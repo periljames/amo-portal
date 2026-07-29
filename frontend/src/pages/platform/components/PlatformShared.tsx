@@ -45,9 +45,14 @@ const ACCENT_KEY = "amo_platform_accent";
 const DEFAULT_ACCENT = "#3b67f2";
 const ACCENTS = ["#4f46e5", "#2563eb", "#0f8b8d", "#a16207", "#c026d3"];
 
-function resolveTheme(theme: PlatformTheme): "dark" | "light" {
-  if (theme !== "system") return theme;
+function resolveSystemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function accentRgb(hex: string): string {
+  const clean = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return "59, 103, 242";
+  return `${Number.parseInt(clean.slice(0, 2), 16)}, ${Number.parseInt(clean.slice(2, 4), 16)}, ${Number.parseInt(clean.slice(4, 6), 16)}`;
 }
 
 function navTarget(item: PlatformNavItem) {
@@ -80,40 +85,38 @@ export const PlatformShell: React.FC<{
   const navigate = useNavigate();
   const location = useLocation();
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchRequestRef = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [theme, setTheme] = useState<PlatformTheme>(() => {
     const stored = window.localStorage.getItem(THEME_KEY);
     return stored === "dark" || stored === "light" || stored === "system" ? stored : "dark";
   });
-  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => resolveTheme(theme));
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(resolveSystemTheme);
   const [accent, setAccent] = useState(() => window.localStorage.getItem(ACCENT_KEY) || DEFAULT_ACCENT);
-  const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
+  const [bootstrapSnapshot, setBootstrapSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlatformConsoleSearchResult[]>([]);
-  const realtime = usePlatformRealtime();
+  const realtime = usePlatformRealtime(Boolean(user?.is_superuser));
+  const snapshot = realtime.snapshot ?? bootstrapSnapshot;
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
 
   useEffect(() => {
-    void platformConsoleApi.bootstrap().then(setSnapshot).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (realtime.snapshot) setSnapshot(realtime.snapshot);
-  }, [realtime.snapshot]);
+    if (!user?.is_superuser) return;
+    void platformConsoleApi.bootstrap().then(setBootstrapSnapshot).catch(() => undefined);
+  }, [user?.is_superuser]);
 
   useEffect(() => {
     window.localStorage.setItem(THEME_KEY, theme);
-    if (theme !== "system") {
-      setResolvedTheme(theme);
-      return;
-    }
+  }, [theme]);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: light)");
-    const apply = () => setResolvedTheme(media.matches ? "light" : "dark");
-    apply();
+    const apply = () => setSystemTheme(media.matches ? "light" : "dark");
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [theme]);
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(ACCENT_KEY, accent);
@@ -137,17 +140,21 @@ export const PlatformShell: React.FC<{
 
   useEffect(() => {
     const clean = query.trim();
-    if (clean.length < 2) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
+    const requestId = ++searchRequestRef.current;
+    if (clean.length < 2) return;
+
     const timer = window.setTimeout(() => {
+      setSearching(true);
       void platformConsoleApi.search(clean)
-        .then((response) => setResults(response.items || []))
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+        .then((response) => {
+          if (requestId === searchRequestRef.current) setResults(response.items || []);
+        })
+        .catch(() => {
+          if (requestId === searchRequestRef.current) setResults([]);
+        })
+        .finally(() => {
+          if (requestId === searchRequestRef.current) setSearching(false);
+        });
     }, 220);
     return () => window.clearTimeout(timer);
   }, [query]);
@@ -169,7 +176,10 @@ export const PlatformShell: React.FC<{
     );
   }
 
-  const style = { "--platform-accent": accent } as React.CSSProperties;
+  const style = {
+    "--platform-accent": accent,
+    "--platform-accent-rgb": accentRgb(accent),
+  } as React.CSSProperties;
   const selectSearchResult = (result: PlatformConsoleSearchResult) => {
     setQuery("");
     setResults([]);
@@ -229,7 +239,7 @@ export const PlatformShell: React.FC<{
               aria-label="Search platform console"
             />
             <kbd>Ctrl K</kbd>
-            {(query.trim().length >= 2 || results.length) ? (
+            {query.trim().length >= 2 ? (
               <div className="platform-search-results">
                 {searching ? <div className="platform-search-state">Searching…</div> : results.length ? results.map((result) => (
                   <button key={`${result.kind}:${result.id}`} onClick={() => selectSearchResult(result)}>
@@ -249,7 +259,7 @@ export const PlatformShell: React.FC<{
                 <div className="platform-theme-menu">
                   <span className="platform-menu-label">Appearance</span>
                   {(["dark", "light", "system"] as PlatformTheme[]).map((option) => (
-                    <button key={option} className={theme === option ? "selected" : undefined} onClick={() => setTheme(option)}>
+                    <button key={option} className={theme === option ? "selected" : undefined} onClick={() => { setTheme(option); setThemeOpen(false); }}>
                       <span>{option === "dark" ? "◉" : option === "light" ? "○" : "◐"}</span>
                       {option[0].toUpperCase() + option.slice(1)}{option === "dark" ? " (Default)" : ""}
                     </button>
@@ -263,7 +273,7 @@ export const PlatformShell: React.FC<{
               ) : null}
             </div>
             <button className="platform-icon-btn" aria-label="Reconnect live updates" title="Reconnect live updates" onClick={realtime.reconnect}>↻</button>
-            <button className="platform-icon-btn platform-notification-btn" aria-label="Notifications">♢<span>{snapshot?.critical_security_alerts ? String(snapshot.critical_security_alerts) : ""}</span></button>
+            <button className="platform-icon-btn platform-notification-btn" aria-label="Open security alerts" title="Open security alerts" onClick={() => navigate("/platform/security")}>♢<span>{snapshot?.critical_security_alerts ? String(snapshot.critical_security_alerts) : ""}</span></button>
             <div className="platform-profile-chip" title={user.email || "Platform user"}>
               <span>{initials}</span>
               <small><strong>{user.email || "Platform user"}</strong><em>Superadmin</em></small>
