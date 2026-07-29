@@ -42,6 +42,7 @@ import {
   listWorkPatternAssignments,
   listWorkPatterns,
 } from "../../../services/workforce";
+import { listAllRosterPeople } from "../../../services/rosterPeople";
 import type { ShiftTemplateKind, ShiftTemplateRead } from "../../../types/rostering";
 import type {
   RosterAutomationPreview,
@@ -50,6 +51,8 @@ import type {
 } from "../../../types/rosteringAutomation";
 import type { PatternDayStatus, WorkPatternDayInput } from "../../../types/workforce";
 import { errorMessage, newIdempotencyKey } from "../rosterUi";
+import { RosterGovernancePanel } from "./RosterGovernancePanel";
+import { RosterRuleQuickEditor } from "./RosterRuleQuickEditor";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
 
 type Section = "overview" | "calendar" | "automation" | "shifts" | "patterns" | "policy" | "advanced";
@@ -101,7 +104,7 @@ export function RosteringSetupWorkspace() {
   const periodsQuery = useQuery({
     queryKey: ["rostering", "settings", "periods"],
     queryFn: () => listRosterPeriods(),
-    enabled: section === "calendar",
+    enabled: section === "calendar" || section === "policy",
     staleTime: 60_000,
   });
   const shiftsQuery = useQuery({
@@ -122,6 +125,16 @@ export function RosteringSetupWorkspace() {
     enabled: section === "patterns",
     staleTime: 60_000,
   });
+  const governancePeopleQuery = useQuery({
+    queryKey: ["rostering", "settings", "governance-people"],
+    queryFn: () => listAllRosterPeople({
+      page_size: 250,
+      active_only: true,
+      roster_eligible_only: false,
+    }),
+    enabled: section === "policy",
+    staleTime: 15 * 60_000,
+  });
   const rulesQuery = useQuery({
     queryKey: ["rostering", "settings", "rules"],
     queryFn: () => listRosterRules(true),
@@ -136,6 +149,21 @@ export function RosteringSetupWorkspace() {
   });
 
   const permissions = permissionsQuery.data?.permissions || [];
+  const governancePeople = useMemo(
+    () => governancePeopleQuery.data?.items || [],
+    [governancePeopleQuery.data?.items],
+  );
+  const governanceBases = useMemo(() => {
+    const map = new Map<string, { id: string; code: string }>();
+    governancePeople.forEach((person) => {
+      if (!person.primary_base_station_id) return;
+      map.set(person.primary_base_station_id, {
+        id: person.primary_base_station_id,
+        code: person.primary_base_code || "BASE",
+      });
+    });
+    return [...map.values()].sort((left, right) => left.code.localeCompare(right.code));
+  }, [governancePeople]);
   const can = (permission: string) => permissions.includes(permission);
   const canGenerate = can("roster.create") && can("roster.manage_patterns");
   const readiness = readinessQuery.data;
@@ -239,7 +267,12 @@ export function RosteringSetupWorkspace() {
           loading={rulesQuery.isPending}
           authorityCount={readiness.active_approval_authority_count}
           canManageRules={can("roster.manage_rules")}
-          root={root}
+          canManageAuthorities={can("roster.manage_approval_authorities")}
+          people={governancePeople}
+          periods={periodsQuery.data || []}
+          bases={governanceBases}
+          governanceLoading={governancePeopleQuery.isPending || periodsQuery.isPending}
+          governanceError={governancePeopleQuery.error || periodsQuery.error}
         />
       ) : null}
       {section === "advanced" ? (
@@ -662,13 +695,23 @@ function PolicyPanel({
   loading,
   authorityCount,
   canManageRules,
-  root,
+  canManageAuthorities,
+  people,
+  periods,
+  bases,
+  governanceLoading,
+  governanceError,
 }: {
   rules: Awaited<ReturnType<typeof listRosterRules>>;
   loading: boolean;
   authorityCount: number;
   canManageRules: boolean;
-  root: string;
+  canManageAuthorities: boolean;
+  people: Awaited<ReturnType<typeof listAllRosterPeople>>["items"];
+  periods: Awaited<ReturnType<typeof listRosterPeriods>>;
+  bases: Array<{ id: string; code: string }>;
+  governanceLoading: boolean;
+  governanceError: unknown;
 }) {
   const groups = useMemo(() => ({
     statutory: rules.filter((rule) => /KCAR|STATUT/i.test(`${rule.name} ${rule.description || ""}`)),
@@ -696,7 +739,19 @@ function PolicyPanel({
         ))}
         {!canManageRules ? <div className="rs-readonly">Rules are visible for review. Only authorised policy controllers can change them.</div> : null}
       </section>
-      <section className="wr-panel rs-approval-summary"><div><CheckCircle2 size={20} /><span><strong>{authorityCount}</strong> active approval authority record{authorityCount === 1 ? "" : "s"}</span></div><p>Approval authorities define who may review and approve. Pending approvals belong in Command, not Setup.</p><Link className="wr-button wr-button--secondary" to={`${root}/dashboard`}>Open Command <ArrowRight size={14} /></Link></section>
+      {canManageRules ? <RosterRuleQuickEditor /> : null}
+      <section className="wr-panel rs-approval-summary"><div><CheckCircle2 size={20} /><span><strong>{authorityCount}</strong> active approval authority record{authorityCount === 1 ? "" : "s"}</span></div><p>Approval authorities define review and publishing scopes. Configure them here; submitted roster decisions remain in Command.</p></section>
+      {governanceError ? <div className="wr-inline-error" role="alert">{errorMessage(governanceError)}</div> : null}
+      {governanceLoading ? <RosterLoading label="Loading approval authorities…" /> : (
+        <RosterGovernancePanel
+          people={people}
+          periods={periods}
+          bases={bases}
+          canManageRules={canManageRules}
+          canManageAuthorities={canManageAuthorities}
+          showApprovalWorkflow={false}
+        />
+      )}
     </div>
   );
 }

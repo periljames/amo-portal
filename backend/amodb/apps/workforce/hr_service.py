@@ -135,6 +135,27 @@ def serialize_overtime(row: models.OvertimeRequest) -> hr_schemas.HrOvertimeRequ
     )
 
 
+def serialize_attendance_exception(
+    row: models.RosterActualVariance,
+    *,
+    user: Optional[account_models.User] = None,
+) -> hr_schemas.HrAttendanceExceptionRead:
+    return hr_schemas.HrAttendanceExceptionRead(
+        id=row.id,
+        amo_id=row.amo_id,
+        roster_assignment_id=row.roster_assignment_id,
+        user_id=row.user_id,
+        user_full_name=_display_name(user),
+        planned_minutes=row.planned_minutes,
+        attendance_minutes=row.attendance_minutes,
+        productive_minutes=row.productive_minutes,
+        variance_minutes=row.variance_minutes,
+        classification=row.classification,
+        metadata_json=row.metadata_json if isinstance(row.metadata_json, dict) else None,
+        calculated_at=row.calculated_at,
+    )
+
+
 def list_overtime_requests(
     db: Session,
     *,
@@ -444,6 +465,17 @@ def dashboard(
         ),
     ).order_by(models.RosterActualVariance.calculated_at.desc()).limit(50).all()
 
+    attendance_user_ids = sorted({row.user_id for row in attendance_exception_rows})
+    attendance_users = (
+        db.query(account_models.User).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(attendance_user_ids),
+        ).all()
+        if attendance_user_ids
+        else []
+    )
+    attendance_users_by_id = {str(user.id): user for user in attendance_users}
+
     actions: list[hr_schemas.HrActionItem] = []
     for row in expiring_rows[:20]:
         actions.append(hr_schemas.HrActionItem(
@@ -520,6 +552,22 @@ def dashboard(
             due_on=row.starts_at.date(),
             action_label="Review overtime",
             action_path=f"time/overtime/{row.id}",
+        ))
+    for row in attendance_exception_rows[:20]:
+        actions.append(hr_schemas.HrActionItem(
+            id=f"attendance:{row.id}",
+            category="ATTENDANCE",
+            severity="ACTION",
+            title="Attendance variance requires review",
+            detail=(
+                f"{row.classification}: {row.variance_minutes:+d} minutes variance; "
+                f"{row.attendance_minutes} attendance minutes against {row.planned_minutes} planned."
+            ),
+            user_id=row.user_id,
+            user_name=_display_name(attendance_users_by_id.get(str(row.user_id))),
+            due_on=row.calculated_at.date(),
+            action_label="Inspect variance",
+            action_path=f"time/attendance/{row.id}",
         ))
     actions.sort(key=lambda item: (
         0 if item.severity == "BLOCKER" else 1 if item.severity == "ACTION" else 2,
@@ -598,5 +646,12 @@ def dashboard(
         metrics=metrics,
         action_queue=actions[:100],
         pending_overtime=[serialize_overtime(row) for row in pending_overtime_rows],
+        attendance_exceptions=[
+            serialize_attendance_exception(
+                row,
+                user=attendance_users_by_id.get(str(row.user_id)),
+            )
+            for row in attendance_exception_rows
+        ],
         people=people,
     )

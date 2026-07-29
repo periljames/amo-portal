@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +78,21 @@ class HrOvertimeRequestRead(HrSchema):
     updated_at: datetime
 
 
+class HrAttendanceExceptionRead(HrSchema):
+    id: str
+    amo_id: str
+    roster_assignment_id: str
+    user_id: str
+    user_full_name: Optional[str] = None
+    planned_minutes: int
+    attendance_minutes: int
+    productive_minutes: int
+    variance_minutes: int
+    classification: str
+    metadata_json: Optional[dict[str, Any]] = None
+    calculated_at: datetime
+
+
 class HrOvertimeDecisionRequest(HrSchema):
     stage: Literal["SUPERVISOR", "HR"]
     decision: Literal["APPROVED", "REJECTED"]
@@ -108,4 +123,5 @@ class HrDashboardResponse(HrSchema):
     metrics: list[HrMetric]
     action_queue: list[HrActionItem]
     pending_overtime: list[HrOvertimeRequestRead]
+    attendance_exceptions: list[HrAttendanceExceptionRead] = Field(default_factory=list)
     people: list[HrPersonReadiness]

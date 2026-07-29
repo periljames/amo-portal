@@ -65,6 +65,21 @@ export type HrOvertimeRequest = {
   updated_at: string;
 };
 
+export type HrAttendanceException = {
+  id: string;
+  amo_id: string;
+  roster_assignment_id: string;
+  user_id: string;
+  user_full_name?: string | null;
+  planned_minutes: number;
+  attendance_minutes: number;
+  productive_minutes: number;
+  variance_minutes: number;
+  classification: string;
+  metadata_json?: Record<string, unknown> | null;
+  calculated_at: string;
+};
+
 export type HrDashboard = {
   generated_at: string;
   can_manage_contracts: boolean;
@@ -89,5 +104,6 @@ export type HrDashboard = {
   metrics: HrMetric[];
   action_queue: HrActionItem[];
   pending_overtime: HrOvertimeRequest[];
+  attendance_exceptions: HrAttendanceException[];
   people: HrPersonReadiness[];
 };

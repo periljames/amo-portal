@@ -33,12 +33,14 @@ export function RosterGovernancePanel({
   bases,
   canManageRules,
   canManageAuthorities,
+  showApprovalWorkflow = true,
 }: {
   people: RosterPersonRead[];
   periods: RosterPeriodRead[];
   bases: Array<{ id: string; code: string }>;
   canManageRules: boolean;
   canManageAuthorities: boolean;
+  showApprovalWorkflow?: boolean;
 }) {
   const queryClient = useQueryClient();
   const versions = useMemo(
@@ -73,7 +75,7 @@ export function RosterGovernancePanel({
   const matrixQuery = useQuery({
     queryKey: ["rostering", "governance", "matrix", effectiveVersionId],
     queryFn: () => getRosterApprovalMatrix(effectiveVersionId),
-    enabled: Boolean(effectiveVersionId),
+    enabled: Boolean(effectiveVersionId) && showApprovalWorkflow,
   });
 
   const activeRules = (rulesQuery.data || []).filter((rule) => rule.is_active);
@@ -158,26 +160,28 @@ export function RosterGovernancePanel({
         </div>
       </section>
 
-      <section className="wr-panel">
-        <div className="wr-section-heading">
-          <div><h2>Roster approval</h2></div>
-          <BadgeCheck size={19} />
-        </div>
-        <div className="wr-filter-bar">
-          <label><span>Submitted version</span><select value={effectiveVersionId} onChange={(event) => setVersionId(event.target.value)}><option value="">No submitted roster</option>{versions.map((version) => <option key={version.id} value={version.id}>{version.periodName} · v{version.version_no} · {version.status}</option>)}</select></label>
-          <button type="button" className="wr-icon-button" aria-label="Refresh approval matrix" onClick={() => void matrixQuery.refetch()} disabled={!effectiveVersionId}><RefreshCw size={16} className={matrixQuery.isFetching ? "is-spinning" : ""} /></button>
-        </div>
-        {matrixQuery.data ? <div className="wr-metric-grid"><article><strong>{matrixQuery.data.required_count}</strong><span>Required</span></article><article><strong>{matrixQuery.data.approved_count}</strong><span>Approved</span></article><article><strong>{matrixQuery.data.pending_count}</strong><span>Pending</span></article><article><strong>{matrixQuery.data.changes_requested_count}</strong><span>Changes</span></article></div> : null}
-        <div className="wr-data-list">
-          {(matrixQuery.data?.items || []).map((approval) => {
-            const department = departments.find((row) => row.id === approval.department_id);
-            const base = bases.find((row) => row.id === approval.base_station_id);
-            const approver = people.find((row) => row.user_id === approval.assigned_approver_user_id);
-            return <article key={approval.id} className="wr-data-row"><div><strong>{department?.label || "Base-wide roster"}</strong><small>{base?.code || "Unassigned base"} · {approver?.full_name || "Authority required"}</small></div><StatusPill value={approval.status} /><span>{approval.decision_comment || "Awaiting decision"}</span></article>;
-          })}
-        </div>
-        {effectiveVersionId ? <div className="wr-governance-decision"><label><span>Comment</span><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Approval evidence or required change" /></label><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "changes" })}><RotateCcw size={15} /> Request changes</button><button type="button" className="wr-button wr-button--success" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "approve" })}><CheckCircle2 size={15} /> Approve my scopes</button></div></div> : <EmptyState title="No roster awaiting approval" description="Submit a roster from the planner to create its approval matrix." />}
-      </section>
+      {showApprovalWorkflow ? (
+        <section className="wr-panel">
+          <div className="wr-section-heading">
+            <div><h2>Roster approval</h2></div>
+            <BadgeCheck size={19} />
+          </div>
+          <div className="wr-filter-bar">
+            <label><span>Submitted version</span><select value={effectiveVersionId} onChange={(event) => setVersionId(event.target.value)}><option value="">No submitted roster</option>{versions.map((version) => <option key={version.id} value={version.id}>{version.periodName} · v{version.version_no} · {version.status}</option>)}</select></label>
+            <button type="button" className="wr-icon-button" aria-label="Refresh approval matrix" onClick={() => void matrixQuery.refetch()} disabled={!effectiveVersionId}><RefreshCw size={16} className={matrixQuery.isFetching ? "is-spinning" : ""} /></button>
+          </div>
+          {matrixQuery.data ? <div className="wr-metric-grid"><article><strong>{matrixQuery.data.required_count}</strong><span>Required</span></article><article><strong>{matrixQuery.data.approved_count}</strong><span>Approved</span></article><article><strong>{matrixQuery.data.pending_count}</strong><span>Pending</span></article><article><strong>{matrixQuery.data.changes_requested_count}</strong><span>Changes</span></article></div> : null}
+          <div className="wr-data-list">
+            {(matrixQuery.data?.items || []).map((approval) => {
+              const department = departments.find((row) => row.id === approval.department_id);
+              const base = bases.find((row) => row.id === approval.base_station_id);
+              const approver = people.find((row) => row.user_id === approval.assigned_approver_user_id);
+              return <article key={approval.id} className="wr-data-row"><div><strong>{department?.label || "Base-wide roster"}</strong><small>{base?.code || "Unassigned base"} · {approver?.full_name || "Authority required"}</small></div><StatusPill value={approval.status} /><span>{approval.decision_comment || "Awaiting decision"}</span></article>;
+            })}
+          </div>
+          {effectiveVersionId ? <div className="wr-governance-decision"><label><span>Comment</span><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Approval evidence or required change" /></label><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "changes" })}><RotateCcw size={15} /> Request changes</button><button type="button" className="wr-button wr-button--success" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "approve" })}><CheckCircle2 size={15} /> Approve my scopes</button></div></div> : <EmptyState title="No roster awaiting approval" description="Submit a roster from the planner to create its approval matrix." />}
+        </section>
+      ) : null}
     </div>
   );
 }

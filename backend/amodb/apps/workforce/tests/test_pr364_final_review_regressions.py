@@ -152,3 +152,28 @@ def test_dashboard_pending_counts_are_uncapped():
     db.query.side_effect = query
 
     assert hr_service._pending_queue_counts(db, amo_id="amo-1") == expected
+
+
+
+def test_attendance_exception_serializes_canonical_evidence():
+    row = SimpleNamespace(
+        id="variance-1",
+        amo_id="amo-1",
+        roster_assignment_id="assignment-1",
+        user_id="employee-1",
+        planned_minutes=480,
+        attendance_minutes=430,
+        productive_minutes=410,
+        variance_minutes=-50,
+        classification="UNDER_RECORDED",
+        metadata_json={"source": "attendance"},
+        calculated_at=datetime(2026, 7, 29, 18, tzinfo=timezone.utc),
+    )
+    user = SimpleNamespace(full_name="Amina Engineer")
+
+    result = hr_service.serialize_attendance_exception(row, user=user)
+
+    assert result.user_full_name == "Amina Engineer"
+    assert result.roster_assignment_id == "assignment-1"
+    assert result.variance_minutes == -50
+    assert result.metadata_json == {"source": "attendance"}

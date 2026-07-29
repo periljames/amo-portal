@@ -52,6 +52,10 @@ describe("rostering setup experience", () => {
     expect(setupWorkspaceSource).toContain("createWorkPattern");
     expect(setupWorkspaceSource).toContain("Visual work patterns");
     expect(setupWorkspaceSource).toContain("Compliance rules");
+    expect(setupWorkspaceSource).toContain("RosterRuleQuickEditor");
+    expect(setupWorkspaceSource).toContain("RosterGovernancePanel");
+    expect(setupWorkspaceSource).toContain("showApprovalWorkflow={false}");
+    expect(setupWorkspaceSource).toContain("roster.manage_approval_authorities");
     expect(setupWorkspaceSource).toContain("History & diagnostics");
   });
 
@@ -62,6 +66,8 @@ describe("rostering setup experience", () => {
     expect(workforceSource).toContain("dashboard.can_approve_leave");
     expect(workforceSource).toContain("dashboard.can_approve_timesheet_supervisor");
     expect(workforceSource).toContain("dashboard.can_approve_timesheet_hr");
+    expect(workforceSource).toContain("dashboard.attendance_exceptions.map");
+    expect(workforceSource).toContain("roster_assignment_id");
   });
 
   it("gates Workforce and Setup navigation with effective server permissions", () => {
