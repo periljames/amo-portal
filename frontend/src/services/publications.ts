@@ -1,6 +1,7 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiPostForm } from "./crs";
+import type { ManualReadPayload } from "./manuals";
 
 export type PublicationUploadPreview = {
   filename: string;
@@ -70,6 +71,10 @@ export type PublicationReaderMetadata = {
   citation_current: number;
   citation_total: number;
   subsidiary_count: number;
+  cache_key?: string;
+  source_exact?: boolean;
+  form_policy?: "READ_ONLY_PRESERVED" | string;
+  section_count?: number;
 };
 
 export type PublicationAcknowledgement = {
@@ -81,11 +86,112 @@ export type PublicationAcknowledgement = {
   acknowledgement_text?: string | null;
 };
 
+export type PublicationReaderBootstrap = {
+  cache_key: string;
+  metadata: PublicationReaderMetadata;
+  read: ManualReadPayload & {
+    revision?: {
+      id: string;
+      rev_number?: string | null;
+      issue_number?: string | null;
+      effective_date?: string | null;
+      published_at?: string | null;
+      source_filename?: string | null;
+      source_type?: string | null;
+      source_mime_type?: string | null;
+      source_page_count?: number | null;
+      source_available?: boolean;
+      source_url?: string | null;
+    };
+    progress?: {
+      last_section_id?: string | null;
+      last_anchor_slug?: string | null;
+      last_page_number?: number | null;
+      scroll_percent?: number;
+      zoom_percent?: number;
+      last_opened_at?: string | null;
+    };
+    sections: Array<ManualReadPayload["sections"][number] & { page_start?: number | null; page_end?: number | null }>;
+  };
+  acknowledgement: PublicationAcknowledgement;
+};
+
+export type PublicationReaderContent = {
+  sections: Array<{ id: string; heading: string; anchor_slug: string; level: number }>;
+  blocks: ManualReadPayload["blocks"];
+  start: number;
+  limit: number;
+  returned_sections: number;
+};
+
+export type PublicationSearchResult = {
+  section_id: string;
+  anchor_slug: string;
+  heading: string;
+  level: number;
+  page_start?: number | null;
+  snippet: string;
+};
+
+export type ApprovedPublicationIntakePayload = {
+  authority_name: string;
+  approval_reference: string;
+  approval_date: string;
+  effective_date?: string | null;
+  comments: string;
+  acknowledgement_required: boolean;
+  notify_eligible_users: boolean;
+};
+
+const READER_CACHE_PREFIX = "amo-publication-bootstrap:v2";
+const READER_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 function extensionOf(file: File): "docx" | "pdf" {
   const name = file.name.toLowerCase();
   if (name.endsWith(".docx")) return "docx";
   if (name.endsWith(".pdf")) return "pdf";
   throw new Error("Only searchable DOCX and PDF publications are supported.");
+}
+
+function readerCacheKey(tenantSlug: string, manualId: string, revisionId: string): string {
+  return `${READER_CACHE_PREFIX}:${tenantSlug}:${manualId}:${revisionId}`;
+}
+
+export function readCachedPublicationBootstrap(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+): PublicationReaderBootstrap | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(readerCacheKey(tenantSlug, manualId, revisionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { cached_at: number; payload: PublicationReaderBootstrap };
+    if (!parsed?.payload || Date.now() - Number(parsed.cached_at || 0) > READER_CACHE_MAX_AGE_MS) {
+      window.localStorage.removeItem(readerCacheKey(tenantSlug, manualId, revisionId));
+      return null;
+    }
+    return parsed.payload;
+  } catch {
+    return null;
+  }
+}
+
+export function cachePublicationBootstrap(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+  payload: PublicationReaderBootstrap,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      readerCacheKey(tenantSlug, manualId, revisionId),
+      JSON.stringify({ cached_at: Date.now(), payload }),
+    );
+  } catch {
+    // Storage may be unavailable or full. HTTP caching still remains active.
+  }
 }
 
 export async function previewPublicationUpload(tenantSlug: string, file: File): Promise<PublicationUploadPreview> {
@@ -121,23 +227,124 @@ export async function uploadPublicationRevision(
   );
 }
 
-async function authenticatedFetch(path: string): Promise<Response> {
+async function authenticatedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(authHeaders());
+  if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "GET",
-    headers: authHeaders(),
+    ...init,
+    headers,
     credentials: "same-origin",
   });
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {
       const payload = await response.json();
-      detail = String(payload?.detail || detail);
+      const raw = payload?.detail;
+      detail = typeof raw === "string" ? raw : String(raw?.message || JSON.stringify(raw || detail));
     } catch {
       // Keep the HTTP status fallback when the response is not JSON.
     }
     throw new Error(detail);
   }
   return response;
+}
+
+export async function getPublicationReaderBootstrap(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+): Promise<PublicationReaderBootstrap> {
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-bootstrap`;
+  const response = await authenticatedFetch(path);
+  const payload = await response.json() as PublicationReaderBootstrap;
+  cachePublicationBootstrap(tenantSlug, manualId, revisionId, payload);
+  return payload;
+}
+
+export function prefetchPublicationReader(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+): void {
+  if (readCachedPublicationBootstrap(tenantSlug, manualId, revisionId)) return;
+  void getPublicationReaderBootstrap(tenantSlug, manualId, revisionId).catch(() => undefined);
+}
+
+export async function getPublicationReaderContent(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+  sectionIds: string[],
+): Promise<PublicationReaderContent> {
+  const query = new URLSearchParams();
+  for (const sectionId of [...new Set(sectionIds.filter(Boolean))]) query.append("section_id", sectionId);
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-content?${query.toString()}`;
+  const response = await authenticatedFetch(path);
+  return response.json() as Promise<PublicationReaderContent>;
+}
+
+export async function searchPublicationReader(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+  query: string,
+): Promise<PublicationSearchResult[]> {
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-search?q=${encodeURIComponent(query)}`;
+  const response = await authenticatedFetch(path);
+  const payload = await response.json() as { items: PublicationSearchResult[] };
+  return payload.items || [];
+}
+
+export function updatePublicationReaderPosition(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+  payload: {
+    page_number?: number | null;
+    anchor_slug?: string | null;
+    section_id?: string | null;
+    scroll_percent?: number;
+    zoom_percent?: number;
+  },
+): Promise<void> {
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-position`;
+  return authenticatedFetch(path, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).then(() => undefined);
+}
+
+export function publicationPdfSource(path: string): {
+  url: string;
+  httpHeaders: Record<string, string>;
+  withCredentials: boolean;
+  rangeChunkSize: number;
+  disableAutoFetch: boolean;
+  disableRange: boolean;
+  disableStream: boolean;
+} {
+  return {
+    url: `${getApiBaseUrl()}${path}`,
+    httpHeaders: Object.fromEntries(authHeaders().entries()),
+    withCredentials: true,
+    rangeChunkSize: 512 * 1024,
+    disableAutoFetch: false,
+    disableRange: false,
+    disableStream: false,
+  };
+}
+
+export async function approvePublicationIntake(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+  payload: ApprovedPublicationIntakePayload,
+): Promise<{ status: string; campaign_id?: string | null; notifications_issued?: boolean }> {
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/approved-intake`;
+  const response = await authenticatedFetch(path, { method: "POST", body: JSON.stringify(payload) });
+  return response.json();
 }
 
 export async function getPublicationReaderMetadata(
