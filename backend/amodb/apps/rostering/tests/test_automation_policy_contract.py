@@ -122,3 +122,24 @@ def test_period_only_automation_does_not_require_or_validate_a_draft():
     assert 'if should_generate and draft:' in source
     assert 'if policy.validate_after_generation and draft:' in source
     assert '"draft_created_or_reused": draft is not None' in source
+
+
+def test_scheduled_worker_catches_unexpected_execution_errors():
+    source = inspect.getsource(rostering_automation._run_policy)
+    assert "except Exception as exc:" in source
+    assert "_record_failed_scheduled_run(" in source
+
+
+def test_one_tenant_failure_does_not_abort_later_due_policies():
+    source = inspect.getsource(rostering_automation.run)
+    assert "for policy_id in policy_ids:" in source
+    assert "results.append(_run_policy(" in source
+    assert '"evidence_retained": False' in source
+
+
+def test_scheduled_no_owner_path_retains_immutable_evidence():
+    source = inspect.getsource(rostering_automation._run_policy)
+    no_owner = source[source.index("if not actor_user_id:"):source.index("try:", source.index("if not actor_user_id:"))]
+    assert "_record_failed_scheduled_run(" in no_owner
+    assert 'failure_kind="NO_ACCOUNTABLE_OWNER"' in no_owner
+    assert '"evidence_retained": retained' in no_owner
