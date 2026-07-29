@@ -2401,6 +2401,8 @@ def command_notify_user(
         subject=payload.subject,
         context={"message": payload.message, "user_id": user.id, "actor_user_id": current_user.id},
         correlation_id=f"user-notify-{user.id}-{int(now.timestamp())}",
+        email_class="ROUTINE",
+        recipient_user_id=str(user.id),
         amo_id=user.amo_id,
         db=db,
     )

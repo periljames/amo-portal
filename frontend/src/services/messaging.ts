@@ -70,9 +70,20 @@ export type NotificationPreferences = {
   desktop_enabled: boolean;
   sound_enabled: boolean;
   email_enabled: boolean;
+  receipt_email_enabled: boolean;
+  marketing_email_enabled: boolean;
   chat_enabled: boolean;
   quiet_hours_start?: string | null;
   quiet_hours_end?: string | null;
+  mandatory_email_classes?: string[];
+  updated_at?: string | null;
+};
+
+export type TenantEmailPreferences = {
+  routine_email_enabled: boolean;
+  receipt_email_enabled: boolean;
+  marketing_email_enabled: boolean;
+  mandatory_email_classes: string[];
   updated_at?: string | null;
 };
 
@@ -192,5 +203,9 @@ export const messagingApi = {
   updatePreferences: (payload: Partial<NotificationPreferences>) => request<NotificationPreferences>("/api/notifications/preferences", {
     method: "PUT",
     body: JSON.stringify(payload),
+  }),
+  tenantPreferences: () => request<TenantEmailPreferences>("/api/notifications/tenant-preferences"),
+  updateTenantPreferences: (payload: Partial<TenantEmailPreferences>) => request<TenantEmailPreferences>("/api/notifications/tenant-preferences", {
+    method: "PUT", body: JSON.stringify(payload),
   }),
 };

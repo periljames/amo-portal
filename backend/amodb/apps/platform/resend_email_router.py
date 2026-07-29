@@ -25,6 +25,10 @@ RECOMMENDED_TEMPLATE_KEYS = (
     "finding-issued",
     "corrective-action-reminder",
     "corrective-action-overdue",
+    "task_reminder",
+    "task_escalation",
+    "qms_audit_schedule_notice",
+    "qms_audit_notice_memo",
     "approval-request",
     "approval-result",
     "document-review-due",
@@ -192,47 +196,65 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     message_id = str((data or {}).get("email_id") or (data or {}).get("id") or "").strip()
     svix_id = str(request.headers.get("svix-id") or "").strip()
+    occurred_at = datetime.now(timezone.utc)
     matched_log_id: str | None = None
     duplicate = False
-    if message_id:
-        rows = (
-            db.query(notification_models.EmailLog)
-            .order_by(notification_models.EmailLog.created_at.desc())
-            .limit(2000)
-            .all()
+    if svix_id:
+        existing_event = (
+            db.query(notification_models.EmailDeliveryEvent)
+            .filter(
+                notification_models.EmailDeliveryEvent.provider == "resend",
+                notification_models.EmailDeliveryEvent.provider_event_id == svix_id,
+            )
+            .first()
         )
-        for row in rows:
-            context = dict(row.context_json or {})
-            delivery = context.get("_delivery") if isinstance(context.get("_delivery"), dict) else {}
-            if str(delivery.get("message_id") or "") != message_id:
-                continue
-            history = list(delivery.get("events") or [])
-            if svix_id and any(str(item.get("svix_id") or "") == svix_id for item in history if isinstance(item, dict)):
-                matched_log_id = row.id
-                duplicate = True
-                break
-            delivery.update(
-                {
-                    "status": event_type.removeprefix("email.").upper() or "UNKNOWN",
-                    "last_event_at": str(event.get("created_at") or datetime.now(timezone.utc).isoformat()),
-                }
+        if existing_event is not None:
+            duplicate = True
+            matched_log_id = existing_event.email_log_id
+
+    row = None
+    if not duplicate and message_id:
+        row = (
+            db.query(notification_models.EmailLog)
+            .filter(
+                notification_models.EmailLog.provider == "resend",
+                notification_models.EmailLog.provider_message_id == message_id,
             )
-            history = history[-19:]
-            history.append(
-                {
-                    "svix_id": svix_id or None,
-                    "type": event_type,
-                    "created_at": event.get("created_at"),
-                }
+            .order_by(notification_models.EmailLog.created_at.desc())
+            .first()
+        )
+        matched_log_id = row.id if row is not None else None
+
+    if not duplicate:
+        db.add(
+            notification_models.EmailDeliveryEvent(
+                email_log_id=matched_log_id,
+                provider="resend",
+                provider_event_id=svix_id or f"{message_id}:{event_type}:{occurred_at.isoformat()}",
+                provider_message_id=message_id or None,
+                event_type=event_type or "unknown",
+                occurred_at=occurred_at,
+                payload_json=event,
             )
-            delivery["events"] = history
-            context["_delivery"] = delivery
-            row.context_json = context
-            if event_type in {"email.failed", "email.bounced", "email.complained", "email.suppressed"}:
-                row.status = notification_models.EmailStatus.FAILED
-                row.error = f"Resend delivery event: {event_type}"
-            matched_log_id = row.id
-            break
+        )
+
+    if row is not None and not duplicate:
+        delivery_status = event_type.removeprefix("email.").upper() or "UNKNOWN"
+        context = dict(row.context_json or {})
+        delivery = context.get("_delivery") if isinstance(context.get("_delivery"), dict) else {}
+        delivery.update(
+            {
+                "status": delivery_status,
+                "last_event_at": str(event.get("created_at") or occurred_at.isoformat()),
+            }
+        )
+        context["_delivery"] = delivery
+        row.context_json = context
+        row.delivery_status = delivery_status
+        row.last_delivery_event_at = occurred_at
+        if event_type in {"email.failed", "email.bounced", "email.complained", "email.suppressed"}:
+            row.status = notification_models.EmailStatus.FAILED
+            row.error = f"Resend delivery event: {event_type}"
     db.commit()
     return {
         "ok": True,

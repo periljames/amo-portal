@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import logging
 import os
 import socket
 import time
 from typing import Any
 
+from sqlalchemy import text
+
 from amodb.apps.accounts import models as account_models
+from amodb.apps.tasks import services as task_services
 from amodb.apps.platform import (
     saas_lease,
     saas_models as models,
@@ -15,6 +20,9 @@ from amodb.apps.platform import (
     saas_side_effects,
 )
 from amodb.database import WriteSessionLocal, close_session_safely
+
+
+logger = logging.getLogger(__name__)
 
 
 def _worker_id() -> str:
@@ -130,12 +138,52 @@ def _run_periodic_health(last_run: float | None) -> float:
     return now
 
 
+def _quality_task_interval_seconds() -> int:
+    requested = int(os.getenv("QUALITY_TASK_INTERVAL_SECONDS", "300"))
+    return max(60, min(requested, 86400))
+
+
+def _run_periodic_quality_tasks(last_run: float | None) -> float:
+    now = time.monotonic()
+    interval = _quality_task_interval_seconds()
+    if last_run is not None and now - last_run < interval:
+        return last_run
+
+    db = WriteSessionLocal()
+    try:
+        bind = db.get_bind()
+        if bind.dialect.name == "postgresql":
+            digest = hashlib.sha256(b"quality:task-reminder-runner").digest()
+            lock_key = int.from_bytes(digest[:8], byteorder="big", signed=False) & 0x7FFF_FFFF_FFFF_FFFF
+            acquired = bool(
+                db.execute(
+                    text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+                    {"lock_key": lock_key},
+                ).scalar()
+            )
+            if not acquired:
+                db.rollback()
+                return now
+        summary = task_services.run_task_runner(db)
+        db.commit()
+        if summary.get("reminders") or summary.get("escalations"):
+            logger.info("Quality task email run completed: %s", summary)
+    except Exception:
+        db.rollback()
+        logger.exception("Quality task reminder/escalation run failed")
+    finally:
+        close_session_safely(db)
+    return now
+
+
 def run_forever(*, poll_seconds: float = 1.0, batch_size: int = 1) -> None:
     worker_id = _worker_id()
     last_health_run: float | None = None
+    last_quality_task_run: float | None = None
     while True:
         result = run_once(batch_size=batch_size, worker_id=worker_id)
         last_health_run = _run_periodic_health(last_health_run)
+        last_quality_task_run = _run_periodic_quality_tasks(last_quality_task_run)
         if result["claimed"] == 0:
             time.sleep(max(0.25, min(poll_seconds, 30.0)))
 

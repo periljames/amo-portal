@@ -2,6 +2,18 @@
 
 AMO Portal uses **Resend as its only runtime outbound email provider**. SMTP, SendGrid, SES, Mailgun, Postmark and browser-local email configuration are excluded from the portal notification path. Resend is a platform-wide credential controlled only by a platform superuser; AMO administrators cannot create tenant-specific email-provider overrides.
 
+## Delivery policy
+
+The platform classifies outbound email before it reaches Resend:
+
+- `ESSENTIAL`: password recovery, account verification and security messages. Always active.
+- `CRITICAL`: overdue compliance actions, audit notices and escalation. Always active.
+- `ROUTINE`: normal operational notifications. Requires both tenant and user opt-in.
+- `RECEIPT`: delivery and workflow receipts. Requires both tenant and user opt-in.
+- `MARKETING`: product updates, surveys and promotional communication. Requires both tenant and user opt-in.
+
+Tenant administrators choose optional classes in **Administration → Integrations & automation setup**. Users choose their own optional classes in Inbox notification settings. Essential and critical classes are intentionally not switchable.
+
 ## Configure it
 
 1. Sign in as a platform superuser.
@@ -95,6 +107,8 @@ When no mapping exists, the portal sends a safe generic HTML/text notification s
 - Signed Resend webhook events update the matching portal email log with delivery, delay, bounce, complaint, suppression or failure information.
 - Webhook processing stores and deduplicates the signed `svix-id` in the delivery-event history.
 - The portal stores the Resend message ID in the email audit context; it never stores the API key in an email log.
+- Password-reset links are delivered through this same Resend path and are never returned from the public password-reset request response.
+- Resend message IDs and signed delivery events are stored in indexed columns/tables instead of scanning recent JSON logs.
 
 ## Deployment checklist
 

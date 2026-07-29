@@ -11,16 +11,22 @@ from . import messaging as legacy
 from . import models, notification_policy
 
 
+MANDATORY_EMAIL_CLASSES = ("ESSENTIAL", "CRITICAL")
+
+
 def preference_payload(row: models.NotificationPreference) -> dict[str, Any]:
     return {
         "in_app_enabled": bool(row.in_app_enabled),
         "desktop_enabled": bool(row.desktop_enabled),
         "sound_enabled": bool(row.sound_enabled),
         "email_enabled": bool(row.email_enabled),
+        "receipt_email_enabled": bool(row.receipt_email_enabled),
+        "marketing_email_enabled": bool(row.marketing_email_enabled),
         "chat_enabled": bool(row.chat_enabled),
         "quiet_hours_start": row.quiet_hours_start,
         "quiet_hours_end": row.quiet_hours_end,
         "timezone_name": row.timezone_name or "UTC",
+        "mandatory_email_classes": list(MANDATORY_EMAIL_CLASSES),
         "updated_at": row.updated_at,
     }
 
@@ -47,6 +53,8 @@ def update_preferences(
         "desktop_enabled",
         "sound_enabled",
         "email_enabled",
+        "receipt_email_enabled",
+        "marketing_email_enabled",
         "chat_enabled",
     ):
         if key in payload:
@@ -70,6 +78,62 @@ def update_preferences(
     row.updated_at = legacy.utcnow()
     db.commit()
     return preference_payload(row)
+
+
+def _tenant_preferences(db: Session, *, amo_id: str) -> models.NotificationTenantPreference:
+    row = (
+        db.query(models.NotificationTenantPreference)
+        .filter(models.NotificationTenantPreference.amo_id == amo_id)
+        .first()
+    )
+    if row is None:
+        row = models.NotificationTenantPreference(amo_id=amo_id)
+        db.add(row)
+        db.flush()
+    return row
+
+
+def tenant_preference_payload(row: models.NotificationTenantPreference) -> dict[str, Any]:
+    return {
+        "routine_email_enabled": bool(row.routine_email_enabled),
+        "receipt_email_enabled": bool(row.receipt_email_enabled),
+        "marketing_email_enabled": bool(row.marketing_email_enabled),
+        "mandatory_email_classes": list(MANDATORY_EMAIL_CLASSES),
+        "updated_by_user_id": row.updated_by_user_id,
+        "updated_at": row.updated_at,
+    }
+
+
+def get_tenant_preferences(
+    db: Session,
+    *,
+    user: account_models.User,
+) -> dict[str, Any]:
+    amo_id = legacy.effective_amo_id(user)
+    row = _tenant_preferences(db, amo_id=amo_id)
+    db.commit()
+    return tenant_preference_payload(row)
+
+
+def update_tenant_preferences(
+    db: Session,
+    *,
+    user: account_models.User,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    amo_id = legacy.effective_amo_id(user)
+    row = _tenant_preferences(db, amo_id=amo_id)
+    for key in (
+        "routine_email_enabled",
+        "receipt_email_enabled",
+        "marketing_email_enabled",
+    ):
+        if key in payload:
+            setattr(row, key, bool(payload[key]))
+    row.updated_by_user_id = str(user.id)
+    row.updated_at = legacy.utcnow()
+    db.commit()
+    return tenant_preference_payload(row)
 
 
 def allows_chat_notification(
