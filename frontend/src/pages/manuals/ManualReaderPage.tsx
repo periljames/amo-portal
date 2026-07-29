@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 
 import DocumentationAssistantPanel from "./DocumentationAssistantPanel";
+import PublicationAssistedNavigationBridge from "./PublicationAssistedNavigationBridge";
 import PublicationsReaderPage from "./PublicationsReaderPage";
 import PublicationInlineReferenceController from "./PublicationInlineReferenceController";
 
@@ -10,6 +11,7 @@ export default function ManualReaderPage() {
 
   return <>
     <PublicationsReaderPage />
+    <PublicationAssistedNavigationBridge />
     <PublicationInlineReferenceController />
     {tenant ? <DocumentationAssistantPanel
       tenant={tenant}
