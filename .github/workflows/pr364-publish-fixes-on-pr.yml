@@ -1,0 +1,89 @@
+name: PR364 Publish Validated Rostering Fixes
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Apply validated replacements
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, *, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count} occurrence(s), found {found}: {old[:100]!r}")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          replace(
+              "frontend/src/pages/rostering/components/MyRosterWorkspace.tsx",
+              "  const balances = balancesQuery.data || [];",
+              "  const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);",
+          )
+
+          path = "backend/amodb/apps/rostering/automation_service.py"
+          replace(path, "    if not draft:\n        raise ValueError(\"No draft roster version is available for generation\")\n    run_row.version_id = draft.id", "    if not draft and (should_create_draft or should_generate):\n        raise ValueError(\"No draft roster version is available for generation\")\n    run_row.version_id = draft.id if draft else None")
+          replace(path, "    if should_generate:\n        generation = roster_services.generate_from_patterns(", "    if should_generate and draft:\n        generation = roster_services.generate_from_patterns(")
+          replace(path, "    if policy.validate_after_generation:\n        validation = roster_services.validate_version(", "    if policy.validate_after_generation and draft:\n        validation = roster_services.validate_version(")
+          replace(path, "        \"conflicts\": conflicts,\n        \"review_required\": True,", "        \"conflicts\": conflicts,\n        \"period_created_or_reused\": True,\n        \"draft_created_or_reused\": draft is not None,\n        \"generation_performed\": bool(should_generate and draft),\n        \"validation_performed\": bool(policy.validate_after_generation and draft),\n        \"review_required\": True,")
+
+          test_path = Path("backend/amodb/apps/rostering/tests/test_automation_policy_contract.py")
+          test_text = test_path.read_text(encoding="utf-8")
+          marker = "    assert \"ROSTER_AUTOMATION_ALREADY_RUNNING\" in source\n"
+          addition = '''\n\ndef test_period_only_automation_does_not_require_or_validate_a_draft():\n    source = inspect.getsource(automation_service.run)\n    assert 'if not draft and (should_create_draft or should_generate):' in source\n    assert 'run_row.version_id = draft.id if draft else None' in source\n    assert 'if should_generate and draft:' in source\n    assert 'if policy.validate_after_generation and draft:' in source\n    assert '\"draft_created_or_reused\": draft is not None' in source\n'''
+          if addition.strip() not in test_text:
+              if test_text.count(marker) != 1:
+                  raise SystemExit("automation policy test insertion point drifted")
+              test_path.write_text(test_text.replace(marker, marker + addition, 1), encoding="utf-8")
+
+          setup = "frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx"
+          replace(setup, "  CheckCircle2,\n  Clock3,\n  History,", "  CheckCircle2,\n  History,")
+          replace(setup, "  RefreshCw,\n  RotateCcw,\n  Save,", "  RefreshCw,\n  Save,")
+          replace(setup, "function setupActionPath(section: Section): string {\n  return `?section=${encodeURIComponent(section)}`;\n}\n\n", "")
+          replace(setup, "          workforcePath={`${root}/workforce`}\n        />", "          workforcePath={`${root}/workforce`}\n          timezoneName={readiness.policy.timezone_name}\n        />")
+          replace(setup, "  const [reason, setReason] = useState(\"\");\n\n  const save", "  const [reason, setReason] = useState(\"\");\n  const schedulingDisabled = !canManage || draft.frequency === \"MANUAL\";\n  const changeFrequency = (frequency: RosterAutomationFrequency) => {\n    const weeklyCadence = frequency === \"WEEKLY\" || frequency === \"FORTNIGHTLY\";\n    const runDay = weeklyCadence && draft.run_day > 7 ? 1 : !weeklyCadence && draft.run_day > 28 ? 1 : draft.run_day;\n    setDraft({ ...draft, frequency, run_day: runDay });\n  };\n\n  const save")
+          replace(setup, "    preserve_source_commitments: draft.preserve_source_commitments,", "    preserve_source_commitments: true,")
+          replace(setup, "    notify_planners: draft.notify_planners,", "    notify_planners: false,")
+          replace(setup, "<select value={draft.frequency} disabled={!canManage} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RosterAutomationFrequency })}", "<select value={draft.frequency} disabled={!canManage} onChange={(event) => changeFrequency(event.target.value as RosterAutomationFrequency)}")
+          replace(setup, "<select value={draft.lead_periods} disabled={!canManage}", "<select value={draft.lead_periods} disabled={schedulingDisabled}")
+          replace(setup, "          <label><span>Run day</span><input type=\"number\" min=\"1\" max=\"28\" value={draft.run_day} disabled={!canManage} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label>", "          {draft.frequency === \"MONTHLY\" ? <label><span>Day of month</span><input type=\"number\" min=\"1\" max=\"28\" value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label> : null}\n          {draft.frequency === \"WEEKLY\" || draft.frequency === \"FORTNIGHTLY\" ? <label><span>Weekday</span><select value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })}>{[\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\"].map((day, index) => <option key={day} value={index + 1}>{day}</option>)}</select></label> : null}")
+          replace(setup, "<input type=\"number\" min=\"0\" max=\"23\" value={draft.run_hour_local} disabled={!canManage}", "<input type=\"number\" min=\"0\" max=\"23\" value={draft.run_hour_local} disabled={schedulingDisabled}")
+          replace(setup, "          <label><input type=\"checkbox\" checked={draft.notify_planners} disabled={!canManage} onChange={(event) => setDraft({ ...draft, notify_planners: event.target.checked })} /> Notify planners</label>\n", "")
+          replace(setup, "          <label><input type=\"checkbox\" checked={draft.preserve_source_commitments} disabled={!canManage} onChange={(event) => setDraft({ ...draft, preserve_source_commitments: event.target.checked })} /> Preserve source commitments</label>\n", "")
+          replace(setup, "        <div className=\"rs-safety-note\"><ShieldCheck size={18} /><p><strong>Controlled boundary:</strong>", "        <div className=\"rs-safety-note\"><ShieldCheck size={18} /><p><strong>Enforced protection:</strong> source commitments are always preserved during generation.</p></div>\n        <div className=\"rs-safety-note\"><ShieldCheck size={18} /><p><strong>Controlled boundary:</strong>")
+          replace(setup, "  workforcePath,\n}: {", "  workforcePath,\n  timezoneName,\n}: {")
+          replace(setup, "  workforcePath: string;\n}) {", "  workforcePath: string;\n  timezoneName: string;\n}) {")
+          replace(setup, 'timezone_name: "Africa/Nairobi"', "timezone_name: timezoneName")
+
+          overhaul = Path("frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts")
+          source = overhaul.read_text(encoding="utf-8")
+          insertion = '''\n  it("uses cadence-aware scheduling controls and normalizes run days", () => {\n    expect(setupSource).toContain("Day of month");\n    expect(setupSource).toContain("Weekday");\n    expect(setupSource).toContain('draft.frequency === "MANUAL"');\n    expect(setupSource).toContain("draft.run_day > 7 ? 1");\n  });\n\n  it("does not advertise unimplemented or optional safety behavior", () => {\n    expect(setupSource).not.toContain("> Notify planners<");\n    expect(setupSource).not.toContain("> Preserve source commitments<");\n    expect(setupSource).toContain("source commitments are always preserved");\n  });\n\n  it("uses the controlled automation timezone for work patterns", () => {\n    expect(setupSource).toContain("timezoneName={readiness.policy.timezone_name}");\n    expect(setupSource).toContain("timezone_name: timezoneName");\n    expect(setupSource).not.toContain('timezone_name: "Africa/Nairobi"');\n  });\n'''
+          marker = '  it("keeps HR-owned records out of roster setup", () => {'
+          if insertion.strip() not in source:
+              if source.count(marker) != 1:
+                  raise SystemExit("setup overhaul test insertion point drifted")
+              overhaul.write_text(source.replace(marker, insertion + "\n" + marker, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          git add backend/amodb/apps/rostering frontend/src/pages/rostering
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Fix Rostering automation merge readiness"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
