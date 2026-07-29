@@ -9,14 +9,15 @@ The Workforce and HR employee register previously started from effective employm
 1. The register starts from every active, non-system user belonging to the current tenant.
 2. Employment contracts, bases, work-pattern assignments and approved leave are joined as readiness data.
 3. Missing Workforce records remain visible as actionable readiness blockers; they never remove the user from the register.
+5. When no contract is currently effective, the next future ACTIVE or ONBOARDING contract is surfaced for editing rather than offering an overlapping contract creation.
 4. Authorized Workforce managers can create a missing effective contract or edit an existing one from the same register.
-5. The contract editor uses the exact backend enums and tenant-owned canonical bases.
-6. An authorized manager may explicitly create or repair the reserved `DEFAULT-DAY` shift and `DEFAULT-DAY-5X2` Monday-to-Friday pattern.
-7. The default pattern is assigned only to active or onboarding employees with effective contracts who do not already have a valid active pattern. Existing active patterns are preserved.
-8. All effective-date decisions use the tenant timezone.
-9. Replacing an inactive current pattern closes the historical assignment and creates a new row effective on the tenant-local current date; historical records are never rewritten.
-10. The `DEFAULT-DAY-5X2` cycle is anchored to the tenant-local week's Monday, regardless of the day the bootstrap is run.
-11. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
+6. The contract editor uses the exact backend enums and tenant-owned canonical bases.
+7. An authorized manager may explicitly create or repair the reserved `DEFAULT-DAY` shift and `DEFAULT-DAY-5X2` Monday-to-Friday pattern.
+8. The default pattern is assigned only to active or onboarding employees with effective contracts who do not already have a valid active pattern. Existing active patterns are preserved.
+9. All effective-date decisions use the tenant timezone.
+10. Replacing an inactive current pattern closes the historical assignment and creates a new row effective on the tenant-local current date; historical records are never rewritten.
+11. The `DEFAULT-DAY-5X2` cycle is anchored to the tenant-local week's Monday, regardless of the day the bootstrap is run.
+12. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
 
 ## Review corrections
 

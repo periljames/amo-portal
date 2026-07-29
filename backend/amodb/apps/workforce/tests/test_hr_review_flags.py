@@ -39,8 +39,18 @@ def test_hr_people_register_starts_from_active_tenant_users():
     assert "User.is_system_account.is_(False)" in source
     people_source = inspect.getsource(hr_service.list_people_page_v2)
     assert "_active_tenant_users" in people_source
-    assert "_current_contracts_by_user" in people_source
+    assert "_readiness_contracts_by_user" in people_source
     assert "contract=contracts.get" in people_source
+
+
+def test_hr_readiness_surfaces_the_next_future_contract():
+    lookup_source = inspect.getsource(hr_service._readiness_contracts_by_user)
+    readiness_source = inspect.getsource(hr_service._person_readiness_for_user)
+    assert "effective_from > on_date" in lookup_source
+    assert "effective_from.asc()" in lookup_source
+    assert "result.setdefault" in lookup_source
+    assert "Employment contract starts on" in readiness_source
+    assert "has_effective_contract=contract_is_effective" in readiness_source
 
 
 def test_default_day_bootstrap_is_explicit_and_canonical():

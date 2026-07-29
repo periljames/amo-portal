@@ -319,7 +319,7 @@ function PeoplePanel({
     setEditing(person);
     setDraft({
       contract_type: (person.contract_type || "PERMANENT") as ContractType,
-      employment_status: (person.has_effective_contract ? person.employment_status : "ACTIVE") as EmploymentStatus,
+      employment_status: (person.contract_id ? person.employment_status : "ACTIVE") as EmploymentStatus,
       effective_from: person.contract_effective_from || isoDate(new Date()),
       effective_to: person.contract_effective_to || "",
       primary_base_station_id: person.primary_base_station_id || "",

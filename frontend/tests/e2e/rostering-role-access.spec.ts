@@ -116,6 +116,42 @@ function hrDashboardResponse(permissions: string[]) {
   };
 }
 
+const activeUserWithFutureContract = {
+  user_id: "active-user-future-contract",
+  contract_id: "future-contract-001",
+  staff_code: "TECH-002",
+  full_name: "Future Starter",
+  email: "future.starter@example.test",
+  has_effective_contract: false,
+  uses_default_day_pattern: false,
+  position_title: "Aircraft Technician",
+  department_code: "maintenance",
+  employment_status: "ONBOARDING",
+  contract_type: "FIXED_TERM",
+  contract_effective_from: "2026-08-15",
+  contract_effective_to: "2027-08-14",
+  primary_base_station_id: "base-nbo",
+  primary_base_code: "NBO",
+  supervisor_name: null,
+  standard_weekly_minutes: 2400,
+  standard_daily_minutes: 480,
+  fte_percentage: 100,
+  cost_centre: null,
+  payroll_number: null,
+  overtime_eligible: true,
+  night_shift_eligible: true,
+  standby_eligible: true,
+  work_pattern_code: null,
+  work_pattern_name: null,
+  work_pattern_effective_from: null,
+  active_leave_status: null,
+  readiness_state: "NEEDS_ATTENTION",
+  readiness_reasons: [
+    "Employment contract starts on 2026-08-15.",
+    "No active work pattern is assigned.",
+  ],
+};
+
 const activeUserWithoutContract = {
   user_id: "active-user-without-contract",
   contract_id: null,
@@ -218,7 +254,13 @@ async function installAuthenticatedSession(page: Page, roleCase: RoleCase) {
       return;
     }
     if (path.endsWith("/workforce/hr/people")) {
-      await fulfilJson(route, { items: [activeUserWithoutContract], page: 1, page_size: 100, total: 1, pages: 1 });
+      await fulfilJson(route, {
+        items: [activeUserWithoutContract, activeUserWithFutureContract],
+        page: 1,
+        page_size: 100,
+        total: 2,
+        pages: 1,
+      });
       return;
     }
     if (path.endsWith("/foundations/base-stations")) {
@@ -284,6 +326,12 @@ test("active users without contracts remain visible and actionable in Workforce"
   await expect(page.getByText("No contract", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create contract" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Apply default day pattern" })).toBeVisible();
+
+  const futureEmployee = page.getByText("Future Starter", { exact: true }).locator("xpath=ancestor::article");
+  await expect(futureEmployee).toContainText("ONBOARDING");
+  await expect(futureEmployee).toContainText("starts on 2026-08-15");
+  await expect(futureEmployee.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(futureEmployee.getByRole("button", { name: "Create contract" })).toHaveCount(0);
 });
 
 test("AMO Admin can open guided Setup and HR-only controls remain absent for employees", async ({ browser }) => {

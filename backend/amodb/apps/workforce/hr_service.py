@@ -794,17 +794,61 @@ def _current_contracts_by_user(
     return result
 
 
+def _readiness_contracts_by_user(
+    db: Session,
+    *,
+    amo_id: str,
+    user_ids: list[str],
+    on_date: date,
+) -> dict[str, models.EmploymentContract]:
+    """Return the effective contract or, when absent, the next future contract."""
+    result = _current_contracts_by_user(db, amo_id=amo_id, on_date=on_date)
+    missing_user_ids = [user_id for user_id in user_ids if user_id not in result]
+    if not missing_user_ids:
+        return result
+    future_rows = db.query(models.EmploymentContract).options(
+        joinedload(models.EmploymentContract.user),
+        joinedload(models.EmploymentContract.supervisor),
+        joinedload(models.EmploymentContract.primary_base),
+    ).filter(
+        models.EmploymentContract.amo_id == amo_id,
+        models.EmploymentContract.user_id.in_(missing_user_ids),
+        models.EmploymentContract.employment_status.in_([
+            models.EmploymentStatus.ACTIVE,
+            models.EmploymentStatus.ONBOARDING,
+        ]),
+        models.EmploymentContract.effective_from > on_date,
+    ).order_by(
+        models.EmploymentContract.user_id.asc(),
+        models.EmploymentContract.effective_from.asc(),
+        models.EmploymentContract.id.asc(),
+    ).all()
+    for row in future_rows:
+        result.setdefault(str(row.user_id), row)
+    return result
+
+
 def _person_readiness_for_user(
     user: account_models.User,
     *,
     contract: Optional[models.EmploymentContract],
     pattern: Optional[models.EmployeeWorkPatternAssignment],
     leave: Optional[models.LeaveRequest],
+    on_date: date,
 ) -> hr_schemas.HrPersonReadiness:
     reasons: list[str] = []
     status_value = _value(contract.employment_status) if contract else None
+    contract_is_effective = bool(
+        contract
+        and contract.effective_from <= on_date
+        and (contract.effective_to is None or contract.effective_to >= on_date)
+    )
     if contract is None:
-        reasons.append("No effective employment contract exists.")
+        reasons.append("No effective or future employment contract exists.")
+    elif not contract_is_effective:
+        reasons.append(f"Employment contract starts on {contract.effective_from.isoformat()}.")
+        if not contract.primary_base_station_id:
+            reasons.append("The future contract has no primary base assigned.")
     else:
         if status_value != models.EmploymentStatus.ACTIVE.value:
             reasons.append(f"Employment status is {status_value.replace('_', ' ').lower()}.")
@@ -830,7 +874,7 @@ def _person_readiness_for_user(
         staff_code=str(getattr(user, "staff_code", "") or ""),
         full_name=_display_name(user) or str(user.id),
         email=getattr(user, "email", None),
-        has_effective_contract=contract is not None,
+        has_effective_contract=contract_is_effective,
         uses_default_day_pattern=bool(work_pattern and work_pattern.code == "DEFAULT-DAY-5X2"),
         position_title=getattr(user, "position_title", None),
         department_code=_department_code(user),
@@ -870,7 +914,9 @@ def list_people_page_v2(
     now = _utcnow()
     users = _active_tenant_users(db, amo_id=amo_id)
     user_ids = [str(user.id) for user in users]
-    contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    contracts = _readiness_contracts_by_user(
+        db, amo_id=amo_id, user_ids=user_ids, on_date=today
+    )
     patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
     leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
     items = [
@@ -879,6 +925,7 @@ def list_people_page_v2(
             contract=contracts.get(str(user.id)),
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
+            on_date=today,
         )
         for user in users
     ]
@@ -936,7 +983,10 @@ def dashboard_v2(
     now = _utcnow()
     users = _active_tenant_users(db, amo_id=amo_id)
     user_ids = [str(user.id) for user in users]
-    contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    current_contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    contracts = _readiness_contracts_by_user(
+        db, amo_id=amo_id, user_ids=user_ids, on_date=today
+    )
     patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
     leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
     people = [
@@ -945,6 +995,7 @@ def dashboard_v2(
             contract=contracts.get(str(user.id)),
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
+            on_date=today,
         )
         for user in users
     ]
@@ -969,11 +1020,11 @@ def dashboard_v2(
     response.active_employee_count = len(users)
     response.employees_without_contract_count = len(without_contract)
     response.onboarding_employee_count = sum(
-        1 for contract in contracts.values()
+        1 for contract in current_contracts.values()
         if _value(contract.employment_status) == models.EmploymentStatus.ONBOARDING.value
     )
     response.suspended_employee_count = sum(
-        1 for contract in contracts.values()
+        1 for contract in current_contracts.values()
         if _value(contract.employment_status) == models.EmploymentStatus.SUSPENDED.value
     )
     response.employees_without_pattern_count = len(without_pattern)
