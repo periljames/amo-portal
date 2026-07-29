@@ -89,7 +89,19 @@ The final merge-safety pass also guarantees that:
 - manual generation does not advance or suppress the scheduled cadence;
 - concurrent identical manual requests return the matching winning run instead of a false database-conflict response;
 - failed, mismatched and still-running idempotent replays remain explicit conflicts;
-- leave rejection is shown only to users with the effective review permission.
+- leave rejection is shown only to users with the effective review permission;
+- weekly, fortnightly and other sub-monthly windows receive collision-safe date-boundary period codes;
+- non-schedule policy edits preserve the already calculated weekly or fortnightly occurrence.
+
+## Production scheduler
+
+Both default Compose deployments now include a dedicated `rostering-automation` service. It runs:
+
+```text
+python -m amodb.jobs.rostering_automation --loop
+```
+
+The worker polls at `ROSTER_AUTOMATION_POLL_SECONDS` intervals, defaults to one hour, retries top-level scheduler errors after `ROSTER_AUTOMATION_RETRY_SECONDS`, and limits each pass using `ROSTER_AUTOMATION_BATCH_LIMIT`. Database row locks and tenant-scoped idempotency make concurrent worker instances safe.
 
 ## Persistence
 
@@ -131,6 +143,7 @@ All mutations continue to use the existing Workforce APIs and permission model. 
 - legacy overlapping-head repair;
 - backend compilation and mapper configuration;
 - Rostering and Workforce regressions;
+- production scheduler wiring contract;
 - frontend TypeScript/Vite build;
 - frontend source-contract tests;
 - integrated lint;
