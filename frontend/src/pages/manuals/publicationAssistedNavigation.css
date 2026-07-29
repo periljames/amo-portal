@@ -1,0 +1,12 @@
+.publication-assisted-navigation-target {
+  outline: 3px solid color-mix(in srgb, var(--color-primary, #2563eb) 55%, transparent);
+  outline-offset: 4px;
+  scroll-margin-top: 108px;
+  transition: outline-color 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .publication-assisted-navigation-target {
+    transition: none;
+  }
+}
