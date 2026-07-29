@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.doc_control.knowledge_service import index_revision_background
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -61,6 +62,7 @@ async def preview_pdf_upload_guarded(
 async def upload_docx_revision_guarded(
     tenant_slug: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     code: str = Form(...),
     title: str = Form(...),
     rev_number: str = Form(...),
@@ -74,7 +76,7 @@ async def upload_docx_revision_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    return await legacy.upload_docx_revision(
+    result = await legacy.upload_docx_revision(
         tenant_slug=tenant_slug,
         request=request,
         code=code,
@@ -89,12 +91,15 @@ async def upload_docx_revision_guarded(
         db=db,
         current_user=current_user,
     )
+    background_tasks.add_task(index_revision_background, result["revision_id"])
+    return {**result, "reference_index_status": "PENDING"}
 
 
 @router.post("/t/{tenant_slug}/upload-pdf", include_in_schema=False)
 async def upload_pdf_revision_guarded(
     tenant_slug: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     code: str = Form(...),
     title: str = Form(...),
     rev_number: str = Form(...),
@@ -108,7 +113,7 @@ async def upload_pdf_revision_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    return await legacy.upload_pdf_revision(
+    result = await legacy.upload_pdf_revision(
         tenant_slug=tenant_slug,
         request=request,
         code=code,
@@ -123,3 +128,5 @@ async def upload_pdf_revision_guarded(
         db=db,
         current_user=current_user,
     )
+    background_tasks.add_task(index_revision_background, result["revision_id"])
+    return {**result, "reference_index_status": "PENDING"}
