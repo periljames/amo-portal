@@ -118,6 +118,7 @@ def check_api_key(*, api_key: str, api_url: str | None = None) -> dict[str, Any]
                 return {
                     "ok": True,
                     "provider": "resend",
+                    "credential_status": "AUTHENTICATED",
                     "access": "sending_only_or_restricted",
                     "detail": "The key authenticated but cannot list domains. Run an explicit test email to confirm sending.",
                 }
@@ -126,9 +127,10 @@ def check_api_key(*, api_key: str, api_url: str | None = None) -> dict[str, Any]
     return {
         "ok": True,
         "provider": "resend",
+        "credential_status": "AUTHENTICATED",
         "access": "full",
         "domain_count": len(domains or []),
-        "detail": "Resend authentication and domain API access passed.",
+        "detail": "Resend authentication and domain API access passed. Run an explicit test email to confirm delivery.",
     }
 
 
