@@ -39,7 +39,8 @@ jobs:
           SECRET_KEY: pr377-workforce-fix
         run: |
           python -m compileall -q amodb/apps/workforce amodb/apps/rostering
-          pytest -q amodb/apps/workforce/tests amodb/apps/rostering/tests
+          pytest -q amodb/apps/workforce/tests
+          pytest -q amodb/apps/rostering/tests
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
