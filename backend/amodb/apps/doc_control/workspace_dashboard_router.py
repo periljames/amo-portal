@@ -9,6 +9,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import domain_models as dm
+from .workspace_capabilities import document_control_capabilities, reader_capabilities
 from .workspace_router import dashboard as _get_full_dashboard
 from .workspace_service import can_read_manual, is_control_user, resolve_tenant
 
@@ -61,7 +62,7 @@ def _reader_dashboard(
     }
     return {
         "default_workspace": "LIBRARY",
-        "capabilities": {"read": True, "control": False, "approve": False},
+        "capabilities": reader_capabilities(),
         "metrics": metrics,
         "recent_activity": [],
     }
@@ -85,8 +86,10 @@ def get_role_appropriate_dashboard(
             tenant_slug=tenant_slug,
             current_user=current_user,
         )
-    return _get_full_dashboard(
+    dashboard = _get_full_dashboard(
         tenant_slug=tenant_slug,
         db=db,
         current_user=current_user,
     )
+    dashboard["capabilities"] = document_control_capabilities(current_user)
+    return dashboard
