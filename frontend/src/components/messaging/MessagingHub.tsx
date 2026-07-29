@@ -228,7 +228,10 @@ export function MessagingHub() {
                 updatePreferences.mutate({ desktop_enabled: event.target.checked });
               }} /> Desktop alerts</label>
               <label><input type="checkbox" checked={preferences.sound_enabled} onChange={(event) => updatePreferences.mutate({ sound_enabled: event.target.checked })} /> Sound</label>
-              <label title="Email is off by default to prevent routine chat spam"><input type="checkbox" checked={preferences.email_enabled} onChange={(event) => updatePreferences.mutate({ email_enabled: event.target.checked })} /> Email summaries</label>
+              <div className="messaging-settings__required"><strong>Essential account and critical compliance email</strong><small>Always active and cannot be disabled.</small></div>
+              <label><input type="checkbox" checked={preferences.email_enabled} onChange={(event) => updatePreferences.mutate({ email_enabled: event.target.checked })} /> Routine operational email</label>
+              <label><input type="checkbox" checked={preferences.receipt_email_enabled} onChange={(event) => updatePreferences.mutate({ receipt_email_enabled: event.target.checked })} /> Delivery and workflow receipts</label>
+              <label><input type="checkbox" checked={preferences.marketing_email_enabled} onChange={(event) => updatePreferences.mutate({ marketing_email_enabled: event.target.checked })} /> Product updates and surveys</label>
             </div>
           ) : null}
 

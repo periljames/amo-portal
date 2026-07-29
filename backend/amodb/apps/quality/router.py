@@ -1550,6 +1550,7 @@ def _send_notice_email(
         subject=subject,
         context=context,
         correlation_id=correlation_id,
+        email_class="CRITICAL",
         amo_id=amo_id,
         db=db,
     )

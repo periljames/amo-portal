@@ -16,6 +16,7 @@ from . import (
     gateway,
     models as realtime_models,
     notification_counts,
+    notification_preferences,
     presence_service,
     realtime_auth,
     schemas,
@@ -44,6 +45,20 @@ def get_current_active_realtime_user(
 
 def _flush_outbox() -> None:
     gateway.gateway.flush_pending()
+
+def _require_notification_admin(user: account_models.User) -> None:
+    role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")) or "").upper()
+    if (
+        getattr(user, "is_superuser", False)
+        or getattr(user, "is_amo_admin", False)
+        or role in {"SUPERUSER", "AMO_ADMIN"}
+    ):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only an AMO administrator may change tenant email delivery preferences",
+    )
+
 
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
@@ -332,6 +347,29 @@ def notification_preferences_update(
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ):
     return messaging.update_preferences(db, user=current_user, payload=payload)
+
+
+@router.get("/notifications/tenant-preferences")
+def notification_tenant_preferences(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
+):
+    _require_notification_admin(current_user)
+    return notification_preferences.get_tenant_preferences(db, user=current_user)
+
+
+@router.put("/notifications/tenant-preferences")
+def notification_tenant_preferences_update(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
+):
+    _require_notification_admin(current_user)
+    return notification_preferences.update_tenant_preferences(
+        db,
+        user=current_user,
+        payload=payload,
+    )
 
 
 @router.post("/prompts/{prompt_id}/action")

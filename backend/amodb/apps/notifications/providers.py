@@ -107,10 +107,18 @@ def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) 
 
 
 class ResendProvider(EmailProvider):
-    def __init__(self, *, secret: dict[str, Any], config: dict[str, Any], credential_status: str):
+    def __init__(
+        self,
+        *,
+        secret: dict[str, Any],
+        config: dict[str, Any],
+        credential_status: str,
+        tenant_id: str | None = None,
+    ):
         self.secret = dict(secret or {})
         self.config = dict(config or {})
         self.credential_status = str(credential_status or "").strip().upper()
+        self.tenant_id = str(tenant_id or "platform")
 
     def send(
         self,
@@ -167,7 +175,9 @@ class ResendProvider(EmailProvider):
             idempotency_key=correlation_id or f"{template_key}:{effective_recipient}",
             tags=[
                 {"name": "source", "value": "amo_portal"},
+                {"name": "tenant_id", "value": re.sub(r"[^A-Za-z0-9_-]", "_", self.tenant_id)[:256]},
                 {"name": "template", "value": re.sub(r"[^A-Za-z0-9_-]", "_", template_key)[:256]},
+                {"name": "email_class", "value": str(context.get("_email_class") or "ROUTINE")[:256]},
             ],
         )
         return {
@@ -201,6 +211,7 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
             secret=saas_services.provider_secrets(row),
             config=row.config_json or {},
             credential_status=str(row.status or ""),
+            tenant_id=amo_id,
         ),
         True,
     )

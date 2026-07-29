@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import TenantEmailPreferencesPanel from "../components/notifications/TenantEmailPreferencesPanel";
 import { getCachedUser } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import {
@@ -291,6 +292,8 @@ export default function AdminSaaSSettingsPage() {
           <div><span>Queue depth</span><strong>{String(setup?.queue.queue_depth ?? 0)}</strong></div>
           <div><span>Unhealthy providers</span><strong>{setup?.provider_readiness.unhealthy ?? 0}</strong></div>
         </section>
+
+        {!isSuperuser ? <TenantEmailPreferencesPanel /> : null}
 
         {error ? <div className="saas-admin__alert saas-admin__alert--error" role="alert">{error}</div> : null}
         {notice ? <div className="saas-admin__alert saas-admin__alert--success" role="status">{notice}</div> : null}
