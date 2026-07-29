@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Maximize2, Minus, Plus } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 
+import type { DocumentationReference } from "../../services/documentation";
 import { publicationPdfSource } from "../../services/publications";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -31,6 +32,9 @@ type PublicationPdfLayoutViewerProps = {
   navigationRequest?: PdfNavigationRequest | null;
   initialPage?: number;
   initialZoom?: number;
+  references?: DocumentationReference[];
+  activeReferenceId?: string | null;
+  onReferenceClick?: (reference: DocumentationReference) => void;
   onPageChange?: (pageNumber: number) => void;
   onZoomChange?: (zoomPercent: number) => void;
   onAcroFormDetected?: (hasAcroForm: boolean) => void;
@@ -95,6 +99,21 @@ async function resolveOutline(documentProxy: any): Promise<PdfOutlineItem[]> {
   return resolved;
 }
 
+function hotspotStyle(reference: DocumentationReference): CSSProperties | null {
+  const box = reference.source.bbox || {};
+  const x = Number(box.x);
+  const y = Number(box.y);
+  const width = Number(box.width);
+  const height = Number(box.height);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  return {
+    left: `${clamp(x, 0, 1) * 100}%`,
+    top: `${clamp(y, 0, 1) * 100}%`,
+    width: `${clamp(width, 0.004, 1) * 100}%`,
+    height: `${clamp(height, 0.006, 1) * 100}%`,
+  };
+}
+
 export default function PublicationPdfLayoutViewer({
   fileUrl,
   title,
@@ -102,6 +121,9 @@ export default function PublicationPdfLayoutViewer({
   navigationRequest,
   initialPage = 1,
   initialZoom = 100,
+  references = [],
+  activeReferenceId,
+  onReferenceClick,
   onPageChange,
   onZoomChange,
   onAcroFormDetected,
@@ -120,6 +142,15 @@ export default function PublicationPdfLayoutViewer({
   const [hasAcroForm, setHasAcroForm] = useState(false);
 
   const pdfSource = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
+  const referencesByPage = useMemo(() => {
+    const grouped = new Map<number, DocumentationReference[]>();
+    for (const reference of references) {
+      const page = Number(reference.source.page_number || 0);
+      if (!page || !reference.target || !hotspotStyle(reference)) continue;
+      grouped.set(page, [...(grouped.get(page) || []), reference]);
+    }
+    return grouped;
+  }, [references]);
 
   useEffect(() => {
     onPageChangeRef.current = onPageChange;
@@ -211,6 +242,7 @@ export default function PublicationPdfLayoutViewer({
         <div className="publication-native-pdf__page-state" aria-live="polite">
           <strong>Page {currentPage}</strong>
           <span>{pageCount ? `of ${pageCount}` : ""}</span>
+          {referencesByPage.get(currentPage)?.length ? <span>{referencesByPage.get(currentPage)?.length} linked item(s)</span> : null}
           {hasAcroForm ? <span className="publication-native-pdf__form-state">AcroForm · read-only</span> : null}
         </div>
         <div className="publication-native-pdf__zoom" aria-label="Document zoom controls">
@@ -292,6 +324,18 @@ export default function PublicationPdfLayoutViewer({
                   setPageRatios((current) => Math.abs((current[pageNumber] || 0) - nextRatio) < 0.001 ? current : { ...current, [pageNumber]: nextRatio });
                 }}
               /> : <div className="publication-native-pdf__placeholder" aria-label={`Page ${pageNumber} is ready to render`} />}
+              {(referencesByPage.get(pageNumber) || []).map((reference) => {
+                const referenceStyle = hotspotStyle(reference);
+                if (!referenceStyle) return null;
+                return <button
+                  type="button"
+                  key={reference.id}
+                  className={`publication-reference-hotspot ${activeReferenceId === reference.id ? "active" : ""}`}
+                  style={referenceStyle}
+                  aria-label={`${reference.raw_token}: open ${reference.target?.code || "linked document"}`}
+                  onClick={() => onReferenceClick?.(reference)}
+                />;
+              })}
             </div>;
           })}
         </div>
