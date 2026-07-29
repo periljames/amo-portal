@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { platformApi, type PlatformUser } from "../../services/platformControl";
@@ -14,24 +14,14 @@ import { usePlatformData } from "./components/usePlatformData";
 
 export default function PlatformUsersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
-  const [status, setStatus] = useState(() => searchParams.get("status") ?? "");
+  const q = searchParams.get("q") ?? "";
+  const status = searchParams.get("status") ?? "";
   const [reason, setReason] = useState("Platform user security action");
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const users = usePlatformData(() => platformApi.users({ q, status, limit: 100 }), [q, status], { pollMs: 15_000 });
 
-  useEffect(() => {
-    const nextQ = searchParams.get("q") ?? "";
-    const nextStatus = searchParams.get("status") ?? "";
-    if (nextQ !== q) setQ(nextQ);
-    if (nextStatus !== status) setStatus(nextStatus);
-  // q and status deliberately participate so browser navigation remains authoritative.
-  }, [q, searchParams, status]);
-
   const updateFilters = (nextQ: string, nextStatus: string) => {
-    setQ(nextQ);
-    setStatus(nextStatus);
     const next = new URLSearchParams(searchParams);
     if (nextQ.trim()) next.set("q", nextQ);
     else next.delete("q");
