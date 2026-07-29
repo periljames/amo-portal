@@ -53,12 +53,12 @@ def _record_failed_scheduled_run(
     as_of: datetime,
     failure_kind: str = "EXECUTION_FAILED",
 ) -> bool:
-    """Roll back generated work, then record one failed scheduled attempt.
+    """Roll back generated work, then record one terminal scheduled attempt.
 
     The operational transaction is discarded before evidence is inserted. The
     policy advances to its next scheduled occurrence so a deterministic failed
-    idempotency key cannot leave the hourly worker replaying the same failed
-    cycle forever.
+    idempotency key cannot leave the hourly worker replaying the same cycle.
+    Missing accountable ownership is recorded as SKIPPED rather than FAILED.
     """
     db.rollback()
     try:
@@ -68,6 +68,7 @@ def _record_failed_scheduled_run(
         if policy is None:
             return False
 
+        skipped = failure_kind == "NO_ACCOUNTABLE_OWNER"
         existing = db.query(RosterGenerationRun).filter(
             RosterGenerationRun.amo_id == policy.amo_id,
             RosterGenerationRun.idempotency_key == idempotency_key,
@@ -78,7 +79,11 @@ def _record_failed_scheduled_run(
                 amo_id=policy.amo_id,
                 policy_id=policy.id,
                 trigger=RosterAutomationTrigger.SCHEDULED,
-                status=RosterAutomationRunStatus.FAILED,
+                status=(
+                    RosterAutomationRunStatus.SKIPPED
+                    if skipped
+                    else RosterAutomationRunStatus.FAILED
+                ),
                 idempotency_key=idempotency_key,
                 dry_run=False,
                 target_from=target_from.isoformat(),
@@ -90,7 +95,8 @@ def _record_failed_scheduled_run(
                 validation_warning_count=0,
                 summary_json={
                     "operational_changes_committed": False,
-                    "failure_recorded_after_rollback": True,
+                    "failure_recorded_after_rollback": not skipped,
+                    "skip_recorded_after_rollback": skipped,
                     "scheduled_cycle_advanced": True,
                     "failure_kind": failure_kind,
                 },
@@ -106,7 +112,7 @@ def _record_failed_scheduled_run(
         policy.next_run_at = automation_service._next_run(policy, now=as_of)
         policy.updated_reason = (
             "Scheduled run skipped because no accountable policy owner is recorded."
-            if failure_kind == "NO_ACCOUNTABLE_OWNER"
+            if skipped
             else "Scheduled automation failed; all generated changes were rolled back."
         )
         db.add(policy)
