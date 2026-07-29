@@ -34,6 +34,7 @@ class HrActionItem(HrSchema):
 
 class HrPersonReadiness(HrSchema):
     user_id: str
+    contract_id: str
     staff_code: str
     full_name: str
     position_title: Optional[str] = None
@@ -42,8 +43,17 @@ class HrPersonReadiness(HrSchema):
     contract_type: Optional[str] = None
     contract_effective_from: Optional[date] = None
     contract_effective_to: Optional[date] = None
+    primary_base_station_id: Optional[str] = None
     primary_base_code: Optional[str] = None
     supervisor_name: Optional[str] = None
+    standard_weekly_minutes: int = 0
+    standard_daily_minutes: int = 0
+    fte_percentage: float = 100.0
+    cost_centre: Optional[str] = None
+    payroll_number: Optional[str] = None
+    overtime_eligible: bool = True
+    night_shift_eligible: bool = True
+    standby_eligible: bool = True
     work_pattern_code: Optional[str] = None
     work_pattern_name: Optional[str] = None
     work_pattern_effective_from: Optional[date] = None
