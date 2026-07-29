@@ -31,6 +31,16 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _status_after_authentication(current_status: str, result: dict) -> str:
+    """Authentication cannot promote an untested credential to delivery healthy."""
+
+    current = str(current_status or "").strip().upper()
+    if current == "HEALTHY":
+        return "HEALTHY"
+    status = str(result.get("credential_status") or "AUTHENTICATED").strip().upper()
+    return status if status in {"AUTHENTICATED", "HEALTHY"} else "AUTHENTICATED"
+
+
 def _acquire_health_lock(db) -> bool:
     """Allow one worker replica to decide whether the periodic probe is due."""
 
@@ -50,6 +60,7 @@ def _acquire_health_lock(db) -> bool:
 def _check_resend_credentials(db) -> dict[str, int]:
     checked = 0
     healthy = 0
+    authenticated = 0
     unhealthy = 0
     rows = (
         db.query(saas_models.SaaSProviderCredential)
@@ -68,17 +79,25 @@ def _check_resend_credentials(db) -> dict[str, int]:
                 secret=saas_services.provider_secrets(row),
                 config=row.config_json or {},
             )
-            row.status = "HEALTHY"
+            row.status = _status_after_authentication(str(row.status or ""), result)
             row.last_health_detail = str(result.get("detail") or "Resend API authentication passed")[:2000]
             row.last_latency_ms = int(result.get("latency_ms") or _elapsed_ms(started))
-            healthy += 1
+            if row.status == "HEALTHY":
+                healthy += 1
+            else:
+                authenticated += 1
         except Exception as exc:
             row.status = "UNHEALTHY"
             row.last_health_detail = str(exc)[:2000]
             row.last_latency_ms = _elapsed_ms(started)
             unhealthy += 1
         row.last_checked_at = services.now_utc()
-    return {"checked": checked, "healthy": healthy, "unhealthy": unhealthy}
+    return {
+        "checked": checked,
+        "healthy": healthy,
+        "authenticated": authenticated,
+        "unhealthy": unhealthy,
+    }
 
 
 def run_once(*, min_interval_seconds: int = 0) -> dict:
