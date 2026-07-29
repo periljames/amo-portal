@@ -2,7 +2,8 @@
 
 Date: 2026-07-28  
 Implementation branch: `agent/rostering-automation-workforce-hr-overhaul`  
-Parent contract: issue #347
+Parent contract: issue #347  
+Synchronized main baseline: `f20fef6a29817fc5a777557860ce356ef82c881c`
 
 ## Purpose
 
