@@ -1,18 +1,21 @@
-import React from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+
 import { endSession, getCachedUser } from "../../../services/auth";
+import { platformConsoleApi, type PlatformConsoleSearchResult } from "../../../services/platformConsole";
 import "../../../styles/platform-control.css";
-import { platformNav } from "./platformNavigation";
+import { platformNavSections, type PlatformNavItem } from "./platformNavigation";
+import { usePlatformRealtime, type PlatformConsoleSnapshot } from "./usePlatformRealtime";
 
 export const StatusBadge: React.FC<{ value?: unknown }> = ({ value }) => {
   const text = String(value ?? "UNKNOWN");
   const v = text.toUpperCase();
   const cls =
-    v.includes("ACTIVE") || v.includes("HEALTHY") || v.includes("SUCCEEDED") || v === "OPEN"
+    v.includes("ACTIVE") || v.includes("HEALTHY") || v.includes("SUCCEEDED") || v === "OPEN" || v === "LIVE"
       ? "ok"
-      : v.includes("FAIL") || v.includes("CRITICAL") || v.includes("LOCK") || v.includes("ERROR") || v.includes("DENIED")
+      : v.includes("FAIL") || v.includes("CRITICAL") || v.includes("LOCK") || v.includes("ERROR") || v.includes("DENIED") || v.includes("OFFLINE")
         ? "bad"
-        : v.includes("WARN") || v.includes("PENDING") || v.includes("DEGRADED") || v.includes("TRIAL")
+        : v.includes("WARN") || v.includes("PENDING") || v.includes("DEGRADED") || v.includes("TRIAL") || v.includes("CONNECTING")
           ? "warn"
           : "neutral";
   return <span className={`platform-badge ${cls}`}>{text}</span>;
@@ -23,14 +26,49 @@ export const MetricCard: React.FC<{
   value: React.ReactNode;
   caption?: React.ReactNode;
   tone?: "blue" | "green" | "amber" | "red" | "purple";
-}> = ({ label, value, caption, tone = "blue" }) => (
+  mark?: React.ReactNode;
+}> = ({ label, value, caption, tone = "blue", mark }) => (
   <section className={`platform-card platform-metric platform-metric--${tone}`}>
     <div className="platform-metric__shine" />
-    <div className="label">{label}</div>
+    <div className="platform-metric__top">
+      <div className="label">{label}</div>
+      {mark ? <span className="platform-metric__mark">{mark}</span> : null}
+    </div>
     <div className="value">{value ?? "-"}</div>
     {caption ? <div className="caption">{caption}</div> : null}
   </section>
 );
+
+type PlatformTheme = "dark" | "light" | "system";
+const THEME_KEY = "amo_platform_theme";
+const ACCENT_KEY = "amo_platform_accent";
+const DEFAULT_ACCENT = "#3b67f2";
+const ACCENTS = ["#4f46e5", "#2563eb", "#0f8b8d", "#a16207", "#c026d3"];
+
+function resolveTheme(theme: PlatformTheme): "dark" | "light" {
+  if (theme !== "system") return theme;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function navTarget(item: PlatformNavItem) {
+  const [pathname, rawQuery = ""] = item.to.split("?");
+  return { pathname, query: new URLSearchParams(rawQuery) };
+}
+
+function navIsActive(item: PlatformNavItem, pathname: string, search: string) {
+  const target = navTarget(item);
+  if (target.pathname !== pathname) return false;
+  const tab = target.query.get("tab");
+  const currentTab = new URLSearchParams(search).get("tab");
+  return tab ? tab === currentTab : !currentTab;
+}
+
+function badgeValue(snapshot: PlatformConsoleSnapshot | null, key?: string): React.ReactNode {
+  if (!key || !snapshot) return null;
+  const value = snapshot[key];
+  if (value === undefined || value === null || value === "" || value === 0) return null;
+  return String(value);
+}
 
 export const PlatformShell: React.FC<{
   title: string;
@@ -40,6 +78,85 @@ export const PlatformShell: React.FC<{
 }> = ({ title, subtitle, actions, children }) => {
   const user = getCachedUser();
   const navigate = useNavigate();
+  const location = useLocation();
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [theme, setTheme] = useState<PlatformTheme>(() => {
+    const stored = window.localStorage.getItem(THEME_KEY);
+    return stored === "dark" || stored === "light" || stored === "system" ? stored : "dark";
+  });
+  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() => resolveTheme(theme));
+  const [accent, setAccent] = useState(() => window.localStorage.getItem(ACCENT_KEY) || DEFAULT_ACCENT);
+  const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<PlatformConsoleSearchResult[]>([]);
+  const realtime = usePlatformRealtime();
+
+  useEffect(() => {
+    void platformConsoleApi.bootstrap().then(setSnapshot).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (realtime.snapshot) setSnapshot(realtime.snapshot);
+  }, [realtime.snapshot]);
+
+  useEffect(() => {
+    window.localStorage.setItem(THEME_KEY, theme);
+    if (theme !== "system") {
+      setResolvedTheme(theme);
+      return;
+    }
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => setResolvedTheme(media.matches ? "light" : "dark");
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem(ACCENT_KEY, accent);
+  }, [accent]);
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (event.key === "Escape") {
+        setThemeOpen(false);
+        setResults([]);
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
+
+  useEffect(() => {
+    const clean = query.trim();
+    if (clean.length < 2) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      void platformConsoleApi.search(clean)
+        .then((response) => setResults(response.items || []))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const initials = useMemo(
+    () => user?.full_name?.split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || user?.email?.slice(0, 2)?.toUpperCase() || "SA",
+    [user?.email, user?.full_name],
+  );
+
   if (!user?.is_superuser) {
     return (
       <main className="platform-access-denied">
@@ -51,45 +168,125 @@ export const PlatformShell: React.FC<{
       </main>
     );
   }
-  const initials = user.full_name?.split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || user.email?.slice(0, 2)?.toUpperCase() || "SA";
+
+  const style = { "--platform-accent": accent } as React.CSSProperties;
+  const selectSearchResult = (result: PlatformConsoleSearchResult) => {
+    setQuery("");
+    setResults([]);
+    navigate(result.path);
+  };
+
   return (
-    <div className="platform-shell">
-      <aside className="platform-sidebar">
+    <div className="platform-shell" data-platform-theme={resolvedTheme} style={style}>
+      <button className="platform-sidebar-scrim" aria-label="Close navigation" data-open={sidebarOpen} onClick={() => setSidebarOpen(false)} />
+      <aside className="platform-sidebar" data-open={sidebarOpen}>
         <div className="platform-sidebar__brand">
           <span className="platform-brand-mark">AM</span>
-          <span><strong>AMO SaaS</strong><small>Control Plane</small></span>
+          <span><strong>AMO SaaS</strong><small>Superadmin Console</small></span>
+          <button className="platform-icon-btn platform-sidebar__close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}>×</button>
         </div>
         <nav className="platform-nav" aria-label="Platform navigation">
-          {platformNav.map(([to, label, mark]) => (
-            <NavLink key={to} to={to}>
-              <span className="platform-nav__mark">{mark}</span>
-              <span>{label}</span>
-            </NavLink>
+          {platformNavSections.map((section) => (
+            <section className="platform-nav__section" key={section.label}>
+              <span className="platform-nav__heading">{section.label}</span>
+              {section.items.map((item) => {
+                const active = navIsActive(item, location.pathname, location.search);
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={active ? "active" : undefined}
+                    title={item.description}
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <span className="platform-nav__mark">{item.mark}</span>
+                    <span className="platform-nav__copy"><strong>{item.label}</strong><small>{item.description}</small></span>
+                    {badgeValue(snapshot, item.badgeKey) ? <span className="platform-nav__badge">{badgeValue(snapshot, item.badgeKey)}</span> : null}
+                  </Link>
+                );
+              })}
+            </section>
           ))}
         </nav>
-        <div className="platform-sidebar__footer">
-          <span className="platform-status-dot" />
-          <span>Protected platform scope</span>
+        <div className="platform-sidebar__status">
+          <div><span className={`platform-status-dot ${realtime.status}`} /><strong>System status</strong></div>
+          <span>{realtime.status === "live" ? "Live updates connected" : realtime.status === "connecting" ? "Connecting to control plane" : "Live channel unavailable"}</span>
+          <small>{realtime.lastUpdated ? `Updated ${realtime.lastUpdated.toLocaleTimeString()}` : "Awaiting first event"}</small>
         </div>
+        <a className="platform-public-link" href="/" target="_blank" rel="noreferrer">View public portal <span>↗</span></a>
       </aside>
+
       <main className="platform-main">
-        <header className="platform-topbar">
-          <div className="platform-title">
-            <span className="platform-eyebrow">Superadmin console</span>
-            <h1>{title}</h1>
-            <p>{subtitle}</p>
+        <header className="platform-global-bar">
+          <button className="platform-icon-btn platform-menu-btn" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>☰</button>
+          <div className="platform-search-shell">
+            <span className="platform-search-icon">⌕</span>
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search tenants, users, tickets, or settings…"
+              aria-label="Search platform console"
+            />
+            <kbd>Ctrl K</kbd>
+            {(query.trim().length >= 2 || results.length) ? (
+              <div className="platform-search-results">
+                {searching ? <div className="platform-search-state">Searching…</div> : results.length ? results.map((result) => (
+                  <button key={`${result.kind}:${result.id}`} onClick={() => selectSearchResult(result)}>
+                    <span className="platform-search-result__kind">{result.kind.slice(0, 2).toUpperCase()}</span>
+                    <span><strong>{result.title}</strong><small>{result.subtitle || result.path}</small></span>
+                    {result.status ? <StatusBadge value={result.status} /> : null}
+                  </button>
+                )) : <div className="platform-search-state">No matching platform records.</div>}
+              </div>
+            ) : null}
           </div>
-          <div className="platform-actions">
-            {actions}
+
+          <div className="platform-global-actions">
+            <div className="platform-theme-control">
+              <button className="platform-btn compact" onClick={() => setThemeOpen((open) => !open)}>◐ Theme <span>⌄</span></button>
+              {themeOpen ? (
+                <div className="platform-theme-menu">
+                  <span className="platform-menu-label">Appearance</span>
+                  {(["dark", "light", "system"] as PlatformTheme[]).map((option) => (
+                    <button key={option} className={theme === option ? "selected" : undefined} onClick={() => setTheme(option)}>
+                      <span>{option === "dark" ? "◉" : option === "light" ? "○" : "◐"}</span>
+                      {option[0].toUpperCase() + option.slice(1)}{option === "dark" ? " (Default)" : ""}
+                    </button>
+                  ))}
+                  <span className="platform-menu-label">Accent presets</span>
+                  <div className="platform-accent-row">
+                    {ACCENTS.map((preset) => <button key={preset} aria-label={`Use ${preset} accent`} className={accent === preset ? "selected" : undefined} style={{ background: preset }} onClick={() => setAccent(preset)} />)}
+                  </div>
+                  <label className="platform-accent-custom"><span>Custom primary</span><input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} /></label>
+                </div>
+              ) : null}
+            </div>
+            <button className="platform-icon-btn" aria-label="Reconnect live updates" title="Reconnect live updates" onClick={realtime.reconnect}>↻</button>
+            <button className="platform-icon-btn platform-notification-btn" aria-label="Notifications">♢<span>{snapshot?.critical_security_alerts ? String(snapshot.critical_security_alerts) : ""}</span></button>
             <div className="platform-profile-chip" title={user.email || "Platform user"}>
               <span>{initials}</span>
-              <small>{user.email || "Platform user"}</small>
+              <small><strong>{user.email || "Platform user"}</strong><em>Superadmin</em></small>
             </div>
-            <button className="platform-btn" onClick={() => navigate("/login", { replace: true })}>Switch account</button>
-            <button className="platform-btn danger" onClick={() => { endSession("manual"); navigate("/login", { replace: true }); }}>Sign out</button>
+            <button className="platform-icon-btn" aria-label="Sign out" title="Sign out" onClick={() => { endSession("manual"); navigate("/login", { replace: true }); }}>↪</button>
           </div>
         </header>
-        {children}
+
+        <div className="platform-workspace">
+          <div className="platform-page">
+            <header className="platform-page-header">
+              <div className="platform-title">
+                <span className="platform-page-emblem">◇</span>
+                <div><h1>{title}</h1><p>{subtitle}</p></div>
+              </div>
+              <div className="platform-page-actions">
+                <span className={`platform-live-chip ${realtime.status}`}><i />{realtime.status === "live" ? "Live" : realtime.status}</span>
+                {actions}
+              </div>
+            </header>
+            <div className="platform-page-body">{children}</div>
+          </div>
+        </div>
       </main>
     </div>
   );
@@ -97,10 +294,7 @@ export const PlatformShell: React.FC<{
 
 export const ErrorState: React.FC<{ error: unknown; retry?: () => void }> = ({ error, retry }) => (
   <div className="platform-error">
-    <div>
-      <strong>Unable to load this platform section.</strong>
-      <p>{error instanceof Error ? error.message : String(error || "Unable to load data.")}</p>
-    </div>
+    <div><strong>Unable to load this platform section.</strong><p>{error instanceof Error ? error.message : String(error || "Unable to load data.")}</p></div>
     {retry ? <button className="platform-btn" onClick={retry}>Retry</button> : null}
   </div>
 );
