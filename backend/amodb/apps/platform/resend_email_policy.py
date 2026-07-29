@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Any
 
-from . import saas_providers, saas_queue, saas_services
+from . import saas_models, saas_providers, saas_queue, saas_services
 from .resend_adapter import check_api_key
 
 
@@ -36,6 +37,57 @@ _INSTALLED = False
 
 def _environment() -> str:
     return (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+
+
+def status_after_authentication(current_status: str, result: dict[str, Any]) -> str:
+    """A non-sending API probe cannot grant delivery-ready status."""
+
+    current = str(current_status or "").strip().upper()
+    if current == "HEALTHY":
+        return "HEALTHY"
+    candidate = str(result.get("credential_status") or "AUTHENTICATED").strip().upper()
+    return candidate if candidate in {"AUTHENTICATED", "HEALTHY"} else "AUTHENTICATED"
+
+
+def process_resend_authentication_job(db, job) -> dict[str, Any]:
+    payload = dict(job.payload_json or {})
+    credential_id = str(payload.get("credential_id") or "").strip()
+    credential = db.get(saas_models.SaaSProviderCredential, credential_id)
+    if credential is None or str(credential.provider or "").strip().lower() != "resend":
+        raise ValueError("Resend credential was not found")
+    current_status = str(credential.status or "").strip().upper()
+    if current_status == "DISABLED":
+        raise ValueError("Disabled Resend credentials cannot be authenticated")
+    if current_status not in {"CONFIGURED", "AUTHENTICATED", "HEALTHY", "UNHEALTHY"}:
+        raise ValueError("Resend is not configured for an authentication check")
+
+    started = time.perf_counter()
+    try:
+        result = saas_providers.check_provider(
+            "resend",
+            secret=saas_services.provider_secrets(credential),
+            config=credential.config_json or {},
+        )
+    except Exception as exc:
+        credential.status = "UNHEALTHY"
+        credential.last_checked_at = saas_services.utcnow()
+        credential.last_latency_ms = max(0, int(round((time.perf_counter() - started) * 1000)))
+        credential.last_health_detail = str(exc)[:2000]
+        db.flush()
+        raise
+
+    credential.status = status_after_authentication(current_status, result)
+    credential.last_checked_at = saas_services.utcnow()
+    credential.last_latency_ms = int(
+        result.get("latency_ms")
+        or max(0, int(round((time.perf_counter() - started) * 1000)))
+    )
+    credential.last_health_detail = str(
+        result.get("detail")
+        or "Resend API authentication passed. Send one explicit test email to authorize automatic delivery."
+    )[:2000]
+    db.flush()
+    return result
 
 
 def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
