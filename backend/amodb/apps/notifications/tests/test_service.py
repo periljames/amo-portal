@@ -74,7 +74,7 @@ def test_send_email_no_provider_marks_skipped(db_session, monkeypatch):
     monkeypatch.setattr(
         notification_providers,
         "get_email_provider",
-        lambda: (notification_providers.NoopProvider(), False),
+        lambda **_: (notification_providers.NoopProvider(), False),
     )
 
     log = notification_service.send_email(
@@ -98,13 +98,22 @@ def test_send_email_provider_success(db_session, monkeypatch):
     _create_user(db_session, amo.id)
 
     class FakeProvider(notification_providers.EmailProvider):
+        config = {"per_minute_limit": 10, "daily_limit": 500}
+
         def send(self, **kwargs):
-            return None
+            return {
+                "provider": "resend",
+                "message_id": "email_123",
+                "mode": "SANDBOX",
+                "recipient": kwargs["recipient"],
+                "original_recipient": kwargs["recipient"],
+                "template_id": None,
+            }
 
     monkeypatch.setattr(
         notification_providers,
         "get_email_provider",
-        lambda: (FakeProvider(), True),
+        lambda **_: (FakeProvider(), True),
     )
 
     log = notification_service.send_email(
@@ -121,6 +130,53 @@ def test_send_email_provider_success(db_session, monkeypatch):
     assert log.status == notification_models.EmailStatus.SENT
     assert log.sent_at is not None
     assert log.error is None
+    assert log.context_json["_delivery"]["provider"] == "resend"
+    assert log.context_json["_delivery"]["message_id"] == "email_123"
+
+
+def test_send_email_reuses_successful_correlation_id(db_session, monkeypatch):
+    amo = _create_amo(db_session)
+    _create_user(db_session, amo.id)
+    calls = 0
+
+    class FakeProvider(notification_providers.EmailProvider):
+        config = {}
+
+        def send(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            return {
+                "provider": "resend",
+                "message_id": "email_once",
+                "mode": "SANDBOX",
+                "recipient": kwargs["recipient"],
+                "original_recipient": kwargs["recipient"],
+                "template_id": None,
+            }
+
+    monkeypatch.setattr(notification_providers, "get_email_provider", lambda **_: (FakeProvider(), True))
+    first = notification_service.send_email(
+        "task_reminder",
+        "notify@example.com",
+        "Reminder",
+        {},
+        correlation_id="same-correlation",
+        amo_id=amo.id,
+        db=db_session,
+    )
+    db_session.commit()
+    second = notification_service.send_email(
+        "task_reminder",
+        "notify@example.com",
+        "Reminder",
+        {},
+        correlation_id="same-correlation",
+        amo_id=amo.id,
+        db=db_session,
+    )
+
+    assert first.id == second.id
+    assert calls == 1
 
 
 def test_send_email_provider_failure_best_effort(db_session, monkeypatch):
@@ -128,13 +184,15 @@ def test_send_email_provider_failure_best_effort(db_session, monkeypatch):
     _create_user(db_session, amo.id)
 
     class FailingProvider(notification_providers.EmailProvider):
+        config = {}
+
         def send(self, **kwargs):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(
         notification_providers,
         "get_email_provider",
-        lambda: (FailingProvider(), True),
+        lambda **_: (FailingProvider(), True),
     )
 
     log = notification_service.send_email(
@@ -157,13 +215,15 @@ def test_send_email_provider_failure_critical_raises(db_session, monkeypatch):
     _create_user(db_session, amo.id)
 
     class FailingProvider(notification_providers.EmailProvider):
+        config = {}
+
         def send(self, **kwargs):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(
         notification_providers,
         "get_email_provider",
-        lambda: (FailingProvider(), True),
+        lambda **_: (FailingProvider(), True),
     )
 
     with pytest.raises(RuntimeError):

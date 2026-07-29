@@ -44,6 +44,13 @@ def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
         return saas_side_effects.process_etims_fiscalization(db, job=job)
     if job.job_type == "AI_SUPPORT_REPLY":
         return saas_side_effects.process_ai_support_reply(db, job=job)
+    if (
+        job.job_type == "PROVIDER_HEALTH_CHECK"
+        and str((job.payload_json or {}).get("provider") or "").strip().lower() == "resend"
+    ):
+        from amodb.apps.platform.resend_email_policy import process_resend_authentication_job
+
+        return process_resend_authentication_job(db, job)
     from amodb.jobs import saas_worker as handlers
 
     return handlers.process_job(db, job)
@@ -107,10 +114,28 @@ def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, 
         close_session_safely(db)
 
 
+def _health_interval_seconds() -> int:
+    requested = int(os.getenv("RESEND_HEALTH_INTERVAL_SECONDS", "3600"))
+    return max(300, min(requested, 86400))
+
+
+def _run_periodic_health(last_run: float | None) -> float:
+    now = time.monotonic()
+    interval = _health_interval_seconds()
+    if last_run is not None and now - last_run < interval:
+        return last_run
+    from amodb.jobs import platform_integration_health
+
+    platform_integration_health.run_once(min_interval_seconds=interval)
+    return now
+
+
 def run_forever(*, poll_seconds: float = 1.0, batch_size: int = 1) -> None:
     worker_id = _worker_id()
+    last_health_run: float | None = None
     while True:
         result = run_once(batch_size=batch_size, worker_id=worker_id)
+        last_health_run = _run_periodic_health(last_health_run)
         if result["claimed"] == 0:
             time.sleep(max(0.25, min(poll_seconds, 30.0)))
 

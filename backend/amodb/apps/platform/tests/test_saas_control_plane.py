@@ -162,7 +162,8 @@ def test_tenant_support_payload_hides_internal_notes() -> None:
 
 def test_provider_catalog_covers_required_saas_services() -> None:
     catalog = {item["provider"] for item in saas_providers.provider_catalog()}
-    assert {"stripe", "mpesa_daraja", "etims_oscu", "etims_vscu", "smtp", "openai", "zendesk"}.issubset(catalog)
+    assert {"stripe", "mpesa_daraja", "etims_oscu", "etims_vscu", "resend", "openai", "zendesk"}.issubset(catalog)
+    assert "smtp" not in catalog
 
 
 def test_module_code_normalization_rejects_unsafe_values() -> None:
