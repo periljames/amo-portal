@@ -530,8 +530,8 @@ def dashboard(
     metrics = [
         hr_schemas.HrMetric(key="active", label="Active employees", value=active_count, detail="Effective active contracts", tone="good"),
         hr_schemas.HrMetric(key="onboarding", label="Onboarding", value=onboarding_count, detail="Not yet fully active", tone="info"),
-        hr_schemas.HrMetric(key="leave", label="Leave approvals", value=len(pending_leave_rows), detail="Supervisor or HR action", tone="warning" if pending_leave_rows else "neutral"),
-        hr_schemas.HrMetric(key="time", label="Time approvals", value=len(pending_timesheet_rows), detail="Submitted timesheets", tone="warning" if pending_timesheet_rows else "neutral"),
+        hr_schemas.HrMetric(key="leave", label="Leave approvals", value=pending_counts["leave"], detail="Supervisor or HR action", tone="warning" if pending_counts["leave"] else "neutral"),
+        hr_schemas.HrMetric(key="time", label="Time approvals", value=pending_counts["timesheet"], detail="Submitted timesheets", tone="warning" if pending_counts["timesheet"] else "neutral"),
         hr_schemas.HrMetric(key="patterns", label="Pattern gaps", value=len(without_pattern), detail="Cannot be auto-rotated", tone="danger" if without_pattern else "good"),
         hr_schemas.HrMetric(key="contracts", label="Expiring contracts", value=len(expiring_rows), detail="Within 60 days", tone="warning" if expiring_rows else "neutral"),
     ]
