@@ -1,0 +1,27 @@
+name: PR364 Synchronize Current Main
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  synchronize:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/rostering-automation-workforce-hr-overhaul'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Merge current main
+        run: |
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git push origin HEAD:${{ github.head_ref }}
