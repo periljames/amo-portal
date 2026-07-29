@@ -260,9 +260,27 @@ jobs:
           src/services/saasSettings.test.ts
           src/services/typedApi.ts
           src/services/workOrders.ts
-      - name: Install Chromium for constrained-network measurement
+      - name: Install Chromium for Rostering browser validation
         working-directory: frontend
         run: npm exec -- playwright install --with-deps chromium
+      - name: Run authenticated Rostering role acceptance
+        working-directory: frontend
+        shell: bash
+        run: |
+          npm exec -- vite preview --host 127.0.0.1 --port 4173 > /tmp/rostering-role-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat /tmp/rostering-role-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm exec -- playwright test tests/e2e/rostering-role-access.spec.ts
       - name: Measure cold and warm synthetic 2G rostering waterfall
         working-directory: frontend
         shell: bash
@@ -291,5 +309,6 @@ jobs:
             frontend/dist/rostering-perf-report.json
             frontend/dist/rostering-network-waterfall.json
             /tmp/rostering-preview.log
+            /tmp/rostering-role-preview.log
           if-no-files-found: warn
           retention-days: 14
