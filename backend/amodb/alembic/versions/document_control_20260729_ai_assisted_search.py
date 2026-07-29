@@ -19,37 +19,45 @@ branch_labels = None
 depends_on = None
 
 
+_INDEXES = (
+    (
+        "ix_manual_blocks_text_search",
+        "manual_blocks",
+        "to_tsvector('simple', coalesce(text_plain, ''))",
+    ),
+    (
+        "ix_manual_sections_heading_search",
+        "manual_sections",
+        "to_tsvector('simple', coalesce(heading, ''))",
+    ),
+    (
+        "ix_manuals_identity_search",
+        "manuals",
+        "to_tsvector('simple', coalesce(code, '') || ' ' || coalesce(title, '') || ' ' || coalesce(manual_type, ''))",
+    ),
+)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS ix_manual_blocks_text_search
-        ON manual_blocks
-        USING GIN (to_tsvector('simple', coalesce(text_plain, '')))
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS ix_manual_sections_heading_search
-        ON manual_sections
-        USING GIN (to_tsvector('simple', coalesce(heading, '')))
-        """
-    )
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS ix_manuals_identity_search
-        ON manuals
-        USING GIN (to_tsvector('simple', coalesce(code, '') || ' ' || coalesce(title, '') || ' ' || coalesce(manual_type, '')))
-        """
-    )
+    # Large controlled libraries must remain writable while indexes are built.
+    # PostgreSQL requires concurrent index DDL outside a transaction, so Alembic's
+    # explicit autocommit block is used instead of weakening the global migration
+    # transaction policy.
+    with op.get_context().autocommit_block():
+        for name, table, expression in _INDEXES:
+            op.execute(
+                f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} "
+                f"ON {table} USING GIN ({expression})"
+            )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
-    op.execute("DROP INDEX IF EXISTS ix_manuals_identity_search")
-    op.execute("DROP INDEX IF EXISTS ix_manual_sections_heading_search")
-    op.execute("DROP INDEX IF EXISTS ix_manual_blocks_text_search")
+    with op.get_context().autocommit_block():
+        for name, _table, _expression in reversed(_INDEXES):
+            op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
