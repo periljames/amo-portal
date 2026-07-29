@@ -1,0 +1,118 @@
+name: PR364 Apply Final Review Fixes
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Apply exact final review fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          service = "backend/amodb/apps/rostering/automation_service.py"
+          replace(service, "import calendar\n", "import calendar\nimport hashlib\nimport json\n")
+          replace(service, "from sqlalchemy import distinct, func, or_\n", "from sqlalchemy import distinct, func, or_\nfrom sqlalchemy.exc import IntegrityError\n")
+          replace(
+              service,
+              "def _enum_value(value) -> str:\n    return str(getattr(value, \"value\", value))\n\n\n",
+              '''def _enum_value(value) -> str:\n    return str(getattr(value, "value", value))\n\n\ndef _request_fingerprint(\n    payload: RosterAutomationRunRequest,\n    trigger: RosterAutomationTrigger,\n) -> str:\n    values = payload.model_dump(mode="json", exclude={"idempotency_key"})\n    values["user_ids"] = sorted(set(values.get("user_ids") or []))\n    canonical = {"trigger": _enum_value(trigger), "payload": values}\n    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")\n    return hashlib.sha256(encoded).hexdigest()\n\n\n''',
+          )
+          replace(
+              service,
+              '''    row = RosterGenerationPolicy(\n        amo_id=amo_id,\n        timezone_name=timezone_name,\n        created_by_user_id=actor_user_id,\n        updated_by_user_id=actor_user_id,\n    )\n    row.next_run_at = _next_run(row)\n    db.add(row)\n    db.flush()\n    return row\n''',
+              '''    candidate = RosterGenerationPolicy(\n        amo_id=amo_id,\n        timezone_name=timezone_name,\n        created_by_user_id=actor_user_id,\n        updated_by_user_id=actor_user_id,\n    )\n    candidate.next_run_at = _next_run(candidate)\n    try:\n        with db.begin_nested():\n            db.add(candidate)\n            db.flush()\n        return candidate\n    except IntegrityError:\n        winner = db.query(RosterGenerationPolicy).filter(\n            RosterGenerationPolicy.amo_id == amo_id,\n        ).first()\n        if winner is not None:\n            return winner\n        raise\n''',
+          )
+          replace(
+              service,
+              '''    replay = _existing_run(db, amo_id=amo_id, idempotency_key=payload.idempotency_key)\n    if replay:\n        replay_status = _enum_value(replay.status)\n''',
+              '''    request_fingerprint = _request_fingerprint(payload, trigger)\n    replay = _existing_run(db, amo_id=amo_id, idempotency_key=payload.idempotency_key)\n    if replay:\n        stored_fingerprint = (replay.summary_json or {}).get("request_fingerprint")\n        if stored_fingerprint and stored_fingerprint != request_fingerprint:\n            raise RuntimeError(f"ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH:{replay.id}")\n        replay_status = _enum_value(replay.status)\n''',
+          )
+          replace(
+              service,
+              '        summary_json={"preview": preview_result.model_dump(mode="json")},',
+              '        summary_json={"preview": preview_result.model_dump(mode="json"), "request_fingerprint": request_fingerprint},',
+          )
+          replace(
+              service,
+              '        "preview": preview_result.model_dump(mode="json"),\n        "conflicts": conflicts,',
+              '        "preview": preview_result.model_dump(mode="json"),\n        "request_fingerprint": request_fingerprint,\n        "conflicts": conflicts,',
+          )
+
+          router = "backend/amodb/apps/rostering/automation_router.py"
+          replace(
+              router,
+              '''    except (ValueError, RuntimeError) as exc:\n        message = str(exc)\n        evidence_retained = _record_failed_run(\n''',
+              '''    except (ValueError, RuntimeError) as exc:\n        message = str(exc)\n        if message.startswith("ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH:"):\n            db.rollback()\n            raise _error(\n                "This idempotency key was already used with a different automation request.",\n                code="ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH",\n                status_code=status.HTTP_409_CONFLICT,\n                conflicts=[{"idempotency_key": payload.idempotency_key}],\n            ) from exc\n        evidence_retained = _record_failed_run(\n''',
+          )
+
+          policy_test = Path("backend/amodb/apps/rostering/tests/test_automation_policy_contract.py")
+          test_text = policy_test.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_successful_idempotency_replay_rejects_changed_payloads():\n    source = inspect.getsource(automation_service.run)\n    assert "_request_fingerprint(payload, trigger)" in source\n    assert "ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH" in source\n    assert '\"request_fingerprint\": request_fingerprint' in source\n\n\ndef test_first_policy_creation_recovers_the_unique_race():\n    source = inspect.getsource(automation_service.get_or_create_policy)\n    assert "with db.begin_nested():" in source\n    assert "except IntegrityError:" in source\n    assert "if winner is not None:" in source\n\n\ndef test_no_owner_evidence_uses_skipped_status():\n    source = inspect.getsource(rostering_automation._record_failed_scheduled_run)\n    assert "RosterAutomationRunStatus.SKIPPED" in source\n    assert '\"skip_recorded_after_rollback\": skipped' in source\n'''
+          if addition.strip() not in test_text:
+              policy_test.write_text(test_text.rstrip() + addition + "\n", encoding="utf-8")
+
+          legacy = "frontend/src/router.legacy.tsx"
+          replace(
+              legacy,
+              '''  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";\n  if (!canViewFeature(currentUser, feature, getContext().department)) {\n''',
+              '''  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";\n  const workforceSettings = feature === "rostering.settings"\n    && new URLSearchParams(location.search).get("section") === "workforce";\n  if (workforceSettings) return children;\n  if (!canViewFeature(currentUser, feature, getContext().department)) {\n''',
+          )
+
+          hr = "frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx"
+          replace(hr, '<HrOverview dashboard={dashboard} amoCode={amoCode} onOpen={setSection} onRefresh={() => void refresh()} />', '<HrOverview dashboard={dashboard} amoCode={amoCode} onOpen={setSection} onRefresh={() => void refresh()} />')
+          replace(hr, '<PeoplePanel people={people} search={search} onSearch={setSearch} amoCode={amoCode} />', '<PeoplePanel people={people} search={search} onSearch={setSearch} />')
+          replace(hr, '<ActionQueue items={dashboard.action_queue.slice(0, 12)} amoCode={amoCode} onOpen={onOpen} />', '<ActionQueue items={dashboard.action_queue.slice(0, 12)} onOpen={onOpen} />')
+          replace(
+              hr,
+              'function ActionQueue({ items, amoCode, onOpen }: { items: HrActionItem[]; amoCode: string; onOpen: (section: HrSection) => void }) {',
+              'function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (section: HrSection) => void }) {',
+          )
+          replace(
+              hr,
+              '    return item.user_id ? <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(item.user_id)}`}>{item.action_label || "Open"} <ArrowRight size={13} /></Link> : null;',
+              '    return item.user_id ? <button type="button" className="hr-action-link" onClick={() => onOpen("people")}>{item.action_label || "Open employment record"} <ArrowRight size={13} /></button> : null;',
+          )
+          replace(
+              hr,
+              'function PeoplePanel({ people, search, onSearch, amoCode }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void; amoCode: string }) {',
+              'function PeoplePanel({ people, search, onSearch }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void }) {',
+          )
+          replace(hr, '<header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span /></header>', '<header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Source</span></header>')
+          old_row = '<Link className="wr-icon-button" to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(person.user_id)}`} aria-label={`Open ${person.full_name}`}><ArrowRight size={15} /></Link>'
+          replace(hr, old_row, '<span className="hr-person-source">Workforce</span>')
+
+          overhaul = "frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts"
+          replace(overhaul, 'const automationServiceSource = readSource("../../services/rosteringAutomation.ts");', 'const automationServiceSource = readSource("../../services/rosteringAutomation.ts");\nconst legacyRouterSource = readSource("../../router.legacy.tsx");')
+          marker = '''  it("simplifies primary navigation and combines reports with operations", () => {'''
+          addition = '''  it("lets live Workforce permission holders reach the permission-aware workspace", () => {\n    expect(legacyRouterSource).toContain('feature === "rostering.settings"');\n    expect(legacyRouterSource).toContain('get("section") === "workforce"');\n  });\n\n  it("keeps HR remediation inside HR-accessible Workforce surfaces", () => {\n    expect(hrSource).not.toContain("/admin/users/");\n    expect(hrSource).toContain('onOpen("people")');\n    expect(hrSource).toContain("Open employment record");\n  });\n\n'''
+          replace(overhaul, marker, addition + marker)
+          PY
+
+          git diff --check
+          git add backend/amodb/apps/rostering backend/amodb/jobs/rostering_automation.py frontend/src/router.legacy.tsx frontend/src/pages/rostering
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Resolve final Rostering review blockers"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
