@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from enum import Enum
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
 from amodb.apps.realtime import models as realtime_models
 
 
@@ -62,11 +64,39 @@ def _user_preferences(
     )
 
 
+def _internal_recipient_user_id(
+    db: Session,
+    *,
+    amo_id: str,
+    recipient_email: str | None,
+) -> str | None:
+    """Resolve a tenant user from an email before treating it as external.
+
+    Operational producers historically supplied only an employee email address.
+    Resolving that address here prevents those calls from bypassing an explicit
+    user opt-out while still allowing genuinely external recipients.
+    """
+
+    normalized_email = str(recipient_email or "").strip().lower()
+    if not normalized_email:
+        return None
+    row = (
+        db.query(account_models.User.id)
+        .filter(
+            account_models.User.amo_id == amo_id,
+            func.lower(account_models.User.email) == normalized_email,
+        )
+        .first()
+    )
+    return str(row[0]) if row else None
+
+
 def email_allowed(
     db: Session,
     *,
     amo_id: str,
     recipient_user_id: str | None,
+    recipient_email: str | None,
     email_class: EmailClass | str,
 ) -> tuple[bool, str | None]:
     """Return whether an outbound email may be sent under tenant/user policy.
@@ -89,10 +119,15 @@ def email_allowed(
     if tenant is None or not bool(getattr(tenant, tenant_field, False)):
         return False, f"{classification.value.title()} email is disabled for this tenant"
 
-    if not recipient_user_id:
+    resolved_user_id = recipient_user_id or _internal_recipient_user_id(
+        db,
+        amo_id=amo_id,
+        recipient_email=recipient_email,
+    )
+    if not resolved_user_id:
         return True, None
 
-    user = _user_preferences(db, amo_id=amo_id, user_id=recipient_user_id)
+    user = _user_preferences(db, amo_id=amo_id, user_id=resolved_user_id)
     user_field = {
         EmailClass.ROUTINE: "email_enabled",
         EmailClass.RECEIPT: "receipt_email_enabled",
