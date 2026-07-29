@@ -5,6 +5,7 @@ import { resendEmailApi, type ResendStatus } from "../../../services/resendEmail
 import { StatusBadge } from "./PlatformShared";
 
 const PRODUCTION_CONFIRMATION = "ENABLE RESEND PRODUCTION";
+const RESEND_API_URL = "https://api.resend.com";
 
 type Draft = {
   api_base_url: string;
@@ -20,7 +21,7 @@ type Draft = {
 };
 
 const defaults: Draft = {
-  api_base_url: "https://api.resend.com",
+  api_base_url: RESEND_API_URL,
   from_email: "onboarding@resend.dev",
   from_name: "AMO Portal",
   reply_to: "",
@@ -35,7 +36,7 @@ const defaults: Draft = {
 function readDraft(status: ResendStatus): Draft {
   const config = status.config ?? {};
   return {
-    api_base_url: String(config.api_base_url ?? defaults.api_base_url),
+    api_base_url: RESEND_API_URL,
     from_email: String(config.from_email ?? defaults.from_email),
     from_name: String(config.from_name ?? defaults.from_name),
     reply_to: String(config.reply_to ?? ""),
@@ -71,11 +72,11 @@ export default function ResendEmailConfigPanel() {
   }, [load]);
 
   const healthIsStale = useMemo(() => {
-    if (!status?.last_checked_at) return true;
+    if (status?.status !== "HEALTHY" || !status.last_checked_at) return true;
     return Date.now() - new Date(status.last_checked_at).getTime() > 24 * 60 * 60 * 1000;
-  }, [status?.last_checked_at]);
+  }, [status?.last_checked_at, status?.status]);
 
-  const setField = <K extends keyof Draft>(field: K, value: Draft[K]) => {
+  const setField = (field: keyof Draft, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
 
@@ -91,6 +92,7 @@ export default function ResendEmailConfigPanel() {
       await platformApi.updateSaasProvider("resend", {
         config: {
           ...draft,
+          api_base_url: RESEND_API_URL,
           per_minute_limit: Number(draft.per_minute_limit),
           daily_limit: Number(draft.daily_limit),
         },
@@ -103,7 +105,7 @@ export default function ResendEmailConfigPanel() {
       setWebhookSecret("");
       setProductionConfirmation("");
       await load();
-      setNotice("Resend configuration saved. A changed API key will be used by the next send; no secret is returned to the browser.");
+      setNotice("Configuration saved. Automatic email stays blocked until the current settings pass a new health check or explicit test email.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -148,8 +150,8 @@ export default function ResendEmailConfigPanel() {
         <div>
           <h2 style={{ marginTop: 0 }}>Resend email delivery</h2>
           <p>
-            The API key is encrypted by the backend. The browser receives only a fingerprint. Saving a replacement key
-            invalidates the previous health result so stale credentials cannot remain marked healthy.
+            The API key is encrypted by the backend. The browser receives only a fingerprint. Saving any replacement
+            key or configuration invalidates the previous health result so stale settings cannot authorize email.
           </p>
         </div>
         <StatusBadge value={status?.status ?? "NOT_CONFIGURED"} />
@@ -163,7 +165,7 @@ export default function ResendEmailConfigPanel() {
       </div>
 
       {healthIsStale && status?.has_secret ? (
-        <div className="platform-error">The Resend health result is missing or older than 24 hours. Run the non-sending health check.</div>
+        <div className="platform-error">Automatic email is blocked because the current Resend configuration has not passed a fresh health check.</div>
       ) : null}
       {status?.last_health_detail ? <p><small>{status.last_health_detail}</small></p> : null}
 
@@ -174,7 +176,7 @@ export default function ResendEmailConfigPanel() {
         </label>
         <label>
           <span>Webhook signing secret</span>
-          <input type="password" autoComplete="new-password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} placeholder={status?.has_secret ? "Leave blank to preserve stored value" : "whsec_xxxxxxxxx"} />
+          <input type="password" autoComplete="new-password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} placeholder="Optional: whsec_xxxxxxxxx" />
         </label>
         <label>
           <span>Sending mode</span>
@@ -185,8 +187,8 @@ export default function ResendEmailConfigPanel() {
           </select>
         </label>
         <label>
-          <span>API base URL</span>
-          <input value={draft.api_base_url} onChange={(event) => setField("api_base_url", event.target.value)} />
+          <span>API endpoint</span>
+          <input value={RESEND_API_URL} readOnly aria-readonly="true" title="Pinned to prevent API-key exfiltration" />
         </label>
         <label>
           <span>From email</span>
@@ -228,7 +230,7 @@ export default function ResendEmailConfigPanel() {
         <label style={{ display: "block", marginTop: 12 }}>
           <span>Production activation phrase</span>
           <input value={productionConfirmation} onChange={(event) => setProductionConfirmation(event.target.value)} placeholder={PRODUCTION_CONFIRMATION} />
-          <small>Production mode is also rejected unless the backend deployment environment is production.</small>
+          <small>Production mode is also rejected unless the backend deployment environment is production and the sender uses a custom domain.</small>
         </label>
       ) : null}
 
@@ -244,7 +246,7 @@ export default function ResendEmailConfigPanel() {
         <input value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} placeholder="Single explicit test recipient" />
         <button className="platform-btn" disabled={Boolean(busy) || !status?.has_secret} onClick={sendTest}>{busy === "test" ? "Sending…" : "Send one test email"}</button>
       </div>
-      <small>The test button sends exactly one message and is rate-deduplicated per recipient per minute. Normal portal messages remain blocked in Disabled mode.</small>
+      <small>The test button sends one explicit message and is rate-deduplicated per recipient per minute. Normal portal messages remain blocked until health passes.</small>
     </section>
   );
 }
