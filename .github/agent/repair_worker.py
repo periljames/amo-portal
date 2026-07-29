@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 
 path = Path("backend/amodb/jobs/saas_worker_safe.py")
 worker = path.read_text(encoding="utf-8")
@@ -20,3 +21,10 @@ if "logger = logging.getLogger(__name__)" not in worker:
         raise RuntimeError("safe worker import anchor was not found")
     worker = worker.replace(anchor, anchor + "\n\nlogger = logging.getLogger(__name__)\n", 1)
 path.write_text(worker, encoding="utf-8")
+
+# GitHub Actions tokens cannot update workflow files without the workflows scope.
+# The connector applies this CI change separately after the implementation commit lands.
+subprocess.run(
+    ["git", "checkout", "HEAD", "--", ".github/workflows/release-candidate-recheck.yml"],
+    check=True,
+)
