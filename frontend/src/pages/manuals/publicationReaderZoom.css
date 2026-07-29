@@ -1,3 +1,5 @@
+@import "./publicationReaderEnhancements.css";
+
 .publication-native-pdf {
   overflow-x: auto;
   overscroll-behavior-inline: contain;
