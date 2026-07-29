@@ -21,9 +21,25 @@ def test_canonical_workforce_routes_are_registered_as_siblings():
         ("POST", "/workforce/attendance-events"),
         ("POST", "/workforce/timesheets/generate"),
         ("GET", "/workforce/payroll-export"),
+        ("GET", "/workforce/hr/dashboard"),
+        ("GET", "/workforce/hr/work-patterns"),
+        ("POST", "/workforce/hr/work-pattern-assignments"),
     }
     assert required.issubset(routes)
     assert not any(path.startswith("/rostering/workforce/") for _, path in routes)
+
+
+def test_roster_setup_and_automation_routes_are_registered():
+    routes = route_methods()
+    required = {
+        ("GET", "/rostering/setup/readiness"),
+        ("GET", "/rostering/automation-policy"),
+        ("PATCH", "/rostering/automation-policy"),
+        ("POST", "/rostering/automation/preview"),
+        ("POST", "/rostering/automation/run"),
+        ("GET", "/rostering/automation/runs"),
+    }
+    assert required.issubset(routes)
 
 
 def test_complete_roster_lifecycle_and_planner_routes_exist():
