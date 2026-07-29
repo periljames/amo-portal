@@ -1,4 +1,5 @@
 @import "./publicationReaderEnhancements.css";
+@import "./publicationReferenceLayout.css";
 
 .publication-native-pdf {
   overflow-x: auto;

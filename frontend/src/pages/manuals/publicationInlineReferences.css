@@ -1,0 +1,34 @@
+.publication-inline-linked-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  width: min(46vw, 44rem);
+  background: var(--publication-paper, #fff);
+  box-shadow: -16px 0 42px rgba(2, 6, 23, 0.28);
+}
+
+.publication-inline-linked-drawer .linked-documentation-panel {
+  position: relative;
+  top: 0;
+  height: 100dvh;
+}
+
+body.has-inline-linked-document .publication-reader-page {
+  width: calc(100% - min(46vw, 44rem));
+}
+
+body.has-inline-linked-document .publication-floating-header {
+  right: min(46vw, 44rem);
+}
+
+@media (max-width: 1050px) {
+  .publication-inline-linked-drawer { width: min(92vw, 44rem); }
+  body.has-inline-linked-document .publication-reader-page { width: 100%; }
+  body.has-inline-linked-document .publication-floating-header { right: 0; }
+}
+
+@media (max-width: 700px) {
+  .publication-inline-linked-drawer { width: 100vw; }
+}

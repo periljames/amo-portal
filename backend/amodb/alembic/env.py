@@ -53,6 +53,7 @@ from amodb.apps.inventory import models as inventory_models  # noqa: F401, E402
 from amodb.apps.finance import models as finance_models  # noqa: F401, E402
 import amodb.apps.realtime.models as realtime_models  # noqa: F401, E402
 from amodb.apps.doc_control import domain_models as document_control_domain_models  # noqa: F401, E402
+from amodb.apps.doc_control import knowledge_models as document_control_knowledge_models  # noqa: F401, E402
 
 # Target metadata for 'autogenerate'
 target_metadata = Base.metadata
