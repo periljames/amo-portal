@@ -76,7 +76,9 @@ When no mapping exists, the portal sends a safe generic HTML/text notification s
 ## Health and delivery evidence
 
 - The non-sending health check authenticates against Resend without sending an email.
-- `python -m amodb.jobs.platform_integration_health` checks all configured Resend credentials and updates their health state. Schedule this command through the production job scheduler.
+- The long-running `amodb.jobs.saas_worker_safe` process runs the health probe at startup and then hourly by default. `RESEND_HEALTH_INTERVAL_SECONDS` can set an interval from 300 to 86,400 seconds.
+- A PostgreSQL advisory lock ensures only one worker replica performs each recurring probe.
+- `python -m amodb.jobs.platform_integration_health` remains available for an explicit operational check.
 - The explicit test confirms that Resend accepts a real email request.
 - Signed Resend webhook events update the matching portal email log with delivery, delay, bounce, complaint, suppression or failure information.
 - Webhook processing stores and deduplicates the signed `svix-id` in the delivery-event history.
@@ -89,5 +91,5 @@ When no mapping exists, the portal sends a safe generic HTML/text notification s
 - Set `APP_ENV=production` only in the production deployment.
 - Verify the sending domain in Resend and configure SPF, DKIM and DMARC.
 - Register the signed webhook endpoint.
-- Schedule the non-sending health job.
+- Run the long-lived `amodb.jobs.saas_worker_safe` process so recurring health checks and integration jobs remain active.
 - Start in `DISABLED`, then `SANDBOX`, and enable `PRODUCTION` only after the explicit test succeeds.
