@@ -325,9 +325,10 @@ export function publicationPdfSource(path: string): {
   disableRange: boolean;
   disableStream: boolean;
 } {
+  const headers = new Headers(authHeaders());
   return {
     url: `${getApiBaseUrl()}${path}`,
-    httpHeaders: Object.fromEntries(authHeaders().entries()),
+    httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
     rangeChunkSize: 512 * 1024,
     disableAutoFetch: false,
