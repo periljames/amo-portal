@@ -29,6 +29,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Apply active-user register and default-day correction
         run: |
+          python .github/scripts/prepare_pr377_patch.py
           python .github/scripts/fix_workforce_active_users_default_day.py
           python .github/scripts/fix_workforce_active_users_followup.py
       - name: Install backend dependencies
@@ -37,7 +38,7 @@ jobs:
         working-directory: backend
         run: |
           python -m compileall -q amodb/apps/workforce amodb/apps/rostering
-          pytest -q amodb/apps/workforce/tests/test_hr_review_flags.py amodb/apps/workforce/tests amodb/apps/rostering/tests/test_route_contracts.py
+          pytest -q amodb/apps/workforce/tests amodb/apps/rostering/tests/test_route_contracts.py
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
@@ -49,8 +50,10 @@ jobs:
           npm run build
       - name: Remove one-shot correction machinery
         run: |
+          rm -f .github/scripts/prepare_pr377_patch.py
           rm -f .github/scripts/fix_workforce_active_users_default_day.py
           rm -f .github/scripts/fix_workforce_active_users_followup.py
+          rm -f .github/pr377-trigger.txt
           rm -f .github/workflows/pr377-workforce-active-users-fixer.yml
       - name: Commit and push validated correction
         run: |
