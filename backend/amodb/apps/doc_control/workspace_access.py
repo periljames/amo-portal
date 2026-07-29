@@ -30,6 +30,10 @@ _PUBLIC_WORKSPACE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     (
+        "GET",
+        re.compile(r"^/doc-control/workspace/t/[^/]+/knowledge/tree/?$"),
+    ),
+    (
         "POST",
         re.compile(r"^/doc-control/workspace/t/[^/]+/change-requests/?$"),
     ),
@@ -48,12 +52,12 @@ def enforce_workspace_access(
 ) -> None:
     """Protect controller worklists independently of frontend visibility.
 
-    The Library, permitted document detail/read target, reader-originated change
-    request, and a recipient's acknowledgement action remain available to normal
-    active tenant users. Every other workspace route is a governance/control
-    surface and therefore fails closed unless the actor has Document Control
-    privileges. Endpoint-specific tenant, document, workflow, and recipient checks
-    still run after this coarse route gate.
+    The Library, permitted document detail/read target, documented-information
+    hierarchy, reader-originated change request, and a recipient's acknowledgement
+    action remain available to normal active tenant users. Every other workspace
+    route is a governance/control surface and therefore fails closed unless the
+    actor has Document Control privileges. Endpoint-specific tenant, document,
+    workflow, and recipient checks still run after this coarse route gate.
     """
     method = request.method.upper()
     path = request.url.path
