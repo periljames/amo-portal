@@ -4,11 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from amodb.apps.doc_control import knowledge_hardening
 from amodb.apps.doc_control.knowledge_artifact_transactions import (
     _cleanup_if_outer_transaction_ended,
     _cleanup_pending_artifacts,
+    _finalize_outer_commit,
+    _mark_outer_commit_intent,
     _track_pending_artifact,
 )
 from amodb.apps.doc_control.knowledge_hardening import (
@@ -22,7 +25,16 @@ from amodb.apps.doc_control.knowledge_hierarchy_identity import (
     _ensure_node_with_stable_manual_less_identity,
     _select_stable_manual_less_node,
 )
+from amodb.apps.doc_control.knowledge_resolution_router import (
+    _revision_is_approved_immutable,
+)
+from amodb.apps.doc_control.knowledge_signature_guard import (
+    _create_documentation_record_signature_guarded,
+)
 from amodb.apps.manuals import models as manual_models
+from amodb.apps.manuals.knowledge_reader_access_router import (
+    _enforce_reference_source_access,
+)
 from amodb.main import app
 
 
@@ -140,6 +152,45 @@ def test_nested_transaction_end_does_not_remove_pending_outer_artifact(tmp_path)
     assert path.exists()
 
 
+def test_savepoint_commit_does_not_finalize_outer_artifact_custody(tmp_path) -> None:
+    path = tmp_path / "savepoint-commit.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={}, in_nested_transaction=lambda: True)
+    _track_pending_artifact(session, str(path))
+
+    _mark_outer_commit_intent(session)
+    _finalize_outer_commit(session)
+    _cleanup_if_outer_transaction_ended(session, SimpleNamespace(parent=object()))
+
+    assert path.exists()
+    assert session.info.get("documentation_pending_artifact_paths")
+
+
+def test_savepoint_rollback_does_not_delete_outer_artifact(tmp_path) -> None:
+    path = tmp_path / "savepoint-rollback.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={})
+    _track_pending_artifact(session, str(path))
+
+    _cleanup_if_outer_transaction_ended(session, SimpleNamespace(parent=object()))
+
+    assert path.exists()
+
+
+def test_successful_outer_commit_finalizes_without_deleting_artifact(tmp_path) -> None:
+    path = tmp_path / "outer-commit.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={}, in_nested_transaction=lambda: False)
+    _track_pending_artifact(session, str(path))
+
+    _mark_outer_commit_intent(session)
+    _finalize_outer_commit(session)
+    _cleanup_if_outer_transaction_ended(session, SimpleNamespace(parent=None))
+
+    assert path.exists()
+    assert session.info == {}
+
+
 def test_reconciliation_detects_controller_governed_hierarchy_changes() -> None:
     row = SimpleNamespace(
         code="QWI-01",
@@ -231,12 +282,85 @@ def test_reader_hierarchy_omits_restricted_nodes_records_and_descendants() -> No
     assert visible_ids == {"root", "group", "public"}
 
 
-def test_access_filtered_tree_routes_precede_legacy_tree_handlers() -> None:
+def test_restricted_reference_source_is_rejected_even_when_target_is_readable() -> None:
+    source = SimpleNamespace(id="source-manual")
+    restricted_profile = SimpleNamespace(restricted_flag=True, access_scope_json={})
+
+    class FakeQuery:
+        def __init__(self, result):
+            self.result = result
+
+        def filter(self, *_criteria):
+            return self
+
+        def first(self):
+            return self.result
+
+    class FakeDb:
+        def __init__(self):
+            self.results = iter((source, restricted_profile))
+
+        def query(self, _model):
+            return FakeQuery(next(self.results))
+
+    user = SimpleNamespace(
+        id="ordinary-user",
+        role="USER",
+        department=None,
+        is_superuser=False,
+        is_amo_admin=False,
+    )
+    with pytest.raises(HTTPException) as caught:
+        _enforce_reference_source_access(
+            FakeDb(),
+            tenant=SimpleNamespace(id="tenant-db", amo_id="amo-1"),
+            reference=SimpleNamespace(source_manual_id=source.id),
+            user=user,
+        )
+    assert caught.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("status", "immutable", "expected"),
+    [
+        (manual_models.ManualRevisionStatus.PUBLISHED, True, True),
+        (manual_models.ManualRevisionStatus.PUBLISHED, False, False),
+        (manual_models.ManualRevisionStatus.DRAFT, True, False),
+    ],
+)
+def test_only_published_immutable_revisions_can_be_verified(status, immutable, expected) -> None:
+    revision = SimpleNamespace(status_enum=status, immutable_locked=immutable)
+    assert _revision_is_approved_immutable(revision) is expected
+
+
+def test_signature_required_record_workflow_fails_closed() -> None:
+    with pytest.raises(HTTPException) as caught:
+        _create_documentation_record_signature_guarded(
+            SimpleNamespace(),
+            profile=SimpleNamespace(requires_signature=True),
+            manual_tenant=SimpleNamespace(),
+            template=SimpleNamespace(),
+            revision=SimpleNamespace(),
+            actor_id="user-1",
+            filename="unsigned.pdf",
+            content=b"%PDF-1.7\nunsigned",
+            source_reference_id=None,
+            payload={},
+        )
+    assert caught.value.status_code == 409
+    assert "validated digital signature" in caught.value.detail
+
+
+def test_precedence_routes_enforce_hardened_contracts() -> None:
     routes = [route for route in app.routes if getattr(route, "path", None)]
-    for path in (
-        "/doc-control/workspace/t/{tenant_slug}/knowledge/tree",
-        "/manuals/t/{tenant_slug}/knowledge-tree",
-    ):
+    expected_modules = {
+        "/doc-control/workspace/t/{tenant_slug}/knowledge/tree": "knowledge_access_router",
+        "/manuals/t/{tenant_slug}/knowledge-tree": "knowledge_access_router",
+        "/manuals/t/{tenant_slug}/linked-resources/{reference_id}": "knowledge_reader_access_router",
+        "/manuals/t/{tenant_slug}/linked-resources/{reference_id}/submit": "knowledge_reader_access_router",
+        "/doc-control/workspace/t/{tenant_slug}/knowledge/references/{reference_id}/resolve": "knowledge_resolution_router",
+    }
+    for path, module_suffix in expected_modules.items():
         matching = [route for route in routes if route.path == path]
         assert len(matching) >= 2
-        assert matching[0].endpoint.__module__.endswith("knowledge_access_router")
+        assert matching[0].endpoint.__module__.endswith(module_suffix)
