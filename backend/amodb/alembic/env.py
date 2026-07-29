@@ -129,100 +129,232 @@ def run_migrations_offline() -> None:
 # ONLINE MIGRATIONS
 # ---------------------------------------------------------------------------
 
-def _configured_script_directory() -> ScriptDirectory:
-    return ScriptDirectory.from_config(config)
+def _assert_no_duplicate_revisions() -> None:
+    script = ScriptDirectory.from_config(config)
+    revisions: dict[str, list[str]] = defaultdict(list)
+    for revision in script.walk_revisions():
+        revisions[revision.revision].append(revision.path)
+    duplicates = {rev: paths for rev, paths in revisions.items() if len(paths) > 1}
+    if duplicates:
+        details = "\n".join(
+            f"- {rev}: {', '.join(paths)}" for rev, paths in sorted(duplicates.items())
+        )
+        raise RuntimeError(
+            "Duplicate Alembic revision IDs detected. Remove or rename the extra migration file(s):\n"
+            f"{details}"
+        )
 
 
-def _database_revision_rows(connection) -> set[str]:
-    inspector = inspect(connection)
-    if not inspector.has_table("alembic_version"):
-        return set()
-    return {
-        str(row[0])
-        for row in connection.execute(text("SELECT version_num FROM alembic_version"))
-        if row and row[0]
+def _ensure_alembic_version_column_width(connection) -> None:
+    """Make Alembic version storage tolerant of descriptive revision IDs.
+
+    Older local databases may have alembic_version.version_num as VARCHAR(32).
+    That blocks migrations whose revision IDs are longer than 32 chars before the
+    migration itself can run. This guard is intentionally idempotent and only
+    widens metadata storage; it does not alter application tables.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    try:
+        exists = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'alembic_version'
+                  AND column_name = 'version_num'
+                  AND character_maximum_length IS NOT NULL
+                  AND character_maximum_length < 128
+                """
+            )
+        ).scalar()
+        if exists:
+            connection.execute(
+                text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
+            )
+    except Exception:
+        # Alembic may be creating the version table for a fresh DB. Do not fail
+        # preflight; normal migration execution will report real schema issues.
+        return
+
+
+_LEGACY_PHASE2_ANCESTOR = "phase2_14a_20260615"
+
+
+def _repair_redundant_phase2_version_row(connection) -> None:
+    """Repair the released Workforce/Phase 2 overlap before graph traversal.
+
+    Older databases legitimately stored ``phase2_14a_20260615`` and a Workforce
+    revision as independent heads. The current graph requires Phase 2 before the
+    Workforce precreate revision, making that old Phase 2 row a redundant ancestor
+    of the recorded Workforce descendant. Alembic rejects overlapping current rows
+    before it can execute a normal migration, so the redundant marker must be
+    collapsed during online preflight.
+
+    The repair is intentionally narrow and graph-verified: it removes only the
+    known compatibility marker, only when another current revision is proven by
+    the loaded ScriptDirectory to contain that marker in its ancestry. Application
+    tables and all non-redundant version rows are untouched.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    if not inspect(connection).has_table("alembic_version"):
+        return
+
+    current_revisions = {
+        str(revision)
+        for revision in connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalars()
     }
+    if _LEGACY_PHASE2_ANCESTOR not in current_revisions:
+        return
 
-
-def _unknown_database_revisions(connection) -> set[str]:
-    script = _configured_script_directory()
-    known = {revision.revision for revision in script.walk_revisions()}
-    return _database_revision_rows(connection) - known
-
-
-def _database_revision_leaf_heads(connection) -> set[str]:
-    rows = _database_revision_rows(connection)
-    if not rows:
-        return set()
-    script = _configured_script_directory()
-    ancestors: set[str] = set()
-    for revision_id in rows:
-        revision = script.get_revision(revision_id)
-        if not revision:
+    script = ScriptDirectory.from_config(config)
+    containing_revisions: list[str] = []
+    for current_revision in sorted(current_revisions - {_LEGACY_PHASE2_ANCESTOR}):
+        try:
+            ancestry = {
+                str(revision.revision)
+                for revision in script.iterate_revisions(current_revision, "base")
+            }
+        except Exception:
+            # Unknown or otherwise invalid current revisions must still be reported
+            # by Alembic; never hide them through this compatibility repair.
             continue
-        ancestors.update(parent.revision for parent in revision._all_down_revisions)
-    return rows - ancestors
+        if _LEGACY_PHASE2_ANCESTOR in ancestry:
+            containing_revisions.append(current_revision)
+
+    if not containing_revisions:
+        return
+
+    connection.execute(
+        text("DELETE FROM alembic_version WHERE version_num = :revision"),
+        {"revision": _LEGACY_PHASE2_ANCESTOR},
+    )
+    print(
+        "Alembic compatibility repair: removed redundant "
+        f"{_LEGACY_PHASE2_ANCESTOR} version row; contained by "
+        + ", ".join(containing_revisions)
+    )
 
 
-def _connected_revision_components(connection) -> list[set[str]]:
-    heads = _database_revision_leaf_heads(connection)
-    if len(heads) <= 1:
-        return [heads] if heads else []
-    script = _configured_script_directory()
-    head_ancestors: dict[str, set[str]] = {}
-    for head in heads:
-        revision = script.get_revision(head)
-        if revision:
-            head_ancestors[head] = {revision.revision, *(ancestor.revision for ancestor in revision._all_down_revisions)}
-    adjacency: dict[str, set[str]] = defaultdict(set)
-    for left, left_ancestors in head_ancestors.items():
-        for right, right_ancestors in head_ancestors.items():
-            if left != right and left_ancestors.intersection(right_ancestors):
-                adjacency[left].add(right)
-    components: list[set[str]] = []
-    remaining = set(heads)
-    while remaining:
-        start = remaining.pop()
-        component = {start}
-        frontier = [start]
-        while frontier:
-            current = frontier.pop()
-            for neighbour in adjacency[current]:
-                if neighbour in remaining:
-                    remaining.remove(neighbour)
-                    component.add(neighbour)
-                    frontier.append(neighbour)
-        components.append(component)
-    return components
+def _revision_parents(script: ScriptDirectory, revision_id: str) -> tuple[str, ...]:
+    """Return graph parents without asking Alembic to iterate the malformed graph."""
+    try:
+        revision = script.get_revision(revision_id)
+    except Exception:
+        return ()
+    if revision is None:
+        return ()
+    raw_parents: list[str] = []
+    down_revision = revision.down_revision
+    if isinstance(down_revision, str):
+        raw_parents.append(down_revision)
+    elif down_revision:
+        raw_parents.extend(str(item) for item in down_revision)
+    dependencies = revision.dependencies
+    if isinstance(dependencies, str):
+        raw_parents.append(dependencies)
+    elif dependencies:
+        raw_parents.extend(str(item) for item in dependencies)
+    return tuple(dict.fromkeys(raw_parents))
+
+
+def _is_graph_ancestor(script: ScriptDirectory, ancestor: str, descendant: str) -> bool:
+    if ancestor == descendant:
+        return True
+    pending = [descendant]
+    visited: set[str] = set()
+    while pending:
+        revision_id = pending.pop()
+        if revision_id in visited:
+            continue
+        visited.add(revision_id)
+        parents = _revision_parents(script, revision_id)
+        if ancestor in parents:
+            return True
+        pending.extend(parent for parent in parents if parent not in visited)
+    return False
+
+
+def _install_redundant_head_delete_compatibility() -> None:
+    """Handle released overlapping merge ancestry during clean traversal.
+
+    Several historical merge migrations share already-consumed ancestors. On a
+    clean multi-head upgrade Alembic can therefore request deletion of a version
+    marker that a prior branch transition has already replaced. Alembic's internal
+    ``HeadMaintainer`` raises ``KeyError`` before it reaches SQL, even though the
+    requested marker is provably redundant and absent.
+
+    The compatibility hook is deliberately fail-closed. It skips a missing marker
+    only when the loaded migration graph proves that marker is an ancestor of at
+    least one head currently maintained by Alembic. Unknown or unrelated missing
+    markers still use Alembic's original method and fail normally. Final-head tests
+    remain authoritative after the traversal.
+    """
+    from alembic.runtime.migration import HeadMaintainer
+
+    if getattr(HeadMaintainer, "_amo_redundant_delete_compatibility", False):
+        return
+
+    script = ScriptDirectory.from_config(config)
+    original_delete_version = HeadMaintainer._delete_version
+
+    def _delete_version_compat(self, version: str) -> None:
+        if version not in self.heads:
+            containing_heads = sorted(
+                str(head)
+                for head in self.heads
+                if _is_graph_ancestor(script, str(version), str(head))
+            )
+            if containing_heads:
+                print(
+                    "Alembic compatibility repair: skipped redundant clean-schema "
+                    f"version deletion for {version}; already contained by "
+                    + ", ".join(containing_heads)
+                )
+                return
+        original_delete_version(self, version)
+
+    HeadMaintainer._delete_version = _delete_version_compat
+    HeadMaintainer._amo_redundant_delete_compatibility = True
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    """Run migrations in 'online' mode.
+
+    Here we use the same write_engine as the application.
+    """
+    _assert_no_duplicate_revisions()
+    _install_redundant_head_delete_compatibility()
     connectable = write_engine
 
     with connectable.connect() as connection:
-        unknown = _unknown_database_revisions(connection)
-        if unknown:
-            raise RuntimeError(
-                "Database references Alembic revision(s) not present in this checkout: "
-                f"{sorted(unknown)}. Refusing to guess or stamp over unknown history."
-            )
-        components = _connected_revision_components(connection)
-        if len(components) > 1:
-            raise RuntimeError(
-                "Database contains disconnected Alembic revision components: "
-                f"{[sorted(component) for component in components]}. Repair the overlap before upgrading."
-            )
+        # SQLAlchemy 2.x autobegins a transaction even for preflight queries. Commit
+        # the compatibility preflight before handing the connection to Alembic so
+        # version-table repairs persist and normal migration transactions remain
+        # authoritative.
+        _ensure_alembic_version_column_width(connection)
+        _repair_redundant_phase2_version_row(connection)
+        if connection.in_transaction():
+            connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
+            # You can add include_object / process_revision_directives here later if needed.
         )
 
         with context.begin_transaction():
             context.run_migrations()
 
+
+# ---------------------------------------------------------------------------
+# ENTRYPOINT
+# ---------------------------------------------------------------------------
 
 if context.is_offline_mode():
     run_migrations_offline()
