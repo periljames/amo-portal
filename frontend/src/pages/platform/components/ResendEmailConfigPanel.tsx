@@ -105,7 +105,7 @@ export default function ResendEmailConfigPanel() {
       setWebhookSecret("");
       setProductionConfirmation("");
       await load();
-      setNotice("Configuration saved. Automatic email stays blocked until the current settings pass a new health check or explicit test email.");
+      setNotice("Configuration saved. Automatic email stays blocked until one explicit test email is accepted with the current settings.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -118,7 +118,7 @@ export default function ResendEmailConfigPanel() {
     setError(null);
     try {
       const job = await platformApi.testSaasProvider("resend");
-      setNotice(`Credential health check queued as ${job.id}. Refresh after the integration worker processes it.`);
+      setNotice(`API authentication check queued as ${job.id}. This check sends no email and does not enable automatic delivery.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -136,7 +136,7 @@ export default function ResendEmailConfigPanel() {
     try {
       const result = await resendEmailApi.sendTest(testRecipient.trim());
       await load();
-      setNotice(`Resend accepted the test email. Message ID: ${String(result.result?.message_id ?? result.id)}`);
+      setNotice(`Resend accepted the explicit test email. Message ID: ${String(result.result?.message_id ?? result.id)}. The current configuration is now delivery-ready.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -151,7 +151,7 @@ export default function ResendEmailConfigPanel() {
           <h2 style={{ marginTop: 0 }}>Resend email delivery</h2>
           <p>
             The API key is encrypted by the backend. The browser receives only a fingerprint. Saving any replacement
-            key or configuration invalidates the previous health result so stale settings cannot authorize email.
+            key or configuration invalidates delivery readiness so stale settings cannot authorize email.
           </p>
         </div>
         <StatusBadge value={status?.status ?? "NOT_CONFIGURED"} />
@@ -164,8 +164,10 @@ export default function ResendEmailConfigPanel() {
         <div><small>Sending mode</small><br /><strong>{draft.sending_mode}</strong></div>
       </div>
 
-      {healthIsStale && status?.has_secret ? (
-        <div className="platform-error">Automatic email is blocked because the current Resend configuration has not passed a fresh health check.</div>
+      {status?.status === "AUTHENTICATED" ? (
+        <div className="platform-error">The API key authenticated successfully, but automatic email remains blocked until one explicit test email is accepted.</div>
+      ) : healthIsStale && status?.has_secret ? (
+        <div className="platform-error">Automatic email is blocked because the current Resend configuration is not delivery-ready or its successful test is stale.</div>
       ) : null}
       {status?.last_health_detail ? <p><small>{status.last_health_detail}</small></p> : null}
 
@@ -207,7 +209,7 @@ export default function ResendEmailConfigPanel() {
           <input value={draft.sandbox_recipient} onChange={(event) => setField("sandbox_recipient", event.target.value)} placeholder="All non-production mail is rerouted here" />
         </label>
         <label>
-          <span>Health/test recipient</span>
+          <span>Explicit test recipient</span>
           <input value={draft.health_check_recipient} onChange={(event) => { setField("health_check_recipient", event.target.value); setTestRecipient(event.target.value); }} />
         </label>
         <label>
@@ -239,14 +241,14 @@ export default function ResendEmailConfigPanel() {
 
       <div className="platform-actions" style={{ marginTop: 14 }}>
         <button className="platform-btn primary" disabled={Boolean(busy)} onClick={save}>{busy === "save" ? "Saving…" : "Save Resend configuration"}</button>
-        <button className="platform-btn" disabled={Boolean(busy) || !status?.has_secret} onClick={checkHealth}>{busy === "health" ? "Checking…" : "Queue non-sending health check"}</button>
+        <button className="platform-btn" disabled={Boolean(busy) || !status?.has_secret} onClick={checkHealth}>{busy === "health" ? "Checking…" : "Queue API authentication check"}</button>
       </div>
 
       <div className="platform-form" style={{ gridTemplateColumns: "1fr auto", marginTop: 14 }}>
         <input value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} placeholder="Single explicit test recipient" />
         <button className="platform-btn" disabled={Boolean(busy) || !status?.has_secret} onClick={sendTest}>{busy === "test" ? "Sending…" : "Send one test email"}</button>
       </div>
-      <small>The test button sends one explicit message and is rate-deduplicated per recipient per minute. Normal portal messages remain blocked until health passes.</small>
+      <small>The API check sends nothing. The explicit test sends one rate-deduplicated message and is the only action that marks the current configuration delivery-ready.</small>
     </section>
   );
 }
