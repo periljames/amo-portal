@@ -1,0 +1,82 @@
+.dc-records-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--dc-border);
+  border-radius: 0.48rem;
+  overflow: hidden;
+  background: var(--dc-surface);
+}
+.dc-records-summary > div { padding: 0.7rem 0.85rem; border-right: 1px solid var(--dc-border); }
+.dc-records-summary > div:last-child { border-right: 0; }
+.dc-records-summary strong { display: block; font: 600 1.3rem/1.1 Georgia, "Times New Roman", serif; }
+.dc-records-summary span { display: block; margin-top: 0.14rem; color: var(--dc-muted); font-size: 0.66rem; }
+
+.dc-records-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.7rem;
+}
+.dc-records-toolbar label {
+  min-height: 38px;
+  min-width: min(100%, 35rem);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--dc-border);
+  border-radius: 0.42rem;
+  background: var(--dc-surface);
+  color: var(--dc-muted);
+}
+.dc-records-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--dc-ink); font-size: 0.73rem; }
+.dc-records-toolbar select { min-height: 38px; padding: 0 0.6rem; border: 1px solid var(--dc-border); border-radius: 0.42rem; background: var(--dc-surface); color: var(--dc-ink); font-size: 0.7rem; }
+
+.dc-records-table td:first-child { min-width: 13rem; }
+.dc-records-table td:nth-child(2) { min-width: 16rem; }
+.dc-records-table td:nth-child(3) { min-width: 13rem; }
+.dc-records-table td strong,
+.dc-records-table td small { display: block; }
+.dc-records-table td small + small { margin-top: 0.12rem; }
+
+.dc-records-pagination { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-top: 0.7rem; }
+.dc-records-pagination span { color: var(--dc-muted); font-size: 0.7rem; }
+
+.dc-record-detail { width: min(54rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; }
+.dc-record-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0.75rem;
+  border: 1px solid var(--dc-border);
+  border-radius: 0.42rem;
+  overflow: hidden;
+  background: var(--dc-border);
+}
+.dc-record-detail__facts > div { min-width: 0; padding: 0.6rem 0.7rem; background: var(--dc-surface); }
+.dc-record-detail__facts span,
+.dc-record-detail__facts strong,
+.dc-record-detail__facts code { display: block; }
+.dc-record-detail__facts > div > span:first-child { margin-bottom: 0.2rem; color: var(--dc-muted); font-size: 0.59rem; font-weight: 720; letter-spacing: 0.045em; text-transform: uppercase; }
+.dc-record-detail__facts strong { overflow: hidden; font-size: 0.69rem; text-overflow: ellipsis; white-space: nowrap; }
+.dc-record-detail__facts code { overflow: hidden; color: var(--dc-muted); font-size: 0.58rem; text-overflow: ellipsis; white-space: nowrap; }
+.dc-record-detail > .dc-error,
+.dc-record-detail > .dc-callout { margin: 0.75rem; }
+.dc-record-detail__actions { display: flex; gap: 0.4rem; padding: 0 0.75rem 0.75rem; }
+.dc-record-detail__complete { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0.75rem; padding: 0.7rem; border: 1px solid color-mix(in srgb, #15803d 40%, var(--dc-border)); border-radius: 0.42rem; background: color-mix(in srgb, #15803d 8%, var(--dc-surface)); }
+.dc-record-detail__complete strong,
+.dc-record-detail__complete span { display: block; }
+.dc-record-detail__complete span { margin-top: 0.12rem; color: var(--dc-muted); font-size: 0.66rem; }
+
+.dc-button--danger { border-color: #b91c1c !important; background: #b91c1c !important; color: #fff !important; }
+
+@media (max-width: 760px) {
+  .dc-records-summary { grid-template-columns: 1fr; }
+  .dc-records-summary > div { border-right: 0; border-bottom: 1px solid var(--dc-border); }
+  .dc-records-summary > div:last-child { border-bottom: 0; }
+  .dc-records-toolbar { align-items: stretch; flex-direction: column; }
+  .dc-records-toolbar label { min-width: 0; width: 100%; }
+  .dc-record-detail__facts { grid-template-columns: 1fr; }
+}
