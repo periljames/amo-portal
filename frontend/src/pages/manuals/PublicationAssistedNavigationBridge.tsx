@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
+import "./publicationAssistedNavigation.css";
 
 export type PublicationNavigationDetail = {
   manualId?: string | null;
