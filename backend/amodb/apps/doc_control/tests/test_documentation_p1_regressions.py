@@ -6,6 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 from amodb.apps.doc_control import knowledge_hardening
+from amodb.apps.doc_control.knowledge_artifact_transactions import (
+    _cleanup_pending_artifacts,
+    _track_pending_artifact,
+)
 from amodb.apps.doc_control.knowledge_hardening import (
     _filter_hierarchy_items,
     _hierarchy_override_detected,
@@ -94,6 +98,18 @@ def test_new_artifact_is_removed_when_record_flush_fails(tmp_path, monkeypatch) 
             payload={},
         )
     assert not list(tmp_path.rglob("*.pdf"))
+
+
+def test_pending_artifact_is_removed_when_outer_transaction_rolls_back(tmp_path) -> None:
+    path = tmp_path / "pending.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={})
+    _track_pending_artifact(session, str(path))
+
+    _cleanup_pending_artifacts(session)
+
+    assert not path.exists()
+    assert session.info == {}
 
 
 def test_reconciliation_detects_controller_governed_hierarchy_changes() -> None:
