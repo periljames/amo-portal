@@ -143,3 +143,16 @@ def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None
     assert "onLoadSuccess={async" not in viewer
     assert "error={<div" in viewer
     assert "error={<div" in linked_panel
+
+
+def test_progress_refresh_does_not_clear_an_already_loaded_pdf() -> None:
+    repository_root = Path(__file__).resolve().parents[5]
+    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
+
+    source_reset_tail = viewer.split("// Only an actual source replacement", 1)[1]
+    source_reset_body = source_reset_tail.split("useEffect(() => {", 1)[1].split("}, [fileUrl]);", 1)[0]
+    assert "setPageCount(0)" in source_reset_body
+    assert "initialPage" not in source_reset_body
+    assert "const initialPageRef = useRef(initialPage)" in viewer
+    assert 'jumpToPage(initialPage || 1, "auto")' in viewer
+    assert "const restoredPage = clamp(initialPageRef.current || 1" in viewer
