@@ -67,7 +67,7 @@ Any configuration save changes the provider state back to `CONFIGURED`. Automati
 
 ## Burst and duplicate protection
 
-The portal enforces configurable per-minute and per-day limits before calling Resend. PostgreSQL transaction advisory locks serialize each tenant's send decision, preventing concurrent workers from all passing the same limit check. Successful notifications with the same tenant, recipient, template and correlation ID are reused rather than sent again. Every Resend request also carries an idempotency key.
+The portal enforces platform-wide per-minute and per-day limits before calling Resend. One PostgreSQL transaction advisory lock serializes each portal send decision, preventing concurrent workers or different AMO tenants from collectively passing the same limit check. Successful notifications with the same tenant, recipient, template and correlation ID are reused rather than sent again. Every Resend request also carries an idempotency key.
 
 The explicit test endpoint is limited to one request per credential, recipient and minute. It does not change the selected sending mode or cause any additional messages.
 
