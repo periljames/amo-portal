@@ -1,0 +1,37 @@
+name: Apply complete email delivery patch
+
+on:
+  push:
+    branches:
+      - agent/complete-resend-notification-delivery
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, 'Stage complete email delivery patch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate and apply patch
+        run: |
+          git apply --check .github/agent/complete-email-delivery.patch
+          git apply .github/agent/complete-email-delivery.patch
+          rm .github/agent/complete-email-delivery.patch
+          python -m compileall -q \
+            backend/amodb/apps/accounts \
+            backend/amodb/apps/notifications \
+            backend/amodb/apps/platform \
+            backend/amodb/apps/realtime \
+            backend/amodb/apps/tasks \
+            backend/amodb/jobs
+      - name: Commit completed implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete Resend notification delivery"
+          git push
