@@ -44,6 +44,13 @@ def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
         return saas_side_effects.process_etims_fiscalization(db, job=job)
     if job.job_type == "AI_SUPPORT_REPLY":
         return saas_side_effects.process_ai_support_reply(db, job=job)
+    if (
+        job.job_type == "PROVIDER_HEALTH_CHECK"
+        and str((job.payload_json or {}).get("provider") or "").strip().lower() == "resend"
+    ):
+        from amodb.apps.platform.resend_email_policy import process_resend_authentication_job
+
+        return process_resend_authentication_job(db, job)
     from amodb.jobs import saas_worker as handlers
 
     return handlers.process_job(db, job)
