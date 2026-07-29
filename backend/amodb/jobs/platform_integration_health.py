@@ -8,7 +8,7 @@ DEFAULT_PROVIDERS = [
     ("google_workspace", "Google Workspace"),
     ("zoom_education", "Zoom Education SDK"),
     ("aws_s3", "AWS S3"),
-    ("sendgrid", "SendGrid"),
+    ("resend", "Resend"),
     ("zendesk", "Zendesk"),
     ("jira", "Jira"),
     ("generic_webhook", "Generic Webhook"),
