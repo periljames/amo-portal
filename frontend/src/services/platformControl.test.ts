@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { endSession } = vi.hoisted(() => ({ endSession: vi.fn() }));
@@ -16,6 +19,11 @@ import { shouldProxyDevApi, shouldServePlatformSpa } from "./devProxyRouting";
 import { platformConsoleApi } from "./platformConsole";
 import { platformApi } from "./platformControl";
 
+const platformSharedSource = readFileSync(
+  fileURLToPath(new URL("../pages/platform/components/PlatformShared.tsx", import.meta.url)),
+  "utf8",
+);
+
 describe("platform SaaS control API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -24,6 +32,13 @@ describe("platform SaaS control API", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("hydrates the authoritative platform user before denying access", () => {
+    expect(platformSharedSource).toContain("fetchCurrentUser()");
+    expect(platformSharedSource).toContain('accessState === "checking"');
+    expect(platformSharedSource).toContain('endSession("manual")');
+    expect(platformSharedSource).toContain("Sign in with platform account");
   });
 
   it("keeps direct platform page navigation in the SPA", () => {

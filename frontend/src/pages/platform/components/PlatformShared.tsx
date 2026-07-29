@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { endSession, getCachedUser } from "../../../services/auth";
+import { endSession, fetchCurrentUser, getCachedUser, isAuthenticated, type PortalUser } from "../../../services/auth";
 import { platformConsoleApi, type PlatformConsoleSearchResult } from "../../../services/platformConsole";
 import "../../../styles/platform-control.css";
 import { platformNavSections, type PlatformNavItem } from "./platformNavigation";
@@ -81,7 +81,6 @@ export const PlatformShell: React.FC<{
   actions?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, subtitle, actions, children }) => {
-  const user = getCachedUser();
   const navigate = useNavigate();
   const location = useLocation();
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -98,14 +97,51 @@ export const PlatformShell: React.FC<{
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlatformConsoleSearchResult[]>([]);
-  const realtime = usePlatformRealtime(Boolean(user?.is_superuser));
+  const [user, setUser] = useState<PortalUser | null>(() => getCachedUser());
+  const [accessState, setAccessState] = useState<"checking" | "allowed" | "denied">(
+    () => (isAuthenticated() ? "checking" : "denied"),
+  );
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [accessAttempt, setAccessAttempt] = useState(0);
+  const realtime = usePlatformRealtime(accessState === "allowed");
   const snapshot = realtime.snapshot ?? bootstrapSnapshot;
   const resolvedTheme = theme === "system" ? systemTheme : theme;
+  const style = {
+    "--platform-accent": accent,
+    "--platform-accent-rgb": accentRgb(accent),
+  } as React.CSSProperties;
 
   useEffect(() => {
-    if (!user?.is_superuser) return;
+    let active = true;
+    if (!isAuthenticated()) {
+      setUser(null);
+      setAccessError(null);
+      setAccessState("denied");
+      return () => { active = false; };
+    }
+
+    setAccessError(null);
+    setAccessState("checking");
+    void fetchCurrentUser()
+      .then((freshUser) => {
+        if (!active) return;
+        setUser(freshUser);
+        setAccessState(freshUser.is_superuser ? "allowed" : "denied");
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setUser(getCachedUser());
+        setAccessError(error instanceof Error ? error.message : "Unable to verify platform access.");
+        setAccessState("denied");
+      });
+
+    return () => { active = false; };
+  }, [accessAttempt]);
+
+  useEffect(() => {
+    if (accessState !== "allowed") return;
     void platformConsoleApi.bootstrap().then(setBootstrapSnapshot).catch(() => undefined);
-  }, [user?.is_superuser]);
+  }, [accessState]);
 
   useEffect(() => {
     window.localStorage.setItem(THEME_KEY, theme);
@@ -164,22 +200,43 @@ export const PlatformShell: React.FC<{
     [user?.email, user?.full_name],
   );
 
-  if (!user?.is_superuser) {
+  const signInWithPlatformAccount = () => {
+    endSession("manual");
+    navigate("/login", {
+      replace: true,
+      state: { from: location.pathname + location.search },
+    });
+  };
+
+  if (accessState === "checking") {
     return (
-      <main className="platform-access-denied">
-        <section className="platform-card">
-          <h1>Platform access required</h1>
-          <p>This console is available only to global platform superusers.</p>
-          <button className="platform-btn primary" onClick={() => navigate("/login", { replace: true })}>Go to login</button>
-        </section>
-      </main>
+      <div className="platform-shell" data-platform-theme={resolvedTheme} style={style}>
+        <main className="platform-access-denied">
+          <section className="platform-card" role="status" aria-live="polite">
+            <h1>Verifying platform access</h1>
+            <p>Confirming this session with the platform control plane…</p>
+          </section>
+        </main>
+      </div>
     );
   }
 
-  const style = {
-    "--platform-accent": accent,
-    "--platform-accent-rgb": accentRgb(accent),
-  } as React.CSSProperties;
+  if (accessState !== "allowed" || !user?.is_superuser) {
+    return (
+      <div className="platform-shell" data-platform-theme={resolvedTheme} style={style}>
+        <main className="platform-access-denied">
+          <section className="platform-card">
+            <h1>Platform access required</h1>
+            <p>{accessError ? `Platform access could not be verified: ${accessError}` : "This console is available only to global platform superusers."}</p>
+            {accessError && isAuthenticated() ? (
+              <button className="platform-btn" onClick={() => setAccessAttempt((attempt) => attempt + 1)}>Retry access check</button>
+            ) : null}
+            <button className="platform-btn primary" onClick={signInWithPlatformAccount}>Sign in with platform account</button>
+          </section>
+        </main>
+      </div>
+    );
+  }
   const selectSearchResult = (result: PlatformConsoleSearchResult) => {
     setQuery("");
     setResults([]);
