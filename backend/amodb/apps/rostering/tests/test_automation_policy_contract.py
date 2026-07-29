@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import inspect
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -193,3 +194,52 @@ def test_concurrent_identical_manual_request_returns_the_winning_run():
     assert "automation_service._request_fingerprint(" in branch
     assert "return winner" in branch
     assert branch.index("return winner") < branch.index("_record_failed_run(")
+
+def test_submonthly_period_codes_include_full_date_boundaries():
+    first = automation_service._render_period_code(
+        "{YYYY}-{MM}",
+        date(2026, 8, 3),
+        date(2026, 8, 9),
+    )
+    second = automation_service._render_period_code(
+        "{YYYY}-{MM}",
+        date(2026, 8, 10),
+        date(2026, 8, 16),
+    )
+    assert first != second
+    assert first.endswith("20260803-20260809")
+    assert second.endswith("20260810-20260816")
+    assert len(first) <= 32
+    assert automation_service._render_period_code(
+        "{YYYY}-{MM}",
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+    ) == "2026-08"
+
+
+def test_unrelated_policy_edits_do_not_change_the_schedule():
+    fortnightly = policy(
+        frequency=RosterAutomationFrequency.FORTNIGHTLY,
+        run_day=1,
+    )
+    assert not automation_service._schedule_fields_changed(
+        fortnightly,
+        {"period_name_pattern": "Controlled roster"},
+    )
+    assert automation_service._schedule_fields_changed(fortnightly, {"run_day": 2})
+    source = inspect.getsource(automation_service.update_policy)
+    assert "previous_next_run = row.next_run_at" in source
+    assert "row.next_run_at = previous_next_run" in source
+
+
+def test_default_compose_deployments_run_the_scheduler_continuously():
+    repository_root = Path(__file__).resolve().parents[5]
+    for filename in ("docker-compose.yml", "docker-compose.prod.yml"):
+        source = (repository_root / filename).read_text(encoding="utf-8")
+        assert "rostering-automation:" in source
+        assert "amodb.jobs.rostering_automation" in source
+        assert "--loop" in source
+    worker_source = inspect.getsource(rostering_automation.main)
+    assert 'parser.add_argument("--loop"' in worker_source
+    assert "ROSTER_AUTOMATION_POLL_SECONDS" in worker_source
+    assert "time_module.sleep" in worker_source

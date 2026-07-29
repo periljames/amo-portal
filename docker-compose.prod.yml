@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 5
 
+  rostering-automation:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    command: ["python", "-m", "amodb.jobs.rostering_automation", "--loop"]
+    restart: unless-stopped
+    volumes:
+      - /opt/amo-portal/shared/uploads:/srv/amo/uploads
+      - /opt/amo-portal/shared/logs:/var/log/amo
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: .

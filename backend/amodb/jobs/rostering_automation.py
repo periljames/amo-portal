@@ -7,7 +7,11 @@ tenant-scoped idempotency key.
 """
 from __future__ import annotations
 
+import argparse
 from datetime import datetime, timezone
+import json
+import os
+import time as time_module
 from typing import Optional
 
 from amodb.database import WriteSessionLocal
@@ -231,5 +235,51 @@ def run(*, as_of: Optional[datetime] = None, limit: int = 100) -> dict:
     }
 
 
+def _positive_int(value: str, *, field: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError(f"{field} must be at least 1")
+    return parsed
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Execute due roster automation policies")
+    parser.add_argument("--loop", action="store_true", help="Run continuously for container deployments")
+    parser.add_argument(
+        "--interval-seconds",
+        type=int,
+        default=_positive_int(os.getenv("ROSTER_AUTOMATION_POLL_SECONDS", "3600"), field="ROSTER_AUTOMATION_POLL_SECONDS"),
+    )
+    parser.add_argument(
+        "--retry-seconds",
+        type=int,
+        default=_positive_int(os.getenv("ROSTER_AUTOMATION_RETRY_SECONDS", "60"), field="ROSTER_AUTOMATION_RETRY_SECONDS"),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=_positive_int(os.getenv("ROSTER_AUTOMATION_BATCH_LIMIT", "100"), field="ROSTER_AUTOMATION_BATCH_LIMIT"),
+    )
+    args = parser.parse_args(argv)
+    if args.interval_seconds < 1 or args.retry_seconds < 1 or args.limit < 1:
+        parser.error("interval, retry and limit values must be at least 1")
+
+    while True:
+        exit_code = 0
+        try:
+            summary = run(limit=args.limit)
+        except Exception as exc:
+            exit_code = 1
+            summary = {
+                "as_of": _utcnow().isoformat(),
+                "outcome": "scheduler_error",
+                "error": str(exc),
+            }
+        print(json.dumps(summary, sort_keys=True, default=str), flush=True)
+        if not args.loop:
+            return exit_code
+        time_module.sleep(args.interval_seconds if exit_code == 0 else args.retry_seconds)
+
+
 if __name__ == "__main__":
-    print("Rostering automation completed:", run())
+    raise SystemExit(main())

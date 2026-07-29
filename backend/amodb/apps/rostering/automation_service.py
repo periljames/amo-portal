@@ -75,6 +75,29 @@ def _validate_run_day(frequency, run_day: int) -> int:
     return int(run_day)
 
 
+_SCHEDULE_FIELDS = frozenset({
+    "enabled",
+    "frequency",
+    "run_day",
+    "run_hour_local",
+    "timezone_name",
+})
+
+
+def _schedule_fields_changed(policy: RosterGenerationPolicy, values: dict) -> bool:
+    for key in _SCHEDULE_FIELDS:
+        if key not in values:
+            continue
+        current = getattr(policy, key)
+        proposed = values[key]
+        if key == "frequency":
+            if _enum_value(current) != _enum_value(proposed):
+                return True
+        elif current != proposed:
+            return True
+    return False
+
+
 def _add_months(value: date, months: int) -> date:
     month_index = value.year * 12 + value.month - 1 + months
     year, zero_month = divmod(month_index, 12)
@@ -125,6 +148,26 @@ def _render_pattern(pattern: str, target_from: date, target_to: date) -> str:
     for token, value in tokens.items():
         rendered = rendered.replace(token, value)
     return rendered.strip()
+
+
+def _render_period_code(pattern: str, target_from: date, target_to: date) -> str:
+    """Render a stable period code that stays unique for sub-monthly windows."""
+    rendered = _render_pattern(pattern, target_from, target_to) or "ROSTER"
+    full_month = (
+        target_from.day == 1
+        and target_from.year == target_to.year
+        and target_from.month == target_to.month
+        and target_to.day == calendar.monthrange(target_from.year, target_from.month)[1]
+    )
+    if full_month:
+        return rendered[:32]
+
+    boundary = f"{target_from:%Y%m%d}-{target_to:%Y%m%d}"
+    if rendered.endswith(boundary) and len(rendered) <= 32:
+        return rendered
+    prefix_length = 32 - len(boundary) - 1
+    prefix = rendered[:prefix_length].rstrip("- _")
+    return f"{prefix}-{boundary}" if prefix else boundary
 
 
 def _next_run(policy: RosterGenerationPolicy, *, now: Optional[datetime] = None) -> Optional[datetime]:
@@ -212,13 +255,21 @@ def update_policy(
         raise ValueError("A reason is required when changing roster automation")
     if values.get("timezone_name"):
         values["timezone_name"] = _validate_timezone(str(values["timezone_name"]))
+    schedule_changed = _schedule_fields_changed(row, values)
+    previous_next_run = row.next_run_at
     for key, value in values.items():
         setattr(row, key, value)
     _validate_run_day(row.frequency, row.run_day)
     row.updated_by_user_id = actor_user_id
     row.updated_reason = reason
     row.state_revision += 1
-    row.next_run_at = _next_run(row)
+    frequency = _enum_value(row.frequency)
+    if not row.enabled or frequency == RosterAutomationFrequency.MANUAL.value:
+        row.next_run_at = None
+    elif schedule_changed or previous_next_run is None:
+        row.next_run_at = _next_run(row)
+    else:
+        row.next_run_at = previous_next_run
     db.add(row)
     db.flush()
     return row
@@ -324,7 +375,7 @@ def preview(
         if payload.target_from and payload.target_to
         else _target_window(policy)
     )
-    period_code = _render_pattern(policy.period_code_pattern, target_from, target_to)
+    period_code = _render_period_code(policy.period_code_pattern, target_from, target_to)
     period_name = _render_pattern(policy.period_name_pattern, target_from, target_to)
     period = _period_for_window(db, amo_id=amo_id, target_from=target_from, target_to=target_to)
     drafts = [
