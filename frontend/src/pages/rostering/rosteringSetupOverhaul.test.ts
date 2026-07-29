@@ -73,6 +73,14 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(legacyRouterSource).toContain('get("section") === "workforce"');
   });
 
+  it("makes contracts editable only for authorized Workforce managers", () => {
+    expect(hrSource).toContain("updateEmploymentContract");
+    expect(hrSource).toContain("listBaseStations");
+    expect(hrSource).toContain("dashboard.can_manage_contracts");
+    expect(hrSource).toContain("Save contract");
+    expect(hrSource).toContain("Read only");
+  });
+
   it("keeps HR remediation inside HR-accessible Workforce surfaces", () => {
     expect(hrSource).not.toContain("/admin/users/");
     expect(hrSource).toContain('onOpen("people")');

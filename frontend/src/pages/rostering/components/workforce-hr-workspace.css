@@ -385,3 +385,51 @@
 [data-theme="dark"] .hr-search {
   background: var(--surface-raised, #111827);
 }
+
+.hr-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hr-contract-grid label,
+.hr-contract-flags label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted, #64748b);
+  font-size: .7rem;
+  font-weight: 650;
+}
+
+.hr-contract-grid input,
+.hr-contract-grid select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle, rgba(100, 116, 139, .28));
+  border-radius: 9px;
+  background: var(--surface-solid, #fff);
+  color: var(--text-strong, #0f172a);
+  font: inherit;
+}
+
+.hr-contract-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.hr-contract-flags label {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+[data-theme="dark"] .hr-contract-grid input,
+[data-theme="dark"] .hr-contract-grid select {
+  background: var(--surface-raised, #111827);
+}
+
+@media (max-width: 640px) {
+  .hr-contract-grid { grid-template-columns: 1fr; }
+}
