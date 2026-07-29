@@ -6,14 +6,17 @@ const distDir = path.resolve("dist");
 const manifestPath = path.join(distDir, ".vite", "manifest.json");
 const reportPath = path.join(distDir, "rostering-network-waterfall.json");
 const baseUrl = process.env.PERF_BASE_URL || "http://127.0.0.1:4173";
+
+// These are the current first-level Rostering workspaces. Capacity and legacy
+// report components are second-level chunks inside RosterOperationsWorkspace.
 const workspaceNames = [
-  "CapacityBoard",
+  "RosterDashboard",
+  "UnifiedRosterPlanner",
+  "RosterOperationsWorkspace",
   "ComplianceImpact",
   "MyRosterWorkspace",
-  "RosterDashboard",
-  "RosterReports",
-  "UnifiedRosterPlanner",
-  "UnifiedRosterSettings",
+  "WorkforceHrWorkspace",
+  "RosteringSetupWorkspace",
 ];
 const profile = {
   name: "synthetic-edge-2g",
@@ -57,7 +60,8 @@ const workspaceEntries = workspaceNames.map((name) => ({
 }));
 const workspaceKeys = new Set(workspaceEntries.map(({ entry }) => entry?.[0]).filter(Boolean));
 const explicitRouteEntry = entries.find(([key, record]) =>
-  sourceMatches(key, record, "WorkforceRosteringPagesV2"),
+  sourceMatches(key, record, "WorkforceRosteringPagesV2")
+  || sourceMatches(key, record, "RosteringPages"),
 );
 const graphRouteEntry = entries
   .map((entry) => ({
@@ -101,8 +105,8 @@ const workspaceMap = new Map(workspaceEntries.map(({ name, entry }) => [name, en
 const routeKey = routeEntry[0];
 const scenarios = {
   planner: collectDependencyFiles([routeKey, workspaceMap.get("UnifiedRosterPlanner")[0]]),
-  setup: collectDependencyFiles([routeKey, workspaceMap.get("UnifiedRosterSettings")[0]]),
-  myRoster: collectDependencyFiles([routeKey, workspaceMap.get("MyRosterWorkspace")[0]]),
+  setup: collectDependencyFiles([routeKey, workspaceMap.get("RosteringSetupWorkspace")[0]]),
+  workforce: collectDependencyFiles([routeKey, workspaceMap.get("WorkforceHrWorkspace")[0]]),
 };
 
 async function applyNetworkProfile(context, page) {
