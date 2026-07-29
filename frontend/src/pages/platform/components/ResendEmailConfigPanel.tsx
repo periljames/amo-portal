@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { platformApi } from "../../../services/platformControl";
 import { resendEmailApi, type ResendStatus } from "../../../services/resendEmail";
+import "../../../styles/platform-control-workspace.css";
 import { StatusBadge } from "./PlatformShared";
 import { PLATFORM_CONSOLE_LIVE_EVENT } from "./usePlatformRealtime";
 
