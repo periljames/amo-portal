@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import importlib
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from amodb.apps.platform import console_router
+
+console_router = importlib.import_module("amodb.apps.platform.console_router")
 
 
 def test_console_router_exposes_superadmin_bootstrap_search_and_stream() -> None:
