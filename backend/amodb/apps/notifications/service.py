@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import WriteSessionLocal
@@ -12,6 +14,17 @@ from . import models, providers
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _acquire_delivery_lock(db: Session, *, amo_id: str) -> None:
+    """Serialize delivery decisions for one tenant inside the DB transaction."""
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    digest = hashlib.sha256(f"resend:{amo_id}".encode("utf-8")).digest()
+    lock_key = int.from_bytes(digest[:8], byteorder="big", signed=False) & 0x7FFF_FFFF_FFFF_FFFF
+    db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
 def _existing_delivery(
@@ -77,29 +90,28 @@ def send_email(
     cleaned_recipient = (recipient or "").strip()
     normalized_recipient = cleaned_recipient or "unknown"
 
-    existing = _existing_delivery(
-        db,
-        amo_id=amo_id,
-        recipient=normalized_recipient,
-        template_key=template_key,
-        correlation_id=correlation_id,
-    )
-    if existing is not None:
-        if owns_session:
-            db.close()
-        return existing
-
-    safe_context = dict(context or {})
-    log = models.EmailLog(
-        amo_id=amo_id,
-        recipient=normalized_recipient,
-        subject=subject,
-        template_key=template_key,
-        status=models.EmailStatus.QUEUED,
-        context_json=safe_context,
-        correlation_id=correlation_id,
-    )
     try:
+        _acquire_delivery_lock(db, amo_id=amo_id)
+        existing = _existing_delivery(
+            db,
+            amo_id=amo_id,
+            recipient=normalized_recipient,
+            template_key=template_key,
+            correlation_id=correlation_id,
+        )
+        if existing is not None:
+            return existing
+
+        safe_context = dict(context or {})
+        log = models.EmailLog(
+            amo_id=amo_id,
+            recipient=normalized_recipient,
+            subject=subject,
+            template_key=template_key,
+            status=models.EmailStatus.QUEUED,
+            context_json=safe_context,
+            correlation_id=correlation_id,
+        )
         db.add(log)
         db.flush()
 
