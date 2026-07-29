@@ -48,12 +48,17 @@ def test_overtime_requester_cannot_self_approve():
     db.add.assert_not_called()
 
 
-def test_supervisor_stage_requires_assigned_supervisor():
+def test_supervisor_stage_requires_assigned_supervisor(monkeypatch):
     db = MagicMock()
     request_query = _query_returning(_overtime_row())
     contract = SimpleNamespace(supervisor_user_id="assigned-supervisor")
     contract_query = _query_returning(contract)
     db.query.side_effect = [request_query, contract_query]
+    monkeypatch.setattr(
+        hr_service,
+        "_amo_work_date",
+        lambda *args, **kwargs: date(2026, 7, 29),
+    )
 
     with pytest.raises(ValueError, match="assigned supervisor"):
         hr_service.decide_overtime(
@@ -154,7 +159,6 @@ def test_dashboard_pending_counts_are_uncapped():
     assert hr_service._pending_queue_counts(db, amo_id="amo-1") == expected
 
 
-
 def test_attendance_exception_serializes_canonical_evidence():
     row = SimpleNamespace(
         id="variance-1",
@@ -182,8 +186,10 @@ def test_attendance_exception_serializes_canonical_evidence():
 class _ScalarQuery:
     def __init__(self, value):
         self.value = value
+
     def filter(self, *args, **kwargs):
         return self
+
     def scalar(self):
         return self.value
 
