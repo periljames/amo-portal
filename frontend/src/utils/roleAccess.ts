@@ -10,6 +10,7 @@ export type RoleCapability =
   | "quality"
   | "safety"
   | "stores"
+  | "hr"
   | "viewer";
 
 export type DepartmentId =
@@ -115,29 +116,36 @@ type AccessRule = {
 function getDepartmentFromUser(user: PortalUser | null, contextDepartment?: string | null): string | null {
   const fromContext = normalizeDepartmentCode(contextDepartment || "");
   if (fromContext) return fromContext;
-  const fromUser = normalizeDepartmentCode(
-    (user as any)?.department?.code || (user as any)?.department_code || ""
+  return normalizeDepartmentCode(
+    (user as any)?.department?.code || (user as any)?.department_code || "",
   );
-  return fromUser;
+}
+
+function titleContext(user: PortalUser | null): string {
+  return `${user?.position_title || ""} ${(user as any)?.department?.name || ""}`.toLowerCase();
 }
 
 function hasRecordsTitle(user: PortalUser | null): boolean {
-  const title = `${user?.position_title || ""} ${(user as any)?.department?.name || ""}`.toLowerCase();
-  return /(technical\s*records?|records?\s*clerk|records?\s*officer|records?\s*controller)/.test(title);
+  return /(technical\s*records?|records?\s*clerk|records?\s*officer|records?\s*controller)/.test(titleContext(user));
+}
+
+function hasHrTitle(user: PortalUser | null, department: string | null): boolean {
+  return /(^|\b)(human\s+resources?|hr|payroll)(\b|$)/.test(titleContext(user))
+    || department === "hr"
+    || department === "human-resources"
+    || department === "human_resources";
 }
 
 export function getUserCapabilities(
   user: PortalUser | null,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): RoleCapability[] {
   if (!user) return [];
   const caps = new Set<RoleCapability>();
   const role = user.role as AccountRole;
   const assignedDepartment = getDepartmentFromUser(user, contextDepartment);
 
-  if (user.is_superuser || user.is_amo_admin || role === "SUPERUSER" || role === "AMO_ADMIN") {
-    caps.add("admin");
-  }
+  if (user.is_superuser || user.is_amo_admin || role === "SUPERUSER" || role === "AMO_ADMIN") caps.add("admin");
   if (role === "PLANNING_ENGINEER") caps.add("planner");
   if (role === "PRODUCTION_ENGINEER") caps.add("supervisor");
   if (role === "CERTIFYING_ENGINEER" || role === "CERTIFYING_TECHNICIAN") caps.add("certifying");
@@ -146,53 +154,37 @@ export function getUserCapabilities(
   if (role === "SAFETY_MANAGER") caps.add("safety");
   if (["STORES", "STORES_MANAGER", "STOREKEEPER", "PROCUREMENT_OFFICER"].includes(role)) caps.add("stores");
   if (role === "VIEW_ONLY") caps.add("viewer");
+  if (hasHrTitle(user, assignedDepartment) || role === "FINANCE_MANAGER" || role === "ACCOUNTS_OFFICER") caps.add("hr");
 
-  if (hasRecordsTitle(user) || assignedDepartment === "technical-records") {
-    caps.add("records");
-  }
-  if (role === "VIEW_ONLY" && assignedDepartment === "production") {
-    caps.add("records");
-  }
-  if (role === "PRODUCTION_ENGINEER") {
-    caps.add("records");
-  }
+  if (hasRecordsTitle(user) || assignedDepartment === "technical-records") caps.add("records");
+  if (role === "VIEW_ONLY" && assignedDepartment === "production") caps.add("records");
+  if (role === "PRODUCTION_ENGINEER") caps.add("records");
 
   return Array.from(caps);
 }
 
 export function getRoleDrivenDepartments(
   user: PortalUser | null,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): DepartmentId[] {
   if (!user) return [];
   const caps = new Set(getUserCapabilities(user, contextDepartment));
   if (caps.has("admin")) {
     return [
-      "planning",
-      "production",
-      "maintenance",
-      "document-control",
-      "quality",
-      "reliability",
-      "safety",
-      "stores",
-      "workshops",
-      "admin",
+      "planning", "production", "maintenance", "document-control", "quality",
+      "reliability", "safety", "stores", "workshops", "admin",
     ];
   }
 
   const departments = new Set<DepartmentId>();
   const assigned = getDepartmentFromUser(user, contextDepartment);
-  if (assigned === "planning" || assigned === "production" || assigned === "maintenance" || assigned === "document-control" || assigned === "quality" || assigned === "reliability" || assigned === "safety" || assigned === "stores" || assigned === "workshops") {
-    departments.add(assigned);
-  }
-
+  const supported: DepartmentId[] = [
+    "planning", "production", "maintenance", "document-control", "quality",
+    "reliability", "safety", "stores", "workshops",
+  ];
+  if (supported.includes(assigned as DepartmentId)) departments.add(assigned as DepartmentId);
   if (caps.has("planner")) departments.add("planning");
-  if (caps.has("supervisor")) {
-    departments.add("production");
-    departments.add("maintenance");
-  }
-  if (caps.has("certifying")) {
+  if (caps.has("supervisor") || caps.has("certifying")) {
     departments.add("production");
     departments.add("maintenance");
   }
@@ -201,7 +193,6 @@ export function getRoleDrivenDepartments(
   if (caps.has("quality")) departments.add("quality");
   if (caps.has("safety")) departments.add("safety");
   if (caps.has("stores")) departments.add("stores");
-
   return Array.from(departments);
 }
 
@@ -247,16 +238,16 @@ const FEATURE_RULES: Record<ModuleFeature, AccessRule> = {
   "maintenance.non-routines": { view: ["admin", "supervisor", "certifying", "technician"] },
   "maintenance.inspections": { view: ["admin", "supervisor", "certifying"] },
   "maintenance.parts-tools": { view: ["admin", "supervisor", "certifying", "technician", "stores"] },
-  "maintenance.closeout": { view: ["admin", "supervisor", "certifying"] , edit: ["admin", "supervisor", "certifying"]},
+  "maintenance.closeout": { view: ["admin", "supervisor", "certifying"], edit: ["admin", "supervisor", "certifying"] },
   "maintenance.reports": { view: ["admin", "supervisor", "certifying", "technician", "quality"] },
   "maintenance.settings": { view: ["admin", "supervisor"], edit: ["admin", "supervisor"] },
-  "rostering.dashboard": { view: ["admin", "planner", "supervisor", "certifying", "technician", "quality", "viewer"] },
+  "rostering.dashboard": { view: ["admin", "planner", "supervisor", "certifying", "technician", "quality", "viewer", "hr"] },
   "rostering.calendar": { view: ["admin", "planner", "supervisor", "certifying", "technician", "quality", "viewer"], edit: ["admin", "planner", "supervisor"] },
   "rostering.planning-board": { view: ["admin", "planner", "supervisor", "certifying", "quality"], edit: ["admin", "planner", "supervisor"] },
-  "rostering.my-roster": { view: ["admin", "planner", "supervisor", "certifying", "technician", "records", "quality", "safety", "stores", "viewer"] },
-  "rostering.training-impact": { view: ["admin", "planner", "supervisor", "certifying", "quality"] },
-  "rostering.reports": { view: ["admin", "planner", "supervisor", "quality", "records"] },
-  "rostering.settings": { view: ["admin", "planner", "supervisor"], edit: ["admin", "planner"] },
+  "rostering.my-roster": { view: ["admin", "planner", "supervisor", "certifying", "technician", "records", "quality", "safety", "stores", "viewer", "hr"] },
+  "rostering.training-impact": { view: ["admin", "planner", "supervisor", "certifying", "quality", "hr"] },
+  "rostering.reports": { view: ["admin", "planner", "supervisor", "quality", "records", "hr"] },
+  "rostering.settings": { view: ["admin", "planner", "supervisor", "hr"], edit: ["admin", "planner"] },
 };
 
 const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
@@ -297,38 +288,34 @@ function hasMatchingCapability(caps: RoleCapability[], expected: RoleCapability[
 export function canViewFeature(
   user: PortalUser | null,
   feature: ModuleFeature,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): boolean {
-  const caps = getUserCapabilities(user, contextDepartment);
   const rule = FEATURE_RULES[feature];
-  return !!rule && hasMatchingCapability(caps, rule.view);
+  return Boolean(rule && hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.view));
 }
 
 export function canEditFeature(
   user: PortalUser | null,
   feature: ModuleFeature,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): boolean {
-  const caps = getUserCapabilities(user, contextDepartment);
   const rule = FEATURE_RULES[feature];
   if (!rule) return false;
-  return hasMatchingCapability(caps, rule.edit || rule.view);
+  return hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.edit || rule.view);
 }
 
 export function canPerformAction(
   user: PortalUser | null,
   action: ModuleAction,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): boolean {
-  const caps = getUserCapabilities(user, contextDepartment);
-  const allowed = ACTION_RULES[action] || [];
-  return hasMatchingCapability(caps, allowed);
+  return hasMatchingCapability(getUserCapabilities(user, contextDepartment), ACTION_RULES[action] || []);
 }
 
 export function getFirstAccessibleModuleRoute(
   amoCode: string,
   user: PortalUser | null,
-  contextDepartment?: string | null
+  contextDepartment?: string | null,
 ): string {
   if (!user) return `/maintenance/${amoCode}/login`;
   const ordered: Array<[ModuleFeature, string]> = [
@@ -336,6 +323,7 @@ export function getFirstAccessibleModuleRoute(
     ["production.control-board", `/maintenance/${amoCode}/production/control-board`],
     ["production.records.dashboard", `/maintenance/${amoCode}/production/records`],
     ["maintenance.dashboard", `/maintenance/${amoCode}/maintenance/dashboard`],
+    ["rostering.settings", `/maintenance/${amoCode}/rostering/settings?section=workforce`],
   ];
   for (const [feature, route] of ordered) {
     if (canViewFeature(user, feature, contextDepartment)) return route;
@@ -349,41 +337,27 @@ export function getFirstAccessibleModuleRoute(
 }
 
 export function getFeatureDenialMessage(feature: ModuleFeature): string {
-  if (feature.startsWith("planning.")) {
-    return "This planning surface is limited to planning control roles.";
-  }
-  if (feature.startsWith("production.records.")) {
-    return "This technical records surface is limited to production records, supervisory, certifying, or planning read-only roles.";
-  }
-  if (feature.startsWith("production.")) {
-    return "This production surface is limited to production supervisory and execution roles.";
-  }
+  if (feature.startsWith("planning.")) return "This planning surface is limited to planning control roles.";
+  if (feature.startsWith("production.records.")) return "This technical records surface is limited to production records, supervisory, certifying, or planning read-only roles.";
+  if (feature.startsWith("production.")) return "This production surface is limited to production supervisory and execution roles.";
+  if (feature.startsWith("rostering.")) return "This rostering surface requires the relevant operational or Workforce permission.";
   return "This maintenance surface is limited to maintenance execution and certification roles.";
 }
 
 export function formatCapabilitiesForUi(user: PortalUser | null, contextDepartment?: string | null): string[] {
   return getUserCapabilities(user, contextDepartment).map((cap) => {
     switch (cap) {
-      case "admin":
-        return "Admin";
-      case "planner":
-        return "Planner";
-      case "supervisor":
-        return "Supervisor";
-      case "certifying":
-        return "Certifying Staff";
-      case "technician":
-        return "Technician";
-      case "records":
-        return "Technical Records";
-      case "quality":
-        return "Quality";
-      case "safety":
-        return "Safety";
-      case "stores":
-        return "Stores";
-      default:
-        return "Read only";
+      case "admin": return "Admin";
+      case "planner": return "Planner";
+      case "supervisor": return "Supervisor";
+      case "certifying": return "Certifying Staff";
+      case "technician": return "Technician";
+      case "records": return "Technical Records";
+      case "quality": return "Quality";
+      case "safety": return "Safety";
+      case "stores": return "Stores";
+      case "hr": return "Workforce & HR";
+      default: return "Read only";
     }
   });
 }

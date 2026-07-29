@@ -290,7 +290,7 @@ export function MyRosterWorkspace() {
 
   const roster = rosterQuery.data || null;
   const leaveTypes = leaveTypesQuery.data || [];
-  const balances = balancesQuery.data || [];
+  const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);
   const requests = requestsQuery.data?.items || [];
   const attendance = attendanceQuery.data || null;
   const currentAttendance = currentAttendanceQuery.data || null;

@@ -4,6 +4,7 @@ export {
   ManpowerPlanningBoardPage,
   MyRosterPage,
   TrainingImpactPage,
+  WorkforceHrPage,
   RosterReportsPage,
   RosterSettingsPage,
 } from "./WorkforceRosteringPages";

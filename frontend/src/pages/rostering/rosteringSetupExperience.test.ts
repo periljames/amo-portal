@@ -4,20 +4,20 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const quickActionsSource = readFileSync(
-  new URL("./components/RosterPeriodQuickActions.tsx", import.meta.url),
-  "utf8",
-);
-const ruleEditorSource = readFileSync(
-  new URL("./components/RosterRuleQuickEditor.tsx", import.meta.url),
-  "utf8",
-);
-const governanceSource = readFileSync(
-  new URL("./components/RosterGovernancePanel.tsx", import.meta.url),
-  "utf8",
-);
 const setupPageSource = readFileSync(
   new URL("./WorkforceRosteringPagesV2.tsx", import.meta.url),
+  "utf8",
+);
+const setupWorkspaceSource = readFileSync(
+  new URL("./components/RosteringSetupWorkspace.tsx", import.meta.url),
+  "utf8",
+);
+const workforceSource = readFileSync(
+  new URL("./components/WorkforceHrWorkspace.tsx", import.meta.url),
+  "utf8",
+);
+const shellSource = readFileSync(
+  new URL("./components/RosterShell.tsx", import.meta.url),
   "utf8",
 );
 const depthSource = readFileSync(
@@ -26,43 +26,58 @@ const depthSource = readFileSync(
 );
 
 describe("rostering setup experience", () => {
-  it("supports fast period creation and audited period modification", () => {
-    expect(quickActionsSource).toContain("createRosterPeriod");
-    expect(quickActionsSource).toContain("updateRosterPeriod");
-    expect(quickActionsSource).toContain("createRosterVersion");
-    expect(quickActionsSource).toContain("Edit period");
-    expect(quickActionsSource).toContain("New period");
+  it("routes Setup and Workforce through the replacement lazy workspaces", () => {
+    expect(setupPageSource).toContain("LazyRosteringSetupWorkspace");
+    expect(setupPageSource).toContain("LazyWorkforceHrWorkspace");
+    expect(setupPageSource).toContain('eyebrow="Guided setup"');
+    expect(setupPageSource).toContain('title="Roster setup"');
+    expect(setupPageSource).toContain('get("section") === "workforce"');
+    expect(setupPageSource).not.toContain("LazyRosterPeriodQuickActions");
+    expect(setupPageSource).not.toContain("LazyRosterRuleQuickEditor");
+    expect(setupPageSource).not.toContain("LazyUnifiedRosterSettings");
   });
 
-  it("detects the browser timezone and exposes a manual timezone selector", () => {
-    expect(quickActionsSource).toContain("Intl.DateTimeFormat().resolvedOptions().timeZone");
-    expect(quickActionsSource).toContain("supportedValuesOf?.(\"timeZone\")");
-    expect(quickActionsSource).toContain("<select value={draft.timezone_name}");
-    expect(quickActionsSource).toContain("detected");
+  it("supports previewed, explicitly confirmed, draft-only roster automation", () => {
+    expect(setupWorkspaceSource).toContain("previewRosterAutomation");
+    expect(setupWorkspaceSource).toContain("runRosterAutomation");
+    expect(setupWorkspaceSource).toContain("confirm_preview: true");
+    expect(setupWorkspaceSource).toContain("Create draft and rotation");
+    expect(setupWorkspaceSource).toContain("Automation creates a draft only");
+    expect(setupWorkspaceSource).toContain("It never approves or publishes a roster");
   });
 
-  it("lets authorised administrators change active rule values without exposing them to everyone", () => {
-    expect(ruleEditorSource).toContain("roster.manage_rules");
-    expect(ruleEditorSource).toContain("updateRosterRule");
-    expect(ruleEditorSource).toContain("Save rule");
-    expect(ruleEditorSource).toContain("<details");
+  it("provides actionable shift, work-pattern and controlled-policy setup", () => {
+    expect(setupWorkspaceSource).toContain("createShiftTemplate");
+    expect(setupWorkspaceSource).toContain("updateShiftTemplate");
+    expect(setupWorkspaceSource).toContain("createWorkPattern");
+    expect(setupWorkspaceSource).toContain("Visual work patterns");
+    expect(setupWorkspaceSource).toContain("Compliance rules");
+    expect(setupWorkspaceSource).toContain("RosterRuleQuickEditor");
+    expect(setupWorkspaceSource).toContain("RosterGovernancePanel");
+    expect(setupWorkspaceSource).toContain("showApprovalWorkflow={false}");
+    expect(setupWorkspaceSource).toContain("roster.manage_approval_authorities");
+    expect(setupWorkspaceSource).toContain("History & diagnostics");
   });
 
-  it("does not repeat every rule severity in the approval workspace", () => {
-    expect(governanceSource).toContain("wr-policy-compact");
-    expect(governanceSource).toContain("active checks");
-    expect(governanceSource).toContain("hard stops");
-    expect(governanceSource).not.toContain("wr-compliance-rule-grid");
-    expect(governanceSource).not.toContain("controlled override");
+  it("keeps employee pattern assignment and staged approvals inside Workforce and HR", () => {
+    expect(workforceSource).toContain("assignWorkforceHrPattern");
+    expect(workforceSource).toContain("cycle_anchor_date: effectiveFrom");
+    expect(workforceSource).toContain("dashboard.can_review_leave");
+    expect(workforceSource).toContain("dashboard.can_approve_leave");
+    expect(workforceSource).toContain("dashboard.can_approve_timesheet_supervisor");
+    expect(workforceSource).toContain("dashboard.can_approve_timesheet_hr");
+    expect(workforceSource).toContain("dashboard.attendance_exceptions.map");
+    expect(workforceSource).toContain("listWorkforceHrPeople");
+    expect(workforceSource).toContain("Showing {people.length} of {total}");
+    expect(workforceSource).toContain("roster_assignment_id");
   });
 
-  it("uses concise setup copy while preserving the required lazy settings chunk", () => {
-    expect(setupPageSource).toContain("LazyRosterPeriodQuickActions");
-    expect(setupPageSource).toContain("LazyRosterRuleQuickEditor");
-    expect(setupPageSource).toContain("LazyUnifiedRosterSettings");
-    expect(setupPageSource).toContain('eyebrow="Setup"');
-    expect(setupPageSource).toContain('description="Periods, shifts, work patterns, contracts, rules and approvals."');
-    expect(setupPageSource).not.toContain("Source-aware");
+  it("gates Workforce and Setup navigation with effective server permissions", () => {
+    expect(shellSource).toContain("getCurrentWorkforcePermissions");
+    expect(shellSource).toContain('requiredPermissions: ["workforce.view_sensitive"]');
+    expect(shellSource).toContain("livePermissions.includes(permission)");
+    expect(setupPageSource).toContain('includes("workforce.view_sensitive")');
+    expect(setupPageSource).toContain("This workspace requires the workforce.view_sensitive permission");
   });
 
   it("adds portal-wide dark surface separation without changing status colours", () => {

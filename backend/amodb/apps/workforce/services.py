@@ -548,13 +548,18 @@ def preview_patterns(
 ) -> schemas.PatternPreviewResponse:
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
     timezone_name = getattr(amo, "time_zone", None) or "UTC"
-    query = db.query(models.EmployeeWorkPatternAssignment).options(
+    query = db.query(models.EmployeeWorkPatternAssignment).join(
+        models.WorkPattern,
+        models.EmployeeWorkPatternAssignment.work_pattern_id == models.WorkPattern.id,
+    ).options(
         selectinload(models.EmployeeWorkPatternAssignment.user),
         selectinload(models.EmployeeWorkPatternAssignment.work_pattern)
         .selectinload(models.WorkPattern.days)
         .selectinload(models.WorkPatternDay.shift_template),
     ).filter(
         models.EmployeeWorkPatternAssignment.amo_id == amo_id,
+        models.WorkPattern.amo_id == amo_id,
+        models.WorkPattern.is_active.is_(True),
         models.EmployeeWorkPatternAssignment.effective_from <= payload.to_date,
         or_(models.EmployeeWorkPatternAssignment.effective_to.is_(None), models.EmployeeWorkPatternAssignment.effective_to >= payload.from_date),
     )

@@ -5,14 +5,19 @@ import zlib from "node:zlib";
 const root = path.resolve("dist");
 const manifestPath = path.join(root, ".vite", "manifest.json");
 const reportPath = path.join(root, "rostering-perf-report.json");
+
+// These are the seven first-level operational workspaces loaded by the
+// Rostering route shell. CapacityBoard and RosterReports are intentionally
+// second-level lazy chunks inside RosterOperationsWorkspace and are measured
+// in the complete Rostering source total below.
 const workspaceNames = [
-  "CapacityBoard",
+  "RosterDashboard",
+  "UnifiedRosterPlanner",
+  "RosterOperationsWorkspace",
   "ComplianceImpact",
   "MyRosterWorkspace",
-  "RosterDashboard",
-  "RosterReports",
-  "UnifiedRosterPlanner",
-  "UnifiedRosterSettings",
+  "WorkforceHrWorkspace",
+  "RosteringSetupWorkspace",
 ];
 
 function writeReport(report) {
@@ -76,7 +81,8 @@ const workspaceKeys = new Set(
   workspaceEntries.map(({ entry }) => entry?.[0]).filter(Boolean),
 );
 const explicitRouteEntry = entries.find(([key, record]) =>
-  sourceMatches(key, record, "WorkforceRosteringPagesV2"),
+  sourceMatches(key, record, "WorkforceRosteringPagesV2")
+  || sourceMatches(key, record, "RosteringPages"),
 );
 const graphRouteEntry = entries
   .map((entry) => ({

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { NavLink, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 import {
-  BarChart3,
+  Building2,
   CalendarDays,
   ClipboardCheck,
   Gauge,
@@ -11,6 +12,9 @@ import {
 } from "lucide-react";
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
+import { getCachedUser } from "../../../services/auth";
+import { getCurrentWorkforcePermissions } from "../../../services/workforce";
+import { canViewFeature, type ModuleFeature } from "../../../utils/roleAccess";
 import "../../../styles/rostering-workforce.css";
 import "../../../styles/rostering-workforce-layout.css";
 
@@ -23,19 +27,48 @@ type Props = {
   context?: ReactNode;
 };
 
-const NAV = [
-  { suffix: "dashboard", label: "Command", icon: Gauge },
-  { suffix: "calendar", label: "Planner", icon: CalendarDays },
-  { suffix: "planning-board", label: "Capacity", icon: UsersRound },
-  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck },
-  { suffix: "training-impact", label: "Compliance", icon: GraduationCap },
-  { suffix: "reports", label: "Reports", icon: BarChart3 },
-  { suffix: "settings", label: "Setup", icon: Settings2 },
-] as const;
+type NavItem = {
+  suffix: string;
+  label: string;
+  icon: typeof Gauge;
+  feature?: ModuleFeature;
+  requiredPermissions?: string[];
+};
+
+const NAV: NavItem[] = [
+  { suffix: "dashboard", label: "Command", icon: Gauge, feature: "rostering.dashboard" },
+  { suffix: "calendar", label: "Planner", icon: CalendarDays, feature: "rostering.calendar" },
+  { suffix: "planning-board", label: "Operations", icon: UsersRound, feature: "rostering.planning-board" },
+  { suffix: "training-impact", label: "Compliance", icon: GraduationCap, feature: "rostering.training-impact" },
+  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck, feature: "rostering.my-roster" },
+  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2, requiredPermissions: ["workforce.view_sensitive"] },
+  {
+    suffix: "settings?section=overview",
+    label: "Setup",
+    icon: Settings2,
+    requiredPermissions: ["roster.create", "roster.manage_shift_templates", "roster.manage_patterns", "roster.manage_rules"],
+  },
+];
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
   const { amoCode = "UNKNOWN" } = useParams();
+  const location = useLocation();
+  const user = getCachedUser();
+  const permissionsQuery = useQuery({
+    queryKey: ["rostering", "shell", "workforce-permissions"],
+    queryFn: getCurrentWorkforcePermissions,
+    staleTime: 5 * 60_000,
+    networkMode: "offlineFirst",
+  });
+  const livePermissions = permissionsQuery.data?.permissions || [];
+  const visibleNav = NAV.filter((item) => {
+    if (item.requiredPermissions) {
+      return item.requiredPermissions.some((permission) => livePermissions.includes(permission));
+    }
+    return item.feature ? canViewFeature(user, item.feature) : false;
+  });
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
+  const selectedSection = new URLSearchParams(location.search).get("section");
 
   return (
     <DepartmentLayout amoCode={amoCode || "UNKNOWN"} activeDepartment="rostering">
@@ -50,11 +83,16 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
         </header>
 
         <nav className="wr-tabs" aria-label="Duty rostering sections">
-          {NAV.map(({ suffix, label, icon: Icon }) => (
+          {visibleNav.map(({ suffix, label, icon: Icon }) => (
             <NavLink
-              key={suffix}
+              key={`${suffix}:${label}`}
               to={`${root}/${suffix}`}
-              className={({ isActive }) => `wr-tab${isActive ? " wr-tab--active" : ""}`}
+              className={({ isActive }) => {
+                const workforceActive = label === "Workforce" && location.pathname.endsWith("/rostering/settings") && selectedSection === "workforce";
+                const setupActive = label === "Setup" && location.pathname.endsWith("/rostering/settings") && selectedSection !== "workforce";
+                const active = label === "Workforce" ? workforceActive : label === "Setup" ? setupActive : isActive;
+                return `wr-tab${active ? " wr-tab--active" : ""}`;
+              }}
             >
               <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
               <span>{label}</span>
