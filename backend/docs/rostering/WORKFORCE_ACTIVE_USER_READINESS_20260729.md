@@ -18,6 +18,15 @@ The Workforce and HR employee register previously started from effective employm
 10. The `DEFAULT-DAY-5X2` cycle is anchored to the tenant-local week's Monday, regardless of the day the bootstrap is run.
 11. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
 
+## Review corrections
+
+The final blocker review identified and corrected two effective-dating defects:
+
+- inactive pattern assignments are no longer rewritten in place across their historical interval; and
+- the five-day duty cycle is anchored to Monday rather than the day on which the bootstrap action is executed.
+
+Both invariants are covered by Workforce regression contracts and the complete Rostering and Workforce test suites.
+
 ## Acceptance coverage
 
 The rendered Playwright scenario authenticates an AMO administrator, opens Workforce > People and contracts, and verifies that an active user without a contract is displayed with:
