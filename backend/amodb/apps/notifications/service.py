@@ -17,13 +17,13 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _acquire_delivery_lock(db: Session, *, amo_id: str) -> None:
-    """Serialize delivery decisions for one tenant inside the DB transaction."""
+def _acquire_delivery_lock(db: Session) -> None:
+    """Serialize platform-wide Resend rate decisions inside the DB transaction."""
 
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return
-    digest = hashlib.sha256(f"resend:{amo_id}".encode("utf-8")).digest()
+    digest = hashlib.sha256(b"resend:platform-delivery").digest()
     lock_key = int.from_bytes(digest[:8], byteorder="big", signed=False) & 0x7FFF_FFFF_FFFF_FFFF
     db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
@@ -69,24 +69,21 @@ def _existing_delivery(
     )
 
 
-def _enforce_rate_limits(db: Session, *, amo_id: str, config: dict) -> None:
+def _enforce_rate_limits(db: Session, *, config: dict) -> None:
     now = _utcnow()
     per_minute = max(1, min(int(config.get("per_minute_limit") or 10), 60))
     daily = max(1, min(int(config.get("daily_limit") or 500), 100000))
-    sent_query = db.query(models.EmailLog).filter(
-        models.EmailLog.amo_id == amo_id,
-        models.EmailLog.status == models.EmailStatus.SENT,
-    )
+    sent_query = db.query(models.EmailLog).filter(models.EmailLog.status == models.EmailStatus.SENT)
     recent_count = sent_query.filter(models.EmailLog.sent_at >= now - timedelta(minutes=1)).count()
     if recent_count >= per_minute:
         raise providers.EmailDeliveryBlocked(
-            f"Resend portal rate limit reached: {per_minute} email(s) per minute"
+            f"Resend platform rate limit reached: {per_minute} email(s) per minute"
         )
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     daily_count = sent_query.filter(models.EmailLog.sent_at >= day_start).count()
     if daily_count >= daily:
         raise providers.EmailDeliveryBlocked(
-            f"Resend portal daily limit reached: {daily} email(s) per UTC day"
+            f"Resend platform daily limit reached: {daily} email(s) per UTC day"
         )
 
 
@@ -109,7 +106,7 @@ def send_email(
     normalized_recipient = cleaned_recipient or "unknown"
 
     try:
-        _acquire_delivery_lock(db, amo_id=amo_id)
+        _acquire_delivery_lock(db)
         existing = _existing_delivery(
             db,
             amo_id=amo_id,
@@ -164,7 +161,7 @@ def send_email(
             return log
 
         try:
-            _enforce_rate_limits(db, amo_id=amo_id, config=getattr(provider, "config", {}))
+            _enforce_rate_limits(db, config=getattr(provider, "config", {}))
             result = provider.send(
                 template_key=template_key,
                 recipient=cleaned_recipient,
