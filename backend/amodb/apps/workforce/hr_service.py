@@ -866,7 +866,7 @@ def list_people_page_v2(
     page_size: int = 100,
     search: Optional[str] = None,
 ) -> hr_schemas.HrPeoplePage:
-    today = date.today()
+    today = datetime.now(_amo_zone(db, amo_id=amo_id)).date()
     now = _utcnow()
     users = _active_tenant_users(db, amo_id=amo_id)
     user_ids = [str(user.id) for user in users]
@@ -932,7 +932,7 @@ def dashboard_v2(
         current_user=current_user,
         people_limit=people_limit,
     )
-    today = date.today()
+    today = datetime.now(_amo_zone(db, amo_id=amo_id)).date()
     now = _utcnow()
     users = _active_tenant_users(db, amo_id=amo_id)
     user_ids = [str(user.id) for user in users]
@@ -955,7 +955,12 @@ def dashboard_v2(
         item.user_id,
     ))
     without_contract = [user for user in users if str(user.id) not in contracts]
-    without_pattern = [user for user in users if str(user.id) not in patterns]
+    without_pattern = [
+        user for user in users
+        if not (assignment := patterns.get(str(user.id)))
+        or not assignment.work_pattern
+        or not assignment.work_pattern.is_active
+    ]
     without_base = [
         user for user in users
         if (contract := contracts.get(str(user.id))) is not None and not contract.primary_base_station_id
@@ -1038,8 +1043,8 @@ def bootstrap_default_day_pattern(
     amo = db.query(account_models.AMO).filter(
         account_models.AMO.id == amo_id,
     ).with_for_update().one()
-    today = date.today()
     timezone_name = str(amo.time_zone or "UTC")
+    today = datetime.now(_amo_zone(db, amo_id=amo_id)).date()
 
     shift = db.query(roster_models.ShiftTemplate).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
@@ -1064,8 +1069,17 @@ def bootstrap_default_day_pattern(
         )
         db.add(shift)
         db.flush()
-    elif not shift.is_active:
+    else:
+        shift.label = "Default day shift"
+        shift.kind = roster_models.ShiftTemplateKind.DAY
+        shift.default_start_time = "08:00"
+        shift.default_end_time = "17:00"
+        shift.duration_minutes = 480
+        shift.counts_as_duty = True
         shift.is_active = True
+        shift.display_order = 10
+        shift.description = "System baseline for active staff without an assigned work pattern; planner review remains required."
+        shift.icon_name = "Sun"
         shift.updated_by_user_id = actor_user_id
         db.add(shift)
 
@@ -1089,24 +1103,33 @@ def bootstrap_default_day_pattern(
         )
         db.add(pattern)
         db.flush()
-        for day_index in range(7):
-            duty = day_index < 5
-            db.add(models.WorkPatternDay(
+    else:
+        pattern.name = "Default day shift · Monday to Friday"
+        pattern.description = "Five default day duties followed by two days off. This is a visible baseline, not a published roster."
+        pattern.cycle_length_days = 7
+        pattern.is_active = True
+        pattern.timezone_name = timezone_name
+        pattern.updated_by_user_id = actor_user_id
+        db.add(pattern)
+        db.flush()
+
+    days_by_index = {int(row.cycle_day_index): row for row in (pattern.days or [])}
+    for day_index in range(7):
+        duty = day_index < 5
+        day = days_by_index.get(day_index)
+        if day is None:
+            day = models.WorkPatternDay(
                 amo_id=amo_id,
                 work_pattern_id=pattern.id,
                 cycle_day_index=day_index,
-                shift_template_id=shift.id if duty else None,
-                status=models.PatternDayStatus.DUTY if duty else models.PatternDayStatus.OFF,
-                start_time_local="08:00" if duty else None,
-                end_time_local="17:00" if duty else None,
-                spans_next_day=False,
-                planned_minutes=480 if duty else 0,
-            ))
-    else:
-        if not pattern.is_active:
-            pattern.is_active = True
-        pattern.updated_by_user_id = actor_user_id
-        db.add(pattern)
+            )
+        day.shift_template_id = shift.id if duty else None
+        day.status = models.PatternDayStatus.DUTY if duty else models.PatternDayStatus.OFF
+        day.start_time_local = "08:00" if duty else None
+        day.end_time_local = "17:00" if duty else None
+        day.spans_next_day = False
+        day.planned_minutes = 480 if duty else 0
+        db.add(day)
 
     users = _active_tenant_users(db, amo_id=amo_id)
     contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
@@ -1140,7 +1163,10 @@ def bootstrap_default_day_pattern(
             if current.work_pattern and current.work_pattern.is_active:
                 already_assigned += 1
             else:
-                skipped_conflict += 1
+                current.work_pattern_id = pattern.id
+                current.cycle_anchor_date = today
+                db.add(current)
+                assigned += 1
             continue
         future = db.query(models.EmployeeWorkPatternAssignment).filter(
             models.EmployeeWorkPatternAssignment.amo_id == amo_id,

@@ -117,5 +117,10 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(hrSource).toContain("Apply default day pattern");
     const workforceHrService = readSource("../../services/workforceHr.ts");
     expect(workforceHrService).toContain("/workforce/hr/default-day-pattern");
+    const workforceTypes = readSource("../../types/workforce.ts");
+    expect(workforceTypes).toContain('"TEMPORARY"');
+    expect(workforceTypes).not.toContain('"CASUAL"');
+    expect(workforceTypes).not.toContain('"SECONDMENT"');
+    expect(workforceTypes).not.toContain('"ENDED"');
   });
 });

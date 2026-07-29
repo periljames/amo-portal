@@ -49,3 +49,12 @@ def test_default_day_bootstrap_is_explicit_and_canonical():
     assert 'code="DEFAULT-DAY-5X2"' in source
     assert "EmployeeWorkPatternAssignment" in source
     assert "with_for_update" in source
+    assert "datetime.now(_amo_zone" in source
+    assert "days_by_index" in source
+    assert "range(7)" in source
+    assert "current.work_pattern_id = pattern.id" in source
+
+
+def test_active_user_readiness_uses_tenant_local_date():
+    assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.list_people_page_v2)
+    assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.dashboard_v2)
