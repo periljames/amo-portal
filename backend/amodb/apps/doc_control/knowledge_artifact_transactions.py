@@ -33,6 +33,18 @@ def _cleanup_pending_artifacts(session: Session) -> None:
             continue
 
 
+def _cleanup_if_outer_transaction_ended(session: Session, transaction) -> None:
+    """Remove uncommitted files when an outer transaction ends without commit.
+
+    ``Session.close()`` may implicitly roll back without emitting ``after_rollback``.
+    ``after_transaction_end`` is paired with every logical transaction, including
+    close-driven termination. A successful commit clears the pending set first in
+    ``after_commit``, so a remaining set at outer transaction end is uncommitted.
+    """
+    if getattr(transaction, "parent", None) is None and session.info.get(_PENDING_ARTIFACTS_KEY):
+        _cleanup_pending_artifacts(session)
+
+
 @event.listens_for(Session, "after_commit")
 def _documentation_artifacts_after_commit(session: Session) -> None:
     _clear_pending_artifacts(session)
@@ -41,6 +53,11 @@ def _documentation_artifacts_after_commit(session: Session) -> None:
 @event.listens_for(Session, "after_rollback")
 def _documentation_artifacts_after_rollback(session: Session) -> None:
     _cleanup_pending_artifacts(session)
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _documentation_artifacts_after_transaction_end(session: Session, transaction) -> None:
+    _cleanup_if_outer_transaction_ended(session, transaction)
 
 
 def _create_documentation_record_transactional(*args, **kwargs):
@@ -55,6 +72,7 @@ knowledge_service.create_documentation_record = _create_documentation_record_tra
 
 
 __all__ = [
+    "_cleanup_if_outer_transaction_ended",
     "_cleanup_pending_artifacts",
     "_clear_pending_artifacts",
     "_track_pending_artifact",
