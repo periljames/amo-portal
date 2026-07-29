@@ -21,8 +21,8 @@ def _clean_api_key(value: Any) -> str:
 
 def _clean_api_url(value: Any) -> str:
     url = str(value or _DEFAULT_API_URL).strip().rstrip("/")
-    if not url.startswith("https://"):
-        raise ValueError("Resend api_base_url must use HTTPS.")
+    if url != _DEFAULT_API_URL:
+        raise ValueError("Resend API calls are pinned to https://api.resend.com.")
     return url
 
 
