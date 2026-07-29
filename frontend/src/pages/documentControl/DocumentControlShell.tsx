@@ -22,6 +22,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
 import "./documentControlWorkspace.css";
 
 export type DocumentControlWorkspaceId =
@@ -123,7 +124,7 @@ export default function DocumentControlShell({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { amoCode, basePath } = useDocumentControlRoute();
+  const { amoCode, basePath, tenant } = useDocumentControlRoute();
   const active = workspaceForPath(location.pathname);
   const visibleWorkspaces = WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
 
@@ -157,6 +158,7 @@ export default function DocumentControlShell({
       </nav>
 
       <main className="dc-workspace__content">{children}</main>
+      {tenant ? <DocumentationAssistantPanel tenant={tenant} title="Search documented information" /> : null}
     </div>
   );
 
