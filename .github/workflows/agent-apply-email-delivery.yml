@@ -61,39 +61,43 @@ jobs:
 
           service_path = Path('backend/amodb/apps/notifications/service.py')
           service = service_path.read_text(encoding='utf-8')
-          signature = """    *,
+          signature = textwrap.dedent('''
+              *,
               amo_id: Optional[str] = None,
               db: Optional[Session] = None,
-          ) -> models.EmailLog:"""
-          signature = textwrap.dedent(signature)
-          replacement = """    *,
+          ) -> models.EmailLog:
+          ''').lstrip('\n')
+          replacement = textwrap.dedent('''
+              *,
               amo_id: Optional[str] = None,
               db: Optional[Session] = None,
               email_class: policy.EmailClass | str = policy.EmailClass.ROUTINE,
               recipient_user_id: Optional[str] = None,
               audit_context: Optional[dict] = None,
-          ) -> models.EmailLog:"""
-          replacement = textwrap.dedent(replacement)
+          ) -> models.EmailLog:
+          ''').lstrip('\n')
           if 'email_class: policy.EmailClass' not in service:
               if signature not in service:
                   raise RuntimeError('notification service signature anchor was not found')
               service = service.replace(signature, replacement, 1)
 
-          success_anchor = """            log.error = None
-          except providers.EmailDeliveryBlocked as exc:
-              log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
-              log.error = str(exc)"""
-          success_anchor = textwrap.dedent(success_anchor)
-          success_replacement = """            log.error = None
-              log.provider = str(result.get("provider") or "resend")
-              log.provider_message_id = str(result.get("message_id") or "").strip() or None
-              log.delivery_status = "ACCEPTED"
-          except providers.EmailDeliveryBlocked as exc:
-              log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
-              log.error = str(exc)
-              log.provider = "resend"
-              log.delivery_status = "BLOCKED""""
-          success_replacement = textwrap.dedent(success_replacement)
+          success_anchor = textwrap.dedent('''
+                      log.error = None
+                  except providers.EmailDeliveryBlocked as exc:
+                      log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
+                      log.error = str(exc)
+          ''').lstrip('\n').rstrip('\n')
+          success_replacement = textwrap.dedent('''
+                      log.error = None
+                      log.provider = str(result.get("provider") or "resend")
+                      log.provider_message_id = str(result.get("message_id") or "").strip() or None
+                      log.delivery_status = "ACCEPTED"
+                  except providers.EmailDeliveryBlocked as exc:
+                      log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
+                      log.error = str(exc)
+                      log.provider = "resend"
+                      log.delivery_status = "BLOCKED"
+          ''').lstrip('\n').rstrip('\n')
           if 'log.provider_message_id' not in service:
               if success_anchor not in service:
                   raise RuntimeError('notification success-state anchor was not found')
