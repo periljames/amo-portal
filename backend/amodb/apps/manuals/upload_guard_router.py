@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.doc_control.knowledge_service import index_revision_background
+from amodb.apps.doc_control.knowledge_indexer import index_revision_background
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
