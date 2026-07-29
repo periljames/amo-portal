@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any
 
-from . import saas_providers, saas_services
+from . import saas_providers, saas_queue, saas_services
 from .resend_adapter import check_api_key
 
 
@@ -96,6 +97,7 @@ def install_resend_email_provider() -> None:
     original_check = saas_providers.check_provider
     original_list = saas_services.list_provider_credentials
     original_upsert = saas_services.upsert_provider_credential
+    original_enqueue_health = saas_services.enqueue_provider_health
 
     def provider_catalog() -> list[dict[str, Any]]:
         items = [item for item in original_catalog() if item.get("provider") not in LEGACY_EMAIL_PROVIDERS]
@@ -164,16 +166,64 @@ def install_resend_email_provider() -> None:
                 row.last_checked_at = None
                 row.last_latency_ms = None
                 row.last_health_detail = (
-                    "API key changed; run a new health check and test email."
+                    "API key changed; authenticate the key and send one explicit test email."
                     if secret_changed
-                    else "Configuration changed; run a new health check and test email."
+                    else "Configuration changed; authenticate the key and send one explicit test email."
                 )
                 db.commit()
                 db.refresh(row)
                 return saas_services.provider_payload(row)
         return response
 
+    def enqueue_provider_health(
+        db,
+        *,
+        provider: str,
+        tenant_id: str | None,
+        actor_user_id: str,
+    ):
+        normalized = str(provider or "").strip().lower()
+        if normalized != "resend":
+            return original_enqueue_health(
+                db,
+                provider=normalized,
+                tenant_id=tenant_id,
+                actor_user_id=actor_user_id,
+            )
+        if tenant_id is not None:
+            raise ValueError("Resend is a platform-wide credential and can only be checked by a platform superuser")
+        row = saas_services.get_provider_credential(
+            db,
+            provider="resend",
+            tenant_id=None,
+            allow_platform_fallback=False,
+        )
+        if row is None:
+            raise ValueError("Resend is not configured")
+        current_status = str(row.status or "").strip().upper()
+        if current_status == "DISABLED":
+            raise ValueError("Disabled providers cannot be authenticated")
+        if current_status not in {"CONFIGURED", "AUTHENTICATED", "HEALTHY", "UNHEALTHY"}:
+            raise ValueError("Resend is not configured for an authentication check")
+        return saas_queue.enqueue_job(
+            db,
+            job_type="PROVIDER_HEALTH_CHECK",
+            queue_name="integrations",
+            tenant_id=None,
+            payload={
+                "provider": "resend",
+                "credential_id": row.id,
+                "mutate_credential_status": False,
+                "credential_scope": saas_services.provider_scope(row.tenant_id),
+            },
+            idempotency_key=f"health:{row.id}:{saas_services.utcnow().strftime('%Y%m%d%H%M')}",
+            correlation_id=str(uuid.uuid4()),
+            created_by=actor_user_id,
+            max_attempts=3,
+        )
+
     saas_providers.provider_catalog = provider_catalog
     saas_providers.check_provider = check_provider
     saas_services.list_provider_credentials = list_provider_credentials
     saas_services.upsert_provider_credential = guarded_upsert_provider_credential
+    saas_services.enqueue_provider_health = enqueue_provider_health
