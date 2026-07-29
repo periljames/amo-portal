@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -22,7 +23,7 @@ from amodb.security import get_current_active_user
 from . import domain_models
 from . import knowledge_models as km
 from .knowledge_service import normalize_code
-from .workspace_service import can_read_manual, resolve_tenant
+from .workspace_service import can_read_manual, is_control_user, resolve_tenant
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Assisted Search"])
@@ -30,6 +31,7 @@ router = APIRouter(prefix="/workspace", tags=["Document Control Assisted Search"
 _MAX_PROVIDER_SOURCES = 8
 _MAX_PROVIDER_SNIPPET = 900
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,63}")
+_EXECUTABLE_TYPES = {"FORM", "CHECKLIST", "REGISTER"}
 
 
 class DocumentationAssistRequest(BaseModel):
@@ -89,19 +91,22 @@ def _snippet(text: str, query: str, limit: int = 420) -> str:
     start = max(0, center - limit // 3)
     end = min(len(compact), start + limit)
     start = max(0, end - limit)
-    prefix = "…" if start else ""
-    suffix = "…" if end < len(compact) else ""
-    return f"{prefix}{compact[start:end].strip()}{suffix}"
+    return f"{'…' if start else ''}{compact[start:end].strip()}{'…' if end < len(compact) else ''}"
 
 
-def _reader_url(tenant: manual_models.Tenant, manual_id: str, revision_id: str, *, page: int | None, anchor: str | None) -> str:
+def _reader_url(
+    tenant: manual_models.Tenant,
+    manual_id: str,
+    revision_id: str,
+    *,
+    page: int | None,
+    anchor: str | None,
+) -> str:
     base = f"/maintenance/{tenant.slug.upper()}/publications/{manual_id}/rev/{revision_id}/read"
     params: list[str] = []
     if page:
         params.append(f"page={int(page)}")
     if anchor:
-        from urllib.parse import quote
-
         params.append(f"anchor={quote(anchor, safe='')}")
     return f"{base}?{'&'.join(params)}" if params else base
 
@@ -114,7 +119,7 @@ def _search_context(
     requested_manual_id: str | None,
     requested_revision_id: str | None,
 ) -> SearchContext:
-    manuals = (
+    all_manuals = (
         db.query(manual_models.Manual)
         .filter(
             manual_models.Manual.tenant_id == tenant.id,
@@ -122,7 +127,7 @@ def _search_context(
         )
         .all()
     )
-    manual_ids = [manual.id for manual in manuals]
+    manual_ids = [manual.id for manual in all_manuals]
     profiles = {
         row.manual_id: row
         for row in db.query(domain_models.DocumentControlProfile)
@@ -132,20 +137,23 @@ def _search_context(
         )
         .all()
     }
-    allowed_manuals = {
+    manuals = {
         manual.id: manual
-        for manual in manuals
+        for manual in all_manuals
         if can_read_manual(user, profiles.get(manual.id))
     }
-    if requested_manual_id and requested_manual_id not in allowed_manuals:
+    if requested_manual_id and requested_manual_id not in manuals:
+        # Do not disclose whether the requested ID exists outside the user's scope.
         raise HTTPException(status_code=404, detail="The requested document context is unavailable")
 
-    revision_ids = {
+    allowed_revision_ids = {
         manual.current_published_rev_id
-        for manual in allowed_manuals.values()
+        for manual in manuals.values()
         if manual.current_published_rev_id
     }
-    if requested_manual_id and requested_revision_id:
+    if requested_revision_id:
+        if not requested_manual_id:
+            raise HTTPException(status_code=422, detail="A revision context requires its document ID")
         requested = (
             db.query(manual_models.ManualRevision)
             .filter(
@@ -156,77 +164,77 @@ def _search_context(
         )
         if not requested:
             raise HTTPException(status_code=404, detail="The requested revision context is unavailable")
-        # Readers may search the exact revision they are currently authorised to read.
-        # Other documents remain restricted to their current effective revision.
-        revision_ids.add(requested.id)
+        current_effective = manuals[requested_manual_id].current_published_rev_id == requested.id and _status_value(requested) == "PUBLISHED"
+        if not current_effective and not is_control_user(user):
+            raise HTTPException(status_code=404, detail="The requested revision context is unavailable")
+        allowed_revision_ids.add(requested.id)
 
     revisions = {
         row.id: row
         for row in db.query(manual_models.ManualRevision)
-        .filter(manual_models.ManualRevision.id.in_(revision_ids or ["-"]))
+        .filter(manual_models.ManualRevision.id.in_(allowed_revision_ids or ["-"]))
         .all()
-        if row.manual_id in allowed_manuals
-        and (_status_value(row) == "PUBLISHED" or row.id == requested_revision_id)
+        if row.manual_id in manuals
+        and (
+            (_status_value(row) == "PUBLISHED" and manuals[row.manual_id].current_published_rev_id == row.id)
+            or (is_control_user(user) and row.id == requested_revision_id)
+        )
     }
     nodes = {
         row.manual_id: row
         for row in db.query(km.DocumentationNode)
         .filter(
             km.DocumentationNode.tenant_id == tenant.amo_id,
-            km.DocumentationNode.manual_id.in_(list(allowed_manuals) or ["-"]),
+            km.DocumentationNode.manual_id.in_(list(manuals) or ["-"]),
             km.DocumentationNode.status == "ACTIVE",
         )
         .all()
     }
-    return SearchContext(
-        tenant=tenant,
-        manuals=allowed_manuals,
-        revisions=revisions,
-        profiles=profiles,
-        nodes=nodes,
-    )
+    return SearchContext(tenant=tenant, manuals=manuals, revisions=revisions, profiles=profiles, nodes=nodes)
 
 
 def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]]:
     needle = query.lower()
     normalized = normalize_code(query)
     tokens = _tokens(query)
+    revisions_by_manual: dict[str, list[manual_models.ManualRevision]] = {}
+    for revision in context.revisions.values():
+        revisions_by_manual.setdefault(revision.manual_id, []).append(revision)
     results: list[dict[str, Any]] = []
-    revisions_by_manual = {revision.manual_id: revision for revision in context.revisions.values()}
     for manual in context.manuals.values():
-        revision = revisions_by_manual.get(manual.id)
-        if not revision:
-            continue
         node = context.nodes.get(manual.id)
         aliases = [manual.code, *list((node.metadata_json or {}).get("aliases", []))] if node else [manual.code]
-        haystack = " ".join([manual.code, manual.title, manual.manual_type, *(str(value) for value in aliases)]).lower()
+        identity = " ".join(
+            [manual.code, manual.title, manual.manual_type, node.node_type if node else "MANUAL", *(str(value) for value in aliases)]
+        ).lower()
         exact_code = bool(normalized and normalized in {normalize_code(value) for value in aliases})
-        token_hits = sum(1 for token in tokens if token in haystack)
-        if not exact_code and needle not in haystack and not token_hits:
+        token_hits = sum(1 for token in tokens if token in identity)
+        if not exact_code and needle not in identity and not token_hits:
             continue
-        score = 100.0 if exact_code else 72.0 if needle in haystack else 40.0 + token_hits * 5
-        results.append(
-            {
-                "id": f"document:{manual.id}:{revision.id}",
-                "kind": "DOCUMENT",
-                "manual_id": manual.id,
-                "revision_id": revision.id,
-                "code": manual.code,
-                "title": manual.title,
-                "node_type": node.node_type if node else "MANUAL",
-                "hierarchy_path": node.path if node else None,
-                "heading": None,
-                "section_id": None,
-                "anchor": None,
-                "page_number": None,
-                "snippet": f"{manual.manual_type.replace('_', ' ').title()} · Revision {revision.rev_number} · {_status_value(revision).title()}",
-                "score": score,
-                "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=None, anchor=None),
-                "source_type": _source_type(revision),
-                "executable": bool(node and node.node_type in {"FORM", "CHECKLIST", "REGISTER"}),
-                "reason": "Exact document code" if exact_code else "Document title, type, or alias match",
-            }
-        )
+        for revision in revisions_by_manual.get(manual.id, []):
+            score = 100.0 if exact_code else 72.0 if needle in identity else 40.0 + token_hits * 5
+            results.append(
+                {
+                    "id": f"document:{manual.id}:{revision.id}",
+                    "kind": "DOCUMENT",
+                    "manual_id": manual.id,
+                    "revision_id": revision.id,
+                    "code": manual.code,
+                    "title": manual.title,
+                    "node_type": node.node_type if node else "MANUAL",
+                    "hierarchy_path": node.path if node else None,
+                    "heading": None,
+                    "section_id": None,
+                    "anchor": None,
+                    "page_number": None,
+                    "snippet": f"{manual.manual_type.replace('_', ' ').title()} · Revision {revision.rev_number} · {_status_value(revision).title()}",
+                    "score": score,
+                    "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=None, anchor=None),
+                    "source_type": _source_type(revision),
+                    "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
+                    "reason": "Exact document code" if exact_code else "Document title, type, or alias match",
+                }
+            )
     return results
 
 
@@ -247,24 +255,26 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
         .outerjoin(manual_models.ManualBlock, manual_models.ManualBlock.section_id == manual_models.ManualSection.id)
         .filter(manual_models.ManualRevision.id.in_(revision_ids))
     )
-    dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name if getattr(getattr(db, "bind", None), "dialect", None) else "")
-    ranked_rows: list[tuple[Any, ...]] = []
+    dialect = str(db.get_bind().dialect.name)
+    rows: list[tuple[Any, ...]] = []
     if dialect == "postgresql":
-        vector = func.to_tsvector(
-            literal_column("'simple'"),
-            func.concat_ws(" ", manual_models.ManualSection.heading, func.coalesce(manual_models.ManualBlock.text_plain, "")),
-        )
-        ts_query = func.websearch_to_tsquery(literal_column("'simple'"), query)
-        rank = func.ts_rank_cd(vector, ts_query)
-        ranked_rows = (
+        language = literal_column("'simple'")
+        heading_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualSection.heading, ""))
+        block_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualBlock.text_plain, ""))
+        search_query = func.websearch_to_tsquery(language, query)
+        rank = func.ts_rank_cd(heading_vector, search_query) * 1.5 + func.ts_rank_cd(block_vector, search_query)
+        rows = (
             base.add_columns(rank.label("search_rank"))
-            .filter(vector.op("@@")(ts_query))
+            .filter(or_(heading_vector.op("@@")(search_query), block_vector.op("@@")(search_query)))
             .order_by(rank.desc(), manual_models.ManualSection.order_index.asc())
             .limit(max(40, limit * 8))
             .all()
         )
-    if not ranked_rows:
-        conditions = [manual_models.ManualSection.heading.ilike(f"%{query}%"), manual_models.ManualBlock.text_plain.ilike(f"%{query}%")]
+    if not rows:
+        conditions = [
+            manual_models.ManualSection.heading.ilike(f"%{query}%"),
+            manual_models.ManualBlock.text_plain.ilike(f"%{query}%"),
+        ]
         for token in tokens[:6]:
             conditions.extend(
                 [
@@ -272,21 +282,20 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
                     manual_models.ManualBlock.text_plain.ilike(f"%{token}%"),
                 ]
             )
-        ranked_rows = [(*row, 0.0) for row in base.filter(or_(*conditions)).limit(max(40, limit * 8)).all()]
+        rows = [(*row, 0.0) for row in base.filter(or_(*conditions)).limit(max(40, limit * 8)).all()]
 
     output: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     query_lower = query.lower()
-    for manual, revision, section, block, raw_rank in ranked_rows:
+    for manual, revision, section, block, raw_rank in rows:
         identity = (revision.id, section.id)
         if identity in seen:
             continue
         seen.add(identity)
         text = str(getattr(block, "text_plain", "") or "")
         combined = f"{section.heading} {text}".lower()
-        token_hits = sum(1 for token in tokens if token in combined)
         exact = query_lower in combined
-        score = float(raw_rank or 0.0) * 100 + (45 if exact else 0) + token_hits * 4
+        token_hits = sum(1 for token in tokens if token in combined)
         node = context.nodes.get(manual.id)
         metadata = dict(section.metadata_json or {})
         page = int(metadata.get("page_start") or 0) or None
@@ -305,14 +314,25 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
                 "anchor": section.anchor_slug,
                 "page_number": page,
                 "snippet": _snippet(text or section.heading, query),
-                "score": score,
+                "score": float(raw_rank or 0.0) * 100 + (45 if exact else 0) + token_hits * 4,
                 "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=page, anchor=section.anchor_slug),
                 "source_type": _source_type(revision),
-                "executable": bool(node and node.node_type in {"FORM", "CHECKLIST", "REGISTER"}),
+                "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
                 "reason": "Exact phrase in controlled content" if exact else "Controlled-content keyword match",
             }
         )
     return output
+
+
+def _apply_context_boost(items: list[dict[str, Any]], payload: DocumentationAssistRequest) -> None:
+    for item in items:
+        if payload.manual_id and item["manual_id"] == payload.manual_id:
+            item["score"] = float(item.get("score") or 0) + 14
+        if payload.revision_id and item["revision_id"] == payload.revision_id:
+            item["score"] = float(item.get("score") or 0) + 8
+        if payload.page_number and item.get("page_number"):
+            distance = abs(int(item["page_number"]) - payload.page_number)
+            item["score"] = float(item.get("score") or 0) + max(0, 8 - min(8, distance))
 
 
 def _deduplicate(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -338,7 +358,7 @@ def _deterministic_answer(query: str, sources: list[dict[str, Any]], mode: str) 
     if mode == "NAVIGATE":
         location = f", page {first['page_number']}" if first.get("page_number") else ""
         return f"The strongest authorised match is {first['code']} — {first['title']}{location}. Open the cited source to verify the controlled text."
-    return f"Found {len(sources)} authorised controlled source{'s' if len(sources) != 1 else ''} for “{query}”. Results are ranked by document code, title, heading, and indexed controlled text."
+    return f"Found {len(sources)} authorised controlled source{'s' if len(sources) != 1 else ''} for “{query}”. Results are ranked by document code, title, heading, indexed text, and the current reading context."
 
 
 def _extract_response_text(payload: dict[str, Any]) -> str:
@@ -358,8 +378,8 @@ def _openai_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | 
         return None, [], "AI synthesis is disabled by the external-data policy; permission-filtered assisted search remains available."
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     model = os.getenv("DOCUMENT_AI_MODEL", "").strip()
-    if not api_key or not model:
-        return None, [], "AI synthesis is configured but the server-side provider key or model is missing."
+    if not api_key or not model or model == "UNKNOWN__FILL_ME":
+        return None, [], "AI synthesis is configured but the approved server-side provider key or model is missing."
 
     provider_sources = [
         {
@@ -391,14 +411,7 @@ def _openai_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | 
             "Keep the answer concise and identify the source IDs that support it. Never make or recommend a controlled decision."
         ),
         "input": json.dumps({"question": query, "sources": provider_sources}, ensure_ascii=False),
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "controlled_document_assist",
-                "strict": True,
-                "schema": schema,
-            }
-        },
+        "text": {"format": {"type": "json_schema", "name": "controlled_document_assist", "strict": True, "schema": schema}},
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -411,7 +424,7 @@ def _openai_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | 
             response_payload = json.loads(response.read().decode("utf-8"))
         structured = json.loads(_extract_response_text(response_payload))
         allowed_ids = {source["id"] for source in provider_sources}
-        cited = [value for value in structured.get("source_ids", []) if value in allowed_ids]
+        cited = [str(value) for value in structured.get("source_ids", []) if str(value) in allowed_ids]
         answer = str(structured.get("answer") or "").strip()
         if not answer or not cited:
             return None, [], "AI synthesis returned no verifiable controlled-source citation; deterministic results are shown instead."
@@ -468,6 +481,7 @@ def assist_documentation_search(
     )
     candidates = _metadata_results(context, payload.query)
     candidates.extend(_content_results(db, context, payload.query, payload.limit))
+    _apply_context_boost(candidates, payload)
     sources = _deduplicate(candidates, payload.limit)
 
     answer = _deterministic_answer(payload.query, sources, payload.mode)
