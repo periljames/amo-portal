@@ -1,0 +1,74 @@
+name: PR364 Publish Final Concurrency Fixes
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Apply final concurrency and permission fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          service = "backend/amodb/apps/rostering/automation_service.py"
+          replace(
+              service,
+              '''    if payload.expected_state_revision != row.state_revision:\n        raise RuntimeError(f"ROSTER_AUTOMATION_REVISION_CONFLICT:{row.state_revision}")\n    values = payload.model_dump(exclude_unset=True)\n''',
+              '''    row = db.query(RosterGenerationPolicy).filter(\n        RosterGenerationPolicy.id == row.id,\n        RosterGenerationPolicy.amo_id == row.amo_id,\n    ).populate_existing().with_for_update().one()\n    if payload.expected_state_revision != row.state_revision:\n        raise RuntimeError(f"ROSTER_AUTOMATION_REVISION_CONFLICT:{row.state_revision}")\n    values = payload.model_dump(exclude_unset=True)\n''',
+          )
+          replace(
+              service,
+              '''    if not draft and (should_create_draft or should_generate):\n        raise ValueError("No draft roster version is available for generation")\n    run_row.version_id = draft.id if draft else None\n''',
+              '''    if not draft and (should_create_draft or should_generate):\n        raise ValueError("No draft roster version is available for generation")\n    if draft:\n        draft = db.query(roster_models.RosterVersion).filter(\n            roster_models.RosterVersion.id == draft.id,\n            roster_models.RosterVersion.amo_id == amo_id,\n        ).populate_existing().with_for_update().first()\n        if not draft or _enum_value(draft.status) != roster_models.RosterVersionStatus.DRAFT.value:\n            raise RuntimeError("ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE")\n    run_row.version_id = draft.id if draft else None\n''',
+          )
+
+          test = Path("backend/amodb/apps/rostering/tests/test_automation_policy_contract.py")
+          text = test.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_policy_updates_lock_and_refresh_the_current_revision():\n    source = inspect.getsource(automation_service.update_policy)\n    assert ".populate_existing().with_for_update().one()" in source\n    assert source.index("with_for_update") < source.index("expected_state_revision")\n\n\ndef test_reused_draft_is_locked_before_generation_and_validation():\n    source = inspect.getsource(automation_service.run)\n    assert "roster_models.RosterVersion.id == draft.id" in source\n    assert ".populate_existing().with_for_update().first()" in source\n    assert "ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE" in source\n    assert source.index("with_for_update") < source.index("generate_from_patterns(")\n'''
+          if addition.strip() not in text:
+              test.write_text(text.rstrip() + addition.rstrip() + "\n", encoding="utf-8")
+
+          ui = "frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx"
+          replace(
+              ui,
+              '''{dashboard.can_review_leave || dashboard.can_approve_leave ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}''',
+              '''{dashboard.can_review_leave ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}''',
+          )
+
+          setup_test = Path("frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts")
+          source = setup_test.read_text(encoding="utf-8")
+          marker = '  it("makes contracts editable only for authorized Workforce managers", () => {'
+          gate_test = '''  it("shows leave rejection only to effective leave reviewers", () => {\n    expect(hrSource).toContain("dashboard.can_review_leave ?");\n    expect(hrSource).not.toContain("dashboard.can_review_leave || dashboard.can_approve_leave");\n  });\n\n'''
+          if gate_test.strip() not in source:
+              if source.count(marker) != 1:
+                  raise SystemExit("leave permission test insertion point drifted")
+              setup_test.write_text(source.replace(marker, gate_test + marker, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          git add backend/amodb/apps/rostering/automation_service.py backend/amodb/apps/rostering/tests/test_automation_policy_contract.py frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Resolve final Rostering concurrency blockers"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
