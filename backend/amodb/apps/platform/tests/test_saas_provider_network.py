@@ -198,17 +198,11 @@ def test_pinned_smtp_ssl_socket_uses_validated_ip_and_original_sni(monkeypatch: 
     assert result is wrapped_socket
 
 
-def test_installed_provider_health_check_uses_hardened_smtp_path(monkeypatch: pytest.MonkeyPatch):
-    sentinel = {"ok": True, "provider": "smtp", "authenticated": True}
-    monkeypatch.setattr(
-        saas_provider_network,
-        "smtp_health_check",
-        lambda **kwargs: sentinel,
-    )
-
+def test_installed_provider_registry_rejects_retired_smtp():
     assert saas_provider_network._INSTALLED is True
-    assert saas_providers.check_provider(
-        "smtp",
-        secret={"password": "value"},
-        config={"host": "smtp.example.com"},
-    ) is sentinel
+    with pytest.raises(ValueError, match="Legacy email providers are disabled"):
+        saas_providers.check_provider(
+            "smtp",
+            secret={"password": "value"},
+            config={"host": "smtp.example.com"},
+        )
