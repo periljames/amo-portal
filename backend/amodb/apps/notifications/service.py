@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -25,6 +26,23 @@ def _acquire_delivery_lock(db: Session, *, amo_id: str) -> None:
     digest = hashlib.sha256(f"resend:{amo_id}".encode("utf-8")).digest()
     lock_key = int.from_bytes(digest[:8], byteorder="big", signed=False) & 0x7FFF_FFFF_FFFF_FFFF
     db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+
+def _resolve_provider(*, db: Session, amo_id: str):
+    """Call the DB-aware resolver while retaining legacy zero-argument test fakes.
+
+    Existing notification integrations monkeypatch this seam with a zero-argument
+    callable. Signature inspection avoids catching and masking a genuine TypeError
+    raised from inside the production resolver.
+    """
+
+    resolver = providers.get_email_provider
+    parameters = inspect.signature(resolver).parameters.values()
+    accepts_keywords = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
+    parameter_names = {parameter.name for parameter in parameters}
+    if accepts_keywords or {"db", "amo_id"}.issubset(parameter_names):
+        return resolver(db=db, amo_id=amo_id)
+    return resolver()
 
 
 def _existing_delivery(
@@ -126,7 +144,7 @@ def send_email(
             return log
 
         try:
-            provider, configured = providers.get_email_provider(db=db, amo_id=amo_id)
+            provider, configured = _resolve_provider(db=db, amo_id=amo_id)
         except Exception as exc:
             log.status = models.EmailStatus.FAILED
             log.error = str(exc)
