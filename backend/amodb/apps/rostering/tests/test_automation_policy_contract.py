@@ -175,3 +175,21 @@ def test_reused_draft_is_locked_before_generation_and_validation():
     assert ".populate_existing().with_for_update().first()" in source
     assert "ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE" in source
     assert source.index("with_for_update") < source.index("generate_from_patterns(")
+
+def test_manual_runs_do_not_advance_scheduled_policy_timestamps():
+    source = inspect.getsource(automation_service.run)
+    marker = source.index("if trigger == RosterAutomationTrigger.SCHEDULED:")
+    assert source.index("policy.last_run_at", marker) > marker
+    assert source.index("policy.next_run_at", marker) > marker
+    assert source.count("policy.last_run_at") == 1
+    assert source.count("policy.next_run_at") == 1
+
+
+def test_concurrent_identical_manual_request_returns_the_winning_run():
+    source = inspect.getsource(automation_router.run_roster_automation)
+    branch = source[source.index("except IntegrityError"):source.index("except (ValueError, RuntimeError)")]
+    assert "db.rollback()" in branch
+    assert "automation_service._existing_run(" in branch
+    assert "automation_service._request_fingerprint(" in branch
+    assert "return winner" in branch
+    assert branch.index("return winner") < branch.index("_record_failed_run(")

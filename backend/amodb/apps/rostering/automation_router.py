@@ -232,6 +232,44 @@ def run_roster_automation(
         db.refresh(row)
         return row
     except IntegrityError as exc:
+        db.rollback()
+        winner = automation_service._existing_run(
+            db,
+            amo_id=amo_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        if winner is not None:
+            expected_fingerprint = automation_service._request_fingerprint(
+                payload,
+                RosterAutomationTrigger.MANUAL,
+            )
+            stored_fingerprint = (winner.summary_json or {}).get("request_fingerprint")
+            if stored_fingerprint == expected_fingerprint:
+                winner_status = str(getattr(winner.status, "value", winner.status))
+                if winner_status == RosterAutomationRunStatus.FAILED.value:
+                    raise _error(
+                        "This automation request previously failed.",
+                        code="ROSTER_AUTOMATION_PREVIOUS_FAILURE",
+                        status_code=status.HTTP_409_CONFLICT,
+                        conflicts=[{"run_id": winner.id}],
+                    ) from exc
+                if winner_status == RosterAutomationRunStatus.RUNNING.value:
+                    raise _error(
+                        "An identical automation request is still running.",
+                        code="ROSTER_AUTOMATION_ALREADY_RUNNING",
+                        status_code=status.HTTP_409_CONFLICT,
+                        conflicts=[{"run_id": winner.id}],
+                        retryable=True,
+                    ) from exc
+                return winner
+            if stored_fingerprint:
+                raise _error(
+                    "This idempotency key was already used with a different automation request.",
+                    code="ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                    status_code=status.HTTP_409_CONFLICT,
+                    conflicts=[{"idempotency_key": payload.idempotency_key}],
+                ) from exc
+
         message = str(exc)
         evidence_retained = _record_failed_run(
             db,

@@ -563,9 +563,10 @@ def run(
         else RosterAutomationRunStatus.COMPLETED
     )
     run_row.completed_at = _utcnow()
-    policy.last_run_at = run_row.completed_at
-    policy.next_run_at = _next_run(policy, now=run_row.completed_at)
-    db.add(policy)
+    if trigger == RosterAutomationTrigger.SCHEDULED:
+        policy.last_run_at = run_row.completed_at
+        policy.next_run_at = _next_run(policy, now=run_row.completed_at)
+        db.add(policy)
     db.add(run_row)
     db.flush()
     return run_row
