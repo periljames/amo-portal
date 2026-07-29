@@ -1,0 +1,97 @@
+name: PR364 Lazy Policy Controls
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/rostering-automation-workforce-hr-overhaul'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Lazy-load policy-only controls
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'import { useMemo, useState } from "react";',
+              'import { lazy, Suspense, useMemo, useState } from "react";',
+              1,
+          )
+          text = text.replace('import { RosterGovernancePanel } from "./RosterGovernancePanel";\n', '', 1)
+          text = text.replace('import { RosterRuleQuickEditor } from "./RosterRuleQuickEditor";\n', '', 1)
+          anchor = 'type Section = "overview" | "calendar" | "automation" | "shifts" | "patterns" | "policy" | "advanced";\n'
+          lazy_block = '''const RosterGovernancePanel = lazy(() =>
+            import("./RosterGovernancePanel").then((module) => ({ default: module.RosterGovernancePanel })),
+          );
+          const RosterRuleQuickEditor = lazy(() =>
+            import("./RosterRuleQuickEditor").then((module) => ({ default: module.RosterRuleQuickEditor })),
+          );
+
+          '''
+          if lazy_block.strip() not in text:
+              if anchor not in text:
+                  raise RuntimeError('Section type anchor not found')
+              text = text.replace(anchor, lazy_block + anchor, 1)
+          text = text.replace(
+              '{canManageRules ? <RosterRuleQuickEditor /> : null}',
+              '''{canManageRules ? (
+                <Suspense fallback={<RosterLoading label="Loading rule controls…" />}>
+                  <RosterRuleQuickEditor />
+                </Suspense>
+              ) : null}''',
+              1,
+          )
+          old_governance = '''{governanceLoading ? <RosterLoading label="Loading approval authorities…" /> : (
+                <RosterGovernancePanel
+                  people={people}
+                  periods={periods}
+                  bases={bases}
+                  canManageRules={canManageRules}
+                  canManageAuthorities={canManageAuthorities}
+                  showApprovalWorkflow={false}
+                />
+              )}'''
+          new_governance = '''{governanceLoading ? <RosterLoading label="Loading approval authorities…" /> : (
+                <Suspense fallback={<RosterLoading label="Loading approval authority controls…" />}>
+                  <RosterGovernancePanel
+                    people={people}
+                    periods={periods}
+                    bases={bases}
+                    canManageRules={canManageRules}
+                    canManageAuthorities={canManageAuthorities}
+                    showApprovalWorkflow={false}
+                  />
+                </Suspense>
+              )}'''
+          if old_governance in text:
+              text = text.replace(old_governance, new_governance, 1)
+          elif new_governance not in text:
+              raise RuntimeError('Governance render anchor not found')
+          if 'import { RosterGovernancePanel }' in text or 'import { RosterRuleQuickEditor }' in text:
+              raise RuntimeError('Static policy control import remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit performance correction
+        run: |
+          if git diff --quiet -- frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx; then
+            echo "Lazy policy controls already present"
+            exit 0
+          fi
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@github.com"
+          git add frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx
+          git commit -m "Lazy-load Rostering policy controls"
+          git push origin HEAD:${{ github.head_ref }}
