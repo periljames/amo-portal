@@ -1,0 +1,90 @@
+name: PR377 Workforce Active Users Fixer
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.number == 377 && github.head_ref == 'fix/workforce-active-users-default-day'
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/workforce-active-users-default-day
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply follow-up corrections
+        run: python .github/scripts/fix_pr377_followup.py
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check -r backend/requirements.txt
+      - name: Validate backend
+        working-directory: backend
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: '1'
+          SECRET_KEY: pr377-workforce-fix
+        run: |
+          python -m compileall -q amodb/apps/workforce amodb/apps/rostering
+          pytest -q amodb/apps/workforce/tests amodb/apps/rostering/tests
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Validate frontend source, lint and build
+        working-directory: frontend
+        run: |
+          npm exec -- vitest run src/pages/rostering
+          npm exec -- eslint src/pages/rostering src/services/workforce.ts src/services/workforceHr.ts src/types/workforce.ts src/types/workforceHr.ts
+          npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npm exec -- playwright install --with-deps chromium
+      - name: Run rendered role and active-user acceptance
+        working-directory: frontend
+        shell: bash
+        run: |
+          npm exec -- vite preview --host 127.0.0.1 --port 4173 > /tmp/pr377-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat /tmp/pr377-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm exec -- playwright test tests/e2e/rostering-role-access.spec.ts
+      - name: Remove one-shot machinery and generated files
+        run: |
+          rm -f .github/scripts/fix_pr377_followup.py
+          rm -f .github/pr377-followup-trigger.txt
+          rm -f .github/workflows/pr377-workforce-active-users-fixer.yml
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+      - name: Commit and push validated correction
+        run: |
+          git config user.name 'periljames'
+          git config user.email '244658594+periljames@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to publish.'
+            exit 0
+          fi
+          git commit -m 'Harden active-user roster readiness and default day setup'
+          git push origin HEAD:fix/workforce-active-users-default-day
