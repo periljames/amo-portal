@@ -1,0 +1,33 @@
+.platform-dashboard-status { position: relative; }
+.platform-dashboard .platform-nav__mark { font-size: 10px; }
+.platform-dashboard-status p { font-size: 12px; }
+.platform-dashboard-status .platform-eyebrow { font-size: 9px; }
+.platform-dashboard-status__meta small { font-size: 9px; }
+.platform-dashboard-status__meta strong { font-size: 11px; }
+.platform-dashboard-metrics .platform-metric .caption { font-size: 10.5px; line-height: 1.35; }
+.platform-dashboard-metrics .platform-metric__mark { font-size: 9px; }
+.platform-dashboard-panel__header > div > span { font-size: 9px; }
+.platform-dashboard-panel__header h2 { font-size: 15px; }
+.platform-dashboard-panel__header > a { font-size: 10.5px; }
+.platform-health-row strong { font-size: 11px; }
+.platform-health-row small { font-size: 9.5px; }
+.platform-health-row b { font-size: 12px; }
+.platform-readiness-list dt { font-size: 10.5px; }
+.platform-readiness-list dd { font-size: 11.5px; }
+.platform-readiness-list .platform-badge { font-size: 8px; }
+.platform-action-list span { font-size: 10.5px; }
+.platform-action-list strong { font-size: 9.5px; }
+.platform-dashboard-panel--jobs .platform-table th,
+.platform-dashboard-panel--jobs .platform-table td { font-size: 11px; }
+.platform-dashboard-panel--jobs .platform-table th { font-size: 9px; }
+.platform-table-subtext { font-size: 9px; }
+.platform-alert-list strong { font-size: 10.5px; }
+.platform-alert-list small { font-size: 9px; }
+.platform-alert-list .platform-badge { font-size: 8px; }
+.platform-dashboard-empty strong { font-size: 11px; }
+.platform-dashboard-empty small { font-size: 9.5px; }
+
+@media (max-width: 720px) {
+  .platform-dashboard-status p { font-size: 11px; }
+  .platform-dashboard-panel__header h2 { font-size: 14px; }
+}
