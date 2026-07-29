@@ -1,0 +1,1 @@
+Trigger the registered PR377 follow-up correction and rendered acceptance workflow.
