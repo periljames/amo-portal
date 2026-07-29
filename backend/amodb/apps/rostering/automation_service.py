@@ -362,12 +362,17 @@ def _pattern_assignments(
 ) -> list[workforce_models.EmployeeWorkPatternAssignment]:
     if not user_ids:
         return []
-    return db.query(workforce_models.EmployeeWorkPatternAssignment).options(
+    return db.query(workforce_models.EmployeeWorkPatternAssignment).join(
+        workforce_models.WorkPattern,
+        workforce_models.EmployeeWorkPatternAssignment.work_pattern_id == workforce_models.WorkPattern.id,
+    ).options(
         selectinload(workforce_models.EmployeeWorkPatternAssignment.work_pattern).selectinload(
             workforce_models.WorkPattern.days
         ),
     ).filter(
         workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
+        workforce_models.WorkPattern.amo_id == amo_id,
+        workforce_models.WorkPattern.is_active.is_(True),
         workforce_models.EmployeeWorkPatternAssignment.user_id.in_(user_ids),
         workforce_models.EmployeeWorkPatternAssignment.effective_from <= target_to,
         or_(

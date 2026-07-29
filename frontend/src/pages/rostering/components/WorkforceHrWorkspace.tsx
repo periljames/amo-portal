@@ -40,6 +40,7 @@ import {
   decideWorkforceHrOvertime,
   getWorkforceHrDashboard,
   listWorkforceHrOvertime,
+  listWorkforceHrPeople,
   listWorkforceHrPatterns,
 } from "../../../services/workforceHr";
 import type { BaseStationRead } from "../../../types/foundations";
@@ -83,6 +84,7 @@ export function WorkforceHrWorkspace() {
   const queryClient = useQueryClient();
   const [section, setSection] = useState<HrSection>("overview");
   const [search, setSearch] = useState("");
+  const [peoplePage, setPeoplePage] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<DecisionTarget | null>(null);
@@ -93,6 +95,16 @@ export function WorkforceHrWorkspace() {
     queryFn: () => getWorkforceHrDashboard(500),
     staleTime: 60_000,
   });
+  const peopleQuery = useQuery({
+    queryKey: ["workforce", "hr", "people", peoplePage, search.trim()],
+    queryFn: () => listWorkforceHrPeople({
+        page: peoplePage,
+        page_size: 100,
+        search: search.trim() || undefined,
+    }),
+    enabled: section === "people",
+    staleTime: 60_000,
+});
   const leaveQuery = useQuery({
     queryKey: ["workforce", "hr", "leave"],
     queryFn: () => listLeaveRequests({ page_size: 200 }),
@@ -125,15 +137,7 @@ export function WorkforceHrWorkspace() {
   });
 
   const dashboard = dashboardQuery.data;
-  const people = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return dashboard?.people || [];
-    return (dashboard?.people || []).filter((person) =>
-      [person.full_name, person.staff_code, person.position_title, person.department_code, person.primary_base_code]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle)),
-    );
-  }, [dashboard?.people, search]);
+  const people = peopleQuery.data?.items || [];
 
   const openSection = (next: HrSection, searchValue?: string) => {
     setSection(next);
@@ -195,7 +199,12 @@ export function WorkforceHrWorkspace() {
         <PeoplePanel
           people={people}
           search={search}
-          onSearch={setSearch}
+          onSearch={(value) => { setSearch(value); setPeoplePage(1); }}
+          page={peopleQuery.data?.page || peoplePage}
+          pages={peopleQuery.data?.pages || 0}
+          total={peopleQuery.data?.total || 0}
+          loading={peopleQuery.isPending}
+          onPage={setPeoplePage}
           bases={basesQuery.data || []}
           loadingBases={basesQuery.isPending}
           canManage={dashboard.can_manage_contracts}
@@ -282,11 +291,16 @@ function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (sectio
 }
 
 function PeoplePanel({
-  people, search, onSearch, bases, loadingBases, canManage, busy, runAction,
+  people, search, onSearch, page, pages, total, loading, onPage, bases, loadingBases, canManage, busy, runAction,
 }: {
   people: HrPersonReadiness[];
   search: string;
   onSearch: (value: string) => void;
+  page: number;
+  pages: number;
+  total: number;
+  loading: boolean;
+  onPage: (page: number) => void;
   bases: BaseStationRead[];
   loadingBases: boolean;
   canManage: boolean;
@@ -353,7 +367,15 @@ function PeoplePanel({
         <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Action</span></header>
         {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div>{canManage ? <button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(person)}><BriefcaseBusiness size={14} /> Edit</button> : <span className="hr-person-source">Read only</span>}</article>)}
       </div>
-      {!people.length ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}
+    {loading ? <RosterLoading label="Loading employee register…" /> : null}
+    <div className="wr-actions wr-actions--between">
+        <span className="hr-person-source">Showing {people.length} of {total} employees · page {page}{pages ? ` of ${pages}` : ""}</span>
+        <div className="wr-actions">
+            <button type="button" className="wr-button wr-button--secondary wr-button--small" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>Previous</button>
+            <button type="button" className="wr-button wr-button--secondary wr-button--small" disabled={!pages || page >= pages || loading} onClick={() => onPage(page + 1)}>Next</button>
+        </div>
+    </div>
+    {!people.length && !loading ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}
 
       {editing && draft ? (
         <div className="hr-decision hr-contract-editor" role="dialog" aria-modal="true" aria-label={`Edit employment contract for ${editing.full_name}`}>

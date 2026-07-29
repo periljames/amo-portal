@@ -62,6 +62,14 @@ class HrPersonReadiness(HrSchema):
     readiness_reasons: list[str] = Field(default_factory=list)
 
 
+class HrPeoplePage(HrSchema):
+    items: list[HrPersonReadiness]
+    page: int
+    page_size: int
+    total: int
+    pages: int
+
+
 class HrOvertimeRequestRead(HrSchema):
     id: str
     amo_id: str

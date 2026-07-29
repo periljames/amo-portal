@@ -177,3 +177,79 @@ def test_attendance_exception_serializes_canonical_evidence():
     assert result.roster_assignment_id == "assignment-1"
     assert result.variance_minutes == -50
     assert result.metadata_json == {"source": "attendance"}
+
+
+class _ScalarQuery:
+    def __init__(self, value):
+        self.value = value
+    def filter(self, *args, **kwargs):
+        return self
+    def scalar(self):
+        return self.value
+
+
+def test_amo_work_date_uses_tenant_timezone():
+    db = MagicMock()
+    db.query.return_value = _ScalarQuery("Africa/Nairobi")
+    instant = datetime(2026, 7, 29, 22, 30, tzinfo=timezone.utc)
+    assert hr_service._amo_work_date(db, amo_id="amo-1", instant=instant) == date(2026, 7, 30)
+
+
+def test_roster_assignment_validation_rejects_cross_user_link():
+    assignment = SimpleNamespace(
+        amo_id="amo-1",
+        user_id="employee-2",
+        deleted_at=None,
+        starts_at=datetime(2026, 7, 29, 17, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 7, 29, 20, tzinfo=timezone.utc),
+    )
+    db = MagicMock()
+    db.query.return_value = _query_returning(assignment)
+    with pytest.raises(ValueError, match="does not belong"):
+        hr_service._validated_roster_assignment(
+            db,
+            amo_id="amo-1",
+            user_id="employee-1",
+            assignment_id="assignment-1",
+            starts_at=datetime(2026, 7, 29, 18, tzinfo=timezone.utc),
+            ends_at=datetime(2026, 7, 29, 19, tzinfo=timezone.utc),
+        )
+
+
+def test_people_register_is_paginated_without_truncating_total(monkeypatch):
+    contracts = []
+    for index in range(0, 501):
+        user = SimpleNamespace(
+            id=f"user-{index}",
+            staff_code=f"S{index:04d}",
+            full_name=f"Employee {index:04d}",
+            position_title="Engineer",
+            department=None,
+        )
+        contracts.append(SimpleNamespace(
+            id=f"contract-{index}",
+            user_id=user.id,
+            user=user,
+            employment_status=models.EmploymentStatus.ACTIVE,
+            contract_type=models.ContractType.PERMANENT,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            primary_base_station_id=None,
+            primary_base=None,
+            supervisor=None,
+            standard_weekly_minutes=2400,
+            standard_daily_minutes=480,
+            fte_percentage=100,
+            cost_centre=None,
+            payroll_number=None,
+            overtime_eligible=True,
+            night_shift_eligible=False,
+            standby_eligible=False,
+        ))
+    monkeypatch.setattr(hr_service, "_active_contracts", lambda *args, **kwargs: contracts)
+    monkeypatch.setattr(hr_service, "_effective_patterns", lambda *args, **kwargs: {})
+    monkeypatch.setattr(hr_service, "_active_leave", lambda *args, **kwargs: {})
+    result = hr_service.list_people_page(MagicMock(), amo_id="amo-1", page=6, page_size=100)
+    assert result.total == 501
+    assert result.pages == 6
+    assert len(result.items) == 1

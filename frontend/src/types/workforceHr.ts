@@ -49,6 +49,14 @@ export type HrPersonReadiness = {
   readiness_reasons: string[];
 };
 
+export type HrPeoplePage = {
+    items: HrPersonReadiness[];
+    page: number;
+    page_size: number;
+    total: number;
+    pages: number;
+};
+
 export type HrOvertimeRequest = {
   id: string;
   amo_id: string;

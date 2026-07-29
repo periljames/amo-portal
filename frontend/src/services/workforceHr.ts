@@ -1,5 +1,5 @@
 import { apiJson, jsonBody, queryString } from "./typedApi";
-import type { HrDashboard, HrOvertimeRequest } from "../types/workforceHr";
+import type { HrDashboard, HrOvertimeRequest, HrPeoplePage } from "../types/workforceHr";
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
 export type WorkforceHrPatternAssignmentCreate = {
@@ -14,6 +14,16 @@ export function getWorkforceHrDashboard(peopleLimit = 200): Promise<HrDashboard>
   return apiJson(`/workforce/hr/dashboard${queryString({ people_limit: peopleLimit })}`, {
     offline: { cacheTtlMs: 60_000 },
   });
+}
+
+export function listWorkforceHrPeople(params: {
+    page?: number;
+    page_size?: number;
+    search?: string;
+} = {}): Promise<HrPeoplePage> {
+    return apiJson(`/workforce/hr/people${queryString(params)}`, {
+        offline: { cacheTtlMs: 60_000 },
+    });
 }
 
 export function listWorkforceHrPatterns(includeInactive = false): Promise<WorkPatternRead[]> {

@@ -48,6 +48,28 @@ def hr_dashboard(
     )
 
 
+@router.get("/people", response_model=hr_schemas.HrPeoplePage)
+def hr_people(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    search: str | None = Query(default=None, max_length=200),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    permissions.require_permission(
+        db,
+        user=current_user,
+        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+    )
+    return hr_service.list_people_page(
+        db,
+        amo_id=_amo(current_user),
+        page=page,
+        page_size=page_size,
+        search=search,
+    )
+
+
 @router.get("/work-patterns", response_model=list[schemas.WorkPatternRead])
 def hr_work_patterns(
     include_inactive: bool = Query(default=False),

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -33,6 +34,50 @@ def _display_name(user: Optional[account_models.User]) -> Optional[str]:
     return " ".join(
         part for part in [getattr(user, "first_name", None), getattr(user, "last_name", None)] if part
     ).strip() or getattr(user, "email", None)
+
+
+def _amo_zone(db: Session, *, amo_id: str) -> ZoneInfo:
+    zone_name = (
+        db.query(account_models.AMO.time_zone)
+        .filter(account_models.AMO.id == amo_id)
+        .scalar()
+        or "UTC"
+    )
+    try:
+        return ZoneInfo(str(zone_name))
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _amo_work_date(db: Session, *, amo_id: str, instant: datetime) -> date:
+    normalized = instant if instant.tzinfo is not None else instant.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(_amo_zone(db, amo_id=amo_id)).date()
+
+
+def _validated_roster_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    assignment_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+):
+    from ..rostering import models as roster_models
+
+    assignment = db.query(roster_models.RosterAssignment).filter(
+        roster_models.RosterAssignment.id == assignment_id,
+        roster_models.RosterAssignment.amo_id == amo_id,
+    ).first()
+    if assignment is None:
+        raise ValueError("Roster assignment was not found in this AMO")
+    if str(assignment.user_id) != str(user_id):
+        raise ValueError("Roster assignment does not belong to the overtime employee")
+    if assignment.deleted_at is not None:
+        raise ValueError("Deleted roster assignments cannot support overtime claims")
+    if assignment.starts_at >= ends_at or assignment.ends_at <= starts_at:
+        raise ValueError("Roster assignment does not overlap the overtime window")
+    return assignment
 
 
 def _department_code(user: Optional[account_models.User]) -> Optional[str]:
@@ -184,7 +229,7 @@ def create_overtime_request(
 ) -> models.OvertimeRequest:
     user_id = payload.user_id or actor_user_id
     services._require_user(db, amo_id=amo_id, user_id=user_id, active_only=True)
-    on_date = payload.starts_at.date()
+    on_date = _amo_work_date(db, amo_id=amo_id, instant=payload.starts_at)
     contract = db.query(models.EmploymentContract).filter(
         models.EmploymentContract.amo_id == amo_id,
         models.EmploymentContract.user_id == user_id,
@@ -200,6 +245,15 @@ def create_overtime_request(
     requested_minutes = payload.requested_minutes or actual_minutes
     if requested_minutes < 1 or requested_minutes > actual_minutes:
         raise ValueError("requested_minutes must be within the requested overtime window")
+    if payload.roster_assignment_id:
+        _validated_roster_assignment(
+            db,
+            amo_id=amo_id,
+            user_id=user_id,
+            assignment_id=payload.roster_assignment_id,
+            starts_at=payload.starts_at,
+            ends_at=payload.ends_at,
+        )
     duplicate = db.query(models.OvertimeRequest.id).filter(
         models.OvertimeRequest.amo_id == amo_id,
         models.OvertimeRequest.user_id == user_id,
@@ -249,7 +303,7 @@ def decide_overtime(
     stage = models.LeaveApprovalStage(payload.stage)
     decision = models.ApprovalDecision(payload.decision)
     if stage == models.LeaveApprovalStage.SUPERVISOR:
-        work_date = row.starts_at.date()
+        work_date = _amo_work_date(db, amo_id=amo_id, instant=row.starts_at)
         contract = db.query(models.EmploymentContract).filter(
             models.EmploymentContract.amo_id == amo_id,
             models.EmploymentContract.user_id == row.user_id,
@@ -390,6 +444,63 @@ def _pending_queue_counts(db: Session, *, amo_id: str) -> dict[str, int]:
         "overtime": pending_overtime,
         "attendance_exception": attendance_exception,
     }
+
+
+def list_people_page(
+    db: Session,
+    *,
+    amo_id: str,
+    page: int = 1,
+    page_size: int = 100,
+    search: Optional[str] = None,
+) -> hr_schemas.HrPeoplePage:
+    today = date.today()
+    now = _utcnow()
+    contracts = _active_contracts(db, amo_id=amo_id, on_date=today)
+    current_contracts: dict[str, models.EmploymentContract] = {}
+    for row in contracts:
+        current_contracts.setdefault(str(row.user_id), row)
+    selected_contracts = list(current_contracts.values())
+    user_ids = list(current_contracts)
+    patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
+    leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
+    items = [
+        _person_readiness(
+            row,
+            pattern=patterns.get(str(row.user_id)),
+            leave=leave_by_user.get(str(row.user_id)),
+        )
+        for row in selected_contracts
+    ]
+    needle = str(search or "").strip().lower()
+    if needle:
+        items = [
+            item for item in items
+            if any(
+                needle in str(value or "").lower()
+                for value in (
+                    item.full_name,
+                    item.staff_code,
+                    item.position_title,
+                    item.department_code,
+                    item.primary_base_code,
+                    item.payroll_number,
+                )
+            )
+        ]
+    items.sort(key=lambda item: (item.readiness_state == "READY", item.full_name.lower(), item.user_id))
+    total = len(items)
+    safe_page_size = max(1, min(int(page_size), 200))
+    pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+    safe_page = max(1, int(page))
+    start = (safe_page - 1) * safe_page_size
+    return hr_schemas.HrPeoplePage(
+        items=items[start:start + safe_page_size],
+        page=safe_page,
+        page_size=safe_page_size,
+        total=total,
+        pages=pages,
+    )
 
 
 def dashboard(

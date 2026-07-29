@@ -67,6 +67,8 @@ describe("rostering setup experience", () => {
     expect(workforceSource).toContain("dashboard.can_approve_timesheet_supervisor");
     expect(workforceSource).toContain("dashboard.can_approve_timesheet_hr");
     expect(workforceSource).toContain("dashboard.attendance_exceptions.map");
+    expect(workforceSource).toContain("listWorkforceHrPeople");
+    expect(workforceSource).toContain("Showing {people.length} of {total}");
     expect(workforceSource).toContain("roster_assignment_id");
   });
 

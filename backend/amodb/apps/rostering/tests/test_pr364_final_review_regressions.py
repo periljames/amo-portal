@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from amodb.apps.rostering import automation_service
 from amodb.apps.rostering.automation_models import (
@@ -43,3 +44,10 @@ def test_fortnightly_overdue_schedule_preserves_each_due_cycle():
 
     assert result == datetime(2026, 6, 15, 9, tzinfo=timezone.utc)
     assert result <= current
+
+
+def test_pattern_readiness_query_filters_inactive_patterns():
+    source = Path(automation_service.__file__).read_text(encoding="utf-8")
+    section = source[source.index("def _pattern_assignments"):source.index("def _estimated_assignments")]
+    assert "join(" in section
+    assert "WorkPattern.is_active.is_(True)" in section
