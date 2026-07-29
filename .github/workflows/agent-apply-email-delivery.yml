@@ -81,27 +81,27 @@ jobs:
                   raise RuntimeError('notification service signature anchor was not found')
               service = service.replace(signature, replacement, 1)
 
-          success_anchor = textwrap.dedent('''
-                      log.error = None
-                  except providers.EmailDeliveryBlocked as exc:
-                      log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
-                      log.error = str(exc)
-          ''').lstrip('\n').rstrip('\n')
-          success_replacement = textwrap.dedent('''
-                      log.error = None
-                      log.provider = str(result.get("provider") or "resend")
-                      log.provider_message_id = str(result.get("message_id") or "").strip() or None
-                      log.delivery_status = "ACCEPTED"
-                  except providers.EmailDeliveryBlocked as exc:
-                      log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
-                      log.error = str(exc)
-                      log.provider = "resend"
-                      log.delivery_status = "BLOCKED"
-          ''').lstrip('\n').rstrip('\n')
+          success_pattern = re.compile(
+              r'(?m)^ {12}log\.error = None\n'
+              r'^ {8}except providers\.EmailDeliveryBlocked as exc:\n'
+              r'^ {12}log\.status = models\.EmailStatus\.SKIPPED_NO_PROVIDER\n'
+              r'^ {12}log\.error = str\(exc\)'
+          )
+          success_replacement = (
+              '            log.error = None\n'
+              '            log.provider = str(result.get("provider") or "resend")\n'
+              '            log.provider_message_id = str(result.get("message_id") or "").strip() or None\n'
+              '            log.delivery_status = "ACCEPTED"\n'
+              '        except providers.EmailDeliveryBlocked as exc:\n'
+              '            log.status = models.EmailStatus.SKIPPED_NO_PROVIDER\n'
+              '            log.error = str(exc)\n'
+              '            log.provider = "resend"\n'
+              '            log.delivery_status = "BLOCKED"'
+          )
           if 'log.provider_message_id' not in service:
-              if success_anchor not in service:
+              service, count = success_pattern.subn(success_replacement, service, count=1)
+              if count != 1:
                   raise RuntimeError('notification success-state anchor was not found')
-              service = service.replace(success_anchor, success_replacement, 1)
           service_path.write_text(service, encoding='utf-8')
 
           public_path = Path('backend/amodb/apps/accounts/router_public.py')
