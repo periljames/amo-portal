@@ -17,6 +17,10 @@ DEFAULT_PROVIDERS = [
 ]
 
 
+def _elapsed_ms(started: float) -> int:
+    return max(0, int(round((time.perf_counter() - started) * 1000)))
+
+
 def _check_resend_credentials(db) -> dict[str, int]:
     checked = 0
     healthy = 0
@@ -40,12 +44,12 @@ def _check_resend_credentials(db) -> dict[str, int]:
             )
             row.status = "HEALTHY"
             row.last_health_detail = str(result.get("detail") or "Resend API authentication passed")[:2000]
-            row.last_latency_ms = float(result.get("latency_ms") or round((time.perf_counter() - started) * 1000, 2))
+            row.last_latency_ms = int(result.get("latency_ms") or _elapsed_ms(started))
             healthy += 1
         except Exception as exc:
             row.status = "UNHEALTHY"
             row.last_health_detail = str(exc)[:2000]
-            row.last_latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            row.last_latency_ms = _elapsed_ms(started)
             unhealthy += 1
         row.last_checked_at = services.now_utc()
     return {"checked": checked, "healthy": healthy, "unhealthy": unhealthy}
