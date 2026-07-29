@@ -18,10 +18,18 @@ def _source(source_id: str = "section:rev:sec") -> dict:
     }
 
 
+def _repository_root() -> Path:
+    return Path(__file__).resolve().parents[5]
+
+
 def test_provider_is_off_by_default_and_never_calls_external_network(monkeypatch) -> None:
     monkeypatch.delenv("DOCUMENT_AI_PROVIDER", raising=False)
     monkeypatch.delenv("DOCUMENT_AI_ALLOW_EXTERNAL", raising=False)
-    monkeypatch.setattr(assistant.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network called")))
+    monkeypatch.setattr(
+        assistant.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network called")),
+    )
 
     answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
 
@@ -41,8 +49,15 @@ def test_external_provider_request_is_server_side_non_storing_and_citation_limit
             return False
 
         def read(self) -> bytes:
-            content = json.dumps({"answer": "Open QAM 51 and verify the controlled form.", "source_ids": ["section:rev:sec", "invented"]})
-            return json.dumps({"output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}]}).encode()
+            content = json.dumps(
+                {
+                    "answer": "Open QAM 51 and verify the controlled form.",
+                    "source_ids": ["section:rev:sec", "invented"],
+                }
+            )
+            return json.dumps(
+                {"output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}]}
+            ).encode()
 
     def fake_open(request, timeout):
         captured["url"] = request.full_url
@@ -91,11 +106,13 @@ def test_route_contract_filters_access_before_retrieval_and_audits_only_query_ha
     source = Path(assistant.__file__).read_text(encoding="utf-8")
     assert "if can_read_manual(user, profiles.get(manual.id))" in source
     assert "manual.current_published_rev_id" in source
-    assert "row.id == requested_revision_id" in source
+    assert "not current_effective and not is_control_user(user)" in source
     assert 'event_name="documentation.assisted_search"' in source
     assert '"query_sha256": _query_hash(request_payload.query)' in source
     assert '"query_text"' not in source
     assert '"controlled_source_is_authoritative": True' in source
+    assert '"store": False' in source
+    assert "https://api.openai.com/v1/responses" in source
 
 
 def test_assistant_route_precedes_compatibility_workspace_routes() -> None:
@@ -107,11 +124,49 @@ def test_assistant_route_precedes_compatibility_workspace_routes() -> None:
     assert matching[0].endpoint.__module__ == "amodb.apps.doc_control.knowledge_assistant_router"
 
 
-def test_postgresql_search_migration_is_reversible() -> None:
-    root = Path(__file__).resolve().parents[4]
-    migration = root / "alembic/versions/document_control_20260729_ai_assisted_search.py"
+def test_postgresql_search_migration_is_online_safe_and_reversible() -> None:
+    migration = (
+        _repository_root()
+        / "backend/amodb/alembic/versions/document_control_20260729_ai_assisted_search.py"
+    )
     source = migration.read_text(encoding="utf-8")
     assert "USING GIN" in source
     assert "to_tsvector('simple'" in source
     assert "document_control_20260729_knowledge_graph" in source
-    assert "DROP INDEX IF EXISTS ix_manual_blocks_text_search" in source
+    assert "autocommit_block" in source
+    assert "CREATE INDEX CONCURRENTLY IF NOT EXISTS" in source
+    assert "DROP INDEX CONCURRENTLY IF EXISTS" in source
+
+
+def test_frontend_assistant_is_mounted_in_reader_and_document_control() -> None:
+    root = _repository_root() / "frontend/src"
+    service = (root / "services/documentationAssistant.ts").read_text(encoding="utf-8")
+    panel = (root / "pages/manuals/DocumentationAssistantPanel.tsx").read_text(encoding="utf-8")
+    reader = (root / "pages/manuals/ManualReaderPage.tsx").read_text(encoding="utf-8")
+    shell = (root / "pages/documentControl/DocumentControlShell.tsx").read_text(encoding="utf-8")
+
+    assert "/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/assist" in service
+    assert "controlled_source_is_authoritative" in service
+    assert "amo:publication-navigate" in panel
+    assert "The controlled source remains authoritative" in panel
+    assert "DocumentationAssistantPanel" in reader
+    assert "PublicationAssistedNavigationBridge" in reader
+    assert "DocumentationAssistantPanel" in shell
+    assert "OPENAI_API_KEY" not in service + panel + reader + shell
+
+
+def test_direct_and_assisted_reader_navigation_share_one_precise_contract() -> None:
+    bridge = (
+        _repository_root()
+        / "frontend/src/pages/manuals/PublicationAssistedNavigationBridge.tsx"
+    ).read_text(encoding="utf-8")
+    viewer = (
+        _repository_root()
+        / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'searchParams.get("page")' in bridge
+    assert 'searchParams.get("anchor")' in bridge
+    assert 'window.addEventListener("amo:publication-navigate"' in bridge
+    assert '.publication-native-pdf__page[data-page-number=' in bridge
+    assert "data-page-number={pageNumber}" in viewer
