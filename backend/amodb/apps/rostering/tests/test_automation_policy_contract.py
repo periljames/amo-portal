@@ -162,3 +162,16 @@ def test_no_owner_evidence_uses_skipped_status():
     source = inspect.getsource(rostering_automation._record_failed_scheduled_run)
     assert "RosterAutomationRunStatus.SKIPPED" in source
     assert '"skip_recorded_after_rollback": skipped' in source
+
+def test_policy_updates_lock_and_refresh_the_current_revision():
+    source = inspect.getsource(automation_service.update_policy)
+    assert ".populate_existing().with_for_update().one()" in source
+    assert source.index("with_for_update") < source.index("expected_state_revision")
+
+
+def test_reused_draft_is_locked_before_generation_and_validation():
+    source = inspect.getsource(automation_service.run)
+    assert "roster_models.RosterVersion.id == draft.id" in source
+    assert ".populate_existing().with_for_update().first()" in source
+    assert "ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE" in source
+    assert source.index("with_for_update") < source.index("generate_from_patterns(")

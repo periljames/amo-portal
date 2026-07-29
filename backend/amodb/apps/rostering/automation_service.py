@@ -199,6 +199,10 @@ def update_policy(
     actor_user_id: str,
     payload: RosterGenerationPolicyUpdate,
 ) -> RosterGenerationPolicy:
+    row = db.query(RosterGenerationPolicy).filter(
+        RosterGenerationPolicy.id == row.id,
+        RosterGenerationPolicy.amo_id == row.amo_id,
+    ).populate_existing().with_for_update().one()
     if payload.expected_state_revision != row.state_revision:
         raise RuntimeError(f"ROSTER_AUTOMATION_REVISION_CONFLICT:{row.state_revision}")
     values = payload.model_dump(exclude_unset=True)
@@ -496,6 +500,13 @@ def run(
         )
     if not draft and (should_create_draft or should_generate):
         raise ValueError("No draft roster version is available for generation")
+    if draft:
+        draft = db.query(roster_models.RosterVersion).filter(
+            roster_models.RosterVersion.id == draft.id,
+            roster_models.RosterVersion.amo_id == amo_id,
+        ).populate_existing().with_for_update().first()
+        if not draft or _enum_value(draft.status) != roster_models.RosterVersionStatus.DRAFT.value:
+            raise RuntimeError("ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE")
     run_row.version_id = draft.id if draft else None
 
     generated_count = 0

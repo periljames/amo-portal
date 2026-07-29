@@ -73,6 +73,11 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(legacyRouterSource).toContain('get("section") === "workforce"');
   });
 
+  it("shows leave rejection only to effective leave reviewers", () => {
+    expect(hrSource).toContain("dashboard.can_review_leave ?");
+    expect(hrSource).not.toContain("dashboard.can_review_leave || dashboard.can_approve_leave");
+  });
+
   it("makes contracts editable only for authorized Workforce managers", () => {
     expect(hrSource).toContain("updateEmploymentContract");
     expect(hrSource).toContain("listBaseStations");
