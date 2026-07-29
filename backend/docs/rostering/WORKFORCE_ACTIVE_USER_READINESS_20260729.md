@@ -1,0 +1,27 @@
+# Workforce active-user roster readiness correction
+
+## Problem corrected
+
+The Workforce and HR employee register previously started from effective employment contracts. Active tenant users without an effective contract were therefore omitted entirely, producing an empty `0 of 0 employees` register even when active user accounts existed.
+
+## Canonical behavior
+
+1. The register starts from every active, non-system user belonging to the current tenant.
+2. Employment contracts, bases, work-pattern assignments and approved leave are joined as readiness data.
+3. Missing Workforce records remain visible as actionable readiness blockers; they never remove the user from the register.
+4. Authorized Workforce managers can create a missing effective contract or edit an existing one from the same register.
+5. The contract editor uses the exact backend enums and tenant-owned canonical bases.
+6. An authorized manager may explicitly create or repair the reserved `DEFAULT-DAY` shift and `DEFAULT-DAY-5X2` Monday-to-Friday pattern.
+7. The default pattern is assigned only to active or onboarding employees with effective contracts who do not already have a valid active pattern. Existing active patterns are preserved.
+8. All effective-date decisions use the tenant timezone.
+9. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
+
+## Acceptance coverage
+
+The rendered Playwright scenario authenticates an AMO administrator, opens Workforce > People and contracts, and verifies that an active user without a contract is displayed with:
+
+- `No contract`;
+- a `Create contract` action; and
+- the authorized `Apply default day pattern` action.
+
+Backend Workforce and Rostering suites, frontend Rostering tests, ESLint, the production build and the complete role-access browser matrix are required before this correction is considered merge-ready.
