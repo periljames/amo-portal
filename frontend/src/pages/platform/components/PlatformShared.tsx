@@ -113,15 +113,8 @@ export const PlatformShell: React.FC<{
 
   useEffect(() => {
     let active = true;
-    if (!isAuthenticated()) {
-      setUser(null);
-      setAccessError(null);
-      setAccessState("denied");
-      return () => { active = false; };
-    }
+    if (!isAuthenticated()) return () => { active = false; };
 
-    setAccessError(null);
-    setAccessState("checking");
     void fetchCurrentUser()
       .then((freshUser) => {
         if (!active) return;
@@ -229,7 +222,16 @@ export const PlatformShell: React.FC<{
             <h1>Platform access required</h1>
             <p>{accessError ? `Platform access could not be verified: ${accessError}` : "This console is available only to global platform superusers."}</p>
             {accessError && isAuthenticated() ? (
-              <button className="platform-btn" onClick={() => setAccessAttempt((attempt) => attempt + 1)}>Retry access check</button>
+              <button
+                className="platform-btn"
+                onClick={() => {
+                  setAccessError(null);
+                  setAccessState("checking");
+                  setAccessAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Retry access check
+              </button>
             ) : null}
             <button className="platform-btn primary" onClick={signInWithPlatformAccount}>Sign in with platform account</button>
           </section>
