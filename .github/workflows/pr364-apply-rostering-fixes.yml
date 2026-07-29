@@ -1,0 +1,263 @@
+name: PR364 Apply Rostering Fixes
+
+on:
+  push:
+    branches:
+      - agent/rostering-automation-workforce-hr-overhaul
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Apply validated Rostering patch
+        shell: bash
+        run: |
+          cat > /tmp/pr364.patch <<'PATCH'
+          diff --git a/frontend/src/pages/rostering/components/MyRosterWorkspace.tsx b/frontend/src/pages/rostering/components/MyRosterWorkspace.tsx
+          index 02d49e4..87b25d9 100644
+          --- a/frontend/src/pages/rostering/components/MyRosterWorkspace.tsx
+          +++ b/frontend/src/pages/rostering/components/MyRosterWorkspace.tsx
+          @@ -290,7 +290,7 @@ export function MyRosterWorkspace() {
+           
+             const roster = rosterQuery.data || null;
+             const leaveTypes = leaveTypesQuery.data || [];
+          -  const balances = balancesQuery.data || [];
+          +  const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);
+             const requests = requestsQuery.data?.items || [];
+             const attendance = attendanceQuery.data || null;
+             const currentAttendance = currentAttendanceQuery.data || null;
+          diff --git a/backend/amodb/apps/rostering/automation_service.py b/backend/amodb/apps/rostering/automation_service.py
+          index 521e75e..ef1a800 100644
+          --- a/backend/amodb/apps/rostering/automation_service.py
+          +++ b/backend/amodb/apps/rostering/automation_service.py
+          @@ -467,14 +467,14 @@ def run(
+                             idempotency_key=f"{payload.idempotency_key}:version",
+                         ),
+                     )
+          -    if not draft:
+          +    if not draft and (should_create_draft or should_generate):
+                   raise ValueError("No draft roster version is available for generation")
+          -    run_row.version_id = draft.id
+          +    run_row.version_id = draft.id if draft else None
+           
+               generated_count = 0
+               skipped_count = 0
+               conflicts: list[dict] = []
+          -    if should_generate:
+          +    if should_generate and draft:
+                   generation = roster_services.generate_from_patterns(
+                       db,
+                       version=draft,
+          @@ -494,7 +494,7 @@ def run(
+           
+               blocker_count = 0
+               warning_count = 0
+          -    if policy.validate_after_generation:
+          +    if policy.validate_after_generation and draft:
+                   validation = roster_services.validate_version(
+                       db,
+                       version=draft,
+          @@ -511,6 +511,10 @@ def run(
+               run_row.summary_json = {
+                   "preview": preview_result.model_dump(mode="json"),
+                   "conflicts": conflicts,
+          +        "period_created_or_reused": True,
+          +        "draft_created_or_reused": draft is not None,
+          +        "generation_performed": bool(should_generate and draft),
+          +        "validation_performed": bool(policy.validate_after_generation and draft),
+                   "review_required": True,
+                   "publication_performed": False,
+               }
+          diff --git a/backend/amodb/apps/rostering/tests/test_automation_policy_contract.py b/backend/amodb/apps/rostering/tests/test_automation_policy_contract.py
+          index ca41971..f26062b 100644
+          --- a/backend/amodb/apps/rostering/tests/test_automation_policy_contract.py
+          +++ b/backend/amodb/apps/rostering/tests/test_automation_policy_contract.py
+          @@ -113,3 +113,12 @@ def test_failed_idempotency_replay_is_not_returned_as_success():
+               source = inspect.getsource(automation_service.run)
+               assert "ROSTER_AUTOMATION_PREVIOUS_FAILURE" in source
+               assert "ROSTER_AUTOMATION_ALREADY_RUNNING" in source
+          +
+          +
+          +def test_period_only_automation_does_not_require_or_validate_a_draft():
+          +    source = inspect.getsource(automation_service.run)
+          +    assert 'if not draft and (should_create_draft or should_generate):' in source
+          +    assert 'run_row.version_id = draft.id if draft else None' in source
+          +    assert 'if should_generate and draft:' in source
+          +    assert 'if policy.validate_after_generation and draft:' in source
+          +    assert '"draft_created_or_reused": draft is not None' in source
+          diff --git a/frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx b/frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx
+          index a0b92a9..e7b2d32 100644
+          --- a/frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx
+          +++ b/frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx
+          @@ -9,13 +9,11 @@ import {
+             CalendarClock,
+             CalendarPlus,
+             CheckCircle2,
+          -  Clock3,
+             History,
+             Layers3,
+             Play,
+             Plus,
+             RefreshCw,
+          -  RotateCcw,
+             Save,
+             Settings2,
+             ShieldCheck,
+          @@ -81,10 +79,6 @@ function stateTone(value: string): string {
+             return "info";
+           }
+           
+          -function setupActionPath(section: Section): string {
+          -  return `?section=${encodeURIComponent(section)}`;
+          -}
+          -
+           export function RosteringSetupWorkspace() {
+             const { amoCode = "" } = useParams();
+             const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
+          @@ -235,6 +229,7 @@ export function RosteringSetupWorkspace() {
+                     busy={busy}
+                     runAction={runAction}
+                     workforcePath={`${root}/workforce`}
+          +          timezoneName={readiness.policy.timezone_name}
+                   />
+                 ) : null}
+                 {section === "policy" ? (
+          @@ -428,6 +423,12 @@ function AutomationPanel({
+           }) {
+             const [draft, setDraft] = useState(policy);
+             const [reason, setReason] = useState("");
+          +  const schedulingDisabled = !canManage || draft.frequency === "MANUAL";
+          +  const changeFrequency = (frequency: RosterAutomationFrequency) => {
+          +    const weeklyCadence = frequency === "WEEKLY" || frequency === "FORTNIGHTLY";
+          +    const runDay = weeklyCadence && draft.run_day > 7 ? 1 : !weeklyCadence && draft.run_day > 28 ? 1 : draft.run_day;
+          +    setDraft({ ...draft, frequency, run_day: runDay });
+          +  };
+           
+             const save = () => runAction("automation-policy", () => updateRosterAutomationPolicy({
+               enabled: draft.enabled,
+          @@ -440,9 +441,9 @@ function AutomationPanel({
+               period_name_pattern: draft.period_name_pattern,
+               create_initial_draft: draft.create_initial_draft,
+               generate_from_patterns: draft.generate_from_patterns,
+          -    preserve_source_commitments: draft.preserve_source_commitments,
+          +    preserve_source_commitments: true,
+               validate_after_generation: draft.validate_after_generation,
+          -    notify_planners: draft.notify_planners,
+          +    notify_planners: false,
+               require_preview_confirmation: draft.require_preview_confirmation,
+               expected_state_revision: policy.state_revision,
+               reason,
+          @@ -456,17 +457,17 @@ function AutomationPanel({
+                     <label className="rs-toggle"><input type="checkbox" checked={draft.enabled} disabled={!canManage} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span>{draft.enabled ? "On" : "Off"}</span></label>
+                   </div>
+                   <div className="rs-form-grid">
+          -          <label><span>Frequency</span><select value={draft.frequency} disabled={!canManage} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RosterAutomationFrequency })}><option value="MONTHLY">Monthly</option><option value="FORTNIGHTLY">Fortnightly</option><option value="WEEKLY">Weekly</option><option value="MANUAL">Manual only</option></select></label>
+          -          <label><span>Maintain ahead</span><select value={draft.lead_periods} disabled={!canManage} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value} period{value === 1 ? "" : "s"}</option>)}</select></label>
+          -          <label><span>Run day</span><input type="number" min="1" max="28" value={draft.run_day} disabled={!canManage} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label>
+          -          <label><span>Run hour</span><input type="number" min="0" max="23" value={draft.run_hour_local} disabled={!canManage} onChange={(event) => setDraft({ ...draft, run_hour_local: Number(event.target.value) })} /></label>
+          +          <label><span>Frequency</span><select value={draft.frequency} disabled={!canManage} onChange={(event) => changeFrequency(event.target.value as RosterAutomationFrequency)}><option value="MONTHLY">Monthly</option><option value="FORTNIGHTLY">Fortnightly</option><option value="WEEKLY">Weekly</option><option value="MANUAL">Manual only</option></select></label>
+          +          <label><span>Maintain ahead</span><select value={draft.lead_periods} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value} period{value === 1 ? "" : "s"}</option>)}</select></label>
+          +          {draft.frequency === "MONTHLY" ? <label><span>Day of month</span><input type="number" min="1" max="28" value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label> : null}
+          +          {draft.frequency === "WEEKLY" || draft.frequency === "FORTNIGHTLY" ? <label><span>Weekday</span><select value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option key={day} value={index + 1}>{day}</option>)}</select></label> : null}
+          +          <label><span>Run hour</span><input type="number" min="0" max="23" value={draft.run_hour_local} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_hour_local: Number(event.target.value) })} /></label>
+                     <label><span>Timezone</span><input value={draft.timezone_name} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone_name: event.target.value })} /></label>
+                     <label><span>Period code</span><input value={draft.period_code_pattern} disabled={!canManage} onChange={(event) => setDraft({ ...draft, period_code_pattern: event.target.value })} /></label>
+                     <label className="rs-form-grid__wide"><span>Period name</span><input value={draft.period_name_pattern} disabled={!canManage} onChange={(event) => setDraft({ ...draft, period_name_pattern: event.target.value })} /></label>
+                   </div>
+                   <div className="rs-check-grid">
+                     <label><input type="checkbox" checked={draft.create_initial_draft} disabled={!canManage} onChange={(event) => setDraft({ ...draft, create_initial_draft: event.target.checked })} /> Create initial draft</label>
+          -          <label><input type="checkbox" checked={draft.notify_planners} disabled={!canManage} onChange={(event) => setDraft({ ...draft, notify_planners: event.target.checked })} /> Notify planners</label>
+                     <label><input type="checkbox" checked={draft.require_preview_confirmation} disabled={!canManage} onChange={(event) => setDraft({ ...draft, require_preview_confirmation: event.target.checked })} /> Require preview confirmation</label>
+                   </div>
+                 </section>
+          @@ -474,9 +475,9 @@ function AutomationPanel({
+                 <section className="wr-panel">
+                   <div className="wr-section-heading"><div><span className="wr-eyebrow">Automatic rotation</span><h2>Generate duties from work patterns</h2><p>Use effective HR pattern assignments while preserving leave, training and Quality commitments.</p></div><label className="rs-toggle"><input type="checkbox" checked={draft.generate_from_patterns} disabled={!canManage} onChange={(event) => setDraft({ ...draft, generate_from_patterns: event.target.checked })} /><span>{draft.generate_from_patterns ? "On" : "Off"}</span></label></div>
+                   <div className="rs-check-grid">
+          -          <label><input type="checkbox" checked={draft.preserve_source_commitments} disabled={!canManage} onChange={(event) => setDraft({ ...draft, preserve_source_commitments: event.target.checked })} /> Preserve source commitments</label>
+                     <label><input type="checkbox" checked={draft.validate_after_generation} disabled={!canManage} onChange={(event) => setDraft({ ...draft, validate_after_generation: event.target.checked })} /> Validate after generation</label>
+                   </div>
+          +        <div className="rs-safety-note"><ShieldCheck size={18} /><p><strong>Enforced protection:</strong> source commitments are always preserved during generation.</p></div>
+                   <div className="rs-safety-note"><ShieldCheck size={18} /><p><strong>Controlled boundary:</strong> automatic generation can create draft duty only. Submission, approval and publication remain separate authorised actions.</p></div>
+                 </section>
+           
+          @@ -585,6 +586,7 @@ function PatternBuilder({
+             busy,
+             runAction,
+             workforcePath,
+          +  timezoneName,
+           }: {
+             shifts: ShiftTemplateRead[];
+             patterns: Awaited<ReturnType<typeof listWorkPatterns>>;
+          @@ -594,6 +596,7 @@ function PatternBuilder({
+             busy: string | null;
+             runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+             workforcePath: string;
+          +  timezoneName: string;
+           }) {
+             const activeShifts = shifts.filter((shift) => shift.is_active);
+             const [building, setBuilding] = useState(false);
+          @@ -614,7 +617,7 @@ function PatternBuilder({
+               return { cycle_day_index: index, shift_template_id: shift?.id || null, status, start_time_local: shift?.default_start_time || null, end_time_local: shift?.default_end_time || null, spans_next_day: spans, planned_minutes: shift?.duration_minutes || 0 };
+             });
+             const save = () => runAction("pattern", async () => {
+          -    await createWorkPattern({ code: code.trim().toUpperCase(), name: name.trim(), description: null, cycle_length_days: cycleLength, is_active: true, timezone_name: "Africa/Nairobi", days });
+          +    await createWorkPattern({ code: code.trim().toUpperCase(), name: name.trim(), description: null, cycle_length_days: cycleLength, is_active: true, timezone_name: timezoneName, days });
+               setBuilding(false); setCode(""); setName(""); resize(7);
+             });
+           
+          diff --git a/frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts b/frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          index ae0d837..0439bb9 100644
+          --- a/frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          +++ b/frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          @@ -31,6 +31,25 @@ describe("Rostering setup and Workforce ownership", () => {
+               expect(automationServiceSource).toContain("/automation/run");
+             });
+           
+          +  it("uses cadence-aware scheduling controls and normalizes run days", () => {
+          +    expect(setupSource).toContain("Day of month");
+          +    expect(setupSource).toContain("Weekday");
+          +    expect(setupSource).toContain('draft.frequency === "MANUAL"');
+          +    expect(setupSource).toContain("draft.run_day > 7 ? 1");
+          +  });
+          +
+          +  it("does not advertise unimplemented or optional safety behavior", () => {
+          +    expect(setupSource).not.toContain("> Notify planners<");
+          +    expect(setupSource).not.toContain("> Preserve source commitments<");
+          +    expect(setupSource).toContain("source commitments are always preserved");
+          +  });
+          +
+          +  it("uses the controlled automation timezone for work patterns", () => {
+          +    expect(setupSource).toContain("timezoneName={readiness.policy.timezone_name}");
+          +    expect(setupSource).toContain("timezone_name: timezoneName");
+          +    expect(setupSource).not.toContain('timezone_name: "Africa/Nairobi"');
+          +  });
+          +
+             it("keeps HR-owned records out of roster setup", () => {
+               expect(setupSource).not.toContain("createEmploymentContract");
+               expect(setupSource).not.toContain("createLeaveType");
+          PATCH
+
+          git apply --check /tmp/pr364.patch
+          git apply /tmp/pr364.patch
+          git diff --check
+          git add \
+            backend/amodb/apps/rostering/automation_service.py \
+            backend/amodb/apps/rostering/tests/test_automation_policy_contract.py \
+            frontend/src/pages/rostering/components/RosteringSetupWorkspace.tsx \
+            frontend/src/pages/rostering/components/MyRosterWorkspace.tsx \
+            frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Fix Rostering automation merge readiness"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
