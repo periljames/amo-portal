@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+# Bind the exact page-native indexer before reader/workspace modules import the
+# stable knowledge-service callables.
+from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # noqa: F401
+
 from . import router_legacy as _legacy
 from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_router import router as _knowledge_reader_router
