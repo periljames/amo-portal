@@ -114,11 +114,12 @@ def _health_interval_seconds() -> int:
 
 def _run_periodic_health(last_run: float | None) -> float:
     now = time.monotonic()
-    if last_run is not None and now - last_run < _health_interval_seconds():
+    interval = _health_interval_seconds()
+    if last_run is not None and now - last_run < interval:
         return last_run
     from amodb.jobs import platform_integration_health
 
-    platform_integration_health.run_once()
+    platform_integration_health.run_once(min_interval_seconds=interval)
     return now
 
 
