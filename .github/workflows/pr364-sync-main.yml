@@ -1,0 +1,30 @@
+name: PR364 Synchronize Latest Main
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  synchronize:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Merge latest main and remove synchronizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git rm .github/workflows/pr364-sync-main.yml
+          git commit -m "Remove one-shot PR364 main synchronizer"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
