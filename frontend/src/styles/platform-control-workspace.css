@@ -1,0 +1,78 @@
+.platform-grid--five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.platform-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 9px;
+  margin-bottom: 11px;
+  border: 1px solid var(--platform-line);
+  border-radius: 9px;
+  background: var(--platform-panel-3);
+}
+
+.platform-health-strip > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 2px 8px;
+  border-right: 1px solid var(--platform-line);
+}
+
+.platform-health-strip > div:last-child { border-right: 0; }
+.platform-health-strip small {
+  overflow: hidden;
+  color: var(--platform-muted);
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.platform-health-strip strong {
+  overflow: hidden;
+  color: var(--platform-ink);
+  font-size: 9.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.platform-field-block {
+  display: grid;
+  gap: 5px;
+  color: var(--platform-muted);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.platform-actions > select {
+  min-height: 32px;
+  padding: 6px 9px;
+  color: var(--platform-ink);
+  border: 1px solid var(--platform-line);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--platform-input);
+  font-size: 9.5px;
+}
+
+@media (max-width: 1440px) {
+  .platform-grid--five { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .platform-grid--five { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .platform-health-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .platform-health-strip > div:nth-child(2) { border-right: 0; }
+  .platform-health-strip > div:nth-child(-n + 2) { padding-bottom: 8px; border-bottom: 1px solid var(--platform-line); }
+}
+
+@media (max-width: 480px) {
+  .platform-grid--five { grid-template-columns: 1fr; }
+  .platform-health-strip { grid-template-columns: 1fr; }
+  .platform-health-strip > div { border-right: 0; border-bottom: 1px solid var(--platform-line); padding: 6px 4px; }
+  .platform-health-strip > div:last-child { border-bottom: 0; }
+}
