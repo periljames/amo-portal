@@ -191,7 +191,9 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
     event_type = str(event.get("type") or "").strip().lower()
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     message_id = str((data or {}).get("email_id") or (data or {}).get("id") or "").strip()
+    svix_id = str(request.headers.get("svix-id") or "").strip()
     matched_log_id: str | None = None
+    duplicate = False
     if message_id:
         rows = (
             db.query(notification_models.EmailLog)
@@ -204,14 +206,25 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
             delivery = context.get("_delivery") if isinstance(context.get("_delivery"), dict) else {}
             if str(delivery.get("message_id") or "") != message_id:
                 continue
+            history = list(delivery.get("events") or [])
+            if svix_id and any(str(item.get("svix_id") or "") == svix_id for item in history if isinstance(item, dict)):
+                matched_log_id = row.id
+                duplicate = True
+                break
             delivery.update(
                 {
                     "status": event_type.removeprefix("email.").upper() or "UNKNOWN",
                     "last_event_at": str(event.get("created_at") or datetime.now(timezone.utc).isoformat()),
                 }
             )
-            history = list(delivery.get("events") or [])[-19:]
-            history.append({"type": event_type, "created_at": event.get("created_at")})
+            history = history[-19:]
+            history.append(
+                {
+                    "svix_id": svix_id or None,
+                    "type": event_type,
+                    "created_at": event.get("created_at"),
+                }
+            )
             delivery["events"] = history
             context["_delivery"] = delivery
             row.context_json = context
@@ -221,4 +234,10 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
             matched_log_id = row.id
             break
     db.commit()
-    return {"ok": True, "event_type": event_type, "message_id": message_id or None, "email_log_id": matched_log_id}
+    return {
+        "ok": True,
+        "duplicate": duplicate,
+        "event_type": event_type,
+        "message_id": message_id or None,
+        "email_log_id": matched_log_id,
+    }
