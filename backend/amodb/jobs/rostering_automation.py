@@ -10,8 +10,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy.exc import IntegrityError
-
 from amodb.database import WriteSessionLocal
 from amodb.apps.rostering import automation_service
 from amodb.apps.rostering.automation_models import (
@@ -49,10 +47,11 @@ def _record_failed_scheduled_run(
     db,
     *,
     policy_id: str,
-    actor_user_id: str,
+    actor_user_id: Optional[str],
     idempotency_key: str,
     message: str,
     as_of: datetime,
+    failure_kind: str = "EXECUTION_FAILED",
 ) -> bool:
     """Roll back generated work, then record one failed scheduled attempt.
 
@@ -93,6 +92,7 @@ def _record_failed_scheduled_run(
                     "operational_changes_committed": False,
                     "failure_recorded_after_rollback": True,
                     "scheduled_cycle_advanced": True,
+                    "failure_kind": failure_kind,
                 },
                 error_message=message,
                 requested_by_user_id=actor_user_id,
@@ -104,7 +104,11 @@ def _record_failed_scheduled_run(
 
         policy.last_run_at = as_of
         policy.next_run_at = automation_service._next_run(policy, now=as_of)
-        policy.updated_reason = "Scheduled automation failed; all generated changes were rolled back."
+        policy.updated_reason = (
+            "Scheduled run skipped because no accountable policy owner is recorded."
+            if failure_kind == "NO_ACCOUNTABLE_OWNER"
+            else "Scheduled automation failed; all generated changes were rolled back."
+        )
         db.add(policy)
         db.commit()
         return True
@@ -124,17 +128,29 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
         if not policy.enabled or policy.next_run_at is None or policy.next_run_at > as_of:
             return {"policy_id": policy_id, "outcome": "not_due"}
 
-        actor_user_id: Optional[str] = policy.updated_by_user_id or policy.created_by_user_id
-        if not actor_user_id:
-            policy.next_run_at = automation_service._next_run(policy, now=as_of)
-            policy.updated_reason = "Scheduled run skipped because no accountable policy owner is recorded."
-            db.add(policy)
-            db.commit()
-            return {"policy_id": policy_id, "outcome": "skipped_no_owner"}
-
         amo_id = policy.amo_id
         due_key = policy.next_run_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         idempotency_key = f"scheduled:{policy.id}:{due_key}"
+        actor_user_id: Optional[str] = policy.updated_by_user_id or policy.created_by_user_id
+        if not actor_user_id:
+            message = "Scheduled run skipped because no accountable policy owner is recorded."
+            retained = _record_failed_scheduled_run(
+                db,
+                policy_id=policy_id,
+                actor_user_id=None,
+                idempotency_key=idempotency_key,
+                message=message,
+                as_of=as_of,
+                failure_kind="NO_ACCOUNTABLE_OWNER",
+            )
+            return {
+                "policy_id": policy_id,
+                "amo_id": amo_id,
+                "outcome": "skipped_no_owner",
+                "evidence_retained": retained,
+                "error": message,
+            }
+
         try:
             row = automation_service.run(
                 db,
@@ -159,7 +175,7 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
                 "generated_count": row.generated_count,
                 "conflict_count": row.conflict_count,
             }
-        except (ValueError, RuntimeError, IntegrityError) as exc:
+        except Exception as exc:
             message = str(exc)
             retained = _record_failed_scheduled_run(
                 db,
@@ -181,10 +197,24 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
 
 
 def run(*, as_of: Optional[datetime] = None, limit: int = 100) -> dict:
-    """Execute due policies and return a scheduler-safe summary."""
+    """Execute due policies and return a scheduler-safe summary.
+
+    One tenant failure is returned as an isolated result and never prevents
+    later due tenants from being attempted in the same scheduler invocation.
+    """
     effective_as_of = as_of or _utcnow()
     policy_ids = _due_policy_ids(as_of=effective_as_of, limit=max(1, min(limit, 500)))
-    results = [_run_policy(policy_id, as_of=effective_as_of) for policy_id in policy_ids]
+    results: list[dict] = []
+    for policy_id in policy_ids:
+        try:
+            results.append(_run_policy(policy_id, as_of=effective_as_of))
+        except Exception as exc:
+            results.append({
+                "policy_id": policy_id,
+                "outcome": "failed",
+                "evidence_retained": False,
+                "error": str(exc),
+            })
     return {
         "as_of": effective_as_of.isoformat(),
         "due_count": len(policy_ids),
