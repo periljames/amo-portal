@@ -1,4 +1,4 @@
-"""Access-filtered hierarchy endpoints registered ahead of compatibility routes."""
+"""Access-filtered, read-only hierarchy endpoints registered first."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +10,7 @@ from amodb.apps.manuals.router_legacy import _tenant_by_slug
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
-from .knowledge_service import hierarchy_payload
+from .knowledge_tree_reader import read_only_hierarchy_payload
 from .workspace_service import is_control_user, resolve_tenant
 
 
@@ -25,13 +25,11 @@ def get_access_filtered_knowledge_tree(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = resolve_tenant(db, tenant_slug, current_user)
-    payload = hierarchy_payload(
+    payload = read_only_hierarchy_payload(
         db,
         manual_tenant=tenant,
-        actor_id=current_user.id if is_control_user(current_user) else None,
         user=current_user,
     )
-    db.commit()
     payload["capabilities"] = {"read": True, "control": is_control_user(current_user)}
     return payload
 
@@ -45,13 +43,11 @@ def get_access_filtered_publication_tree(
     tenant: manual_models.Tenant = _tenant_by_slug(db, tenant_slug)
     if not getattr(current_user, "is_superuser", False) and str(current_user.amo_id) != str(tenant.amo_id):
         raise HTTPException(status_code=403, detail="The requested hierarchy is outside the active AMO")
-    payload = hierarchy_payload(
+    payload = read_only_hierarchy_payload(
         db,
         manual_tenant=tenant,
-        actor_id=current_user.id if is_control_user(current_user) else None,
         user=current_user,
     )
-    db.commit()
     payload["capabilities"] = {"read": True, "control": is_control_user(current_user)}
     return payload
 
