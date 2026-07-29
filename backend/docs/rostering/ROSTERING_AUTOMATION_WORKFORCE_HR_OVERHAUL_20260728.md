@@ -81,6 +81,15 @@ Automation:
 - records failed execution evidence;
 - never submits, approves or publishes a roster.
 
+The final merge-safety pass also guarantees that:
+
+- policy revisions are locked before their expected revision is checked;
+- reused draft versions are locked and revalidated as `DRAFT` before mutation;
+- manual generation does not advance or suppress the scheduled cadence;
+- concurrent identical manual requests return the matching winning run instead of a false database-conflict response;
+- failed, mismatched and still-running idempotent replays remain explicit conflicts;
+- leave rejection is shown only to users with the effective review permission.
+
 ## Persistence
 
 Migration `rostering_20260728_automation_policy` adds:
