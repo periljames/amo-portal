@@ -25,6 +25,7 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
 const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
 const DocControlDraftsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftsPage })));
 const DocControlDraftDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftDetailPage })));
@@ -144,6 +145,7 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/:department/doc-control/*" element={<CanonicalDocumentControlRedirect />} />
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<WorkspaceRequireAuth><DocControlDraftDetailPage /></WorkspaceRequireAuth>} />
