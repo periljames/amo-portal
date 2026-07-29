@@ -1,1 +1,0 @@
-Open the draft pull request to apply and validate the completion patch.
