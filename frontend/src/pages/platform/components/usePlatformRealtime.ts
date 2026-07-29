@@ -51,12 +51,12 @@ function platformStreamUrl(lastEventId: string | null): string {
   return `${getApiBaseUrl()}/platform/console/events${suffix ? `?${suffix}` : ""}`;
 }
 
-export function usePlatformRealtime() {
-  const [status, setStatus] = useState<PlatformLiveStatus>("connecting");
+export function usePlatformRealtime(enabled = true) {
+  const [status, setStatus] = useState<PlatformLiveStatus>(enabled ? "connecting" : "offline");
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastEvent, setLastEvent] = useState<PlatformConsoleEvent | null>(null);
-  const statusRef = useRef<PlatformLiveStatus>("connecting");
+  const statusRef = useRef<PlatformLiveStatus>(enabled ? "connecting" : "offline");
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<number | null>(null);
   const retryRef = useRef(0);
@@ -78,6 +78,8 @@ export function usePlatformRealtime() {
   const connect = useCallback(() => {
     controllerRef.current?.abort();
     if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
+    if (!enabled) return;
+
     const token = getToken();
     if (!token || (typeof navigator !== "undefined" && !navigator.onLine)) {
       updateStatus("offline");
@@ -130,22 +132,24 @@ export function usePlatformRealtime() {
         }
         if (!controller.signal.aborted) throw new Error("Platform live stream closed");
       } catch {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !enabled) return;
         updateStatus("offline");
         const delay = Math.min(30_000, 1_500 * 2 ** retryRef.current);
         retryRef.current += 1;
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [publish, updateStatus]);
+  }, [enabled, publish, updateStatus]);
 
   const reconnect = useCallback(() => {
+    if (!enabled) return;
     retryRef.current = 0;
     connectRef.current();
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     connectRef.current = connect;
+    if (!enabled) return;
     connect();
     const online = () => reconnect();
     const offline = () => {
@@ -165,7 +169,7 @@ export function usePlatformRealtime() {
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [connect, reconnect, updateStatus]);
+  }, [connect, enabled, reconnect, updateStatus]);
 
   return { status, snapshot, lastUpdated, lastEvent, reconnect };
 }
