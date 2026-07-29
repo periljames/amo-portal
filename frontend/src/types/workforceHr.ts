@@ -21,6 +21,7 @@ export type HrActionItem = {
 
 export type HrPersonReadiness = {
   user_id: string;
+  contract_id: string;
   staff_code: string;
   full_name: string;
   position_title?: string | null;
@@ -29,8 +30,17 @@ export type HrPersonReadiness = {
   contract_type?: string | null;
   contract_effective_from?: string | null;
   contract_effective_to?: string | null;
+  primary_base_station_id?: string | null;
   primary_base_code?: string | null;
   supervisor_name?: string | null;
+  standard_weekly_minutes: number;
+  standard_daily_minutes: number;
+  fte_percentage: number;
+  cost_centre?: string | null;
+  payroll_number?: string | null;
+  overtime_eligible: boolean;
+  night_shift_eligible: boolean;
+  standby_eligible: boolean;
   work_pattern_code?: string | null;
   work_pattern_name?: string | null;
   work_pattern_effective_from?: string | null;
