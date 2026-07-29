@@ -126,7 +126,7 @@ def install_resend_email_provider() -> None:
             if str(item.get("provider") or "").lower() not in LEGACY_EMAIL_PROVIDERS
         ]
 
-    def upsert_provider_credential(
+    def guarded_upsert_provider_credential(
         db,
         *,
         provider: str,
@@ -172,4 +172,4 @@ def install_resend_email_provider() -> None:
     saas_providers.provider_catalog = provider_catalog
     saas_providers.check_provider = check_provider
     saas_services.list_provider_credentials = list_provider_credentials
-    saas_services.upsert_provider_credential = upsert_provider_credential
+    saas_services.upsert_provider_credential = guarded_upsert_provider_credential
