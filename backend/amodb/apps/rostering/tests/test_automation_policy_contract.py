@@ -113,3 +113,12 @@ def test_failed_idempotency_replay_is_not_returned_as_success():
     source = inspect.getsource(automation_service.run)
     assert "ROSTER_AUTOMATION_PREVIOUS_FAILURE" in source
     assert "ROSTER_AUTOMATION_ALREADY_RUNNING" in source
+
+
+def test_period_only_automation_does_not_require_or_validate_a_draft():
+    source = inspect.getsource(automation_service.run)
+    assert 'if not draft and (should_create_draft or should_generate):' in source
+    assert 'run_row.version_id = draft.id if draft else None' in source
+    assert 'if should_generate and draft:' in source
+    assert 'if policy.validate_after_generation and draft:' in source
+    assert '"draft_created_or_reused": draft is not None' in source

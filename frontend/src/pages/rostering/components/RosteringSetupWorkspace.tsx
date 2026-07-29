@@ -9,13 +9,11 @@ import {
   CalendarClock,
   CalendarPlus,
   CheckCircle2,
-  Clock3,
   History,
   Layers3,
   Play,
   Plus,
   RefreshCw,
-  RotateCcw,
   Save,
   Settings2,
   ShieldCheck,
@@ -79,10 +77,6 @@ function stateTone(value: string): string {
   if (value === "BLOCKED" || value === "FAILED") return "danger";
   if (value === "NEEDS_ATTENTION" || value === "COMPLETED_WITH_CONFLICTS") return "warning";
   return "info";
-}
-
-function setupActionPath(section: Section): string {
-  return `?section=${encodeURIComponent(section)}`;
 }
 
 export function RosteringSetupWorkspace() {
@@ -235,6 +229,7 @@ export function RosteringSetupWorkspace() {
           busy={busy}
           runAction={runAction}
           workforcePath={`${root}/workforce`}
+          timezoneName={readiness.policy.timezone_name}
         />
       ) : null}
       {section === "policy" ? (
@@ -428,6 +423,12 @@ function AutomationPanel({
 }) {
   const [draft, setDraft] = useState(policy);
   const [reason, setReason] = useState("");
+  const schedulingDisabled = !canManage || draft.frequency === "MANUAL";
+  const changeFrequency = (frequency: RosterAutomationFrequency) => {
+    const weeklyCadence = frequency === "WEEKLY" || frequency === "FORTNIGHTLY";
+    const runDay = weeklyCadence && draft.run_day > 7 ? 1 : !weeklyCadence && draft.run_day > 28 ? 1 : draft.run_day;
+    setDraft({ ...draft, frequency, run_day: runDay });
+  };
 
   const save = () => runAction("automation-policy", () => updateRosterAutomationPolicy({
     enabled: draft.enabled,
@@ -440,9 +441,9 @@ function AutomationPanel({
     period_name_pattern: draft.period_name_pattern,
     create_initial_draft: draft.create_initial_draft,
     generate_from_patterns: draft.generate_from_patterns,
-    preserve_source_commitments: draft.preserve_source_commitments,
+    preserve_source_commitments: true,
     validate_after_generation: draft.validate_after_generation,
-    notify_planners: draft.notify_planners,
+    notify_planners: false,
     require_preview_confirmation: draft.require_preview_confirmation,
     expected_state_revision: policy.state_revision,
     reason,
@@ -456,17 +457,17 @@ function AutomationPanel({
           <label className="rs-toggle"><input type="checkbox" checked={draft.enabled} disabled={!canManage} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span>{draft.enabled ? "On" : "Off"}</span></label>
         </div>
         <div className="rs-form-grid">
-          <label><span>Frequency</span><select value={draft.frequency} disabled={!canManage} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RosterAutomationFrequency })}><option value="MONTHLY">Monthly</option><option value="FORTNIGHTLY">Fortnightly</option><option value="WEEKLY">Weekly</option><option value="MANUAL">Manual only</option></select></label>
-          <label><span>Maintain ahead</span><select value={draft.lead_periods} disabled={!canManage} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value} period{value === 1 ? "" : "s"}</option>)}</select></label>
-          <label><span>Run day</span><input type="number" min="1" max="28" value={draft.run_day} disabled={!canManage} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label>
-          <label><span>Run hour</span><input type="number" min="0" max="23" value={draft.run_hour_local} disabled={!canManage} onChange={(event) => setDraft({ ...draft, run_hour_local: Number(event.target.value) })} /></label>
+          <label><span>Frequency</span><select value={draft.frequency} disabled={!canManage} onChange={(event) => changeFrequency(event.target.value as RosterAutomationFrequency)}><option value="MONTHLY">Monthly</option><option value="FORTNIGHTLY">Fortnightly</option><option value="WEEKLY">Weekly</option><option value="MANUAL">Manual only</option></select></label>
+          <label><span>Maintain ahead</span><select value={draft.lead_periods} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value} period{value === 1 ? "" : "s"}</option>)}</select></label>
+          {draft.frequency === "MONTHLY" ? <label><span>Day of month</span><input type="number" min="1" max="28" value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label> : null}
+          {draft.frequency === "WEEKLY" || draft.frequency === "FORTNIGHTLY" ? <label><span>Weekday</span><select value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option key={day} value={index + 1}>{day}</option>)}</select></label> : null}
+          <label><span>Run hour</span><input type="number" min="0" max="23" value={draft.run_hour_local} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_hour_local: Number(event.target.value) })} /></label>
           <label><span>Timezone</span><input value={draft.timezone_name} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone_name: event.target.value })} /></label>
           <label><span>Period code</span><input value={draft.period_code_pattern} disabled={!canManage} onChange={(event) => setDraft({ ...draft, period_code_pattern: event.target.value })} /></label>
           <label className="rs-form-grid__wide"><span>Period name</span><input value={draft.period_name_pattern} disabled={!canManage} onChange={(event) => setDraft({ ...draft, period_name_pattern: event.target.value })} /></label>
         </div>
         <div className="rs-check-grid">
           <label><input type="checkbox" checked={draft.create_initial_draft} disabled={!canManage} onChange={(event) => setDraft({ ...draft, create_initial_draft: event.target.checked })} /> Create initial draft</label>
-          <label><input type="checkbox" checked={draft.notify_planners} disabled={!canManage} onChange={(event) => setDraft({ ...draft, notify_planners: event.target.checked })} /> Notify planners</label>
           <label><input type="checkbox" checked={draft.require_preview_confirmation} disabled={!canManage} onChange={(event) => setDraft({ ...draft, require_preview_confirmation: event.target.checked })} /> Require preview confirmation</label>
         </div>
       </section>
@@ -474,9 +475,9 @@ function AutomationPanel({
       <section className="wr-panel">
         <div className="wr-section-heading"><div><span className="wr-eyebrow">Automatic rotation</span><h2>Generate duties from work patterns</h2><p>Use effective HR pattern assignments while preserving leave, training and Quality commitments.</p></div><label className="rs-toggle"><input type="checkbox" checked={draft.generate_from_patterns} disabled={!canManage} onChange={(event) => setDraft({ ...draft, generate_from_patterns: event.target.checked })} /><span>{draft.generate_from_patterns ? "On" : "Off"}</span></label></div>
         <div className="rs-check-grid">
-          <label><input type="checkbox" checked={draft.preserve_source_commitments} disabled={!canManage} onChange={(event) => setDraft({ ...draft, preserve_source_commitments: event.target.checked })} /> Preserve source commitments</label>
           <label><input type="checkbox" checked={draft.validate_after_generation} disabled={!canManage} onChange={(event) => setDraft({ ...draft, validate_after_generation: event.target.checked })} /> Validate after generation</label>
         </div>
+        <div className="rs-safety-note"><ShieldCheck size={18} /><p><strong>Enforced protection:</strong> source commitments are always preserved during generation.</p></div>
         <div className="rs-safety-note"><ShieldCheck size={18} /><p><strong>Controlled boundary:</strong> automatic generation can create draft duty only. Submission, approval and publication remain separate authorised actions.</p></div>
       </section>
 
@@ -585,6 +586,7 @@ function PatternBuilder({
   busy,
   runAction,
   workforcePath,
+  timezoneName,
 }: {
   shifts: ShiftTemplateRead[];
   patterns: Awaited<ReturnType<typeof listWorkPatterns>>;
@@ -594,6 +596,7 @@ function PatternBuilder({
   busy: string | null;
   runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
   workforcePath: string;
+  timezoneName: string;
 }) {
   const activeShifts = shifts.filter((shift) => shift.is_active);
   const [building, setBuilding] = useState(false);
@@ -614,7 +617,7 @@ function PatternBuilder({
     return { cycle_day_index: index, shift_template_id: shift?.id || null, status, start_time_local: shift?.default_start_time || null, end_time_local: shift?.default_end_time || null, spans_next_day: spans, planned_minutes: shift?.duration_minutes || 0 };
   });
   const save = () => runAction("pattern", async () => {
-    await createWorkPattern({ code: code.trim().toUpperCase(), name: name.trim(), description: null, cycle_length_days: cycleLength, is_active: true, timezone_name: "Africa/Nairobi", days });
+    await createWorkPattern({ code: code.trim().toUpperCase(), name: name.trim(), description: null, cycle_length_days: cycleLength, is_active: true, timezone_name: timezoneName, days });
     setBuilding(false); setCode(""); setName(""); resize(7);
   });
 

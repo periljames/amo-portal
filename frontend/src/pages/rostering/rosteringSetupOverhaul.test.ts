@@ -31,6 +31,26 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(automationServiceSource).toContain("/automation/run");
   });
 
+
+  it("uses cadence-aware scheduling controls and normalizes run days", () => {
+    expect(setupSource).toContain("Day of month");
+    expect(setupSource).toContain("Weekday");
+    expect(setupSource).toContain('draft.frequency === "MANUAL"');
+    expect(setupSource).toContain("draft.run_day > 7 ? 1");
+  });
+
+  it("does not advertise unimplemented or optional safety behavior", () => {
+    expect(setupSource).not.toContain("> Notify planners<");
+    expect(setupSource).not.toContain("> Preserve source commitments<");
+    expect(setupSource).toContain("source commitments are always preserved");
+  });
+
+  it("uses the controlled automation timezone for work patterns", () => {
+    expect(setupSource).toContain("timezoneName={readiness.policy.timezone_name}");
+    expect(setupSource).toContain("timezone_name: timezoneName");
+    expect(setupSource).not.toContain('timezone_name: "Africa/Nairobi"');
+  });
+
   it("keeps HR-owned records out of roster setup", () => {
     expect(setupSource).not.toContain("createEmploymentContract");
     expect(setupSource).not.toContain("createLeaveType");

@@ -467,14 +467,14 @@ def run(
                 idempotency_key=f"{payload.idempotency_key}:version",
             ),
         )
-    if not draft:
+    if not draft and (should_create_draft or should_generate):
         raise ValueError("No draft roster version is available for generation")
-    run_row.version_id = draft.id
+    run_row.version_id = draft.id if draft else None
 
     generated_count = 0
     skipped_count = 0
     conflicts: list[dict] = []
-    if should_generate:
+    if should_generate and draft:
         generation = roster_services.generate_from_patterns(
             db,
             version=draft,
@@ -494,7 +494,7 @@ def run(
 
     blocker_count = 0
     warning_count = 0
-    if policy.validate_after_generation:
+    if policy.validate_after_generation and draft:
         validation = roster_services.validate_version(
             db,
             version=draft,
@@ -511,6 +511,10 @@ def run(
     run_row.summary_json = {
         "preview": preview_result.model_dump(mode="json"),
         "conflicts": conflicts,
+        "period_created_or_reused": True,
+        "draft_created_or_reused": draft is not None,
+        "generation_performed": bool(should_generate and draft),
+        "validation_performed": bool(policy.validate_after_generation and draft),
         "review_required": True,
         "publication_performed": False,
     }
