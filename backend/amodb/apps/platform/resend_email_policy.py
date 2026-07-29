@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from typing import Any
 
 from . import saas_providers, saas_services
 from .resend_adapter import check_api_key
@@ -137,6 +137,8 @@ def install_resend_email_provider() -> None:
         normalized = str(provider or "").strip().lower()
         if normalized in LEGACY_EMAIL_PROVIDERS:
             raise ValueError("Legacy email providers are disabled; configure Resend instead")
+        if normalized == "resend" and tenant_id is not None:
+            raise ValueError("Resend is a platform-wide credential and can only be configured by a platform superuser")
         secret_changed = normalized == "resend" and bool((payload or {}).get("secret"))
         effective_payload = _normalise_resend_payload(payload) if normalized == "resend" else payload
         response = original_upsert(
@@ -150,7 +152,7 @@ def install_resend_email_provider() -> None:
             row = saas_services.get_provider_credential(
                 db,
                 provider="resend",
-                tenant_id=tenant_id,
+                tenant_id=None,
                 allow_platform_fallback=False,
             )
             if row is not None:
