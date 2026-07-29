@@ -50,6 +50,13 @@ function hierarchyLabel(path?: string | null): string {
     .join(" › ");
 }
 
+function visibleReaderPage(explicitPage?: number | null): number | undefined {
+  if (explicitPage && explicitPage > 0) return explicitPage;
+  const current = document.querySelector<HTMLElement>(".publication-native-pdf__page.is-current");
+  const page = Number(current?.dataset.pageNumber || 0);
+  return Number.isFinite(page) && page > 0 ? page : undefined;
+}
+
 export default function DocumentationAssistantPanel({
   tenant,
   manualId,
@@ -83,7 +90,7 @@ export default function DocumentationAssistantPanel({
         mode,
         manual_id: manualId || undefined,
         revision_id: revisionId || undefined,
-        page_number: pageNumber || undefined,
+        page_number: visibleReaderPage(pageNumber),
         limit: 12,
       });
       setResult(response);
