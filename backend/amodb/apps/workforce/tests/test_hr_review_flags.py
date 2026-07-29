@@ -72,3 +72,20 @@ def test_default_day_bootstrap_is_explicit_and_canonical():
 def test_active_user_readiness_uses_tenant_local_date():
     assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.list_people_page_v2)
     assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.dashboard_v2)
+
+
+def test_effective_contract_gap_retains_future_starters():
+    source = inspect.getsource(hr_service.dashboard_v2)
+    assert "without_effective_contract" in source
+    assert "not in current_contracts" in source
+    assert "future_contract_users" in source
+    assert "Edit future contract" in source
+    assert "len(without_effective_contract)" in source
+
+
+def test_default_day_bootstrap_repairs_non_monday_reserved_anchor():
+    source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    assert 'current.work_pattern.code == "DEFAULT-DAY-5X2"' in source
+    assert "current.cycle_anchor_date.weekday() == 0" in source
+    assert "not current_is_reserved_default or current_default_anchor_is_monday" in source
+    assert "cycle_anchor_date=week_monday" in source

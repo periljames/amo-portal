@@ -21,11 +21,13 @@ The Workforce and HR employee register previously started from effective employm
 
 ## Review corrections
 
-The blocker reviews identified and corrected three effective-dating defects:
+The blocker reviews identified and corrected five readiness and effective-dating defects:
 
 - inactive pattern assignments are no longer rewritten in place across their historical interval;
 - the five-day duty cycle is anchored to Monday rather than the day on which the bootstrap action is executed; and
-- future contracts are surfaced and edited instead of misclassified as missing contracts that invite an overlapping creation.
+- future contracts are surfaced and edited instead of misclassified as missing contracts that invite an overlapping creation;
+- future starters remain included in the currently effective-contract gap metric and receive an edit-future-contract action; and
+- existing reserved default-day assignments with non-Monday anchors are safely re-effective-dated to the canonical Monday anchor.
 
 These invariants are covered by Workforce regression contracts and the complete Rostering and Workforce test suites.
 

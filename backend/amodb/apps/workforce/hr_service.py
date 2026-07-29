@@ -1005,7 +1005,16 @@ def dashboard_v2(
         item.full_name.lower(),
         item.user_id,
     ))
-    without_contract = [user for user in users if str(user.id) not in contracts]
+    without_effective_contract = [
+        user for user in users if str(user.id) not in current_contracts
+    ]
+    without_any_contract = [
+        user for user in users if str(user.id) not in contracts
+    ]
+    future_contract_users = [
+        user for user in without_effective_contract
+        if str(user.id) in contracts
+    ]
     without_pattern = [
         user for user in users
         if not (assignment := patterns.get(str(user.id)))
@@ -1018,7 +1027,7 @@ def dashboard_v2(
     ]
 
     response.active_employee_count = len(users)
-    response.employees_without_contract_count = len(without_contract)
+    response.employees_without_contract_count = len(without_effective_contract)
     response.onboarding_employee_count = sum(
         1 for contract in current_contracts.values()
         if _value(contract.employment_status) == models.EmploymentStatus.ONBOARDING.value
@@ -1059,9 +1068,9 @@ def dashboard_v2(
     response.metrics.insert(1, hr_schemas.HrMetric(
         key="contract_gaps",
         label="Contract gaps",
-        value=len(without_contract),
-        detail="Active users without an effective contract",
-        tone="danger" if without_contract else "good",
+        value=len(without_effective_contract),
+        detail="Active users without a currently effective contract",
+        tone="danger" if without_effective_contract else "good",
     ))
 
     missing_contract_actions = [
@@ -1076,9 +1085,30 @@ def dashboard_v2(
             action_label="Create contract",
             action_path=f"people/{user.id}?section=contract",
         )
-        for user in without_contract[:50]
+        for user in without_any_contract[:50]
     ]
-    response.action_queue = (missing_contract_actions + list(response.action_queue))[:100]
+    future_contract_actions = [
+        hr_schemas.HrActionItem(
+            id=f"contract-future:{user.id}",
+            category="CONTRACT",
+            severity="WARNING",
+            title="Employment contract not yet effective",
+            detail=(
+                "This active tenant user remains in the effective-contract gap until "
+                f"{contracts[str(user.id)].effective_from.isoformat()}."
+            ),
+            user_id=str(user.id),
+            user_name=_display_name(user),
+            action_label="Edit future contract",
+            action_path=f"people/{user.id}?section=contract",
+        )
+        for user in future_contract_users[:50]
+    ]
+    response.action_queue = (
+        missing_contract_actions
+        + future_contract_actions
+        + list(response.action_queue)
+    )[:100]
     return response
 
 
@@ -1211,7 +1241,21 @@ def bootstrap_default_day_pattern(
     skipped_conflict = 0
     for user in eligible_users:
         current = occupied.get(str(user.id))
-        if current is not None and current.work_pattern and current.work_pattern.is_active:
+        current_has_active_pattern = bool(
+            current and current.work_pattern and current.work_pattern.is_active
+        )
+        current_is_reserved_default = bool(
+            current_has_active_pattern
+            and current.work_pattern.code == "DEFAULT-DAY-5X2"
+        )
+        current_default_anchor_is_monday = bool(
+            current_is_reserved_default
+            and current.cycle_anchor_date
+            and current.cycle_anchor_date.weekday() == 0
+        )
+        if current_has_active_pattern and (
+            not current_is_reserved_default or current_default_anchor_is_monday
+        ):
             already_assigned += 1
             continue
 
