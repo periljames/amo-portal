@@ -171,14 +171,14 @@ def send_email(
                 subject=subject,
                 context=safe_context,
                 correlation_id=correlation_id or f"email-log:{log.id}",
-            )
+            ) or {}
             delivery = {
-                "provider": "resend",
+                "provider": str(result.get("provider") or "resend"),
                 "message_id": result.get("message_id"),
                 "status": "SENT",
                 "mode": result.get("mode"),
-                "effective_recipient": result.get("recipient"),
-                "original_recipient": result.get("original_recipient"),
+                "effective_recipient": result.get("recipient") or cleaned_recipient,
+                "original_recipient": result.get("original_recipient") or cleaned_recipient,
                 "template_id": result.get("template_id"),
                 "accepted_at": _utcnow().isoformat(),
             }
