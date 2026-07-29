@@ -23,8 +23,8 @@ jobs:
       - name: Validate and apply patch
         run: |
           test -f .github/agent/complete-email-delivery.patch || exit 0
-          git apply --check .github/agent/complete-email-delivery.patch
-          git apply .github/agent/complete-email-delivery.patch
+          git apply --recount --check .github/agent/complete-email-delivery.patch
+          git apply --recount .github/agent/complete-email-delivery.patch
           rm .github/agent/complete-email-delivery.patch
           python -m compileall -q \
             backend/amodb/apps/accounts \
