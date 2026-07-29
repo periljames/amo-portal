@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from .router_legacy import router as legacy_router
+from .knowledge_records_router import router as knowledge_records_router
 from .knowledge_workspace_router import router as knowledge_workspace_router
 from .workspace_access import enforce_workspace_access
 from .workspace_authority_router import router as workspace_authority_router
@@ -34,14 +35,19 @@ router.include_router(legacy_router)
 # custody, distribution integrity, external-source currency, periodic-review
 # follow-up, profile-owner tenancy, terminal temporary-revision immutability,
 # accountable approval authority, decision evidence, active-recipient publication,
-# server-derived workflow impact, governed hierarchy/reference integrity, and
-# release safeguards. They must precede the compatibility workspace router because
-# Starlette resolves matching routes in declaration order.
+# server-derived workflow impact, governed hierarchy/reference integrity, generated
+# record custody, and release safeguards. They must precede the compatibility
+# workspace router because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
 router.include_router(
     knowledge_workspace_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    knowledge_records_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
