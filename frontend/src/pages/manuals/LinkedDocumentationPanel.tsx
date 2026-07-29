@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -26,14 +26,15 @@ import {
   fetchPublicationBlob,
   publicationPdfSource,
 } from "../../services/publications";
+import { PDF_DOCUMENT_OPTIONS, pdfDevicePixelRatio } from "./pdfReaderConfig";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import "./linkedDocumentationPanel.css";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-const PdfDocument = Document as unknown as React.FC<any>;
-const PdfPage = Page as unknown as React.FC<any>;
+const PdfDocument = Document as unknown as FC<any>;
+const PdfPage = Page as unknown as FC<any>;
 
 type PdfHandle = {
   numPages: number;
@@ -60,6 +61,11 @@ function formatDate(value?: string | null): string {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(parsed);
 }
 
+function humanize(value: unknown, fallback = "Not recorded"): string {
+  const text = String(value ?? "").trim();
+  return text ? text.replaceAll("_", " ") : fallback;
+}
+
 export default function LinkedDocumentationPanel({
   tenant,
   referenceId,
@@ -71,6 +77,7 @@ export default function LinkedDocumentationPanel({
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const inspectionGenerationRef = useRef(0);
   const [detail, setDetail] = useState<LinkedResourceDetail | null>(null);
   const [pdf, setPdf] = useState<PdfHandle | null>(null);
   const [pageCount, setPageCount] = useState(1);
@@ -87,9 +94,15 @@ export default function LinkedDocumentationPanel({
 
   useEffect(() => {
     let active = true;
+    inspectionGenerationRef.current += 1;
     setLoading(true);
     setError("");
     setDetail(null);
+    setPdf(null);
+    setPageCount(1);
+    setPageNumber(1);
+    setFieldCount(0);
+    setHasJavaScript(false);
     setRecord(null);
     setUploadFile(null);
     setDirty(false);
@@ -97,7 +110,10 @@ export default function LinkedDocumentationPanel({
       .then((value) => { if (active) setDetail(value); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The linked controlled resource could not be opened."); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      inspectionGenerationRef.current += 1;
+    };
   }, [referenceId, tenant]);
 
   useEffect(() => {
@@ -105,6 +121,10 @@ export default function LinkedDocumentationPanel({
     if (!host) return;
     const resize = () => setPageWidth(Math.max(300, Math.min(760, host.clientWidth - 28)));
     resize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", resize);
+      return () => window.removeEventListener("resize", resize);
+    }
     const observer = new ResizeObserver(resize);
     observer.observe(host);
     return () => observer.disconnect();
@@ -136,22 +156,32 @@ export default function LinkedDocumentationPanel({
             ? "No interactive AcroForm fields were detected."
             : null;
 
-  const onPdfLoad = async (document: PdfHandle) => {
+  const onPdfLoad = useCallback((document: PdfHandle) => {
     setPdf(document);
-    setPageCount(document.numPages || 1);
+    setPageCount(Math.max(1, Number(document.numPages || 1)));
     setPageNumber(1);
     setError("");
-    try {
-      const [fields, scripted] = await Promise.all([
-        typeof document.getFieldObjects === "function" ? document.getFieldObjects().catch(() => null) : Promise.resolve(null),
-        typeof document.hasJSActions === "function" ? document.hasJSActions().catch(() => false) : Promise.resolve(false),
-      ]);
-      setFieldCount(Object.values(fields || {}).reduce((count, values) => count + values.length, 0));
+
+    const generation = ++inspectionGenerationRef.current;
+    void Promise.all([
+      typeof document.getFieldObjects === "function"
+        ? document.getFieldObjects().catch(() => null)
+        : Promise.resolve(null),
+      typeof document.hasJSActions === "function"
+        ? document.hasJSActions().catch(() => false)
+        : Promise.resolve(false),
+    ]).then(([fields, scripted]) => {
+      if (generation !== inspectionGenerationRef.current) return;
+      const count = Object.values(fields || {}).reduce((total, values) => total + (Array.isArray(values) ? values.length : 0), 0);
+      setFieldCount(count);
       setHasJavaScript(Boolean(scripted));
-    } catch {
-      setFieldCount(0);
-    }
-  };
+    }).catch(() => {
+      if (generation === inspectionGenerationRef.current) {
+        setFieldCount(0);
+        setHasJavaScript(false);
+      }
+    });
+  }, []);
 
   const download = async () => {
     if (!detail) return;
@@ -243,10 +273,10 @@ export default function LinkedDocumentationPanel({
 
       {detail ? <>
         <div className="linked-documentation-panel__context">
-          <div><span>Referenced as</span><strong>{detail.reference.raw_token}</strong></div>
-          <div><span>Relationship</span><strong>{detail.reference.relationship_type.replaceAll("_", " ")}</strong></div>
+          <div><span>Referenced as</span><strong>{detail.reference.raw_token || "Reference"}</strong></div>
+          <div><span>Relationship</span><strong>{humanize(detail.reference.relationship_type)}</strong></div>
           <div><span>Effective</span><strong>{formatDate(detail.target.effective_date)}</strong></div>
-          <div><span>Hierarchy</span><strong>{detail.target.node?.node_type.replaceAll("_", " ") || detail.target.manual_type}</strong></div>
+          <div><span>Hierarchy</span><strong>{humanize(detail.target.node?.node_type, detail.target.manual_type || "Document")}</strong></div>
         </div>
 
         <div className="linked-documentation-panel__actions">
@@ -267,7 +297,7 @@ export default function LinkedDocumentationPanel({
           {canSubmit ? <button type="button" className="primary" onClick={() => void submit()} disabled={busy || (canUpload && !uploadFile)}><Save size={15} /> {busy ? "Submitting…" : canUpload ? "Submit completed PDF" : "Submit completed form"}</button> : null}
         </div>
 
-        {record ? <div className="linked-documentation-panel__success" role="status"><CheckCircle2 size={19} /><div><strong>Controlled record created</strong><span>{record.record_number} · {record.status.replaceAll("_", " ")}</span><a href={record.download_url} target="_blank" rel="noreferrer">Open retained copy</a></div></div> : null}
+        {record ? <div className="linked-documentation-panel__success" role="status"><CheckCircle2 size={19} /><div><strong>Controlled record created</strong><span>{record.record_number} · {humanize(record.status)}</span><a href={record.download_url} target="_blank" rel="noreferrer">Open retained copy</a></div></div> : null}
         {!record && readOnlyReason ? <div className="linked-documentation-panel__notice"><ShieldCheck size={18} /><div><strong>Read-only controlled resource</strong><span>{readOnlyReason}</span></div></div> : null}
         {!record && canExecute ? <div className="linked-documentation-panel__notice linked-documentation-panel__notice--editable"><FileCheck2 size={18} /><div><strong>Executable AcroForm</strong><span>{fieldCount} field{fieldCount === 1 ? "" : "s"} detected. Entries remain local until submitted as a retained record.</span></div></div> : null}
         {!record && canUpload ? <div className="linked-documentation-panel__notice linked-documentation-panel__notice--editable"><Upload size={18} /><div><strong>Completed PDF upload</strong><span>{uploadFile ? `${uploadFile.name} selected. Submit it to create the retained record.` : "Download and complete the controlled template, then choose the completed PDF for submission."}</span></div></div> : null}
@@ -281,9 +311,13 @@ export default function LinkedDocumentationPanel({
           <PdfDocument
             file={source}
             onLoadSuccess={onPdfLoad}
-            onLoadError={(caught: unknown) => setError(caught instanceof Error ? caught.message : "The linked PDF could not be rendered.")}
-            options={{ isEvalSupported: false, enableXfa: true }}
+            onLoadError={(caught: unknown) => {
+              inspectionGenerationRef.current += 1;
+              setError(caught instanceof Error ? caught.message : "The linked PDF could not be rendered.");
+            }}
+            options={PDF_DOCUMENT_OPTIONS}
             loading={<div className="linked-documentation-panel__state"><LoaderCircle className="is-spinning" size={20} /> Opening page…</div>}
+            error={<div className="linked-documentation-panel__error" role="alert"><AlertTriangle size={19} /><span>The linked PDF could not be rendered. Download the controlled copy or reopen the reader.</span></div>}
           >
             <PdfPage
               pageNumber={pageNumber}
@@ -292,7 +326,7 @@ export default function LinkedDocumentationPanel({
               renderAnnotationLayer
               renderForms={canExecute}
               externalLinkTarget="_blank"
-              devicePixelRatio={Math.min(window.devicePixelRatio || 1, 1.6)}
+              devicePixelRatio={pdfDevicePixelRatio()}
             />
           </PdfDocument>
         </div>
