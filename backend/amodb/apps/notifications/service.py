@@ -87,6 +87,19 @@ def _enforce_rate_limits(db: Session, *, config: dict) -> None:
         )
 
 
+def _requires_isolated_delivery_session(audit_context: Optional[dict]) -> bool:
+    """Keep account-recovery delivery evidence independent of request teardown.
+
+    Password-reset token creation is committed before delivery. Its email log must
+    therefore also commit independently so signed provider webhooks can always
+    reconcile against the stored provider message ID, even though the endpoint's
+    request-owned SQLAlchemy session is closed without another commit.
+    """
+
+    purpose = str((audit_context or {}).get("purpose") or "").strip().lower()
+    return purpose == "password-reset"
+
+
 def send_email(
     template_key: str,
     recipient: Optional[str],
@@ -101,10 +114,12 @@ def send_email(
     recipient_user_id: Optional[str] = None,
     audit_context: Optional[dict] = None,
 ) -> models.EmailLog:
-    owns_session = db is None
-    db = db or WriteSessionLocal()
     if not amo_id:
         raise ValueError("amo_id is required to create an email log entry")
+
+    isolated_session = db is not None and _requires_isolated_delivery_session(audit_context)
+    owns_session = db is None or isolated_session
+    db = WriteSessionLocal() if isolated_session else (db or WriteSessionLocal())
     cleaned_recipient = (recipient or "").strip()
     normalized_recipient = cleaned_recipient or "unknown"
 
@@ -153,6 +168,7 @@ def send_email(
             db,
             amo_id=amo_id,
             recipient_user_id=recipient_user_id,
+            recipient_email=cleaned_recipient,
             email_class=classification,
         )
         if not allowed:
