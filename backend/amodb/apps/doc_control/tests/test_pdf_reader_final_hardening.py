@@ -17,13 +17,23 @@ from amodb.apps.manuals import pdf_reader_router as reader_router
 ROOT = Path(__file__).resolve().parents[5]
 
 
-def _plain_pdf() -> bytes:
+def _plain_pdf(*, label: str = "Immutable controlled source", font: str = "Helvetica") -> bytes:
     output = BytesIO()
     document = canvas.Canvas(output)
-    document.drawString(72, 760, "Immutable controlled source")
+    document.setFont(font, 12)
+    document.drawString(72, 760, label)
     document.showPage()
     document.save()
     return output.getvalue()
+
+
+def _pdf_with_added_static_text(source: bytes, text: str) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        document[0].insert_text((72, 700), text, fontsize=12, overlay=True)
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
 
 
 def test_source_custody_rehashes_when_path_size_and_mtime_are_unchanged(
@@ -70,7 +80,6 @@ def test_source_custody_rehashes_when_path_size_and_mtime_are_unchanged(
         )
     assert mismatch.value.code == "PDF_SOURCE_CHECKSUM_MISMATCH"
     assert mismatch.value.status_code == 409
-    # The changed bytes are rejected before a second processor invocation.
     assert inspected == [source]
 
 
@@ -108,12 +117,12 @@ def test_vector_path_geometry_is_part_of_controlled_drawing_provenance() -> None
     expected = SimpleNamespace(
         page_count=1,
         source_sha256="source",
-        template_fingerprint={"version": 3, "total_anchors": 1, "pages": [source_page]},
+        template_fingerprint={"version": 4, "total_anchors": 1, "pages": [source_page]},
     )
     candidate = SimpleNamespace(
         page_count=1,
         source_sha256="candidate",
-        template_fingerprint={"version": 3, "total_anchors": 1, "pages": [altered_page]},
+        template_fingerprint={"version": 4, "total_anchors": 1, "pages": [altered_page]},
     )
 
     with pytest.raises(engine.PdfEngineError) as mismatch:
@@ -122,8 +131,43 @@ def test_vector_path_geometry_is_part_of_controlled_drawing_provenance() -> None
     assert mismatch.value.status_code == 409
 
 
+def test_added_static_instructions_outside_form_fields_are_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    source = _plain_pdf(label="AIRWORTHINESS RELEASE")
+    candidate = _pdf_with_added_static_text(source, "AUTHORIZED EXCEPTION: SKIP INSPECTION")
+
+    source_inspection = engine.inspect_pdf_bytes(source)
+    candidate_inspection = engine.inspect_pdf_bytes(candidate)
+    assert candidate_inspection.template_fingerprint["total_anchors"] > source_inspection.template_fingerprint["total_anchors"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source_inspection, candidate_inspection)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+    assert "adds unauthorized static content" in mismatch.value.message
+
+
+def test_semantic_punctuation_and_operators_are_fingerprinted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    assert engine._normalize_text_token("LIMIT < 10 HOURS") == "limit < 10 hours"
+    assert engine._normalize_text_token("LIMIT > 10 HOURS") == "limit > 10 hours"
+
+    source = engine.inspect_pdf_bytes(_plain_pdf(label="LIMIT < 10 HOURS", font="Courier"))
+    altered = engine.inspect_pdf_bytes(_plain_pdf(label="LIMIT > 10 HOURS", font="Courier"))
+    source_anchor = source.template_fingerprint["pages"][0]["words"][0]
+    altered_anchor = altered.template_fingerprint["pages"][0]["words"][0]
+    assert source_anchor["text"] != altered_anchor["text"]
+    assert source_anchor["appearance"] == altered_anchor["appearance"]
+    assert source_anchor["bbox"] == altered_anchor["bbox"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source, altered)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+
+
 def test_dedicated_reader_workflows_trigger_for_authority_service_changes() -> None:
-    authority_path = 'frontend/src/services/pdfWorkingCopyAuthority.ts'
+    authority_path = "frontend/src/services/pdfWorkingCopyAuthority.ts"
     workflows = (
         ROOT / ".github/workflows/publications-reader-ci.yml",
         ROOT / ".github/workflows/document-control-domain-ci.yml",
