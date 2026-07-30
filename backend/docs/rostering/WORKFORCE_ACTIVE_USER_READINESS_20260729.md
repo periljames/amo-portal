@@ -40,6 +40,7 @@ These invariants are covered by Workforce regression contracts and the complete 
 - The documentation assistant is a conventional right-side drawer with an explicit full-height left resize edge, pointer and keyboard resizing, a double-click reset, and persisted width.
 - The assistant opens at the intended 460-pixel default when no saved width exists, remains within 360–760 pixels on desktop, and becomes a full-width non-resizable sheet on smaller screens.
 - Mode-aware icons, a busy spinner, and restrained launcher motion provide state feedback while respecting `prefers-reduced-motion`.
+- The resize grip is rendered with CSS rather than a separate icon chunk, preserving the visual control without adding a request to the Rostering planner's synthetic 2G waterfall.
 - The assistant header remains fixed while its body scrolls independently, preventing page-wide overflow.
 
 ## Acceptance coverage
@@ -49,4 +50,4 @@ The rendered Playwright scenario authenticates an AMO administrator, opens Workf
 - an active user without a contract is displayed with `No contract`, `Create contract`, and the authorized `Apply default day pattern` action; and
 - an active user with a future contract is displayed with the future start date and an `Edit` action, without an overlapping `Create contract` action.
 
-The focused correction workflows passed the complete Workforce and Rostering suites, frontend Rostering and assistant tests, changed-surface ESLint, the production build, and the rendered role-access matrix before removing their temporary validation machinery. The protected release-candidate gate must pass on the clean exact head before merge readiness is declared.
+The focused correction workflows passed the complete Workforce and Rostering suites, frontend Rostering and assistant tests, changed-surface ESLint, the production build, the rendered role-access matrix, production bundle budgets, and the cold/warm synthetic 2G Rostering waterfall before removing their temporary validation machinery. The protected release-candidate gate must pass on the clean exact head before merge readiness is declared.
