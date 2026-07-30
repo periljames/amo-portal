@@ -16,7 +16,7 @@ from amodb.security import get_current_active_user
 
 from . import knowledge_reader_router as reader
 from . import models
-from .pdf_reader_router import process_completed_pdf
+from .pdf_reader_router import process_completed_pdf, read_bounded_pdf_upload
 from .router_legacy import _tenant_by_slug
 
 
@@ -155,7 +155,7 @@ async def submit_linked_resource_with_source_access(
         )
 
     result, enriched_payload = process_completed_pdf(
-        await artifact.read(),
+        await read_bounded_pdf_upload(artifact),
         _submission_payload(payload_json),
     )
     filename = artifact.filename or "completed-form.pdf"
