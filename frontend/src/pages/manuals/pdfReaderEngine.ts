@@ -53,6 +53,13 @@ export function copyPdfBytes(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+export function isPdfWorkingCopyGenerationCurrent(
+  persistedGeneration: number,
+  currentGeneration: number,
+): boolean {
+  return persistedGeneration === currentGeneration;
+}
+
 export function isPdfTextEntryTarget(target: EventTarget | null): boolean {
   if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
