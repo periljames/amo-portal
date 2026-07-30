@@ -124,3 +124,35 @@ def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
     assert "opacity: 0.32" in styles
     assert "pointer-events: none" in styles
     assert "content-visibility: auto" in styles
+
+
+def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None:
+    repository_root = Path(__file__).resolve().parents[5]
+    config = (repository_root / "frontend/src/pages/manuals/pdfReaderConfig.ts").read_text(encoding="utf-8")
+    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
+    linked_panel = (repository_root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
+
+    assert "export const PDF_DOCUMENT_OPTIONS = Object.freeze" in config
+    assert "options={PDF_DOCUMENT_OPTIONS}" in viewer
+    assert "options={PDF_DOCUMENT_OPTIONS}" in linked_panel
+    assert "options={{ isEvalSupported" not in viewer
+    assert "options={{ isEvalSupported" not in linked_panel
+    assert "inspectionGenerationRef" in viewer
+    assert "inspectionGenerationRef" in linked_panel
+    assert "handleDocumentLoadSuccess" in viewer
+    assert "onLoadSuccess={async" not in viewer
+    assert "error={<div" in viewer
+    assert "error={<div" in linked_panel
+
+
+def test_progress_refresh_does_not_clear_an_already_loaded_pdf() -> None:
+    repository_root = Path(__file__).resolve().parents[5]
+    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
+
+    source_reset_tail = viewer.split("// Only an actual source replacement", 1)[1]
+    source_reset_body = source_reset_tail.split("useEffect(() => {", 1)[1].split("}, [fileUrl]);", 1)[0]
+    assert "setPageCount(0)" in source_reset_body
+    assert "initialPage" not in source_reset_body
+    assert "const initialPageRef = useRef(initialPage)" in viewer
+    assert 'jumpToPage(initialPage || 1, "auto")' in viewer
+    assert "const restoredPage = clamp(initialPageRef.current || 1" in viewer
