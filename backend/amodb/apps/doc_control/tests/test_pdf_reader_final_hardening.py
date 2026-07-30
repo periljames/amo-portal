@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import binascii
 import hashlib
 import os
+import struct
+import zlib
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pymupdf
 import pytest
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from amodb.apps.doc_control import pdfium_service as engine
@@ -27,10 +31,74 @@ def _plain_pdf(*, label: str = "Immutable controlled source", font: str = "Helve
     return output.getvalue()
 
 
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    checksum = binascii.crc32(kind + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+
+def _red_png() -> bytes:
+    width = height = 2
+    scanlines = b"".join(b"\x00" + b"\xff\x00\x00" * width for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(scanlines))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _image_pdf() -> bytes:
+    output = BytesIO()
+    document = canvas.Canvas(output)
+    document.drawImage(ImageReader(BytesIO(_red_png())), 72, 600, width=100, height=100)
+    document.showPage()
+    document.save()
+    return output.getvalue()
+
+
 def _pdf_with_added_static_text(source: bytes, text: str) -> bytes:
     document = pymupdf.open(stream=source, filetype="pdf")
     try:
         document[0].insert_text((72, 700), text, fontsize=12, overlay=True)
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _rotated_pdf(source: bytes, rotation: int = 180) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        document[0].set_rotation(rotation)
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _faded_image_pdf(source: bytes) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        page = document[0]
+        graphics_state_xref = document.get_new_xref()
+        document.update_object(graphics_state_xref, "<< /Type /ExtGState /ca 0.5 /CA 0.5 >>")
+        document.xref_set_key(
+            page.xref,
+            "Resources/ExtGState",
+            f"<< /GSfade {graphics_state_xref} 0 R >>",
+        )
+
+        original_contents = list(page.get_contents() or [])
+        prefix_xref = document.get_new_xref()
+        document.update_object(prefix_xref, "<<>>")
+        document.update_stream(prefix_xref, b"q /GSfade gs\n")
+        suffix_xref = document.get_new_xref()
+        document.update_object(suffix_xref, "<<>>")
+        document.update_stream(suffix_xref, b"\nQ")
+        content_refs = " ".join(f"{xref} 0 R" for xref in original_contents)
+        document.xref_set_key(
+            page.xref,
+            "Contents",
+            f"[ {prefix_xref} 0 R {content_refs} {suffix_xref} 0 R ]",
+        )
         return document.tobytes(garbage=4, deflate=True)
     finally:
         document.close()
@@ -105,6 +173,9 @@ def test_vector_path_geometry_is_part_of_controlled_drawing_provenance() -> None
     source_page = {
         "width": 100.0,
         "height": 100.0,
+        "rotation": 0,
+        "content_sha256": "content",
+        "resources_sha256": "resources",
         "excluded_rects": [],
         "words": [],
         "images": [],
@@ -117,18 +188,63 @@ def test_vector_path_geometry_is_part_of_controlled_drawing_provenance() -> None
     expected = SimpleNamespace(
         page_count=1,
         source_sha256="source",
-        template_fingerprint={"version": 4, "total_anchors": 1, "pages": [source_page]},
+        template_fingerprint={"version": 5, "total_anchors": 1, "pages": [source_page]},
     )
     candidate = SimpleNamespace(
         page_count=1,
         source_sha256="candidate",
-        template_fingerprint={"version": 4, "total_anchors": 1, "pages": [altered_page]},
+        template_fingerprint={"version": 5, "total_anchors": 1, "pages": [altered_page]},
     )
 
     with pytest.raises(engine.PdfEngineError) as mismatch:
         engine.validate_template_provenance(expected, candidate)
     assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
     assert mismatch.value.status_code == 409
+
+
+def test_page_rotation_is_part_of_controlled_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    source_bytes = _plain_pdf(label="CONTROLLED ORIENTATION")
+    rotated_bytes = _rotated_pdf(source_bytes, 180)
+    source = engine.inspect_pdf_bytes(source_bytes)
+    rotated = engine.inspect_pdf_bytes(rotated_bytes)
+
+    source_page = source.template_fingerprint["pages"][0]
+    rotated_page = rotated.template_fingerprint["pages"][0]
+    assert source_page["width"] == rotated_page["width"]
+    assert source_page["height"] == rotated_page["height"]
+    assert source_page["rotation"] == 0
+    assert rotated_page["rotation"] == 180
+    assert source_page["words"] == rotated_page["words"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source, rotated)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+    assert "page rotation" in mismatch.value.message
+
+
+def test_image_graphics_state_is_part_of_controlled_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    source_bytes = _image_pdf()
+    faded_bytes = _faded_image_pdf(source_bytes)
+    source = engine.inspect_pdf_bytes(source_bytes)
+    faded = engine.inspect_pdf_bytes(faded_bytes)
+
+    source_page = source.template_fingerprint["pages"][0]
+    faded_page = faded.template_fingerprint["pages"][0]
+    assert source_page["images"] == faded_page["images"]
+    assert source_page["content_sha256"] != faded_page["content_sha256"]
+    assert source_page["resources_sha256"] != faded_page["resources_sha256"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source, faded)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+    assert "controlled static page content" in mismatch.value.message or "graphics resources" in mismatch.value.message
 
 
 def test_added_static_instructions_outside_form_fields_are_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,7 +260,7 @@ def test_added_static_instructions_outside_form_fields_are_rejected(tmp_path: Pa
         engine.validate_template_provenance(source_inspection, candidate_inspection)
     assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
     assert mismatch.value.status_code == 409
-    assert "adds unauthorized static content" in mismatch.value.message
+    assert "controlled static page content" in mismatch.value.message
 
 
 def test_semantic_punctuation_and_operators_are_fingerprinted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
