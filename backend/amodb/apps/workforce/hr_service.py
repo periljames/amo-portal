@@ -816,6 +816,7 @@ def _readiness_contracts_by_user(
         models.EmploymentContract.employment_status.in_([
             models.EmploymentStatus.ACTIVE,
             models.EmploymentStatus.ONBOARDING,
+            models.EmploymentStatus.SUSPENDED,
         ]),
         models.EmploymentContract.effective_from > on_date,
     ).order_by(

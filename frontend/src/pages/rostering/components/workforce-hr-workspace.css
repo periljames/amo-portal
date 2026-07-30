@@ -433,3 +433,165 @@
 @media (max-width: 640px) {
   .hr-contract-grid { grid-template-columns: 1fr; }
 }
+
+/* PR377 final Workforce readability refinement */
+.hr-workspace {
+  width: min(100%, 1480px);
+  margin-inline: auto;
+  gap: 14px;
+  color: var(--text-primary, var(--text-strong, #172033));
+}
+
+.hr-workspace__nav {
+  position: sticky;
+  z-index: 6;
+  top: 0;
+  padding: 6px;
+  background: color-mix(in srgb, var(--surface-raised, #fff) 96%, transparent);
+  box-shadow: 0 7px 22px rgb(15 23 42 / 7%);
+  backdrop-filter: blur(14px);
+}
+
+.hr-workspace__nav button {
+  min-height: 38px;
+  padding-inline: 14px;
+  color: var(--text-secondary, #475569);
+  font-size: .87rem;
+}
+
+.hr-workspace .wr-panel {
+  min-width: 0;
+  padding: clamp(14px, 1vw, 18px);
+}
+
+.hr-workspace .wr-section-heading h2 {
+  color: var(--text-primary, #172033);
+  font-size: clamp(1rem, .92vw, 1.16rem);
+}
+
+.hr-workspace .wr-section-heading p {
+  max-width: 76ch;
+  color: var(--text-secondary, #475569);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+
+.hr-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.hr-metrics article,
+.hr-mini-grid article {
+  padding: 14px;
+  background: var(--surface-raised, #fff);
+}
+
+.hr-metrics span,
+.hr-metrics small,
+.hr-mini-grid span {
+  color: var(--text-secondary, #475569);
+  font-size: .78rem;
+  line-height: 1.4;
+}
+
+.hr-metrics strong,
+.hr-mini-grid strong {
+  font-size: clamp(1.4rem, 1.25vw, 1.7rem);
+}
+
+.hr-overview-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  align-items: start;
+  gap: 14px;
+}
+
+.hr-action-list strong,
+.hr-people-table strong,
+.hr-approval-list strong,
+.hr-pattern-list strong {
+  color: var(--text-primary, #172033);
+  font-size: .86rem;
+}
+
+.hr-action-list p,
+.hr-people-table span,
+.hr-people-table small,
+.hr-approval-list span,
+.hr-pattern-list span,
+.hr-readiness-list span,
+.hr-ownership p,
+.hr-person-source {
+  color: var(--text-secondary, #475569);
+  font-size: .79rem;
+  line-height: 1.5;
+}
+
+.hr-action-list a,
+.hr-action-link { font-size: .8rem; }
+
+.hr-search {
+  min-width: min(320px, 100%);
+  min-height: 40px;
+  background: var(--surface-standard, var(--surface-solid, #fff));
+}
+
+.hr-search input {
+  color: var(--text-primary, #172033);
+  font-size: .84rem;
+}
+
+.hr-people-table {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.hr-people-table header,
+.hr-people-table article {
+  grid-template-columns: minmax(180px, 1.1fr) minmax(132px, .75fr) minmax(72px, .36fr) minmax(145px, .82fr) minmax(180px, 1fr) minmax(116px, auto);
+  min-width: 820px;
+}
+
+.hr-people-table header {
+  color: var(--text-secondary, #475569);
+  font-size: .72rem;
+}
+
+.hr-people-table article { min-height: 64px; }
+
+.hr-decision { width: min(620px, calc(100vw - 32px)); }
+.hr-decision h3 { font-size: 1.06rem; }
+.hr-decision p { color: var(--text-secondary, #475569); font-size: .82rem; line-height: 1.5; }
+.hr-decision label,
+.hr-assignment-grid label,
+.hr-contract-grid label { color: var(--text-secondary, #475569); font-size: .78rem; }
+.hr-decision textarea,
+.hr-assignment-grid input,
+.hr-assignment-grid select,
+.hr-contract-grid input,
+.hr-contract-grid select { min-height: 42px; font-size: .86rem; }
+
+@media (max-width: 1180px) {
+  .hr-overview-grid { grid-template-columns: 1fr; }
+  .hr-people-table { overflow: visible; }
+  .hr-people-table header { display: none; }
+  .hr-people-table article {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    margin-bottom: 9px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle, rgba(100, 116, 139, .22));
+    border-radius: 11px;
+    background: var(--surface-raised, #fff);
+  }
+  .hr-people-table article > :nth-child(5) { grid-column: 1 / -1; }
+  .hr-people-table article > :nth-child(6) { justify-self: start; }
+}
+
+@media (max-width: 640px) {
+  .hr-workspace { gap: 10px; }
+  .hr-workspace__nav button { font-size: .82rem; }
+  .hr-people-table article { grid-template-columns: 1fr; }
+  .hr-people-table article > :nth-child(5),
+  .hr-people-table article > :nth-child(6) { grid-column: 1; }
+}

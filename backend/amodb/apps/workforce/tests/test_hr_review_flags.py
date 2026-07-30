@@ -47,6 +47,7 @@ def test_hr_readiness_surfaces_the_next_future_contract():
     lookup_source = inspect.getsource(hr_service._readiness_contracts_by_user)
     readiness_source = inspect.getsource(hr_service._person_readiness_for_user)
     assert "effective_from > on_date" in lookup_source
+    assert "EmploymentStatus.SUSPENDED" in lookup_source
     assert "effective_from.asc()" in lookup_source
     assert "result.setdefault" in lookup_source
     assert "Employment contract starts on" in readiness_source
