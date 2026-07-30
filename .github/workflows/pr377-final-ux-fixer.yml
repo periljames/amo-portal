@@ -1,0 +1,173 @@
+name: PR377 Final UX Fixer
+
+on:
+  push:
+    branches:
+      - fix/workforce-active-users-default-day
+    paths:
+      - .github/pr377-final-ux-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      SECRET_KEY: pr377-final-ux-secret
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/workforce-active-users-default-day
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply backend and UX corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = root / path
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise RuntimeError(f'Expected patch anchor missing in {path}: {old[:120]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Future SUSPENDED contracts participate in overlap validation, so they
+          # must also be surfaced in readiness for editing instead of inviting a
+          # conflicting contract creation.
+          replace_once(
+              'backend/amodb/apps/workforce/hr_service.py',
+              '''        models.EmploymentContract.employment_status.in_([\n            models.EmploymentStatus.ACTIVE,\n            models.EmploymentStatus.ONBOARDING,\n        ]),''',
+              '''        models.EmploymentContract.employment_status.in_([\n            models.EmploymentStatus.ACTIVE,\n            models.EmploymentStatus.ONBOARDING,\n            models.EmploymentStatus.SUSPENDED,\n        ]),''',
+          )
+          replace_once(
+              'backend/amodb/apps/workforce/tests/test_hr_review_flags.py',
+              '''    assert "effective_from > on_date" in lookup_source\n    assert "effective_from.asc()" in lookup_source''',
+              '''    assert "effective_from > on_date" in lookup_source\n    assert "EmploymentStatus.SUSPENDED" in lookup_source\n    assert "effective_from.asc()" in lookup_source''',
+          )
+
+          panel_path = root / 'frontend/src/pages/manuals/DocumentationAssistantPanel.tsx'
+          panel = panel_path.read_text(encoding='utf-8')
+          panel = panel.replace(
+              'import { useMemo, useState, type FormEvent } from "react";',
+              '''import {\n  useEffect,\n  useMemo,\n  useRef,\n  useState,\n  type CSSProperties,\n  type FormEvent,\n  type KeyboardEvent as ReactKeyboardEvent,\n  type PointerEvent as ReactPointerEvent,\n} from "react";''',
+              1,
+          )
+          panel = panel.replace(
+              '''  FileText,\n  Navigation,''',
+              '''  FileText,\n  GripVertical,\n  LoaderCircle,\n  Navigation,''',
+              1,
+          )
+          mode_anchor = '''const MODE_OPTIONS: Array<{ value: DocumentationAssistMode; label: string; icon: typeof Search }> = [\n  { value: "ASSIST", label: "Ask", icon: Sparkles },\n  { value: "SEARCH", label: "Search", icon: Search },\n  { value: "NAVIGATE", label: "Navigate", icon: Navigation },\n];'''
+          mode_replacement = mode_anchor + '''\n\nconst FLOATING_MIN_WIDTH = 360;\nconst FLOATING_MAX_WIDTH = 760;\nconst FLOATING_DEFAULT_WIDTH = 460;\nconst FLOATING_WIDTH_STORAGE_KEY = "amo_documentation_assistant_width";\n\nfunction maximumAssistantWidth(viewportWidth: number): number {\n  return Math.max(FLOATING_MIN_WIDTH, Math.min(FLOATING_MAX_WIDTH, viewportWidth - 56));\n}\n\nfunction clampAssistantWidth(value: number, viewportWidth = 1440): number {\n  return Math.min(maximumAssistantWidth(viewportWidth), Math.max(FLOATING_MIN_WIDTH, value));\n}\n'''
+          if mode_anchor not in panel:
+              raise RuntimeError('Assistant mode anchor missing')
+          panel = panel.replace(mode_anchor, mode_replacement, 1)
+
+          state_anchor = '''  const [busy, setBusy] = useState(false);\n  const [error, setError] = useState("");'''
+          state_replacement = state_anchor + '''\n  const [panelWidth, setPanelWidth] = useState(() => {\n    if (typeof window === "undefined") return FLOATING_DEFAULT_WIDTH;\n    const stored = Number(window.localStorage.getItem(FLOATING_WIDTH_STORAGE_KEY));\n    return Number.isFinite(stored)\n      ? clampAssistantWidth(stored, window.innerWidth)\n      : clampAssistantWidth(FLOATING_DEFAULT_WIDTH, window.innerWidth);\n  });\n  const [resizing, setResizing] = useState(false);\n  const latestPanelWidth = useRef(panelWidth);\n\n  useEffect(() => {\n    latestPanelWidth.current = panelWidth;\n  }, [panelWidth]);\n\n  useEffect(() => {\n    if (!resizing || embedded || typeof window === "undefined") return undefined;\n\n    const resize = (event: PointerEvent) => {\n      setPanelWidth(clampAssistantWidth(window.innerWidth - event.clientX, window.innerWidth));\n    };\n    const stop = () => {\n      setResizing(false);\n      document.body.classList.remove("documentation-assistant-is-resizing");\n      window.localStorage.setItem(FLOATING_WIDTH_STORAGE_KEY, String(latestPanelWidth.current));\n    };\n\n    document.body.classList.add("documentation-assistant-is-resizing");\n    window.addEventListener("pointermove", resize);\n    window.addEventListener("pointerup", stop, { once: true });\n    window.addEventListener("pointercancel", stop, { once: true });\n    return () => {\n      document.body.classList.remove("documentation-assistant-is-resizing");\n      window.removeEventListener("pointermove", resize);\n      window.removeEventListener("pointerup", stop);\n      window.removeEventListener("pointercancel", stop);\n    };\n  }, [embedded, resizing]);\n\n  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {\n    if (embedded) return;\n    event.preventDefault();\n    setResizing(true);\n  };\n\n  const resizeWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {\n    if (embedded || typeof window === "undefined") return;\n    let next = panelWidth;\n    if (event.key === "ArrowLeft") next += 24;\n    else if (event.key === "ArrowRight") next -= 24;\n    else if (event.key === "Home") next = FLOATING_MIN_WIDTH;\n    else if (event.key === "End") next = maximumAssistantWidth(window.innerWidth);\n    else return;\n    event.preventDefault();\n    const clamped = clampAssistantWidth(next, window.innerWidth);\n    setPanelWidth(clamped);\n    window.localStorage.setItem(FLOATING_WIDTH_STORAGE_KEY, String(clamped));\n  };\n\n  const resetWidth = () => {\n    if (typeof window === "undefined") return;\n    const next = clampAssistantWidth(FLOATING_DEFAULT_WIDTH, window.innerWidth);\n    setPanelWidth(next);\n    window.localStorage.setItem(FLOATING_WIDTH_STORAGE_KEY, String(next));\n  };\n\n  const ActiveModeIcon = MODE_OPTIONS.find((option) => option.value === mode)?.icon || Bot;'''
+          if state_anchor not in panel:
+              raise RuntimeError('Assistant state anchor missing')
+          panel = panel.replace(state_anchor, state_replacement, 1)
+
+          launcher_old = '''    return <button type="button" className="documentation-assistant-launcher" onClick={() => setOpen(true)}>\n      <Bot size={18} />\n      <span>Assisted search</span>\n    </button>;'''
+          launcher_new = '''    return <button type="button" className="documentation-assistant-launcher" onClick={() => setOpen(true)} aria-expanded="false">\n      <span className="documentation-assistant-launcher__icon" aria-hidden="true"><Bot size={18} /><Sparkles size={11} /></span>\n      <span>Assisted search</span>\n    </button>;'''
+          if launcher_old not in panel:
+              raise RuntimeError('Assistant launcher anchor missing')
+          panel = panel.replace(launcher_old, launcher_new, 1)
+
+          aside_old = '''  return <aside className={`documentation-assistant ${embedded ? "is-embedded" : "is-floating"}`} aria-label={title}>\n    <header className="documentation-assistant__header">'''
+          aside_new = '''  const floatingStyle = !embedded\n    ? ({ "--documentation-assistant-width": `${panelWidth}px` } as CSSProperties)\n    : undefined;\n\n  return <aside\n    className={`documentation-assistant ${embedded ? "is-embedded" : "is-floating"} ${busy ? "is-busy" : ""}`}\n    aria-label={title}\n    style={floatingStyle}\n    data-resizing={resizing ? "true" : "false"}\n    data-mode={mode.toLowerCase()}\n  >\n    {!embedded ? <div\n      className="documentation-assistant__resize-handle"\n      role="separator"\n      aria-label="Resize document assistant"\n      aria-orientation="vertical"\n      aria-valuemin={FLOATING_MIN_WIDTH}\n      aria-valuemax={typeof window === "undefined" ? FLOATING_MAX_WIDTH : maximumAssistantWidth(window.innerWidth)}\n      aria-valuenow={Math.round(panelWidth)}\n      tabIndex={0}\n      title="Drag to resize · double-click to reset"\n      onPointerDown={startResize}\n      onKeyDown={resizeWithKeyboard}\n      onDoubleClick={resetWidth}\n    ><GripVertical size={16} /></div> : null}\n    <header className="documentation-assistant__header">'''
+          if aside_old not in panel:
+              raise RuntimeError('Assistant aside anchor missing')
+          panel = panel.replace(aside_old, aside_new, 1)
+
+          panel = panel.replace(
+              '<span className="documentation-assistant__eyebrow"><Bot size={14} /> Controlled-document assistance</span>',
+              '<span className="documentation-assistant__eyebrow">{busy ? <LoaderCircle className="is-spinning" size={14} /> : <ActiveModeIcon size={14} />} Controlled-document assistance</span>',
+              1,
+          )
+          panel = panel.replace(
+              '''    </header>\n\n    <div className="documentation-assistant__modes"''',
+              '''    </header>\n\n    <div className="documentation-assistant__body">\n    <div className="documentation-assistant__modes"''',
+              1,
+          )
+          panel = panel.replace(
+              '''    </div> : null}\n  </aside>;''',
+              '''    </div> : null}\n    </div>\n  </aside>;''',
+              1,
+          )
+          panel_path.write_text(panel, encoding='utf-8')
+
+          assistant_css_path = root / 'frontend/src/pages/manuals/documentationAssistantPanel.css'
+          assistant_css = assistant_css_path.read_text(encoding='utf-8')
+          assistant_css = assistant_css.replace(
+              '''  width: min(520px, 46vw);\n  border-left: 1px solid var(--assistant-border);\n  box-shadow: -18px 0 46px rgb(15 23 42 / 18%);\n  overflow: auto;''',
+              '''  width: min(var(--documentation-assistant-width, 460px), calc(100vw - 56px));\n  min-width: min(360px, 100vw);\n  max-width: min(760px, calc(100vw - 56px));\n  border-left: 1px solid var(--assistant-border);\n  box-shadow: -18px 0 46px rgb(15 23 42 / 18%);\n  overflow: hidden;\n  transition: width 180ms ease, box-shadow 180ms ease;''',
+              1,
+          )
+          assistant_css += '''\n\n/* Final assistant interaction and accessibility refinement. */\n.documentation-assistant {\n  --assistant-muted: var(--text-secondary, #475569);\n  font-size: 1rem;\n}\n\n.documentation-assistant.is-floating[data-resizing="true"] {\n  transition: none;\n  box-shadow: -24px 0 60px rgb(15 23 42 / 24%);\n}\n\n.documentation-assistant__body {\n  min-height: 0;\n}\n\n.documentation-assistant.is-floating .documentation-assistant__body {\n  flex: 1;\n  overflow: auto;\n  overscroll-behavior: contain;\n  scrollbar-gutter: stable;\n}\n\n.documentation-assistant__resize-handle {\n  position: absolute;\n  z-index: 8;\n  top: 0;\n  bottom: 0;\n  left: -7px;\n  display: grid;\n  place-items: center;\n  width: 14px;\n  color: var(--assistant-muted);\n  cursor: col-resize;\n  outline: 0;\n  touch-action: none;\n}\n\n.documentation-assistant__resize-handle::before {\n  position: absolute;\n  top: 0;\n  bottom: 0;\n  left: 6px;\n  width: 2px;\n  background: transparent;\n  content: "";\n  transition: background 140ms ease, width 140ms ease;\n}\n\n.documentation-assistant__resize-handle svg {\n  position: relative;\n  z-index: 1;\n  padding: 2px;\n  border: 1px solid var(--assistant-border);\n  border-radius: 999px;\n  background: var(--surface-raised, #fff);\n  opacity: 0;\n  transition: opacity 140ms ease, transform 140ms ease;\n}\n\n.documentation-assistant__resize-handle:hover::before,\n.documentation-assistant__resize-handle:focus-visible::before,\n.documentation-assistant[data-resizing="true"] .documentation-assistant__resize-handle::before {\n  width: 3px;\n  background: var(--color-primary, #2563eb);\n}\n\n.documentation-assistant__resize-handle:hover svg,\n.documentation-assistant__resize-handle:focus-visible svg,\n.documentation-assistant[data-resizing="true"] .documentation-assistant__resize-handle svg {\n  opacity: 1;\n  transform: scale(1.06);\n}\n\n.documentation-assistant-launcher__icon {\n  position: relative;\n  display: grid;\n  place-items: center;\n}\n\n.documentation-assistant-launcher__icon svg:last-child {\n  position: absolute;\n  top: -6px;\n  right: -7px;\n  color: var(--color-primary, #2563eb);\n  animation: documentation-assistant-spark 2.4s ease-in-out infinite;\n}\n\n.documentation-assistant-launcher:hover .documentation-assistant-launcher__icon > svg:first-child {\n  transform: translateY(-1px) rotate(-4deg);\n}\n\n.documentation-assistant__eyebrow .is-spinning {\n  animation: documentation-assistant-spin .8s linear infinite;\n}\n\n.documentation-assistant__header h2 { font-size: 1.14rem; }\n.documentation-assistant__header p { font-size: .84rem; line-height: 1.45; }\n.documentation-assistant__eyebrow,\n.documentation-assistant__answer-meta,\n.documentation-assistant__source-meta { font-size: .75rem; }\n.documentation-assistant__modes button { min-height: 38px; font-size: .84rem; }\n.documentation-assistant__query > label { font-size: .8rem; }\n.documentation-assistant__query input { min-height: 44px; font-size: .92rem; }\n.documentation-assistant__query button { min-width: 84px; font-size: .86rem; }\n.documentation-assistant__suggestions button { font-size: .78rem; }\n.documentation-assistant__answer > p { font-size: .94rem; line-height: 1.62; }\n.documentation-assistant__source-title,\n.documentation-assistant__source-heading { font-size: .85rem; }\n.documentation-assistant__source-snippet { font-size: .81rem; line-height: 1.5; }\n.documentation-assistant__authority-note { font-size: .78rem; }\n\nbody.documentation-assistant-is-resizing,\nbody.documentation-assistant-is-resizing * {\n  cursor: col-resize !important;\n  user-select: none !important;\n}\n\n@keyframes documentation-assistant-spin { to { transform: rotate(360deg); } }\n@keyframes documentation-assistant-spark {\n  0%, 100% { opacity: .55; transform: scale(.88) rotate(0deg); }\n  50% { opacity: 1; transform: scale(1.1) rotate(12deg); }\n}\n\n@media (max-width: 900px) {\n  .documentation-assistant.is-floating {\n    width: min(100%, 560px);\n    min-width: 0;\n    max-width: 100%;\n  }\n  .documentation-assistant__resize-handle { display: none; }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .documentation-assistant.is-floating,\n  .documentation-assistant-launcher__icon svg,\n  .documentation-assistant__resize-handle::before,\n  .documentation-assistant__resize-handle svg {\n    animation: none !important;\n    transition: none !important;\n  }\n}\n'''
+          assistant_css_path.write_text(assistant_css, encoding='utf-8')
+
+          hr_css_path = root / 'frontend/src/pages/rostering/components/workforce-hr-workspace.css'
+          hr_css = hr_css_path.read_text(encoding='utf-8')
+          hr_css += '''\n\n/* Final Workforce readability and viewport refinement. */\n.hr-workspace {\n  width: min(100%, 1560px);\n  margin-inline: auto;\n  gap: 14px;\n  color: var(--text-primary, var(--text-strong, #172033));\n}\n\n.hr-workspace__nav {\n  position: sticky;\n  z-index: 6;\n  top: 0;\n  padding: 6px;\n  background: color-mix(in srgb, var(--surface-raised, #fff) 96%, transparent);\n  box-shadow: 0 7px 22px rgb(15 23 42 / 7%);\n  backdrop-filter: blur(14px);\n}\n\n.hr-workspace__nav button {\n  min-height: 38px;\n  padding-inline: 14px;\n  color: var(--text-secondary, #475569);\n  font-size: .87rem;\n}\n\n.hr-workspace .wr-panel {\n  min-width: 0;\n  padding: clamp(14px, 1vw, 18px);\n}\n\n.hr-workspace .wr-section-heading h2 {\n  color: var(--text-primary, #172033);\n  font-size: clamp(1rem, .92vw, 1.16rem);\n}\n\n.hr-workspace .wr-section-heading p {\n  max-width: 76ch;\n  color: var(--text-secondary, #475569);\n  font-size: .84rem;\n  line-height: 1.5;\n}\n\n.hr-metrics {\n  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n  gap: 10px;\n}\n\n.hr-metrics article,\n.hr-mini-grid article {\n  padding: 14px;\n  background: var(--surface-raised, #fff);\n}\n\n.hr-metrics span,\n.hr-metrics small,\n.hr-mini-grid span {\n  color: var(--text-secondary, #475569);\n  font-size: .78rem;\n  line-height: 1.4;\n}\n\n.hr-metrics strong,\n.hr-mini-grid strong {\n  font-size: clamp(1.4rem, 1.25vw, 1.7rem);\n}\n\n.hr-overview-grid {\n  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);\n  align-items: start;\n  gap: 14px;\n}\n\n.hr-action-list strong,\n.hr-people-table strong,\n.hr-approval-list strong,\n.hr-pattern-list strong {\n  font-size: .86rem;\n}\n\n.hr-action-list p,\n.hr-people-table span,\n.hr-people-table small,\n.hr-approval-list span,\n.hr-pattern-list span,\n.hr-readiness-list span,\n.hr-ownership p,\n.hr-person-source {\n  color: var(--text-secondary, #475569);\n  font-size: .79rem;\n  line-height: 1.5;\n}\n\n.hr-action-list a,\n.hr-action-link { font-size: .8rem; }\n\n.hr-search {\n  min-width: min(320px, 100%);\n  min-height: 40px;\n  background: var(--surface-standard, var(--surface-solid, #fff));\n}\n\n.hr-search input {\n  color: var(--text-primary, #172033);\n  font-size: .84rem;\n}\n\n.hr-people-table {\n  overflow-x: auto;\n  scrollbar-gutter: stable;\n}\n\n.hr-people-table header,\n.hr-people-table article {\n  grid-template-columns: minmax(180px, 1.1fr) minmax(132px, .75fr) minmax(72px, .36fr) minmax(145px, .82fr) minmax(180px, 1fr) minmax(116px, auto);\n  min-width: 800px;\n}\n\n.hr-people-table header {\n  color: var(--text-secondary, #475569);\n  font-size: .72rem;\n}\n\n.hr-people-table article {\n  min-height: 64px;\n}\n\n.hr-decision {\n  width: min(620px, calc(100vw - 32px));\n}\n\n.hr-decision h3 { font-size: 1.06rem; }\n.hr-decision p { color: var(--text-secondary, #475569); font-size: .82rem; line-height: 1.5; }\n.hr-decision label,\n.hr-assignment-grid label,\n.hr-contract-grid label { color: var(--text-secondary, #475569); font-size: .78rem; }\n.hr-decision textarea,\n.hr-assignment-grid input,\n.hr-assignment-grid select,\n.hr-contract-grid input,\n.hr-contract-grid select { min-height: 42px; font-size: .86rem; }\n\n@media (max-width: 1080px) {\n  .hr-overview-grid { grid-template-columns: 1fr; }\n  .hr-people-table { overflow: visible; }\n  .hr-people-table header { display: none; }\n  .hr-people-table article {\n    grid-template-columns: repeat(2, minmax(0, 1fr));\n    min-width: 0;\n    margin-bottom: 9px;\n    padding: 12px;\n    border: 1px solid var(--border-subtle, rgba(100, 116, 139, .22));\n    border-radius: 11px;\n    background: var(--surface-raised, #fff);\n  }\n  .hr-people-table article > :nth-child(5) { grid-column: 1 / -1; }\n  .hr-people-table article > :nth-child(6) { justify-self: start; }\n}\n\n@media (max-width: 640px) {\n  .hr-workspace { gap: 10px; }\n  .hr-workspace__nav button { font-size: .82rem; }\n  .hr-people-table article { grid-template-columns: 1fr; }\n  .hr-people-table article > :nth-child(5),\n  .hr-people-table article > :nth-child(6) { grid-column: 1; }\n}\n'''
+          hr_css_path.write_text(hr_css, encoding='utf-8')
+
+          test_path = root / 'frontend/src/pages/manuals/documentationAssistantPanel.test.ts'
+          test_path.write_text('''import { readFileSync } from "node:fs";\nimport { describe, expect, it } from "vitest";\n\nconst component = readFileSync(new URL("./DocumentationAssistantPanel.tsx", import.meta.url), "utf8");\nconst assistantCss = readFileSync(new URL("./documentationAssistantPanel.css", import.meta.url), "utf8");\nconst workforceCss = readFileSync(new URL("../rostering/components/workforce-hr-workspace.css", import.meta.url), "utf8");\n\ndescribe("documentation assistant interaction contract", () => {\n  it("supports persisted drag and keyboard resizing", () => {\n    expect(component).toContain("amo_documentation_assistant_width");\n    expect(component).toContain("onPointerDown={startResize}");\n    expect(component).toContain("onKeyDown={resizeWithKeyboard}");\n    expect(component).toContain("onDoubleClick={resetWidth}");\n    expect(component).toContain("window.addEventListener(\\\"pointermove\\\"");\n    expect(component).toContain("role=\\\"separator\\\"");\n    expect(assistantCss).toContain("--documentation-assistant-width");\n    expect(assistantCss).toContain("cursor: col-resize");\n    expect(assistantCss).toContain("prefers-reduced-motion");\n  });\n\n  it("keeps the Workforce register bounded and readable", () => {\n    expect(workforceCss).toContain("width: min(100%, 1560px)");\n    expect(workforceCss).toContain("font-size: .84rem");\n    expect(workforceCss).toContain("@media (max-width: 1080px)");\n    expect(workforceCss).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");\n  });\n});\n''', encoding='utf-8')
+          PY
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Validate Workforce and Rostering backend
+        working-directory: backend
+        run: |
+          pytest -q amodb/apps/workforce/tests
+          pytest -q amodb/apps/rostering/tests
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Validate frontend tests, lint and build
+        working-directory: frontend
+        run: |
+          npx vitest run src/pages/manuals/documentationAssistantPanel.test.ts src/pages/rostering/rosteringSetupOverhaul.test.ts
+          npm run lint
+          npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run rendered Workforce role acceptance
+        working-directory: frontend
+        run: npx playwright test tests/e2e/rostering-role-access.spec.ts --project=chromium
+      - name: Remove one-shot machinery
+        run: rm -f .github/workflows/pr377-final-ux-fixer.yml .github/pr377-final-ux-trigger.txt
+      - name: Commit and push validated correction
+        run: |
+          git config user.name "periljames"
+          git config user.email "244658594+periljames@users.noreply.github.com"
+          git add backend/amodb/apps/workforce/hr_service.py \
+            backend/amodb/apps/workforce/tests/test_hr_review_flags.py \
+            frontend/src/pages/manuals/DocumentationAssistantPanel.tsx \
+            frontend/src/pages/manuals/documentationAssistantPanel.css \
+            frontend/src/pages/manuals/documentationAssistantPanel.test.ts \
+            frontend/src/pages/rostering/components/workforce-hr-workspace.css \
+            .github/workflows/pr377-final-ux-fixer.yml \
+            .github/pr377-final-ux-trigger.txt
+          git commit -m "Fix future suspended contracts and refine Workforce UX"
+          git push origin HEAD:fix/workforce-active-users-default-day
