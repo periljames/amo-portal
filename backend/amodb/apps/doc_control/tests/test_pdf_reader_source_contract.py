@@ -132,6 +132,11 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "PDFIUM_PROCESS_TIMEOUT_SECONDS" in service
     assert "document.xref_object" in service
     assert "_decode_pdf_name_escapes" in service
+    assert "_ACTION_SUBTYPE_PATTERN" in service
+    for action in ("launch", "submitform", "importdata"):
+        assert f'"{action}"' in service
+    assert "_text_appearance_signature" in service
+    assert 'completed.get("appearance") == source_word.get("appearance")' in service
     assert "validate_template_provenance" in service
     assert "template_fingerprint" in service
     assert "PDF_TEMPLATE_VISUAL_OVERLAY" in overlay
@@ -139,6 +144,23 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "process_completed_pdf" in access
     assert "process_completed_pdf" in router
     assert "create_documentation_record" in router
+
+
+def test_async_pdf_routes_offload_blocking_inspection_and_flattening() -> None:
+    access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
+    router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
+
+    assert "from starlette.concurrency import run_in_threadpool" in router
+    assert "from starlette.concurrency import run_in_threadpool" in access
+
+    direct_flatten = router.split("async def flatten_reader_working_copy", 1)[1].split("@router.post", 1)[0]
+    direct_submit = router.split("async def submit_reader_working_copy", 1)[1].split("@router.get", 1)[0]
+    linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
+    for route_source in (direct_flatten, direct_submit, linked_submit):
+        assert "await run_in_threadpool(_inspection, revision)" in route_source
+        assert "await run_in_threadpool(" in route_source
+        assert "process_completed_pdf," in route_source
+        assert route_source.index("await read_bounded_pdf_upload(artifact)") < route_source.index("process_completed_pdf,")
 
 
 def test_execution_scope_precedes_capabilities_and_uploaded_bytes() -> None:
@@ -176,11 +198,11 @@ def test_source_checksum_and_template_provenance_precede_record_creation() -> No
     assert process.index("reject_visual_overlays") < process.index("flatten_pdf_bytes(content)")
 
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
-    assert direct_submit.index("source_inspection = _inspection(revision)") < direct_submit.index("process_completed_pdf")
-    assert direct_submit.index("process_completed_pdf") < direct_submit.index("create_documentation_record")
+    assert direct_submit.index("source_inspection = await run_in_threadpool(_inspection, revision)") < direct_submit.index("process_completed_pdf,")
+    assert direct_submit.index("process_completed_pdf,") < direct_submit.index("create_documentation_record")
 
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
-    assert linked_submit.index("revision = _controlled_target_revision") < linked_submit.index("process_completed_pdf")
+    assert linked_submit.index("revision = _controlled_target_revision") < linked_submit.index("process_completed_pdf,")
     assert "expected_source=source_inspection" in linked_submit
 
 
@@ -197,14 +219,14 @@ def test_authorization_and_signature_guards_precede_bounded_upload_processing() 
     assert linked_submit.index("_load_authorized_reference") < linked_read
     assert linked_submit.index("detail, execution_profile = _authorized_linked_detail") < linked_read
     assert linked_submit.index('execution.get("requires_signature")') < linked_read
-    assert linked_submit.index("source_inspection = _inspection(revision)") < linked_read
+    assert linked_submit.index("source_inspection = await run_in_threadpool(_inspection, revision)") < linked_read
 
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
     assert direct_submit.index("_load_direct_context") < direct_read
     assert direct_submit.index("execution.requires_signature") < direct_read
     assert direct_submit.index('capabilities["can_submit"]') < direct_read
-    assert direct_submit.index("source_inspection = _inspection(revision)") < direct_read
+    assert direct_submit.index("source_inspection = await run_in_threadpool(_inspection, revision)") < direct_read
 
 
 def test_reader_routes_precede_compatibility_routes() -> None:
