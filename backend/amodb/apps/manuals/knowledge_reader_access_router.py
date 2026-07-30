@@ -1,8 +1,12 @@
 """Precedence routes that authorize both sides of linked-document references."""
 from __future__ import annotations
 
+import io
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
+from starlette.datastructures import Headers
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
@@ -12,6 +16,7 @@ from amodb.security import get_current_active_user
 
 from . import knowledge_reader_router as reader
 from . import models
+from .pdf_reader_router import process_completed_pdf
 from .router_legacy import _tenant_by_slug
 
 
@@ -60,6 +65,16 @@ def _load_authorized_reference(
     return reference
 
 
+def _submission_payload(payload_json: str) -> dict:
+    try:
+        payload = json.loads(payload_json or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
+
+
 @router.get("/t/{tenant_slug}/linked-resources/{reference_id}")
 def linked_resource_detail_with_source_access(
     tenant_slug: str,
@@ -103,12 +118,25 @@ async def submit_linked_resource_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
+
+    result, enriched_payload = process_completed_pdf(
+        await artifact.read(),
+        _submission_payload(payload_json),
+    )
+    filename = artifact.filename or "completed-form.pdf"
+    if "FLATTENED" not in filename.upper():
+        filename = filename[:-4] + "_FLATTENED.pdf" if filename.lower().endswith(".pdf") else f"{filename}_FLATTENED.pdf"
+    flattened_artifact = UploadFile(
+        file=io.BytesIO(result.content),
+        filename=filename,
+        headers=Headers({"content-type": "application/pdf"}),
+    )
     return await reader.submit_linked_resource(
         tenant_slug=tenant_slug,
         reference_id=reference_id,
         request=request,
-        artifact=artifact,
-        payload_json=payload_json,
+        artifact=flattened_artifact,
+        payload_json=json.dumps(enriched_payload, separators=(",", ":"), sort_keys=True),
         db=db,
         current_user=current_user,
     )
