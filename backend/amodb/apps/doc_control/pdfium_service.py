@@ -8,9 +8,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 MAX_PDF_BYTES = int(os.getenv("PDFIUM_MAX_INPUT_BYTES", str(100 * 1024 * 1024)))
@@ -41,7 +42,6 @@ _DANGEROUS_ACTION_SUBTYPES = {
     "resetform",
     "trans",
 }
-_WORD_PATTERN = re.compile(r"[\w][\w./-]*", re.UNICODE)
 
 
 class PdfEngineError(RuntimeError):
@@ -113,6 +113,13 @@ def _decode_pdf_name_escapes(value: str) -> str:
     return _PDF_NAME_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), value)
 
 
+def _normalize_text_token(value: Any) -> str:
+    """Preserve all semantic glyphs while normalizing Unicode and whitespace."""
+
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return " ".join(normalized.split())
+
+
 def _rect_payload(value: Any) -> list[float]:
     return [
         round(float(value.x0), 1),
@@ -136,14 +143,6 @@ def _rects_intersect(left: list[float], right: list[float], tolerance: float = 1
         or left[3] <= right[1] - tolerance
         or left[1] >= right[3] + tolerance
     )
-
-
-def _intersection_area(left: list[float], right: list[float]) -> float:
-    if not _rects_intersect(left, right, tolerance=0):
-        return 0.0
-    width = max(0.0, min(left[2], right[2]) - max(left[0], right[0]))
-    height = max(0.0, min(left[3], right[3]) - max(left[1], right[1]))
-    return width * height
 
 
 def _rounded_color(value: Any) -> list[float] | None:
@@ -220,24 +219,15 @@ def _page_text_spans(page: Any) -> list[dict[str, Any]]:
         for line in list(block.get("lines") or []):
             for span in list(line.get("spans") or []):
                 bbox = _bbox_payload(span.get("bbox"))
-                if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+                normalized_text = _normalize_text_token(span.get("text"))
+                if bbox[2] <= bbox[0] or bbox[3] <= bbox[1] or not normalized_text:
                     continue
                 spans.append({
+                    "text": normalized_text,
                     "bbox": bbox,
                     "appearance": _text_appearance_signature(span),
                 })
     return spans
-
-
-def _appearance_for_word(word_bbox: list[float], spans: list[dict[str, Any]]) -> str | None:
-    matches = [
-        (float(_intersection_area(word_bbox, list(span.get("bbox") or []))), span)
-        for span in spans
-    ]
-    matches = [item for item in matches if item[0] > 0]
-    if not matches:
-        return None
-    return str(max(matches, key=lambda item: item[0])[1].get("appearance") or "") or None
 
 
 def _contains_unsafe_action(source: str) -> bool:
@@ -260,8 +250,9 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
 
     PyMuPDF expands compressed object streams and normalizes escaped PDF names,
     so action dictionaries cannot hide behind byte encoding. Form rectangles are
-    exclusion zones: field values may change, while static text—including its
-    appearance—images, and full vector path geometry outside those zones must remain.
+    exclusion zones: field values may change, while all static text—including
+    punctuation, operators, and appearance—images, and vector path geometry outside
+    those zones must remain exactly attributable to the controlled template.
     """
     import pymupdf
 
@@ -294,20 +285,12 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
         total_anchors = 0
         for page in document:
             excluded_rects = [_rect_payload(widget.rect) for widget in list(page.widgets() or [])]
-            text_spans = _page_text_spans(page)
 
-            words: list[dict[str, Any]] = []
-            for word in page.get_text("words", sort=True):
-                bbox = [round(float(value), 1) for value in word[:4]]
-                if any(_rects_intersect(bbox, excluded) for excluded in excluded_rects):
-                    continue
-                normalized = " ".join(_WORD_PATTERN.findall(str(word[4]).casefold()))
-                if normalized:
-                    words.append({
-                        "text": normalized,
-                        "bbox": bbox,
-                        "appearance": _appearance_for_word(bbox, text_spans),
-                    })
+            words = [
+                span
+                for span in _page_text_spans(page)
+                if not any(_rects_intersect(list(span.get("bbox") or []), excluded) for excluded in excluded_rects)
+            ]
 
             images: list[dict[str, Any]] = []
             for image in page.get_image_info(hashes=True, xrefs=True):
@@ -337,7 +320,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
                 "drawings": drawings,
             })
 
-        return has_actions, encrypted, {"version": 3, "total_anchors": total_anchors, "pages": pages}
+        return has_actions, encrypted, {"version": 4, "total_anchors": total_anchors, "pages": pages}
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -360,6 +343,19 @@ def _filtered_anchors(page: dict[str, Any], excluded_rects: list[list[float]], k
         for anchor in list(page.get(key) or [])
         if not any(_rects_intersect(list(anchor.get("bbox") or []), excluded) for excluded in excluded_rects)
     ]
+
+
+def _consume_matching_anchor(
+    candidates: list[dict[str, Any]],
+    used_indexes: set[int],
+    predicate: Callable[[dict[str, Any]], bool],
+) -> bool:
+    for index, candidate in enumerate(candidates):
+        if index in used_indexes or not predicate(candidate):
+            continue
+        used_indexes.add(index)
+        return True
+    return False
 
 
 def validate_template_provenance(expected: PdfInspection, candidate: PdfInspection) -> dict[str, Any]:
@@ -397,26 +393,35 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         completed_words = _filtered_anchors(completed_page, exclusions, "words")
         completed_images = _filtered_anchors(completed_page, exclusions, "images")
         completed_drawings = _filtered_anchors(completed_page, exclusions, "drawings")
+        used_words: set[int] = set()
+        used_images: set[int] = set()
+        used_drawings: set[int] = set()
 
         for source_word in list(source_page.get("words") or []):
-            if not any(
-                completed.get("text") == source_word.get("text")
-                and completed.get("appearance") == source_word.get("appearance")
-                and _near_bbox(list(completed.get("bbox") or []), list(source_word.get("bbox") or []))
-                for completed in completed_words
+            if not _consume_matching_anchor(
+                completed_words,
+                used_words,
+                lambda completed: (
+                    completed.get("text") == source_word.get("text")
+                    and completed.get("appearance") == source_word.get("appearance")
+                    and _near_bbox(list(completed.get("bbox") or []), list(source_word.get("bbox") or []))
+                ),
             ):
                 raise PdfEngineError(
                     "PDF_TEMPLATE_MISMATCH",
-                    f"Completed PDF page {page_number} is missing or visually changes controlled template text",
+                    f"Completed PDF page {page_number} is missing or changes controlled template text",
                     status_code=409,
                 )
             verified_anchors += 1
 
         for source_image in list(source_page.get("images") or []):
-            if not any(
-                completed.get("digest") == source_image.get("digest")
-                and _near_bbox(list(completed.get("bbox") or []), list(source_image.get("bbox") or []))
-                for completed in completed_images
+            if not _consume_matching_anchor(
+                completed_images,
+                used_images,
+                lambda completed: (
+                    completed.get("digest") == source_image.get("digest")
+                    and _near_bbox(list(completed.get("bbox") or []), list(source_image.get("bbox") or []))
+                ),
             ):
                 raise PdfEngineError(
                     "PDF_TEMPLATE_MISMATCH",
@@ -426,10 +431,13 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
             verified_anchors += 1
 
         for source_drawing in list(source_page.get("drawings") or []):
-            if not any(
-                completed.get("signature") == source_drawing.get("signature")
-                and _near_bbox(list(completed.get("bbox") or []), list(source_drawing.get("bbox") or []))
-                for completed in completed_drawings
+            if not _consume_matching_anchor(
+                completed_drawings,
+                used_drawings,
+                lambda completed: (
+                    completed.get("signature") == source_drawing.get("signature")
+                    and _near_bbox(list(completed.get("bbox") or []), list(source_drawing.get("bbox") or []))
+                ),
             ):
                 raise PdfEngineError(
                     "PDF_TEMPLATE_MISMATCH",
@@ -438,13 +446,24 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
                 )
             verified_anchors += 1
 
+        if (
+            len(used_words) != len(completed_words)
+            or len(used_images) != len(completed_images)
+            or len(used_drawings) != len(completed_drawings)
+        ):
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} adds unauthorized static content outside form fields",
+                status_code=409,
+            )
+
     return {
         "verified": True,
         "template_source_sha256": expected.source_sha256,
         "completed_source_sha256": candidate.source_sha256,
         "page_count": expected.page_count,
         "verified_anchors": verified_anchors,
-        "fingerprint_version": int(expected_fingerprint.get("version") or 3),
+        "fingerprint_version": int(expected_fingerprint.get("version") or 4),
     }
 
 
