@@ -240,7 +240,7 @@ def test_visual_overlay_over_controlled_text_is_rejected_even_when_original_anch
         engine.validate_template_provenance(template, candidate)
     assert provenance.value.code == "PDF_TEMPLATE_MISMATCH"
     assert provenance.value.status_code == 409
-    assert "unauthorized static content" in provenance.value.message
+    assert "controlled static page content" in provenance.value.message
 
     with pytest.raises(engine.PdfEngineError) as overlay:
         reject_visual_overlays(template, candidate)
