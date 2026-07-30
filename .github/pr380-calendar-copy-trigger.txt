@@ -1,1 +1,1 @@
-Execute the registered release-workflow publisher for PR380 now.
+Trigger the trusted pull-request-target publisher for the calendar correction.
