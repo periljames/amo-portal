@@ -304,6 +304,23 @@ describe("platform SaaS control API", () => {
     expect(handleAuthFailure).not.toHaveBeenCalled();
   });
 
+  it("aborts a stalled platform access verification", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+
+    const pending = verifyCurrentPlatformUser();
+    const assertion = expect(pending).rejects.toMatchObject({
+      name: "PlatformAccessVerificationError",
+      status: 0,
+      message: "Platform access verification timed out after 10 seconds.",
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+    expect(handleAuthFailure).not.toHaveBeenCalled();
+  });
+
   it("encodes superadmin search terms and result limits", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ items: [] }), {
