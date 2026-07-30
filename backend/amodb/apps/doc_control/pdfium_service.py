@@ -152,13 +152,49 @@ def _rounded_color(value: Any) -> list[float] | None:
     return [round(float(component), 3) for component in value]
 
 
+def _geometry_payload(value: Any) -> Any:
+    """Return a stable JSON-safe representation of PyMuPDF path geometry."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return round(value, 3)
+    if isinstance(value, dict):
+        return {str(key): _geometry_payload(value[key]) for key in sorted(value, key=str)}
+    if isinstance(value, (list, tuple)):
+        return [_geometry_payload(item) for item in value]
+    if all(hasattr(value, attr) for attr in ("x0", "y0", "x1", "y1")):
+        return {
+            "rect": [
+                round(float(value.x0), 3),
+                round(float(value.y0), 3),
+                round(float(value.x1), 3),
+                round(float(value.y1), 3),
+            ]
+        }
+    if all(hasattr(value, attr) for attr in ("x", "y")):
+        return {"point": [round(float(value.x), 3), round(float(value.y), 3)]}
+    try:
+        return [_geometry_payload(item) for item in value]
+    except TypeError:
+        return str(value)
+
+
 def _drawing_signature(drawing: dict[str, Any]) -> str:
     payload = {
         "type": str(drawing.get("type") or ""),
         "rect": _rect_payload(drawing["rect"]),
+        "items": _geometry_payload(drawing.get("items") or []),
         "fill": _rounded_color(drawing.get("fill")),
         "color": _rounded_color(drawing.get("color")),
         "width": round(float(drawing.get("width") or 0), 2),
+        "close_path": bool(drawing.get("closePath")),
+        "dashes": str(drawing.get("dashes") or ""),
+        "line_cap": _geometry_payload(drawing.get("lineCap")),
+        "line_join": _geometry_payload(drawing.get("lineJoin")),
+        "fill_opacity": round(float(drawing.get("fill_opacity") or 0), 3),
+        "stroke_opacity": round(float(drawing.get("stroke_opacity") or 0), 3),
+        "layer": str(drawing.get("layer") or ""),
     }
     return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
@@ -225,7 +261,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
     PyMuPDF expands compressed object streams and normalizes escaped PDF names,
     so action dictionaries cannot hide behind byte encoding. Form rectangles are
     exclusion zones: field values may change, while static text—including its
-    appearance—images, and vector geometry outside those zones must remain.
+    appearance—images, and full vector path geometry outside those zones must remain.
     """
     import pymupdf
 
@@ -301,7 +337,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
                 "drawings": drawings,
             })
 
-        return has_actions, encrypted, {"version": 2, "total_anchors": total_anchors, "pages": pages}
+        return has_actions, encrypted, {"version": 3, "total_anchors": total_anchors, "pages": pages}
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -408,7 +444,7 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         "completed_source_sha256": candidate.source_sha256,
         "page_count": expected.page_count,
         "verified_anchors": verified_anchors,
-        "fingerprint_version": int(expected_fingerprint.get("version") or 2),
+        "fingerprint_version": int(expected_fingerprint.get("version") or 3),
     }
 
 
