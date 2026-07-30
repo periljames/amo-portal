@@ -2,14 +2,14 @@ name: PR380 Calendar Fix Publisher
 
 on:
   pull_request:
-    types: [synchronize, reopened]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   publish-fix:
-    if: github.event.pull_request.number == 380 && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.ref == 'fix/rostering-calendar-feed-copy-feedback-v2' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -26,7 +26,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "PR380 correction is already published; no-op."
+            echo "Calendar correction is already published; no-op."
           fi
       - uses: actions/setup-python@v6
         if: steps.pending.outputs.run == 'true'
