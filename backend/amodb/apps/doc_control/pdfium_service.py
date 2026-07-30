@@ -20,6 +20,27 @@ WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
 
 _PDF_NAME_ESCAPE = re.compile(r"#([0-9A-Fa-f]{2})")
 _ACTION_NAME_PATTERN = re.compile(r"/(?:JavaScript|JS|OpenAction|AA)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
+_ACTION_CONTAINER_PATTERN = re.compile(r"/(?:A|Next)(?=[\s/<>{}\[\]()])|/Type\s*/Action\b", re.IGNORECASE)
+_ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
+_SAFE_ACTION_SUBTYPES = {"goto", "uri"}
+_DANGEROUS_ACTION_SUBTYPES = {
+    "javascript",
+    "js",
+    "launch",
+    "submitform",
+    "importdata",
+    "gotor",
+    "gotoe",
+    "named",
+    "rendition",
+    "richmediaexecute",
+    "setocgstate",
+    "sound",
+    "movie",
+    "hide",
+    "resetform",
+    "trans",
+}
 _WORD_PATTERN = re.compile(r"[\w][\w./-]*", re.UNICODE)
 
 
@@ -101,13 +122,28 @@ def _rect_payload(value: Any) -> list[float]:
     ]
 
 
+def _bbox_payload(value: Any) -> list[float]:
+    values = list(value or (0, 0, 0, 0))
+    return [round(float(component), 1) for component in values[:4]]
+
+
 def _rects_intersect(left: list[float], right: list[float], tolerance: float = 1.0) -> bool:
+    if len(left) != 4 or len(right) != 4:
+        return False
     return not (
         left[2] <= right[0] - tolerance
         or left[0] >= right[2] + tolerance
         or left[3] <= right[1] - tolerance
         or left[1] >= right[3] + tolerance
     )
+
+
+def _intersection_area(left: list[float], right: list[float]) -> float:
+    if not _rects_intersect(left, right, tolerance=0):
+        return 0.0
+    width = max(0.0, min(left[2], right[2]) - max(left[0], right[0]))
+    height = max(0.0, min(left[3], right[3]) - max(left[1], right[1]))
+    return width * height
 
 
 def _rounded_color(value: Any) -> list[float] | None:
@@ -127,13 +163,69 @@ def _drawing_signature(drawing: dict[str, Any]) -> str:
     return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
+def _text_appearance_signature(span: dict[str, Any]) -> str:
+    payload = {
+        "font": str(span.get("font") or ""),
+        "size": round(float(span.get("size") or 0), 2),
+        "color": int(span.get("color") or 0),
+        "alpha": int(span.get("alpha") if span.get("alpha") is not None else 255),
+        "flags": int(span.get("flags") or 0),
+        "char_flags": int(span.get("char_flags") or 0),
+    }
+    return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _page_text_spans(page: Any) -> list[dict[str, Any]]:
+    spans: list[dict[str, Any]] = []
+    text = page.get_text("dict", sort=True)
+    for block in list(text.get("blocks") or []):
+        if int(block.get("type") or 0) != 0:
+            continue
+        for line in list(block.get("lines") or []):
+            for span in list(line.get("spans") or []):
+                bbox = _bbox_payload(span.get("bbox"))
+                if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+                    continue
+                spans.append({
+                    "bbox": bbox,
+                    "appearance": _text_appearance_signature(span),
+                })
+    return spans
+
+
+def _appearance_for_word(word_bbox: list[float], spans: list[dict[str, Any]]) -> str | None:
+    matches = [
+        (float(_intersection_area(word_bbox, list(span.get("bbox") or []))), span)
+        for span in spans
+    ]
+    matches = [item for item in matches if item[0] > 0]
+    if not matches:
+        return None
+    return str(max(matches, key=lambda item: item[0])[1].get("appearance") or "") or None
+
+
+def _contains_unsafe_action(source: str) -> bool:
+    normalized = _decode_pdf_name_escapes(source or "")
+    if _ACTION_NAME_PATTERN.search(normalized):
+        return True
+    subtypes = {match.group(1).casefold() for match in _ACTION_SUBTYPE_PATTERN.finditer(normalized)}
+    if subtypes & _DANGEROUS_ACTION_SUBTYPES:
+        return True
+    if _ACTION_CONTAINER_PATTERN.search(normalized):
+        if not subtypes:
+            return True
+        if any(subtype not in _SAFE_ACTION_SUBTYPES for subtype in subtypes):
+            return True
+    return False
+
+
 def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
     """Inspect decoded PDF objects and build immutable page anchors.
 
     PyMuPDF expands compressed object streams and normalizes escaped PDF names,
-    so automatic actions cannot hide behind byte encoding that a raw regex misses.
-    Form rectangles are retained as exclusion zones: field values may change, while
-    static words, images and vector geometry outside those zones must remain.
+    so action dictionaries cannot hide behind byte encoding. Form rectangles are
+    exclusion zones: field values may change, while static text—including its
+    appearance—images, and vector geometry outside those zones must remain.
     """
     import pymupdf
 
@@ -158,7 +250,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
             for xref in range(1, document.xref_length())
         )
         for source in object_sources:
-            if _ACTION_NAME_PATTERN.search(_decode_pdf_name_escapes(source or "")):
+            if _contains_unsafe_action(source or ""):
                 has_actions = True
                 break
 
@@ -166,6 +258,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
         total_anchors = 0
         for page in document:
             excluded_rects = [_rect_payload(widget.rect) for widget in list(page.widgets() or [])]
+            text_spans = _page_text_spans(page)
 
             words: list[dict[str, Any]] = []
             for word in page.get_text("words", sort=True):
@@ -174,7 +267,11 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
                     continue
                 normalized = " ".join(_WORD_PATTERN.findall(str(word[4]).casefold()))
                 if normalized:
-                    words.append({"text": normalized, "bbox": bbox})
+                    words.append({
+                        "text": normalized,
+                        "bbox": bbox,
+                        "appearance": _appearance_for_word(bbox, text_spans),
+                    })
 
             images: list[dict[str, Any]] = []
             for image in page.get_image_info(hashes=True, xrefs=True):
@@ -204,7 +301,7 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
                 "drawings": drawings,
             })
 
-        return has_actions, encrypted, {"version": 1, "total_anchors": total_anchors, "pages": pages}
+        return has_actions, encrypted, {"version": 2, "total_anchors": total_anchors, "pages": pages}
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -268,12 +365,13 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         for source_word in list(source_page.get("words") or []):
             if not any(
                 completed.get("text") == source_word.get("text")
+                and completed.get("appearance") == source_word.get("appearance")
                 and _near_bbox(list(completed.get("bbox") or []), list(source_word.get("bbox") or []))
                 for completed in completed_words
             ):
                 raise PdfEngineError(
                     "PDF_TEMPLATE_MISMATCH",
-                    f"Completed PDF page {page_number} is missing controlled template text",
+                    f"Completed PDF page {page_number} is missing or visually changes controlled template text",
                     status_code=409,
                 )
             verified_anchors += 1
@@ -310,7 +408,7 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         "completed_source_sha256": candidate.source_sha256,
         "page_count": expected.page_count,
         "verified_anchors": verified_anchors,
-        "fingerprint_version": int(expected_fingerprint.get("version") or 1),
+        "fingerprint_version": int(expected_fingerprint.get("version") or 2),
     }
 
 
