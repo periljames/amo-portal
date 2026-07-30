@@ -69,6 +69,12 @@ const PdfPage = Page as unknown as FC<any>;
 let activePdfReaderId: string | null = null;
 let pdfReaderSequence = 0;
 
+type PdfAnnotationStorage = {
+  onSetModified?: () => void;
+  onResetModified?: () => void;
+  modified?: boolean;
+};
+
 type PdfDocumentHandle = {
   numPages: number;
   getPage: (pageNumber: number) => Promise<any>;
@@ -78,6 +84,7 @@ type PdfDocumentHandle = {
   getFieldObjects?: () => Promise<Record<string, unknown[]> | null>;
   hasJSActions?: () => Promise<boolean>;
   saveDocument?: () => Promise<Uint8Array>;
+  annotationStorage?: PdfAnnotationStorage;
 };
 
 export type PdfReaderOutlineItem = {
@@ -161,6 +168,20 @@ function pagesAround(pageNumber: number, pageCount: number): Set<number> {
   return pages;
 }
 
+function fitModeStorageKey(identity: PdfWorkingCopyIdentity): string {
+  return `pdf-reader-fit-mode:v1:${identity.userId}:${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
+}
+
+function readFitMode(identity: PdfWorkingCopyIdentity): FitMode {
+  try {
+    const stored = window.localStorage.getItem(fitModeStorageKey(identity));
+    if (stored === "WIDTH" || stored === "PAGE" || stored === "CUSTOM") return stored;
+  } catch {
+    // Local storage is an optional convenience. The reader remains usable without it.
+  }
+  return "WIDTH";
+}
+
 async function resolveOutline(documentProxy: PdfDocumentHandle): Promise<PdfReaderOutlineItem[]> {
   const outline = await documentProxy.getOutline?.().catch(() => null);
   if (!Array.isArray(outline) || !outline.length) return [];
@@ -237,7 +258,7 @@ export default function PdfReaderCore({
   const [hostWidth, setHostWidth] = useState(960);
   const [hostHeight, setHostHeight] = useState(720);
   const [zoomPercent, setZoomPercent] = useState(clampPdfValue(initialZoom, 50, 250));
-  const [fitMode, setFitMode] = useState<FitMode>(initialZoom === 100 ? "WIDTH" : "CUSTOM");
+  const [fitMode, setFitMode] = useState<FitMode>(() => readFitMode(identity));
   const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
   const [loadError, setLoadError] = useState("");
   const [fieldCount, setFieldCount] = useState(0);
@@ -276,6 +297,9 @@ export default function PdfReaderCore({
     || capabilities.encrypted
     ? capabilities.unsupported_reason
     : null;
+  const formRestrictionReason = fieldCount > 0 && !canFill
+    ? capabilities.unsupported_reason || "This PDF contains form fields, but editable execution is not enabled for this controlled revision."
+    : "";
 
   const setWorkingDirty = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -289,6 +313,19 @@ export default function PdfReaderCore({
   useEffect(() => { onOutlineReadyRef.current = onOutlineReady; }, [onOutlineReady]);
   useEffect(() => { onDirtyChangeRef.current = onDirtyChange; }, [onDirtyChange]);
   useEffect(() => { onDirtyChangeRef.current?.(dirty); }, [dirty]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(fitModeStorageKey(identity), fitMode);
+    } catch {
+      // Persistence is optional and must never block reading.
+    }
+  }, [fitMode, identity.manualId, identity.revisionId, identity.tenant, identity.userId]);
+
+  useEffect(() => {
+    if (canFill) setFillMode(true);
+    else setFillMode(false);
+  }, [canFill]);
 
   useEffect(() => {
     if (!activePdfReaderId) activePdfReaderId = readerIdRef.current;
@@ -335,6 +372,11 @@ export default function PdfReaderCore({
   useEffect(() => {
     inspectionGenerationRef.current += 1;
     searchControllerRef.current?.abort();
+    const existingStorage = documentRef.current?.annotationStorage;
+    if (existingStorage) {
+      existingStorage.onSetModified = undefined;
+      existingStorage.onResetModified = undefined;
+    }
     documentRef.current = null;
     setDocumentProxy(null);
     setPageCount(0);
@@ -352,23 +394,30 @@ export default function PdfReaderCore({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const scroller = readerScroller();
     const resize = () => {
-      setHostWidth(Math.max(360, host.clientWidth));
-      setHostHeight(Math.max(420, host.clientHeight || window.innerHeight - 160));
+      const viewportHeight = scroller?.clientHeight || window.innerHeight;
+      setHostWidth(Math.max(280, host.clientWidth));
+      setHostHeight(Math.max(360, viewportHeight - 112));
     };
     resize();
+    window.addEventListener("resize", resize);
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", resize);
       return () => window.removeEventListener("resize", resize);
     }
     const observer = new ResizeObserver(resize);
     observer.observe(host);
-    return () => observer.disconnect();
+    if (scroller) observer.observe(scroller);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
   }, []);
 
   const currentRatio = pageRatios[currentPage] || 1.414;
-  const availableWidth = Math.max(320, Math.min(1180, hostWidth - (compact ? 22 : 40)));
-  const fitPageWidth = Math.max(280, Math.min(availableWidth, (hostHeight - 122) / currentRatio));
+  const availableWidth = Math.max(240, Math.min(1600, hostWidth - (compact ? 16 : 32)));
+  const fitPageChrome = searchOpen ? 118 : 74;
+  const fitPageWidth = Math.max(220, Math.min(availableWidth, (hostHeight - fitPageChrome) / currentRatio));
   const pageWidth = Math.round(
     fitMode === "PAGE"
       ? fitPageWidth
@@ -426,8 +475,10 @@ export default function PdfReaderCore({
     setPageInput(String(page));
     onPageChangeRef.current?.(page);
     window.requestAnimationFrame(() => {
-      const element = pageRefs.current.get(page);
-      if (element) scrollPageIntoView(element, behavior);
+      window.requestAnimationFrame(() => {
+        const element = pageRefs.current.get(page);
+        if (element) scrollPageIntoView(element, behavior);
+      });
     });
   }, [pageCount]);
 
@@ -495,6 +546,11 @@ export default function PdfReaderCore({
   useEffect(() => () => {
     searchControllerRef.current?.abort();
     if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    const storage = documentRef.current?.annotationStorage;
+    if (storage) {
+      storage.onSetModified = undefined;
+      storage.onResetModified = undefined;
+    }
     inspectionGenerationRef.current += 1;
   }, []);
 
@@ -517,6 +573,10 @@ export default function PdfReaderCore({
   const handleDocumentLoad = useCallback((loaded: PdfDocumentHandle) => {
     documentRef.current = loaded;
     setDocumentProxy(loaded);
+    if (loaded.annotationStorage) {
+      loaded.annotationStorage.onSetModified = scheduleAutosave;
+      loaded.annotationStorage.onResetModified = () => setWorkingDirty(false);
+    }
     const nextPageCount = Math.max(1, Number(loaded.numPages || 1));
     const restoredPage = clampPdfValue(initialPageRef.current, 1, nextPageCount);
     setPageCount(nextPageCount);
@@ -525,7 +585,7 @@ export default function PdfReaderCore({
     setLoadError("");
     onPageChangeRef.current?.(restoredPage);
     inspectDocument(loaded);
-  }, [inspectDocument]);
+  }, [inspectDocument, scheduleAutosave, setWorkingDirty]);
 
   const runSearch = useCallback(async (requestedQuery = query) => {
     const needle = requestedQuery.trim();
@@ -708,7 +768,7 @@ export default function PdfReaderCore({
           <button type="button" onClick={() => changeZoom(-10)} aria-label="Zoom out"><Minus size={17} /></button>
           <button type="button" className="pdf-engine-zoom-value" onClick={() => { setFitMode("CUSTOM"); setZoomPercent(100); }}>{fitMode === "WIDTH" ? "Fit width" : fitMode === "PAGE" ? "Fit page" : `${zoomPercent}%`}</button>
           <button type="button" onClick={() => changeZoom(10)} aria-label="Zoom in"><Plus size={17} /></button>
-          <details className="pdf-engine-menu"><summary aria-label="Fit options"><Maximize2 size={16} /></summary><div><button type="button" onClick={() => setFitMode("WIDTH")}>Fit width</button><button type="button" onClick={() => setFitMode("PAGE")}>Fit page</button><button type="button" onClick={() => { setFitMode("CUSTOM"); setZoomPercent(100); }}>Actual size</button></div></details>
+          <details className="pdf-engine-menu"><summary aria-label="Fit options"><Maximize2 size={16} /></summary><div><button type="button" className={fitMode === "WIDTH" ? "active" : ""} onClick={() => setFitMode("WIDTH")}>Fit width</button><button type="button" className={fitMode === "PAGE" ? "active" : ""} onClick={() => setFitMode("PAGE")}>Fit page</button><button type="button" className={fitMode === "CUSTOM" && zoomPercent === 100 ? "active" : ""} onClick={() => { setFitMode("CUSTOM"); setZoomPercent(100); }}>Actual size</button></div></details>
         </div>
 
         <div className="pdf-engine-toolbar__actions">
@@ -747,6 +807,7 @@ export default function PdfReaderCore({
 
       {capabilityError ? <div className="pdf-engine-notice"><AlertTriangle size={16} /><span>{capabilityError}. Reading and original download remain available.</span></div> : null}
       {unsafeCapabilityReason ? <div className="pdf-engine-notice"><AlertTriangle size={16} /><span>{unsafeCapabilityReason}</span></div> : null}
+      {formRestrictionReason && formRestrictionReason !== unsafeCapabilityReason ? <div className="pdf-engine-notice"><FilePenLine size={16} /><span>{formRestrictionReason}</span></div> : null}
       {draftNotice ? <div className="pdf-engine-notice pdf-engine-notice--draft"><FileCheck2 size={16} /><span>{draftNotice}</span>{draftState === "SAVING" ? <small>Saving…</small> : draftState === "SAVED" ? <small>Saved</small> : draftState === "ERROR" ? <small>Save failed</small> : null}</div> : null}
       {actionError || searchError ? <div className="pdf-engine-error" role="alert"><AlertTriangle size={17} /><span>{actionError || searchError}</span></div> : null}
       {record ? <div className="pdf-engine-success" role="status"><CheckCircle2 size={17} /><span>Controlled record {record.record_number} created.</span><a href={record.download_url} target="_blank" rel="noreferrer">Open retained copy</a></div> : null}
@@ -757,6 +818,10 @@ export default function PdfReaderCore({
           file={readerFile}
           options={PDF_DOCUMENT_OPTIONS}
           onLoadSuccess={handleDocumentLoad}
+          onItemClick={({ pageIndex, pageNumber }: { pageIndex?: number; pageNumber?: number }) => {
+            const targetPage = Number(pageNumber || (Number.isFinite(pageIndex) ? Number(pageIndex) + 1 : 0));
+            if (targetPage > 0) jumpToPage(targetPage);
+          }}
           onLoadError={(caught: unknown) => {
             inspectionGenerationRef.current += 1;
             setLoadError(caught instanceof Error ? caught.message : "The PDF could not be opened");
@@ -806,7 +871,14 @@ export default function PdfReaderCore({
                     const ratioValue = width > 0 && height > 0 ? height / width : 1.414;
                     setPageRatios((current) => Math.abs((current[pageNumber] || 0) - ratioValue) < 0.001 ? current : { ...current, [pageNumber]: ratioValue });
                   }}
-                /> : <div className="pdf-engine-page__placeholder" aria-label={`Page ${pageNumber} is ready to render`} />}
+                /> : <PdfPage
+                  pageNumber={pageNumber}
+                  width={pageWidth}
+                  renderMode="none"
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                  loading={<div className="pdf-engine-page__placeholder" aria-label={`Page ${pageNumber} is ready to render`} />}
+                />}
                 {renderPageOverlay?.(pageNumber)}
               </div>;
             })}
