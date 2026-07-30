@@ -66,6 +66,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.m
 
 const PdfDocument = Document as unknown as FC<any>;
 const PdfPage = Page as unknown as FC<any>;
+let activePdfReaderId: string | null = null;
+let pdfReaderSequence = 0;
 
 type PdfDocumentHandle = {
   numPages: number;
@@ -107,6 +109,7 @@ export type PdfReaderCoreProps = {
   onZoomChange?: (zoomPercent: number) => void;
   onAcroFormDetected?: (hasAcroForm: boolean) => void;
   onOutlineReady?: (items: PdfReaderOutlineItem[]) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmitWorkingCopy?: (file: File) => Promise<DocumentationRecord>;
   onRecordCreated?: (record: DocumentationRecord) => void;
 };
@@ -201,10 +204,12 @@ export default function PdfReaderCore({
   onZoomChange,
   onAcroFormDetected,
   onOutlineReady,
+  onDirtyChange,
   onSubmitWorkingCopy,
   onRecordCreated,
 }: PdfReaderCoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const readerIdRef = useRef(`pdf-reader-${++pdfReaderSequence}`);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const documentRef = useRef<PdfDocumentHandle | null>(null);
@@ -213,10 +218,12 @@ export default function PdfReaderCore({
   const autosaveTimerRef = useRef<number | null>(null);
   const serializationRef = useRef<Promise<Uint8Array> | null>(null);
   const pendingAutosaveRef = useRef(false);
+  const dirtyRef = useRef(false);
   const onPageChangeRef = useRef(onPageChange);
   const onZoomChangeRef = useRef(onZoomChange);
   const onAcroFormDetectedRef = useRef(onAcroFormDetected);
   const onOutlineReadyRef = useRef(onOutlineReady);
+  const onDirtyChangeRef = useRef(onDirtyChange);
   const initialPageRef = useRef(initialPage);
 
   const [resolvedCapabilities, setResolvedCapabilities] = useState<PdfReaderCapabilities | null>(suppliedCapabilities || null);
@@ -230,7 +237,7 @@ export default function PdfReaderCore({
   const [hostWidth, setHostWidth] = useState(960);
   const [hostHeight, setHostHeight] = useState(720);
   const [zoomPercent, setZoomPercent] = useState(clampPdfValue(initialZoom, 50, 250));
-  const [fitMode, setFitMode] = useState<FitMode>("WIDTH");
+  const [fitMode, setFitMode] = useState<FitMode>(initialZoom === 100 ? "WIDTH" : "CUSTOM");
   const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
   const [loadError, setLoadError] = useState("");
   const [fieldCount, setFieldCount] = useState(0);
@@ -253,7 +260,7 @@ export default function PdfReaderCore({
   const capabilities = resolvedCapabilities || READ_ONLY_CAPABILITIES;
   const originalSource = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
   const readerFile = useMemo(
-    () => localDraft ? { data: new Uint8Array(localDraft.bytes) } : originalSource,
+    () => localDraft ? { data: new Uint8Array(localDraft.bytes.slice(0)) } : originalSource,
     [localDraft, originalSource],
   );
   const outputFilename = safePdfFilename(filename || "", `${title}.pdf`);
@@ -264,12 +271,31 @@ export default function PdfReaderCore({
     && !capabilities.has_javascript
     && !capabilities.is_dynamic_xfa,
   );
+  const unsafeCapabilityReason = capabilities.has_javascript
+    || capabilities.is_dynamic_xfa
+    || capabilities.encrypted
+    ? capabilities.unsupported_reason
+    : null;
+
+  const setWorkingDirty = useCallback((value: boolean) => {
+    dirtyRef.current = value;
+    setDirty(value);
+  }, []);
 
   useEffect(() => { initialPageRef.current = initialPage; }, [initialPage]);
   useEffect(() => { onPageChangeRef.current = onPageChange; }, [onPageChange]);
   useEffect(() => { onZoomChangeRef.current = onZoomChange; }, [onZoomChange]);
   useEffect(() => { onAcroFormDetectedRef.current = onAcroFormDetected; }, [onAcroFormDetected]);
   useEffect(() => { onOutlineReadyRef.current = onOutlineReady; }, [onOutlineReady]);
+  useEffect(() => { onDirtyChangeRef.current = onDirtyChange; }, [onDirtyChange]);
+  useEffect(() => { onDirtyChangeRef.current?.(dirty); }, [dirty]);
+
+  useEffect(() => {
+    if (!activePdfReaderId) activePdfReaderId = readerIdRef.current;
+    return () => {
+      if (activePdfReaderId === readerIdRef.current) activePdfReaderId = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (suppliedCapabilities) {
@@ -298,13 +324,13 @@ export default function PdfReaderCore({
           setDraftNotice("A local working copy belongs to a different source checksum and was not restored.");
           return;
         }
-        setLocalDraft(draft);
+        setLocalDraft((current) => current?.key === draft.key && current.savedAt === draft.savedAt ? current : draft);
         setDraftNotice(`Working copy restored from ${new Date(draft.savedAt).toLocaleString()}.`);
-        setDirty(true);
+        setWorkingDirty(true);
       })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [capabilities.source_sha256, identity.manualId, identity.revisionId, identity.tenant, identity.userId]);
+  }, [capabilities.source_sha256, identity.manualId, identity.revisionId, identity.tenant, identity.userId, setWorkingDirty]);
 
   useEffect(() => {
     inspectionGenerationRef.current += 1;
@@ -425,7 +451,7 @@ export default function PdfReaderCore({
   }, []);
 
   const persistDraft = useCallback(async () => {
-    if (!capabilities.can_save_draft || !dirty) return;
+    if (!capabilities.can_save_draft || !dirtyRef.current) return;
     if (serializationRef.current) {
       pendingAutosaveRef.current = true;
       return;
@@ -449,15 +475,15 @@ export default function PdfReaderCore({
         window.setTimeout(() => void persistDraft(), 0);
       }
     }
-  }, [capabilities.can_save_draft, capabilities.source_sha256, dirty, identity, outputFilename, serializeCurrentDocument]);
+  }, [capabilities.can_save_draft, capabilities.source_sha256, identity, outputFilename, serializeCurrentDocument]);
 
   const scheduleAutosave = useCallback(() => {
-    setDirty(true);
+    setWorkingDirty(true);
     setDraftState("IDLE");
     if (!capabilities.can_save_draft) return;
     if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = window.setTimeout(() => void persistDraft(), 900);
-  }, [capabilities.can_save_draft, persistDraft]);
+  }, [capabilities.can_save_draft, persistDraft, setWorkingDirty]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -547,7 +573,9 @@ export default function PdfReaderCore({
   }, []);
 
   useEffect(() => {
+    const readerId = readerIdRef.current;
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (activePdfReaderId !== readerId) return;
       const shortcut = pdfReaderShortcut(event);
       if (!shortcut) return;
       event.preventDefault();
@@ -625,7 +653,7 @@ export default function PdfReaderCore({
         ? await onSubmitWorkingCopy(file)
         : await submitPdfWorkingCopy(identity.tenant, identity.manualId, identity.revisionId, file, { output_mode: "FLATTENED_RECORD" });
       setRecord(created);
-      setDirty(false);
+      setWorkingDirty(false);
       setDraftState("IDLE");
       await deletePdfWorkingCopy(identity).catch(() => undefined);
       setLocalDraft(null);
@@ -642,19 +670,23 @@ export default function PdfReaderCore({
     if (dirty && !window.confirm("Discard the locally saved working copy and reopen the controlled source?")) return;
     await deletePdfWorkingCopy(identity).catch(() => undefined);
     setLocalDraft(null);
-    setDirty(false);
+    setWorkingDirty(false);
     setFillMode(false);
     setDraftNotice("");
     setDraftState("IDLE");
   };
 
+  const activateReader = () => { activePdfReaderId = readerIdRef.current; };
   const activeResult = searchResults[activeSearchIndex] || null;
   const pageNumbers = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
 
   return (
     <section
       ref={hostRef}
-      className={`pdf-engine-reader ${compact ? "pdf-engine-reader--compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${fillMode ? "is-fill-mode" : ""}`}
+      tabIndex={-1}
+      onPointerDownCapture={activateReader}
+      onFocusCapture={activateReader}
+      className={`pdf-engine-reader ${compact ? "pdf-engine-reader--compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${fillMode ? "is-fill-mode" : ""} ${dirty ? "is-dirty" : ""}`}
       aria-label={`${title} controlled PDF reader`}
     >
       <header className="pdf-engine-toolbar">
@@ -681,7 +713,7 @@ export default function PdfReaderCore({
 
         <div className="pdf-engine-toolbar__actions">
           <button type="button" className={searchOpen ? "active" : ""} onClick={() => { setSearchOpen((value) => !value); window.requestAnimationFrame(() => searchInputRef.current?.focus()); }}><Search size={16} /><span>Search</span></button>
-          {canFill ? <button type="button" className={fillMode ? "active" : ""} onClick={() => setFillMode((value) => !value)}><FilePenLine size={16} /><span>{fillMode ? "Reading" : "Fill form"}</span></button> : null}
+          {canFill ? <button type="button" className={fillMode ? "active" : ""} onClick={() => setFillMode((value) => !value)}><FilePenLine size={16} /><span>{fillMode ? "Exit fill" : "Fill form"}</span></button> : null}
           <details className="pdf-engine-menu pdf-engine-download-menu"><summary><Download size={16} /><span>Download</span></summary><div>
             <button type="button" disabled={Boolean(busyAction) || !capabilities.can_download_original} onClick={() => void downloadOriginal()}>Original controlled source</button>
             <button type="button" disabled={Boolean(busyAction) || !capabilities.can_download_working || !documentProxy?.saveDocument} onClick={() => void downloadWorking()}>Editable working copy</button>
@@ -714,7 +746,7 @@ export default function PdfReaderCore({
       </div> : null}
 
       {capabilityError ? <div className="pdf-engine-notice"><AlertTriangle size={16} /><span>{capabilityError}. Reading and original download remain available.</span></div> : null}
-      {capabilities.unsupported_reason && !capabilities.can_fill ? <div className="pdf-engine-notice"><AlertTriangle size={16} /><span>{capabilities.unsupported_reason}</span></div> : null}
+      {unsafeCapabilityReason ? <div className="pdf-engine-notice"><AlertTriangle size={16} /><span>{unsafeCapabilityReason}</span></div> : null}
       {draftNotice ? <div className="pdf-engine-notice pdf-engine-notice--draft"><FileCheck2 size={16} /><span>{draftNotice}</span>{draftState === "SAVING" ? <small>Saving…</small> : draftState === "SAVED" ? <small>Saved</small> : draftState === "ERROR" ? <small>Save failed</small> : null}</div> : null}
       {actionError || searchError ? <div className="pdf-engine-error" role="alert"><AlertTriangle size={17} /><span>{actionError || searchError}</span></div> : null}
       {record ? <div className="pdf-engine-success" role="status"><CheckCircle2 size={17} /><span>Controlled record {record.record_number} created.</span><a href={record.download_url} target="_blank" rel="noreferrer">Open retained copy</a></div> : null}
