@@ -18,7 +18,9 @@ MAX_PDF_PAGES = int(os.getenv("PDFIUM_MAX_PAGES", "5000"))
 PROCESS_TIMEOUT_SECONDS = int(os.getenv("PDFIUM_PROCESS_TIMEOUT_SECONDS", "90"))
 WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
 
-_SCRIPT_PATTERN = re.compile(rb"/(?:JavaScript|JS|OpenAction|AA)(?:\s|\[|<|/)", re.IGNORECASE)
+_PDF_NAME_ESCAPE = re.compile(r"#([0-9A-Fa-f]{2})")
+_ACTION_NAME_PATTERN = re.compile(r"/(?:JavaScript|JS|OpenAction|AA)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
+_WORD_PATTERN = re.compile(r"[\w][\w./-]*", re.UNICODE)
 
 
 class PdfEngineError(RuntimeError):
@@ -42,6 +44,7 @@ class PdfInspection:
     encrypted: bool
     can_flatten: bool
     unsupported_reason: str | None = None
+    template_fingerprint: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -75,12 +78,6 @@ def _validate_input(content: bytes) -> None:
             f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
             status_code=413,
         )
-    if b"/Encrypt" in content:
-        raise PdfEngineError(
-            "PDF_ENCRYPTED",
-            "Encrypted PDFs require an approved password workflow and cannot be processed here",
-            status_code=409,
-        )
 
 
 def _safe_work_root() -> Path:
@@ -91,10 +88,236 @@ def _safe_work_root() -> Path:
     return root
 
 
+def _decode_pdf_name_escapes(value: str) -> str:
+    return _PDF_NAME_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), value)
+
+
+def _rect_payload(value: Any) -> list[float]:
+    return [
+        round(float(value.x0), 1),
+        round(float(value.y0), 1),
+        round(float(value.x1), 1),
+        round(float(value.y1), 1),
+    ]
+
+
+def _rects_intersect(left: list[float], right: list[float], tolerance: float = 1.0) -> bool:
+    return not (
+        left[2] <= right[0] - tolerance
+        or left[0] >= right[2] + tolerance
+        or left[3] <= right[1] - tolerance
+        or left[1] >= right[3] + tolerance
+    )
+
+
+def _rounded_color(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    return [round(float(component), 3) for component in value]
+
+
+def _drawing_signature(drawing: dict[str, Any]) -> str:
+    payload = {
+        "type": str(drawing.get("type") or ""),
+        "rect": _rect_payload(drawing["rect"]),
+        "fill": _rounded_color(drawing.get("fill")),
+        "color": _rounded_color(drawing.get("color")),
+        "width": round(float(drawing.get("width") or 0), 2),
+    }
+    return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
+    """Inspect decoded PDF objects and build immutable page anchors.
+
+    PyMuPDF expands compressed object streams and normalizes escaped PDF names,
+    so automatic actions cannot hide behind byte encoding that a raw regex misses.
+    Form rectangles are retained as exclusion zones: field values may change, while
+    static words, images and vector geometry outside those zones must remain.
+    """
+    import pymupdf
+
+    try:
+        document = pymupdf.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        raise PdfEngineError("PDF_INVALID", "The PDF parser could not open this document") from exc
+
+    try:
+        encrypted = bool(document.needs_pass or document.is_encrypted)
+        if encrypted:
+            raise PdfEngineError(
+                "PDF_ENCRYPTED",
+                "Encrypted PDFs require an approved password workflow and cannot be processed here",
+                status_code=409,
+            )
+
+        has_actions = False
+        object_sources = [document.xref_object(-1, compressed=False)]
+        object_sources.extend(
+            document.xref_object(xref, compressed=False)
+            for xref in range(1, document.xref_length())
+        )
+        for source in object_sources:
+            if _ACTION_NAME_PATTERN.search(_decode_pdf_name_escapes(source or "")):
+                has_actions = True
+                break
+
+        pages: list[dict[str, Any]] = []
+        total_anchors = 0
+        for page in document:
+            excluded_rects = [_rect_payload(widget.rect) for widget in list(page.widgets() or [])]
+
+            words: list[dict[str, Any]] = []
+            for word in page.get_text("words", sort=True):
+                bbox = [round(float(value), 1) for value in word[:4]]
+                if any(_rects_intersect(bbox, excluded) for excluded in excluded_rects):
+                    continue
+                normalized = " ".join(_WORD_PATTERN.findall(str(word[4]).casefold()))
+                if normalized:
+                    words.append({"text": normalized, "bbox": bbox})
+
+            images: list[dict[str, Any]] = []
+            for image in page.get_image_info(hashes=True, xrefs=True):
+                bbox = [round(float(value), 1) for value in image.get("bbox", (0, 0, 0, 0))]
+                if any(_rects_intersect(bbox, excluded) for excluded in excluded_rects):
+                    continue
+                digest = image.get("digest")
+                images.append({
+                    "digest": digest.hex() if isinstance(digest, bytes) else str(digest or ""),
+                    "bbox": bbox,
+                })
+
+            drawings: list[dict[str, Any]] = []
+            for drawing in page.get_drawings():
+                bbox = _rect_payload(drawing["rect"])
+                if any(_rects_intersect(bbox, excluded) for excluded in excluded_rects):
+                    continue
+                drawings.append({"signature": _drawing_signature(drawing), "bbox": bbox})
+
+            total_anchors += len(words) + len(images) + len(drawings)
+            pages.append({
+                "width": round(float(page.rect.width), 1),
+                "height": round(float(page.rect.height), 1),
+                "excluded_rects": excluded_rects,
+                "words": words,
+                "images": images,
+                "drawings": drawings,
+            })
+
+        return has_actions, encrypted, {"version": 1, "total_anchors": total_anchors, "pages": pages}
+    except PdfEngineError:
+        raise
+    except Exception as exc:
+        raise PdfEngineError(
+            "PDF_STRUCTURE_SCAN_FAILED",
+            "The PDF object structure could not be inspected safely",
+            status_code=422,
+        ) from exc
+    finally:
+        document.close()
+
+
+def _near_bbox(left: list[float], right: list[float], tolerance: float = 3.0) -> bool:
+    return len(left) == len(right) == 4 and all(abs(left[index] - right[index]) <= tolerance for index in range(4))
+
+
+def _filtered_anchors(page: dict[str, Any], excluded_rects: list[list[float]], key: str) -> list[dict[str, Any]]:
+    return [
+        anchor
+        for anchor in list(page.get(key) or [])
+        if not any(_rects_intersect(list(anchor.get("bbox") or []), excluded) for excluded in excluded_rects)
+    ]
+
+
+def validate_template_provenance(expected: PdfInspection, candidate: PdfInspection) -> dict[str, Any]:
+    expected_fingerprint = dict(expected.template_fingerprint or {})
+    candidate_fingerprint = dict(candidate.template_fingerprint or {})
+    expected_pages = list(expected_fingerprint.get("pages") or [])
+    candidate_pages = list(candidate_fingerprint.get("pages") or [])
+
+    if expected.page_count != candidate.page_count or len(expected_pages) != len(candidate_pages):
+        raise PdfEngineError(
+            "PDF_TEMPLATE_MISMATCH",
+            "The completed PDF page count does not match the controlled template",
+            status_code=409,
+        )
+    if int(expected_fingerprint.get("total_anchors") or 0) < 1:
+        raise PdfEngineError(
+            "PDF_TEMPLATE_PROVENANCE_UNAVAILABLE",
+            "This template has no stable content anchors; provenance cannot be established safely",
+            status_code=409,
+        )
+
+    verified_anchors = 0
+    for page_number, (source_page, completed_page) in enumerate(zip(expected_pages, candidate_pages), start=1):
+        if (
+            abs(float(source_page.get("width") or 0) - float(completed_page.get("width") or 0)) > 1.0
+            or abs(float(source_page.get("height") or 0) - float(completed_page.get("height") or 0)) > 1.0
+        ):
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} has different page geometry from the controlled template",
+                status_code=409,
+            )
+
+        exclusions = list(source_page.get("excluded_rects") or [])
+        completed_words = _filtered_anchors(completed_page, exclusions, "words")
+        completed_images = _filtered_anchors(completed_page, exclusions, "images")
+        completed_drawings = _filtered_anchors(completed_page, exclusions, "drawings")
+
+        for source_word in list(source_page.get("words") or []):
+            if not any(
+                completed.get("text") == source_word.get("text")
+                and _near_bbox(list(completed.get("bbox") or []), list(source_word.get("bbox") or []))
+                for completed in completed_words
+            ):
+                raise PdfEngineError(
+                    "PDF_TEMPLATE_MISMATCH",
+                    f"Completed PDF page {page_number} is missing controlled template text",
+                    status_code=409,
+                )
+            verified_anchors += 1
+
+        for source_image in list(source_page.get("images") or []):
+            if not any(
+                completed.get("digest") == source_image.get("digest")
+                and _near_bbox(list(completed.get("bbox") or []), list(source_image.get("bbox") or []))
+                for completed in completed_images
+            ):
+                raise PdfEngineError(
+                    "PDF_TEMPLATE_MISMATCH",
+                    f"Completed PDF page {page_number} is missing a controlled template image",
+                    status_code=409,
+                )
+            verified_anchors += 1
+
+        for source_drawing in list(source_page.get("drawings") or []):
+            if not any(
+                completed.get("signature") == source_drawing.get("signature")
+                and _near_bbox(list(completed.get("bbox") or []), list(source_drawing.get("bbox") or []))
+                for completed in completed_drawings
+            ):
+                raise PdfEngineError(
+                    "PDF_TEMPLATE_MISMATCH",
+                    f"Completed PDF page {page_number} is missing controlled template geometry",
+                    status_code=409,
+                )
+            verified_anchors += 1
+
+    return {
+        "verified": True,
+        "template_source_sha256": expected.source_sha256,
+        "completed_source_sha256": candidate.source_sha256,
+        "page_count": expected.page_count,
+        "verified_anchors": verified_anchors,
+        "fingerprint_version": int(expected_fingerprint.get("version") or 1),
+    }
+
+
 def _read_worker_metadata(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # pragma: no cover - defensive worker boundary
+    except Exception as exc:
         raise PdfEngineError("PDF_WORKER_FAILED", "PDFium did not return a valid processing result", status_code=500) from exc
     if not isinstance(payload, dict):
         raise PdfEngineError("PDF_WORKER_FAILED", "PDFium returned an invalid processing result", status_code=500)
@@ -173,9 +396,7 @@ def flatten_pdf_bytes(content: bytes) -> PdfFlattenResult:
 
 def _pdfium_engine_version(pdfium: Any) -> str:
     info = getattr(pdfium, "PDFIUM_INFO", None)
-    if info is None:
-        return "unknown"
-    return str(info)
+    return "unknown" if info is None else str(info)
 
 
 def _worker_process(action: str, source_path: Path, output_path: Path) -> dict[str, Any]:
@@ -184,9 +405,9 @@ def _worker_process(action: str, source_path: Path, output_path: Path) -> dict[s
 
     content = source_path.read_bytes()
     _validate_input(content)
-    has_javascript = bool(_SCRIPT_PATTERN.search(content))
+    has_actions, encrypted, template_fingerprint = _parsed_pdf_profile(content)
     source_sha256 = _sha256(content)
-    if has_javascript:
+    if has_actions:
         raise PdfEngineError(
             "PDF_SCRIPTED",
             "PDF JavaScript and automatic actions are disabled for controlled documents",
@@ -227,11 +448,12 @@ def _worker_process(action: str, source_path: Path, output_path: Path) -> dict[s
             return {
                 **base,
                 "has_acroform": has_acroform,
-                "has_javascript": False,
+                "has_javascript": has_actions,
                 "is_dynamic_xfa": dynamic_xfa,
-                "encrypted": False,
-                "can_flatten": not dynamic_xfa,
+                "encrypted": encrypted,
+                "can_flatten": not dynamic_xfa and not has_actions,
                 "unsupported_reason": unsupported_reason,
+                "template_fingerprint": template_fingerprint,
             }
         if dynamic_xfa:
             raise PdfEngineError("PDF_DYNAMIC_XFA", unsupported_reason or "Dynamic XFA is unsupported", status_code=409)
@@ -288,7 +510,7 @@ def _worker_main(action: str, source: str, output: str, metadata: str) -> int:
             encoding="utf-8",
         )
         return 2
-    except Exception as exc:  # pragma: no cover - worker crash boundary
+    except Exception as exc:
         metadata_path.write_text(
             json.dumps({"error": {"code": "PDF_WORKER_FAILED", "message": str(exc)[:1000], "status_code": 500}}),
             encoding="utf-8",
@@ -306,7 +528,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":  # pragma: no cover - exercised through bounded subprocess tests
+if __name__ == "__main__":
     args = _parse_args()
     if not args.worker:
         raise SystemExit(64)
