@@ -1,5 +1,5 @@
-export type ContractType = "PERMANENT" | "FIXED_TERM" | "CASUAL" | "CONTRACTOR" | "INTERN" | "SECONDMENT";
-export type EmploymentStatus = "ONBOARDING" | "ACTIVE" | "SUSPENDED" | "TERMINATED" | "ENDED";
+export type ContractType = "PERMANENT" | "FIXED_TERM" | "TEMPORARY" | "CONTRACTOR" | "INTERN";
+export type EmploymentStatus = "ONBOARDING" | "ACTIVE" | "SUSPENDED" | "TERMINATED";
 export type PatternDayStatus = "DUTY" | "STANDBY" | "TRAINING" | "OFF" | "LEAVE" | "TRAVEL" | "UNAVAILABLE" | "OTHER";
 export type AvailabilityType =
   | "AVAILABLE"

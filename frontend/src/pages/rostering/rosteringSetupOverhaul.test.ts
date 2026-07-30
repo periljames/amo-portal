@@ -108,4 +108,19 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(shellSource).not.toContain('label: "Reports"');
     expect(pagesSource).toContain("LazyRosterOperationsWorkspace");
   });
+
+
+  it("keeps active tenant users visible when Workforce records are incomplete", () => {
+    expect(hrSource).toContain("Every active tenant user appears here");
+    expect(hrSource).toContain("Create contract");
+    expect(hrSource).toContain("createEmploymentContract");
+    expect(hrSource).toContain("Apply default day pattern");
+    const workforceHrService = readSource("../../services/workforceHr.ts");
+    expect(workforceHrService).toContain("/workforce/hr/default-day-pattern");
+    const workforceTypes = readSource("../../types/workforce.ts");
+    expect(workforceTypes).toContain('"TEMPORARY"');
+    expect(workforceTypes).not.toContain('"CASUAL"');
+    expect(workforceTypes).not.toContain('"SECONDMENT"');
+    expect(workforceTypes).not.toContain('"ENDED"');
+  });
 });

@@ -85,6 +85,11 @@ function hrDashboardResponse(permissions: string[]) {
   return {
     generated_at: "2026-07-29T08:00:00Z",
     can_manage_contracts: permissions.includes("workforce.manage_contracts"),
+    can_initialize_default_day_pattern: [
+      "workforce.manage_contracts",
+      "roster.manage_shift_templates",
+      "roster.manage_patterns",
+    ].every((permission) => permissions.includes(permission)),
     can_manage_leave_balances: permissions.includes("leave.manage_balances"),
     can_review_leave: permissions.includes("leave.review"),
     can_approve_leave: permissions.includes("leave.approve"),
@@ -93,7 +98,8 @@ function hrDashboardResponse(permissions: string[]) {
     can_approve_overtime_supervisor: permissions.includes("overtime.approve"),
     can_approve_overtime_hr: permissions.includes("overtime.approve") && permissions.includes("attendance.approve"),
     can_export_payroll: permissions.includes("payroll.export"),
-    active_employee_count: 0,
+    active_employee_count: 1,
+    employees_without_contract_count: 1,
     onboarding_employee_count: 0,
     suspended_employee_count: 0,
     contracts_expiring_soon_count: 0,
@@ -109,6 +115,78 @@ function hrDashboardResponse(permissions: string[]) {
     people: [],
   };
 }
+
+const activeUserWithFutureContract = {
+  user_id: "active-user-future-contract",
+  contract_id: "future-contract-001",
+  staff_code: "TECH-002",
+  full_name: "Future Starter",
+  email: "future.starter@example.test",
+  has_effective_contract: false,
+  uses_default_day_pattern: false,
+  position_title: "Aircraft Technician",
+  department_code: "maintenance",
+  employment_status: "ONBOARDING",
+  contract_type: "FIXED_TERM",
+  contract_effective_from: "2026-08-15",
+  contract_effective_to: "2027-08-14",
+  primary_base_station_id: "base-nbo",
+  primary_base_code: "NBO",
+  supervisor_name: null,
+  standard_weekly_minutes: 2400,
+  standard_daily_minutes: 480,
+  fte_percentage: 100,
+  cost_centre: null,
+  payroll_number: null,
+  overtime_eligible: true,
+  night_shift_eligible: true,
+  standby_eligible: true,
+  work_pattern_code: null,
+  work_pattern_name: null,
+  work_pattern_effective_from: null,
+  active_leave_status: null,
+  readiness_state: "NEEDS_ATTENTION",
+  readiness_reasons: [
+    "Employment contract starts on 2026-08-15.",
+    "No active work pattern is assigned.",
+  ],
+};
+
+const activeUserWithoutContract = {
+  user_id: "active-user-without-contract",
+  contract_id: null,
+  staff_code: "TECH-001",
+  full_name: "Active Technician",
+  email: "active.technician@example.test",
+  has_effective_contract: false,
+  uses_default_day_pattern: false,
+  position_title: "Aircraft Technician",
+  department_code: "maintenance",
+  employment_status: null,
+  contract_type: null,
+  contract_effective_from: null,
+  contract_effective_to: null,
+  primary_base_station_id: null,
+  primary_base_code: null,
+  supervisor_name: null,
+  standard_weekly_minutes: 2400,
+  standard_daily_minutes: 480,
+  fte_percentage: 100,
+  cost_centre: null,
+  payroll_number: null,
+  overtime_eligible: true,
+  night_shift_eligible: true,
+  standby_eligible: true,
+  work_pattern_code: null,
+  work_pattern_name: null,
+  work_pattern_effective_from: null,
+  active_leave_status: null,
+  readiness_state: "NEEDS_ATTENTION",
+  readiness_reasons: [
+    "No effective employment contract exists.",
+    "No active work pattern is assigned.",
+  ],
+};
 
 async function fulfilJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -175,6 +253,20 @@ async function installAuthenticatedSession(page: Page, roleCase: RoleCase) {
       await fulfilJson(route, hrDashboardResponse(roleCase.permissions));
       return;
     }
+    if (path.endsWith("/workforce/hr/people")) {
+      await fulfilJson(route, {
+        items: [activeUserWithoutContract, activeUserWithFutureContract],
+        page: 1,
+        page_size: 100,
+        total: 2,
+        pages: 1,
+      });
+      return;
+    }
+    if (path.endsWith("/foundations/base-stations")) {
+      await fulfilJson(route, [{ id: "base-nbo", code: "NBO", name: "Nairobi", is_active: true }]);
+      return;
+    }
     if (path.endsWith("/rostering/dashboard")) {
       await fulfilJson(route, dashboardResponse);
       return;
@@ -222,6 +314,24 @@ test("HR Manager can open Workforce while an ordinary employee is denied", async
   await expect(employeePage.getByText("This workspace requires the workforce.view_sensitive permission.")).toBeVisible();
   await expect(employeePage.getByRole("navigation", { name: "Workforce and HR sections" })).toHaveCount(0);
   await employeeContext.close();
+});
+
+test("active users without contracts remain visible and actionable in Workforce", async ({ page }) => {
+  const admin = cases.find((item) => item.name === "AMO Admin")!;
+  await installAuthenticatedSession(page, admin);
+  await page.goto(`${ROSTER_ROOT}/settings?section=workforce`);
+  await page.getByRole("button", { name: "People & contracts" }).click();
+
+  await expect(page.getByText("Active Technician", { exact: true })).toBeVisible();
+  await expect(page.getByText("No contract", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create contract" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply default day pattern" })).toBeVisible();
+
+  const futureEmployee = page.getByText("Future Starter", { exact: true }).locator("xpath=ancestor::article");
+  await expect(futureEmployee).toContainText("ONBOARDING");
+  await expect(futureEmployee).toContainText("starts on 2026-08-15");
+  await expect(futureEmployee.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(futureEmployee.getByRole("button", { name: "Create contract" })).toHaveCount(0);
 });
 
 test("AMO Admin can open guided Setup and HR-only controls remain absent for employees", async ({ browser }) => {

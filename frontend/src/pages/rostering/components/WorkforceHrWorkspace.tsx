@@ -27,6 +27,7 @@ import {
 
 import {
   approveTimesheet,
+  createEmploymentContract,
   downloadPayrollExport,
   hrApproveLeave,
   listLeaveRequests,
@@ -37,6 +38,7 @@ import {
 } from "../../../services/workforce";
 import {
   assignWorkforceHrPattern,
+  bootstrapWorkforceHrDefaultDayPattern,
   decideWorkforceHrOvertime,
   getWorkforceHrDashboard,
   listWorkforceHrOvertime,
@@ -206,10 +208,11 @@ export function WorkforceHrWorkspace() {
           loading={peopleQuery.isPending}
           onPage={setPeoplePage}
           bases={basesQuery.data || []}
-          loadingBases={basesQuery.isPending}
-          canManage={dashboard.can_manage_contracts}
-          busy={busy}
-          runAction={runAction}
+          loadingBases={basesQuery.isPending}           canManage={dashboard.can_manage_contracts}
+           canInitializeDefaults={dashboard.can_initialize_default_day_pattern}
+           onInitializeDefaults={() => runAction("default-day-pattern", bootstrapWorkforceHrDefaultDayPattern)}
+           busy={busy}
+runAction={runAction}
         />
       ) : null}
       {section === "leave" ? <LeavePanel dashboard={dashboard} requests={leaveQuery.data?.items || []} loading={leaveQuery.isPending} onDecision={setDecision} /> : null}
@@ -291,7 +294,7 @@ function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (sectio
 }
 
 function PeoplePanel({
-  people, search, onSearch, page, pages, total, loading, onPage, bases, loadingBases, canManage, busy, runAction,
+  people, search, onSearch, page, pages, total, loading, onPage, bases, loadingBases, canManage, canInitializeDefaults, onInitializeDefaults, busy, runAction,
 }: {
   people: HrPersonReadiness[];
   search: string;
@@ -304,6 +307,8 @@ function PeoplePanel({
   bases: BaseStationRead[];
   loadingBases: boolean;
   canManage: boolean;
+  canInitializeDefaults: boolean;
+  onInitializeDefaults: () => Promise<void>;
   busy: string | null;
   runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
 }) {
@@ -314,12 +319,12 @@ function PeoplePanel({
     setEditing(person);
     setDraft({
       contract_type: (person.contract_type || "PERMANENT") as ContractType,
-      employment_status: (person.employment_status || "ACTIVE") as EmploymentStatus,
+      employment_status: (person.contract_id ? person.employment_status : "ACTIVE") as EmploymentStatus,
       effective_from: person.contract_effective_from || isoDate(new Date()),
       effective_to: person.contract_effective_to || "",
       primary_base_station_id: person.primary_base_station_id || "",
-      standard_weekly_hours: String(person.standard_weekly_minutes / 60),
-      standard_daily_hours: String(person.standard_daily_minutes / 60),
+      standard_weekly_hours: String((person.standard_weekly_minutes || 2400) / 60),
+      standard_daily_hours: String((person.standard_daily_minutes || 480) / 60),
       fte_percentage: String(person.fte_percentage),
       cost_centre: person.cost_centre || "",
       payroll_number: person.payroll_number || "",
@@ -331,8 +336,9 @@ function PeoplePanel({
   const close = () => { setEditing(null); setDraft(null); };
   const save = () => {
     if (!editing || !draft) return;
-    void runAction(`employment-contract:${editing.contract_id}`, async () => {
-      await updateEmploymentContract(editing.contract_id, {
+    void runAction(`employment-contract:${editing.contract_id || editing.user_id}`, async () => {
+      const payload = {
+        user_id: editing.user_id,
         contract_type: draft.contract_type,
         employment_status: draft.employment_status,
         effective_from: draft.effective_from,
@@ -346,7 +352,12 @@ function PeoplePanel({
         overtime_eligible: draft.overtime_eligible,
         night_shift_eligible: draft.night_shift_eligible,
         standby_eligible: draft.standby_eligible,
-      });
+      };
+      if (editing.contract_id) {
+        await updateEmploymentContract(editing.contract_id, { ...payload, user_id: undefined });
+      } else {
+        await createEmploymentContract(payload);
+      }
       close();
     });
   };
@@ -362,10 +373,10 @@ function PeoplePanel({
 
   return (
     <section className="wr-panel">
-      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>Managers can correct effective contract, hours and home-base data here. Other users retain a read-only operational view.</p></div><label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, role, base or department" /></label></div>
+      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>Every active tenant user appears here. Missing contracts, bases and patterns remain visible as readiness blockers instead of removing the employee.</p></div><div className="wr-actions">{canInitializeDefaults ? <button type="button" className="wr-button wr-button--secondary" disabled={Boolean(busy)} onClick={() => void onInitializeDefaults()}><CalendarDays size={15} /> Apply default day pattern</button> : null}<label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, email, role, base or department" /></label></div></div>
       <div className="hr-people-table">
         <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Action</span></header>
-        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div>{canManage ? <button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(person)}><BriefcaseBusiness size={14} /> Edit</button> : <span className="hr-person-source">Read only</span>}</article>)}
+        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span>{person.uses_default_day_pattern ? <small>System baseline · planner review required</small> : null}</div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div>{canManage ? <button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(person)}><BriefcaseBusiness size={14} /> {person.contract_id ? "Edit" : "Create contract"}</button> : <span className="hr-person-source">Read only</span>}</article>)}
       </div>
     {loading ? <RosterLoading label="Loading employee register…" /> : null}
     <div className="wr-actions wr-actions--between">
@@ -375,15 +386,15 @@ function PeoplePanel({
             <button type="button" className="wr-button wr-button--secondary wr-button--small" disabled={!pages || page >= pages || loading} onClick={() => onPage(page + 1)}>Next</button>
         </div>
     </div>
-    {!people.length && !loading ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}
+    {!people.length && !loading ? <EmptyState title="No active tenant users found" description="Change the search, or activate/create user accounts in tenant administration. Employment-contract gaps no longer hide users from this register." /> : null}
 
       {editing && draft ? (
         <div className="hr-decision hr-contract-editor" role="dialog" aria-modal="true" aria-label={`Edit employment contract for ${editing.full_name}`}>
           <div className="hr-decision__head"><div><span className="wr-eyebrow">Controlled Workforce record</span><h3>{editing.full_name}</h3></div><button type="button" className="wr-icon-button" onClick={close}><X size={16} /></button></div>
           <p>{editing.staff_code} · Changes are effective-dated and audited by the Workforce service.</p>
           <div className="hr-contract-grid">
-            <label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => setDraft({ ...draft, contract_type: event.target.value as ContractType })}>{["PERMANENT", "FIXED_TERM", "CASUAL", "CONTRACTOR", "INTERN", "SECONDMENT"].map((value) => <option key={value}>{value}</option>)}</select></label>
-            <label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => setDraft({ ...draft, employment_status: event.target.value as EmploymentStatus })}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED", "ENDED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => setDraft({ ...draft, contract_type: event.target.value as ContractType })}>{["PERMANENT", "FIXED_TERM", "TEMPORARY", "CONTRACTOR", "INTERN"].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => setDraft({ ...draft, employment_status: event.target.value as EmploymentStatus })}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED"].map((value) => <option key={value}>{value}</option>)}</select></label>
             <label><span>Effective from</span><input type="date" value={draft.effective_from} onChange={(event) => setDraft({ ...draft, effective_from: event.target.value })} /></label>
             <label><span>Effective to</span><input type="date" min={draft.effective_from} value={draft.effective_to} onChange={(event) => setDraft({ ...draft, effective_to: event.target.value })} /></label>
             <label><span>Primary base</span><select value={draft.primary_base_station_id} disabled={loadingBases} onChange={(event) => setDraft({ ...draft, primary_base_station_id: event.target.value })}><option value="">Select canonical base</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label>
@@ -399,7 +410,7 @@ function PeoplePanel({
             <label><input type="checkbox" checked={draft.standby_eligible} onChange={(event) => setDraft({ ...draft, standby_eligible: event.target.checked })} /> Standby eligible</label>
           </div>
           {!loadingBases && !bases.length ? <div className="hr-warning"><AlertTriangle size={16} /><span>No active canonical base exists. Create it in Operating Structure before saving this contract.</span></div> : null}
-          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={close}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !validDraft} onClick={save}><Save size={15} /> Save contract</button></div>
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={close}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !validDraft} onClick={save}><Save size={15} /> {editing.contract_id ? "Save contract" : "Create contract"}</button></div>
         </div>
       ) : null}
     </section>

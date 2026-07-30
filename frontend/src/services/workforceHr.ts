@@ -1,5 +1,5 @@
 import { apiJson, jsonBody, queryString } from "./typedApi";
-import type { HrDashboard, HrOvertimeRequest, HrPeoplePage } from "../types/workforceHr";
+import type { HrDashboard, HrDefaultDayBootstrap, HrOvertimeRequest, HrPeoplePage } from "../types/workforceHr";
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
 export type WorkforceHrPatternAssignmentCreate = {
@@ -24,6 +24,10 @@ export function listWorkforceHrPeople(params: {
     return apiJson(`/workforce/hr/people${queryString(params)}`, {
         offline: { cacheTtlMs: 60_000 },
     });
+}
+
+export function bootstrapWorkforceHrDefaultDayPattern(): Promise<HrDefaultDayBootstrap> {
+  return apiJson("/workforce/hr/default-day-pattern", { method: "POST" });
 }
 
 export function listWorkforceHrPatterns(includeInactive = false): Promise<WorkPatternRead[]> {
