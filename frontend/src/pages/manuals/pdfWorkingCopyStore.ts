@@ -72,20 +72,16 @@ export function pdfWorkingCopyMatchesAuthoritativeSource(
 ): boolean {
   const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
   const stored = String(sourceSha256 || "").trim().toLowerCase();
-  return Boolean(authoritative && stored && stored === authoritative);
+  if (!authoritative || !stored || stored !== authoritative) return false;
+  return true;
 }
 
-function authorizedDraft(
-  identity: PdfWorkingCopyIdentity,
-  result: StoredPdfWorkingCopy | null,
-): StoredPdfWorkingCopy | null {
+function authorizedDraft(identity: PdfWorkingCopyIdentity, result: StoredPdfWorkingCopy | null): StoredPdfWorkingCopy | null {
   if (!result || !pdfWorkingCopyMatchesAuthoritativeSource(identity, result.sourceSha256)) return null;
   return result;
 }
 
 export async function readPdfWorkingCopy(identity: PdfWorkingCopyIdentity): Promise<StoredPdfWorkingCopy | null> {
-  // Draft bytes are never exposed until the capability request has registered
-  // the immutable source checksum for this exact tenant/document/revision.
   if (!authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId)) return null;
   const database = await openDatabase();
   const key = pdfWorkingCopyKey(identity);
@@ -107,9 +103,7 @@ export async function savePdfWorkingCopy(
   bytes: ArrayBuffer,
   sourceSha256?: string | null,
 ): Promise<StoredPdfWorkingCopy> {
-  if (bytes.byteLength > MAX_PDF_WORKING_COPY_BYTES) {
-    throw new Error("The PDF working copy exceeds the 100 MB local draft limit");
-  }
+  if (bytes.byteLength > MAX_PDF_WORKING_COPY_BYTES) throw new Error("The PDF working copy exceeds the 100 MB local draft limit");
   const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
   if (!pdfWorkingCopyMatchesAuthoritativeSource(identity, sourceSha256)) {
     throw new Error("The PDF working copy cannot be saved without the authoritative source checksum");
