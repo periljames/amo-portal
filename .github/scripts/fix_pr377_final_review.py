@@ -29,7 +29,6 @@ replace_once(
     "        uses_default_day_pattern=bool(work_pattern and work_pattern.code == \"DEFAULT-DAY-5X2\"),\n",
     "        uses_default_day_pattern=bool(\n            pattern and str(pattern.work_pattern_id) == managed_default_pattern_id\n        ),\n",
 )
-# Both public assemblers are tenant-scoped and must pass that identity explicitly.
 service_path = ROOT / service
 text = service_path.read_text(encoding="utf-8")
 call_anchor = "        _person_readiness_for_user(\n            user,\n            contract=contracts.get(str(user.id)),\n"
@@ -88,7 +87,7 @@ def test_bootstrap_definition_snapshots_include_attribution_mutations():
         assert '"updated_at"' in source
 '''
 if "test_readiness_labels_only_the_managed_default_pattern" not in backend_text:
-    backend_test.write_text(backend_text + backend_addition + "\n", encoding="utf-8")
+    backend_test.write_text(backend_text + backend_addition.rstrip() + "\n", encoding="utf-8")
 
 frontend_test = ROOT / "frontend/src/pages/rostering/documentationAssistantUx.test.ts"
 frontend_text = frontend_test.read_text(encoding="utf-8")
