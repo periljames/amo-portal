@@ -2,8 +2,87 @@
 @import "./publicationReferenceLayout.css";
 
 .publication-native-pdf {
-  overflow-x: auto;
+  --portal-sticky-offset: 44px;
+  min-width: 0;
+  overflow: visible;
   overscroll-behavior-inline: contain;
+}
+
+.publication-native-pdf .pdf-engine-reader {
+  max-width: 100%;
+  overflow: visible;
+}
+
+.publication-native-pdf .pdf-engine-viewport {
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.publication-native-pdf .pdf-engine-pages {
+  width: max-content;
+  min-width: 100%;
+}
+
+.publication-reader-width--focus .publication-linked-layout {
+  width: min(100%, 54rem);
+  margin-inline: auto;
+}
+
+.publication-reader-width--wide .publication-linked-layout {
+  width: min(100%, 96rem);
+  margin-inline: auto;
+}
+
+.publication-reader-width--fit .publication-linked-layout {
+  width: 100%;
+  max-width: none;
+}
+
+.publication-reader-page:has(.pdf-engine-reader) .publication-reader-workspace {
+  grid-template-columns: clamp(230px, 20vw, 320px) minmax(0, 1fr);
+}
+
+.publication-reader-page--nav-collapsed:has(.pdf-engine-reader) .publication-reader-workspace {
+  grid-template-columns: 42px minmax(0, 1fr);
+}
+
+.publication-reader-page:has(.pdf-engine-reader) .publication-document-canvas {
+  min-width: 0;
+  overflow: visible;
+  padding: 0.75rem clamp(0.5rem, 1.5vw, 1.25rem) 4rem;
+}
+
+/* Keep approved forms read-only until the controlled execution capability is
+   active, then override the legacy publication stylesheet and expose the real
+   PDF.js AcroForm widgets. */
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer .widgetAnnotation,
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer .buttonWidgetAnnotation,
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer input,
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer textarea,
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer select,
+.publication-native-pdf .pdf-engine-reader:not(.is-fill-mode) .annotationLayer button:not(.linkAnnotation *) {
+  pointer-events: none !important;
+  caret-color: transparent !important;
+  user-select: none !important;
+}
+
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer .widgetAnnotation,
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer .buttonWidgetAnnotation,
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer input,
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer textarea,
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer select,
+.publication-native-pdf .pdf-engine-reader.is-fill-mode .annotationLayer button {
+  pointer-events: auto !important;
+  caret-color: auto !important;
+  user-select: text !important;
+}
+
+.publication-native-pdf .pdf-engine-reader .annotationLayer .linkAnnotation,
+.publication-native-pdf .pdf-engine-reader .annotationLayer .linkAnnotation a {
+  pointer-events: auto !important;
+  cursor: pointer;
 }
 
 .publication-native-pdf__pages {
@@ -13,6 +92,18 @@
 .publication-native-pdf__page {
   width: var(--publication-native-page-width);
   max-width: none;
+}
+
+@media (max-width: 980px) {
+  .publication-reader-width--focus .publication-linked-layout,
+  .publication-reader-width--wide .publication-linked-layout {
+    width: 100%;
+  }
+
+  .publication-reader-page:has(.pdf-engine-reader) .publication-reader-workspace,
+  .publication-reader-page--nav-collapsed:has(.pdf-engine-reader) .publication-reader-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {
