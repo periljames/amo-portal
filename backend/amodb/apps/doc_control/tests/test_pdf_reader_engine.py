@@ -236,7 +236,12 @@ def test_visual_overlay_over_controlled_text_is_rejected_even_when_original_anch
     anchor = template.template_fingerprint["pages"][0]["words"][0]["bbox"]
     candidate = engine.inspect_pdf_bytes(_opaque_overlay_pdf(source, anchor))
 
-    assert engine.validate_template_provenance(template, candidate)["verified"] is True
+    with pytest.raises(engine.PdfEngineError) as provenance:
+        engine.validate_template_provenance(template, candidate)
+    assert provenance.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert provenance.value.status_code == 409
+    assert "unauthorized static content" in provenance.value.message
+
     with pytest.raises(engine.PdfEngineError) as overlay:
         reject_visual_overlays(template, candidate)
     assert overlay.value.code == "PDF_TEMPLATE_VISUAL_OVERLAY"
