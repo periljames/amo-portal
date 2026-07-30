@@ -10,13 +10,19 @@ from starlette.datastructures import Headers
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
+from amodb.apps.doc_control.pdfium_service import PdfEngineError
 from amodb.apps.doc_control.workspace_service import get_profile, require_manual_access
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import knowledge_reader_router as reader
 from . import models
-from .pdf_reader_router import process_completed_pdf, read_bounded_pdf_upload
+from .pdf_reader_router import (
+    _engine_http_error,
+    _inspection,
+    process_completed_pdf,
+    read_bounded_pdf_upload,
+)
 from .router_legacy import _tenant_by_slug
 
 
@@ -90,6 +96,26 @@ def _authorized_linked_detail(
     )
 
 
+def _controlled_target_revision(db: Session, tenant: models.Tenant, detail: dict) -> models.ManualRevision:
+    target = dict(detail.get("target") or {})
+    manual_id = str(target.get("manual_id") or "")
+    revision_id = str(target.get("revision_id") or "")
+    revision = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(
+            models.Manual.id == manual_id,
+            models.Manual.tenant_id == tenant.id,
+            models.ManualRevision.id == revision_id,
+            models.ManualRevision.manual_id == manual_id,
+        )
+        .first()
+    )
+    if not revision:
+        raise HTTPException(status_code=404, detail="The effective controlled template revision is unavailable")
+    return revision
+
+
 @router.get("/t/{tenant_slug}/linked-resources/{reference_id}")
 def linked_resource_detail_with_source_access(
     tenant_slug: str,
@@ -133,9 +159,6 @@ async def submit_linked_resource_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
-    # Resolve the target and its access profile before reading or processing any
-    # uploaded bytes. The delegated detail route enforces target access and the
-    # effective published revision contract.
     detail = _authorized_linked_detail(
         tenant_slug=tenant_slug,
         reference_id=reference_id,
@@ -154,9 +177,15 @@ async def submit_linked_resource_with_source_access(
             ),
         )
 
+    revision = _controlled_target_revision(db, tenant, detail)
+    try:
+        source_inspection = _inspection(revision)
+    except PdfEngineError as exc:
+        raise _engine_http_error(exc) from exc
     result, enriched_payload = process_completed_pdf(
         await read_bounded_pdf_upload(artifact),
         _submission_payload(payload_json),
+        expected_source=source_inspection,
     )
     filename = artifact.filename or "completed-form.pdf"
     if "FLATTENED" not in filename.upper():
