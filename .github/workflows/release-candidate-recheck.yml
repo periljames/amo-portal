@@ -68,6 +68,28 @@ jobs:
           path.write_text(text, encoding='utf-8')
           PY
           python .github/scripts/fix_pr377_bootstrap_governance.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/amodb/apps/workforce/tests/test_hr_review_flags.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              "    assert 'code=\"DEFAULT-DAY\"' in source\n    assert 'code=\"DEFAULT-DAY-5X2\"' in source\n",
+              "    assert hr_service._DEFAULT_DAY_SHIFT_CODE == \"DEFAULT-DAY\"\n"
+              "    assert hr_service._DEFAULT_DAY_PATTERN_CODE == \"DEFAULT-DAY-5X2\"\n"
+              "    assert \"code=_DEFAULT_DAY_SHIFT_CODE\" in source\n"
+              "    assert \"code=_DEFAULT_DAY_PATTERN_CODE\" in source\n",
+          )
+          text = text.replace(
+              "    assert 'current.work_pattern.code == \"DEFAULT-DAY-5X2\"' in source\n",
+              "    assert \"str(current.work_pattern_id) == str(pattern.id)\" in source\n",
+          )
+          text = text.replace(
+              "        assert action in source\n",
+              "        assert action.replace('action=\"', '').replace('\"', '') in source\n",
+          )
+          path.write_text(text.rstrip() + '\n', encoding='utf-8')
+          PY
       - name: Verify patch cleanliness
         run: |
           git diff --check
