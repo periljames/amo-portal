@@ -43,6 +43,9 @@ These invariants are covered by Workforce regression contracts and the complete 
 - The resize grip is rendered with CSS rather than a separate icon chunk, preserving the visual control without adding a request to the Rostering planner's synthetic 2G waterfall.
 - Reserved default-day definitions use deterministic tenant-scoped portal identities; a tenant-authored record using either reserved code causes an explicit collision error and is never rewritten.
 - Every actual bootstrap definition or assignment mutation writes an append-only AuditEvent with the actor, before/after state, and one correlation ID inside the same transaction.
+- Readiness labels the system baseline only when the assignment targets the deterministic managed pattern ID; a tenant-authored record that reuses the code is never presented as portal-owned.
+- Definition audit snapshots include `updated_by_user_id` and `updated_at`, so administrator attribution changes cannot occur without matching audit evidence.
+- The mobile assistant launcher keeps its icon visible and exposes an explicit accessible name while only the visual text label is collapsed.
 - The assistant header remains fixed while its body scrolls independently, preventing page-wide overflow.
 
 ## Acceptance coverage

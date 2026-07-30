@@ -382,7 +382,7 @@
     width: 100%;
   }
 
-  .documentation-assistant-launcher span {
+  .documentation-assistant-launcher__label {
     display: none;
   }
 

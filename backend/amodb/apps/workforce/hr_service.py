@@ -835,6 +835,7 @@ def _readiness_contracts_by_user(
 def _person_readiness_for_user(
     user: account_models.User,
     *,
+    amo_id: str,
     contract: Optional[models.EmploymentContract],
     pattern: Optional[models.EmployeeWorkPatternAssignment],
     leave: Optional[models.LeaveRequest],
@@ -872,6 +873,11 @@ def _person_readiness_for_user(
     else:
         state = "READY"
 
+    managed_default_pattern_id = _default_day_system_id(
+        amo_id=amo_id,
+        system_key=_DEFAULT_DAY_PATTERN_KEY,
+    )
+
     return hr_schemas.HrPersonReadiness(
         user_id=str(user.id),
         contract_id=contract.id if contract else None,
@@ -879,7 +885,9 @@ def _person_readiness_for_user(
         full_name=_display_name(user) or str(user.id),
         email=getattr(user, "email", None),
         has_effective_contract=contract_is_effective,
-        uses_default_day_pattern=bool(work_pattern and work_pattern.code == "DEFAULT-DAY-5X2"),
+        uses_default_day_pattern=bool(
+            pattern and str(pattern.work_pattern_id) == managed_default_pattern_id
+        ),
         position_title=getattr(user, "position_title", None),
         department_code=_department_code(user),
         employment_status=status_value,
@@ -926,6 +934,7 @@ def list_people_page_v2(
     items = [
         _person_readiness_for_user(
             user,
+            amo_id=amo_id,
             contract=contracts.get(str(user.id)),
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
@@ -996,6 +1005,7 @@ def dashboard_v2(
     people = [
         _person_readiness_for_user(
             user,
+            amo_id=amo_id,
             contract=contracts.get(str(user.id)),
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
@@ -1140,6 +1150,8 @@ def _shift_template_snapshot(row) -> dict:
         "display_order": row.display_order,
         "description": row.description,
         "icon_name": row.icon_name,
+        "updated_by_user_id": row.updated_by_user_id,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
 
@@ -1155,6 +1167,8 @@ def _work_pattern_snapshot(db: Session, row: models.WorkPattern) -> dict:
         "cycle_length_days": row.cycle_length_days,
         "is_active": bool(row.is_active),
         "timezone_name": row.timezone_name,
+        "updated_by_user_id": row.updated_by_user_id,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "days": [
             {
                 "cycle_day_index": day.cycle_day_index,

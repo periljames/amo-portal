@@ -245,9 +245,9 @@ export default function DocumentationAssistantPanel({
   };
 
   if (!embedded && !open) {
-    return <button type="button" className="documentation-assistant-launcher" onClick={() => setOpen(true)} aria-expanded="false">
+    return <button type="button" className="documentation-assistant-launcher" onClick={() => setOpen(true)} aria-expanded="false" aria-label="Open assisted search">
       <span className="documentation-assistant-launcher__icon" aria-hidden="true"><Bot size={18} /><Sparkles size={11} /></span>
-      <span>Assisted search</span>
+      <span className="documentation-assistant-launcher__label">Assisted search</span>
     </button>;
   }
 

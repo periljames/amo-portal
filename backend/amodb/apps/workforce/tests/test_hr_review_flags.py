@@ -127,3 +127,20 @@ def test_default_day_bootstrap_audits_every_controlled_mutation():
     assert 'entity_type="EmployeeWorkPatternAssignment"' in source
     assert "before=current_before" in source
     assert "after=_pattern_assignment_snapshot" in source
+
+
+def test_readiness_labels_only_the_managed_default_pattern():
+    source = inspect.getsource(hr_service._person_readiness_for_user)
+    assert "managed_default_pattern_id" in source
+    assert "str(pattern.work_pattern_id) == managed_default_pattern_id" in source
+    assert 'work_pattern.code == "DEFAULT-DAY-5X2"' not in source
+    assert "amo_id=amo_id" in inspect.getsource(hr_service.list_people_page_v2)
+    assert "amo_id=amo_id" in inspect.getsource(hr_service.dashboard_v2)
+
+
+def test_bootstrap_definition_snapshots_include_attribution_mutations():
+    shift_source = inspect.getsource(hr_service._shift_template_snapshot)
+    pattern_source = inspect.getsource(hr_service._work_pattern_snapshot)
+    for source in (shift_source, pattern_source):
+        assert '"updated_by_user_id"' in source
+        assert '"updated_at"' in source
