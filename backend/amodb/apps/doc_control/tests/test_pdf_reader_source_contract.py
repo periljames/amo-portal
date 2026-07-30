@@ -43,6 +43,8 @@ def test_optional_inspection_never_blocks_first_page() -> None:
 def test_forms_and_working_copies_are_governed() -> None:
     core = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     store = _read("frontend/src/pages/manuals/pdfWorkingCopyStore.ts")
+    capabilities = _read("frontend/src/services/pdfReader.ts")
+    authority = _read("frontend/src/services/pdfWorkingCopyAuthority.ts")
 
     assert "renderForms={fillMode && canFill}" in core
     assert "capabilities.can_fill" in core
@@ -57,6 +59,12 @@ def test_forms_and_working_copies_are_governed() -> None:
     assert "transaction.oncomplete" in write_tail
     assert "resolve(row)" in write_tail.split("transaction.oncomplete", 1)[1]
     assert write_tail.index(".put(row)") < write_tail.index("transaction.oncomplete")
+
+    assert "registerAuthoritativePdfSource" in capabilities
+    assert "authoritativePdfSourceChecksum" in store
+    assert "if (!authoritativePdfSourceChecksum" in store
+    assert "stored !== authoritative" in store
+    assert "authoritativeChecksums" in authority
 
 
 def test_shortcuts_and_dirty_state_are_scoped_to_the_engaged_reader() -> None:
@@ -112,9 +120,34 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "PDF_SCRIPTED" in service
     assert "TemporaryDirectory" in service
     assert "PDFIUM_PROCESS_TIMEOUT_SECONDS" in service
+    assert "document.xref_object" in service
+    assert "_decode_pdf_name_escapes" in service
+    assert "validate_template_provenance" in service
+    assert "template_fingerprint" in service
     assert "process_completed_pdf" in access
     assert "process_completed_pdf" in router
     assert "create_documentation_record" in router
+
+
+def test_source_checksum_and_template_provenance_precede_record_creation() -> None:
+    access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
+    router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
+
+    assert "hmac.compare_digest(actual_sha256, expected_sha256)" in router
+    assert "PDF_SOURCE_CHECKSUM_MISMATCH" in router
+    assert "PDF_SOURCE_CHECKSUM_MISSING" in router
+
+    process = router.split("def process_completed_pdf", 1)[1].split("def _load_direct_context", 1)[0]
+    assert process.index("inspect_pdf_bytes(content)") < process.index("flatten_pdf_bytes(content)")
+    assert process.index("validate_template_provenance") < process.index("flatten_pdf_bytes(content)")
+
+    direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
+    assert direct_submit.index("source_inspection = _inspection(revision)") < direct_submit.index("process_completed_pdf")
+    assert direct_submit.index("process_completed_pdf") < direct_submit.index("create_documentation_record")
+
+    linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
+    assert linked_submit.index("revision = _controlled_target_revision") < linked_submit.index("process_completed_pdf")
+    assert "expected_source=source_inspection" in linked_submit
 
 
 def test_authorization_and_signature_guards_precede_bounded_upload_processing() -> None:
@@ -130,12 +163,14 @@ def test_authorization_and_signature_guards_precede_bounded_upload_processing() 
     assert linked_submit.index("_load_authorized_reference") < linked_read
     assert linked_submit.index("detail = _authorized_linked_detail") < linked_read
     assert linked_submit.index('execution.get("requires_signature")') < linked_read
+    assert linked_submit.index("source_inspection = _inspection(revision)") < linked_read
 
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
     assert direct_submit.index("_load_direct_context") < direct_read
     assert direct_submit.index("execution.requires_signature") < direct_read
     assert direct_submit.index('capabilities["can_submit"]') < direct_read
+    assert direct_submit.index("source_inspection = _inspection(revision)") < direct_read
 
 
 def test_reader_routes_precede_compatibility_routes() -> None:
