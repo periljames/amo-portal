@@ -59,6 +59,17 @@ def _scripted_object_stream_pdf() -> bytes:
         document.close()
 
 
+def _unsafe_action_pdf(subtype: str) -> bytes:
+    document = pymupdf.open(stream=_plain_pdf(pages=1), filetype="pdf")
+    try:
+        action = document.get_new_xref()
+        document.update_object(action, f"<< /Type /Action /S /{subtype} /F (external-payload) >>")
+        document.xref_set_key(document.pdf_catalog(), "A", f"{action} 0 R")
+        return document.tobytes(garbage=4, deflate=True, use_objstms=1)
+    finally:
+        document.close()
+
+
 def _encrypted_pdf() -> bytes:
     document = pymupdf.open(stream=_plain_pdf(pages=1), filetype="pdf")
     try:
@@ -82,6 +93,22 @@ def _opaque_overlay_pdf(source: bytes, anchor_bbox: list[float]) -> bytes:
         shape.finish(color=(1, 1, 1), fill=(1, 1, 1), width=0.5)
         shape.commit(overlay=True)
         page.insert_text((box.x0, max(box.y0 + 8, box.y1 - 1)), "ALTERED", fontsize=8, overlay=True)
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _appearance_pdf(color: tuple[float, float, float]) -> bytes:
+    document = pymupdf.open()
+    try:
+        page = document.new_page(width=595, height=842)
+        page.insert_text(
+            (72, 82),
+            "Controlled appearance",
+            fontname="helv",
+            fontsize=12,
+            color=color,
+        )
         return document.tobytes(garbage=4, deflate=True)
     finally:
         document.close()
@@ -143,6 +170,23 @@ def test_pdfium_fails_closed_for_invalid_encrypted_and_parsed_scripted_inputs(
     assert scripted_error.value.code == "PDF_SCRIPTED"
 
 
+@pytest.mark.parametrize("subtype", ["Launch", "SubmitForm", "ImportData"])
+def test_pdfium_rejects_non_javascript_action_dictionaries(
+    subtype: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    artifact = _unsafe_action_pdf(subtype)
+    assert b"/JavaScript" not in artifact
+
+    with pytest.raises(engine.PdfEngineError) as blocked:
+        engine.inspect_pdf_bytes(artifact)
+
+    assert blocked.value.code == "PDF_SCRIPTED"
+    assert blocked.value.status_code == 409
+
+
 def test_template_provenance_accepts_same_template_and_rejects_unrelated_pdf(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -163,6 +207,25 @@ def test_template_provenance_accepts_same_template_and_rejects_unrelated_pdf(
     assert mismatch.value.status_code == 409
 
 
+def test_controlled_text_appearance_is_part_of_template_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    template = engine.inspect_pdf_bytes(_appearance_pdf((0, 0, 0)))
+    hidden_text = engine.inspect_pdf_bytes(_appearance_pdf((1, 1, 1)))
+    source_word = template.template_fingerprint["pages"][0]["words"][0]
+    candidate_word = hidden_text.template_fingerprint["pages"][0]["words"][0]
+
+    assert source_word["text"] == candidate_word["text"]
+    assert source_word["bbox"] == candidate_word["bbox"]
+    assert source_word["appearance"] != candidate_word["appearance"]
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(template, hidden_text)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+
+
 def test_visual_overlay_over_controlled_text_is_rejected_even_when_original_anchor_remains(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,7 +236,6 @@ def test_visual_overlay_over_controlled_text_is_rejected_even_when_original_anch
     anchor = template.template_fingerprint["pages"][0]["words"][0]["bbox"]
     candidate = engine.inspect_pdf_bytes(_opaque_overlay_pdf(source, anchor))
 
-    # The original text object still exists, so the base anchor check alone passes.
     assert engine.validate_template_provenance(template, candidate)["verified"] is True
     with pytest.raises(engine.PdfEngineError) as overlay:
         reject_visual_overlays(template, candidate)
