@@ -54,6 +54,7 @@ jobs:
           pytest -q \
             amodb/apps/doc_control/tests/test_pdf_reader_engine.py \
             amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py \
+            amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py \
             2>&1 | tee /tmp/publications-pdf-engine-tests.log
       - uses: actions/setup-node@v6
         with:
