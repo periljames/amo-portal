@@ -63,9 +63,9 @@ export default function LinkedDocumentationPanel({
   onClose: () => void;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const [detail, setDetail] = useState<LinkedResourceDetail | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [readerDirty, setReaderDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -78,7 +78,6 @@ export default function LinkedDocumentationPanel({
     setDetail(null);
     setRecord(null);
     setUploadFile(null);
-    setReaderDirty(false);
     getLinkedResource(tenant, referenceId)
       .then((value) => { if (active) setDetail(value); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The linked controlled resource could not be opened."); })
@@ -98,7 +97,8 @@ export default function LinkedDocumentationPanel({
   );
 
   const close = () => {
-    if ((readerDirty || uploadFile) && !window.confirm("Close and discard unsaved form entries or the selected completed file?")) return;
+    const activeFormSession = Boolean(panelRef.current?.querySelector(".pdf-engine-reader.is-fill-mode"));
+    if ((activeFormSession || uploadFile) && !window.confirm("Close and discard unsaved form entries or the selected completed file?")) return;
     onClose();
   };
 
@@ -145,7 +145,7 @@ export default function LinkedDocumentationPanel({
   };
 
   return (
-    <aside className="linked-documentation-panel" aria-label="Linked controlled resource">
+    <aside ref={panelRef} className="linked-documentation-panel" aria-label="Linked controlled resource">
       <header className="linked-documentation-panel__header">
         <div>
           <p>Linked controlled information</p>
@@ -187,7 +187,6 @@ export default function LinkedDocumentationPanel({
           filename={detail.target.source_filename || `${detail.target.code}.pdf`}
           identity={{ tenant, manualId: detail.target.manual_id, revisionId: detail.target.revision_id }}
           capabilities={canUpload ? uploadOnlyCapabilities(detail) : undefined}
-          onDirtyChange={setReaderDirty}
           onSubmitWorkingCopy={canFill ? (file) => submitLinkedPdfResource(tenant, referenceId, file, {
             source_manual_id: detail.reference.source_manual_id,
             source_revision_id: detail.reference.source_revision_id,
