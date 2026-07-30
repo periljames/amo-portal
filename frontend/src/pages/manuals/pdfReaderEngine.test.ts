@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { registerAuthoritativePdfSource } from "../../services/pdfWorkingCopyAuthority";
 import {
   highlightPdfText,
+  isPdfWorkingCopyGenerationCurrent,
   outputPdfFilename,
   pdfReaderShortcut,
   searchPdfDocument,
@@ -97,5 +98,20 @@ describe("controlled PDF reader engine", () => {
   it("labels editable and flattened outputs distinctly", () => {
     expect(outputPdfFilename("QAM-51.pdf", "WORKING_COPY")).toBe("QAM-51_WORKING_COPY.pdf");
     expect(outputPdfFilename("QAM-51.pdf", "FLATTENED")).toBe("QAM-51_FLATTENED.pdf");
+  });
+
+  it("keeps a failed persistence generation dirty", () => {
+    const savingGeneration = 4;
+    const persistenceSucceeded = false;
+
+    expect(persistenceSucceeded && isPdfWorkingCopyGenerationCurrent(savingGeneration, savingGeneration)).toBe(false);
+  });
+
+  it("does not clear dirty custody when a newer edit arrives during persistence", () => {
+    const savingGeneration = 4;
+    const currentGeneration = 5;
+
+    expect(isPdfWorkingCopyGenerationCurrent(savingGeneration, currentGeneration)).toBe(false);
+    expect(isPdfWorkingCopyGenerationCurrent(currentGeneration, currentGeneration)).toBe(true);
   });
 });
