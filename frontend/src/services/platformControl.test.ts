@@ -15,6 +15,7 @@ vi.mock("./config", () => ({
   getApiBaseUrl: () => "https://api.example.test",
 }));
 
+import { resolvePostLoginReturnTarget } from "../app/loginRedirect";
 import { shouldProxyDevApi, shouldServePlatformSpa } from "./devProxyRouting";
 import { platformConsoleApi } from "./platformConsole";
 import { platformApi } from "./platformControl";
@@ -51,6 +52,40 @@ describe("platform SaaS control API", () => {
     expect(signInHandler).toContain('navigate("/login", { replace: true })');
     expect(signInHandler).not.toContain("state:");
     expect(signInHandler).not.toContain("location.pathname");
+  });
+
+  it("allows verified platform users to return to normalized platform pages", () => {
+    expect(resolvePostLoginReturnTarget("/platform/security?tab=alerts", true)).toBe(
+      "/platform/security?tab=alerts",
+    );
+    expect(resolvePostLoginReturnTarget("/Platform/security?tab=alerts", true)).toBe(
+      "/Platform/security?tab=alerts",
+    );
+  });
+
+  it("blocks tenant users from raw, case-variant, and encoded platform routes", () => {
+    expect(resolvePostLoginReturnTarget("/platform/control", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/platform/integrations?tab=email", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/Platform/control", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/%70latform/control", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/PLATFORM/%63ontrol", false)).toBeNull();
+  });
+
+  it("rejects login loops, external targets, and malformed encodings", () => {
+    expect(resolvePostLoginReturnTarget("/login", true)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/LOGIN", true)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/maintenance/safarilink/login", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/maintenance/safarilink/%6Cogin", false)).toBeNull();
+    expect(resolvePostLoginReturnTarget("https://example.com/platform/control", true)).toBeNull();
+    expect(resolvePostLoginReturnTarget("//example.com/platform/control", true)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/%2Fexample.com/platform/control", true)).toBeNull();
+    expect(resolvePostLoginReturnTarget("/%E0%A4%A", false)).toBeNull();
+  });
+
+  it("keeps valid tenant return routes available to tenant users", () => {
+    expect(resolvePostLoginReturnTarget("/maintenance/safarilink/quality/inbox", false)).toBe(
+      "/maintenance/safarilink/quality/inbox",
+    );
   });
 
   it("keeps direct platform page navigation in the SPA", () => {
