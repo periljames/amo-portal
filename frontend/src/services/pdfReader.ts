@@ -1,6 +1,7 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { DocumentationExecutionProfile, DocumentationRecord } from "./documentation";
+import { registerAuthoritativePdfSource } from "./pdfWorkingCopyAuthority";
 
 export type PdfReaderCapabilities = {
   execution?: DocumentationExecutionProfile | null;
@@ -26,6 +27,7 @@ export type FlattenedPdfResult = {
   blob: Blob;
   filename: string;
   sourceSha256?: string | null;
+  workingSha256?: string | null;
   outputSha256?: string | null;
   pageCount?: number | null;
   flattenedPages?: number | null;
@@ -73,7 +75,9 @@ export async function getPdfReaderCapabilities(
   revisionId: string,
 ): Promise<PdfReaderCapabilities> {
   const response = await authenticatedFetch(`${revisionPath(tenant, manualId, revisionId)}/pdf-capabilities`);
-  return response.json() as Promise<PdfReaderCapabilities>;
+  const capabilities = await response.json() as PdfReaderCapabilities;
+  registerAuthoritativePdfSource(tenant, manualId, revisionId, capabilities.source_sha256);
+  return capabilities;
 }
 
 export async function flattenPdfWorkingCopy(
@@ -92,7 +96,8 @@ export async function flattenPdfWorkingCopy(
   return {
     blob,
     filename: contentDispositionFilename(response, file.name.replace(/\.pdf$/i, "_FLATTENED.pdf")),
-    sourceSha256: response.headers.get("X-PDF-Source-SHA256"),
+    sourceSha256: response.headers.get("X-PDF-Template-SHA256"),
+    workingSha256: response.headers.get("X-PDF-Working-SHA256"),
     outputSha256: response.headers.get("X-PDF-Output-SHA256"),
     pageCount: Number(response.headers.get("X-PDF-Page-Count") || 0) || null,
     flattenedPages: Number(response.headers.get("X-PDF-Flattened-Pages") || 0) || null,
