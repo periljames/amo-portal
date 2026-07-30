@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import pymupdf
 import pytest
 from fastapi import HTTPException, UploadFile
 from reportlab.pdfgen import canvas
@@ -14,20 +15,20 @@ from amodb.apps.doc_control import pdfium_service as engine
 from amodb.apps.manuals import pdf_reader_router as reader_router
 
 
-def _plain_pdf(*, pages: int = 2) -> bytes:
+def _plain_pdf(*, pages: int = 2, label: str = "Controlled page") -> bytes:
     output = BytesIO()
     document = canvas.Canvas(output)
     for index in range(pages):
-        document.drawString(72, 760, f"Controlled page {index + 1}")
+        document.drawString(72, 760, f"{label} {index + 1}")
         document.showPage()
     document.save()
     return output.getvalue()
 
 
-def _acroform_pdf() -> bytes:
+def _acroform_pdf(*, label: str = "Aircraft registration") -> bytes:
     output = BytesIO()
     document = canvas.Canvas(output)
-    document.drawString(72, 760, "Aircraft registration")
+    document.drawString(72, 760, label)
     document.acroForm.textfield(
         name="registration",
         value="5Y-ABC",
@@ -43,6 +44,34 @@ def _acroform_pdf() -> bytes:
     return output.getvalue()
 
 
+def _scripted_object_stream_pdf() -> bytes:
+    document = pymupdf.open(stream=_plain_pdf(pages=1), filetype="pdf")
+    try:
+        # Escaped /J#53 is normalized to /JS by the parser. Saving with object
+        # streams ensures the test cannot pass through a raw byte-name scan.
+        document.xref_set_key(
+            document.pdf_catalog(),
+            "OpenAction",
+            "<< /S /J#53 /JS (app.alert\\(1\\)) >>",
+        )
+        return document.tobytes(garbage=4, deflate=True, use_objstms=1)
+    finally:
+        document.close()
+
+
+def _encrypted_pdf() -> bytes:
+    document = pymupdf.open(stream=_plain_pdf(pages=1), filetype="pdf")
+    try:
+        return document.tobytes(
+            encryption=pymupdf.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-secret",
+            user_pw="user-secret",
+            permissions=0,
+        )
+    finally:
+        document.close()
+
+
 def test_pdfium_inspects_plain_and_acroform_pdfs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
 
@@ -53,11 +82,13 @@ def test_pdfium_inspects_plain_and_acroform_pdfs(tmp_path: Path, monkeypatch: py
     assert plain.page_count == 2
     assert plain.has_acroform is False
     assert plain.can_flatten is True
+    assert plain.template_fingerprint["total_anchors"] >= 2
     assert form.page_count == 1
     assert form.has_acroform is True
     assert form.is_dynamic_xfa is False
     assert form.has_javascript is False
     assert form.can_flatten is True
+    assert form.template_fingerprint["pages"][0]["excluded_rects"]
 
 
 def test_pdfium_flattens_and_reopens_without_mutating_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,7 +108,7 @@ def test_pdfium_flattens_and_reopens_without_mutating_source(tmp_path: Path, mon
     assert list((tmp_path / "work").iterdir()) == []
 
 
-def test_pdfium_fails_closed_for_invalid_encrypted_and_scripted_inputs(
+def test_pdfium_fails_closed_for_invalid_encrypted_and_parsed_scripted_inputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,15 +118,59 @@ def test_pdfium_fails_closed_for_invalid_encrypted_and_scripted_inputs(
         engine.inspect_pdf_bytes(b"not-a-pdf")
     assert invalid.value.code == "PDF_INVALID"
 
-    encrypted = _plain_pdf() + b"\n/Encrypt 1 0 R\n"
     with pytest.raises(engine.PdfEngineError) as encrypted_error:
-        engine.inspect_pdf_bytes(encrypted)
+        engine.inspect_pdf_bytes(_encrypted_pdf())
     assert encrypted_error.value.code == "PDF_ENCRYPTED"
 
-    scripted = _plain_pdf() + b"\n/JavaScript /JS /OpenAction\n"
+    scripted = _scripted_object_stream_pdf()
+    assert b"/JavaScript" not in scripted
     with pytest.raises(engine.PdfEngineError) as scripted_error:
         engine.inspect_pdf_bytes(scripted)
     assert scripted_error.value.code == "PDF_SCRIPTED"
+
+
+def test_template_provenance_accepts_same_template_and_rejects_unrelated_pdf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    template = engine.inspect_pdf_bytes(_acroform_pdf())
+    same_template = engine.inspect_pdf_bytes(_acroform_pdf())
+    unrelated = engine.inspect_pdf_bytes(_acroform_pdf(label="Unrelated expense report"))
+
+    evidence = engine.validate_template_provenance(template, same_template)
+    assert evidence["verified"] is True
+    assert evidence["template_source_sha256"] == template.source_sha256
+    assert evidence["verified_anchors"] > 0
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(template, unrelated)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+
+
+def test_immutable_source_checksum_is_enforced_before_inspection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    source = _plain_pdf(pages=1)
+    path = tmp_path / "controlled.pdf"
+    path.write_bytes(source)
+    stat = path.stat()
+    expected = hashlib.sha256(source).hexdigest()
+    reader_router._inspect_source.cache_clear()
+
+    inspection = reader_router._inspect_source(str(path), expected, stat.st_size, stat.st_mtime_ns)
+    assert inspection.source_sha256 == expected
+
+    reader_router._inspect_source.cache_clear()
+    path.write_bytes(_plain_pdf(pages=1, label="Replaced content"))
+    changed = path.stat()
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        reader_router._inspect_source(str(path), expected, changed.st_size, changed.st_mtime_ns)
+    assert mismatch.value.code == "PDF_SOURCE_CHECKSUM_MISMATCH"
+    assert mismatch.value.status_code == 409
 
 
 def test_pdfium_enforces_input_and_page_limits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,7 +184,6 @@ def test_pdfium_enforces_input_and_page_limits(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(engine, "MAX_PDF_BYTES", 100 * 1024 * 1024)
     monkeypatch.setenv("PDFIUM_MAX_PAGES", "1")
     monkeypatch.setattr(engine, "MAX_PDF_PAGES", 1)
-    # Worker limits are inherited from the environment rather than mutable parent globals.
     with pytest.raises(engine.PdfEngineError) as too_many_pages:
         engine.inspect_pdf_bytes(_plain_pdf(pages=2))
     assert too_many_pages.value.code == "PDF_PAGE_LIMIT"
