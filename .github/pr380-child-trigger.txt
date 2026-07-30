@@ -1,0 +1,1 @@
+Trigger the target branch calendar-feed and copy-feedback validation publisher.
