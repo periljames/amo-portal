@@ -56,8 +56,10 @@ def test_hr_readiness_surfaces_the_next_future_contract():
 
 def test_default_day_bootstrap_is_explicit_and_canonical():
     source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
-    assert 'code="DEFAULT-DAY"' in source
-    assert 'code="DEFAULT-DAY-5X2"' in source
+    assert hr_service._DEFAULT_DAY_SHIFT_CODE == "DEFAULT-DAY"
+    assert hr_service._DEFAULT_DAY_PATTERN_CODE == "DEFAULT-DAY-5X2"
+    assert "code=_DEFAULT_DAY_SHIFT_CODE" in source
+    assert "code=_DEFAULT_DAY_PATTERN_CODE" in source
     assert "EmployeeWorkPatternAssignment" in source
     assert "with_for_update" in source
     assert "datetime.now(_amo_zone" in source
@@ -86,7 +88,42 @@ def test_effective_contract_gap_retains_future_starters():
 
 def test_default_day_bootstrap_repairs_non_monday_reserved_anchor():
     source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
-    assert 'current.work_pattern.code == "DEFAULT-DAY-5X2"' in source
+    assert "str(current.work_pattern_id) == str(pattern.id)" in source
     assert "current.cycle_anchor_date.weekday() == 0" in source
     assert "not current_is_reserved_default or current_default_anchor_is_monday" in source
     assert "cycle_anchor_date=week_monday" in source
+
+
+def test_default_day_bootstrap_refuses_unowned_reserved_codes_and_uses_owned_ids():
+    source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    identity_source = inspect.getsource(hr_service._default_day_system_id)
+    assert "uuid5" in identity_source
+    assert "amo-portal:{amo_id}:{system_key}" in identity_source
+    assert "shift_by_code" in source
+    assert "pattern_by_code" in source
+    assert "already owned by tenant configuration" in source
+    assert "id=shift_id" in source
+    assert "id=pattern_id" in source
+    assert "current.work_pattern_id" in source
+    assert "current.work_pattern.code" not in source
+
+
+def test_default_day_bootstrap_audits_every_controlled_mutation():
+    source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    audit_source = inspect.getsource(hr_service._bootstrap_audit)
+    assert "create_audit_event" in audit_source
+    assert "correlation_id=operation_id" in audit_source
+    assert '"system_owned": True' in audit_source
+    for action in (
+        'action="bootstrap_create"',
+        'action="bootstrap_update"',
+        'action="bootstrap_close"',
+        'action="bootstrap_delete"',
+        'action="bootstrap_assign"',
+    ):
+        assert action.replace('action="', '').replace('"', '') in source
+    assert 'entity_type="ShiftTemplate"' in source
+    assert 'entity_type="WorkPattern"' in source
+    assert 'entity_type="EmployeeWorkPatternAssignment"' in source
+    assert "before=current_before" in source
+    assert "after=_pattern_assignment_snapshot" in source

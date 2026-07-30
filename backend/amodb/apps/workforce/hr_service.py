@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from uuid import NAMESPACE_URL, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..accounts import models as account_models
+from ..audit import schemas as audit_schemas
+from ..audit import services as audit_services
 from . import hr_schemas, models, permissions, schemas, services
 
 
@@ -1113,6 +1116,105 @@ def dashboard_v2(
     return response
 
 
+_DEFAULT_DAY_SHIFT_CODE = "DEFAULT-DAY"
+_DEFAULT_DAY_PATTERN_CODE = "DEFAULT-DAY-5X2"
+_DEFAULT_DAY_SHIFT_KEY = "workforce.default-day.shift.v1"
+_DEFAULT_DAY_PATTERN_KEY = "workforce.default-day.pattern.v1"
+
+
+def _default_day_system_id(*, amo_id: str, system_key: str) -> str:
+    """Return the immutable tenant-scoped identity for a portal-owned baseline."""
+    return str(uuid5(NAMESPACE_URL, f"amo-portal:{amo_id}:{system_key}"))
+
+
+def _shift_template_snapshot(row) -> dict:
+    return {
+        "code": row.code,
+        "label": row.label,
+        "kind": _value(row.kind),
+        "default_start_time": row.default_start_time,
+        "default_end_time": row.default_end_time,
+        "duration_minutes": row.duration_minutes,
+        "counts_as_duty": bool(row.counts_as_duty),
+        "is_active": bool(row.is_active),
+        "display_order": row.display_order,
+        "description": row.description,
+        "icon_name": row.icon_name,
+    }
+
+
+def _work_pattern_snapshot(db: Session, row: models.WorkPattern) -> dict:
+    days = db.query(models.WorkPatternDay).filter(
+        models.WorkPatternDay.amo_id == row.amo_id,
+        models.WorkPatternDay.work_pattern_id == row.id,
+    ).order_by(models.WorkPatternDay.cycle_day_index.asc(), models.WorkPatternDay.id.asc()).all()
+    return {
+        "code": row.code,
+        "name": row.name,
+        "description": row.description,
+        "cycle_length_days": row.cycle_length_days,
+        "is_active": bool(row.is_active),
+        "timezone_name": row.timezone_name,
+        "days": [
+            {
+                "cycle_day_index": day.cycle_day_index,
+                "shift_template_id": day.shift_template_id,
+                "status": _value(day.status),
+                "start_time_local": day.start_time_local,
+                "end_time_local": day.end_time_local,
+                "spans_next_day": bool(day.spans_next_day),
+                "planned_minutes": day.planned_minutes,
+            }
+            for day in days
+        ],
+    }
+
+
+def _pattern_assignment_snapshot(row: models.EmployeeWorkPatternAssignment) -> dict:
+    return {
+        "user_id": str(row.user_id),
+        "work_pattern_id": str(row.work_pattern_id),
+        "effective_from": row.effective_from.isoformat(),
+        "effective_to": row.effective_to.isoformat() if row.effective_to else None,
+        "cycle_anchor_date": row.cycle_anchor_date.isoformat(),
+    }
+
+
+def _bootstrap_audit(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: str,
+    operation_id: str,
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    before: Optional[dict] = None,
+    after: Optional[dict] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Write required bootstrap evidence in the same authoritative transaction."""
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor_user_id=actor_user_id,
+            before=before,
+            after=after,
+            correlation_id=operation_id,
+            metadata={
+                "module": "workforce",
+                "operation": "DEFAULT_DAY_BOOTSTRAP",
+                "system_owned": True,
+                **(metadata or {}),
+            },
+        ),
+    )
+
+
 def bootstrap_default_day_pattern(
     db: Session,
     *,
@@ -1128,15 +1230,31 @@ def bootstrap_default_day_pattern(
     timezone_name = str(amo.time_zone or "UTC")
     today = datetime.now(_amo_zone(db, amo_id=amo_id)).date()
     week_monday = today - timedelta(days=today.weekday())
+    operation_id = str(uuid4())
 
+    shift_id = _default_day_system_id(amo_id=amo_id, system_key=_DEFAULT_DAY_SHIFT_KEY)
+    shift_by_code = db.query(roster_models.ShiftTemplate).filter(
+        roster_models.ShiftTemplate.amo_id == amo_id,
+        roster_models.ShiftTemplate.code == _DEFAULT_DAY_SHIFT_CODE,
+    ).with_for_update().first()
     shift = db.query(roster_models.ShiftTemplate).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.code == "DEFAULT-DAY",
-    ).first()
+        roster_models.ShiftTemplate.id == shift_id,
+    ).with_for_update().first()
+    if shift_by_code is not None and str(shift_by_code.id) != shift_id:
+        raise ValueError(
+            "Reserved shift code DEFAULT-DAY is already owned by tenant configuration; "
+            "rename that shift before applying the managed default-day baseline."
+        )
+    if shift is not None and shift_by_code is not None and str(shift.id) != str(shift_by_code.id):
+        raise ValueError("Managed default-day shift identity conflicts with the reserved code")
+
+    shift_before = _shift_template_snapshot(shift) if shift is not None else None
     if shift is None:
         shift = roster_models.ShiftTemplate(
+            id=shift_id,
             amo_id=amo_id,
-            code="DEFAULT-DAY",
+            code=_DEFAULT_DAY_SHIFT_CODE,
             label="Default day shift",
             kind=roster_models.ShiftTemplateKind.DAY,
             default_start_time="08:00",
@@ -1145,14 +1263,17 @@ def bootstrap_default_day_pattern(
             counts_as_duty=True,
             is_active=True,
             display_order=10,
-            description="System baseline for active staff without an assigned work pattern; planner review remains required.",
+            description=(
+                "Portal-managed baseline for active staff without an assigned work pattern; "
+                "planner review remains required."
+            ),
             icon_name="Sun",
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
         )
         db.add(shift)
-        db.flush()
     else:
+        shift.code = _DEFAULT_DAY_SHIFT_CODE
         shift.label = "Default day shift"
         shift.kind = roster_models.ShiftTemplateKind.DAY
         shift.default_start_time = "08:00"
@@ -1161,23 +1282,57 @@ def bootstrap_default_day_pattern(
         shift.counts_as_duty = True
         shift.is_active = True
         shift.display_order = 10
-        shift.description = "System baseline for active staff without an assigned work pattern; planner review remains required."
+        shift.description = (
+            "Portal-managed baseline for active staff without an assigned work pattern; "
+            "planner review remains required."
+        )
         shift.icon_name = "Sun"
         shift.updated_by_user_id = actor_user_id
         db.add(shift)
+    db.flush()
+    shift_after = _shift_template_snapshot(shift)
+    if shift_before != shift_after:
+        _bootstrap_audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            operation_id=operation_id,
+            entity_type="ShiftTemplate",
+            entity_id=str(shift.id),
+            action="bootstrap_create" if shift_before is None else "bootstrap_update",
+            before=shift_before,
+            after=shift_after,
+            metadata={"system_key": _DEFAULT_DAY_SHIFT_KEY},
+        )
 
-    pattern = db.query(models.WorkPattern).options(
-        joinedload(models.WorkPattern.days),
-    ).filter(
+    pattern_id = _default_day_system_id(amo_id=amo_id, system_key=_DEFAULT_DAY_PATTERN_KEY)
+    pattern_by_code = db.query(models.WorkPattern).filter(
         models.WorkPattern.amo_id == amo_id,
-        models.WorkPattern.code == "DEFAULT-DAY-5X2",
-    ).first()
+        models.WorkPattern.code == _DEFAULT_DAY_PATTERN_CODE,
+    ).with_for_update().first()
+    pattern = db.query(models.WorkPattern).filter(
+        models.WorkPattern.amo_id == amo_id,
+        models.WorkPattern.id == pattern_id,
+    ).with_for_update().first()
+    if pattern_by_code is not None and str(pattern_by_code.id) != pattern_id:
+        raise ValueError(
+            "Reserved work-pattern code DEFAULT-DAY-5X2 is already owned by tenant configuration; "
+            "rename that pattern before applying the managed default-day baseline."
+        )
+    if pattern is not None and pattern_by_code is not None and str(pattern.id) != str(pattern_by_code.id):
+        raise ValueError("Managed default-day pattern identity conflicts with the reserved code")
+
+    pattern_before = _work_pattern_snapshot(db, pattern) if pattern is not None else None
     if pattern is None:
         pattern = models.WorkPattern(
+            id=pattern_id,
             amo_id=amo_id,
-            code="DEFAULT-DAY-5X2",
+            code=_DEFAULT_DAY_PATTERN_CODE,
             name="Default day shift · Monday to Friday",
-            description="Five default day duties followed by two days off. This is a visible baseline, not a published roster.",
+            description=(
+                "Portal-managed five-day baseline followed by two days off. "
+                "This is visible draft input, not a published roster."
+            ),
             cycle_length_days=7,
             is_active=True,
             timezone_name=timezone_name,
@@ -1187,8 +1342,12 @@ def bootstrap_default_day_pattern(
         db.add(pattern)
         db.flush()
     else:
+        pattern.code = _DEFAULT_DAY_PATTERN_CODE
         pattern.name = "Default day shift · Monday to Friday"
-        pattern.description = "Five default day duties followed by two days off. This is a visible baseline, not a published roster."
+        pattern.description = (
+            "Portal-managed five-day baseline followed by two days off. "
+            "This is visible draft input, not a published roster."
+        )
         pattern.cycle_length_days = 7
         pattern.is_active = True
         pattern.timezone_name = timezone_name
@@ -1196,7 +1355,14 @@ def bootstrap_default_day_pattern(
         db.add(pattern)
         db.flush()
 
-    days_by_index = {int(row.cycle_day_index): row for row in (pattern.days or [])}
+    existing_days = db.query(models.WorkPatternDay).filter(
+        models.WorkPatternDay.amo_id == amo_id,
+        models.WorkPatternDay.work_pattern_id == pattern.id,
+    ).order_by(models.WorkPatternDay.cycle_day_index.asc(), models.WorkPatternDay.id.asc()).all()
+    days_by_index = {int(row.cycle_day_index): row for row in existing_days if 0 <= int(row.cycle_day_index) < 7}
+    for extra_day in existing_days:
+        if int(extra_day.cycle_day_index) not in range(7):
+            db.delete(extra_day)
     for day_index in range(7):
         duty = day_index < 5
         day = days_by_index.get(day_index)
@@ -1213,6 +1379,21 @@ def bootstrap_default_day_pattern(
         day.spans_next_day = False
         day.planned_minutes = 480 if duty else 0
         db.add(day)
+    db.flush()
+    pattern_after = _work_pattern_snapshot(db, pattern)
+    if pattern_before != pattern_after:
+        _bootstrap_audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            operation_id=operation_id,
+            entity_type="WorkPattern",
+            entity_id=str(pattern.id),
+            action="bootstrap_create" if pattern_before is None else "bootstrap_update",
+            before=pattern_before,
+            after=pattern_after,
+            metadata={"system_key": _DEFAULT_DAY_PATTERN_KEY},
+        )
 
     users = _active_tenant_users(db, amo_id=amo_id)
     contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
@@ -1234,7 +1415,7 @@ def bootstrap_default_day_pattern(
             models.EmployeeWorkPatternAssignment.effective_to.is_(None),
             models.EmployeeWorkPatternAssignment.effective_to >= today,
         ),
-    ).all()
+    ).with_for_update().all()
     occupied = {str(row.user_id): row for row in current_rows}
 
     assigned = 0
@@ -1246,8 +1427,7 @@ def bootstrap_default_day_pattern(
             current and current.work_pattern and current.work_pattern.is_active
         )
         current_is_reserved_default = bool(
-            current_has_active_pattern
-            and current.work_pattern.code == "DEFAULT-DAY-5X2"
+            current_has_active_pattern and str(current.work_pattern_id) == str(pattern.id)
         )
         current_default_anchor_is_monday = bool(
             current_is_reserved_default
@@ -1264,25 +1444,48 @@ def bootstrap_default_day_pattern(
             models.EmployeeWorkPatternAssignment.amo_id == amo_id,
             models.EmployeeWorkPatternAssignment.user_id == user.id,
             models.EmployeeWorkPatternAssignment.effective_from > today,
-        ).order_by(models.EmployeeWorkPatternAssignment.effective_from.asc()).first()
+        ).order_by(models.EmployeeWorkPatternAssignment.effective_from.asc()).with_for_update().first()
         effective_to = future.effective_from - timedelta(days=1) if future else None
         if effective_to is not None and effective_to < today:
             skipped_conflict += 1
             continue
 
         if current is not None:
-            # Never rewrite an historical pattern assignment in place. Close the
-            # prior interval before the tenant-local work date and create a new
-            # default assignment. A same-day invalid row has no historical span,
-            # so remove it before inserting the canonical replacement.
+            current_before = _pattern_assignment_snapshot(current)
             if current.effective_from < today:
                 current.effective_to = today - timedelta(days=1)
                 db.add(current)
+                db.flush()
+                _bootstrap_audit(
+                    db,
+                    amo_id=amo_id,
+                    actor_user_id=actor_user_id,
+                    operation_id=operation_id,
+                    entity_type="EmployeeWorkPatternAssignment",
+                    entity_id=str(current.id),
+                    action="bootstrap_close",
+                    before=current_before,
+                    after=_pattern_assignment_snapshot(current),
+                    metadata={"user_id": str(user.id), "replacement_pattern_id": str(pattern.id)},
+                )
             else:
+                current_id = str(current.id)
                 db.delete(current)
                 db.flush()
+                _bootstrap_audit(
+                    db,
+                    amo_id=amo_id,
+                    actor_user_id=actor_user_id,
+                    operation_id=operation_id,
+                    entity_type="EmployeeWorkPatternAssignment",
+                    entity_id=current_id,
+                    action="bootstrap_delete",
+                    before=current_before,
+                    after=None,
+                    metadata={"user_id": str(user.id), "replacement_pattern_id": str(pattern.id)},
+                )
 
-        db.add(models.EmployeeWorkPatternAssignment(
+        created = models.EmployeeWorkPatternAssignment(
             amo_id=amo_id,
             user_id=user.id,
             work_pattern_id=pattern.id,
@@ -1290,7 +1493,20 @@ def bootstrap_default_day_pattern(
             effective_to=effective_to,
             cycle_anchor_date=week_monday,
             created_by_user_id=actor_user_id,
-        ))
+        )
+        db.add(created)
+        db.flush()
+        _bootstrap_audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            operation_id=operation_id,
+            entity_type="EmployeeWorkPatternAssignment",
+            entity_id=str(created.id),
+            action="bootstrap_assign",
+            after=_pattern_assignment_snapshot(created),
+            metadata={"user_id": str(user.id), "system_key": _DEFAULT_DAY_PATTERN_KEY},
+        )
         assigned += 1
 
     db.flush()

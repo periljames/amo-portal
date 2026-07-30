@@ -41,6 +41,8 @@ These invariants are covered by Workforce regression contracts and the complete 
 - The assistant opens at the intended 460-pixel default when no saved width exists, remains within 360–760 pixels on desktop, and becomes a full-width non-resizable sheet on smaller screens.
 - Mode-aware icons, a busy spinner, and restrained launcher motion provide state feedback while respecting `prefers-reduced-motion`.
 - The resize grip is rendered with CSS rather than a separate icon chunk, preserving the visual control without adding a request to the Rostering planner's synthetic 2G waterfall.
+- Reserved default-day definitions use deterministic tenant-scoped portal identities; a tenant-authored record using either reserved code causes an explicit collision error and is never rewritten.
+- Every actual bootstrap definition or assignment mutation writes an append-only AuditEvent with the actor, before/after state, and one correlation ID inside the same transaction.
 - The assistant header remains fixed while its body scrolls independently, preventing page-wide overflow.
 
 ## Acceptance coverage
