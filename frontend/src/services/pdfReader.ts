@@ -74,6 +74,10 @@ export async function getPdfReaderCapabilities(
   manualId: string,
   revisionId: string,
 ): Promise<PdfReaderCapabilities> {
+  // A revisit or failed refresh must not inherit a checksum registered by an
+  // earlier reader session. Draft admission resumes only after this request
+  // returns the current immutable source checksum.
+  registerAuthoritativePdfSource(tenant, manualId, revisionId, null);
   const response = await authenticatedFetch(`${revisionPath(tenant, manualId, revisionId)}/pdf-capabilities`);
   const capabilities = await response.json() as PdfReaderCapabilities;
   registerAuthoritativePdfSource(tenant, manualId, revisionId, capabilities.source_sha256);
