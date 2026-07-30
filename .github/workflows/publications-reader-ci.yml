@@ -13,6 +13,7 @@ on:
       - "frontend/src/pages/docControlPublicationsBridge.css"
       - "frontend/src/services/publications.ts"
       - "frontend/src/services/pdfReader.ts"
+      - "frontend/src/services/pdfWorkingCopyAuthority.ts"
       - "frontend/src/services/documentation.ts"
       - "frontend/src/router.tsx"
       - "frontend/src/router.legacy.tsx"
