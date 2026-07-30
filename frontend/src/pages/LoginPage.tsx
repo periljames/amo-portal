@@ -14,6 +14,7 @@ import {
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import { preloadWorkspaceForUser } from "../services/routePreloader";
+import { resolvePostLoginReturnTarget } from "../app/loginRedirect";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
@@ -114,10 +115,7 @@ const LoginPage: React.FC = () => {
       if (!slug || !active) return;
 
       const u = getCachedUser();
-      if (isPlatformUser(u)) {
-        navigate("/platform/control", { replace: true });
-        return;
-      }
+      const platformUser = isPlatformUser(u);
       const admin = isAdminUser(u);
       const requiresOnboarding = !!u?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
@@ -125,8 +123,14 @@ const LoginPage: React.FC = () => {
         navigate(`/maintenance/${slug}/onboarding/setup`, { replace: true });
         return;
       }
-      if (fromState) {
-        navigate(fromState, { replace: true });
+
+      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser);
+      if (returnTarget) {
+        navigate(returnTarget, { replace: true });
+        return;
+      }
+      if (platformUser) {
+        navigate("/platform/control", { replace: true });
         return;
       }
 
@@ -206,14 +210,15 @@ const LoginPage: React.FC = () => {
         navigate(`/maintenance/${slugToUse}/onboarding/setup`, { replace: true });
         return;
       }
-      if (fromState) {
-        navigate(fromState, { replace: true });
+      const ctx = getContext();
+      const signedInUser = auth.user || getCachedUser();
+      const platformUser = isPlatformUser(signedInUser);
+      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser);
+      if (returnTarget) {
+        navigate(returnTarget, { replace: true });
         return;
       }
-
-      const ctx = getContext();
-      const signedInUser = getCachedUser();
-      if (isPlatformUser(signedInUser)) {
+      if (platformUser) {
         navigate("/platform/control", { replace: true });
         return;
       }
