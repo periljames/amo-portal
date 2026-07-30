@@ -10,6 +10,7 @@ from starlette.datastructures import Headers
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
+from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile, require_execution_scope
 from amodb.apps.doc_control.pdfium_service import PdfEngineError
 from amodb.apps.doc_control.workspace_service import get_profile, require_manual_access
 from amodb.database import get_db
@@ -81,19 +82,41 @@ def _submission_payload(payload_json: str) -> dict:
         raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
 
 
+def _execution_profile_for_detail(db: Session, tenant: models.Tenant, detail: dict) -> km.DocumentationExecutionProfile | None:
+    manual_id = str((detail.get("target") or {}).get("manual_id") or "")
+    if not manual_id:
+        return None
+    return (
+        db.query(km.DocumentationExecutionProfile)
+        .filter(
+            km.DocumentationExecutionProfile.tenant_id == tenant.amo_id,
+            km.DocumentationExecutionProfile.manual_id == manual_id,
+        )
+        .first()
+    )
+
+
 def _authorized_linked_detail(
     *,
+    tenant: models.Tenant,
     tenant_slug: str,
     reference_id: str,
     db: Session,
     current_user: account_models.User,
-) -> dict:
-    return reader.linked_resource_detail(
+) -> tuple[dict, km.DocumentationExecutionProfile | None]:
+    detail = reader.linked_resource_detail(
         tenant_slug=tenant_slug,
         reference_id=reference_id,
         db=db,
         current_user=current_user,
     )
+    execution = _execution_profile_for_detail(db, tenant, detail)
+    execution_allowed = can_execute_profile(current_user, execution)
+    capabilities = dict(detail.get("capabilities") or {})
+    capabilities["execute"] = bool(capabilities.get("execute") and execution_allowed)
+    capabilities["save_draft"] = bool(capabilities.get("save_draft") and execution_allowed)
+    detail["capabilities"] = capabilities
+    return detail, execution
 
 
 def _controlled_target_revision(db: Session, tenant: models.Tenant, detail: dict) -> models.ManualRevision:
@@ -132,12 +155,14 @@ def linked_resource_detail_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
-    return _authorized_linked_detail(
+    detail, _execution = _authorized_linked_detail(
+        tenant=tenant,
         tenant_slug=tenant_slug,
         reference_id=reference_id,
         db=db,
         current_user=current_user,
     )
+    return detail
 
 
 @router.post("/t/{tenant_slug}/linked-resources/{reference_id}/submit")
@@ -159,12 +184,14 @@ async def submit_linked_resource_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
-    detail = _authorized_linked_detail(
+    detail, execution_profile = _authorized_linked_detail(
+        tenant=tenant,
         tenant_slug=tenant_slug,
         reference_id=reference_id,
         db=db,
         current_user=current_user,
     )
+    require_execution_scope(current_user, execution_profile)
     if not bool((detail.get("capabilities") or {}).get("execute")):
         raise HTTPException(status_code=403, detail="This controlled resource is not executable")
     execution = ((detail.get("target") or {}).get("execution") or {})
