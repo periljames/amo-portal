@@ -15,6 +15,7 @@ on:
       - "frontend/src/services/documentControl*.ts"
       - "frontend/src/services/documentation.ts"
       - "frontend/src/services/pdfReader.ts"
+      - "frontend/src/services/pdfWorkingCopyAuthority.ts"
       - "frontend/src/services/publications.ts"
       - "frontend/src/router.tsx"
       - "frontend/src/components/Layout/DepartmentLayout.tsx"
