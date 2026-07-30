@@ -13,6 +13,8 @@ describe("documentation assistant interaction contract", () => {
     expect(assistant).toContain("onKeyDown={resizeWithKeyboard}");
     expect(assistant).toContain("onDoubleClick={resetWidth}");
     expect(assistant).toContain("role=\"separator\"");
+    expect(assistant).toContain("documentation-assistant__resize-grip");
+    expect(assistant).not.toContain("GripVertical");
     expect(assistantCss).toContain("--documentation-assistant-width");
     expect(assistantCss).toContain("cursor: col-resize");
     expect(assistantCss).toContain("prefers-reduced-motion");

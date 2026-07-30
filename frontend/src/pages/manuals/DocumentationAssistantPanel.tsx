@@ -15,7 +15,6 @@ import {
   ExternalLink,
   FileCheck2,
   FileText,
-  GripVertical,
   LoaderCircle,
   Navigation,
   Search,
@@ -276,7 +275,7 @@ export default function DocumentationAssistantPanel({
       onPointerDown={startResize}
       onKeyDown={resizeWithKeyboard}
       onDoubleClick={resetWidth}
-    ><GripVertical size={16} /></div> : null}
+    ><span className="documentation-assistant__resize-grip" aria-hidden="true" /></div> : null}
     <header className="documentation-assistant__header">
       <div>
         <span className="documentation-assistant__eyebrow">{busy ? <LoaderCircle className="is-spinning" size={14} /> : <ActiveModeIcon size={14} />} Controlled-document assistance</span>

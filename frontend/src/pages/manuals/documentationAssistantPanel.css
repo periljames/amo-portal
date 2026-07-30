@@ -457,14 +457,17 @@
   transition: background 140ms ease, width 140ms ease;
 }
 
-.documentation-assistant__resize-handle svg {
+.documentation-assistant__resize-grip {
   position: relative;
   z-index: 1;
-  box-sizing: content-box;
-  padding: 2px;
+  display: block;
+  width: 6px;
+  height: 18px;
   border: 1px solid var(--assistant-border);
   border-radius: 999px;
-  background: var(--surface-raised, #fff);
+  background:
+    radial-gradient(circle, currentColor 1px, transparent 1.4px) center 3px / 4px 6px repeat-y,
+    var(--surface-raised, #fff);
   opacity: 0;
   transition: opacity 140ms ease, transform 140ms ease;
 }
@@ -476,9 +479,9 @@
   background: var(--color-primary, #2563eb);
 }
 
-.documentation-assistant__resize-handle:hover svg,
-.documentation-assistant__resize-handle:focus-visible svg,
-.documentation-assistant[data-resizing="true"] .documentation-assistant__resize-handle svg {
+.documentation-assistant__resize-handle:hover .documentation-assistant__resize-grip,
+.documentation-assistant__resize-handle:focus-visible .documentation-assistant__resize-grip,
+.documentation-assistant[data-resizing="true"] .documentation-assistant__resize-grip {
   opacity: 1;
   transform: scale(1.06);
 }
@@ -552,7 +555,7 @@ body.documentation-assistant-is-resizing * {
   .documentation-assistant.is-floating,
   .documentation-assistant-launcher__icon svg,
   .documentation-assistant__resize-handle::before,
-  .documentation-assistant__resize-handle svg {
+  .documentation-assistant__resize-grip {
     animation: none !important;
     transition: none !important;
   }
