@@ -54,7 +54,7 @@ export function copyPdfBytes(bytes: Uint8Array): ArrayBuffer {
 }
 
 export function isPdfTextEntryTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
