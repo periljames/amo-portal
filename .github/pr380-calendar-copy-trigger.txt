@@ -1,1 +1,1 @@
-Fire the main-scoped PR380 publisher after restoring the protected release workflow.
+Execute the registered release-workflow publisher for PR380 now.
