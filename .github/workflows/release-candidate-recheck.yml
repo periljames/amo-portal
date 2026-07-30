@@ -67,7 +67,7 @@ EOF
         run: |
           git fetch origin main
           git checkout origin/main -- .github/workflows/release-candidate-recheck.yml
-          rm -f .github/scripts/pr380_calendar_copy_fix.py
+          rm -f .github/scripts/pr380_calendar_copy_fix.py .github/pr380-calendar-copy-trigger.txt
           git diff --check
           git config user.name "periljames"
           git config user.email "244658594+periljames@users.noreply.github.com"
