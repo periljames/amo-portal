@@ -181,6 +181,7 @@ export default function LinkedDocumentationPanel({
         {!record && canUpload ? <div className="linked-documentation-panel__notice linked-documentation-panel__notice--editable"><Upload size={18} /><div><strong>Completed PDF upload</strong><span>{uploadFile ? `${uploadFile.name} selected. PDFium will flatten and verify it before record creation.` : "Download and complete the controlled template, then choose the completed PDF."}</span></div></div> : null}
 
         <PdfReaderCore
+          key={`${tenant}:${detail.target.manual_id}:${detail.target.revision_id}`}
           compact
           fileUrl={detail.target.pdf_url}
           originalDownloadUrl={detail.target.download_url}
