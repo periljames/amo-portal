@@ -44,6 +44,7 @@ import {
   clampPdfValue,
   copyPdfBytes,
   highlightPdfText,
+  isPdfWorkingCopyGenerationCurrent,
   outputPdfFilename,
   pdfReaderShortcut,
   safePdfFilename,
@@ -238,7 +239,9 @@ export default function PdfReaderCore({
   const searchControllerRef = useRef<AbortController | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const serializationRef = useRef<Promise<Uint8Array> | null>(null);
+  const draftSaveInFlightRef = useRef(false);
   const pendingAutosaveRef = useRef(false);
+  const editGenerationRef = useRef(0);
   const dirtyRef = useRef(false);
   const onPageChangeRef = useRef(onPageChange);
   const onZoomChangeRef = useRef(onZoomChange);
@@ -503,10 +506,12 @@ export default function PdfReaderCore({
 
   const persistDraft = useCallback(async () => {
     if (!capabilities.can_save_draft || !dirtyRef.current) return;
-    if (serializationRef.current) {
+    if (draftSaveInFlightRef.current) {
       pendingAutosaveRef.current = true;
       return;
     }
+    draftSaveInFlightRef.current = true;
+    const savingGeneration = editGenerationRef.current;
     setDraftState("SAVING");
     try {
       const bytes = await serializeCurrentDocument();
@@ -516,22 +521,37 @@ export default function PdfReaderCore({
         copyPdfBytes(bytes),
         capabilities.source_sha256,
       );
+      if (isPdfWorkingCopyGenerationCurrent(savingGeneration, editGenerationRef.current)) {
+        setWorkingDirty(false);
+      } else {
+        pendingAutosaveRef.current = true;
+      }
       setDraftState("SAVED");
       setDraftNotice("Working copy saved locally on this device.");
     } catch {
       setDraftState("ERROR");
     } finally {
+      draftSaveInFlightRef.current = false;
       if (pendingAutosaveRef.current) {
         pendingAutosaveRef.current = false;
         window.setTimeout(() => void persistDraft(), 0);
       }
     }
-  }, [capabilities.can_save_draft, capabilities.source_sha256, identity, outputFilename, serializeCurrentDocument]);
+  }, [
+    capabilities.can_save_draft,
+    capabilities.source_sha256,
+    identity,
+    outputFilename,
+    serializeCurrentDocument,
+    setWorkingDirty,
+  ]);
 
   const scheduleAutosave = useCallback(() => {
+    editGenerationRef.current += 1;
     setWorkingDirty(true);
     setDraftState("IDLE");
     if (!capabilities.can_save_draft) return;
+    if (draftSaveInFlightRef.current) pendingAutosaveRef.current = true;
     if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = window.setTimeout(() => void persistDraft(), 900);
   }, [capabilities.can_save_draft, persistDraft, setWorkingDirty]);
@@ -575,7 +595,7 @@ export default function PdfReaderCore({
     setDocumentProxy(loaded);
     if (loaded.annotationStorage) {
       loaded.annotationStorage.onSetModified = scheduleAutosave;
-      loaded.annotationStorage.onResetModified = () => setWorkingDirty(false);
+      loaded.annotationStorage.onResetModified = undefined;
     }
     const nextPageCount = Math.max(1, Number(loaded.numPages || 1));
     const restoredPage = clampPdfValue(initialPageRef.current, 1, nextPageCount);
@@ -585,7 +605,7 @@ export default function PdfReaderCore({
     setLoadError("");
     onPageChangeRef.current?.(restoredPage);
     inspectDocument(loaded);
-  }, [inspectDocument, scheduleAutosave, setWorkingDirty]);
+  }, [inspectDocument, scheduleAutosave]);
 
   const runSearch = useCallback(async (requestedQuery = query) => {
     const needle = requestedQuery.trim();
@@ -713,6 +733,8 @@ export default function PdfReaderCore({
         ? await onSubmitWorkingCopy(file)
         : await submitPdfWorkingCopy(identity.tenant, identity.manualId, identity.revisionId, file, { output_mode: "FLATTENED_RECORD" });
       setRecord(created);
+      editGenerationRef.current = 0;
+      pendingAutosaveRef.current = false;
       setWorkingDirty(false);
       setDraftState("IDLE");
       await deletePdfWorkingCopy(identity).catch(() => undefined);
@@ -730,6 +752,8 @@ export default function PdfReaderCore({
     if (dirty && !window.confirm("Discard the locally saved working copy and reopen the controlled source?")) return;
     await deletePdfWorkingCopy(identity).catch(() => undefined);
     setLocalDraft(null);
+    editGenerationRef.current = 0;
+    pendingAutosaveRef.current = false;
     setWorkingDirty(false);
     setFillMode(false);
     setDraftNotice("");
