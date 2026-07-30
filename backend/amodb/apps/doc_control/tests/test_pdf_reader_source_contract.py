@@ -67,6 +67,15 @@ def test_forms_and_working_copies_are_governed() -> None:
     assert "authoritativeChecksums" in authority
 
 
+def test_reader_instances_are_keyed_by_controlled_source_identity() -> None:
+    publication = _read("frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx")
+    linked = _read("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
+
+    assert "const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`" in publication
+    assert "key={readerIdentityKey}" in publication
+    assert "key={`${tenant}:${detail.target.manual_id}:${detail.target.revision_id}`}" in linked
+
+
 def test_shortcuts_and_dirty_state_are_scoped_to_the_engaged_reader() -> None:
     core = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     linked = _read("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
@@ -109,6 +118,7 @@ def test_pdfium_import_and_dependency_are_confined() -> None:
 
 def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     service = _read("backend/amodb/apps/doc_control/pdfium_service.py")
+    overlay = _read("backend/amodb/apps/doc_control/pdf_provenance_overlay.py")
     access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
     router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
 
@@ -124,9 +134,32 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "_decode_pdf_name_escapes" in service
     assert "validate_template_provenance" in service
     assert "template_fingerprint" in service
+    assert "PDF_TEMPLATE_VISUAL_OVERLAY" in overlay
+    assert "reject_visual_overlays(expected_source, candidate)" in router
     assert "process_completed_pdf" in access
     assert "process_completed_pdf" in router
     assert "create_documentation_record" in router
+
+
+def test_execution_scope_precedes_capabilities_and_uploaded_bytes() -> None:
+    scope = _read("backend/amodb/apps/doc_control/knowledge_execution_scope.py")
+    access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
+    router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
+
+    assert 'scope.get("user_ids"' in scope
+    assert 'scope.get("roles"' in scope
+    assert 'scope.get("departments"' in scope
+    assert "can_execute_profile(current_user, execution)" in router
+    assert "require_execution_scope(current_user, execution)" in router
+    assert "require_execution_scope(current_user, execution_profile)" in access
+
+    direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
+    direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
+    assert direct_submit.index("require_execution_scope(current_user, execution)") < direct_read
+
+    linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
+    linked_read = linked_submit.index("await read_bounded_pdf_upload(artifact)")
+    assert linked_submit.index("require_execution_scope(current_user, execution_profile)") < linked_read
 
 
 def test_source_checksum_and_template_provenance_precede_record_creation() -> None:
@@ -139,7 +172,8 @@ def test_source_checksum_and_template_provenance_precede_record_creation() -> No
 
     process = router.split("def process_completed_pdf", 1)[1].split("def _load_direct_context", 1)[0]
     assert process.index("inspect_pdf_bytes(content)") < process.index("flatten_pdf_bytes(content)")
-    assert process.index("validate_template_provenance") < process.index("flatten_pdf_bytes(content)")
+    assert process.index("validate_template_provenance") < process.index("reject_visual_overlays")
+    assert process.index("reject_visual_overlays") < process.index("flatten_pdf_bytes(content)")
 
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     assert direct_submit.index("source_inspection = _inspection(revision)") < direct_submit.index("process_completed_pdf")
@@ -161,7 +195,7 @@ def test_authorization_and_signature_guards_precede_bounded_upload_processing() 
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
     linked_read = linked_submit.index("await read_bounded_pdf_upload(artifact)")
     assert linked_submit.index("_load_authorized_reference") < linked_read
-    assert linked_submit.index("detail = _authorized_linked_detail") < linked_read
+    assert linked_submit.index("detail, execution_profile = _authorized_linked_detail") < linked_read
     assert linked_submit.index('execution.get("requires_signature")') < linked_read
     assert linked_submit.index("source_inspection = _inspection(revision)") < linked_read
 
