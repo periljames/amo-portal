@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
@@ -303,14 +304,16 @@ async def flatten_reader_working_copy(
     if bool(getattr(execution, "requires_signature", False)):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     try:
-        source_inspection = _inspection(revision)
+        source_inspection = await run_in_threadpool(_inspection, revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
     capabilities = _capability_payload(execution, source_inspection, execution_allowed=True)
     if not capabilities["can_flatten"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
-    result, _metadata = process_completed_pdf(
-        await read_bounded_pdf_upload(artifact),
+    content = await read_bounded_pdf_upload(artifact)
+    result, _metadata = await run_in_threadpool(
+        process_completed_pdf,
+        content,
         {},
         expected_source=source_inspection,
         output_mode="FLATTENED_DOWNLOAD",
@@ -354,7 +357,7 @@ async def submit_reader_working_copy(
     if bool(execution.requires_signature):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     try:
-        source_inspection = _inspection(revision)
+        source_inspection = await run_in_threadpool(_inspection, revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
     capabilities = _capability_payload(execution, source_inspection, execution_allowed=True)
@@ -366,8 +369,10 @@ async def submit_reader_working_copy(
             raise ValueError
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
-    result, enriched_payload = process_completed_pdf(
-        await read_bounded_pdf_upload(artifact),
+    content = await read_bounded_pdf_upload(artifact)
+    result, enriched_payload = await run_in_threadpool(
+        process_completed_pdf,
+        content,
         payload,
         expected_source=source_inspection,
     )
