@@ -65,7 +65,9 @@ function clampAssistantWidth(value: number, viewportWidth = 1440): number {
 function readStoredAssistantWidth(): number {
   if (typeof window === "undefined") return FLOATING_DEFAULT_WIDTH;
   try {
-    const stored = Number(window.localStorage.getItem(FLOATING_WIDTH_STORAGE_KEY));
+    const storedValue = window.localStorage.getItem(FLOATING_WIDTH_STORAGE_KEY);
+    if (!storedValue) return clampAssistantWidth(FLOATING_DEFAULT_WIDTH, window.innerWidth);
+    const stored = Number(storedValue);
     return Number.isFinite(stored)
       ? clampAssistantWidth(stored, window.innerWidth)
       : clampAssistantWidth(FLOATING_DEFAULT_WIDTH, window.innerWidth);

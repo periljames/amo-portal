@@ -8,6 +8,7 @@ const workforceCss = readFileSync(new URL("./components/workforce-hr-workspace.c
 describe("documentation assistant interaction contract", () => {
   it("supports persisted pointer and keyboard resizing", () => {
     expect(assistant).toContain("amo_documentation_assistant_width");
+    expect(assistant).toContain("if (!storedValue) return clampAssistantWidth(FLOATING_DEFAULT_WIDTH");
     expect(assistant).toContain("onPointerDown={startResize}");
     expect(assistant).toContain("onKeyDown={resizeWithKeyboard}");
     expect(assistant).toContain("onDoubleClick={resetWidth}");
