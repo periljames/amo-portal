@@ -265,8 +265,12 @@ const AdminOverviewPage: React.FC = () => {
                 </div>
                 <div>
                   <p>Control</p>
-                  <Button type="button" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin-users`)}>
-                    Open Go Live master
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/amo-assets?tour=1`)}
+                  >
+                    Open AMO setup
                   </Button>
                 </div>
               </div>
