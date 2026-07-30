@@ -9,7 +9,7 @@ The Workforce and HR employee register previously started from effective employm
 1. The register starts from every active, non-system user belonging to the current tenant.
 2. Employment contracts, bases, work-pattern assignments and approved leave are joined as readiness data.
 3. Missing Workforce records remain visible as actionable readiness blockers; they never remove the user from the register.
-4. When no contract is currently effective, the next future ACTIVE or ONBOARDING contract is surfaced for editing rather than offering an overlapping contract creation.
+4. When no contract is currently effective, the next future ACTIVE, ONBOARDING, or SUSPENDED contract is surfaced for editing rather than offering an overlapping contract creation.
 5. Future starters remain in the currently effective-contract gap count until their contract becomes effective.
 6. Authorized Workforce managers can create a missing effective contract or edit an existing one from the same register.
 7. The contract editor uses the exact backend enums and tenant-owned canonical bases.
@@ -22,15 +22,25 @@ The Workforce and HR employee register previously started from effective employm
 
 ## Review corrections
 
-The blocker reviews identified and corrected five readiness and effective-dating defects:
+The blocker reviews identified and corrected six readiness and effective-dating defects:
 
 - inactive pattern assignments are no longer rewritten in place across their historical interval;
 - the five-day duty cycle is anchored to Monday rather than the day on which the bootstrap action is executed;
-- future contracts are surfaced and edited instead of misclassified as missing contracts that invite an overlapping creation;
+- future ACTIVE and ONBOARDING contracts are surfaced and edited instead of misclassified as missing contracts that invite an overlapping creation;
+- future SUSPENDED contracts are also surfaced because contract-overlap validation treats them as conflicting records;
 - future starters remain included in the currently effective-contract gap metric and receive an edit-future-contract action; and
 - existing reserved default-day assignments with non-Monday anchors are safely re-effective-dated to the canonical Monday anchor.
 
 These invariants are covered by Workforce regression contracts and the complete Rostering and Workforce test suites.
+
+## Workforce and assistant usability
+
+- The Workforce workspace is bounded on wide displays, uses stronger theme-aware foreground contrast, and raises operational text to an all-day readable baseline.
+- The employee register remains a compact table where space permits and changes to a two-column then single-column card layout before horizontal scrolling becomes necessary.
+- The documentation assistant is a conventional right-side drawer with an explicit full-height left resize edge, pointer and keyboard resizing, a double-click reset, and persisted width.
+- The assistant opens at the intended 460-pixel default when no saved width exists, remains within 360–760 pixels on desktop, and becomes a full-width non-resizable sheet on smaller screens.
+- Mode-aware icons, a busy spinner, and restrained launcher motion provide state feedback while respecting `prefers-reduced-motion`.
+- The assistant header remains fixed while its body scrolls independently, preventing page-wide overflow.
 
 ## Acceptance coverage
 
@@ -39,4 +49,4 @@ The rendered Playwright scenario authenticates an AMO administrator, opens Workf
 - an active user without a contract is displayed with `No contract`, `Create contract`, and the authorized `Apply default day pattern` action; and
 - an active user with a future contract is displayed with the future start date and an `Edit` action, without an overlapping `Create contract` action.
 
-The final focused correction workflow passed the complete Workforce and Rostering suites, frontend Rostering tests, ESLint, the production build, and the rendered role-access matrix before removing its temporary validation machinery. The protected release-candidate gate must pass on the clean exact head before merge readiness is declared.
+The focused correction workflows passed the complete Workforce and Rostering suites, frontend Rostering and assistant tests, changed-surface ESLint, the production build, and the rendered role-access matrix before removing their temporary validation machinery. The protected release-candidate gate must pass on the clean exact head before merge readiness is declared.
