@@ -1,3 +1,15 @@
+function normalizePathname(target: string): string | null {
+  const rawPathname = target.split(/[?#]/, 1)[0] || "/";
+
+  try {
+    const pathname = decodeURIComponent(rawPathname).replace(/\\/g, "/");
+    if (!pathname.startsWith("/") || pathname.startsWith("//")) return null;
+    return pathname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function isLoginRoute(pathname: string): boolean {
   return pathname === "/login" || /^\/maintenance\/[^/]+\/login\/?$/.test(pathname);
 }
@@ -11,7 +23,8 @@ function isPlatformRoute(pathname: string): boolean {
  *
  * Route state is untrusted input. In particular, tenant users must never be
  * returned to the global platform console, and login routes must not redirect
- * back to themselves.
+ * back to themselves. Classification uses a decoded, case-normalized pathname
+ * so it matches React Router's route semantics.
  */
 export function resolvePostLoginReturnTarget(
   candidate: unknown,
@@ -22,7 +35,8 @@ export function resolvePostLoginReturnTarget(
   const target = candidate.trim();
   if (!target.startsWith("/") || target.startsWith("//")) return null;
 
-  const pathname = target.split(/[?#]/, 1)[0] || "/";
+  const pathname = normalizePathname(target);
+  if (!pathname) return null;
   if (isLoginRoute(pathname)) return null;
   if (isPlatformRoute(pathname) && !platformUser) return null;
 
