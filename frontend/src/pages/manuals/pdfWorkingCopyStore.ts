@@ -1,4 +1,5 @@
 import { getCachedUser } from "../../services/auth";
+import { authoritativePdfSourceChecksum } from "../../services/pdfWorkingCopyAuthority";
 
 const DATABASE_NAME = "amo-controlled-pdf-working-copies";
 const STORE_NAME = "workingCopies";
@@ -65,7 +66,21 @@ function closeQuietly(database: IDBDatabase): void {
   try { database.close(); } catch { /* already closed */ }
 }
 
+function authorizedDraft(
+  identity: PdfWorkingCopyIdentity,
+  result: StoredPdfWorkingCopy | null,
+): StoredPdfWorkingCopy | null {
+  if (!result) return null;
+  const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
+  const stored = String(result.sourceSha256 || "").trim().toLowerCase();
+  if (!authoritative || !stored || stored !== authoritative) return null;
+  return result;
+}
+
 export async function readPdfWorkingCopy(identity: PdfWorkingCopyIdentity): Promise<StoredPdfWorkingCopy | null> {
+  // Draft bytes are never exposed until the capability request has registered
+  // the immutable source checksum for this exact tenant/document/revision.
+  if (!authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId)) return null;
   const database = await openDatabase();
   const key = pdfWorkingCopyKey(identity);
   return new Promise<StoredPdfWorkingCopy | null>((resolve, reject) => {
@@ -74,7 +89,7 @@ export async function readPdfWorkingCopy(identity: PdfWorkingCopyIdentity): Prom
     let result: StoredPdfWorkingCopy | null = null;
     request.onsuccess = () => { result = (request.result as StoredPdfWorkingCopy | undefined) || null; };
     request.onerror = () => reject(request.error || new Error("The PDF working copy could not be read"));
-    transaction.oncomplete = () => { closeQuietly(database); resolve(result); };
+    transaction.oncomplete = () => { closeQuietly(database); resolve(authorizedDraft(identity, result)); };
     transaction.onerror = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage failed")); };
     transaction.onabort = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage was cancelled")); };
   });
@@ -89,12 +104,17 @@ export async function savePdfWorkingCopy(
   if (bytes.byteLength > MAX_PDF_WORKING_COPY_BYTES) {
     throw new Error("The PDF working copy exceeds the 100 MB local draft limit");
   }
+  const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
+  const requestedChecksum = String(sourceSha256 || "").trim().toLowerCase();
+  if (!authoritative || !requestedChecksum || requestedChecksum !== authoritative) {
+    throw new Error("The PDF working copy cannot be saved without the authoritative source checksum");
+  }
   const normalized = normalizedIdentity(identity);
   const row: StoredPdfWorkingCopy = {
     key: pdfWorkingCopyKey({ ...identity, userId: normalized.userId }),
     ...normalized,
     filename,
-    sourceSha256,
+    sourceSha256: authoritative,
     savedAt: new Date().toISOString(),
     byteLength: bytes.byteLength,
     bytes,
