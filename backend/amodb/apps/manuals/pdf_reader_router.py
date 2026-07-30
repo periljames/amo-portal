@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
+from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile, require_execution_scope
 from amodb.apps.doc_control.knowledge_service import create_documentation_record, serialize_execution_profile, serialize_record
+from amodb.apps.doc_control.pdf_provenance_overlay import reject_visual_overlays
 from amodb.apps.doc_control.pdfium_service import (
     MAX_PDF_BYTES,
     PdfEngineError,
@@ -147,10 +149,15 @@ def _inspection(revision: models.ManualRevision) -> PdfInspection:
     )
 
 
-def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspection: PdfInspection) -> dict:
+def _capability_payload(
+    profile: km.DocumentationExecutionProfile | None,
+    inspection: PdfInspection,
+    *,
+    execution_allowed: bool = True,
+) -> dict:
     submission_mode = str(getattr(profile, "submission_mode", "DOWNLOAD_ONLY") or "DOWNLOAD_ONLY")
     execution_type = str(getattr(profile, "execution_type", "NONE") or "NONE")
-    executable = bool(profile and submission_mode in _EXECUTABLE_SUBMISSION_MODES)
+    executable = bool(profile and execution_allowed and submission_mode in _EXECUTABLE_SUBMISSION_MODES)
     signature_required = bool(getattr(profile, "requires_signature", False))
     can_fill = bool(
         executable
@@ -169,6 +176,8 @@ def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspec
     reason = inspection.unsupported_reason
     if inspection.has_javascript:
         reason = "PDF JavaScript and automatic actions are disabled"
+    elif profile is not None and not execution_allowed:
+        reason = "This controlled resource is outside your execution scope"
     elif signature_required:
         reason = _SIGNATURE_UNAVAILABLE
     elif profile is None:
@@ -215,6 +224,7 @@ def process_completed_pdf(
     try:
         candidate = inspect_pdf_bytes(content)
         provenance = validate_template_provenance(expected_source, candidate)
+        reject_visual_overlays(expected_source, candidate)
         result = flatten_pdf_bytes(content)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
@@ -266,7 +276,11 @@ def pdf_reader_capabilities(
         inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    return _capability_payload(execution, inspection)
+    return _capability_payload(
+        execution,
+        inspection,
+        execution_allowed=can_execute_profile(current_user, execution),
+    )
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/flatten.pdf")
@@ -285,13 +299,14 @@ async def flatten_reader_working_copy(
         revision_id=revision_id,
         current_user=current_user,
     )
+    require_execution_scope(current_user, execution)
     if bool(getattr(execution, "requires_signature", False)):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     try:
         source_inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    capabilities = _capability_payload(execution, source_inspection)
+    capabilities = _capability_payload(execution, source_inspection, execution_allowed=True)
     if not capabilities["can_flatten"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
     result, _metadata = process_completed_pdf(
@@ -335,13 +350,14 @@ async def submit_reader_working_copy(
     )
     if not execution or execution.submission_mode not in _EXECUTABLE_SUBMISSION_MODES:
         raise HTTPException(status_code=409, detail="This controlled resource is not configured for retained-record submission")
+    require_execution_scope(current_user, execution)
     if bool(execution.requires_signature):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     try:
         source_inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    capabilities = _capability_payload(execution, source_inspection)
+    capabilities = _capability_payload(execution, source_inspection, execution_allowed=True)
     if not capabilities["can_submit"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be submitted")
     try:
@@ -420,4 +436,8 @@ def pdf_engine_health(
         inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    return _capability_payload(execution, inspection)
+    return _capability_payload(
+        execution,
+        inspection,
+        execution_allowed=can_execute_profile(current_user, execution),
+    )
