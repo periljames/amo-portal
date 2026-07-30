@@ -6,6 +6,7 @@ import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 
 from amodb.apps.accounts import models as account_models
@@ -206,11 +207,13 @@ async def submit_linked_resource_with_source_access(
 
     revision = _controlled_target_revision(db, tenant, detail)
     try:
-        source_inspection = _inspection(revision)
+        source_inspection = await run_in_threadpool(_inspection, revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    result, enriched_payload = process_completed_pdf(
-        await read_bounded_pdf_upload(artifact),
+    content = await read_bounded_pdf_upload(artifact)
+    result, enriched_payload = await run_in_threadpool(
+        process_completed_pdf,
+        content,
         _submission_payload(payload_json),
         expected_source=source_inspection,
     )
