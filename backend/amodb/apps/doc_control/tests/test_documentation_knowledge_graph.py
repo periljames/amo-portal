@@ -112,11 +112,14 @@ def test_knowledge_routes_are_registered_before_generic_compatibility_routes() -
 def test_frontend_reader_and_structure_surface_the_graph() -> None:
     root = Path(__file__).resolve().parents[5]
     pdf_viewer = (root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
+    reader_core = (root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
     linked_panel = (root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
     structure = (root / "frontend/src/pages/documentControl/DocumentControlStructurePage.tsx").read_text(encoding="utf-8")
     assert "publication-reference-hotspot" in pdf_viewer
     assert "getPublicationReferences" in pdf_viewer
-    assert "renderForms={canExecute}" in linked_panel
+    assert "PdfReaderCore" in pdf_viewer
+    assert "renderForms={fillMode && canFill}" in reader_core
+    assert "onSubmitWorkingCopy={canFill ?" in linked_panel
     assert "submitLinkedPdfResource" in linked_panel
     assert "Reference monitor" in structure
     assert "RECORD_SERIES" in structure
