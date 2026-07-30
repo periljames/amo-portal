@@ -1,4 +1,9 @@
-import { authHeaders, endSession } from "./auth";
+import {
+  authHeaders,
+  extendSessionIfNeeded,
+  handleAuthFailure,
+  markSessionActivity,
+} from "./auth";
 import { getApiBaseUrl } from "./config";
 
 export type PlatformConsoleSearchResult = {
@@ -15,21 +20,39 @@ export type PlatformConsoleBootstrap = Record<string, unknown> & {
 };
 
 async function request<T>(path: string): Promise<T> {
+  markSessionActivity(`platform-console:get:start:${path}`);
+  const extension = extendSessionIfNeeded(`platform-console:get:${path}`);
+  if (extension) await extension;
+
+  const headers = new Headers(authHeaders());
+  headers.set("Accept", "application/json");
+
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     credentials: "include",
-    headers: { ...authHeaders(), Accept: "application/json" },
+    headers,
   });
   if (response.status === 401) {
-    endSession("manual");
+    handleAuthFailure("platform-console-unauthorized");
     throw new Error("Session expired. Please sign in again.");
   }
   const text = await response.text().catch(() => "");
-  const payload = text ? JSON.parse(text) : null;
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error(`Platform console route ${path} returned invalid JSON.`);
+    }
+  }
   if (!response.ok) {
-    const detail = payload && typeof payload === "object" ? payload.detail || payload.message : text;
+    const detail = payload && typeof payload === "object"
+      ? (payload as { detail?: unknown; message?: unknown }).detail
+        ?? (payload as { detail?: unknown; message?: unknown }).message
+      : text;
     throw new Error(String(detail || `HTTP ${response.status}`));
   }
+  markSessionActivity(`platform-console:get:ok:${path}`);
   return payload as T;
 }
 
