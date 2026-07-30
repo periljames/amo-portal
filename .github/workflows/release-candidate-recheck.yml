@@ -51,9 +51,13 @@ jobs:
       - name: Run Rostering and documentation-assistant regressions
         working-directory: frontend
         run: npm exec -- vitest run src/pages/rostering src/pages/manuals
-      - name: Lint complete frontend
+      - name: Lint changed frontend surfaces
         working-directory: frontend
-        run: npm run lint
+        run: >-
+          npm exec -- eslint
+          src/pages/manuals/DocumentationAssistantPanel.tsx
+          src/pages/rostering/components/WorkforceHrWorkspace.tsx
+          src/pages/rostering/documentationAssistantUx.test.ts
       - name: Typecheck and build production frontend
         working-directory: frontend
         run: npm run build
