@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
 from amodb.apps.doc_control.knowledge_service import create_documentation_record, serialize_execution_profile, serialize_record
-from amodb.apps.doc_control.pdfium_service import PdfEngineError, PdfFlattenResult, flatten_pdf_bytes, inspect_pdf_bytes
+from amodb.apps.doc_control.pdfium_service import (
+    MAX_PDF_BYTES,
+    PdfEngineError,
+    PdfFlattenResult,
+    flatten_pdf_bytes,
+    inspect_pdf_bytes,
+)
 from amodb.apps.doc_control.workspace_service import require_manual_access
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -31,6 +37,7 @@ _SIGNATURE_UNAVAILABLE = (
     "This controlled workflow requires a validated digital signature, "
     "but trusted PDF signature validation is not configured"
 )
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def _safe_filename(value: str | None, fallback: str) -> str:
@@ -43,6 +50,33 @@ def _flattened_filename(value: str | None, fallback: str) -> str:
     if "FLATTENED" not in filename.upper():
         filename = f"{filename[:-4]}_FLATTENED.pdf"
     return filename
+
+
+async def read_bounded_pdf_upload(artifact: UploadFile) -> bytes:
+    declared_size = getattr(artifact, "size", None)
+    if declared_size is not None and int(declared_size) > MAX_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "PDF_TOO_LARGE",
+                "message": f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
+            },
+        )
+    content = bytearray()
+    while True:
+        chunk = await artifact.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        content.extend(chunk)
+        if len(content) > MAX_PDF_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "PDF_TOO_LARGE",
+                    "message": f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
+                },
+            )
+    return bytes(content)
 
 
 def _source_path(revision: models.ManualRevision) -> Path:
@@ -67,8 +101,6 @@ def _execution_profile(db: Session, tenant_id: str, manual_id: str) -> km.Docume
 @lru_cache(maxsize=256)
 def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns: int):
     del source_sha256, modified_ns
-    from amodb.apps.doc_control.pdfium_service import MAX_PDF_BYTES
-
     if size > MAX_PDF_BYTES:
         raise PdfEngineError(
             "PDF_TOO_LARGE",
@@ -223,7 +255,7 @@ async def flatten_reader_working_copy(
     capabilities = _capability_payload(execution, _inspection(revision))
     if not capabilities["can_flatten"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
-    content = await artifact.read()
+    content = await read_bounded_pdf_upload(artifact)
     try:
         result = flatten_pdf_bytes(content)
     except PdfEngineError as exc:
@@ -273,7 +305,7 @@ async def submit_reader_working_copy(
             raise ValueError
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
-    result, enriched_payload = process_completed_pdf(await artifact.read(), payload)
+    result, enriched_payload = process_completed_pdf(await read_bounded_pdf_upload(artifact), payload)
     record = create_documentation_record(
         db,
         manual_tenant=tenant,
