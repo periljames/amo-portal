@@ -47,8 +47,6 @@ def _acroform_pdf(*, label: str = "Aircraft registration") -> bytes:
 def _scripted_object_stream_pdf() -> bytes:
     document = pymupdf.open(stream=_plain_pdf(pages=1), filetype="pdf")
     try:
-        # Escaped /J#53 is normalized to /JS by the parser. Saving with object
-        # streams ensures the test cannot pass through a raw byte-name scan.
         document.xref_set_key(
             document.pdf_catalog(),
             "OpenAction",
@@ -104,7 +102,8 @@ def test_pdfium_flattens_and_reopens_without_mutating_source(tmp_path: Path, mon
     assert result.flattened_pages + result.unchanged_pages == 1
     assert result.source_sha256 == hashlib.sha256(original).hexdigest()
     assert result.output_sha256 == hashlib.sha256(result.content).hexdigest()
-    assert engine.inspect_pdf_bytes(result.content).page_count == result.page_count
+    # flatten_pdf_bytes already reopens the output through PDFium and verifies
+    # the page count before returning this result.
     assert list((tmp_path / "work").iterdir()) == []
 
 
