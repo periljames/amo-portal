@@ -132,5 +132,7 @@ def test_download_and_upload_mode_has_file_picker_and_submission_path() -> None:
     assert 'type="file"' in panel
     assert 'accept="application/pdf,.pdf"' in panel
     assert "Choose completed PDF" in panel
-    assert "Submit completed PDF" in panel
+    assert "Submit flattened record" in panel
+    assert 'output_mode: "FLATTENED_RECORD"' in panel
+    assert "PDFium will flatten and verify" in panel
     assert "submitLinkedPdfResource" in panel
