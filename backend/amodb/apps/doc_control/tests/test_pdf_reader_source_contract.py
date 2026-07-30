@@ -101,6 +101,22 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "create_documentation_record" in router
 
 
+def test_authorization_and_signature_guards_precede_uploaded_byte_processing() -> None:
+    access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
+    router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
+
+    linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
+    linked_read = linked_submit.index("await artifact.read()")
+    assert linked_submit.index("_load_authorized_reference") < linked_read
+    assert linked_submit.index("detail = _authorized_linked_detail") < linked_read
+    assert linked_submit.index('execution.get("requires_signature")') < linked_read
+
+    direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
+    direct_read = direct_submit.index("await artifact.read()")
+    assert direct_submit.index("_load_direct_context") < direct_read
+    assert direct_submit.index('capabilities["can_submit"]') < direct_read
+
+
 def test_reader_routes_precede_compatibility_routes() -> None:
     composition = _read("backend/amodb/apps/manuals/router.py")
     assert composition.index("router.include_router(_pdf_reader_router)") < composition.index("router.include_router(_fast_reader_router)")
