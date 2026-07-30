@@ -14,7 +14,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
 from amodb.apps.doc_control.knowledge_service import create_documentation_record, serialize_execution_profile, serialize_record
 from amodb.apps.doc_control.pdfium_service import PdfEngineError, PdfFlattenResult, flatten_pdf_bytes, inspect_pdf_bytes
-from amodb.apps.doc_control.workspace_service import get_profile, require_manual_access
+from amodb.apps.doc_control.workspace_service import require_manual_access
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -27,11 +27,22 @@ router = APIRouter(prefix="/manuals", tags=["Controlled PDF Reader Engine"])
 
 _EXECUTABLE_SUBMISSION_MODES = {"FILL_AND_SUBMIT", "DOWNLOAD_AND_UPLOAD", "PORTAL_SUBMISSION"}
 _FILLABLE_EXECUTION_TYPES = {"PDF_ACROFORM", "HYBRID"}
+_SIGNATURE_UNAVAILABLE = (
+    "This controlled workflow requires a validated digital signature, "
+    "but trusted PDF signature validation is not configured"
+)
 
 
 def _safe_filename(value: str | None, fallback: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(value or fallback).name).strip("._") or fallback
     return cleaned if cleaned.lower().endswith(".pdf") else f"{cleaned}.pdf"
+
+
+def _flattened_filename(value: str | None, fallback: str) -> str:
+    filename = _safe_filename(value, fallback)
+    if "FLATTENED" not in filename.upper():
+        filename = f"{filename[:-4]}_FLATTENED.pdf"
+    return filename
 
 
 def _source_path(revision: models.ManualRevision) -> Path:
@@ -55,7 +66,15 @@ def _execution_profile(db: Session, tenant_id: str, manual_id: str) -> km.Docume
 
 @lru_cache(maxsize=256)
 def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns: int):
-    del source_sha256, size, modified_ns
+    del source_sha256, modified_ns
+    from amodb.apps.doc_control.pdfium_service import MAX_PDF_BYTES
+
+    if size > MAX_PDF_BYTES:
+        raise PdfEngineError(
+            "PDF_TOO_LARGE",
+            f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
+            status_code=413,
+        )
     return inspect_pdf_bytes(Path(path_value).read_bytes())
 
 
@@ -74,6 +93,7 @@ def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspec
     submission_mode = str(getattr(profile, "submission_mode", "DOWNLOAD_ONLY") or "DOWNLOAD_ONLY")
     execution_type = str(getattr(profile, "execution_type", "NONE") or "NONE")
     executable = bool(profile and submission_mode in _EXECUTABLE_SUBMISSION_MODES)
+    signature_required = bool(getattr(profile, "requires_signature", False))
     can_fill = bool(
         executable
         and execution_type in _FILLABLE_EXECUTION_TYPES
@@ -82,10 +102,17 @@ def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspec
         and not inspection.has_javascript
         and not inspection.is_dynamic_xfa
     )
-    can_flatten = bool(executable and inspection.can_flatten and not inspection.has_javascript)
+    can_flatten = bool(
+        executable
+        and not signature_required
+        and inspection.can_flatten
+        and not inspection.has_javascript
+    )
     reason = inspection.unsupported_reason
     if inspection.has_javascript:
         reason = "PDF JavaScript and automatic actions are disabled"
+    elif signature_required:
+        reason = _SIGNATURE_UNAVAILABLE
     elif profile is None:
         reason = "No Document Control execution profile is configured"
     elif submission_mode == "DOWNLOAD_ONLY":
@@ -191,6 +218,8 @@ async def flatten_reader_working_copy(
         revision_id=revision_id,
         current_user=current_user,
     )
+    if bool(getattr(execution, "requires_signature", False)):
+        raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     capabilities = _capability_payload(execution, _inspection(revision))
     if not capabilities["can_flatten"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
@@ -199,9 +228,7 @@ async def flatten_reader_working_copy(
         result = flatten_pdf_bytes(content)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    filename = _safe_filename(artifact.filename, f"{manual.code}_FLATTENED.pdf")
-    if "FLATTENED" not in filename.upper():
-        filename = filename[:-4] + "_FLATTENED.pdf"
+    filename = _flattened_filename(artifact.filename, f"{manual.code}_FLATTENED.pdf")
     headers = {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
@@ -235,6 +262,8 @@ async def submit_reader_working_copy(
     )
     if not execution or execution.submission_mode not in _EXECUTABLE_SUBMISSION_MODES:
         raise HTTPException(status_code=409, detail="This controlled resource is not configured for retained-record submission")
+    if bool(execution.requires_signature):
+        raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
     capabilities = _capability_payload(execution, _inspection(revision))
     if not capabilities["can_submit"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be submitted")
@@ -252,7 +281,7 @@ async def submit_reader_working_copy(
         revision=revision,
         profile=execution,
         actor_id=current_user.id,
-        filename=_safe_filename(artifact.filename, f"{manual.code}_FLATTENED.pdf"),
+        filename=_flattened_filename(artifact.filename, f"{manual.code}_FLATTENED.pdf"),
         content=result.content,
         source_reference_id=None,
         payload=enriched_payload,
@@ -304,4 +333,8 @@ def pdf_engine_health(
         revision_id=revision_id,
         current_user=current_user,
     )
-    return _capability_payload(execution, _inspection(revision))
+    try:
+        inspection = _inspection(revision)
+    except PdfEngineError as exc:
+        raise _engine_http_error(exc) from exc
+    return _capability_payload(execution, inspection)
