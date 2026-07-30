@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { registerAuthoritativePdfSource } from "../../services/pdfWorkingCopyAuthority";
 import {
   highlightPdfText,
   outputPdfFilename,
   pdfReaderShortcut,
   searchPdfDocument,
 } from "./pdfReaderEngine";
-import { pdfWorkingCopyKey } from "./pdfWorkingCopyStore";
+import {
+  pdfWorkingCopyKey,
+  pdfWorkingCopyMatchesAuthoritativeSource,
+} from "./pdfWorkingCopyStore";
 
 function fakeDocument(pages: string[]) {
   return {
@@ -78,6 +82,16 @@ describe("controlled PDF reader engine", () => {
 
     expect(new Set([first, otherUser, otherTenant, otherRevision]).size).toBe(4);
     expect(first).toContain("pdf-working-copy:v1");
+  });
+
+  it("admits a draft only after its exact source checksum becomes authoritative", () => {
+    const identity = { userId: "user-1", tenant: "KQ", manualId: "manual-1", revisionId: "rev-1" };
+    registerAuthoritativePdfSource(identity.tenant, identity.manualId, identity.revisionId, null);
+    expect(pdfWorkingCopyMatchesAuthoritativeSource(identity, "source-a")).toBe(false);
+
+    registerAuthoritativePdfSource(identity.tenant, identity.manualId, identity.revisionId, "SOURCE-A");
+    expect(pdfWorkingCopyMatchesAuthoritativeSource(identity, "source-a")).toBe(true);
+    expect(pdfWorkingCopyMatchesAuthoritativeSource(identity, "source-b")).toBe(false);
   });
 
   it("labels editable and flattened outputs distinctly", () => {
