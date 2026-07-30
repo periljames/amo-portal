@@ -61,30 +61,22 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-async function transact<T>(
-  mode: IDBTransactionMode,
-  operation: (store: IDBObjectStore, resolve: (value: T) => void, reject: (reason?: unknown) => void) => void,
-): Promise<T> {
-  const database = await openDatabase();
-  return new Promise<T>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, mode);
-    const store = transaction.objectStore(STORE_NAME);
-    let settled = false;
-    const finish = (value: T) => { if (!settled) { settled = true; resolve(value); } };
-    const fail = (reason?: unknown) => { if (!settled) { settled = true; reject(reason); } };
-    transaction.onerror = () => fail(transaction.error || new Error("PDF working-copy storage failed"));
-    transaction.onabort = () => fail(transaction.error || new Error("PDF working-copy storage was cancelled"));
-    transaction.oncomplete = () => database.close();
-    operation(store, finish, fail);
-  }).finally(() => database.close());
+function closeQuietly(database: IDBDatabase): void {
+  try { database.close(); } catch { /* already closed */ }
 }
 
 export async function readPdfWorkingCopy(identity: PdfWorkingCopyIdentity): Promise<StoredPdfWorkingCopy | null> {
+  const database = await openDatabase();
   const key = pdfWorkingCopyKey(identity);
-  return transact<StoredPdfWorkingCopy | null>("readonly", (store, resolve, reject) => {
-    const request = store.get(key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve((request.result as StoredPdfWorkingCopy | undefined) || null);
+  return new Promise<StoredPdfWorkingCopy | null>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const request = transaction.objectStore(STORE_NAME).get(key);
+    let result: StoredPdfWorkingCopy | null = null;
+    request.onsuccess = () => { result = (request.result as StoredPdfWorkingCopy | undefined) || null; };
+    request.onerror = () => reject(request.error || new Error("The PDF working copy could not be read"));
+    transaction.oncomplete = () => { closeQuietly(database); resolve(result); };
+    transaction.onerror = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage failed")); };
+    transaction.onabort = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage was cancelled")); };
   });
 }
 
@@ -107,19 +99,26 @@ export async function savePdfWorkingCopy(
     byteLength: bytes.byteLength,
     bytes,
   };
-  await transact<void>("readwrite", (store, resolve, reject) => {
-    const request = store.put(row);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+  const database = await openDatabase();
+  return new Promise<StoredPdfWorkingCopy>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const request = transaction.objectStore(STORE_NAME).put(row);
+    request.onerror = () => reject(request.error || new Error("The PDF working copy could not be written"));
+    transaction.oncomplete = () => { closeQuietly(database); resolve(row); };
+    transaction.onerror = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage failed")); };
+    transaction.onabort = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage was cancelled")); };
   });
-  return row;
 }
 
 export async function deletePdfWorkingCopy(identity: PdfWorkingCopyIdentity): Promise<void> {
+  const database = await openDatabase();
   const key = pdfWorkingCopyKey(identity);
-  await transact<void>("readwrite", (store, resolve, reject) => {
-    const request = store.delete(key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const request = transaction.objectStore(STORE_NAME).delete(key);
+    request.onerror = () => reject(request.error || new Error("The PDF working copy could not be deleted"));
+    transaction.oncomplete = () => { closeQuietly(database); resolve(); };
+    transaction.onerror = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage failed")); };
+    transaction.onabort = () => { closeQuietly(database); reject(transaction.error || new Error("PDF working-copy storage was cancelled")); };
   });
 }
