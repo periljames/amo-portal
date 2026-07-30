@@ -1,4 +1,5 @@
 @import "./admin-setup-centre.css";
+@import "./admin-setup-shell.css";
 
 .roster-page {
   min-height: 100vh;
