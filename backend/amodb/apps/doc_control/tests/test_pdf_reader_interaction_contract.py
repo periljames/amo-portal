@@ -57,10 +57,12 @@ def test_pdf_layout_resizes_with_navigation_without_breaking_sticky_controls() -
 def test_working_copy_dirty_custody_survives_failed_or_stale_persistence() -> None:
     source = _source(READER_CORE)
     engine = _source(READER_ENGINE)
+    persistence = source.split("const persistDraft", 1)[1].split("const scheduleAutosave", 1)[0]
+    failure_branch = persistence.split("} catch {", 1)[1].split("} finally {", 1)[0]
 
     assert "draftSaveInFlightRef" in source
     assert "editGenerationRef.current += 1" in source
     assert "isPdfWorkingCopyGenerationCurrent(savingGeneration, editGenerationRef.current)" in source
     assert "loaded.annotationStorage.onResetModified = undefined" in source
-    assert "setWorkingDirty(false)" not in source.split("catch {", 1)[1].split("finally", 1)[0]
+    assert "setWorkingDirty(false)" not in failure_branch
     assert "persistedGeneration === currentGeneration" in engine
