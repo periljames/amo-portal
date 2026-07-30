@@ -195,10 +195,7 @@ export const PlatformShell: React.FC<{
 
   const signInWithPlatformAccount = () => {
     endSession("manual");
-    navigate("/login", {
-      replace: true,
-      state: { from: location.pathname + location.search },
-    });
+    navigate("/login", { replace: true });
   };
 
   if (accessState === "checking") {

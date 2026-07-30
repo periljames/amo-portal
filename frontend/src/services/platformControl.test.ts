@@ -41,6 +41,18 @@ describe("platform SaaS control API", () => {
     expect(platformSharedSource).toContain("Sign in with platform account");
   });
 
+  it("does not return a tenant login to a denied platform route", () => {
+    const handlerStart = platformSharedSource.indexOf("const signInWithPlatformAccount");
+    const handlerEnd = platformSharedSource.indexOf("\n  };", handlerStart);
+    const signInHandler = platformSharedSource.slice(handlerStart, handlerEnd + 5);
+
+    expect(handlerStart).toBeGreaterThanOrEqual(0);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(signInHandler).toContain('navigate("/login", { replace: true })');
+    expect(signInHandler).not.toContain("state:");
+    expect(signInHandler).not.toContain("location.pathname");
+  });
+
   it("keeps direct platform page navigation in the SPA", () => {
     expect(shouldServePlatformSpa("GET", "/platform/integrations", "text/html,application/xhtml+xml")).toBe(true);
     expect(shouldServePlatformSpa("HEAD", "/platform/security?tab=alerts", "text/html")).toBe(true);
