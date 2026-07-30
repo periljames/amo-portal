@@ -63,9 +63,9 @@ export default function LinkedDocumentationPanel({
   onClose: () => void;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const panelRef = useRef<HTMLElement | null>(null);
   const [detail, setDetail] = useState<LinkedResourceDetail | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [readerDirty, setReaderDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -78,6 +78,7 @@ export default function LinkedDocumentationPanel({
     setDetail(null);
     setRecord(null);
     setUploadFile(null);
+    setReaderDirty(false);
     getLinkedResource(tenant, referenceId)
       .then((value) => { if (active) setDetail(value); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The linked controlled resource could not be opened."); })
@@ -97,8 +98,7 @@ export default function LinkedDocumentationPanel({
   );
 
   const close = () => {
-    const activeFormSession = Boolean(panelRef.current?.querySelector(".pdf-engine-reader.is-fill-mode"));
-    if ((activeFormSession || uploadFile) && !window.confirm("Close and discard unsaved form entries or the selected completed file?")) return;
+    if ((readerDirty || uploadFile) && !window.confirm("Close and discard the current working copy or selected completed file?")) return;
     onClose();
   };
 
@@ -136,6 +136,7 @@ export default function LinkedDocumentationPanel({
       });
       setRecord(created);
       setUploadFile(null);
+      setReaderDirty(false);
       if (uploadInputRef.current) uploadInputRef.current.value = "";
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The completed PDF could not be submitted.");
@@ -145,7 +146,7 @@ export default function LinkedDocumentationPanel({
   };
 
   return (
-    <aside ref={panelRef} className="linked-documentation-panel" aria-label="Linked controlled resource">
+    <aside className="linked-documentation-panel" aria-label="Linked controlled resource">
       <header className="linked-documentation-panel__header">
         <div>
           <p>Linked controlled information</p>
@@ -187,6 +188,7 @@ export default function LinkedDocumentationPanel({
           filename={detail.target.source_filename || `${detail.target.code}.pdf`}
           identity={{ tenant, manualId: detail.target.manual_id, revisionId: detail.target.revision_id }}
           capabilities={canUpload ? uploadOnlyCapabilities(detail) : undefined}
+          onDirtyChange={setReaderDirty}
           onSubmitWorkingCopy={canFill ? (file) => submitLinkedPdfResource(tenant, referenceId, file, {
             source_manual_id: detail.reference.source_manual_id,
             source_revision_id: detail.reference.source_revision_id,
@@ -194,7 +196,7 @@ export default function LinkedDocumentationPanel({
             relationship_type: detail.reference.relationship_type,
             output_mode: "FLATTENED_RECORD",
           }) : undefined}
-          onRecordCreated={setRecord}
+          onRecordCreated={(created) => { setRecord(created); setReaderDirty(false); }}
         />
       </> : null}
     </aside>
