@@ -164,9 +164,15 @@ def test_direct_and_assisted_reader_navigation_share_one_precise_contract() -> N
         _repository_root()
         / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
     ).read_text(encoding="utf-8")
+    core = (
+        _repository_root()
+        / "frontend/src/pages/manuals/PdfReaderCore.tsx"
+    ).read_text(encoding="utf-8")
 
     assert 'searchParams.get("page")' in bridge
     assert 'searchParams.get("anchor")' in bridge
     assert 'window.addEventListener("amo:publication-navigate"' in bridge
-    assert '.publication-native-pdf__page[data-page-number=' in bridge
-    assert "data-page-number={pageNumber}" in viewer
+    assert '.pdf-engine-page[data-page-number=' in bridge
+    assert "data-page-number={pageNumber}" in core
+    assert "PdfReaderCore" in viewer
+    assert "<PdfDocument" not in viewer
