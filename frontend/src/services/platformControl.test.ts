@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  cacheCurrentUser,
   endSession,
   extendSessionIfNeeded,
   handleAuthFailure,
   markSessionActivity,
 } = vi.hoisted(() => ({
+  cacheCurrentUser: vi.fn(),
   endSession: vi.fn(),
   extendSessionIfNeeded: vi.fn(),
   handleAuthFailure: vi.fn(),
@@ -16,7 +18,12 @@ const {
 }));
 
 vi.mock("./auth", () => ({
-  authHeaders: () => new Headers({ Authorization: "Bearer platform-token" }),
+  authHeaders: (extra?: HeadersInit) => {
+    const headers = new Headers({ Authorization: "Bearer platform-token" });
+    if (extra) new Headers(extra).forEach((value, key) => headers.set(key, value));
+    return headers;
+  },
+  cacheCurrentUser,
   endSession,
   extendSessionIfNeeded,
   getCachedUser: () => ({ id: "root", email: "root@example.test", is_superuser: true }),
@@ -30,6 +37,7 @@ vi.mock("./config", () => ({
 
 import { resolvePostLoginReturnTarget } from "../app/loginRedirect";
 import { shouldProxyDevApi, shouldServePlatformSpa } from "./devProxyRouting";
+import { verifyCurrentPlatformUser } from "./platformAccess";
 import { platformConsoleApi } from "./platformConsole";
 import { platformApi } from "./platformControl";
 
@@ -41,6 +49,7 @@ const platformSharedSource = readFileSync(
 describe("platform SaaS control API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    cacheCurrentUser.mockReset();
     endSession.mockReset();
     extendSessionIfNeeded.mockReset();
     extendSessionIfNeeded.mockReturnValue(null);
@@ -57,6 +66,17 @@ describe("platform SaaS control API", () => {
     expect(platformSharedSource).toContain('accessState === "checking"');
     expect(platformSharedSource).toContain('endSession("manual")');
     expect(platformSharedSource).toContain("Sign in with platform account");
+  });
+
+  it("keeps verified superuser navigation seamless while revalidating access", () => {
+    expect(platformSharedSource).toContain('if (cachedSuperuserForActiveToken()) return "allowed";');
+    expect(platformSharedSource).toContain("verifiedPlatformAccess");
+    expect(platformSharedSource).toContain("platformVerificationInFlight");
+    expect(platformSharedSource).toContain("PLATFORM_ACCESS_CACHE_TTL_MS");
+    expect(platformSharedSource).toContain("PLATFORM_ACCESS_REVALIDATE_MS");
+    expect(platformSharedSource).toContain("window.setInterval(applyVerification, PLATFORM_ACCESS_REVALIDATE_MS)");
+    expect(platformSharedSource).toContain("error instanceof PlatformAccessVerificationError");
+    expect(platformSharedSource).toContain('setAccessState(fallbackUser ? "allowed" : "denied");');
   });
 
   it("does not return a tenant login to a denied platform route", () => {
@@ -231,6 +251,57 @@ describe("platform SaaS control API", () => {
     expect(headers.get("Accept")).toBe("application/json");
     expect(markSessionActivity).toHaveBeenCalledWith("platform-console:get:start:/platform/console/bootstrap");
     expect(extendSessionIfNeeded).toHaveBeenCalledWith("platform-console:get:/platform/console/bootstrap");
+  });
+
+  it("caches an authoritative active platform user", async () => {
+    const user = { id: "root", email: "root@example.test", is_superuser: true };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(user), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(verifyCurrentPlatformUser()).resolves.toEqual(user);
+    expect(cacheCurrentUser).toHaveBeenCalledWith(user);
+    expect(handleAuthFailure).not.toHaveBeenCalled();
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer platform-token");
+    expect(headers.get("Accept")).toBe("application/json");
+  });
+
+  it("denies access when the server rejects an inactive platform account", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Inactive user account" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(verifyCurrentPlatformUser()).rejects.toMatchObject({
+      name: "PlatformAccessVerificationError",
+      status: 400,
+      message: "Inactive user account",
+    });
+    expect(handleAuthFailure).toHaveBeenCalledWith("platform-access-rejected:400");
+    expect(cacheCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("preserves local authentication for a transient verification failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Verification service unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(verifyCurrentPlatformUser()).rejects.toMatchObject({
+      name: "PlatformAccessVerificationError",
+      status: 503,
+    });
+    expect(handleAuthFailure).not.toHaveBeenCalled();
   });
 
   it("encodes superadmin search terms and result limits", async () => {
