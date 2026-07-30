@@ -66,14 +66,20 @@ function closeQuietly(database: IDBDatabase): void {
   try { database.close(); } catch { /* already closed */ }
 }
 
+export function pdfWorkingCopyMatchesAuthoritativeSource(
+  identity: PdfWorkingCopyIdentity,
+  sourceSha256: string | null | undefined,
+): boolean {
+  const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
+  const stored = String(sourceSha256 || "").trim().toLowerCase();
+  return Boolean(authoritative && stored && stored === authoritative);
+}
+
 function authorizedDraft(
   identity: PdfWorkingCopyIdentity,
   result: StoredPdfWorkingCopy | null,
 ): StoredPdfWorkingCopy | null {
-  if (!result) return null;
-  const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
-  const stored = String(result.sourceSha256 || "").trim().toLowerCase();
-  if (!authoritative || !stored || stored !== authoritative) return null;
+  if (!result || !pdfWorkingCopyMatchesAuthoritativeSource(identity, result.sourceSha256)) return null;
   return result;
 }
 
@@ -105,8 +111,7 @@ export async function savePdfWorkingCopy(
     throw new Error("The PDF working copy exceeds the 100 MB local draft limit");
   }
   const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
-  const requestedChecksum = String(sourceSha256 || "").trim().toLowerCase();
-  if (!authoritative || !requestedChecksum || requestedChecksum !== authoritative) {
+  if (!pdfWorkingCopyMatchesAuthoritativeSource(identity, sourceSha256)) {
     throw new Error("The PDF working copy cannot be saved without the authoritative source checksum");
   }
   const normalized = normalizedIdentity(identity);
