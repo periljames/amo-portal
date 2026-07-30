@@ -20,6 +20,8 @@ PROCESS_TIMEOUT_SECONDS = int(os.getenv("PDFIUM_PROCESS_TIMEOUT_SECONDS", "90"))
 WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
 
 _PDF_NAME_ESCAPE = re.compile(r"#([0-9A-Fa-f]{2})")
+_PDF_REF_PATTERN = re.compile(r"(?<!\d)(\d+)\s+(\d+)\s+R")
+_PDF_LENGTH_PATTERN = re.compile(r"/Length\s+(?:\d+\s+\d+\s+R|\d+)")
 _ACTION_NAME_PATTERN = re.compile(r"/(?:JavaScript|JS|OpenAction|AA)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
 _ACTION_CONTAINER_PATTERN = re.compile(r"/(?:A|Next)(?=[\s/<>{}\[\]()])|/Type\s*/Action\b", re.IGNORECASE)
 _ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
@@ -230,6 +232,65 @@ def _page_text_spans(page: Any) -> list[dict[str, Any]]:
     return spans
 
 
+def _canonical_pdf_object(
+    document: Any,
+    source: str,
+    active: set[int],
+    memo: dict[int, str],
+) -> str:
+    normalized = _PDF_LENGTH_PATTERN.sub("/Length <decoded-stream>", _decode_pdf_name_escapes(source or ""))
+
+    def replace_reference(match: re.Match[str]) -> str:
+        xref = int(match.group(1))
+        return f"<ref:{_xref_graph_sha256(document, xref, active, memo)}>"
+
+    return " ".join(_PDF_REF_PATTERN.sub(replace_reference, normalized).split())
+
+
+def _xref_graph_sha256(document: Any, xref: int, active: set[int], memo: dict[int, str]) -> str:
+    if xref in memo:
+        return memo[xref]
+    if xref in active:
+        return "cycle"
+    active.add(xref)
+    try:
+        object_source = document.xref_object(xref, compressed=False)
+        canonical_object = _canonical_pdf_object(document, object_source or "", active, memo)
+        stream: bytes | None = None
+        try:
+            if document.xref_is_stream(xref):
+                stream = bytes(document.xref_stream(xref) or b"")
+        except Exception:
+            stream = None
+        payload = {
+            "object": canonical_object,
+            "stream_sha256": _sha256(stream) if stream is not None else None,
+        }
+        digest = _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        memo[xref] = digest
+        return digest
+    finally:
+        active.discard(xref)
+
+
+def _page_resources_sha256(document: Any, page: Any) -> str:
+    kind, value = document.xref_get_key(page.xref, "Resources")
+    active: set[int] = set()
+    memo: dict[int, str] = {}
+    if kind == "xref":
+        match = _PDF_REF_PATTERN.search(str(value or ""))
+        if not match:
+            raise PdfEngineError(
+                "PDF_STRUCTURE_SCAN_FAILED",
+                "The page resource dictionary could not be resolved safely",
+                status_code=422,
+            )
+        return _xref_graph_sha256(document, int(match.group(1)), active, memo)
+    canonical = _canonical_pdf_object(document, str(value or ""), active, memo)
+    payload = {"kind": str(kind or "null"), "value": canonical}
+    return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
 def _contains_unsafe_action(source: str) -> bool:
     normalized = _decode_pdf_name_escapes(source or "")
     if _ACTION_NAME_PATTERN.search(normalized):
@@ -250,9 +311,9 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
 
     PyMuPDF expands compressed object streams and normalizes escaped PDF names,
     so action dictionaries cannot hide behind byte encoding. Form rectangles are
-    exclusion zones: field values may change, while all static text—including
-    punctuation, operators, and appearance—images, and vector path geometry outside
-    those zones must remain exactly attributable to the controlled template.
+    exclusion zones: field values may change, while page orientation, static content
+    streams, resource graphics state, text, images, and vector geometry outside those
+    zones must remain attributable to the controlled template.
     """
     import pymupdf
 
@@ -314,13 +375,16 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
             pages.append({
                 "width": round(float(page.rect.width), 1),
                 "height": round(float(page.rect.height), 1),
+                "rotation": int(page.rotation or 0) % 360,
+                "content_sha256": _sha256(bytes(page.read_contents() or b"")),
+                "resources_sha256": _page_resources_sha256(document, page),
                 "excluded_rects": excluded_rects,
                 "words": words,
                 "images": images,
                 "drawings": drawings,
             })
 
-        return has_actions, encrypted, {"version": 4, "total_anchors": total_anchors, "pages": pages}
+        return has_actions, encrypted, {"version": 5, "total_anchors": total_anchors, "pages": pages}
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -386,6 +450,24 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
             raise PdfEngineError(
                 "PDF_TEMPLATE_MISMATCH",
                 f"Completed PDF page {page_number} has different page geometry from the controlled template",
+                status_code=409,
+            )
+        if int(source_page.get("rotation") or 0) % 360 != int(completed_page.get("rotation") or 0) % 360:
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} changes the controlled page rotation",
+                status_code=409,
+            )
+        if str(source_page.get("content_sha256") or "") != str(completed_page.get("content_sha256") or ""):
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} changes controlled static page content",
+                status_code=409,
+            )
+        if str(source_page.get("resources_sha256") or "") != str(completed_page.get("resources_sha256") or ""):
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} changes controlled image or graphics resources",
                 status_code=409,
             )
 
@@ -463,7 +545,7 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         "completed_source_sha256": candidate.source_sha256,
         "page_count": expected.page_count,
         "verified_anchors": verified_anchors,
-        "fingerprint_version": int(expected_fingerprint.get("version") or 4),
+        "fingerprint_version": int(expected_fingerprint.get("version") or 5),
     }
 
 
