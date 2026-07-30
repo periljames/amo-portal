@@ -5,7 +5,6 @@ import hmac
 import io
 import json
 import re
-from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -105,8 +104,14 @@ def _execution_profile(db: Session, tenant_id: str, manual_id: str) -> km.Docume
     )
 
 
-@lru_cache(maxsize=256)
 def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns: int) -> PdfInspection:
+    """Verify and inspect the current bytes without trusting mutable filesystem metadata.
+
+    ``size`` and ``modified_ns`` remain explicit inputs for diagnostics and backwards
+    compatibility, but custody validation deliberately does not cache on them. Every
+    call re-reads and re-hashes the immutable source before the PDF processor runs.
+    """
+
     del modified_ns
     if size > MAX_PDF_BYTES:
         raise PdfEngineError(
@@ -122,6 +127,12 @@ def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns:
             status_code=409,
         )
     content = Path(path_value).read_bytes()
+    if len(content) > MAX_PDF_BYTES:
+        raise PdfEngineError(
+            "PDF_TOO_LARGE",
+            f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
+            status_code=413,
+        )
     actual_sha256 = hashlib.sha256(content).hexdigest()
     if not hmac.compare_digest(actual_sha256, expected_sha256):
         raise PdfEngineError(
@@ -137,6 +148,13 @@ def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns:
             status_code=409,
         )
     return inspection
+
+
+def _clear_source_inspection_cache() -> None:
+    """Compatibility hook: source custody inspection is intentionally uncached."""
+
+
+setattr(_inspect_source, "cache_clear", _clear_source_inspection_cache)
 
 
 def _inspection(revision: models.ManualRevision) -> PdfInspection:
