@@ -5,6 +5,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 READER_CORE = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
+READER_ENGINE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngine.ts"
 READER_LAYOUT = REPOSITORY_ROOT / "frontend/src/pages/manuals/publicationReaderZoom.css"
 
 
@@ -51,3 +52,15 @@ def test_pdf_layout_resizes_with_navigation_without_breaking_sticky_controls() -
     assert "grid-template-columns: clamp(230px, 20vw, 320px) minmax(0, 1fr)" in stylesheet
     assert ".publication-reader-width--focus .publication-linked-layout" in stylesheet
     assert ".publication-reader-width--wide .publication-linked-layout" in stylesheet
+
+
+def test_working_copy_dirty_custody_survives_failed_or_stale_persistence() -> None:
+    source = _source(READER_CORE)
+    engine = _source(READER_ENGINE)
+
+    assert "draftSaveInFlightRef" in source
+    assert "editGenerationRef.current += 1" in source
+    assert "isPdfWorkingCopyGenerationCurrent(savingGeneration, editGenerationRef.current)" in source
+    assert "loaded.annotationStorage.onResetModified = undefined" in source
+    assert "setWorkingDirty(false)" not in source.split("catch {", 1)[1].split("finally", 1)[0]
+    assert "persistedGeneration === currentGeneration" in engine
