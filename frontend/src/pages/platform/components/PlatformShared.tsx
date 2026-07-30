@@ -1,6 +1,12 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { endSession, getCachedUser } from "../../../services/auth";
+import {
+  endSession,
+  fetchCurrentUser,
+  getCachedUser,
+  getToken,
+  type PortalUser,
+} from "../../../services/auth";
 import "../../../styles/platform-control.css";
 import { platformNav } from "./platformNavigation";
 
@@ -38,19 +44,69 @@ export const PlatformShell: React.FC<{
   actions?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, subtitle, actions, children }) => {
-  const user = getCachedUser();
   const navigate = useNavigate();
+  const [user, setUser] = useState<PortalUser | null>(() => getCachedUser());
+  const [checkingAccess, setCheckingAccess] = useState(() => Boolean(getToken()));
+  const [accessError, setAccessError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!getToken()) {
+      setCheckingAccess(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setCheckingAccess(true);
+    setAccessError(null);
+    void fetchCurrentUser()
+      .then((currentUser) => {
+        if (active) setUser(currentUser);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setUser(null);
+        setAccessError(error instanceof Error ? error.message : "Unable to verify the current session.");
+      })
+      .finally(() => {
+        if (active) setCheckingAccess(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const goToLogin = () => {
+    endSession("manual");
+    navigate("/login", { replace: true });
+  };
+
+  if (checkingAccess) {
+    return (
+      <main className="platform-access-denied">
+        <section className="platform-card" role="status" aria-live="polite">
+          <h1>Verifying platform access</h1>
+          <p>Checking the current account against the backend.</p>
+        </section>
+      </main>
+    );
+  }
+
   if (!user?.is_superuser) {
     return (
       <main className="platform-access-denied">
         <section className="platform-card">
           <h1>Platform access required</h1>
           <p>This console is available only to global platform superusers.</p>
-          <button className="platform-btn primary" onClick={() => navigate("/login", { replace: true })}>Go to login</button>
+          {accessError ? <p className="platform-error">{accessError}</p> : null}
+          <button className="platform-btn primary" onClick={goToLogin}>Sign in with another account</button>
         </section>
       </main>
     );
   }
+
   const initials = user.full_name?.split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || user.email?.slice(0, 2)?.toUpperCase() || "SA";
   return (
     <div className="platform-shell">
@@ -85,8 +141,8 @@ export const PlatformShell: React.FC<{
               <span>{initials}</span>
               <small>{user.email || "Platform user"}</small>
             </div>
-            <button className="platform-btn" onClick={() => navigate("/login", { replace: true })}>Switch account</button>
-            <button className="platform-btn danger" onClick={() => { endSession("manual"); navigate("/login", { replace: true }); }}>Sign out</button>
+            <button className="platform-btn" onClick={goToLogin}>Switch account</button>
+            <button className="platform-btn danger" onClick={goToLogin}>Sign out</button>
           </div>
         </header>
         {children}
