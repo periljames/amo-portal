@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException, UploadFile
 from reportlab.pdfgen import canvas
 
 from amodb.apps.doc_control import pdfium_service as engine
+from amodb.apps.manuals import pdf_reader_router as reader_router
 
 
 def _plain_pdf(*, pages: int = 2) -> bytes:
@@ -109,6 +113,58 @@ def test_pdfium_enforces_input_and_page_limits(tmp_path: Path, monkeypatch: pyte
     with pytest.raises(engine.PdfEngineError) as too_many_pages:
         engine.inspect_pdf_bytes(_plain_pdf(pages=2))
     assert too_many_pages.value.code == "PDF_PAGE_LIMIT"
+
+
+def test_upload_reader_enforces_declared_and_streamed_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reader_router, "MAX_PDF_BYTES", 8)
+    monkeypatch.setattr(reader_router, "_UPLOAD_CHUNK_BYTES", 3)
+
+    declared = UploadFile(file=BytesIO(b"%PDF-12345"), filename="large.pdf", size=10)
+    with pytest.raises(HTTPException) as declared_error:
+        asyncio.run(reader_router.read_bounded_pdf_upload(declared))
+    assert declared_error.value.status_code == 413
+    assert declared_error.value.detail["code"] == "PDF_TOO_LARGE"
+
+    streamed = UploadFile(file=BytesIO(b"%PDF-12345"), filename="unknown.pdf", size=None)
+    with pytest.raises(HTTPException) as streamed_error:
+        asyncio.run(reader_router.read_bounded_pdf_upload(streamed))
+    assert streamed_error.value.status_code == 413
+    assert streamed_error.value.detail["code"] == "PDF_TOO_LARGE"
+
+    allowed = UploadFile(file=BytesIO(b"%PDF-1"), filename="allowed.pdf", size=None)
+    assert asyncio.run(reader_router.read_bounded_pdf_upload(allowed)) == b"%PDF-1"
+
+
+def test_signature_required_profiles_disable_flatten_and_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reader_router, "serialize_execution_profile", lambda profile: {"requires_signature": profile.requires_signature})
+    profile = SimpleNamespace(
+        submission_mode="FILL_AND_SUBMIT",
+        execution_type="PDF_ACROFORM",
+        requires_signature=True,
+        allow_save_draft=True,
+        allow_download=True,
+    )
+    inspection = SimpleNamespace(
+        engine="PDFium",
+        engine_version="test",
+        source_sha256="source",
+        page_count=1,
+        has_acroform=True,
+        has_javascript=False,
+        is_dynamic_xfa=False,
+        encrypted=False,
+        can_flatten=True,
+        unsupported_reason=None,
+    )
+
+    capabilities = reader_router._capability_payload(profile, inspection)
+
+    assert capabilities["can_fill"] is True
+    assert capabilities["can_save_draft"] is True
+    assert capabilities["can_download_working"] is True
+    assert capabilities["can_flatten"] is False
+    assert capabilities["can_submit"] is False
+    assert "validated digital signature" in capabilities["unsupported_reason"]
 
 
 def test_reader_routes_are_registered_before_legacy_routes() -> None:
