@@ -33,3 +33,5 @@ Failed writes receive a visible error state and announcement while preserving th
 - integrated frontend ESLint;
 - production frontend build;
 - rendered acceptance and protected exact-head gates.
+
+The merge candidate is synchronized with `main`; the protected exact-head workflows are the authoritative release evidence.
