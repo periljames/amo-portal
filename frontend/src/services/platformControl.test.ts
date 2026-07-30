@@ -53,7 +53,7 @@ describe("platform SaaS control API", () => {
   });
 
   it("hydrates the authoritative platform user before denying access", () => {
-    expect(platformSharedSource).toContain("fetchCurrentUser()");
+    expect(platformSharedSource).toContain("verifyCurrentPlatformUser()");
     expect(platformSharedSource).toContain('accessState === "checking"');
     expect(platformSharedSource).toContain('endSession("manual")');
     expect(platformSharedSource).toContain("Sign in with platform account");
