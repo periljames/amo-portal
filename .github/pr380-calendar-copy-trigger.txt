@@ -1,1 +1,0 @@
-Trigger the trusted pull-request-target publisher for the calendar correction.
