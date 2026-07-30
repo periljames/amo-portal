@@ -1,3 +1,5 @@
+@import "./admin-setup-centre.css";
+
 .roster-page {
   min-height: 100vh;
   padding: clamp(1rem, 2vw, 2rem);
