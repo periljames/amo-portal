@@ -75,6 +75,21 @@ def _submission_payload(payload_json: str) -> dict:
         raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
 
 
+def _authorized_linked_detail(
+    *,
+    tenant_slug: str,
+    reference_id: str,
+    db: Session,
+    current_user: account_models.User,
+) -> dict:
+    return reader.linked_resource_detail(
+        tenant_slug=tenant_slug,
+        reference_id=reference_id,
+        db=db,
+        current_user=current_user,
+    )
+
+
 @router.get("/t/{tenant_slug}/linked-resources/{reference_id}")
 def linked_resource_detail_with_source_access(
     tenant_slug: str,
@@ -91,7 +106,7 @@ def linked_resource_detail_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
-    return reader.linked_resource_detail(
+    return _authorized_linked_detail(
         tenant_slug=tenant_slug,
         reference_id=reference_id,
         db=db,
@@ -118,6 +133,26 @@ async def submit_linked_resource_with_source_access(
         reference_id=reference_id,
         user=current_user,
     )
+    # Resolve the target and its access profile before reading or processing any
+    # uploaded bytes. The delegated detail route enforces target access and the
+    # effective published revision contract.
+    detail = _authorized_linked_detail(
+        tenant_slug=tenant_slug,
+        reference_id=reference_id,
+        db=db,
+        current_user=current_user,
+    )
+    if not bool((detail.get("capabilities") or {}).get("execute")):
+        raise HTTPException(status_code=403, detail="This controlled resource is not executable")
+    execution = ((detail.get("target") or {}).get("execution") or {})
+    if bool(execution.get("requires_signature")):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This controlled workflow requires a validated digital signature, "
+                "but trusted PDF signature validation is not configured"
+            ),
+        )
 
     result, enriched_payload = process_completed_pdf(
         await artifact.read(),
