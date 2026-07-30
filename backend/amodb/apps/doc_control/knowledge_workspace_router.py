@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -43,6 +43,8 @@ class NodeUpdate(BaseModel):
 
 
 class ExecutionProfileUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     execution_type: Literal["NONE", "PDF_ACROFORM", "CHECKLIST", "PORTAL_FORM", "DOWNLOADABLE_TEMPLATE", "HYBRID"]
     submission_mode: Literal["DOWNLOAD_ONLY", "FILL_AND_SUBMIT", "DOWNLOAD_AND_UPLOAD", "PORTAL_SUBMISSION"]
     record_series_node_id: str | None = None
@@ -52,7 +54,7 @@ class ExecutionProfileUpdate(BaseModel):
     allow_save_draft: bool = False
     requires_signature: bool = False
     requires_review: bool = False
-    schema: dict[str, Any] = Field(default_factory=dict)
+    execution_schema: dict[str, Any] = Field(default_factory=dict, alias="schema")
     access_scope: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     expected_version: int | None = Field(default=None, ge=1)
@@ -233,7 +235,7 @@ def upsert_execution_profile(
     row.allow_save_draft = payload.allow_save_draft
     row.requires_signature = payload.requires_signature
     row.requires_review = payload.requires_review
-    row.schema_json = payload.schema
+    row.schema_json = payload.execution_schema
     row.access_scope_json = payload.access_scope
     row.metadata_json = payload.metadata
     row.version = int(row.version or 0) + 1
