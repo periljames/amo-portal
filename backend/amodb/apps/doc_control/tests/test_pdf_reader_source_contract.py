@@ -59,6 +59,19 @@ def test_forms_and_working_copies_are_governed() -> None:
     assert write_tail.index(".put(row)") < write_tail.index("transaction.oncomplete")
 
 
+def test_shortcuts_and_dirty_state_are_scoped_to_the_engaged_reader() -> None:
+    core = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
+    linked = _read("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
+
+    assert "activePdfReaderId" in core
+    assert "if (activePdfReaderId !== readerId) return" in core
+    assert "onPointerDownCapture={activateReader}" in core
+    assert "onFocusCapture={activateReader}" in core
+    assert 'dirty ? "is-dirty"' in core
+    assert "onDirtyChangeRef.current?.(dirty)" in core
+    assert "onDirtyChange={setReaderDirty}" in linked
+
+
 def test_output_choices_are_explicit_and_not_conflated() -> None:
     core = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     for label in (
@@ -104,18 +117,22 @@ def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
     assert "create_documentation_record" in router
 
 
-def test_authorization_and_signature_guards_precede_uploaded_byte_processing() -> None:
+def test_authorization_and_signature_guards_precede_bounded_upload_processing() -> None:
     access = _read("backend/amodb/apps/manuals/knowledge_reader_access_router.py")
     router = _read("backend/amodb/apps/manuals/pdf_reader_router.py")
 
+    assert "async def read_bounded_pdf_upload" in router
+    assert "await artifact.read(_UPLOAD_CHUNK_BYTES)" in router
+    assert "len(content) > MAX_PDF_BYTES" in router
+
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
-    linked_read = linked_submit.index("await artifact.read()")
+    linked_read = linked_submit.index("await read_bounded_pdf_upload(artifact)")
     assert linked_submit.index("_load_authorized_reference") < linked_read
     assert linked_submit.index("detail = _authorized_linked_detail") < linked_read
     assert linked_submit.index('execution.get("requires_signature")') < linked_read
 
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
-    direct_read = direct_submit.index("await artifact.read()")
+    direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
     assert direct_submit.index("_load_direct_context") < direct_read
     assert direct_submit.index("execution.requires_signature") < direct_read
     assert direct_submit.index('capabilities["can_submit"]') < direct_read
