@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import io
 import json
 import re
@@ -17,8 +19,10 @@ from amodb.apps.doc_control.pdfium_service import (
     MAX_PDF_BYTES,
     PdfEngineError,
     PdfFlattenResult,
+    PdfInspection,
     flatten_pdf_bytes,
     inspect_pdf_bytes,
+    validate_template_provenance,
 )
 from amodb.apps.doc_control.workspace_service import require_manual_access
 from amodb.database import get_db
@@ -99,18 +103,40 @@ def _execution_profile(db: Session, tenant_id: str, manual_id: str) -> km.Docume
 
 
 @lru_cache(maxsize=256)
-def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns: int):
-    del source_sha256, modified_ns
+def _inspect_source(path_value: str, source_sha256: str, size: int, modified_ns: int) -> PdfInspection:
+    del modified_ns
     if size > MAX_PDF_BYTES:
         raise PdfEngineError(
             "PDF_TOO_LARGE",
             f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
             status_code=413,
         )
-    return inspect_pdf_bytes(Path(path_value).read_bytes())
+    expected_sha256 = str(source_sha256 or "").strip().lower()
+    if not expected_sha256:
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISSING",
+            "The immutable revision does not have a recorded source checksum",
+            status_code=409,
+        )
+    content = Path(path_value).read_bytes()
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if not hmac.compare_digest(actual_sha256, expected_sha256):
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISMATCH",
+            "The stored PDF bytes do not match the approved immutable revision checksum",
+            status_code=409,
+        )
+    inspection = inspect_pdf_bytes(content)
+    if not hmac.compare_digest(inspection.source_sha256.lower(), expected_sha256):
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISMATCH",
+            "The PDF processor did not confirm the approved immutable revision checksum",
+            status_code=409,
+        )
+    return inspection
 
 
-def _inspection(revision: models.ManualRevision):
+def _inspection(revision: models.ManualRevision) -> PdfInspection:
     path = _source_path(revision)
     stat = path.stat()
     return _inspect_source(
@@ -121,7 +147,7 @@ def _inspection(revision: models.ManualRevision):
     )
 
 
-def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspection) -> dict:
+def _capability_payload(profile: km.DocumentationExecutionProfile | None, inspection: PdfInspection) -> dict:
     submission_mode = str(getattr(profile, "submission_mode", "DOWNLOAD_ONLY") or "DOWNLOAD_ONLY")
     execution_type = str(getattr(profile, "execution_type", "NONE") or "NONE")
     executable = bool(profile and submission_mode in _EXECUTABLE_SUBMISSION_MODES)
@@ -179,15 +205,24 @@ def _engine_http_error(exc: PdfEngineError) -> HTTPException:
     )
 
 
-def process_completed_pdf(content: bytes, payload: dict) -> tuple[PdfFlattenResult, dict]:
+def process_completed_pdf(
+    content: bytes,
+    payload: dict,
+    *,
+    expected_source: PdfInspection,
+    output_mode: str = "FLATTENED_RECORD",
+) -> tuple[PdfFlattenResult, dict]:
     try:
+        candidate = inspect_pdf_bytes(content)
+        provenance = validate_template_provenance(expected_source, candidate)
         result = flatten_pdf_bytes(content)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
     enriched = dict(payload or {})
     enriched["pdf_engine"] = {
         **result.metadata(),
-        "output_mode": "FLATTENED_RECORD",
+        "output_mode": output_mode,
+        "template_provenance": provenance,
     }
     return result, enriched
 
@@ -252,21 +287,27 @@ async def flatten_reader_working_copy(
     )
     if bool(getattr(execution, "requires_signature", False)):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
-    capabilities = _capability_payload(execution, _inspection(revision))
-    if not capabilities["can_flatten"]:
-        raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
-    content = await read_bounded_pdf_upload(artifact)
     try:
-        result = flatten_pdf_bytes(content)
+        source_inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
+    capabilities = _capability_payload(execution, source_inspection)
+    if not capabilities["can_flatten"]:
+        raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be flattened")
+    result, _metadata = process_completed_pdf(
+        await read_bounded_pdf_upload(artifact),
+        {},
+        expected_source=source_inspection,
+        output_mode="FLATTENED_DOWNLOAD",
+    )
     filename = _flattened_filename(artifact.filename, f"{manual.code}_FLATTENED.pdf")
     headers = {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Content-Disposition": f'attachment; filename="{filename}"',
         "X-PDF-Engine": result.engine,
-        "X-PDF-Source-SHA256": result.source_sha256,
+        "X-PDF-Template-SHA256": source_inspection.source_sha256,
+        "X-PDF-Working-SHA256": result.source_sha256,
         "X-PDF-Output-SHA256": result.output_sha256,
         "X-PDF-Page-Count": str(result.page_count),
         "X-PDF-Flattened-Pages": str(result.flattened_pages),
@@ -296,7 +337,11 @@ async def submit_reader_working_copy(
         raise HTTPException(status_code=409, detail="This controlled resource is not configured for retained-record submission")
     if bool(execution.requires_signature):
         raise HTTPException(status_code=409, detail=_SIGNATURE_UNAVAILABLE)
-    capabilities = _capability_payload(execution, _inspection(revision))
+    try:
+        source_inspection = _inspection(revision)
+    except PdfEngineError as exc:
+        raise _engine_http_error(exc) from exc
+    capabilities = _capability_payload(execution, source_inspection)
     if not capabilities["can_submit"]:
         raise HTTPException(status_code=409, detail=capabilities["unsupported_reason"] or "This PDF cannot be submitted")
     try:
@@ -305,7 +350,11 @@ async def submit_reader_working_copy(
             raise ValueError
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Submission metadata must be a JSON object") from exc
-    result, enriched_payload = process_completed_pdf(await read_bounded_pdf_upload(artifact), payload)
+    result, enriched_payload = process_completed_pdf(
+        await read_bounded_pdf_upload(artifact),
+        payload,
+        expected_source=source_inspection,
+    )
     record = create_documentation_record(
         db,
         manual_tenant=tenant,
@@ -333,10 +382,12 @@ async def submit_reader_working_copy(
                 "record_number": record.record_number,
                 "template_manual_id": manual.id,
                 "template_revision_id": revision.id,
-                "source_sha256": result.source_sha256,
+                "template_source_sha256": source_inspection.source_sha256,
+                "working_copy_sha256": result.source_sha256,
                 "artifact_sha256": result.output_sha256,
                 "pdf_engine": result.engine,
                 "flattened_pages": result.flattened_pages,
+                "template_provenance": enriched_payload["pdf_engine"]["template_provenance"],
             },
         )
     )
