@@ -24,7 +24,7 @@ def _acroform_pdf() -> bytes:
     output = BytesIO()
     document = canvas.Canvas(output)
     document.drawString(72, 760, "Aircraft registration")
-    document.acroform.textfield(
+    document.acroForm.textfield(
         name="registration",
         value="5Y-ABC",
         x=72,
@@ -33,7 +33,7 @@ def _acroform_pdf() -> bytes:
         height=24,
         borderWidth=1,
     )
-    document.acroform.checkbox(name="serviceable", checked=True, x=72, y=650, size=18)
+    document.acroForm.checkbox(name="serviceable", checked=True, x=72, y=650, size=18)
     document.showPage()
     document.save()
     return output.getvalue()
