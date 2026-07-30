@@ -1,0 +1,75 @@
+.btn {
+  position: relative;
+  isolation: isolate;
+  transition:
+    transform 150ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
+}
+
+.btn__content,
+.btn__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn__content {
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-primary, currentColor);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+}
+
+.btn--loading {
+  cursor: progress;
+}
+
+.btn__spinner {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: portal-button-spin 700ms linear infinite;
+}
+
+@keyframes portal-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition-duration: 0.01ms;
+  }
+
+  .btn:not(:disabled):hover,
+  .btn:not(:disabled):active {
+    transform: none;
+  }
+
+  .btn__spinner {
+    animation-duration: 1.4s;
+  }
+}
