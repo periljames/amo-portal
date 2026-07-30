@@ -52,8 +52,11 @@ def test_forms_and_working_copies_are_governed() -> None:
     for partition in ("userId", "tenant", "manualId", "revisionId"):
         assert partition in store
     assert "100 * 1024 * 1024" in store
-    assert "objectStore.put" not in store  # writes remain behind the bounded helper
-    assert "store.put(row)" in store
+    assert ".put(row)" in store
+    write_tail = store.split("export async function savePdfWorkingCopy", 1)[1].split("export async function deletePdfWorkingCopy", 1)[0]
+    assert "transaction.oncomplete" in write_tail
+    assert "resolve(row)" in write_tail.split("transaction.oncomplete", 1)[1]
+    assert write_tail.index(".put(row)") < write_tail.index("transaction.oncomplete")
 
 
 def test_output_choices_are_explicit_and_not_conflated() -> None:
@@ -114,6 +117,7 @@ def test_authorization_and_signature_guards_precede_uploaded_byte_processing() -
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     direct_read = direct_submit.index("await artifact.read()")
     assert direct_submit.index("_load_direct_context") < direct_read
+    assert direct_submit.index("execution.requires_signature") < direct_read
     assert direct_submit.index('capabilities["can_submit"]') < direct_read
 
 
