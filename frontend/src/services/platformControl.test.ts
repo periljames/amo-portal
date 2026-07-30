@@ -3,12 +3,25 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { endSession } = vi.hoisted(() => ({ endSession: vi.fn() }));
+const {
+  endSession,
+  extendSessionIfNeeded,
+  handleAuthFailure,
+  markSessionActivity,
+} = vi.hoisted(() => ({
+  endSession: vi.fn(),
+  extendSessionIfNeeded: vi.fn(),
+  handleAuthFailure: vi.fn(),
+  markSessionActivity: vi.fn(),
+}));
 
 vi.mock("./auth", () => ({
-  authHeaders: () => ({ Authorization: "Bearer platform-token" }),
+  authHeaders: () => new Headers({ Authorization: "Bearer platform-token" }),
   endSession,
+  extendSessionIfNeeded,
   getCachedUser: () => ({ id: "root", email: "root@example.test", is_superuser: true }),
+  handleAuthFailure,
+  markSessionActivity,
 }));
 
 vi.mock("./config", () => ({
@@ -29,6 +42,10 @@ describe("platform SaaS control API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     endSession.mockReset();
+    extendSessionIfNeeded.mockReset();
+    extendSessionIfNeeded.mockReturnValue(null);
+    handleAuthFailure.mockReset();
+    markSessionActivity.mockReset();
   });
 
   afterEach(() => {
@@ -190,7 +207,7 @@ describe("platform SaaS control API", () => {
     await assertion;
   });
 
-  it("loads the superadmin console bootstrap with platform authentication", async () => {
+  it("loads the superadmin console bootstrap with a real Headers authorization object", async () => {
     const payload = { active_tenants: 8, queue_depth: 3 };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(payload), {
@@ -205,12 +222,15 @@ describe("platform SaaS control API", () => {
       expect.objectContaining({
         method: "GET",
         credentials: "include",
-        headers: expect.objectContaining({
-          Authorization: "Bearer platform-token",
-          Accept: "application/json",
-        }),
+        headers: expect.any(Headers),
       }),
     );
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer platform-token");
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(markSessionActivity).toHaveBeenCalledWith("platform-console:get:start:/platform/console/bootstrap");
+    expect(extendSessionIfNeeded).toHaveBeenCalledWith("platform-console:get:/platform/console/bootstrap");
   });
 
   it("encodes superadmin search terms and result limits", async () => {
@@ -229,10 +249,11 @@ describe("platform SaaS control API", () => {
     );
   });
 
-  it("invalidates the session when superadmin console authorization expires", async () => {
+  it("clears an actually rejected superadmin token without issuing a second logout request", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
 
     await expect(platformConsoleApi.bootstrap()).rejects.toThrow("Session expired. Please sign in again.");
-    expect(endSession).toHaveBeenCalledWith("manual");
+    expect(handleAuthFailure).toHaveBeenCalledWith("platform-console-unauthorized");
+    expect(endSession).not.toHaveBeenCalled();
   });
 });
