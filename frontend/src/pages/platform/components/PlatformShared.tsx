@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { endSession, fetchCurrentUser, getCachedUser, isAuthenticated, type PortalUser } from "../../../services/auth";
+import {
+  endSession,
+  getCachedUser,
+  getToken,
+  isAuthenticated,
+  type PortalUser,
+} from "../../../services/auth";
+import {
+  PlatformAccessVerificationError,
+  verifyCurrentPlatformUser,
+} from "../../../services/platformAccess";
 import { platformConsoleApi, type PlatformConsoleSearchResult } from "../../../services/platformConsole";
 import "../../../styles/platform-control.css";
 import { platformNavSections, type PlatformNavItem } from "./platformNavigation";
@@ -40,10 +50,17 @@ export const MetricCard: React.FC<{
 );
 
 type PlatformTheme = "dark" | "light" | "system";
+type PlatformAccessState = "checking" | "allowed" | "denied";
+
 const THEME_KEY = "amo_platform_theme";
 const ACCENT_KEY = "amo_platform_accent";
 const DEFAULT_ACCENT = "#3b67f2";
 const ACCENTS = ["#4f46e5", "#2563eb", "#0f8b8d", "#a16207", "#c026d3"];
+const PLATFORM_ACCESS_CACHE_TTL_MS = 15_000;
+const PLATFORM_ACCESS_REVALIDATE_MS = 30_000;
+
+let verifiedPlatformAccess: { token: string; user: PortalUser; verifiedAt: number } | null = null;
+let platformVerificationInFlight: { token: string; promise: Promise<PortalUser> } | null = null;
 
 function resolveSystemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -75,6 +92,52 @@ function badgeValue(snapshot: PlatformConsoleSnapshot | null, key?: string): Rea
   return String(value);
 }
 
+function cachedSuperuserForActiveToken(): PortalUser | null {
+  if (!isAuthenticated()) return null;
+  const user = getCachedUser();
+  return user?.is_superuser ? user : null;
+}
+
+function initialPlatformAccessState(): PlatformAccessState {
+  if (cachedSuperuserForActiveToken()) return "allowed";
+  return isAuthenticated() ? "checking" : "denied";
+}
+
+function verifyPlatformUserForActiveToken(): Promise<PortalUser> {
+  const token = getToken();
+  if (!token) return Promise.reject(new Error("No authenticated platform session."));
+
+  if (
+    verifiedPlatformAccess?.token === token
+    && Date.now() - verifiedPlatformAccess.verifiedAt < PLATFORM_ACCESS_CACHE_TTL_MS
+  ) {
+    return Promise.resolve(verifiedPlatformAccess.user);
+  }
+  if (platformVerificationInFlight?.token === token) {
+    return platformVerificationInFlight.promise;
+  }
+
+  const promise = verifyCurrentPlatformUser()
+    .then((freshUser) => {
+      if (getToken() === token && freshUser.is_superuser) {
+        verifiedPlatformAccess = { token, user: freshUser, verifiedAt: Date.now() };
+      } else if (verifiedPlatformAccess?.token === token) {
+        verifiedPlatformAccess = null;
+      }
+      return freshUser;
+    })
+    .catch((error: unknown) => {
+      if (verifiedPlatformAccess?.token === token) verifiedPlatformAccess = null;
+      throw error;
+    })
+    .finally(() => {
+      if (platformVerificationInFlight?.token === token) platformVerificationInFlight = null;
+    });
+
+  platformVerificationInFlight = { token, promise };
+  return promise;
+}
+
 export const PlatformShell: React.FC<{
   title: string;
   subtitle: string;
@@ -98,9 +161,7 @@ export const PlatformShell: React.FC<{
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlatformConsoleSearchResult[]>([]);
   const [user, setUser] = useState<PortalUser | null>(() => getCachedUser());
-  const [accessState, setAccessState] = useState<"checking" | "allowed" | "denied">(
-    () => (isAuthenticated() ? "checking" : "denied"),
-  );
+  const [accessState, setAccessState] = useState<PlatformAccessState>(initialPlatformAccessState);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [accessAttempt, setAccessAttempt] = useState(0);
   const realtime = usePlatformRealtime(accessState === "allowed");
@@ -115,20 +176,36 @@ export const PlatformShell: React.FC<{
     let active = true;
     if (!isAuthenticated()) return () => { active = false; };
 
-    void fetchCurrentUser()
-      .then((freshUser) => {
-        if (!active) return;
-        setUser(freshUser);
-        setAccessState(freshUser.is_superuser ? "allowed" : "denied");
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setUser(getCachedUser());
-        setAccessError(error instanceof Error ? error.message : "Unable to verify platform access.");
-        setAccessState("denied");
-      });
+    const applyVerification = () => {
+      void verifyPlatformUserForActiveToken()
+        .then((freshUser) => {
+          if (!active) return;
+          setUser(freshUser);
+          setAccessError(freshUser.is_superuser ? null : "Platform superuser access is required.");
+          setAccessState(freshUser.is_superuser ? "allowed" : "denied");
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          const message = error instanceof Error ? error.message : "Unable to verify platform access.";
+          if (error instanceof PlatformAccessVerificationError && error.status >= 400 && error.status < 500) {
+            setUser(null);
+            setAccessError(message);
+            setAccessState("denied");
+            return;
+          }
+          const fallbackUser = cachedSuperuserForActiveToken();
+          setUser(fallbackUser ?? getCachedUser());
+          setAccessError(message);
+          setAccessState(fallbackUser ? "allowed" : "denied");
+        });
+    };
 
-    return () => { active = false; };
+    applyVerification();
+    const revalidationTimer = window.setInterval(applyVerification, PLATFORM_ACCESS_REVALIDATE_MS);
+    return () => {
+      active = false;
+      window.clearInterval(revalidationTimer);
+    };
   }, [accessAttempt]);
 
   useEffect(() => {
@@ -236,6 +313,7 @@ export const PlatformShell: React.FC<{
       </div>
     );
   }
+
   const selectSearchResult = (result: PlatformConsoleSearchResult) => {
     setQuery("");
     setResults([]);
