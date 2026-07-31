@@ -76,7 +76,7 @@ def _reader_dashboard(
 def _controller_control_gaps(
     db: Session,
     *,
-    tenant: account_models.AMO,
+    tenant: manual_models.Tenant,
 ) -> dict[str, int]:
     """Return evidence-control gaps without exposing them to ordinary readers."""
     profiles_missing = (
