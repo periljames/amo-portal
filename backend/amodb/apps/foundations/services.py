@@ -4,9 +4,9 @@ from __future__ import annotations
 import math
 from datetime import date, datetime, timedelta, timezone
 from statistics import median
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, TypeVar
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
@@ -16,6 +16,8 @@ LOCATION_OBSERVATION_RETENTION_DAYS = 7
 CONSENSUS_MIN_CONTRIBUTORS = 2
 CONSENSUS_MAX_ACCEPTED_ACCURACY_M = 500.0
 CONSENSUS_MAX_SPREAD_M = 350.0
+
+ObservationT = TypeVar("ObservationT")
 
 
 def _clean_code(value: Optional[str]) -> Optional[str]:
@@ -45,6 +47,17 @@ def _normalise_aliases(values: Iterable[str]) -> List[str]:
 
 def _has_location(latitude: Optional[float], longitude: Optional[float]) -> bool:
     return latitude is not None and longitude is not None
+
+
+def _latest_observation_per_contributor(observations: Iterable[ObservationT]) -> List[ObservationT]:
+    """Keep one newest observation per contributor so one person cannot weight consensus."""
+    latest: dict[str, ObservationT] = {}
+    for row in observations:
+        contributor = str(getattr(row, "submitted_by_user_id"))
+        existing = latest.get(contributor)
+        if existing is None or getattr(row, "created_at") > getattr(existing, "created_at"):
+            latest[contributor] = row
+    return list(latest.values())
 
 
 def _apply_location_fields(item: models.BaseStation, data: dict, *, actor_user_id: str) -> None:
@@ -221,6 +234,14 @@ def create_location_observation(
         raise ValueError("Location accuracy is too low to use as base evidence.")
 
     prune_location_observations(db, now=now)
+    # A contributor may refresh their evidence, but cannot increase their weight
+    # by submitting repeatedly from the same identity.
+    db.query(models.BaseLocationObservation).filter(
+        models.BaseLocationObservation.amo_id == amo_id,
+        models.BaseLocationObservation.base_station_id == base_station.id,
+        models.BaseLocationObservation.submitted_by_user_id == actor_user_id,
+    ).delete(synchronize_session=False)
+
     observation = models.BaseLocationObservation(
         amo_id=amo_id,
         base_station_id=base_station.id,
@@ -245,7 +266,7 @@ def build_location_consensus(
 ) -> schemas.BaseLocationConsensusRead:
     current = now or datetime.now(timezone.utc)
     prune_location_observations(db, now=current)
-    observations = (
+    rows = (
         db.query(models.BaseLocationObservation)
         .filter(
             models.BaseLocationObservation.amo_id == amo_id,
@@ -256,6 +277,7 @@ def build_location_consensus(
         .order_by(models.BaseLocationObservation.created_at.desc())
         .all()
     )
+    observations = _latest_observation_per_contributor(rows)
     if not observations:
         return schemas.BaseLocationConsensusRead(
             base_station_id=base_station.id,
@@ -272,7 +294,7 @@ def build_location_consensus(
         _haversine_m(candidate_latitude, candidate_longitude, row.latitude, row.longitude)
         for row in observations
     )
-    contributors = len({str(row.submitted_by_user_id) for row in observations})
+    contributors = len(observations)
     allowed_spread = max(CONSENSUS_MAX_SPREAD_M, float(base_station.geofence_radius_m or 250))
     ready = contributors >= CONSENSUS_MIN_CONTRIBUTORS and max_spread <= allowed_spread
     if contributors < CONSENSUS_MIN_CONTRIBUTORS:
@@ -521,7 +543,7 @@ def foundation_contracts() -> schemas.FoundationContracts:
         service_contracts={
             "location_capture": {
                 "raw_observations": "Short-lived, tenant-scoped and never returned to peers.",
-                "consensus": "Requires independent authorised contributors and explicit administrator approval.",
+                "consensus": "Uses one current observation per independent authorised contributor and explicit administrator approval.",
                 "proximity_evaluation": "Transient calculation only; submitted device coordinates are not persisted.",
             },
             "attendance": {

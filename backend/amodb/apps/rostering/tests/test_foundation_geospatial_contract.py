@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
-from amodb.apps.foundations import airport_catalog, schemas
+from amodb.apps.foundations import airport_catalog, schemas, services
 from amodb.apps.foundations.router import router as foundations_router
 
 
@@ -79,6 +80,18 @@ def test_location_observation_payload_rejects_poor_accuracy() -> None:
             accuracy_m=3000,
             captured_at=datetime.now(timezone.utc),
         )
+
+
+def test_consensus_keeps_only_latest_observation_per_contributor() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SimpleNamespace(submitted_by_user_id="u-1", created_at=now - timedelta(minutes=5), latitude=1.0),
+        SimpleNamespace(submitted_by_user_id="u-1", created_at=now, latitude=2.0),
+        SimpleNamespace(submitted_by_user_id="u-2", created_at=now - timedelta(minutes=1), latitude=3.0),
+    ]
+    selected = services._latest_observation_per_contributor(rows)
+    assert len(selected) == 2
+    assert {row.latitude for row in selected} == {2.0, 3.0}
 
 
 def test_foundation_routes_expose_private_consensus_and_department_crud() -> None:
