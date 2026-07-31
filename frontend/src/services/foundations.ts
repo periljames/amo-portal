@@ -93,6 +93,7 @@ export function approveBaseLocationConsensus(
 export function clearBaseLocationObservations(baseStationId: string): Promise<void> {
   return apiDelete<void>(
     `/foundations/base-stations/${encodeURIComponent(baseStationId)}/location-observations`,
+    undefined,
     { headers: authHeaders() },
   );
 }
