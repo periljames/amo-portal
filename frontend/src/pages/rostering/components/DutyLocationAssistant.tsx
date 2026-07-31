@@ -82,20 +82,29 @@ export function DutyLocationAssistant() {
   rosterFrom.setDate(rosterFrom.getDate() - 1);
   const attendanceFrom = new Date(now);
   attendanceFrom.setDate(attendanceFrom.getDate() - 31);
-  const to = new Date(now);
-  to.setDate(to.getDate() + 2);
+  const attendanceTo = new Date(now);
+  attendanceTo.setDate(attendanceTo.getDate() + 1);
+  const rosterTo = new Date(now);
+  rosterTo.setDate(rosterTo.getDate() + 2);
 
   const rosterQuery = useQuery({
-    queryKey: ["rostering", "duty-location", "roster", isoDate(rosterFrom), isoDate(to), userId],
-    queryFn: () => getMyRoster({ from: isoDate(rosterFrom), to: isoDate(to) }),
+    queryKey: ["rostering", "duty-location", "roster", isoDate(rosterFrom), isoDate(rosterTo), userId],
+    queryFn: () => getMyRoster({ from: isoDate(rosterFrom), to: isoDate(rosterTo) }),
     staleTime: 45_000,
   });
   const attendanceQuery = useQuery({
-    queryKey: ["rostering", "duty-location", "attendance", userId, isoDate(attendanceFrom), isoDate(to)],
+    queryKey: [
+      "rostering",
+      "self-service",
+      "attendance-current",
+      userId,
+      isoDate(attendanceFrom),
+      isoDate(attendanceTo),
+    ],
     queryFn: () => getAttendanceSummary({
       user_id: userId || null,
       from: isoDate(attendanceFrom),
-      to: isoDate(to),
+      to: isoDate(attendanceTo),
     }),
     staleTime: 15_000,
   });
@@ -148,6 +157,13 @@ export function DutyLocationAssistant() {
 
   const prompt = useMemo(() => {
     if (!dutyContext || !base) return null;
+    if (!base.location_configured) {
+      return {
+        tone: "info" as const,
+        title: `${base.code} needs independent location verification`,
+        detail: "You may contribute one current device observation. Administrators receive only aggregate quality and never your raw point or identity.",
+      };
+    }
     if (dutyContext.kind === "ACTIVE" && mode === "CLOCKED_OUT" && base.checkin_prompt_enabled) {
       return {
         tone: "action" as const,
@@ -180,9 +196,10 @@ export function DutyLocationAssistant() {
   const locationPolicyEnabled = base.checkin_prompt_enabled
     || base.checkout_reminder_enabled
     || base.suspicious_location_review_enabled;
-  if (!prompt && !locationPolicyEnabled) return null;
+  if (!prompt && !locationPolicyEnabled && hasApprovedLocation) return null;
 
   const checkLocation = async () => {
+    if (!hasApprovedLocation) return;
     setCapturing(true);
     setMessage(null);
     setContributionMessage(null);
@@ -250,17 +267,22 @@ export function DutyLocationAssistant() {
       </div>
 
       {!hasApprovedLocation ? (
-        <div className="duty-location-assistant__result is-warning"><TriangleAlert size={17} /><span>This base does not yet have an approved coordinate. Attendance remains available without location guidance.</span></div>
-      ) : (
-        <div className="duty-location-assistant__actions">
+        <div className="duty-location-assistant__result is-warning">
+          <TriangleAlert size={17} />
+          <span>This base does not yet have an approved coordinate. Attendance remains available without location guidance.</span>
+        </div>
+      ) : null}
+
+      <div className="duty-location-assistant__actions">
+        {hasApprovedLocation ? (
           <button type="button" onClick={() => void checkLocation()} disabled={capturing || contributing}>
             <Crosshair size={16} /> {capturing ? "Checking once…" : "Check my location once"}
           </button>
-          <button type="button" className="is-secondary" onClick={() => void contributeVerification()} disabled={capturing || contributing}>
-            <ShieldCheck size={16} /> {contributing ? "Contributing…" : "Help verify this base"}
-          </button>
-        </div>
-      )}
+        ) : null}
+        <button type="button" className="is-secondary" onClick={() => void contributeVerification()} disabled={capturing || contributing}>
+          <ShieldCheck size={16} /> {contributing ? "Contributing…" : "Help verify this base"}
+        </button>
+      </div>
 
       <div className="duty-location-assistant__privacy">
         <ShieldCheck size={16} />
