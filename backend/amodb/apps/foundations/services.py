@@ -1,67 +1,133 @@
 # backend/amodb/apps/foundations/services.py
-"""Shared Phase 0 foundation services.
-
-This module deliberately centralises cross-module reads/writes that several
-future modules, especially Duty Rostering, must share. The canonical personnel
-identifier is always ``accounts.users.id``.
-"""
-
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Iterable, Optional
+import math
+from datetime import date, datetime, timedelta, timezone
+from statistics import median
+from typing import Iterable, List, Optional
 
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
-from ..quality import models as quality_models
 from . import models, schemas
 
-
-def canonical_user_id(value: object) -> str:
-    """Resolve a user-like object or string to the canonical ``users.id`` string."""
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    user_id = getattr(value, "id", None)
-    if isinstance(user_id, str) and user_id.strip():
-        return user_id.strip()
-    raise ValueError("A canonical users.id value is required.")
+LOCATION_OBSERVATION_RETENTION_DAYS = 7
+CONSENSUS_MIN_CONTRIBUTORS = 2
+CONSENSUS_MAX_ACCEPTED_ACCURACY_M = 500.0
+CONSENSUS_MAX_SPREAD_M = 350.0
 
 
-def normalize_base_code(value: str) -> str:
-    return "".join(str(value or "").strip().upper().split())
+def _clean_code(value: Optional[str]) -> Optional[str]:
+    cleaned = (value or "").strip().upper()
+    return cleaned or None
 
 
-def list_base_stations(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.BaseStation]:
-    q = db.query(models.BaseStation).options(selectinload(models.BaseStation.aliases)).filter(models.BaseStation.amo_id == amo_id)
+def _clean_text(value: Optional[str]) -> Optional[str]:
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+def _normalise_aliases(values: Iterable[str]) -> List[str]:
+    seen = set()
+    result: List[str] = []
+    for raw in values:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
+def _has_location(latitude: Optional[float], longitude: Optional[float]) -> bool:
+    return latitude is not None and longitude is not None
+
+
+def _apply_location_fields(item: models.BaseStation, data: dict, *, actor_user_id: str) -> None:
+    location_keys = {
+        "latitude",
+        "longitude",
+        "coordinate_accuracy_m",
+        "location_source",
+        "airport_reference_ident",
+    }
+    if not location_keys.intersection(data):
+        return
+
+    latitude = data.get("latitude", item.latitude)
+    longitude = data.get("longitude", item.longitude)
+    if (latitude is None) != (longitude is None):
+        raise ValueError("Latitude and longitude must be provided together.")
+
+    item.latitude = latitude
+    item.longitude = longitude
+    item.coordinate_accuracy_m = data.get("coordinate_accuracy_m", item.coordinate_accuracy_m)
+    item.location_source = data.get("location_source", item.location_source)
+    item.airport_reference_ident = _clean_code(data.get("airport_reference_ident", item.airport_reference_ident))
+
+    if _has_location(latitude, longitude):
+        item.location_source = item.location_source or "MANUAL"
+        item.location_verified_at = datetime.now(timezone.utc)
+        item.location_verified_by_user_id = actor_user_id
+    else:
+        item.coordinate_accuracy_m = None
+        item.location_source = None
+        item.airport_reference_ident = None
+        item.location_verified_at = None
+        item.location_verified_by_user_id = None
+        item.checkin_prompt_enabled = False
+        item.checkout_reminder_enabled = False
+        item.suspicious_location_review_enabled = False
+
+
+def list_base_stations(db: Session, *, amo_id: str, include_inactive: bool = False) -> List[models.BaseStation]:
+    query = db.query(models.BaseStation).filter(models.BaseStation.amo_id == amo_id)
     if not include_inactive:
-        q = q.filter(models.BaseStation.is_active.is_(True))
-    return q.order_by(models.BaseStation.code.asc()).all()
+        query = query.filter(models.BaseStation.is_active.is_(True))
+    return query.order_by(models.BaseStation.name.asc()).all()
+
+
+def get_base_station(db: Session, *, amo_id: str, base_station_id: str) -> Optional[models.BaseStation]:
+    return (
+        db.query(models.BaseStation)
+        .filter(models.BaseStation.amo_id == amo_id, models.BaseStation.id == base_station_id)
+        .first()
+    )
 
 
 def create_base_station(
     db: Session,
     *,
     amo_id: str,
-    actor_user_id: Optional[str],
+    actor_user_id: str,
     payload: schemas.BaseStationCreate,
 ) -> models.BaseStation:
+    data = payload.model_dump(exclude={"aliases"})
+    aliases = _normalise_aliases(payload.aliases)
     item = models.BaseStation(
         amo_id=amo_id,
-        code=normalize_base_code(payload.code),
-        name=payload.name.strip(),
-        icao_code=normalize_base_code(payload.icao_code) if payload.icao_code else None,
-        iata_code=normalize_base_code(payload.iata_code) if payload.iata_code else None,
-        base_type=payload.base_type,
-        time_zone=payload.time_zone,
-        description=payload.description,
-        is_active=payload.is_active,
+        code=_clean_code(data.pop("code")),
+        name=(data.pop("name") or "").strip(),
+        icao_code=_clean_code(data.pop("icao_code", None)),
+        iata_code=_clean_code(data.pop("iata_code", None)),
+        time_zone=_clean_text(data.pop("time_zone", None)),
+        description=_clean_text(data.pop("description", None)),
         created_by_user_id=actor_user_id,
         updated_by_user_id=actor_user_id,
+        **{key: value for key, value in data.items() if key not in {
+            "latitude", "longitude", "coordinate_accuracy_m", "location_source", "airport_reference_ident"
+        }},
     )
+    _apply_location_fields(item, data, actor_user_id=actor_user_id)
     db.add(item)
     db.flush()
-    replace_base_aliases(db, amo_id=amo_id, base_station=item, aliases=payload.aliases, source_module="foundations")
+    for alias in aliases:
+        db.add(models.BaseStationAlias(amo_id=amo_id, base_station_id=item.id, alias=alias, source_module="FOUNDATIONS"))
+    db.flush()
     return item
 
 
@@ -70,77 +136,288 @@ def update_base_station(
     *,
     amo_id: str,
     base_station: models.BaseStation,
-    actor_user_id: Optional[str],
+    actor_user_id: str,
     payload: schemas.BaseStationUpdate,
 ) -> models.BaseStation:
-    if payload.code is not None:
-        base_station.code = normalize_base_code(payload.code)
-    if payload.name is not None:
-        base_station.name = payload.name.strip()
-    if payload.icao_code is not None:
-        base_station.icao_code = normalize_base_code(payload.icao_code) if payload.icao_code else None
-    if payload.iata_code is not None:
-        base_station.iata_code = normalize_base_code(payload.iata_code) if payload.iata_code else None
-    if payload.base_type is not None:
-        base_station.base_type = payload.base_type
-    if payload.time_zone is not None:
-        base_station.time_zone = payload.time_zone
-    if payload.description is not None:
-        base_station.description = payload.description
-    if payload.is_active is not None:
-        base_station.is_active = payload.is_active
+    data = payload.model_dump(exclude_unset=True)
+    aliases = data.pop("aliases", None)
+
+    if "code" in data:
+        data["code"] = _clean_code(data["code"])
+    if "icao_code" in data:
+        data["icao_code"] = _clean_code(data["icao_code"])
+    if "iata_code" in data:
+        data["iata_code"] = _clean_code(data["iata_code"])
+    if "time_zone" in data:
+        data["time_zone"] = _clean_text(data["time_zone"])
+    if "description" in data:
+        data["description"] = _clean_text(data["description"])
+    if "name" in data and data["name"] is not None:
+        data["name"] = data["name"].strip()
+
+    _apply_location_fields(base_station, data, actor_user_id=actor_user_id)
+    location_keys = {"latitude", "longitude", "coordinate_accuracy_m", "location_source", "airport_reference_ident"}
+    for field, value in data.items():
+        if field in location_keys:
+            continue
+        setattr(base_station, field, value)
+
+    if not _has_location(base_station.latitude, base_station.longitude) and (
+        base_station.checkin_prompt_enabled
+        or base_station.checkout_reminder_enabled
+        or base_station.suspicious_location_review_enabled
+    ):
+        raise ValueError("Location prompts require approved base coordinates.")
+
     base_station.updated_by_user_id = actor_user_id
+    if aliases is not None:
+        base_station.aliases.clear()
+        db.flush()
+        for alias in _normalise_aliases(aliases):
+            base_station.aliases.append(
+                models.BaseStationAlias(amo_id=amo_id, alias=alias, source_module="FOUNDATIONS")
+            )
     db.add(base_station)
     db.flush()
-    if payload.aliases is not None:
-        replace_base_aliases(db, amo_id=amo_id, base_station=base_station, aliases=payload.aliases, source_module="foundations")
     return base_station
 
 
-def replace_base_aliases(
+def _haversine_m(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
+    radius_m = 6_371_008.8
+    lat_a = math.radians(latitude_a)
+    lat_b = math.radians(latitude_b)
+    delta_lat = math.radians(latitude_b - latitude_a)
+    delta_lon = math.radians(longitude_b - longitude_a)
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2) ** 2
+    return 2 * radius_m * math.atan2(math.sqrt(value), math.sqrt(max(0.0, 1 - value)))
+
+
+def prune_location_observations(db: Session, *, now: Optional[datetime] = None) -> int:
+    current = now or datetime.now(timezone.utc)
+    return (
+        db.query(models.BaseLocationObservation)
+        .filter(models.BaseLocationObservation.expires_at <= current)
+        .delete(synchronize_session=False)
+    )
+
+
+def create_location_observation(
     db: Session,
     *,
     amo_id: str,
     base_station: models.BaseStation,
-    aliases: Iterable[str],
-    source_module: Optional[str],
-) -> None:
-    existing = db.query(models.BaseStationAlias).filter(models.BaseStationAlias.base_station_id == base_station.id).all()
-    for row in existing:
-        db.delete(row)
-    seen: set[str] = set()
-    for alias in aliases:
-        normalized = normalize_base_code(alias)
-        if not normalized or normalized == base_station.code or normalized in seen:
-            continue
-        seen.add(normalized)
-        db.add(models.BaseStationAlias(amo_id=amo_id, base_station_id=base_station.id, alias=normalized, source_module=source_module))
+    actor_user_id: str,
+    payload: schemas.BaseLocationObservationCreate,
+) -> models.BaseLocationObservation:
+    now = datetime.now(timezone.utc)
+    captured_at = payload.captured_at
+    if captured_at.tzinfo is None:
+        captured_at = captured_at.replace(tzinfo=timezone.utc)
+    if captured_at > now + timedelta(minutes=5):
+        raise ValueError("Captured time cannot be in the future.")
+    if captured_at < now - timedelta(hours=24):
+        raise ValueError("Location samples must be captured within the last 24 hours.")
+    if payload.accuracy_m > 2500:
+        raise ValueError("Location accuracy is too low to use as base evidence.")
+
+    prune_location_observations(db, now=now)
+    observation = models.BaseLocationObservation(
+        amo_id=amo_id,
+        base_station_id=base_station.id,
+        submitted_by_user_id=actor_user_id,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        accuracy_m=payload.accuracy_m,
+        captured_at=captured_at,
+        expires_at=now + timedelta(days=LOCATION_OBSERVATION_RETENTION_DAYS),
+    )
+    db.add(observation)
+    db.flush()
+    return observation
+
+
+def build_location_consensus(
+    db: Session,
+    *,
+    amo_id: str,
+    base_station: models.BaseStation,
+    now: Optional[datetime] = None,
+) -> schemas.BaseLocationConsensusRead:
+    current = now or datetime.now(timezone.utc)
+    prune_location_observations(db, now=current)
+    observations = (
+        db.query(models.BaseLocationObservation)
+        .filter(
+            models.BaseLocationObservation.amo_id == amo_id,
+            models.BaseLocationObservation.base_station_id == base_station.id,
+            models.BaseLocationObservation.expires_at > current,
+            models.BaseLocationObservation.accuracy_m <= CONSENSUS_MAX_ACCEPTED_ACCURACY_M,
+        )
+        .order_by(models.BaseLocationObservation.created_at.desc())
+        .all()
+    )
+    if not observations:
+        return schemas.BaseLocationConsensusRead(
+            base_station_id=base_station.id,
+            sample_count=0,
+            distinct_contributor_count=0,
+            ready_for_approval=False,
+            reason="No current high-quality location observations.",
+        )
+
+    candidate_latitude = float(median([row.latitude for row in observations]))
+    candidate_longitude = float(median([row.longitude for row in observations]))
+    median_accuracy = float(median([row.accuracy_m for row in observations]))
+    max_spread = max(
+        _haversine_m(candidate_latitude, candidate_longitude, row.latitude, row.longitude)
+        for row in observations
+    )
+    contributors = len({str(row.submitted_by_user_id) for row in observations})
+    allowed_spread = max(CONSENSUS_MAX_SPREAD_M, float(base_station.geofence_radius_m or 250))
+    ready = contributors >= CONSENSUS_MIN_CONTRIBUTORS and max_spread <= allowed_spread
+    if contributors < CONSENSUS_MIN_CONTRIBUTORS:
+        reason = f"At least {CONSENSUS_MIN_CONTRIBUTORS} distinct authorised contributors are required."
+    elif max_spread > allowed_spread:
+        reason = "Current observations are too widely dispersed and require review or recapture."
+    else:
+        reason = "Independent observations agree closely enough for administrator approval."
+
+    return schemas.BaseLocationConsensusRead(
+        base_station_id=base_station.id,
+        sample_count=len(observations),
+        distinct_contributor_count=contributors,
+        candidate_latitude=round(candidate_latitude, 7),
+        candidate_longitude=round(candidate_longitude, 7),
+        median_accuracy_m=round(median_accuracy, 1),
+        max_spread_m=round(max_spread, 1),
+        ready_for_approval=ready,
+        reason=reason,
+        expires_at=min(row.expires_at for row in observations),
+    )
+
+
+def approve_location_consensus(
+    db: Session,
+    *,
+    amo_id: str,
+    base_station: models.BaseStation,
+    actor_user_id: str,
+    payload: schemas.BaseLocationConsensusApproval,
+) -> schemas.BaseLocationConsensusRead:
+    consensus = build_location_consensus(db, amo_id=amo_id, base_station=base_station)
+    if consensus.sample_count != payload.expected_sample_count:
+        raise ValueError("Location evidence changed. Refresh the consensus before approving it.")
+    if not consensus.ready_for_approval or consensus.candidate_latitude is None or consensus.candidate_longitude is None:
+        raise ValueError(consensus.reason)
+
+    base_station.latitude = consensus.candidate_latitude
+    base_station.longitude = consensus.candidate_longitude
+    base_station.coordinate_accuracy_m = consensus.median_accuracy_m
+    base_station.location_source = "DEVICE_CONSENSUS"
+    base_station.location_verified_at = datetime.now(timezone.utc)
+    base_station.location_verified_by_user_id = actor_user_id
+    base_station.updated_by_user_id = actor_user_id
+    db.add(base_station)
+
+    # Minimise exposure: once the aggregate is approved, discard the raw points.
+    db.query(models.BaseLocationObservation).filter(
+        models.BaseLocationObservation.amo_id == amo_id,
+        models.BaseLocationObservation.base_station_id == base_station.id,
+    ).delete(synchronize_session=False)
+    db.flush()
+    return consensus
+
+
+def clear_location_observations(db: Session, *, amo_id: str, base_station_id: str) -> int:
+    return (
+        db.query(models.BaseLocationObservation)
+        .filter(
+            models.BaseLocationObservation.amo_id == amo_id,
+            models.BaseLocationObservation.base_station_id == base_station_id,
+        )
+        .delete(synchronize_session=False)
+    )
+
+
+def evaluate_location(
+    db: Session,
+    *,
+    amo_id: str,
+    payload: schemas.LocationEvaluationRequest,
+) -> schemas.LocationEvaluationRead:
+    query = db.query(models.BaseStation).filter(
+        models.BaseStation.amo_id == amo_id,
+        models.BaseStation.is_active.is_(True),
+        models.BaseStation.latitude.isnot(None),
+        models.BaseStation.longitude.isnot(None),
+    )
+    if payload.base_station_id:
+        query = query.filter(models.BaseStation.id == payload.base_station_id)
+    candidates = query.all()
+    if not candidates:
+        return schemas.LocationEvaluationRead(
+            location_confidence="UNAVAILABLE",
+            note="No approved base location is configured in this tenant scope.",
+        )
+
+    distances = [
+        (
+            station,
+            _haversine_m(payload.latitude, payload.longitude, float(station.latitude), float(station.longitude)),
+        )
+        for station in candidates
+    ]
+    station, distance_m = min(distances, key=lambda item: item[1])
+    radius = int(station.geofence_radius_m or 250)
+    inside = distance_m <= radius + payload.accuracy_m
+    confidence = "HIGH" if payload.accuracy_m <= 50 else "MEDIUM" if payload.accuracy_m <= 150 else "LOW"
+    review_signal = bool(
+        station.suspicious_location_review_enabled
+        and payload.accuracy_m <= 150
+        and distance_m > max(radius * 4, 1500)
+    )
+    return schemas.LocationEvaluationRead(
+        base_station_id=station.id,
+        base_code=station.code,
+        base_name=station.name,
+        distance_m=round(distance_m, 1),
+        geofence_radius_m=radius,
+        inside_geofence=inside,
+        location_confidence=confidence,
+        checkin_prompt_enabled=bool(station.checkin_prompt_enabled and inside),
+        checkout_reminder_enabled=bool(station.checkout_reminder_enabled),
+        review_signal=review_signal,
+        review_reason=(
+            "Submitted high-confidence position is materially outside the approved base geofence; human review is required."
+            if review_signal else None
+        ),
+        note="This evaluation is computed transiently and does not store the submitted device position.",
+    )
 
 
 def create_user_base_assignment(
     db: Session,
     *,
     amo_id: str,
-    actor_user_id: Optional[str],
+    actor_user_id: str,
     payload: schemas.UserBaseAssignmentCreate,
 ) -> models.UserBaseAssignment:
-    user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
-    if not user:
-        raise ValueError("User not found in tenant scope.")
     base = db.query(models.BaseStation).filter(models.BaseStation.id == payload.base_station_id, models.BaseStation.amo_id == amo_id).first()
-    if not base:
-        raise ValueError("Base station not found in tenant scope.")
+    user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
+    if not base or not user:
+        raise ValueError("User or base station not found in the active AMO")
     item = models.UserBaseAssignment(
         amo_id=amo_id,
-        user_id=user.id,
-        base_station_id=base.id,
-        assignment_kind=payload.assignment_kind,
-        effective_from=payload.effective_from,
-        effective_to=payload.effective_to,
-        is_primary=payload.is_primary,
-        note=payload.note,
         created_by_user_id=actor_user_id,
+        **payload.model_dump(),
     )
+    if payload.is_primary:
+        db.query(models.UserBaseAssignment).filter(
+            models.UserBaseAssignment.amo_id == amo_id,
+            models.UserBaseAssignment.user_id == payload.user_id,
+            models.UserBaseAssignment.is_primary.is_(True),
+            or_(models.UserBaseAssignment.effective_to.is_(None), models.UserBaseAssignment.effective_to >= payload.effective_from),
+        ).update({models.UserBaseAssignment.is_primary: False}, synchronize_session=False)
     db.add(item)
     db.flush()
     return item
@@ -152,121 +429,112 @@ def list_availability(
     amo_id: str,
     user_id: Optional[str] = None,
     active_at: Optional[datetime] = None,
-) -> list[quality_models.UserAvailability]:
-    q = db.query(quality_models.UserAvailability).filter(quality_models.UserAvailability.amo_id == amo_id)
+) -> List[models.CanonicalAvailability]:
+    query = db.query(models.CanonicalAvailability).filter(models.CanonicalAvailability.amo_id == amo_id)
     if user_id:
-        q = q.filter(quality_models.UserAvailability.user_id == user_id)
+        query = query.filter(models.CanonicalAvailability.user_id == user_id)
     if active_at:
-        q = q.filter(
-            quality_models.UserAvailability.effective_from <= active_at,
-            (quality_models.UserAvailability.effective_to.is_(None)) | (quality_models.UserAvailability.effective_to >= active_at),
+        query = query.filter(
+            models.CanonicalAvailability.effective_from <= active_at,
+            or_(models.CanonicalAvailability.effective_to.is_(None), models.CanonicalAvailability.effective_to >= active_at),
         )
-    return q.order_by(quality_models.UserAvailability.updated_at.desc()).all()
+    return query.order_by(models.CanonicalAvailability.effective_from.desc()).all()
 
 
 def create_availability(
     db: Session,
     *,
     amo_id: str,
-    actor_user_id: Optional[str],
+    actor_user_id: str,
     payload: schemas.AvailabilityCreate,
-) -> quality_models.UserAvailability:
+) -> models.CanonicalAvailability:
     user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
     if not user:
-        raise ValueError("User not found in tenant scope.")
-    row = quality_models.UserAvailability(
+        raise ValueError("User not found in the active AMO")
+    item = models.CanonicalAvailability(
         amo_id=amo_id,
-        user_id=user.id,
-        status=quality_models.UserAvailabilityStatus(payload.status),
+        user_id=payload.user_id,
+        status=payload.status,
         effective_from=payload.effective_from or datetime.now(timezone.utc),
         effective_to=payload.effective_to,
         note=payload.note,
         updated_by_user_id=actor_user_id,
     )
-    db.add(row)
+    db.add(item)
     db.flush()
-    return row
+    return item
 
 
 def personnel_identity_health(db: Session, *, amo_id: str) -> schemas.PersonnelIdentityHealth:
-    users = (
-        db.query(account_models.User)
-        .filter(account_models.User.amo_id == amo_id, account_models.User.is_active.is_(True), account_models.User.is_system_account.is_(False))
-        .all()
-    )
-    profiles = (
-        db.query(account_models.PersonnelProfile)
-        .filter(account_models.PersonnelProfile.amo_id == amo_id, account_models.PersonnelProfile.status == "Active")
-        .all()
-    )
-    profiles_by_user = {p.user_id: p for p in profiles if p.user_id}
-    linked_user_ids = set(profiles_by_user)
-    issues: list[schemas.PersonnelIdentityIssue] = []
+    users = db.query(account_models.User).filter(account_models.User.amo_id == amo_id, account_models.User.is_active.is_(True)).all()
+    profiles = db.query(account_models.PersonnelProfile).filter(
+        account_models.PersonnelProfile.amo_id == amo_id,
+        func.lower(account_models.PersonnelProfile.status).notin_(["inactive", "archived", "deleted"]),
+    ).all()
+    users_by_id = {str(user.id): user for user in users}
+    linked_profiles = [profile for profile in profiles if profile.user_id and str(profile.user_id) in users_by_id]
+    linked_user_ids = {str(profile.user_id) for profile in linked_profiles}
+    issues: List[schemas.PersonnelIdentityIssue] = []
 
     for user in users:
-        if user.id not in linked_user_ids:
-            issues.append(
-                schemas.PersonnelIdentityIssue(
-                    issue_type="ACTIVE_USER_WITHOUT_PERSONNEL_PROFILE",
-                    user_id=user.id,
-                    staff_code=getattr(user, "staff_code", None),
-                    full_name=getattr(user, "full_name", None),
-                    email=getattr(user, "email", None),
-                    detail="Active human user is rosterable only after it is linked to a PersonnelProfile record.",
-                )
-            )
+        if str(user.id) not in linked_user_ids:
+            issues.append(schemas.PersonnelIdentityIssue(
+                issue_type="ACTIVE_USER_WITHOUT_PROFILE",
+                user_id=str(user.id),
+                staff_code=user.staff_code,
+                full_name=user.full_name,
+                email=user.email,
+                detail="Active account is not linked to a canonical personnel profile.",
+            ))
     for profile in profiles:
-        if not profile.user_id:
-            issues.append(
-                schemas.PersonnelIdentityIssue(
-                    issue_type="ACTIVE_PERSONNEL_PROFILE_WITHOUT_USER",
-                    personnel_profile_id=profile.id,
-                    person_id=profile.person_id,
-                    full_name=profile.full_name,
-                    email=profile.email,
-                    detail="Active personnel profile cannot be used in rostering, training, work allocation, or attendance until linked to users.id.",
-                )
-            )
+        if not profile.user_id or str(profile.user_id) not in users_by_id:
+            issues.append(schemas.PersonnelIdentityIssue(
+                issue_type="ACTIVE_PROFILE_WITHOUT_USER",
+                personnel_profile_id=str(profile.id),
+                person_id=profile.person_id,
+                full_name=profile.full_name,
+                email=profile.email,
+                detail="Active personnel profile is not linked to an active user account.",
+            ))
 
     return schemas.PersonnelIdentityHealth(
         amo_id=amo_id,
         active_users=len(users),
         active_personnel_profiles=len(profiles),
-        linked_active_profiles=len(linked_user_ids),
-        active_users_without_profile=sum(1 for issue in issues if issue.issue_type == "ACTIVE_USER_WITHOUT_PERSONNEL_PROFILE"),
-        active_profiles_without_user=sum(1 for issue in issues if issue.issue_type == "ACTIVE_PERSONNEL_PROFILE_WITHOUT_USER"),
+        linked_active_profiles=len(linked_profiles),
+        active_users_without_profile=sum(1 for issue in issues if issue.issue_type == "ACTIVE_USER_WITHOUT_PROFILE"),
+        active_profiles_without_user=sum(1 for issue in issues if issue.issue_type == "ACTIVE_PROFILE_WITHOUT_USER"),
         issues=issues,
     )
 
 
 def foundation_contracts() -> schemas.FoundationContracts:
     return schemas.FoundationContracts(
-        canonical_personnel_key="users.id",
         ownership={
-            "personnel_identity": "accounts.users.id; extended HR metadata in accounts.personnel_profiles",
-            "licences_authorisations": "accounts.user_authorisations and accounts.authorisation_types",
-            "training_due_and_currency": "training requirements, records, events, participants, and deferrals",
-            "base_station_master": "foundations.base_stations",
-            "availability_windows": "shared availability service, backed by user_availability during Phase 0",
-            "work_orders_task_cards_assignments": "work module",
-            "aircraft_master": "fleet module",
-            "future_roster_assignments": "rostering module",
-            "future_attendance_punches": "attendance integration under rostering/foundations contract",
+            "personnel_identity": "Accounts users.id is the canonical person key; PersonnelProfile is one-to-one support data.",
+            "base_station": "Foundations base_stations owns operational location identity, approved coordinates and geofence policy.",
+            "department": "Accounts departments are tenant-managed records exposed through the Setup Centre without automatic seed-on-read.",
+            "availability": "Foundations canonical_user_availability owns ON_DUTY/AWAY/ON_LEAVE state.",
+            "workforce_terms": "Workforce owns employment contracts, work patterns and leave balances.",
+            "rostering_plan": "Rostering owns roster plans, assignments, compliance checks and publication.",
         },
         service_contracts={
-            "identity_health": "GET /foundations/personnel/identity-health",
-            "base_stations": "GET/POST /foundations/base-stations; PUT /foundations/base-stations/{base_station_id}",
-            "user_base_assignments": "POST /foundations/user-base-assignments",
-            "availability": "GET/POST /foundations/availability",
+            "location_capture": {
+                "raw_observations": "Short-lived, tenant-scoped and never returned to peers.",
+                "consensus": "Requires independent authorised contributors and explicit administrator approval.",
+                "proximity_evaluation": "Transient calculation only; submitted device coordinates are not persisted.",
+            },
+            "attendance": {
+                "consumer": "Rostering/HR may consume approved base geofence policy and transient proximity evaluations.",
+                "guardrail": "Location alone never closes duty, checks a user in/out, or determines misconduct.",
+            },
+            "airport_catalog": {
+                "provider": "OurAirports public-domain dataset with local server cache and mandatory operator confirmation.",
+            },
         },
         canonical_frontend_routes={
-            "admin_user_detail": "/maintenance/:amoCode/admin/users/:userId",
-            "qms_training_person": "/maintenance/:amoCode/qms/training-competence/people/:userId",
-            "planning_work_packages": "/maintenance/:amoCode/planning/work-packages",
-            "planning_work_orders": "/maintenance/:amoCode/planning/work-orders",
-            "production_control_board": "/maintenance/:amoCode/production/control-board",
-            "maintenance_work_order_detail": "/maintenance/:amoCode/maintenance/work-orders/:woId",
-            "technical_records_packs": "/maintenance/:amoCode/production/records/packs",
-            "future_rostering_root": "/maintenance/:amoCode/rostering",
+            "amo_setup": "/maintenance/{amoCode}/admin/amo-assets",
+            "workforce": "/maintenance/{amoCode}/rostering/settings?section=workforce",
+            "rostering": "/maintenance/{amoCode}/rostering",
         },
     )
