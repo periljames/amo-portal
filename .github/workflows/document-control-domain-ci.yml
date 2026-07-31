@@ -8,12 +8,19 @@ on:
       - "backend/amodb/apps/rostering/tests/postgres_migration_probe.py"
       - "backend/amodb/alembic/**"
       - "backend/docs/document_control/**"
+      - "backend/requirements.txt"
       - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/manuals/**"
       - "frontend/src/pages/DocControlPages.tsx"
       - "frontend/src/services/documentControl*.ts"
+      - "frontend/src/services/documentation.ts"
+      - "frontend/src/services/pdfReader.ts"
+      - "frontend/src/services/pdfWorkingCopyAuthority.ts"
+      - "frontend/src/services/publications.ts"
       - "frontend/src/router.tsx"
       - "frontend/src/components/Layout/DepartmentLayout.tsx"
       - ".github/workflows/document-control-domain-ci.yml"
+      - ".github/workflows/publications-reader-ci.yml"
 
 permissions:
   contents: read
@@ -21,7 +28,7 @@ permissions:
 jobs:
   document-control-domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -180,7 +187,23 @@ jobs:
                   raise SystemExit(
                       f"Unsafe route precedence for {path}: {endpoint_module!r}; expected {expected_module!r}"
                   )
-          print(f"Verified {len(paths)} Document Control workspace paths and reader-safe route precedence")
+
+          reader_routes = {
+              "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/pdf-capabilities": "amodb.apps.manuals.pdf_reader_router",
+              "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/flatten.pdf": "amodb.apps.manuals.pdf_reader_router",
+              "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/submit-record": "amodb.apps.manuals.pdf_reader_router",
+              "/manuals/t/{tenant_slug}/linked-resources/{reference_id}/submit": "amodb.apps.manuals.knowledge_reader_access_router",
+          }
+          for path, expected_module in reader_routes.items():
+              matching = [route for route in app.routes if getattr(route, "path", "") == path]
+              if not matching:
+                  raise SystemExit(f"Missing controlled PDF reader route: {path}")
+              endpoint_module = getattr(matching[0].endpoint, "__module__", "")
+              if endpoint_module != expected_module:
+                  raise SystemExit(
+                      f"Unsafe PDF reader route precedence for {path}: {endpoint_module!r}; expected {expected_module!r}"
+                  )
+          print(f"Verified {len(paths)} Document Control workspace paths and controlled PDF reader route precedence")
           PY
 
       - name: Run Document Control domain invariants
@@ -189,6 +212,17 @@ jobs:
         run: |
           set -o pipefail
           pytest -q amodb/apps/doc_control/tests 2>&1 | tee /tmp/document-control-backend-tests.log
+
+      - name: Run controlled PDF engine and source contracts explicitly
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q \
+            amodb/apps/doc_control/tests/test_pdf_reader_engine.py \
+            amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py \
+            amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py \
+            2>&1 | tee /tmp/document-control-pdf-engine-tests.log
 
       - uses: actions/setup-node@v6
         with:
@@ -199,6 +233,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Run browser PDF engine unit tests
+        working-directory: frontend
+        shell: bash
+        run: npx vitest run src/pages/manuals/pdfReaderEngine.test.ts
 
       - name: Build Document Control frontend
         working-directory: frontend
@@ -233,6 +272,7 @@ jobs:
             /tmp/document-control-backend-compile.log
             /tmp/document-control-backend-contract.log
             /tmp/document-control-backend-tests.log
+            /tmp/document-control-pdf-engine-tests.log
             /tmp/document-control-frontend-build.log
           if-no-files-found: warn
           retention-days: 5

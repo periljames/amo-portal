@@ -4,15 +4,23 @@ on:
   pull_request:
     paths:
       - "backend/amodb/apps/manuals/**"
+      - "backend/amodb/apps/doc_control/pdfium_service.py"
+      - "backend/amodb/apps/doc_control/tests/test_pdf_reader_*.py"
+      - "backend/docs/document_control/PDF_READER_ENGINE_HARDENING_*.md"
+      - "backend/requirements.txt"
       - "frontend/src/pages/manuals/**"
       - "frontend/src/pages/DocControl*"
       - "frontend/src/pages/docControlPublicationsBridge.css"
       - "frontend/src/services/publications.ts"
+      - "frontend/src/services/pdfReader.ts"
+      - "frontend/src/services/pdfWorkingCopyAuthority.ts"
+      - "frontend/src/services/documentation.ts"
       - "frontend/src/router.tsx"
       - "frontend/src/router.legacy.tsx"
       - "frontend/src/components/Layout/DepartmentLayout.tsx"
       - "frontend/src/components/Layout/DepartmentLayout.legacy.tsx"
       - ".github/workflows/publications-reader-ci.yml"
+      - ".github/workflows/document-control-domain-ci.yml"
 
 permissions:
   contents: read
@@ -20,7 +28,12 @@ permissions:
 jobs:
   publications-reader:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      SECRET_KEY: publications-reader-ci-secret-key-not-for-production
+      JWT_SECRET_KEY: publications-reader-ci-jwt-secret-not-for-production
+      PYTHONPATH: backend
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -30,9 +43,19 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Compile Publications backend
+      - name: Compile Publications and PDF engine backend
         working-directory: backend
-        run: python -m compileall -q amodb/apps/manuals
+        run: python -m compileall -q amodb/apps/manuals amodb/apps/doc_control/pdfium_service.py
+      - name: Run controlled PDF engine and source contracts
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q \
+            amodb/apps/doc_control/tests/test_pdf_reader_engine.py \
+            amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py \
+            amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py \
+            2>&1 | tee /tmp/publications-pdf-engine-tests.log
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -41,6 +64,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run browser PDF engine unit tests
+        working-directory: frontend
+        shell: bash
+        run: npx vitest run src/pages/manuals/pdfReaderEngine.test.ts
       - name: Build Publications frontend
         working-directory: frontend
         shell: bash
@@ -51,7 +78,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: publications-frontend-build
-          path: /tmp/publications-frontend-build.log
+          name: publications-reader-diagnostics
+          path: |
+            /tmp/publications-pdf-engine-tests.log
+            /tmp/publications-frontend-build.log
           if-no-files-found: warn
-          retention-days: 3
+          retention-days: 5

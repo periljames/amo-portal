@@ -111,17 +111,17 @@ def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
     repository_root = Path(__file__).resolve().parents[5]
     service = (repository_root / "frontend/src/services/publications.ts").read_text(encoding="utf-8")
     reader_page = (repository_root / "frontend/src/pages/manuals/PublicationsReaderPage.tsx").read_text(encoding="utf-8")
-    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
-    styles = (repository_root / "frontend/src/pages/manuals/publicationReaderEnhancements.css").read_text(encoding="utf-8")
+    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
+    styles = (repository_root / "frontend/src/pages/manuals/pdfReaderEngine.css").read_text(encoding="utf-8")
 
     assert "rangeChunkSize: 512 * 1024" in service
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
     assert "fetchPublicationBlob(viewerPdfPath)" not in reader_page
-    assert "renderForms={false}" in viewer
-    assert "getFieldObjects" in viewer
-    assert "opacity: 0.32" in styles
+    assert "renderForms={fillMode && canFill}" in core
+    assert "getFieldObjects" in core
+    assert "32%" in styles
     assert "pointer-events: none" in styles
     assert "content-visibility: auto" in styles
 
@@ -129,30 +129,30 @@ def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
 def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None:
     repository_root = Path(__file__).resolve().parents[5]
     config = (repository_root / "frontend/src/pages/manuals/pdfReaderConfig.ts").read_text(encoding="utf-8")
+    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
     viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
     linked_panel = (repository_root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
 
     assert "export const PDF_DOCUMENT_OPTIONS = Object.freeze" in config
-    assert "options={PDF_DOCUMENT_OPTIONS}" in viewer
-    assert "options={PDF_DOCUMENT_OPTIONS}" in linked_panel
-    assert "options={{ isEvalSupported" not in viewer
-    assert "options={{ isEvalSupported" not in linked_panel
-    assert "inspectionGenerationRef" in viewer
-    assert "inspectionGenerationRef" in linked_panel
-    assert "handleDocumentLoadSuccess" in viewer
-    assert "onLoadSuccess={async" not in viewer
-    assert "error={<div" in viewer
-    assert "error={<div" in linked_panel
+    assert "options={PDF_DOCUMENT_OPTIONS}" in core
+    assert "options={{ isEvalSupported" not in core
+    assert "<PdfDocument" not in viewer
+    assert "<PdfDocument" not in linked_panel
+    assert "PdfReaderCore" in viewer
+    assert "PdfReaderCore" in linked_panel
+    assert "inspectionGenerationRef" in core
+    assert "handleDocumentLoad" in core
+    assert "onLoadSuccess={async" not in core
+    assert "error={<div" in core
 
 
 def test_progress_refresh_does_not_clear_an_already_loaded_pdf() -> None:
     repository_root = Path(__file__).resolve().parents[5]
-    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
+    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
 
-    source_reset_tail = viewer.split("// Only an actual source replacement", 1)[1]
-    source_reset_body = source_reset_tail.split("useEffect(() => {", 1)[1].split("}, [fileUrl]);", 1)[0]
+    source_reset_body = core.split("documentRef.current = null;", 1)[1].split("}, [fileUrl, localDraft?.savedAt]);", 1)[0]
     assert "setPageCount(0)" in source_reset_body
     assert "initialPage" not in source_reset_body
-    assert "const initialPageRef = useRef(initialPage)" in viewer
-    assert 'jumpToPage(initialPage || 1, "auto")' in viewer
-    assert "const restoredPage = clamp(initialPageRef.current || 1" in viewer
+    assert "const initialPageRef = useRef(initialPage)" in core
+    assert 'jumpToPage(initialPage, "auto")' in core
+    assert "const restoredPage = clampPdfValue(initialPageRef.current" in core

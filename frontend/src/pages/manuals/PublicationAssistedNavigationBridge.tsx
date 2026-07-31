@@ -34,7 +34,9 @@ function scrollPrecisely(element: HTMLElement): void {
 function targetElement(detail: PublicationNavigationDetail): HTMLElement | null {
   const page = Number(detail.pageNumber || 0);
   if (page > 0) {
-    const pageElement = document.querySelector<HTMLElement>(`.publication-native-pdf__page[data-page-number="${page}"]`);
+    const pageElement = document.querySelector<HTMLElement>(
+      `.pdf-engine-page[data-page-number="${page}"], .publication-native-pdf__page[data-page-number="${page}"]`,
+    );
     if (pageElement) return pageElement;
   }
   const anchor = String(detail.anchor || "").trim();
