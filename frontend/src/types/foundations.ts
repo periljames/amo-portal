@@ -28,6 +28,7 @@ export interface BaseStationRead {
   coordinate_accuracy_m?: number | null;
   location_source?: BaseLocationSource | null;
   airport_reference_ident?: string | null;
+  location_configured: boolean;
   location_verified_at?: string | null;
   location_verified_by_user_id?: string | null;
   geofence_radius_m: number;

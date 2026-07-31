@@ -47,12 +47,20 @@ class BaseStationBase(BaseModel):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("Latitude and longitude must be provided together.")
         has_location = self.latitude is not None and self.longitude is not None
-        if not has_location and (
+        prompts_enabled = (
             self.checkin_prompt_enabled
             or self.checkout_reminder_enabled
             or self.suspicious_location_review_enabled
-        ):
+        )
+        if not has_location and prompts_enabled:
             raise ValueError("Location prompts require approved base coordinates.")
+        if (
+            prompts_enabled
+            and self.location_source == "DEVICE_SINGLE"
+            and self.coordinate_accuracy_m is not None
+            and self.coordinate_accuracy_m > max(500, self.geofence_radius_m)
+        ):
+            raise ValueError("Device accuracy is too low to enable attendance location policy. Verify the base or enter an approved coordinate.")
         if has_location and not self.location_source:
             self.location_source = "MANUAL"
         return self
@@ -86,6 +94,7 @@ class BaseStationUpdate(BaseModel):
 class BaseStationRead(BaseStationBase):
     id: str
     amo_id: str
+    location_configured: bool = False
     location_verified_at: Optional[datetime] = None
     location_verified_by_user_id: Optional[str] = None
     created_by_user_id: Optional[str] = None
@@ -93,6 +102,12 @@ class BaseStationRead(BaseStationBase):
     created_at: datetime
     updated_at: datetime
     aliases: List[BaseStationAliasRead] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def derive_location_configured(self):
+        if self.latitude is not None and self.longitude is not None:
+            self.location_configured = True
+        return self
 
     class Config:
         from_attributes = True

@@ -65,6 +65,22 @@ def _department_read(db: Session, department: account_models.Department) -> depa
     )
 
 
+def _base_read_for_user(item: models.BaseStation, user: account_models.User) -> schemas.BaseStationRead:
+    value = schemas.BaseStationRead.model_validate(item)
+    if _can_manage_foundations(user):
+        return value
+    # Ordinary tenant users need the canonical base ID, public aerodrome codes,
+    # geofence radius and prompt policy. They do not need the exact approved
+    # coordinate, device accuracy or verifier identity.
+    return value.model_copy(update={
+        "latitude": None,
+        "longitude": None,
+        "coordinate_accuracy_m": None,
+        "location_verified_at": None,
+        "location_verified_by_user_id": None,
+    })
+
+
 @router.get("/contracts", response_model=schemas.FoundationContracts)
 def get_foundation_contracts() -> schemas.FoundationContracts:
     return services.foundation_contracts()
@@ -259,7 +275,12 @@ def list_base_stations(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return services.list_base_stations(db, amo_id=_effective_amo_id(current_user), include_inactive=include_inactive)
+    rows = services.list_base_stations(
+        db,
+        amo_id=_effective_amo_id(current_user),
+        include_inactive=include_inactive,
+    )
+    return [_base_read_for_user(row, current_user) for row in rows]
 
 
 @router.post("/base-stations", response_model=schemas.BaseStationRead, status_code=status.HTTP_201_CREATED)
@@ -422,7 +443,32 @@ def evaluate_location(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return services.evaluate_location(db, amo_id=_effective_amo_id(current_user), payload=payload)
+    amo_id = _effective_amo_id(current_user)
+    result = services.evaluate_location(db, amo_id=amo_id, payload=payload)
+    if result.review_signal and result.base_station_id:
+        audit_services.log_event(
+            db,
+            amo_id=amo_id,
+            actor_user_id=str(current_user.id),
+            entity_type="foundations.location_review_signal",
+            entity_id=f"{current_user.id}:{result.base_station_id}",
+            action="LOCATION_REVIEW_SIGNAL",
+            after={
+                "base_station_id": result.base_station_id,
+                "distance_m": result.distance_m,
+                "geofence_radius_m": result.geofence_radius_m,
+                "location_confidence": result.location_confidence,
+                "reported_accuracy_m": round(payload.accuracy_m, 1),
+                "reason": result.review_reason,
+            },
+            metadata={
+                "module": "foundations",
+                "raw_coordinates_persisted": False,
+                "human_review_required": True,
+            },
+        )
+        db.commit()
+    return result
 
 
 @router.post("/user-base-assignments", response_model=schemas.UserBaseAssignmentRead, status_code=status.HTTP_201_CREATED)

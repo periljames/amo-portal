@@ -78,21 +78,23 @@ export function DutyLocationAssistant() {
   const user = getCachedUser();
   const userId = String((user as { id?: string } | null)?.id || "");
   const now = new Date();
-  const from = new Date(now);
-  from.setDate(from.getDate() - 31);
+  const rosterFrom = new Date(now);
+  rosterFrom.setDate(rosterFrom.getDate() - 1);
+  const attendanceFrom = new Date(now);
+  attendanceFrom.setDate(attendanceFrom.getDate() - 31);
   const to = new Date(now);
   to.setDate(to.getDate() + 2);
 
   const rosterQuery = useQuery({
-    queryKey: ["rostering", "duty-location", "roster", isoDate(now), userId],
-    queryFn: () => getMyRoster({ from: isoDate(now), to: isoDate(to) }),
+    queryKey: ["rostering", "duty-location", "roster", isoDate(rosterFrom), isoDate(to), userId],
+    queryFn: () => getMyRoster({ from: isoDate(rosterFrom), to: isoDate(to) }),
     staleTime: 45_000,
   });
   const attendanceQuery = useQuery({
-    queryKey: ["rostering", "duty-location", "attendance", userId, isoDate(from), isoDate(to)],
+    queryKey: ["rostering", "duty-location", "attendance", userId, isoDate(attendanceFrom), isoDate(to)],
     queryFn: () => getAttendanceSummary({
       user_id: userId || null,
-      from: isoDate(from),
+      from: isoDate(attendanceFrom),
       to: isoDate(to),
     }),
     staleTime: 15_000,
@@ -174,7 +176,7 @@ export function DutyLocationAssistant() {
     return null;
   }
   if (!dutyContext || !base) return null;
-  const hasApprovedLocation = base.latitude != null && base.longitude != null;
+  const hasApprovedLocation = base.location_configured;
   const locationPolicyEnabled = base.checkin_prompt_enabled
     || base.checkout_reminder_enabled
     || base.suspicious_location_review_enabled;

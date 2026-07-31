@@ -7,7 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from amodb.apps.foundations import airport_catalog, schemas, services
-from amodb.apps.foundations.router import router as foundations_router
+from amodb.apps.foundations.models import BaseStationType
+from amodb.apps.foundations.router import _base_read_for_user, router as foundations_router
 
 
 def test_base_location_prompts_require_coordinates() -> None:
@@ -32,6 +33,20 @@ def test_base_location_accepts_explicit_consent_capture_fields() -> None:
     )
     assert item.location_source == "DEVICE_SINGLE"
     assert item.checkin_prompt_enabled is True
+
+
+def test_low_accuracy_single_device_capture_cannot_enable_attendance_policy() -> None:
+    with pytest.raises(ValidationError):
+        schemas.BaseStationCreate(
+            code="NBO-HQ",
+            name="Nairobi Main Base",
+            latitude=-1.319167,
+            longitude=36.927778,
+            coordinate_accuracy_m=900,
+            location_source="DEVICE_SINGLE",
+            geofence_radius_m=250,
+            checkin_prompt_enabled=True,
+        )
 
 
 def test_airport_catalog_prefers_exact_codes_and_returns_coordinates() -> None:
@@ -92,6 +107,55 @@ def test_consensus_keeps_only_latest_observation_per_contributor() -> None:
     selected = services._latest_observation_per_contributor(rows)
     assert len(selected) == 2
     assert {row.latitude for row in selected} == {2.0, 3.0}
+
+
+def test_ordinary_user_base_list_redacts_precise_location() -> None:
+    now = datetime.now(timezone.utc)
+    base = SimpleNamespace(
+        id="base-1",
+        amo_id="amo-1",
+        code="NBO-HQ",
+        name="Nairobi Main Base",
+        icao_code="HKJK",
+        iata_code="NBO",
+        base_type=BaseStationType.MAIN_BASE,
+        time_zone="Africa/Nairobi",
+        description=None,
+        latitude=-1.319167,
+        longitude=36.927778,
+        coordinate_accuracy_m=20.0,
+        location_source="DEVICE_CONSENSUS",
+        airport_reference_ident="HKJK",
+        geofence_radius_m=250,
+        checkin_prompt_enabled=True,
+        checkout_reminder_enabled=True,
+        suspicious_location_review_enabled=True,
+        is_active=True,
+        location_verified_at=now,
+        location_verified_by_user_id="admin-1",
+        created_by_user_id="admin-1",
+        updated_by_user_id="admin-1",
+        created_at=now,
+        updated_at=now,
+        aliases=[],
+    )
+    ordinary_user = SimpleNamespace(
+        is_system_account=False,
+        is_superuser=False,
+        is_amo_admin=False,
+        role="TECHNICIAN",
+    )
+
+    value = _base_read_for_user(base, ordinary_user)
+
+    assert value.location_configured is True
+    assert value.latitude is None
+    assert value.longitude is None
+    assert value.coordinate_accuracy_m is None
+    assert value.location_verified_at is None
+    assert value.location_verified_by_user_id is None
+    assert value.checkin_prompt_enabled is True
+    assert value.geofence_radius_m == 250
 
 
 def test_foundation_routes_expose_private_consensus_and_department_crud() -> None:
