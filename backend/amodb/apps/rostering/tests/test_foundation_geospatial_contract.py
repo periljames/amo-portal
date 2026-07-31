@@ -126,6 +126,7 @@ def test_ordinary_user_base_list_redacts_precise_location() -> None:
         coordinate_accuracy_m=20.0,
         location_source="DEVICE_CONSENSUS",
         airport_reference_ident="HKJK",
+        location_configured=True,
         geofence_radius_m=250,
         checkin_prompt_enabled=True,
         checkout_reminder_enabled=True,
