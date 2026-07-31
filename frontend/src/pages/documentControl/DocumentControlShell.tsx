@@ -3,6 +3,7 @@ import {
   Archive,
   BookOpen,
   Boxes,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   Copy,
@@ -24,6 +25,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
 import "./documentControlWorkspace.css";
+import "./documentControlExperience.css";
 
 export type DocumentControlWorkspaceId =
   | "desk"
@@ -43,29 +45,193 @@ export type DocumentControlWorkspaceId =
   | "reports"
   | "settings";
 
-const WORKSPACES: Array<{
+type WorkspaceRoute = {
   id: DocumentControlWorkspaceId;
   label: string;
   path: string;
   icon: typeof Gauge;
+  description: string;
   controlOnly?: boolean;
-}> = [
-  { id: "desk", label: "Control desk", path: "", icon: Gauge, controlOnly: true },
-  { id: "library", label: "Library", path: "/library", icon: BookOpen },
-  { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
-  { id: "records", label: "Generated records", path: "/records", icon: Database, controlOnly: true },
-  { id: "changes", label: "Changes", path: "/change-proposals", icon: ClipboardList, controlOnly: true },
-  { id: "revisions", label: "Revisions", path: "/drafts", icon: GitPullRequestArrow, controlOnly: true },
-  { id: "authority", label: "Authority", path: "/authority", icon: Landmark, controlOnly: true },
-  { id: "temporary-revisions", label: "Temporary revisions", path: "/tr", icon: FileClock, controlOnly: true },
-  { id: "distribution", label: "Distribution", path: "/distribution", icon: Send, controlOnly: true },
-  { id: "reviews", label: "Reviews", path: "/reviews", icon: ClipboardCheck, controlOnly: true },
-  { id: "copies", label: "Controlled copies", path: "/controlled-copies", icon: Copy, controlOnly: true },
-  { id: "external", label: "External data", path: "/external-sources", icon: Boxes, controlOnly: true },
-  { id: "integrations", label: "Integrations", path: "/integrations", icon: Link2, controlOnly: true },
-  { id: "archive", label: "Archive", path: "/archive", icon: Archive, controlOnly: true },
-  { id: "reports", label: "Reports", path: "/registers", icon: FileSearch, controlOnly: true },
-  { id: "settings", label: "Settings", path: "/settings", icon: Settings, controlOnly: true },
+};
+
+type WorkspaceGroup = {
+  id: string;
+  label: string;
+  path: string;
+  icon: typeof Gauge;
+  workspaces: WorkspaceRoute[];
+  controlOnly?: boolean;
+};
+
+const WORKSPACE_GROUPS: WorkspaceGroup[] = [
+  {
+    id: "overview",
+    label: "Overview",
+    path: "",
+    icon: Gauge,
+    workspaces: [
+      {
+        id: "desk",
+        label: "Control desk",
+        path: "",
+        icon: Gauge,
+        description: "Priorities, release risks, document health, and recent evidence.",
+      },
+    ],
+  },
+  {
+    id: "documents",
+    label: "Documents",
+    path: "/library",
+    icon: BookOpen,
+    workspaces: [
+      {
+        id: "library",
+        label: "Controlled library",
+        path: "/library",
+        icon: BookOpen,
+        description: "Search, filter, register, and open the permitted revision.",
+      },
+      {
+        id: "structure",
+        label: "Document structure",
+        path: "/structure",
+        icon: FolderTree,
+        description: "Classification, hierarchy, applicability, and document ownership.",
+      },
+      {
+        id: "records",
+        label: "Generated records",
+        path: "/records",
+        icon: Database,
+        description: "Controlled evidence produced by portal workflows.",
+        controlOnly: true,
+      },
+    ],
+  },
+  {
+    id: "lifecycle",
+    label: "Lifecycle",
+    path: "/drafts",
+    icon: GitPullRequestArrow,
+    controlOnly: true,
+    workspaces: [
+      {
+        id: "changes",
+        label: "Change requests",
+        path: "/change-proposals",
+        icon: ClipboardList,
+        description: "Capture, assess, assign, and close amendment triggers.",
+        controlOnly: true,
+      },
+      {
+        id: "revisions",
+        label: "Revision workflows",
+        path: "/drafts",
+        icon: GitPullRequestArrow,
+        description: "Technical, Quality, accountable-manager, and release gates.",
+        controlOnly: true,
+      },
+      {
+        id: "authority",
+        label: "Authority submissions",
+        path: "/authority",
+        icon: Landmark,
+        description: "Submission references, responses, approval evidence, and due dates.",
+        controlOnly: true,
+      },
+      {
+        id: "temporary-revisions",
+        label: "Temporary revisions",
+        path: "/tr",
+        icon: FileClock,
+        description: "Effectivity, distribution, expiry, withdrawal, and incorporation.",
+        controlOnly: true,
+      },
+    ],
+  },
+  {
+    id: "assurance",
+    label: "Assurance",
+    path: "/distribution",
+    icon: ClipboardCheck,
+    controlOnly: true,
+    workspaces: [
+      {
+        id: "distribution",
+        label: "Distribution and acknowledgements",
+        path: "/distribution",
+        icon: Send,
+        description: "Issue current revisions and retain read-and-understand evidence.",
+        controlOnly: true,
+      },
+      {
+        id: "reviews",
+        label: "Periodic reviews",
+        path: "/reviews",
+        icon: ClipboardCheck,
+        description: "Review currency, continued suitability, findings, and actions.",
+        controlOnly: true,
+      },
+      {
+        id: "copies",
+        label: "Controlled copies",
+        path: "/controlled-copies",
+        icon: Copy,
+        description: "Numbered-copy custody, recall, return, and destruction.",
+        controlOnly: true,
+      },
+      {
+        id: "external",
+        label: "External technical data",
+        path: "/external-sources",
+        icon: Boxes,
+        description: "OEM, authority, and supplier revision currency.",
+        controlOnly: true,
+      },
+    ],
+  },
+  {
+    id: "compliance",
+    label: "Compliance",
+    path: "/registers",
+    icon: FileSearch,
+    controlOnly: true,
+    workspaces: [
+      {
+        id: "integrations",
+        label: "QMS and module links",
+        path: "/integrations",
+        icon: Link2,
+        description: "Trace release blockers to live records in their owning modules.",
+        controlOnly: true,
+      },
+      {
+        id: "archive",
+        label: "Archive and withdrawal",
+        path: "/archive",
+        icon: Archive,
+        description: "Supersession, retention, withdrawal, and disposition evidence.",
+        controlOnly: true,
+      },
+      {
+        id: "reports",
+        label: "Registers and reports",
+        path: "/registers",
+        icon: FileSearch,
+        description: "Master register, overdue controls, LEP, and archive register.",
+        controlOnly: true,
+      },
+      {
+        id: "settings",
+        label: "Control settings",
+        path: "/settings",
+        icon: Settings,
+        description: "Review intervals, retention, acknowledgements, and workflow policy.",
+        controlOnly: true,
+      },
+    ],
+  },
 ];
 
 export function useDocumentControlRoute() {
@@ -126,7 +292,13 @@ export default function DocumentControlShell({
   const location = useLocation();
   const { amoCode, basePath, tenant } = useDocumentControlRoute();
   const active = workspaceForPath(location.pathname);
-  const visibleWorkspaces = WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
+  const visibleGroups = WORKSPACE_GROUPS
+    .filter((group) => canControl || !group.controlOnly)
+    .map((group) => ({
+      ...group,
+      workspaces: group.workspaces.filter((workspace) => canControl || !workspace.controlOnly),
+    }))
+    .filter((group) => group.workspaces.length > 0);
 
   const body = (
     <div className="dc-workspace">
@@ -139,20 +311,47 @@ export default function DocumentControlShell({
         {actions ? <div className="dc-workspace__header-actions">{actions}</div> : null}
       </header>
 
-      <nav className="dc-workspace__nav" aria-label="Document Control workspaces">
-        {visibleWorkspaces.map((workspace) => {
-          const Icon = workspace.icon;
+      <nav className="dc-workspace__nav dc-workspace__nav--grouped" aria-label="Document Control workspaces">
+        {visibleGroups.map((group) => {
+          const Icon = group.icon;
+          const activeGroup = group.workspaces.some((workspace) => workspace.id === active);
+          const hasMenu = group.workspaces.length > 1;
           return (
-            <button
-              type="button"
-              key={workspace.id}
-              className={active === workspace.id ? "active" : ""}
-              aria-current={active === workspace.id ? "page" : undefined}
-              onClick={() => navigate(`${basePath}${workspace.path}`)}
-            >
-              <Icon size={15} />
-              <span>{workspace.label}</span>
-            </button>
+            <div className={`dc-workspace__nav-group${activeGroup ? " active" : ""}`} key={group.id}>
+              <button
+                type="button"
+                className="dc-workspace__nav-trigger"
+                aria-current={activeGroup ? "page" : undefined}
+                aria-haspopup={hasMenu ? "menu" : undefined}
+                onClick={() => navigate(`${basePath}${group.path}`)}
+              >
+                <Icon size={15} />
+                <span>{group.label}</span>
+                {hasMenu ? <ChevronDown className="dc-workspace__nav-chevron" size={13} aria-hidden="true" /> : null}
+              </button>
+              {hasMenu ? (
+                <div className="dc-workspace__menu" role="menu" aria-label={`${group.label} routes`}>
+                  {group.workspaces.map((workspace) => {
+                    const WorkspaceIcon = workspace.icon;
+                    return (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        key={workspace.id}
+                        className={active === workspace.id ? "active" : ""}
+                        onClick={() => navigate(`${basePath}${workspace.path}`)}
+                      >
+                        <WorkspaceIcon size={16} />
+                        <span>
+                          <strong>{workspace.label}</strong>
+                          <small>{workspace.description}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </nav>
