@@ -298,16 +298,43 @@ jobs:
           npm exec -- vite preview --host 127.0.0.1 --port 4173 > /tmp/rostering-preview.log 2>&1 &
           preview_pid=$!
           trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:4173/perf-shell.html >/dev/null; then
+
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:4173/perf-shell.html >/dev/null; then
               break
             fi
-            if [ "$attempt" -eq 60 ]; then
+            if [ "$attempt" -eq 120 ]; then
               cat /tmp/rostering-preview.log
               exit 1
             fi
             sleep 1
           done
+
+          # This validates preview-server readiness. Chromium performs the
+          # actual HTTP-cache prime inside measure-rostering-load.mjs.
+          mapfile -t built_assets < <(
+            find dist -maxdepth 2 -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' \) \
+              -printf '/%P\n' | sort -u
+          )
+          asset_paths=("/" "/perf-shell.html" "${built_assets[@]}")
+          for asset in "${asset_paths[@]}"; do
+            echo "Verifying ${asset}"
+            available=0
+            for attempt in $(seq 1 10); do
+              if curl --fail --silent --show-error --max-time 10 \
+                "http://127.0.0.1:4173${asset}" >/dev/null; then
+                available=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$available" -ne 1 ]; then
+              echo "Asset not available: ${asset}"
+              cat /tmp/rostering-preview.log
+              exit 1
+            fi
+          done
+
           npm run perf:rostering:browser
       - name: Upload frontend performance evidence
         if: always()
