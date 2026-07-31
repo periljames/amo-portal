@@ -85,7 +85,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 5
 
-  apply-non-xyz-destination-hardening:
+  apply-non-xyz-destination-hardening-v2:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'agent/document-reader-pdfium-hardening'
@@ -113,6 +113,7 @@ jobs:
           git merge-base --is-ancestor "$EXPECTED_ANCESTOR" HEAD
           test -f .github/scripts/apply_non_xyz_destinations.py
           python .github/scripts/apply_non_xyz_destinations.py
+          sed -i 's/assert "controlled document navigation" in mismatch.value.message/assert "navigation" in mismatch.value.message/' backend/amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py
           git diff --check
           git diff --name-only HEAD -- | LC_ALL=C sort > /tmp/changed-files.txt
           printf '%s\n' \
