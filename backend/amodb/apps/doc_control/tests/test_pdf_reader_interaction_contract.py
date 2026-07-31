@@ -66,3 +66,14 @@ def test_working_copy_dirty_custody_survives_failed_or_stale_persistence() -> No
     assert "loaded.annotationStorage.onResetModified = undefined" in source
     assert "setWorkingDirty(false)" not in failure_branch
     assert "persistedGeneration === currentGeneration" in engine
+
+
+def test_reader_scrolling_and_draft_finalization_are_instance_scoped() -> None:
+    source = _source(READER_CORE)
+    engine = _source(READER_ENGINE)
+
+    assert 'querySelector<HTMLElement>(":scope > .pdf-engine-viewport")' in engine
+    assert 'closest<HTMLElement>(".app-shell__scroll")' in engine
+    assert "resolvePdfReaderScrollRoot(readerRoot)" in source
+    assert "draftLifecycleGenerationRef.current += 1" in source
+    assert "await deletePdfWorkingCopy(identity).catch(() => undefined);\n        return;" in source

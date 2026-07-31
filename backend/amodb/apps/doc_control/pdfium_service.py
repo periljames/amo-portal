@@ -212,6 +212,86 @@ def _text_appearance_signature(span: dict[str, Any]) -> str:
     return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
+def _stable_schema_text(value: Any) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).split())
+
+
+def _widget_fingerprint(widget: Any) -> dict[str, Any]:
+    """Return immutable widget placement/schema without values or appearances."""
+
+    choices = getattr(widget, "choice_values", None) or []
+    return {
+        "rect": _rect_payload(widget.rect),
+        "field_name": _stable_schema_text(getattr(widget, "field_name", None)),
+        "field_type": int(getattr(widget, "field_type", None) or 0),
+        "field_type_string": _stable_schema_text(getattr(widget, "field_type_string", None)),
+        "field_flags": int(getattr(widget, "field_flags", None) or 0),
+        "field_label": _stable_schema_text(getattr(widget, "field_label", None)),
+        "text_maxlen": int(getattr(widget, "text_maxlen", None) or 0),
+        "choice_values": sorted(_stable_schema_text(choice) for choice in choices),
+    }
+
+
+def _destination_payload(destination: dict[str, Any], fallback_page: int | None = None) -> dict[str, Any]:
+    point = destination.get("to")
+    raw_page = destination.get("page", -1)
+    page = int(raw_page) if raw_page is not None else -1
+    if page < 0 and fallback_page is not None:
+        page = fallback_page
+    return {
+        "page": page,
+        "x": round(float(getattr(point, "x", 0) or 0), 2) if point is not None else None,
+        "y": round(float(getattr(point, "y", 0) or 0), 2) if point is not None else None,
+        "zoom": round(float(destination.get("zoom", 0) or 0), 3),
+    }
+
+
+def _navigation_fingerprint(document: Any) -> dict[str, Any]:
+    """Fingerprint ordered outlines and page links without volatile object ids."""
+
+    import pymupdf
+
+    outlines: list[dict[str, Any]] = []
+    for entry in list(document.get_toc(simple=False) or []):
+        level, title, page_number = entry[:3]
+        target = entry[3] if len(entry) > 3 and isinstance(entry[3], dict) else {}
+        kind = int(target.get("kind", pymupdf.LINK_GOTO) or 0)
+        item: dict[str, Any] = {
+            "level": int(level),
+            "title": _stable_schema_text(title),
+            "kind": kind,
+        }
+        if kind == pymupdf.LINK_GOTO:
+            item["destination"] = _destination_payload(target, int(page_number or 0) - 1)
+        else:
+            item.update({
+                "uri": _stable_schema_text(target.get("uri")),
+                "file": _stable_schema_text(target.get("file")),
+                "name": _stable_schema_text(target.get("name")),
+            })
+        outlines.append(item)
+
+    page_links: list[dict[str, Any]] = []
+    for source_page, page in enumerate(document):
+        for link in list(page.get_links() or []):
+            kind = int(link.get("kind", 0) or 0)
+            item = {
+                "source_page": source_page,
+                "rect": _rect_payload(link.get("from")),
+                "kind": kind,
+            }
+            if kind == pymupdf.LINK_GOTO:
+                item["destination"] = _destination_payload(link)
+            else:
+                item.update({
+                    "uri": _stable_schema_text(link.get("uri")),
+                    "file": _stable_schema_text(link.get("file")),
+                    "name": _stable_schema_text(link.get("name")),
+                })
+            page_links.append(item)
+    return {"outlines": outlines, "page_links": page_links}
+
+
 def _page_text_spans(page: Any) -> list[dict[str, Any]]:
     spans: list[dict[str, Any]] = []
     text = page.get_text("dict", sort=True)
@@ -345,7 +425,11 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
         pages: list[dict[str, Any]] = []
         total_anchors = 0
         for page in document:
-            excluded_rects = [_rect_payload(widget.rect) for widget in list(page.widgets() or [])]
+            widgets = sorted(
+                (_widget_fingerprint(widget) for widget in list(page.widgets() or [])),
+                key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")),
+            )
+            excluded_rects = [list(widget["rect"]) for widget in widgets]
 
             words = [
                 span
@@ -378,13 +462,19 @@ def _parsed_pdf_profile(content: bytes) -> tuple[bool, bool, dict[str, Any]]:
                 "rotation": int(page.rotation or 0) % 360,
                 "content_sha256": _sha256(bytes(page.read_contents() or b"")),
                 "resources_sha256": _page_resources_sha256(document, page),
+                "widgets": widgets,
                 "excluded_rects": excluded_rects,
                 "words": words,
                 "images": images,
                 "drawings": drawings,
             })
 
-        return has_actions, encrypted, {"version": 5, "total_anchors": total_anchors, "pages": pages}
+        return has_actions, encrypted, {
+            "version": 6,
+            "total_anchors": total_anchors,
+            "pages": pages,
+            "navigation": _navigation_fingerprint(document),
+        }
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -440,9 +530,21 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
             "This template has no stable content anchors; provenance cannot be established safely",
             status_code=409,
         )
+    if expected_fingerprint.get("navigation", {}) != candidate_fingerprint.get("navigation", {}):
+        raise PdfEngineError(
+            "PDF_TEMPLATE_MISMATCH",
+            "The completed PDF changes controlled bookmarks or page-link navigation",
+            status_code=409,
+        )
 
     verified_anchors = 0
     for page_number, (source_page, completed_page) in enumerate(zip(expected_pages, candidate_pages), start=1):
+        if list(source_page.get("widgets") or []) != list(completed_page.get("widgets") or []):
+            raise PdfEngineError(
+                "PDF_TEMPLATE_MISMATCH",
+                f"Completed PDF page {page_number} changes controlled form field schema or placement",
+                status_code=409,
+            )
         if (
             abs(float(source_page.get("width") or 0) - float(completed_page.get("width") or 0)) > 1.0
             or abs(float(source_page.get("height") or 0) - float(completed_page.get("height") or 0)) > 1.0
@@ -545,7 +647,7 @@ def validate_template_provenance(expected: PdfInspection, candidate: PdfInspecti
         "completed_source_sha256": candidate.source_sha256,
         "page_count": expected.page_count,
         "verified_anchors": verified_anchors,
-        "fingerprint_version": int(expected_fingerprint.get("version") or 5),
+        "fingerprint_version": int(expected_fingerprint.get("version") or 6),
     }
 
 

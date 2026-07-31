@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { registerAuthoritativePdfSource } from "../../services/pdfWorkingCopyAuthority";
 import {
   highlightPdfText,
   isPdfWorkingCopyGenerationCurrent,
+  isPdfDraftLifecycleCurrent,
   outputPdfFilename,
   pdfReaderShortcut,
   searchPdfDocument,
+  resolvePdfReaderScrollRoot,
 } from "./pdfReaderEngine";
 import {
   pdfWorkingCopyKey,
@@ -113,5 +115,27 @@ describe("controlled PDF reader engine", () => {
 
     expect(isPdfWorkingCopyGenerationCurrent(savingGeneration, currentGeneration)).toBe(false);
     expect(isPdfWorkingCopyGenerationCurrent(currentGeneration, currentGeneration)).toBe(true);
+  });
+
+  it("invalidates an autosave completing after submit or discard", () => {
+    expect(isPdfDraftLifecycleCurrent(3, 3)).toBe(true);
+    expect(isPdfDraftLifecycleCurrent(3, 4)).toBe(false);
+  });
+
+  it("selects only the current compact reader's direct scrolling viewport", () => {
+    const shell = {} as HTMLElement;
+    const viewport = {} as HTMLElement;
+    let overflowY = "auto";
+    const reader = {
+      querySelector: vi.fn(() => viewport),
+      closest: vi.fn(() => shell),
+    } as unknown as HTMLElement;
+    vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY }) });
+
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(viewport);
+    overflowY = "visible";
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(shell);
+    expect(reader.querySelector).toHaveBeenCalledWith(":scope > .pdf-engine-viewport");
+    vi.unstubAllGlobals();
   });
 });

@@ -45,9 +45,11 @@ import {
   copyPdfBytes,
   highlightPdfText,
   isPdfWorkingCopyGenerationCurrent,
+  isPdfDraftLifecycleCurrent,
   outputPdfFilename,
   pdfReaderShortcut,
   safePdfFilename,
+  resolvePdfReaderScrollRoot,
   searchPdfDocument,
   type PdfSearchOptions,
   type PdfSearchResult,
@@ -143,12 +145,8 @@ const READ_ONLY_CAPABILITIES: PdfReaderCapabilities = {
   can_submit: false,
 };
 
-function readerScroller(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".app-shell__scroll");
-}
-
-function scrollPageIntoView(element: HTMLElement, behavior: ScrollBehavior = "smooth"): void {
-  const scroller = readerScroller();
+function scrollPageIntoView(readerRoot: HTMLElement, element: HTMLElement, behavior: ScrollBehavior = "smooth"): void {
+  const scroller = resolvePdfReaderScrollRoot(readerRoot);
   const offset = 104;
   if (scroller) {
     const scrollerRect = scroller.getBoundingClientRect();
@@ -242,6 +240,7 @@ export default function PdfReaderCore({
   const draftSaveInFlightRef = useRef(false);
   const pendingAutosaveRef = useRef(false);
   const editGenerationRef = useRef(0);
+  const draftLifecycleGenerationRef = useRef(0);
   const dirtyRef = useRef(false);
   const onPageChangeRef = useRef(onPageChange);
   const onZoomChangeRef = useRef(onZoomChange);
@@ -397,7 +396,7 @@ export default function PdfReaderCore({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const scroller = readerScroller();
+    const scroller = resolvePdfReaderScrollRoot(host);
     const resize = () => {
       const viewportHeight = scroller?.clientHeight || window.innerHeight;
       setHostWidth(Math.max(280, host.clientWidth));
@@ -446,7 +445,9 @@ export default function PdfReaderCore({
 
   useEffect(() => {
     if (!pageCount || typeof IntersectionObserver === "undefined") return;
-    const root = readerScroller();
+    const readerRoot = hostRef.current;
+    if (!readerRoot) return;
+    const root = resolvePdfReaderScrollRoot(readerRoot);
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.filter((entry) => entry.isIntersecting);
       if (!visible.length) return;
@@ -480,7 +481,8 @@ export default function PdfReaderCore({
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const element = pageRefs.current.get(page);
-        if (element) scrollPageIntoView(element, behavior);
+        const readerRoot = hostRef.current;
+        if (readerRoot && element) scrollPageIntoView(readerRoot, element, behavior);
       });
     });
   }, [pageCount]);
@@ -512,6 +514,7 @@ export default function PdfReaderCore({
     }
     draftSaveInFlightRef.current = true;
     const savingGeneration = editGenerationRef.current;
+    const savingLifecycle = draftLifecycleGenerationRef.current;
     setDraftState("SAVING");
     try {
       const bytes = await serializeCurrentDocument();
@@ -521,6 +524,10 @@ export default function PdfReaderCore({
         copyPdfBytes(bytes),
         capabilities.source_sha256,
       );
+      if (!isPdfDraftLifecycleCurrent(savingLifecycle, draftLifecycleGenerationRef.current)) {
+        await deletePdfWorkingCopy(identity).catch(() => undefined);
+        return;
+      }
       if (isPdfWorkingCopyGenerationCurrent(savingGeneration, editGenerationRef.current)) {
         setWorkingDirty(false);
       } else {
@@ -529,7 +536,7 @@ export default function PdfReaderCore({
       setDraftState("SAVED");
       setDraftNotice("Working copy saved locally on this device.");
     } catch {
-      setDraftState("ERROR");
+      if (isPdfDraftLifecycleCurrent(savingLifecycle, draftLifecycleGenerationRef.current)) setDraftState("ERROR");
     } finally {
       draftSaveInFlightRef.current = false;
       if (pendingAutosaveRef.current) {
@@ -732,6 +739,7 @@ export default function PdfReaderCore({
       const created = onSubmitWorkingCopy
         ? await onSubmitWorkingCopy(file)
         : await submitPdfWorkingCopy(identity.tenant, identity.manualId, identity.revisionId, file, { output_mode: "FLATTENED_RECORD" });
+      draftLifecycleGenerationRef.current += 1;
       setRecord(created);
       editGenerationRef.current = 0;
       pendingAutosaveRef.current = false;
@@ -750,6 +758,7 @@ export default function PdfReaderCore({
 
   const discardDraft = async () => {
     if (dirty && !window.confirm("Discard the locally saved working copy and reopen the controlled source?")) return;
+    draftLifecycleGenerationRef.current += 1;
     await deletePdfWorkingCopy(identity).catch(() => undefined);
     setLocalDraft(null);
     editGenerationRef.current = 0;

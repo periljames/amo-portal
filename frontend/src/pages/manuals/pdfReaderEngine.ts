@@ -60,6 +60,16 @@ export function isPdfWorkingCopyGenerationCurrent(
   return persistedGeneration === currentGeneration;
 }
 
+export function isPdfDraftLifecycleCurrent(savingLifecycle: number, currentLifecycle: number): boolean {
+  return savingLifecycle === currentLifecycle;
+}
+
+export function resolvePdfReaderScrollRoot(readerRoot: HTMLElement): HTMLElement | null {
+  const viewport = readerRoot.querySelector<HTMLElement>(":scope > .pdf-engine-viewport");
+  if (viewport && ["auto", "scroll"].includes(window.getComputedStyle(viewport).overflowY)) return viewport;
+  return readerRoot.closest<HTMLElement>(".app-shell__scroll");
+}
+
 export function isPdfTextEntryTarget(target: EventTarget | null): boolean {
   if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();

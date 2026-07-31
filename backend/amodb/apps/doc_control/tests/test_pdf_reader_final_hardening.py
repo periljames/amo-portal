@@ -104,6 +104,67 @@ def _faded_image_pdf(source: bytes) -> bytes:
         document.close()
 
 
+def _controlled_form_with_navigation() -> bytes:
+    document = pymupdf.open()
+    first = document.new_page()
+    first.insert_text((72, 72), "CONTROLLED FORM PAGE ONE")
+    second = document.new_page()
+    second.insert_text((72, 72), "CONTROLLED FORM PAGE TWO")
+    first = document[0]
+    widget = pymupdf.Widget()
+    widget.field_name = "release_code"
+    widget.field_label = "Release code"
+    widget.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    widget.field_flags = 0
+    widget.text_maxlen = 12
+    widget.rect = pymupdf.Rect(72, 110, 220, 136)
+    first.add_widget(widget)
+    first.insert_link({
+        "kind": pymupdf.LINK_GOTO,
+        "from": pymupdf.Rect(72, 160, 220, 184),
+        "page": 1,
+        "to": pymupdf.Point(0, 0),
+        "zoom": 0,
+    })
+    document.set_toc([[1, "Controlled overview", 1], [2, "Execution page", 2]])
+    try:
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _relocate_filled_widget(source: bytes) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        widget = next(iter(document[0].widgets() or []))
+        document.xref_set_key(widget.xref, "V", "(APPROVED)")
+        document.xref_set_key(widget.xref, "Rect", "[300 300 448 326]")
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _change_outline_destination(source: bytes) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        document.set_toc([[1, "Controlled overview", 2], [2, "Execution page", 2]])
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+def _change_internal_link_destination(source: bytes) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        page = document[0]
+        link = page.get_links()[0]
+        page.delete_link(link)
+        page.insert_link({"kind": pymupdf.LINK_GOTO, "from": link["from"], "page": 0, "to": pymupdf.Point(0, 0), "zoom": 0})
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
 def test_source_custody_rehashes_when_path_size_and_mtime_are_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -292,3 +353,38 @@ def test_dedicated_reader_workflows_trigger_for_authority_service_changes() -> N
         content = workflow.read_text(encoding="utf-8")
         assert authority_path in content, workflow
         assert "test_pdf_reader_final_hardening.py" in content, workflow
+
+
+@pytest.mark.parametrize(
+    ("mutator", "changed_structure"),
+    [
+        (_relocate_filled_widget, "widgets"),
+        (_change_outline_destination, "navigation"),
+        (_change_internal_link_destination, "navigation"),
+    ],
+)
+def test_controlled_widgets_and_navigation_reject_structural_relocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutator: object,
+    changed_structure: str,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    source_bytes = _controlled_form_with_navigation()
+    candidate_bytes = mutator(source_bytes)  # type: ignore[operator]
+    source = engine.inspect_pdf_bytes(source_bytes)
+    candidate = engine.inspect_pdf_bytes(candidate_bytes)
+
+    source_page = source.template_fingerprint["pages"][0]
+    candidate_page = candidate.template_fingerprint["pages"][0]
+    assert source_page["content_sha256"] == candidate_page["content_sha256"]
+    assert source_page["resources_sha256"] == candidate_page["resources_sha256"]
+    if changed_structure == "widgets":
+        assert source_page["widgets"] != candidate_page["widgets"]
+    else:
+        assert source.template_fingerprint["navigation"] != candidate.template_fingerprint["navigation"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source, candidate)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
