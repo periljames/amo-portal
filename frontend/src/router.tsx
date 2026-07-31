@@ -18,6 +18,7 @@ import { AppRouter as LegacyAppRouter } from "./router.legacy";
  * /maintenance/:amoCode/admin/email-settings
  */
 
+const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -59,6 +60,11 @@ function isSegmentPath(pathname: string, segment: "manuals" | "publications"): b
     (parts[0] === "maintenance" && parts[2] === segment) ||
     (parts[0] === "t" && parts[2] === segment)
   );
+}
+
+function isQmsOverviewPath(pathname: string): boolean {
+  const parts = pathSegments(pathname);
+  return parts.length === 3 && parts[0] === "maintenance" && Boolean(parts[1]) && parts[2] === "quality";
 }
 
 function isDocumentControlPath(pathname: string): boolean {
@@ -145,6 +151,14 @@ function CanonicalDocumentControlRedirect() {
   return <Navigate to={`/maintenance/${parts[1]}/document-control${suffix ? `/${suffix}` : ""}${location.search}${location.hash}`} replace />;
 }
 
+function QmsOverviewRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Quality overview…</div></div>}>
+      <WorkspaceRequireAuth><QmsOverviewPage /></WorkspaceRequireAuth>
+    </Suspense>
+  );
+}
+
 function DocumentControlRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
@@ -214,6 +228,7 @@ export const AppRouter: React.FC = () => {
   if (isSegmentPath(location.pathname, "manuals")) {
     return <Navigate to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`} replace state={location.state} />;
   }
+  if (isQmsOverviewPath(location.pathname)) return <QmsOverviewRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
   return <LegacyAppRouter />;
