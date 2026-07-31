@@ -7,18 +7,11 @@ import {
   isAuthenticated,
   type OnboardingStatus,
 } from "./services/auth";
+import { classifyQmsPath } from "./pages/qms/routes/qmsRouteRegistry";
 import { AppRouter as LegacyAppRouter } from "./router.legacy";
 
-/*
- * Release-contract markers are implemented in router.legacy.tsx and
- * intentionally remain visible here for source-contract scanners:
- * path="/maintenance/:amoCode/quality"
- * <QmsCanonicalPage />
- * path="/maintenance/:amoCode/quality/*"
- * /maintenance/:amoCode/admin/email-settings
- */
-
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
+const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -60,11 +53,6 @@ function isSegmentPath(pathname: string, segment: "manuals" | "publications"): b
     (parts[0] === "maintenance" && parts[2] === segment) ||
     (parts[0] === "t" && parts[2] === segment)
   );
-}
-
-function isQmsOverviewPath(pathname: string): boolean {
-  const parts = pathSegments(pathname);
-  return parts.length === 3 && parts[0] === "maintenance" && Boolean(parts[1]) && parts[2] === "quality";
 }
 
 function isDocumentControlPath(pathname: string): boolean {
@@ -159,6 +147,14 @@ function QmsOverviewRouteSurface() {
   );
 }
 
+function QmsNotFoundRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Checking Quality route…</div></div>}>
+      <WorkspaceRequireAuth><QmsNotFoundPage /></WorkspaceRequireAuth>
+    </Suspense>
+  );
+}
+
 function DocumentControlRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
@@ -221,6 +217,7 @@ function PublicationsRouteSurface() {
 export const AppRouter: React.FC = () => {
   const location = useLocation();
   const workforceTarget = rosteringWorkforceRedirect(location.pathname);
+  const qmsRoute = classifyQmsPath(location.pathname);
 
   if (workforceTarget) {
     return <Navigate to={`${workforceTarget}${location.hash}`} replace state={location.state} />;
@@ -228,7 +225,11 @@ export const AppRouter: React.FC = () => {
   if (isSegmentPath(location.pathname, "manuals")) {
     return <Navigate to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`} replace state={location.state} />;
   }
-  if (isQmsOverviewPath(location.pathname)) return <QmsOverviewRouteSurface />;
+  if (qmsRoute.kind === "legacy" && qmsRoute.canonicalTarget) {
+    return <Navigate to={`${qmsRoute.canonicalTarget}${location.search}${location.hash}`} replace state={location.state} />;
+  }
+  if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
+  if (qmsRoute.kind === "unknown") return <QmsNotFoundRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
   return <LegacyAppRouter />;
