@@ -109,6 +109,27 @@ def test_consensus_keeps_only_latest_observation_per_contributor() -> None:
     assert {row.latitude for row in selected} == {2.0, 3.0}
 
 
+def test_consensus_candidate_coordinates_never_serialize() -> None:
+    value = schemas.BaseLocationConsensusRead(
+        base_station_id="base-1",
+        sample_count=2,
+        distinct_contributor_count=2,
+        candidate_latitude=-1.319167,
+        candidate_longitude=36.927778,
+        median_accuracy_m=20,
+        max_spread_m=35,
+        ready_for_approval=True,
+        reason="Independent observations agree.",
+    )
+
+    payload = value.model_dump()
+
+    assert "candidate_latitude" not in payload
+    assert "candidate_longitude" not in payload
+    assert payload["sample_count"] == 2
+    assert payload["max_spread_m"] == 35
+
+
 def test_ordinary_user_base_list_redacts_precise_location() -> None:
     now = datetime.now(timezone.utc)
     base = SimpleNamespace(
