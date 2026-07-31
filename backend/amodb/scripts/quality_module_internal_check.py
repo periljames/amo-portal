@@ -52,6 +52,7 @@ REQUIRED_CHECKS = {
             "signature = (path, methods, endpoint_marker)",
             "_deduplicate_exact_routes(router)",
             "_deduplicate_exact_routes(public_router)",
+            "dashboard_v2 as _dashboard_v2",
         ],
     ),
     "backend_service_dashboard_scoped": (
@@ -59,6 +60,31 @@ REQUIRED_CHECKS = {
         [
             "def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None)",
             "models.QMSAudit.amo_id == amo_id",
+        ],
+    ),
+    "backend_operational_dashboard_contract": (
+        BACKEND_ROOT / "amodb/apps/quality/dashboard_v2.py",
+        [
+            'DASHBOARD_V2_CONTRACT = "qms-operational-dashboard.v2"',
+            '@canonical_router.get("/dashboard-v2")',
+            '"action_queue": action_queue',
+            '"my_work": my_work',
+            '"upcoming_obligations": upcoming',
+            '"performance_kpis": kpis',
+            '"aging_buckets":',
+            '"unassigned_counts":',
+            '"severity_breakdown":',
+            '"period_comparisons":',
+            '"data_freshness":',
+            '"source_health":',
+        ],
+    ),
+    "backend_operational_dashboard_tests": (
+        BACKEND_ROOT / "amodb/apps/quality/tests/test_dashboard_v2_contract.py",
+        [
+            "test_operational_dashboard_route_is_registered",
+            "test_action_queue_is_ranked_and_bounded",
+            "test_action_queue_omits_zero_count_items",
         ],
     ),
     "backend_schema_integrity_migration": (
@@ -121,20 +147,73 @@ REQUIRED_CHECKS = {
             '${PORT:-8080}',
         ],
     ),
-    "frontend_quality_canonical_root": (
-        FRONTEND_ROOT / "src/router.tsx",
+    "frontend_qms_route_registry": (
+        FRONTEND_ROOT / "src/pages/qms/routes/qmsRouteRegistry.ts",
         [
-            'path="/maintenance/:amoCode/quality"',
-            "<QmsCanonicalPage />",
-            'path="/maintenance/:amoCode/quality/*"',
+            "export const QMS_ROUTE_REGISTRY",
+            "export function qmsBasePath(",
+            "export function qmsModulePath(",
+            "export function qmsNavigationItems(",
+            "export function classifyQmsPath(",
+            'kind: "unknown"',
+            'kind: "legacy"',
+            "validViews",
+            "componentType",
+            "legacyAliases",
         ],
     ),
-    "frontend_qms_command_centre_target": (
-        FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.tsx",
+    "frontend_qms_router_ownership": (
+        FRONTEND_ROOT / "src/router.tsx",
         [
-            'label: "Command Centre"',
-            'path: `/maintenance/${amoCode}/quality`',
-            "const qmsNavItems = useMemo<QmsNavItem[]>",
+            'import { classifyQmsPath, type QmsPathClassification }',
+            "function isQmsRegisterWorkspace(",
+            'qmsRoute.kind === "overview"',
+            'qmsRoute.kind === "unknown"',
+            "<QmsNotFoundPage />",
+            "<QmsRegisterPage />",
+        ],
+    ),
+    "frontend_qms_route_regressions": (
+        FRONTEND_ROOT / "src/pages/qms/routes/qmsRouteRegistry.test.ts",
+        [
+            'describe("QMS route registry"',
+            "does not silently accept misspelled modules or views",
+            "maps intentional legacy aliases",
+        ],
+    ),
+    "frontend_qms_operational_overview": (
+        FRONTEND_ROOT / "src/pages/qms/QmsOverviewPage.tsx",
+        [
+            "getQmsOperationalDashboard",
+            "<QmsActionQueue",
+            "<QmsMyWork",
+            "<QmsUpcomingObligations",
+            "<QmsPerformanceSummary",
+            "<QmsDiagnosticsDrawer",
+        ],
+    ),
+    "frontend_qms_compact_register": (
+        FRONTEND_ROOT / "src/pages/qms/QmsRegisterPage.tsx",
+        [
+            "Generic quick creation is disabled",
+            "Module navigation remains in the sidebar",
+            "qms-register-table",
+            "Support diagnostics",
+        ],
+    ),
+    "frontend_qms_dashboard_service": (
+        FRONTEND_ROOT / "src/services/qmsDashboard.ts",
+        [
+            'qmsPath(amoCode, "/dashboard-lite")',
+            'qmsPath(amoCode, "/dashboard-v2")',
+            "getQmsOperationalDashboard",
+        ],
+    ),
+    "frontend_qms_dashboard_service_tests": (
+        FRONTEND_ROOT / "src/services/qmsDashboard.test.ts",
+        [
+            "keeps the bounded legacy counter endpoint",
+            "loads the server-ranked operational dashboard contract",
         ],
     ),
     "frontend_active_audit_workflow_contract": (
@@ -185,8 +264,7 @@ REQUIRED_CHECKS = {
         [
             "name: Quality Module CI",
             "python -m amodb.scripts.quality_module_internal_check",
-            "python -m amodb.apps.quality.tests.postgres_schema_integrity_probe",
-            "test_quality_delivery_profile.py",
+            "test_dashboard_v2_contract.py",
             "npm run test:quality",
             "npm run build",
         ],
@@ -215,7 +293,18 @@ FORBIDDEN_CHECKS = {
             "workforce_router",
         ],
     ),
+    "frontend_retired_cockpit_score": (
+        FRONTEND_ROOT / "src/dashboards/DashboardCockpit.tsx",
+        ["qualityScore", "manpowerSlide", "QualityCockpitCanvas"],
+    ),
 }
+
+FORBIDDEN_FILES = [
+    FRONTEND_ROOT / "src/layouts/QmsShell.tsx",
+    FRONTEND_ROOT / "src/pages/QMSHomePage.tsx",
+    FRONTEND_ROOT / "src/components/dashboard/QualityCockpitCanvas.tsx",
+    FRONTEND_ROOT / "src/components/dashboard/charts/QualityCockpitCharts.tsx",
+]
 
 COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/quality_main.py",
@@ -223,9 +312,11 @@ COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/apps/quality/router.py",
     BACKEND_ROOT / "amodb/apps/quality/service.py",
     BACKEND_ROOT / "amodb/apps/quality/schemas.py",
+    BACKEND_ROOT / "amodb/apps/quality/dashboard_v2.py",
     BACKEND_ROOT / "amodb/alembic/versions/quality_20260722_schema_integrity.py",
     BACKEND_ROOT / "amodb/apps/quality/tests/postgres_schema_integrity_probe.py",
     BACKEND_ROOT / "amodb/apps/quality/tests/test_quality_delivery_profile.py",
+    BACKEND_ROOT / "amodb/apps/quality/tests/test_dashboard_v2_contract.py",
     Path(__file__),
 ]
 
@@ -289,18 +380,36 @@ def main() -> int:
             "present": present,
         }
 
+    retired = []
+    for path in FORBIDDEN_FILES:
+        exists = path.exists()
+        retired.append({"path": _display_path(path), "passed": not exists})
+        ok = ok and not exists
+    results["frontend_retired_qms_surfaces"] = {
+        "passed": all(item["passed"] for item in retired),
+        "files": retired,
+    }
+
     package_json = FRONTEND_ROOT / "package.json"
     package_result: dict[str, object]
     if package_json.exists():
         try:
             payload = json.loads(package_json.read_text(encoding="utf-8"))
-            quality_command = payload.get("scripts", {}).get("test:quality")
-            passed = quality_command == "vitest run src/services/qmsAuditHubActions.test.ts"
+            quality_command = str(payload.get("scripts", {}).get("test:quality") or "")
+            required_tests = [
+                "qmsAuditHubActions.test.ts",
+                "qmsDashboard.test.ts",
+                "qmsOverviewModel.test.ts",
+                "qmsRouteRegistry.test.ts",
+            ]
+            missing_tests = [name for name in required_tests if name not in quality_command]
+            passed = not missing_tests
             ok = ok and passed
             package_result = {
                 "passed": passed,
                 "path": _display_path(package_json),
                 "command": quality_command,
+                "missing_tests": missing_tests,
             }
         except Exception as exc:
             ok = False
