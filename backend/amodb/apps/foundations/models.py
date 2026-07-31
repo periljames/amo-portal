@@ -100,6 +100,11 @@ class BaseStation(Base):
         lazy="noload",
     )
 
+    @property
+    def location_configured(self) -> bool:
+        """Derived flag exposed without disclosing the approved coordinate."""
+        return self.latitude is not None and self.longitude is not None
+
 
 class BaseStationAlias(Base):
     __tablename__ = "base_station_aliases"
