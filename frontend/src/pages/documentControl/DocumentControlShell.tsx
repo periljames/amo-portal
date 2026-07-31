@@ -26,6 +26,7 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
+import "./documentControlLibraryExperience.css";
 
 export type DocumentControlWorkspaceId =
   | "desk"
