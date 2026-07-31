@@ -25,8 +25,9 @@ const profile = {
   uploadBytesPerSecond: 15 * 1024,
 };
 const phaseMethodology = {
-  cold: "Empty browser HTTP cache over the synthetic edge-2G profile.",
-  warm: "Offline replay from the populated browser HTTP cache; any uncached route asset fails the phase.",
+  cold: "Empty Chromium HTTP cache over the synthetic edge-2G profile.",
+  prime: "Unthrottled Chromium fetch with bounded retries populates the browser HTTP cache.",
+  warm: "Force-cache replay from the populated Chromium HTTP cache; every route asset must be verified as a cache hit.",
 };
 
 function writeReport(report) {
@@ -114,7 +115,7 @@ const scenarios = {
   workforce: collectDependencyFiles([routeKey, workspaceMap.get("WorkforceHrWorkspace")[0]]),
 };
 
-async function applyPhaseNetwork(context, page, phase) {
+async function createNetworkClient(context, page, phase) {
   const client = await context.newCDPSession(page);
   await client.send("Network.enable");
   await client.send("Network.setCacheDisabled", { cacheDisabled: false });
@@ -129,11 +130,8 @@ async function applyPhaseNetwork(context, page, phase) {
       connectionType: "cellular2g",
     });
   } else {
-    // A warm-cache measurement should measure cache retrieval, not charge the
-    // synthetic 2G round-trip latency again. Offline mode makes this stricter:
-    // every asset must be available from the HTTP cache or the phase fails.
     await client.send("Network.emulateNetworkConditions", {
-      offline: true,
+      offline: false,
       latency: 0,
       downloadThroughput: -1,
       uploadThroughput: -1,
@@ -144,51 +142,150 @@ async function applyPhaseNetwork(context, page, phase) {
   return client;
 }
 
+async function fetchAssets(page, assetUrls, options) {
+  return page.evaluate(async ({ urls, cacheMode, retries, retryDelayMs, label }) => {
+    const sleep = (duration) => new Promise((resolve) => window.setTimeout(resolve, duration));
+    const fetchWithRetry = async (url) => {
+      let lastError;
+      for (let attempt = 1; attempt <= retries; attempt += 1) {
+        try {
+          const response = await fetch(url, {
+            cache: cacheMode,
+            credentials: "same-origin",
+          });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}: ${url}`);
+          }
+          await response.arrayBuffer();
+          return { url, status: response.status, attempts: attempt };
+        } catch (error) {
+          lastError = error;
+          if (attempt < retries) await sleep(retryDelayMs * attempt);
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(`Failed to fetch ${url}`);
+    };
+
+    performance.clearResourceTimings();
+    const startedAt = performance.now();
+    const responses = await Promise.all(urls.map(fetchWithRetry));
+    const totalMs = Number((performance.now() - startedAt).toFixed(2));
+    const resources = performance.getEntriesByType("resource")
+      .filter((entry) => urls.includes(entry.name))
+      .map((entry) => ({
+        name: entry.name,
+        initiatorType: entry.initiatorType,
+        startTimeMs: Number(entry.startTime.toFixed(2)),
+        durationMs: Number(entry.duration.toFixed(2)),
+        transferSize: entry.transferSize,
+        encodedBodySize: entry.encodedBodySize,
+        decodedBodySize: entry.decodedBodySize,
+      }))
+      .sort((left, right) => left.startTimeMs - right.startTimeMs);
+    return { phase: label, totalMs, responses, resources };
+  }, {
+    urls: assetUrls,
+    cacheMode: options.cacheMode,
+    retries: options.retries,
+    retryDelayMs: options.retryDelayMs,
+    label: options.label,
+  });
+}
+
+function observeCacheHits(client, expectedUrls) {
+  const expected = new Set(expectedUrls);
+  const requestUrls = new Map();
+  const cacheHits = new Set();
+
+  client.on("Network.requestWillBeSent", ({ requestId, request }) => {
+    if (expected.has(request.url)) requestUrls.set(requestId, request.url);
+  });
+  client.on("Network.requestServedFromCache", ({ requestId }) => {
+    const url = requestUrls.get(requestId);
+    if (url) cacheHits.add(url);
+  });
+  client.on("Network.responseReceived", ({ requestId, response }) => {
+    const url = requestUrls.get(requestId) || response.url;
+    if (expected.has(url) && (response.fromDiskCache || response.fromPrefetchCache)) {
+      cacheHits.add(url);
+    }
+  });
+
+  return cacheHits;
+}
+
+async function openMeasurementPage(context) {
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/perf-shell.html`, { waitUntil: "domcontentloaded" });
+  return page;
+}
+
 async function measureScenario(browser, name, files) {
   const context = await browser.newContext({ serviceWorkers: "block" });
   const urls = files.map((file) => new URL(`/${file}`, baseUrl).href);
 
-  async function measurePhase(phase) {
-    const page = await context.newPage();
-    await page.goto(`${baseUrl}/perf-shell.html`, { waitUntil: "domcontentloaded" });
-    const client = await applyPhaseNetwork(context, page, phase);
-    const result = await page.evaluate(async ({ assetUrls, scenario, label }) => {
-      performance.clearResourceTimings();
-      const startedAt = performance.now();
-      const responses = await Promise.all(assetUrls.map(async (url) => {
-        const response = await fetch(url, { cache: "default", credentials: "same-origin" });
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${url}`);
-        await response.arrayBuffer();
-        return { url, status: response.status };
-      }));
-      const totalMs = Number((performance.now() - startedAt).toFixed(2));
-      const resources = performance.getEntriesByType("resource")
-        .filter((entry) => assetUrls.includes(entry.name))
-        .map((entry) => ({
-          name: entry.name,
-          initiatorType: entry.initiatorType,
-          startTimeMs: Number(entry.startTime.toFixed(2)),
-          durationMs: Number(entry.duration.toFixed(2)),
-          transferSize: entry.transferSize,
-          encodedBodySize: entry.encodedBodySize,
-          decodedBodySize: entry.decodedBodySize,
-        }))
-        .sort((left, right) => left.startTimeMs - right.startTimeMs);
-      return { scenario, phase: label, totalMs, responses, resources };
-    }, { assetUrls: urls, scenario: name, label: phase });
-    await client.detach();
-    await page.close();
-    return result;
-  }
-
   try {
-    const cold = await measurePhase("cold-cache");
-    const warm = await measurePhase("warm-http-cache");
+    const coldPage = await openMeasurementPage(context);
+    const coldClient = await createNetworkClient(context, coldPage, "cold-cache");
+    const coldResult = await fetchAssets(coldPage, urls, {
+      cacheMode: "reload",
+      retries: 2,
+      retryDelayMs: 500,
+      label: "cold-cache",
+    });
+    await coldClient.detach();
+    await coldPage.close();
+
+    // Explicitly prime the Chromium cache online. Workflow curl checks verify
+    // server availability, but only browser requests can populate this cache.
+    const primePage = await openMeasurementPage(context);
+    const primeClient = await createNetworkClient(context, primePage, "cache-prime");
+    const primeResult = await fetchAssets(primePage, urls, {
+      cacheMode: "reload",
+      retries: 3,
+      retryDelayMs: 400,
+      label: "cache-prime",
+    });
+    await primeClient.detach();
+    await primePage.close();
+
+    const warmPage = await openMeasurementPage(context);
+    const warmClient = await createNetworkClient(context, warmPage, "warm-http-cache");
+    const cacheHits = observeCacheHits(warmClient, urls);
+    const warmResult = await fetchAssets(warmPage, urls, {
+      cacheMode: "force-cache",
+      retries: 1,
+      retryDelayMs: 0,
+      label: "warm-http-cache",
+    });
+    await warmPage.waitForTimeout(50);
+
+    const timingCacheHits = new Set(
+      warmResult.resources
+        .filter((resource) => resource.transferSize === 0 && resource.decodedBodySize > 0)
+        .map((resource) => resource.name),
+    );
+    const verifiedCacheHits = new Set([...cacheHits, ...timingCacheHits]);
+    const missingCacheHits = urls.filter((url) => !verifiedCacheHits.has(url));
+
+    await warmClient.detach();
+    await warmPage.close();
+
+    const cold = { scenario: name, ...coldResult };
+    const prime = { scenario: name, ...primeResult };
+    const warm = {
+      scenario: name,
+      ...warmResult,
+      verifiedCacheHitCount: verifiedCacheHits.size,
+      missingCacheHits,
+    };
+
     return {
       name,
       files,
       assetCount: files.length,
       cold,
+      prime,
       warm,
       warmSpeedup: cold.totalMs && warm.totalMs
         ? Number((cold.totalMs / warm.totalMs).toFixed(2))
@@ -219,6 +316,9 @@ try {
     }
     if (measurement.warm.totalMs > budgets.warmRouteAssetsMs) {
       failures.push(`${measurement.name} warm assets ${measurement.warm.totalMs}ms exceed ${budgets.warmRouteAssetsMs}ms.`);
+    }
+    if (measurement.warm.missingCacheHits.length) {
+      failures.push(`${measurement.name} warm cache missed ${measurement.warm.missingCacheHits.length} route asset(s): ${measurement.warm.missingCacheHits.join(", ")}.`);
     }
     if (measurement.assetCount > budgets.maximumRouteAssetRequests) {
       failures.push(`${measurement.name} requires ${measurement.assetCount} route assets; maximum is ${budgets.maximumRouteAssetRequests}.`);
