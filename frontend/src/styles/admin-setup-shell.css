@@ -1,0 +1,15 @@
+.app-shell__content:has(.admin-amo-assets.setup-centre) {
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: clamp(10px, 1.2vw, 24px);
+}
+
+.app-shell__scroll:has(.admin-amo-assets.setup-centre) {
+  padding-right: 0;
+}
+
+@media (min-width: 1920px) {
+  .app-shell__content:has(.admin-amo-assets.setup-centre) {
+    padding-inline: clamp(18px, 1.6vw, 42px);
+  }
+}
