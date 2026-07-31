@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { BookOpen, FilePlus2, Search, ShieldAlert, ShieldCheck, UploadCloud, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { BookOpen, CalendarClock, FilePlus2, Search, ShieldAlert, ShieldCheck, UploadCloud, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -45,6 +45,19 @@ function genericOutlineTitle(value?: string | null): boolean {
   return !text || /^(chapter|section|part|appendix|annex)\b/i.test(text) || /front\s+matter/i.test(text) || /^table\s+of\s+contents$/i.test(text);
 }
 
+function formatReviewDate(value?: string | null): string {
+  if (!value) return "Not scheduled";
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
+function reviewDueSoon(document: DocumentLibraryItem): boolean {
+  if (!document.profile.next_review_due) return false;
+  const due = new Date(`${document.profile.next_review_due}T23:59:59`).getTime();
+  return Number.isFinite(due) && due <= Date.now() + (90 * 24 * 60 * 60 * 1000);
+}
+
+type LibraryView = "ALL" | "REVIEW" | "INTERNAL" | "EXTERNAL" | "RECORD";
 type IntakeMode = "DRAFT" | "APPROVED";
 
 type IntakeState = {
@@ -110,7 +123,7 @@ export default function DocumentControlLibraryPage() {
   const { tenant, basePath, readerBasePath } = useDocumentControlRoute();
   const [response, setResponse] = useState<DocumentLibraryResponse | null>(null);
   const [query, setQuery] = useState("");
-  const [classFilter, setClassFilter] = useState("");
+  const [libraryView, setLibraryView] = useState<LibraryView>("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [canControl, setCanControl] = useState(false);
@@ -126,7 +139,7 @@ export default function DocumentControlLibraryPage() {
     setError("");
     try {
       const [library, dashboard] = await Promise.all([
-        listDocumentControlDocuments(tenant, { q: query.trim() || undefined, documentClass: classFilter || undefined, perPage: 100 }),
+        listDocumentControlDocuments(tenant, { q: query.trim() || undefined, perPage: 100 }),
         getDocumentControlDashboard(tenant),
       ]);
       setResponse(library);
@@ -136,14 +149,38 @@ export default function DocumentControlLibraryPage() {
     } finally {
       setLoading(false);
     }
-  }, [classFilter, query, tenant]);
+  }, [query, tenant]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => void load(), query ? 260 : 0);
     return () => window.clearTimeout(handle);
   }, [load, query]);
 
-  const documents = response?.items || [];
+  const allDocuments = response?.items || [];
+  const documents = useMemo(() => allDocuments.filter((document) => {
+    if (libraryView === "REVIEW") return reviewDueSoon(document) || !document.profile.next_review_due;
+    if (libraryView === "INTERNAL") return document.profile.document_class === "INTERNAL";
+    if (libraryView === "EXTERNAL") return document.profile.document_class === "EXTERNAL";
+    if (libraryView === "RECORD") return document.profile.document_class === "RECORD";
+    return true;
+  }), [allDocuments, libraryView]);
+
+  const groupedDocuments = useMemo(() => {
+    const groups = new Map<string, DocumentLibraryItem[]>();
+    documents.forEach((document) => {
+      const key = document.manual_type?.trim() || "Unclassified";
+      groups.set(key, [...(groups.get(key) || []), document]);
+    });
+    return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right));
+  }, [documents]);
+
+  const viewCounts = useMemo(() => ({
+    ALL: allDocuments.length,
+    REVIEW: allDocuments.filter((document) => reviewDueSoon(document) || !document.profile.next_review_due).length,
+    INTERNAL: allDocuments.filter((document) => document.profile.document_class === "INTERNAL").length,
+    EXTERNAL: allDocuments.filter((document) => document.profile.document_class === "EXTERNAL").length,
+    RECORD: allDocuments.filter((document) => document.profile.document_class === "RECORD").length,
+  }), [allDocuments]);
 
   const warmReader = (document: DocumentLibraryItem) => {
     const revisionId = document.read_target.revision_id || document.latest_revision?.id;
@@ -233,38 +270,59 @@ export default function DocumentControlLibraryPage() {
     }
   };
 
+  const viewOptions: Array<{ id: LibraryView; label: string }> = [
+    { id: "ALL", label: "All documents" },
+    { id: "REVIEW", label: "Close to review" },
+    { id: "INTERNAL", label: "Internal" },
+    { id: "EXTERNAL", label: "External data" },
+    { id: "RECORD", label: "Records" },
+  ];
+  const hasFilter = Boolean(query.trim()) || libraryView !== "ALL";
+
   return (
     <DocumentControlShell
-      title="Library"
-      subtitle="One searchable register for internal manuals, external technical data, and controlled records. Select a row to open the permitted revision directly."
+      title="Controlled Library"
+      subtitle="One searchable register for internal documents, external technical data, and retained records. Rows are grouped by document type and open the permitted revision directly."
       canControl={canControl}
       actions={canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}><FilePlus2 size={15} /> Register or upload</button> : undefined}
     >
-      <div className="dc-toolbar">
-        <label className="dc-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search code, title, category, or status" /></label>
-        <label className="dc-search" style={{ minWidth: "12rem" }}><select value={classFilter} onChange={(event) => setClassFilter(event.target.value)} aria-label="Document class"><option value="">All document classes</option><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External technical data</option><option value="RECORD">Records and evidence</option></select></label>
+      <div className="dc-library-command">
+        <div className="dc-library-views" role="tablist" aria-label="Document library views">
+          {viewOptions.map((view) => (
+            <button type="button" role="tab" aria-selected={libraryView === view.id} className={libraryView === view.id ? "active" : ""} key={view.id} onClick={() => setLibraryView(view.id)}>
+              <span>{view.label}</span><em>{viewCounts[view.id]}</em>
+            </button>
+          ))}
+        </div>
+        <label className="dc-search dc-library-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search code, title, type, or status" /></label>
       </div>
 
       {loading ? <DocumentControlLoading label="Loading the controlled library…" /> : null}
       {error ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !error && documents.length ? (
-        <div className="dc-table-wrap"><table className="dc-table">
-          <thead><tr><th>Code</th><th>Document</th><th>Revision available</th><th>Governance</th>{canControl ? <th>Work</th> : null}<th>Action</th></tr></thead>
-          <tbody>{documents.map((document) => {
-            const canMarkApproved = canControl && document.read_target.kind !== "PUBLISHED" && document.latest_revision?.source_type?.toUpperCase() === "PDF";
-            return <tr key={document.id} className="dc-row--clickable" tabIndex={0} onMouseEnter={() => warmReader(document)} onFocus={() => warmReader(document)} onClick={() => openPrimary(document)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPrimary(document); }}>
-              <td><strong>{document.code}</strong><small>{document.profile.document_class.replaceAll("_", " ")}</small></td>
-              <td><strong>{document.title}</strong><small>{document.manual_type} · {document.profile.owner_department}</small></td>
-              <td><strong>{document.latest_revision ? `Issue ${document.latest_revision.issue_number || "—"} · Rev ${document.latest_revision.revision_number}` : "No revision uploaded"}</strong><small>{document.latest_revision?.source_type || "No source"}{document.latest_revision?.source_page_count ? ` · ${document.latest_revision.source_page_count} pages` : ""}</small></td>
-              <td><DocumentControlStatus status={document.read_target.kind === "PUBLISHED" ? "Effective publication" : document.read_target.kind === "UNCONTROLLED" ? "Uncontrolled draft" : document.latest_revision?.status || "No revision"} kind={statusKind(document)} /><small>{document.profile.regulated_flag ? "Regulated" : "Internal control"}{document.profile.restricted_flag ? " · Restricted" : ""}</small></td>
-              {canControl ? <td><strong>{document.open_change_requests} changes</strong><small>{document.pending_acknowledgements} acknowledgements pending</small>{canMarkApproved ? <button type="button" className="dc-button" style={{ marginTop: "0.35rem" }} onClick={(event) => { event.stopPropagation(); setApprovalDocument(document); }}><ShieldCheck size={14} /> Record existing approval</button> : null}</td> : null}
-              <td><button type="button" className="dc-button dc-button--primary" disabled={!document.read_target.revision_id && !canControl} onClick={(event) => { event.stopPropagation(); openPrimary(document); }}><BookOpen size={14} /> {document.read_target.label}</button>{canControl ? <button type="button" className="dc-button" style={{ marginTop: "0.35rem" }} onClick={(event) => { event.stopPropagation(); navigate(`${basePath}/library/${document.id}`); }}>View control record</button> : null}</td>
-            </tr>;
-          })}</tbody>
+        <div className="dc-table-wrap dc-library-table-wrap"><table className="dc-table dc-library-table">
+          <thead><tr><th>Code</th><th>Document</th><th>Issue / revision</th><th>Owner</th><th>Review due</th><th>Governance</th><th>Actions</th></tr></thead>
+          <tbody>{groupedDocuments.flatMap(([group, groupItems]) => [
+            <tr className="dc-table-group" key={`group-${group}`}><td colSpan={7}><strong>Document type: {group}</strong><span>{groupItems.length}</span></td></tr>,
+            ...groupItems.map((document) => {
+              const canMarkApproved = canControl && document.read_target.kind !== "PUBLISHED" && document.latest_revision?.source_type?.toUpperCase() === "PDF";
+              const reviewMissing = !document.profile.next_review_due;
+              const reviewSoon = reviewDueSoon(document);
+              return <tr key={document.id} className="dc-row--clickable" tabIndex={0} onMouseEnter={() => warmReader(document)} onFocus={() => warmReader(document)} onClick={() => openPrimary(document)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPrimary(document); }}>
+                <td><strong>{document.code}</strong><small>{document.profile.document_class.replaceAll("_", " ")}</small></td>
+                <td><strong>{document.title}</strong><small>{document.profile.regulated_flag ? "Regulated" : "Internal control"}{document.profile.restricted_flag ? " · Restricted" : ""}</small></td>
+                <td><strong>{document.latest_revision ? `Issue ${document.latest_revision.issue_number || "—"} · Rev ${document.latest_revision.revision_number}` : "No revision uploaded"}</strong><small>{document.latest_revision?.source_type || "No source"}{document.latest_revision?.effective_date ? ` · Effective ${document.latest_revision.effective_date}` : ""}</small></td>
+                <td><strong>{document.profile.owner_department || "Not assigned"}</strong><small>{document.profile.owner_user_id ? "Named owner assigned" : "Department ownership only"}</small></td>
+                <td><strong>{formatReviewDate(document.profile.next_review_due)}</strong><small className={reviewMissing || reviewSoon ? "dc-text-warning" : ""}>{reviewMissing ? "Control gap" : reviewSoon ? "Due within 90 days" : `${document.profile.review_interval_months} month cycle`}</small></td>
+                <td><DocumentControlStatus status={document.read_target.kind === "PUBLISHED" ? "Effective publication" : document.read_target.kind === "UNCONTROLLED" ? "Uncontrolled draft" : document.latest_revision?.status || "No revision"} kind={statusKind(document)} /><small>{canControl ? `${document.open_change_requests} changes · ${document.pending_acknowledgements} acknowledgements pending` : document.profile.acknowledgement_required ? "Acknowledgement controlled" : "Standard access"}</small></td>
+                <td><div className="dc-row-actions"><button type="button" className="dc-button dc-button--primary" disabled={!document.read_target.revision_id && !canControl} onClick={(event) => { event.stopPropagation(); openPrimary(document); }}><BookOpen size={14} /> {document.read_target.label}</button>{canControl ? <button type="button" className="dc-button" onClick={(event) => { event.stopPropagation(); navigate(`${basePath}/library/${document.id}`); }}>Control record</button> : null}{canMarkApproved ? <button type="button" className="dc-button" onClick={(event) => { event.stopPropagation(); setApprovalDocument(document); }}><ShieldCheck size={14} /> Record approval</button> : null}</div></td>
+              </tr>;
+            }),
+          ])}</tbody>
         </table></div>
       ) : null}
 
-      {!loading && !error && !documents.length ? <DocumentControlEmpty icon={query || classFilter ? Search : ShieldAlert} title={query || classFilter ? "No document matches the current search" : "No document has been registered"} message={query || classFilter ? "Clear the search or select another document class." : canControl ? "Upload or register the first document before it can be governed or read." : "No effective publication is currently available within your access scope."} action={(query || classFilter) ? <button type="button" className="dc-button" onClick={() => { setQuery(""); setClassFilter(""); }}>Clear filters</button> : canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}>Register first document</button> : undefined} /> : null}
+      {!loading && !error && !documents.length ? <DocumentControlEmpty icon={hasFilter ? Search : ShieldAlert} title={hasFilter ? "No document matches this view" : "No document has been registered"} message={hasFilter ? "Clear the search or choose another library view." : canControl ? "Upload or register the first document before it can be governed or read." : "No effective publication is currently available within your access scope."} action={hasFilter ? <button type="button" className="dc-button" onClick={() => { setQuery(""); setLibraryView("ALL"); }}>Clear filters</button> : canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}>Register first document</button> : undefined} /> : null}
 
       {intakeOpen ? <div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !intakeBusy) setIntakeOpen(false); }}>
         <section className="publications-upload-dialog" role="dialog" aria-modal="true" aria-label="Register controlled document">
