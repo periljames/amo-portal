@@ -7,6 +7,7 @@ const setupCss = readFileSync(new URL("../../styles/admin-setup-centre.css", imp
 const setupShellCss = readFileSync(new URL("../../styles/admin-setup-shell.css", import.meta.url), "utf8");
 const workforceDialogCss = readFileSync(new URL("../../styles/workforce-dialog-layer.css", import.meta.url), "utf8");
 const rosteringCss = readFileSync(new URL("../../styles/rostering.css", import.meta.url), "utf8");
+const performanceScript = readFileSync(new URL("../../../scripts/measure-rostering-load.mjs", import.meta.url), "utf8");
 
 describe("AMO administrator setup flow", () => {
   it("uses canonical backend services for setup readiness and editing", () => {
@@ -52,5 +53,13 @@ describe("AMO administrator setup flow", () => {
     expect(setupCss).toContain("repeat(auto-fit, minmax(340px, 1fr))");
     expect(setupShellCss).toContain(".app-shell__content:has(.admin-amo-assets.setup-centre)");
     expect(setupShellCss).toContain("max-width: none");
+  });
+
+  it("keeps the cold-load budget strict while proving warm assets are cached", () => {
+    expect(performanceScript).toContain("Network.clearBrowserCache");
+    expect(performanceScript).toContain("latency: profile.latencyMs");
+    expect(performanceScript).toContain("offline: true");
+    expect(performanceScript).toContain("any uncached route asset fails the phase");
+    expect(performanceScript).toContain("warmRouteAssetsMs: 5_000");
   });
 });
