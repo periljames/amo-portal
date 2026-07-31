@@ -59,12 +59,78 @@ def _reader_dashboard(
         "reviews_due_60_days": 0,
         "external_currency_checks_due": 0,
         "issued_controlled_copies": 0,
+        "control_profiles_missing": 0,
+        "document_owners_unassigned": 0,
+        "review_dates_missing": 0,
+        "documents_without_effective_issue": 0,
+        "critical_acknowledgement_gaps": 0,
     }
     return {
         "default_workspace": "LIBRARY",
         "capabilities": reader_capabilities(),
         "metrics": metrics,
         "recent_activity": [],
+    }
+
+
+def _controller_control_gaps(
+    db: Session,
+    *,
+    tenant: manual_models.Tenant,
+) -> dict[str, int]:
+    """Return evidence-control gaps without exposing them to ordinary readers."""
+    profiles_missing = (
+        db.query(manual_models.Manual)
+        .outerjoin(
+            dm.DocumentControlProfile,
+            (dm.DocumentControlProfile.manual_id == manual_models.Manual.id)
+            & (dm.DocumentControlProfile.tenant_id == tenant.amo_id),
+        )
+        .filter(
+            manual_models.Manual.tenant_id == tenant.id,
+            dm.DocumentControlProfile.id.is_(None),
+        )
+        .count()
+    )
+    owners_unassigned = (
+        db.query(dm.DocumentControlProfile)
+        .filter(
+            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
+            dm.DocumentControlProfile.owner_user_id.is_(None),
+        )
+        .count()
+    )
+    review_dates_missing = (
+        db.query(dm.DocumentControlProfile)
+        .filter(
+            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
+            dm.DocumentControlProfile.next_review_due.is_(None),
+        )
+        .count()
+    )
+    documents_without_effective_issue = (
+        db.query(manual_models.Manual)
+        .filter(
+            manual_models.Manual.tenant_id == tenant.id,
+            manual_models.Manual.current_published_rev_id.is_(None),
+        )
+        .count()
+    )
+    critical_acknowledgement_gaps = (
+        db.query(dm.DocumentControlProfile)
+        .filter(
+            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
+            dm.DocumentControlProfile.criticality == "CRITICAL",
+            dm.DocumentControlProfile.acknowledgement_required.is_(False),
+        )
+        .count()
+    )
+    return {
+        "control_profiles_missing": profiles_missing,
+        "document_owners_unassigned": owners_unassigned,
+        "review_dates_missing": review_dates_missing,
+        "documents_without_effective_issue": documents_without_effective_issue,
+        "critical_acknowledgement_gaps": critical_acknowledgement_gaps,
     }
 
 
@@ -86,10 +152,12 @@ def get_role_appropriate_dashboard(
             tenant_slug=tenant_slug,
             current_user=current_user,
         )
+    tenant = resolve_tenant(db, tenant_slug, current_user)
     dashboard = _get_full_dashboard(
         tenant_slug=tenant_slug,
         db=db,
         current_user=current_user,
     )
     dashboard["capabilities"] = document_control_capabilities(current_user)
+    dashboard["metrics"].update(_controller_control_gaps(db, tenant=tenant))
     return dashboard
