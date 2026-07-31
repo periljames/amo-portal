@@ -14,8 +14,8 @@
     "build:profile": "npm run build && npm run perf:report && npm run perf:rostering",
     "test:e2e": "playwright test",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
-    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts",
-    "test:qms-overview": "vitest run src/pages/qms/qmsOverviewModel.test.ts",
+    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts",
+    "test:qms-overview": "vitest run src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts",
     "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
   },
   "dependencies": {
@@ -46,7 +46,6 @@
     "react-dropzone": "^15.0.0",
     "react-hook-form": "^7.62.0",
     "react-pdf": "^10.2.0",
-    "react-router-dom": "^7.9.6",
     "recharts": "^2.15.4",
     "zod": "^3.23.8"
   },
