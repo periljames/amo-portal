@@ -1,0 +1,28 @@
+body:has(.hr-decision)::before {
+  content: "";
+  position: fixed;
+  z-index: 10990;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+.hr-decision {
+  z-index: 11000 !important;
+  width: min(680px, calc(100vw - 32px)) !important;
+  max-height: calc(100vh - 40px) !important;
+  box-shadow: 0 34px 100px rgba(2, 6, 23, 0.42) !important;
+}
+
+.hr-contract-editor {
+  overscroll-behavior: contain;
+}
+
+.hr-contract-editor .wr-actions--end {
+  position: sticky;
+  bottom: -18px;
+  margin: 14px -18px -18px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.3));
+  background: var(--surface-elevated, #fff);
+}
