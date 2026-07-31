@@ -124,8 +124,10 @@ class BaseLocationConsensusRead(BaseModel):
     base_station_id: str
     sample_count: int
     distinct_contributor_count: int
-    candidate_latitude: Optional[float] = None
-    candidate_longitude: Optional[float] = None
+    # The candidate point is available to server-side approval logic only. It
+    # must never be serialized into contribution or consensus API responses.
+    candidate_latitude: Optional[float] = Field(default=None, exclude=True)
+    candidate_longitude: Optional[float] = Field(default=None, exclude=True)
     median_accuracy_m: Optional[float] = None
     max_spread_m: Optional[float] = None
     ready_for_approval: bool
