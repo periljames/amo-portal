@@ -47,6 +47,7 @@ export function updateSetupDepartment(
 export function deleteSetupDepartment(departmentId: string): Promise<void> {
   return apiDelete<void>(
     `/foundations/departments/${encodeURIComponent(departmentId)}`,
+    undefined,
     { headers: authHeaders() },
   );
 }
