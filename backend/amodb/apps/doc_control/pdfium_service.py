@@ -243,7 +243,23 @@ def _destination_payload(destination: dict[str, Any], fallback_page: int | None 
         "x": round(float(getattr(point, "x", 0) or 0), 2) if point is not None else None,
         "y": round(float(getattr(point, "y", 0) or 0), 2) if point is not None else None,
         "zoom": round(float(destination.get("zoom", 0) or 0), 3),
+        "view": _geometry_payload(destination.get("view")),
+        "viewrect": _geometry_payload(destination.get("viewrect")),
     }
+
+
+def _has_internal_destination(destination: dict[str, Any], fallback_page: int | None = None) -> bool:
+    raw_page = destination.get("page", -1)
+    try:
+        if raw_page is not None and int(raw_page) >= 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    if fallback_page is not None and fallback_page >= 0:
+        return True
+    if destination.get("to") is not None or destination.get("viewrect") is not None:
+        return True
+    return destination.get("view") not in (None, "")
 
 
 def _navigation_fingerprint(document: Any) -> dict[str, Any]:
@@ -261,8 +277,9 @@ def _navigation_fingerprint(document: Any) -> dict[str, Any]:
             "title": _stable_schema_text(title),
             "kind": kind,
         }
-        if kind == pymupdf.LINK_GOTO:
-            item["destination"] = _destination_payload(target, int(page_number or 0) - 1)
+        fallback_page = int(page_number or 0) - 1
+        if _has_internal_destination(target, fallback_page):
+            item["destination"] = _destination_payload(target, fallback_page)
         else:
             item.update({
                 "uri": _stable_schema_text(target.get("uri")),
@@ -280,7 +297,7 @@ def _navigation_fingerprint(document: Any) -> dict[str, Any]:
                 "rect": _rect_payload(link.get("from")),
                 "kind": kind,
             }
-            if kind == pymupdf.LINK_GOTO:
+            if _has_internal_destination(link):
                 item["destination"] = _destination_payload(link)
             else:
                 item.update({

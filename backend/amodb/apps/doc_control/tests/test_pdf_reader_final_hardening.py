@@ -388,3 +388,93 @@ def test_controlled_widgets_and_navigation_reject_structural_relocation(
         engine.validate_template_provenance(source, candidate)
     assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
     assert mismatch.value.status_code == 409
+
+
+
+def _fit_destination_array(document: object, page_index: int, mode: str) -> str:
+    suffix = {
+        "Fit": "/Fit",
+        "FitH": "/FitH 72",
+        "FitV": "/FitV 72",
+        "FitR": "/FitR 0 0 200 200",
+    }[mode]
+    return f"[{document[page_index].xref} 0 R {suffix}]"  # type: ignore[index]
+
+
+def _set_xref_destination(document: object, xref: int, destination: str) -> None:
+    action_kind, _ = document.xref_get_key(xref, "A")  # type: ignore[attr-defined]
+    if action_kind != "null":
+        document.xref_set_key(xref, "A/D", destination)  # type: ignore[attr-defined]
+    else:
+        document.xref_set_key(xref, "Dest", destination)  # type: ignore[attr-defined]
+
+
+def _rewrite_non_xyz_navigation(
+    source: bytes,
+    mode: str,
+    page_index: int,
+    *,
+    outline: bool,
+    page_link: bool,
+) -> bytes:
+    document = pymupdf.open(stream=source, filetype="pdf")
+    try:
+        destination = _fit_destination_array(document, page_index, mode)
+        if outline:
+            toc = document.get_toc(simple=False)
+            outline_xref = int(toc[0][3]["xref"])
+            _set_xref_destination(document, outline_xref, destination)
+        if page_link:
+            link_xref = int(document[0].get_links()[0]["xref"])
+            _set_xref_destination(document, link_xref, destination)
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
+
+
+@pytest.mark.parametrize("mode", ["Fit", "FitH", "FitV", "FitR"])
+@pytest.mark.parametrize("navigation_kind", ["outline", "page_link"])
+def test_non_xyz_internal_destinations_are_fingerprinted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    navigation_kind: str,
+) -> None:
+    monkeypatch.setattr(engine, "WORK_ROOT", tmp_path / "work")
+    baseline = _controlled_form_with_navigation()
+    source_bytes = _rewrite_non_xyz_navigation(
+        baseline,
+        mode,
+        0,
+        outline=True,
+        page_link=True,
+    )
+    candidate_bytes = _rewrite_non_xyz_navigation(
+        source_bytes,
+        mode,
+        1,
+        outline=navigation_kind == "outline",
+        page_link=navigation_kind == "page_link",
+    )
+
+    source = engine.inspect_pdf_bytes(source_bytes)
+    candidate = engine.inspect_pdf_bytes(candidate_bytes)
+    for source_page, candidate_page in zip(
+        source.template_fingerprint["pages"],
+        candidate.template_fingerprint["pages"],
+    ):
+        assert source_page["content_sha256"] == candidate_page["content_sha256"]
+        assert source_page["resources_sha256"] == candidate_page["resources_sha256"]
+
+    collection = "outlines" if navigation_kind == "outline" else "page_links"
+    source_item = source.template_fingerprint["navigation"][collection][0]
+    candidate_item = candidate.template_fingerprint["navigation"][collection][0]
+    assert source_item["kind"] == candidate_item["kind"]
+    assert source_item["destination"] != candidate_item["destination"]
+    assert source.template_fingerprint["navigation"] != candidate.template_fingerprint["navigation"]
+
+    with pytest.raises(engine.PdfEngineError) as mismatch:
+        engine.validate_template_provenance(source, candidate)
+    assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
+    assert mismatch.value.status_code == 409
+    assert "navigation" in mismatch.value.message
