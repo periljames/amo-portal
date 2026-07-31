@@ -100,7 +100,7 @@ jobs:
           ref: agent/document-reader-pdfium-hardening
           fetch-depth: 0
 
-      - name: Retrieve, validate, and publish the verified bundle
+      - name: Retrieve, validate, and publish the verified reader files
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_PARENT: 52a7f420a5cff8a52bfbd6d6bd5c3dfb304d77ba
@@ -110,7 +110,6 @@ jobs:
           set -euo pipefail
 
           git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD
-          test -f .github/workflows/apply-reader-bundle-once.yml
 
           gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --jq .body > /tmp/comment-body.txt
           sed -n '/^BUNDLE_BASE64_START$/,/^BUNDLE_BASE64_END$/p' /tmp/comment-body.txt \
@@ -141,15 +140,14 @@ jobs:
             install -D -m 0644 "/tmp/reader-bundle/${file}" "${file}"
           done < /tmp/expected-files.txt
 
-          git checkout "$EXPECTED_PARENT" -- .github/workflows/publications-reader-ci.yml
-          rm .github/workflows/apply-reader-bundle-once.yml
           git diff --check
-
-          git diff --name-only "$EXPECTED_PARENT" -- | LC_ALL=C sort > /tmp/final-files.txt
-          diff -u /tmp/expected-files.txt /tmp/final-files.txt
+          git diff --name-only HEAD -- | LC_ALL=C sort > /tmp/changed-files.txt
+          diff -u /tmp/expected-files.txt /tmp/changed-files.txt
 
           git config user.name 'AMO Portal automation'
           git config user.email 'actions@users.noreply.github.com'
-          git add -A
+          while IFS= read -r file; do
+            git add -- "$file"
+          done < /tmp/expected-files.txt
           git commit -m 'Complete PDF reader navigation and form custody'
           git push origin HEAD:agent/document-reader-pdfium-hardening
