@@ -24,6 +24,7 @@ on:
       - "frontend/src/services/qms.ts"
       - "frontend/src/services/qmsAuditHubActions.ts"
       - "frontend/src/services/qmsAuditHubActions.test.ts"
+      - "frontend/src/styles/qms-overview.css"
       - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -196,10 +197,15 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run Quality service regression tests
         run: npm run test:quality
+      - name: Run QMS overview decision tests
+        run: npm run test:qms-overview
       - name: Typecheck and production build
         run: npm run build
-      - name: Lint changed Quality service boundary
+      - name: Lint changed Quality boundaries
         run: >-
           npm exec -- eslint
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
+          src/pages/qms/QmsOverviewPage.tsx
+          src/pages/qms/qmsOverviewModel.ts
+          src/pages/qms/qmsOverviewModel.test.ts
