@@ -5,6 +5,7 @@ const setupPage = readFileSync(new URL("../AdminAmoAssetsPage.tsx", import.meta.
 const overviewPage = readFileSync(new URL("../AdminOverviewPage.tsx", import.meta.url), "utf8");
 const setupCss = readFileSync(new URL("../../styles/admin-setup-centre.css", import.meta.url), "utf8");
 const setupShellCss = readFileSync(new URL("../../styles/admin-setup-shell.css", import.meta.url), "utf8");
+const workforceDialogCss = readFileSync(new URL("../../styles/workforce-dialog-layer.css", import.meta.url), "utf8");
 const rosteringCss = readFileSync(new URL("../../styles/rostering.css", import.meta.url), "utf8");
 
 describe("AMO administrator setup flow", () => {
@@ -37,11 +38,12 @@ describe("AMO administrator setup flow", () => {
     expect(overviewPage).not.toContain("/admin-users");
   });
 
-  it("keeps the Workforce editor visible above the portal shell", () => {
-    expect(rosteringCss).toContain("admin-setup-centre.css");
-    expect(setupCss).toContain("body:has(.hr-decision)::before");
-    expect(setupCss).toContain("z-index: 11000 !important");
-    expect(setupCss).toContain(".hr-contract-editor .wr-actions--end");
+  it("keeps the Workforce editor visible without loading AMO setup CSS into Rostering", () => {
+    expect(rosteringCss).toContain("workforce-dialog-layer.css");
+    expect(rosteringCss).not.toContain("admin-setup-centre.css");
+    expect(workforceDialogCss).toContain("body:has(.hr-decision)::before");
+    expect(workforceDialogCss).toContain("z-index: 11000 !important");
+    expect(workforceDialogCss).toContain(".hr-contract-editor .wr-actions--end");
   });
 
   it("removes the narrow admin assets constraint at page and shell level", () => {
