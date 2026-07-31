@@ -1,0 +1,313 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { Link, Navigate, NavLink, useLocation, useSearchParams } from "react-router-dom";
+
+import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
+import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import PageHeader from "../../components/shared/PageHeader";
+import { apiRequest, qmsPath } from "../../services/apiClient";
+import { getCachedUser } from "../../services/auth";
+import type { QmsSourceError } from "../../types/qms";
+import {
+  classifyQmsPath,
+  qmsBasePath,
+  qmsModulePath,
+  type QmsModuleRoute,
+} from "./routes/qmsRouteRegistry";
+import "../../styles/qms-register.css";
+
+type LoadState = "idle" | "loading" | "ready" | "error";
+type QmsRow = Record<string, unknown>;
+
+type QmsRegisterResponse = {
+  module?: string;
+  view?: string;
+  table?: string;
+  items?: QmsRow[];
+  columns?: string[];
+  limit?: number;
+  offset?: number;
+  next_offset?: number | null;
+  has_more?: boolean;
+  table_missing?: boolean;
+  warning?: string | null;
+  source_errors?: QmsSourceError[];
+  trace_id?: string | null;
+  elapsed_ms?: number | null;
+  applied_filters?: Record<string, string>;
+};
+
+const PAGE_SIZES = [15, 30, 60, 100] as const;
+const CONTROLLED_NEW_VIEWS = new Set(["new"]);
+
+function friendlyError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Unable to load this Quality workspace.";
+}
+
+function humanise(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatValue(value: unknown): string {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return Intl.NumberFormat().format(value);
+  if (typeof value === "object") {
+    try {
+      const serialised = JSON.stringify(value);
+      return serialised.length > 100 ? `${serialised.slice(0, 97)}…` : serialised;
+    } catch {
+      return String(value);
+    }
+  }
+  const raw = String(value);
+  const parsed = /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(raw) ? new Date(raw) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
+  return raw.length > 130 ? `${raw.slice(0, 127)}…` : raw;
+}
+
+function rowId(row: QmsRow): string | null {
+  const value = row.id ?? row.uuid ?? row.record_id;
+  return value == null ? null : String(value);
+}
+
+function statusTone(value: unknown): string {
+  const status = String(value || "").toUpperCase();
+  if (["CLOSED", "COMPLETE", "COMPLETED", "ACTIVE", "APPROVED", "IMPLEMENTED"].includes(status)) return "positive";
+  if (["OVERDUE", "REJECTED", "CANCELLED", "FAILED", "CRITICAL", "MAJOR"].includes(status)) return "danger";
+  if (["DRAFT", "PENDING", "PENDING_APPROVAL", "OPEN", "IN_PROGRESS", "AWAITING_AUDITEE", "AWAITING_QUALITY_REVIEW"].includes(status)) return "warning";
+  return "neutral";
+}
+
+function deriveColumns(rows: QmsRow[], responseColumns: string[] | undefined): string[] {
+  const preferred = [
+    "reference", "audit_ref", "car_number", "finding_ref", "doc_code", "title", "name", "message",
+    "status", "severity", "owner_user_id", "assigned_to_user_id", "due_date", "created_at", "updated_at",
+  ];
+  const seen = new Set<string>();
+  const candidates = [...preferred, ...(responseColumns || []), ...rows.flatMap((row) => Object.keys(row))];
+  return candidates.filter((column) => {
+    if (seen.has(column) || ["payload", "raw_payload", "amo_id"].includes(column)) return false;
+    seen.add(column);
+    return rows.some((row) => row[column] != null && row[column] !== "");
+  }).slice(0, 7);
+}
+
+function viewLabel(view: string): string {
+  if (view === "assigned-to-me") return "Assigned to me";
+  if (view === "executive-dashboard") return "Executive dashboard";
+  return humanise(view);
+}
+
+function routeContext(pathname: string): { amoCode: string; module: QmsModuleRoute; view: string } | null {
+  const classified = classifyQmsPath(pathname);
+  if (classified.kind !== "known" || !classified.amoCode || !classified.module) return null;
+  const relative = (classified.relativePath || "").split("/").filter(Boolean);
+  return {
+    amoCode: classified.amoCode,
+    module: classified.module,
+    view: relative[1] || classified.module.defaultView,
+  };
+}
+
+const QmsRegisterPage: React.FC = () => {
+  const location = useLocation();
+  const context = useMemo(() => routeContext(location.pathname), [location.pathname]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const abortRef = useRef<AbortController | null>(null);
+  const [state, setState] = useState<LoadState>("idle");
+  const [data, setData] = useState<QmsRegisterResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const query = searchParams.get("q") || "";
+  const status = searchParams.get("status") || "";
+  const limit = PAGE_SIZES.includes(Number(searchParams.get("limit")) as (typeof PAGE_SIZES)[number])
+    ? Number(searchParams.get("limit"))
+    : 30;
+  const offset = Math.max(0, Number(searchParams.get("offset") || 0));
+  const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
+
+  const load = useCallback(async () => {
+    if (!context || controlledNew) return;
+    abortRef.current?.abort(new DOMException("Superseded by a newer Quality register request", "AbortError"));
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setState("loading");
+    setError(null);
+
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (query.trim()) params.set("q", query.trim());
+    if (status) params.set("status", status);
+
+    try {
+      const response = await apiRequest<QmsRegisterResponse>(
+        `${qmsPath(context.amoCode, `/${context.module.segment}/${context.view}`)}?${params.toString()}`,
+        { timeoutMs: 15_000, signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      setData(response);
+      setState("ready");
+    } catch (loadError) {
+      if (controller.signal.aborted) return;
+      setError(friendlyError(loadError));
+      setState("error");
+    }
+  }, [context, controlledNew, limit, offset, query, status]);
+
+  useEffect(() => {
+    void load();
+    return () => abortRef.current?.abort(new DOMException("Quality register unmounted", "AbortError"));
+  }, [load]);
+
+  const rows = data?.items || [];
+  const columns = useMemo(() => deriveColumns(rows, data?.columns), [data?.columns, rows]);
+  const currentUser = getCachedUser();
+  const diagnosticsAuthorized = Boolean(currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_INSPECTOR");
+
+  if (!context) return <Navigate to="." replace />;
+  const { amoCode, module, view } = context;
+  if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
+  if (!hasQmsRolePermission(module.permission)) return <Navigate to={qmsBasePath(amoCode)} replace />;
+
+  const updateSearch = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value == null || value === "") next.delete(key);
+      else next.set(key, value);
+    });
+    setSearchParams(next, { replace: true });
+  };
+
+  const page = Math.floor((data?.offset ?? offset) / Math.max(1, data?.limit ?? limit)) + 1;
+
+  return (
+    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      <div className="qms-register-page">
+        <PageHeader
+          compact
+          eyebrow="Quality Management System"
+          title={module.label}
+          subtitle={`${viewLabel(view)} workspace. Module navigation remains in the sidebar so the register can use the available width.`}
+          breadcrumbs={[
+            { label: "Quality", to: qmsBasePath(amoCode) },
+            { label: module.navigationLabel },
+            { label: viewLabel(view) },
+          ]}
+          actions={!controlledNew ? (
+            <button type="button" className="qms-register-refresh" onClick={() => void load()} disabled={state === "loading"}>
+              <RefreshCw size={15} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh
+            </button>
+          ) : null}
+        />
+
+        <nav className="qms-register-views" aria-label={`${module.navigationLabel} views`}>
+          {module.validViews.slice(0, 10).map((candidate) => (
+            <NavLink key={candidate} to={qmsModulePath(amoCode, module.id, candidate)} className={({ isActive }) => isActive ? "is-active" : ""}>
+              {viewLabel(candidate)}
+            </NavLink>
+          ))}
+        </nav>
+
+        {controlledNew ? (
+          <section className="qms-register-controlled" role="status">
+            <ShieldCheck size={22} aria-hidden="true" />
+            <div>
+              <span>Controlled workflow</span>
+              <h2>Generic quick creation is disabled</h2>
+              <p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership, and approval controls. The portal will not create a governed record from a generic five-field form.</p>
+              <Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Return to {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="qms-register-workspace" aria-label={`${module.label} ${viewLabel(view)}`}>
+              <div className="qms-register-toolbar">
+                <label className="qms-register-search">
+                  <Search size={15} aria-hidden="true" />
+                  <input
+                    value={query}
+                    onChange={(event) => updateSearch({ q: event.target.value, offset: null })}
+                    placeholder={`Search ${module.navigationLabel.toLowerCase()}`}
+                    aria-label={`Search ${module.navigationLabel}`}
+                  />
+                </label>
+                <label><span>Status</span><select value={status} onChange={(event) => updateSearch({ status: event.target.value, offset: null })}><option value="">All statuses</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label>
+                <label><span>Rows</span><select value={limit} onChange={(event) => updateSearch({ limit: event.target.value, offset: null })}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+                <span className="qms-register-page-number">Page {page}</span>
+              </div>
+
+              {data?.warning || data?.table_missing || data?.source_errors?.length ? (
+                <div className="qms-register-warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{data?.warning || (data?.table_missing ? "The configured Quality data source is unavailable." : "Some source reads failed; available rows are shown.")}</span></div>
+              ) : null}
+
+              {error ? (
+                <div className="qms-register-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><div><strong>Unable to load this register</strong><p>{error}</p></div><button type="button" onClick={() => void load()}>Retry</button></div>
+              ) : null}
+
+              {state === "loading" && !data ? <div className="qms-register-loading" role="status"><RefreshCw size={17} className="is-spinning" /> Loading {module.navigationLabel.toLowerCase()}…</div> : null}
+
+              {state !== "loading" && !error && rows.length === 0 ? (
+                <div className="qms-register-empty"><CheckCircle2 size={19} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status, and search filters.</p></div></div>
+              ) : null}
+
+              {rows.length ? (
+                <div className="qms-register-table-wrap">
+                  <table className="qms-register-table">
+                    <thead><tr>{columns.map((column) => <th key={column}>{humanise(column)}</th>)}{module.allowRecordDetails ? <th>Action</th> : null}</tr></thead>
+                    <tbody>
+                      {rows.map((row, index) => {
+                        const id = rowId(row) || `row-${index}`;
+                        return (
+                          <tr key={id}>
+                            {columns.map((column) => {
+                              const value = row[column];
+                              return (
+                                <td key={column} data-label={humanise(column)}>
+                                  {column === "status" || column === "severity" ? <span className={`qms-register-status qms-register-status--${statusTone(value)}`}>{humanise(value) || "Unknown"}</span> : formatValue(value)}
+                                </td>
+                              );
+                            })}
+                            {module.allowRecordDetails ? <td data-label="Action">{rowId(row) ? <Link className="qms-register-open" to={`${qmsBasePath(amoCode)}/${module.segment}/${encodeURIComponent(id)}/overview`}>Open <ArrowRight size={13} /></Link> : "—"}</td> : null}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              <footer className="qms-register-pagination">
+                <button type="button" disabled={offset <= 0 || state === "loading"} onClick={() => updateSearch({ offset: String(Math.max(0, offset - limit)) })}>Previous</button>
+                <span>{rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"} on this page</span>
+                <button type="button" disabled={!data?.has_more || state === "loading"} onClick={() => updateSearch({ offset: String(data?.next_offset ?? offset + limit) })}>Next</button>
+              </footer>
+            </section>
+
+            <details className="qms-register-help">
+              <summary><HelpCircle size={15} aria-hidden="true" /> Workflow guidance</summary>
+              <div><strong>{module.label}</strong><p>Use this view to find and open governed records. Creation, approval, evidence, verification, and closure remain in their dedicated workflows rather than a generic register form.</p></div>
+            </details>
+
+            {diagnosticsAuthorized ? (
+              <details className="qms-register-diagnostics">
+                <summary>Support diagnostics</summary>
+                <dl>
+                  <div><dt>Source</dt><dd>{data?.table || module.segment}</dd></div>
+                  <div><dt>Trace ID</dt><dd><code>{data?.trace_id || "Unavailable"}</code></dd></div>
+                  <div><dt>Backend duration</dt><dd>{data?.elapsed_ms == null ? "Unavailable" : `${data.elapsed_ms} ms`}</dd></div>
+                  <div><dt>Applied view</dt><dd>{data?.view || view}</dd></div>
+                </dl>
+              </details>
+            ) : null}
+          </>
+        )}
+      </div>
+    </DepartmentLayout>
+  );
+};
+
+export default QmsRegisterPage;

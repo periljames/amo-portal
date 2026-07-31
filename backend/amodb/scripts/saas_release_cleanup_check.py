@@ -71,12 +71,16 @@ def main() -> int:
     assert tenant_route in admin_links_text
     assert "module._setup_links = setup_links" in admin_links_text
     frontend_router = _read(FRONTEND_ROOT / "src/router.tsx")
+    delegated_frontend_router = _read(FRONTEND_ROOT / "src/router.legacy.tsx")
+    assert 'from "./router.legacy"' in frontend_router
     registered_route = tenant_route.replace("{amoCode}", ":amoCode")
-    assert registered_route in frontend_router, registered_route
+    assert registered_route in delegated_frontend_router, registered_route
     checks["tenant-admin-link-is-registered"] = {
         "passed": True,
         "backend": tenant_route,
         "frontend": registered_route,
+        "owner": "frontend/src/router.legacy.tsx",
+        "delegated_by": "frontend/src/router.tsx",
     }
 
     fiscal_path = BACKEND_ROOT / "amodb/apps/platform/saas_fiscalization_policy.py"
