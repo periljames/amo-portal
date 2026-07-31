@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { BookOpen, CalendarClock, FilePlus2, Search, ShieldAlert, ShieldCheck, UploadCloud, X } from "lucide-react";
+import { BookOpen, FilePlus2, Search, ShieldAlert, ShieldCheck, UploadCloud, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {
