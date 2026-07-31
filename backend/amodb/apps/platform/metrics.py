@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import math
+import os
 import threading
 import time
 from collections import defaultdict, deque
@@ -8,15 +10,24 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Tuple
 
+from sqlalchemy import case, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from . import models
+
+logger = logging.getLogger(__name__)
 
 _BUCKETS: dict[Tuple[datetime, str, str, str | None, bool], dict[str, Any]] = defaultdict(dict)
 _LOCK = threading.Lock()
 _MAX_SAMPLES = 200
 _PERSISTED_CACHE_TTL_SECONDS = 10.0
 _PERSISTED_CACHE: dict[str, Any] = {"at": 0.0, "minutes": 0, "rows": []}
+
+_AUTO_FLUSH_LOCK = threading.Lock()
+_AUTO_FLUSH_IN_FLIGHT = False
+_AUTO_FLUSH_INTERVAL_SECONDS = max(5.0, float(os.getenv("PLATFORM_METRICS_FLUSH_INTERVAL_SEC", "30") or "30"))
+_LAST_AUTO_FLUSH_AT = time.monotonic()
 
 _NETWORK_LOCK = threading.Lock()
 _NETWORK_LAST: dict[str, Any] | None = None
@@ -60,6 +71,95 @@ def _weighted(values: list[tuple[float | None, int]]) -> float | None:
     return round(sum(value * weight for value, weight in usable) / total_weight, 2)
 
 
+def _new_bucket_row() -> dict[str, Any]:
+    return {
+        "request_count": 0,
+        "success_count": 0,
+        "client_error_count": 0,
+        "server_error_count": 0,
+        "timeout_count": 0,
+        "total_duration_ms": 0.0,
+        "min_duration_ms": None,
+        "max_duration_ms": None,
+        "samples": [],
+    }
+
+
+def _merge_bucket_rows(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    for key in ("request_count", "success_count", "client_error_count", "server_error_count", "timeout_count"):
+        target[key] = int(target.get(key) or 0) + int(source.get(key) or 0)
+    target["total_duration_ms"] = float(target.get("total_duration_ms") or 0) + float(source.get("total_duration_ms") or 0)
+    source_min = source.get("min_duration_ms")
+    target_min = target.get("min_duration_ms")
+    if source_min is not None:
+        target["min_duration_ms"] = source_min if target_min is None else min(float(target_min), float(source_min))
+    source_max = source.get("max_duration_ms")
+    target_max = target.get("max_duration_ms")
+    if source_max is not None:
+        target["max_duration_ms"] = source_max if target_max is None else max(float(target_max), float(source_max))
+    samples = [float(value) for value in target.get("samples") or []]
+    samples.extend(float(value) for value in source.get("samples") or [])
+    target["samples"] = samples[-_MAX_SAMPLES:]
+    return target
+
+
+def _drain_route_metrics(*, include_current: bool = False) -> dict[Tuple[datetime, str, str, str | None, bool], dict[str, Any]]:
+    current_bucket = _bucket_start()
+    with _LOCK:
+        keys = [
+            key
+            for key in _BUCKETS
+            if include_current or key[0] < current_bucket
+        ]
+        payload = {key: _BUCKETS.pop(key) for key in keys}
+        if payload:
+            _PERSISTED_CACHE.update({"at": 0.0, "minutes": 0, "rows": []})
+    return payload
+
+
+def _restore_route_metrics(payload: dict[Tuple[datetime, str, str, str | None, bool], dict[str, Any]]) -> None:
+    if not payload:
+        return
+    with _LOCK:
+        for key, row in payload.items():
+            target = _BUCKETS.setdefault(key, _new_bucket_row())
+            _merge_bucket_rows(target, row)
+
+
+def _auto_flush_worker() -> None:
+    global _AUTO_FLUSH_IN_FLIGHT
+    db = None
+    try:
+        from amodb.database import WriteSessionLocal
+
+        db = WriteSessionLocal()
+        flush_route_metrics(db, include_current=False)
+    except Exception:
+        logger.warning("Unable to persist platform route metrics from the API process.", exc_info=True)
+    finally:
+        if db is not None:
+            db.close()
+        with _AUTO_FLUSH_LOCK:
+            _AUTO_FLUSH_IN_FLIGHT = False
+
+
+def _schedule_auto_flush() -> None:
+    global _AUTO_FLUSH_IN_FLIGHT
+    global _LAST_AUTO_FLUSH_AT
+
+    now = time.monotonic()
+    with _AUTO_FLUSH_LOCK:
+        if _AUTO_FLUSH_IN_FLIGHT or now - _LAST_AUTO_FLUSH_AT < _AUTO_FLUSH_INTERVAL_SECONDS:
+            return
+        _AUTO_FLUSH_IN_FLIGHT = True
+        _LAST_AUTO_FLUSH_AT = now
+    threading.Thread(
+        target=_auto_flush_worker,
+        name="platform-metrics-flush",
+        daemon=True,
+    ).start()
+
+
 def record_route_metric(
     *,
     method: str,
@@ -74,17 +174,7 @@ def record_route_metric(
     del actor_user_id  # Retained for backwards-compatible callers and tests.
     key = (_bucket_start(), method.upper(), route[:255] or "unknown", tenant_id, bool(is_platform_route))
     with _LOCK:
-        row = _BUCKETS.setdefault(key, {
-            "request_count": 0,
-            "success_count": 0,
-            "client_error_count": 0,
-            "server_error_count": 0,
-            "timeout_count": 0,
-            "total_duration_ms": 0.0,
-            "min_duration_ms": None,
-            "max_duration_ms": None,
-            "samples": [],
-        })
+        row = _BUCKETS.setdefault(key, _new_bucket_row())
         row["request_count"] += 1
         if 200 <= status_code < 400:
             row["success_count"] += 1
@@ -102,6 +192,7 @@ def record_route_metric(
             samples.append(float(duration_ms))
         elif row["request_count"] % 10 == 0:
             samples[row["request_count"] % _MAX_SAMPLES] = float(duration_ms)
+    _schedule_auto_flush()
 
 
 def _read_network_totals() -> dict[str, Any] | None:
@@ -381,14 +472,16 @@ def _trend_series(rows: list[dict[str, Any]], minutes: int) -> list[dict[str, An
         aggregate = buckets.setdefault(bucket, {
             "requests": 0,
             "errors": 0,
+            "timeouts": 0,
             "p95": [],
             "p99": [],
             "avg": [],
         })
         request_count = int(row.get("request_count") or 0)
-        errors = int(row.get("client_error_count") or 0) + int(row.get("server_error_count") or 0) + int(row.get("timeout_count") or 0)
+        errors = int(row.get("client_error_count") or 0) + int(row.get("server_error_count") or 0)
         aggregate["requests"] += request_count
         aggregate["errors"] += errors
+        aggregate["timeouts"] += int(row.get("timeout_count") or 0)
         aggregate["p95"].append((row.get("p95_latency_ms"), request_count))
         aggregate["p99"].append((row.get("p99_latency_ms"), request_count))
         aggregate["avg"].append((row.get("avg_latency_ms"), request_count))
@@ -396,7 +489,7 @@ def _trend_series(rows: list[dict[str, Any]], minutes: int) -> list[dict[str, An
     series: list[dict[str, Any]] = []
     cursor = start
     while cursor <= end:
-        aggregate = buckets.get(cursor) or {"requests": 0, "errors": 0, "p95": [], "p99": [], "avg": []}
+        aggregate = buckets.get(cursor) or {"requests": 0, "errors": 0, "timeouts": 0, "p95": [], "p99": [], "avg": []}
         requests = int(aggregate["requests"])
         errors = int(aggregate["errors"])
         series.append({
@@ -404,6 +497,7 @@ def _trend_series(rows: list[dict[str, Any]], minutes: int) -> list[dict[str, An
             "requests": requests,
             "requests_per_minute": float(requests),
             "errors": errors,
+            "timeouts": int(aggregate["timeouts"]),
             "error_rate": round(errors / requests, 4) if requests else 0.0,
             "avg_latency_ms": _weighted(aggregate["avg"]),
             "p95_latency_ms": _weighted(aggregate["p95"]),
@@ -421,7 +515,6 @@ def live_summary(minutes: int = 60) -> dict[str, Any]:
     rows = [row for row in persisted_rows if (_as_utc(row.get("bucket_start")) or cutoff) >= cutoff] + live_rows
 
     total = success = client = server = timeouts = 0
-    exact_live_durations: list[float] = []
     route_aggregates: dict[tuple[str, str, str | None, bool], dict[str, Any]] = {}
     tenants: dict[str, int] = {}
     for row in rows:
@@ -431,7 +524,6 @@ def live_summary(minutes: int = 60) -> dict[str, Any]:
         client += int(row.get("client_error_count") or 0)
         server += int(row.get("server_error_count") or 0)
         timeouts += int(row.get("timeout_count") or 0)
-        exact_live_durations.extend(float(value) for value in row.get("samples") or [])
         tenant_id = row.get("tenant_id")
         if tenant_id:
             tenants[str(tenant_id)] = tenants.get(str(tenant_id), 0) + request_count
@@ -469,12 +561,12 @@ def live_summary(minutes: int = 60) -> dict[str, Any]:
             "p99_latency_ms": _weighted(aggregate["p99"]),
         })
 
-    error_count = client + server + timeouts
+    error_count = client + server
     trend = _trend_series(rows, window_minutes)
-    global_p95 = _pct(exact_live_durations, 95) if exact_live_durations else _weighted([
+    global_p95 = _weighted([
         (row.get("p95_latency_ms"), int(row.get("request_count") or 0)) for row in rows
     ])
-    global_p99 = _pct(exact_live_durations, 99) if exact_live_durations else _weighted([
+    global_p99 = _weighted([
         (row.get("p99_latency_ms"), int(row.get("request_count") or 0)) for row in rows
     ])
 
@@ -490,6 +582,7 @@ def live_summary(minutes: int = 60) -> dict[str, Any]:
         "peak_requests_per_minute": peak_requests_per_minute,
         "success_count": success,
         "failure_count": error_count,
+        "timeout_count": timeouts,
         "error_rate": round(error_count / total, 4) if total else 0.0,
         "p95_latency_ms": global_p95,
         "p99_latency_ms": global_p99,
@@ -511,39 +604,123 @@ def live_summary(minutes: int = 60) -> dict[str, Any]:
     }
 
 
-def flush_route_metrics(db: Session) -> dict[str, int]:
-    with _LOCK:
-        payload = dict(_BUCKETS)
-        _BUCKETS.clear()
-        _PERSISTED_CACHE.update({"at": 0.0, "minutes": 0, "rows": []})
+def _latency_upsert_expression(table, excluded, column_name: str, new_request_count):
+    existing_value = getattr(table.c, column_name)
+    incoming_value = getattr(excluded, column_name)
+    return case(
+        (incoming_value.is_(None), existing_value),
+        (existing_value.is_(None), incoming_value),
+        else_=(
+            (existing_value * table.c.request_count)
+            + (incoming_value * excluded.request_count)
+        ) / func.nullif(new_request_count, 0),
+    )
+
+
+def _minimum_upsert_expression(existing, incoming):
+    return case(
+        (incoming.is_(None), existing),
+        (existing.is_(None), incoming),
+        else_=func.least(existing, incoming),
+    )
+
+
+def _maximum_upsert_expression(existing, incoming):
+    return case(
+        (incoming.is_(None), existing),
+        (existing.is_(None), incoming),
+        else_=func.greatest(existing, incoming),
+    )
+
+
+def flush_route_metrics(db: Session, *, include_current: bool = False) -> dict[str, int]:
+    payload = _drain_route_metrics(include_current=include_current)
+    if not payload:
+        return {"written": 0}
+
+    table = models.PlatformRouteMetric1m.__table__
     written = 0
-    for (bucket, method, route, tenant_id, is_platform_route), row in payload.items():
-        request_count = int(row.get("request_count") or 0)
-        if request_count <= 0:
-            continue
-        samples = [float(value) for value in row.get("samples") or []]
-        metric = models.PlatformRouteMetric1m(
-            bucket_start=bucket,
-            method=method,
-            route=route,
-            tenant_id=tenant_id,
-            is_platform_route=is_platform_route,
-            request_count=request_count,
-            success_count=int(row.get("success_count") or 0),
-            client_error_count=int(row.get("client_error_count") or 0),
-            server_error_count=int(row.get("server_error_count") or 0),
-            timeout_count=int(row.get("timeout_count") or 0),
-            total_duration_ms=float(row.get("total_duration_ms") or 0),
-            min_duration_ms=row.get("min_duration_ms"),
-            max_duration_ms=row.get("max_duration_ms"),
-            p50_latency_ms=_pct(samples, 50),
-            p95_latency_ms=_pct(samples, 95),
-            p99_latency_ms=_pct(samples, 99),
-            avg_latency_ms=round((float(row.get("total_duration_ms") or 0) / request_count), 2),
-            requests_per_minute=float(request_count),
-            errors_per_minute=float(int(row.get("client_error_count") or 0) + int(row.get("server_error_count") or 0) + int(row.get("timeout_count") or 0)),
-        )
-        db.add(metric)
-        written += 1
-    db.commit()
+    try:
+        for (bucket, method, route, tenant_id, is_platform_route), row in payload.items():
+            request_count = int(row.get("request_count") or 0)
+            if request_count <= 0:
+                continue
+            samples = [float(value) for value in row.get("samples") or []]
+            error_count = int(row.get("client_error_count") or 0) + int(row.get("server_error_count") or 0)
+            values = {
+                "id": getattr(models.PlatformRouteMetric1m, "id").default.arg() if getattr(models.PlatformRouteMetric1m, "id").default else None,
+                "bucket_start": bucket,
+                "method": method,
+                "route": route,
+                "tenant_id": tenant_id,
+                "is_platform_route": is_platform_route,
+                "request_count": request_count,
+                "success_count": int(row.get("success_count") or 0),
+                "client_error_count": int(row.get("client_error_count") or 0),
+                "server_error_count": int(row.get("server_error_count") or 0),
+                "timeout_count": int(row.get("timeout_count") or 0),
+                "total_duration_ms": float(row.get("total_duration_ms") or 0),
+                "min_duration_ms": row.get("min_duration_ms"),
+                "max_duration_ms": row.get("max_duration_ms"),
+                "p50_latency_ms": _pct(samples, 50),
+                "p95_latency_ms": _pct(samples, 95),
+                "p99_latency_ms": _pct(samples, 99),
+                "avg_latency_ms": round((float(row.get("total_duration_ms") or 0) / request_count), 2),
+                "requests_per_minute": float(request_count),
+                "errors_per_minute": float(error_count),
+            }
+            if values["id"] is None:
+                values.pop("id")
+            statement = pg_insert(table).values(**values)
+            excluded = statement.excluded
+            new_request_count = table.c.request_count + excluded.request_count
+            statement = statement.on_conflict_do_update(
+                index_elements=[
+                    table.c.bucket_start,
+                    table.c.method,
+                    table.c.route,
+                    table.c.tenant_id,
+                    table.c.is_platform_route,
+                ],
+                set_={
+                    "request_count": new_request_count,
+                    "success_count": table.c.success_count + excluded.success_count,
+                    "client_error_count": table.c.client_error_count + excluded.client_error_count,
+                    "server_error_count": table.c.server_error_count + excluded.server_error_count,
+                    "timeout_count": table.c.timeout_count + excluded.timeout_count,
+                    "total_duration_ms": table.c.total_duration_ms + excluded.total_duration_ms,
+                    "min_duration_ms": _minimum_upsert_expression(table.c.min_duration_ms, excluded.min_duration_ms),
+                    "max_duration_ms": _maximum_upsert_expression(table.c.max_duration_ms, excluded.max_duration_ms),
+                    "p50_latency_ms": _latency_upsert_expression(table, excluded, "p50_latency_ms", new_request_count),
+                    "p95_latency_ms": _latency_upsert_expression(table, excluded, "p95_latency_ms", new_request_count),
+                    "p99_latency_ms": _latency_upsert_expression(table, excluded, "p99_latency_ms", new_request_count),
+                    "avg_latency_ms": (
+                        (table.c.total_duration_ms + excluded.total_duration_ms)
+                        / func.nullif(new_request_count, 0)
+                    ),
+                    "requests_per_minute": new_request_count,
+                    "errors_per_minute": table.c.errors_per_minute + excluded.errors_per_minute,
+                },
+            )
+            db.execute(statement)
+            written += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        _restore_route_metrics(payload)
+        raise
+    with _LOCK:
+        _PERSISTED_CACHE.update({"at": 0.0, "minutes": 0, "rows": []})
     return {"written": written}
+
+
+def flush_current_process_metrics() -> dict[str, int]:
+    db = None
+    try:
+        from amodb.database import WriteSessionLocal
+
+        db = WriteSessionLocal()
+        return flush_route_metrics(db, include_current=True)
+    finally:
+        if db is not None:
+            db.close()
