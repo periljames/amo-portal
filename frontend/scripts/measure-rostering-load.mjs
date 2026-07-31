@@ -24,6 +24,10 @@ const profile = {
   downloadBytesPerSecond: 30 * 1024,
   uploadBytesPerSecond: 15 * 1024,
 };
+const phaseMethodology = {
+  cold: "Empty browser HTTP cache over the synthetic edge-2G profile.",
+  warm: "Offline replay from the populated browser HTTP cache; any uncached route asset fails the phase.",
+};
 
 function writeReport(report) {
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
@@ -35,6 +39,7 @@ function failureReport(failures, extra = {}) {
     generatedAt: new Date().toISOString(),
     baseUrl,
     profile,
+    phaseMethodology,
     passed: false,
     failures,
     ...extra,
@@ -109,17 +114,33 @@ const scenarios = {
   workforce: collectDependencyFiles([routeKey, workspaceMap.get("WorkforceHrWorkspace")[0]]),
 };
 
-async function applyNetworkProfile(context, page) {
+async function applyPhaseNetwork(context, page, phase) {
   const client = await context.newCDPSession(page);
   await client.send("Network.enable");
   await client.send("Network.setCacheDisabled", { cacheDisabled: false });
-  await client.send("Network.emulateNetworkConditions", {
-    offline: false,
-    latency: profile.latencyMs,
-    downloadThroughput: profile.downloadBytesPerSecond,
-    uploadThroughput: profile.uploadBytesPerSecond,
-    connectionType: "cellular2g",
-  });
+
+  if (phase === "cold-cache") {
+    await client.send("Network.clearBrowserCache");
+    await client.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: profile.latencyMs,
+      downloadThroughput: profile.downloadBytesPerSecond,
+      uploadThroughput: profile.uploadBytesPerSecond,
+      connectionType: "cellular2g",
+    });
+  } else {
+    // A warm-cache measurement should measure cache retrieval, not charge the
+    // synthetic 2G round-trip latency again. Offline mode makes this stricter:
+    // every asset must be available from the HTTP cache or the phase fails.
+    await client.send("Network.emulateNetworkConditions", {
+      offline: true,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+      connectionType: "none",
+    });
+  }
+
   return client;
 }
 
@@ -130,7 +151,7 @@ async function measureScenario(browser, name, files) {
   async function measurePhase(phase) {
     const page = await context.newPage();
     await page.goto(`${baseUrl}/perf-shell.html`, { waitUntil: "domcontentloaded" });
-    const client = await applyNetworkProfile(context, page);
+    const client = await applyPhaseNetwork(context, page, phase);
     const result = await page.evaluate(async ({ assetUrls, scenario, label }) => {
       performance.clearResourceTimings();
       const startedAt = performance.now();
@@ -208,6 +229,7 @@ try {
     generatedAt: new Date().toISOString(),
     baseUrl,
     profile,
+    phaseMethodology,
     routeSource: routeEntry[1].src || routeEntry[0],
     workspaces: workspaceEntries.map(({ name, entry }) => ({
       name,
