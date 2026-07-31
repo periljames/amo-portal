@@ -32,6 +32,7 @@ from .console_router import router as console_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
+from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
@@ -56,5 +57,11 @@ install_legacy_command_queue()
 # Usage aggregation remains batched per API worker, but database increments are
 # atomic across workers and failed batches are restored before the next flush.
 install_usage_meter_hardening(router)
+
+# Route latency and request distributions are process-local while requests are
+# active. Persist each worker's current bucket on a real lifecycle timer so the
+# dashboard combines every worker and the final bucket survives idle periods or
+# a graceful restart.
+install_platform_metrics_lifecycle(router)
 
 __all__ = ["router"]
