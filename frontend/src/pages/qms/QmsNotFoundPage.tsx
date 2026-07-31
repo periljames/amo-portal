@@ -7,9 +7,20 @@ import PageHeader from "../../components/shared/PageHeader";
 import { qmsBasePath, qmsNavigationItems } from "./routes/qmsRouteRegistry";
 import "../../styles/qms-overview.css";
 
+function decodeSegment(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 const QmsNotFoundPage: React.FC = () => {
   const location = useLocation();
-  const { amoCode = "UNKNOWN" } = useParams<{ amoCode: string }>();
+  const params = useParams<{ amoCode?: string }>();
+  const parts = location.pathname.split("/").filter(Boolean);
+  const amoCode = params.amoCode || (parts[0] === "maintenance" ? decodeSegment(parts[1]) : "") || "UNKNOWN";
   const suggestions = useMemo(
     () => qmsNavigationItems(amoCode).filter((item) => ["command", "assurance", "control"].includes(item.section)).slice(0, 6),
     [amoCode],
