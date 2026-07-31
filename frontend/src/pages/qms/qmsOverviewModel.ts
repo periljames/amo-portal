@@ -1,6 +1,18 @@
-import type { QmsCounterMap } from "../../types/qms";
+import type {
+  QmsOperationalActionItem,
+  QmsOperationalDashboardResponse,
+  QmsOperationalObligation,
+  QmsOperationalTone,
+  QmsOperationalWorkItem,
+} from "../../types/qms";
+import { qmsBasePath, qmsModulePath, qmsTrainingPath } from "./routes/qmsRouteRegistry";
 
-export type QmsOverviewTone = "danger" | "warning" | "neutral" | "positive";
+export type QmsOverviewHealth = {
+  tone: QmsOperationalTone;
+  label: string;
+  summary: string;
+  urgentCount: number;
+};
 
 export type QmsOverviewRoutes = {
   root: string;
@@ -17,134 +29,92 @@ export type QmsOverviewRoutes = {
   reports: string;
 };
 
-export type QmsExposureSignal = {
-  id: string;
-  label: string;
-  description: string;
-  count: number;
-  route: string;
-  tone: QmsOverviewTone;
-  priority: number;
-};
-
-export type QmsCalendarEntry = {
-  id: string;
-  title: string;
-  date: string | null;
-  module?: string | null;
-  event_type?: string | null;
-  due_state?: string | null;
-  link?: string | null;
-};
-
-export type QmsOverviewHealth = {
-  tone: QmsOverviewTone;
-  label: string;
-  summary: string;
-  urgentCount: number;
-};
-
-function encodeSegment(value: string): string {
-  return encodeURIComponent(value);
-}
-
 export function buildQmsOverviewRoutes(amoCode: string): QmsOverviewRoutes {
-  const base = `/maintenance/${encodeSegment(amoCode)}/quality`;
   return {
-    root: base,
-    myWork: `${base}/inbox/assigned-to-me`,
-    calendar: `${base}/calendar/list`,
-    audits: `${base}/audits/dashboard`,
-    auditSchedule: `${base}/audits/schedule`,
-    cars: `${base}/cars/register`,
-    overdueCars: `${base}/cars/overdue`,
-    findings: `${base}/findings/register`,
-    documents: `${base}/documents/library`,
-    training: `/maintenance/${encodeSegment(amoCode)}/training/competence/dashboard`,
-    overdueTraining: `/maintenance/${encodeSegment(amoCode)}/training/competence/overdue`,
-    reports: `${base}/reports/executive-dashboard`,
+    root: qmsBasePath(amoCode),
+    myWork: qmsModulePath(amoCode, "inbox", "assigned-to-me"),
+    calendar: qmsModulePath(amoCode, "calendar", "list"),
+    audits: qmsModulePath(amoCode, "audits", "dashboard"),
+    auditSchedule: qmsModulePath(amoCode, "audits", "schedule"),
+    cars: qmsModulePath(amoCode, "cars", "register"),
+    overdueCars: qmsModulePath(amoCode, "cars", "overdue"),
+    findings: qmsModulePath(amoCode, "findings", "register"),
+    documents: qmsModulePath(amoCode, "documents", "library"),
+    training: qmsTrainingPath(amoCode, "dashboard"),
+    overdueTraining: qmsTrainingPath(amoCode, "overdue"),
+    reports: qmsModulePath(amoCode, "reports", "executive-dashboard"),
   };
 }
 
-export function qmsCounter(counters: QmsCounterMap | null | undefined, key: string): number {
-  const value = Number(counters?.[key] ?? 0);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+export function parseQmsDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) {
+    const candidate = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    if (
+      candidate.getFullYear() === Number(dateOnly[1]) &&
+      candidate.getMonth() === Number(dateOnly[2]) - 1 &&
+      candidate.getDate() === Number(dateOnly[3])
+    ) return candidate;
+    return null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export function buildQmsExposureSignals(
-  counters: QmsCounterMap | null | undefined,
-  routes: QmsOverviewRoutes,
-): QmsExposureSignal[] {
-  const definitions: Array<Omit<QmsExposureSignal, "count"> & { counter: string }> = [
-    {
-      id: "overdue-cars",
-      label: "Overdue CARs",
-      description: "Corrective actions are beyond their approved due date.",
-      counter: "overdue_cars",
-      route: routes.overdueCars,
-      tone: "danger",
-      priority: 100,
-    },
-    {
-      id: "expired-training",
-      label: "Expired training",
-      description: "Personnel competence records require renewal or review.",
-      counter: "training_expired_records",
-      route: routes.overdueTraining,
-      tone: "danger",
-      priority: 95,
-    },
-    {
-      id: "cars-due-soon",
-      label: "CARs due within 30 days",
-      description: "Intervene before corrective actions become overdue.",
-      counter: "cars_due_soon",
-      route: routes.cars,
-      tone: "warning",
-      priority: 80,
-    },
-    {
-      id: "audits-due-soon",
-      label: "Audits due within 30 days",
-      description: "Confirm scope, team, notice, and preparation readiness.",
-      counter: "audits_due_soon",
-      route: routes.auditSchedule,
-      tone: "warning",
-      priority: 75,
-    },
-    {
-      id: "open-findings",
-      label: "Open findings",
-      description: "Review classification, ownership, and linked corrective action.",
-      counter: "open_findings",
-      route: routes.findings,
-      tone: "neutral",
-      priority: 55,
-    },
-    {
-      id: "draft-documents",
-      label: "Draft controlled documents",
-      description: "Documents remain outside the approved active baseline.",
-      counter: "draft_documents",
-      route: routes.documents,
-      tone: "neutral",
-      priority: 35,
-    },
-  ];
-
-  return definitions
-    .map(({ counter, ...definition }) => ({
-      ...definition,
-      count: qmsCounter(counters, counter),
-    }))
-    .filter((item) => item.count > 0)
-    .sort((a, b) => b.priority - a.priority || b.count - a.count || a.label.localeCompare(b.label));
+function startOfDay(value: Date): number {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
 }
 
-export function deriveQmsOverviewHealth(counters: QmsCounterMap | null | undefined): QmsOverviewHealth {
-  const overdueCars = qmsCounter(counters, "overdue_cars");
-  const expiredTraining = qmsCounter(counters, "training_expired_records");
-  const urgentCount = overdueCars + expiredTraining;
+export function qmsRelativeDateLabel(value: string | null | undefined, now = new Date()): string {
+  const target = parseQmsDate(value);
+  if (!target) return "Date unavailable";
+  const dayMs = 24 * 60 * 60 * 1000;
+  const days = Math.round((startOfDay(target) - startOfDay(now)) / dayMs);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days > 1) return `In ${days} days`;
+  if (days === -1) return "1 day overdue";
+  return `${Math.abs(days)} days overdue`;
+}
+
+export function qmsDateLabel(value: string | null | undefined): string {
+  const parsed = parseQmsDate(value);
+  if (!parsed) return "Date unavailable";
+  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function qmsTimestampLabel(value: string | null | undefined): string {
+  const parsed = parseQmsDate(value);
+  if (!parsed) return "Time unavailable";
+  return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+export function normaliseQmsCalendarEntries(
+  entries: QmsOperationalObligation[] | null | undefined,
+  now = new Date(),
+  limit = 12,
+): QmsOperationalObligation[] {
+  const floor = startOfDay(now);
+  return (entries ?? [])
+    .filter((entry) => {
+      const parsed = parseQmsDate(entry.date);
+      return parsed ? startOfDay(parsed) >= floor : false;
+    })
+    .sort((left, right) => {
+      const leftTime = parseQmsDate(left.date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightTime = parseQmsDate(right.date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime || left.title.localeCompare(right.title);
+    })
+    .slice(0, Math.max(1, limit));
+}
+
+export function deriveQmsOverviewHealth(
+  dashboard: Pick<QmsOperationalDashboardResponse, "action_queue" | "source_health"> | null | undefined,
+): QmsOverviewHealth {
+  const queue = dashboard?.action_queue ?? [];
+  const urgent = queue.filter((item) => item.tone === "danger");
+  const urgentCount = urgent.reduce((total, item) => total + Math.max(0, item.count), 0);
 
   if (urgentCount > 0) {
     return {
@@ -155,70 +125,89 @@ export function deriveQmsOverviewHealth(counters: QmsCounterMap | null | undefin
     };
   }
 
-  const upcoming =
-    qmsCounter(counters, "cars_due_soon") +
-    qmsCounter(counters, "audits_due_soon") +
-    qmsCounter(counters, "open_findings");
-
-  if (upcoming > 0) {
+  const attentionCount = queue.reduce((total, item) => total + Math.max(0, item.count), 0);
+  if (attentionCount > 0) {
     return {
       tone: "warning",
       label: "Attention needed",
-      summary: `${upcoming} open or upcoming quality item${upcoming === 1 ? "" : "s"} should be reviewed before they age.`,
+      summary: `${attentionCount} ranked quality item${attentionCount === 1 ? "" : "s"} should be addressed before exposure increases.`,
+      urgentCount: 0,
+    };
+  }
+
+  if (dashboard?.source_health.status === "partial" || dashboard?.source_health.status === "unavailable") {
+    return {
+      tone: "neutral",
+      label: "Data incomplete",
+      summary: "No exception is shown, but one or more operational sources are incomplete.",
       urgentCount: 0,
     };
   }
 
   return {
     tone: "positive",
-    label: "No dashboard exceptions",
-    summary: "No overdue or upcoming exceptions were detected in the loaded dashboard sources.",
+    label: "No ranked exceptions",
+    summary: "No overdue or priority exceptions were returned by the operational dashboard contract.",
     urgentCount: 0,
   };
 }
 
-function startOfDay(value: Date): number {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+export function qmsOwnerStatusLabel(value: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    assigned: "Assigned",
+    unassigned: "Unassigned",
+    partially_assigned: "Partly unassigned",
+    department_owner: "Department owner",
+    audit_programme: "Audit programme",
+    mixed: "Mixed ownership",
+    none: "No open records",
+    not_available: "Ownership unavailable",
+  };
+  return labels[String(value || "not_available")] || String(value || "Ownership unavailable").replaceAll("_", " ");
 }
 
-export function normaliseQmsCalendarEntries(
-  entries: QmsCalendarEntry[] | null | undefined,
-  now = new Date(),
-  limit = 8,
-): QmsCalendarEntry[] {
-  const floor = startOfDay(now);
-  return (entries ?? [])
-    .filter((entry) => {
-      if (!entry.date) return false;
-      const timestamp = new Date(entry.date).getTime();
-      return Number.isFinite(timestamp) && timestamp >= floor;
-    })
-    .sort((a, b) => {
-      const aTime = new Date(a.date as string).getTime();
-      const bTime = new Date(b.date as string).getTime();
-      return aTime - bTime || a.title.localeCompare(b.title);
-    })
-    .slice(0, Math.max(1, limit));
-}
-
-export function qmsRelativeDateLabel(value: string | null | undefined, now = new Date()): string {
-  if (!value) return "Date unavailable";
-  const target = new Date(value);
-  if (Number.isNaN(target.getTime())) return "Date unavailable";
-  const dayMs = 24 * 60 * 60 * 1000;
-  const days = Math.round((startOfDay(target) - startOfDay(now)) / dayMs);
-  if (days === 0) return "Today";
-  if (days === 1) return "Tomorrow";
-  if (days > 1) return `In ${days} days`;
-  if (days === -1) return "1 day overdue";
-  return `${Math.abs(days)} days overdue`;
+export function qmsAgeLabel(days: number | null | undefined): string {
+  if (days == null || !Number.isFinite(days)) return "Age unavailable";
+  const rounded = Math.max(0, Math.floor(days));
+  return `${rounded} day${rounded === 1 ? "" : "s"}`;
 }
 
 export function qmsModuleLabel(value: string | null | undefined): string {
   const raw = String(value || "Quality").trim();
   if (!raw) return "Quality";
-  return raw
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+  return raw.replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+export function qmsDirectionLabel(value: string): string {
+  const labels: Record<string, string> = {
+    improving: "Improving",
+    deteriorating: "Deteriorating",
+    flat: "No change",
+    not_available: "Trend unavailable",
+  };
+  return labels[value] || "Trend unavailable";
+}
+
+export function qmsMetricLabel(value: number | null | undefined, unit: string): string {
+  if (value == null || !Number.isFinite(value)) return "Not available";
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return unit === "%" ? `${formatted}%` : unit ? `${formatted} ${unit}` : formatted;
+}
+
+export function safeQmsInternalLink(value: string | null | undefined, fallback: string, amoCode: string): string {
+  if (!value) return fallback;
+  const qualityPrefix = `/maintenance/${encodeURIComponent(amoCode)}/quality`;
+  const trainingPrefix = `/maintenance/${encodeURIComponent(amoCode)}/training/competence`;
+  return value.startsWith(qualityPrefix) || value.startsWith(trainingPrefix) ? value : fallback;
+}
+
+export function normaliseMyWork(items: QmsOperationalWorkItem[] | null | undefined): QmsOperationalWorkItem[] {
+  return (items ?? []).filter((item) => item.id && item.title && item.route).slice(0, 6);
+}
+
+export function normaliseActionQueue(items: QmsOperationalActionItem[] | null | undefined): QmsOperationalActionItem[] {
+  return (items ?? [])
+    .filter((item) => item.count > 0 && item.route)
+    .sort((left, right) => right.priority - left.priority || right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, 5);
 }
