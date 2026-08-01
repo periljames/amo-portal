@@ -31,6 +31,7 @@ export type DetailedAuditRecord = {
   module: string;
   actor_user_id?: string | null;
   tenant_id?: string | null;
+  tenant_name?: string | null;
   entity_type?: string | null;
   entity_id?: string | null;
   reason?: string | null;
@@ -87,6 +88,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       credentials: "include",
       signal: init.signal ?? controller.signal,
     });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Phase 4 platform request timed out after 20 seconds.");
+    }
+    throw error;
   } finally {
     globalThis.clearTimeout(timer);
   }
@@ -108,9 +114,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const phase4Api = {
-  securityAlerts: (params: { q?: string; severity?: string; status?: string; tenant_id?: string; limit?: number; offset?: number } = {}) => request<PlatformList<DetailedSecurityAlert>>(`/platform/phase4/security/alerts${qs(params)}`),
+  securityAlerts: (params: { data_mode: PlatformDataMode; q?: string; severity?: string; status?: string; tenant_id?: string; limit?: number; offset?: number }) => request<PlatformList<DetailedSecurityAlert>>(`/platform/phase4/security/alerts${qs(params)}`),
   resolveSecurityAlert: (id: string, reason: string) => request<DetailedSecurityAlert>(`/platform/phase4/security/alerts/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ reason }) }),
-  securityAudit: (params: { q?: string; tenant_id?: string; action?: string; limit?: number; offset?: number } = {}) => request<PlatformList<DetailedAuditRecord>>(`/platform/phase4/security/audit${qs(params)}`),
+  securityAudit: (params: { data_mode: PlatformDataMode; q?: string; tenant_id?: string; action?: string; limit?: number; offset?: number }) => request<PlatformList<DetailedAuditRecord>>(`/platform/phase4/security/audit${qs(params)}`),
   tenantOptions: (dataMode: PlatformDataMode, q?: string) => request<PlatformList<TenantOption>>(`/platform/phase4/tenants/select${qs({ data_mode: dataMode, q })}`),
   webhookDeliveries: (id: string) => request<{ webhook: Record<string, unknown>; items: WebhookDelivery[] }>(`/platform/phase4/webhooks/${encodeURIComponent(id)}/deliveries`),
   updateWebhook: (id: string, status: "ACTIVE" | "PAUSED" | "DISABLED", reason: string) => request<Record<string, unknown>>(`/platform/phase4/webhooks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status, reason }) }),
