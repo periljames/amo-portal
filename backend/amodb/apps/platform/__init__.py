@@ -1,8 +1,9 @@
 """Platform control-plane package for global and tenant SaaS operations."""
 
-# Import the durable SaaS models before FastAPI startup/Alembic mapper checks so
-# SQLAlchemy registers every control-plane table in the shared metadata.
+# Import durable control-plane models before FastAPI startup/Alembic mapper
+# checks so SQLAlchemy registers every table in the shared metadata.
 from . import saas_models as _saas_models  # noqa: F401
+from . import commercial_models as _commercial_models  # noqa: F401
 from . import saas_services as _saas_services
 from . import saas_webhooks as _saas_webhooks
 from .saas_admin_links import install_tenant_admin_links
@@ -29,6 +30,7 @@ install_provider_network_hardening()
 install_resend_email_provider()
 
 from .console_router import router as console_router  # noqa: E402
+from .commercial_router import router as commercial_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
@@ -42,6 +44,7 @@ from .saas_usage import install_usage_meter_hardening  # noqa: E402
 # expansion here preserves one audited top-level control-plane namespace while
 # each tenant route applies its own AMO-admin/superuser permission boundary.
 router.include_router(console_router)
+router.include_router(commercial_router)
 router.include_router(platform_saas_router)
 router.include_router(webhook_router)
 router.include_router(support_router)
