@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.platform import commercial_services
+from amodb.apps.platform import commercial_services, router as platform_router
 
 commercial_router = importlib.import_module("amodb.apps.platform.commercial_router")
 phase4_router = importlib.import_module("amodb.apps.platform.phase4_router")
@@ -95,6 +95,7 @@ def test_platform_console_never_offers_all_data_mode():
         repository_root / "frontend" / "src" / "pages" / "platform" / "PlatformBillingPage.tsx",
         repository_root / "frontend" / "src" / "pages" / "platform" / "PlatformSecurityPage.tsx",
         repository_root / "frontend" / "src" / "pages" / "platform" / "PlatformIntegrationsPage.tsx",
+        repository_root / "frontend" / "src" / "pages" / "platform" / "PlatformUsersPage.tsx",
         repository_root / "frontend" / "src" / "services" / "commercialControl.ts",
         repository_root / "frontend" / "src" / "services" / "platformPhase4.ts",
     ]
@@ -152,3 +153,41 @@ def test_canonical_api_key_route_persists_and_validates_expiry():
     assert "expires_at=expires_at" in source
     assert "expires_at must be in the future" in source
     assert "install_canonical_api_key_create_route" in source
+
+
+def test_legacy_console_endpoints_are_replaced_once():
+    expected = {
+        "/platform/integrations/api-keys": "POST",
+        "/platform/support-sessions": "POST",
+        "/platform/users": "GET",
+    }
+    for path, method in expected.items():
+        matches = [
+            route
+            for route in platform_router.routes
+            if route.path == path and method in set(getattr(route, "methods", None) or ())
+        ]
+        assert len(matches) == 1, f"Expected one canonical {method} {path}, found {len(matches)}"
+
+
+def test_user_directory_and_navigation_are_environment_scoped():
+    repository_root = Path(__file__).resolve().parents[5]
+    user_route = (repository_root / "backend" / "amodb" / "apps" / "platform" / "user_environment_router.py").read_text(encoding="utf-8")
+    mode_runtime = (repository_root / "frontend" / "src" / "pages" / "platform" / "components" / "platformModeRuntime.ts").read_text(encoding="utf-8")
+    users_page = (repository_root / "frontend" / "src" / "pages" / "platform" / "PlatformUsersPage.tsx").read_text(encoding="utf-8")
+    assert 'data_mode: str = Query("REAL")' in user_route
+    assert "normalize_data_mode(data_mode)" in user_route
+    assert "PLATFORM_MODE_KEY" in mode_runtime
+    assert 'phase4Api.users({ data_mode: dataMode' in users_page
+
+
+def test_platform_ux_contract_has_feedback_dialogs_graph_focus_and_request_deduplication():
+    repository_root = Path(__file__).resolve().parents[5]
+    runtime = (repository_root / "frontend" / "src" / "pages" / "platform" / "components" / "platformUxRuntime.ts").read_text(encoding="utf-8")
+    graph = (repository_root / "frontend" / "src" / "pages" / "platform" / "components" / "platformGraphFocus.ts").read_text(encoding="utf-8")
+    data_hook = (repository_root / "frontend" / "src" / "pages" / "platform" / "components" / "usePlatformData.ts").read_text(encoding="utf-8")
+    assert "showToast" in runtime
+    assert "installDangerConfirmations" in runtime
+    assert "platform-graph-expanded" in graph
+    assert "stopImmediatePropagation" in graph
+    assert "inFlightRef" in data_hook
