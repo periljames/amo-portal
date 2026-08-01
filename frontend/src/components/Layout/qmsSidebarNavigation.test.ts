@@ -7,12 +7,12 @@ import {
 
 describe("QMS sidebar navigation", () => {
   it("keeps every primary audit page directly reachable", () => {
-    expect(QMS_AUDIT_SHORTCUTS.map((item) => item.suffix)).toEqual([
-      "audits/dashboard",
-      "audits/program",
-      "audits/schedule",
-      "audits/checklists",
-      "audits/reports",
+    expect(QMS_AUDIT_SHORTCUTS.map((item) => item.view)).toEqual([
+      "dashboard",
+      "program",
+      "schedule",
+      "checklists",
+      "reports",
     ]);
     expect(new Set(QMS_AUDIT_SHORTCUTS.map((item) => item.id)).size).toBe(
       QMS_AUDIT_SHORTCUTS.length,
