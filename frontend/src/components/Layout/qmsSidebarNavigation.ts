@@ -1,8 +1,13 @@
+import {
+  qmsBasePath,
+  qmsModulePath,
+} from "../../pages/qms/routes/qmsRouteRegistry";
+
 type QmsAuditShortcut = {
   id: string;
   label: string;
-  suffix: string;
-  matchSuffixes?: string[];
+  view: "dashboard" | "program" | "schedule" | "checklists" | "reports";
+  matchRelativePrefixes?: string[];
 };
 
 type QmsSidebarEnhancementOptions = {
@@ -13,19 +18,18 @@ type QmsSidebarEnhancementOptions = {
 };
 
 const QUALITY_NAV_SELECTOR = '.sidebar__qms-nav[aria-label="Quality modules"]';
-const QUALITY_BASE_SEGMENT = "quality";
 
 export const QMS_AUDIT_SHORTCUTS: readonly QmsAuditShortcut[] = [
-  { id: "dashboard", label: "Dashboard", suffix: "audits/dashboard" },
-  { id: "programme", label: "Programme", suffix: "audits/program" },
+  { id: "dashboard", label: "Dashboard", view: "dashboard" },
+  { id: "programme", label: "Programme", view: "program" },
   {
     id: "schedule",
     label: "Schedule",
-    suffix: "audits/schedule",
-    matchSuffixes: ["audits/schedules/"],
+    view: "schedule",
+    matchRelativePrefixes: ["audits/schedules/"],
   },
-  { id: "checklists", label: "Checklists", suffix: "audits/checklists" },
-  { id: "reports", label: "Reports", suffix: "audits/reports" },
+  { id: "checklists", label: "Checklists", view: "checklists" },
+  { id: "reports", label: "Reports", view: "reports" },
 ] as const;
 
 const MODULE_SEARCH_ALIASES: Record<string, string> = {
@@ -40,10 +44,6 @@ const MODULE_SEARCH_ALIASES: Record<string, string> = {
   "management review": "management review meeting actions minutes",
   "external interface": "regulator authority external finding",
 };
-
-function qualityBasePath(amoCode: string): string {
-  return `/maintenance/${amoCode}/${QUALITY_BASE_SEGMENT}`;
-}
 
 function normalise(value: string | null | undefined): string {
   return String(value || "").trim().toLowerCase();
@@ -74,13 +74,22 @@ function matchesPath(pathname: string, path: string, matchPrefixes: string[] = [
   return pathname === path || pathname === `${path}/` || matchPrefixes.some((prefix) => pathname.startsWith(prefix));
 }
 
+function auditShortcutPath(amoCode: string, shortcut: QmsAuditShortcut): string {
+  return qmsModulePath(amoCode, "audits", shortcut.view);
+}
+
+function auditShortcutPrefixes(amoCode: string, shortcut: QmsAuditShortcut): string[] {
+  const basePath = qmsBasePath(amoCode);
+  return (shortcut.matchRelativePrefixes || []).map((relative) => `${basePath}/${relative}`);
+}
+
 function createShortcutButton(
   shortcut: QmsAuditShortcut,
-  basePath: string,
+  amoCode: string,
   pathname: string,
   onNavigate: (path: string) => void,
 ): HTMLButtonElement {
-  const path = `${basePath}/${shortcut.suffix}`;
+  const path = auditShortcutPath(amoCode, shortcut);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "qms-sidebar-audit-link";
@@ -90,8 +99,7 @@ function createShortcutButton(
   button.setAttribute("aria-label", `Open audit ${shortcut.label.toLowerCase()}`);
   button.onclick = () => onNavigate(path);
 
-  const matchPrefixes = (shortcut.matchSuffixes || []).map((suffix) => `${basePath}/${suffix}`);
-  const active = matchesPath(pathname, path, matchPrefixes);
+  const active = matchesPath(pathname, path, auditShortcutPrefixes(amoCode, shortcut));
   button.classList.toggle("qms-sidebar-audit-link--active", active);
   if (active) button.setAttribute("aria-current", "page");
 
@@ -135,7 +143,7 @@ function createTools(
   pathname: string,
   onNavigate: (path: string) => void,
 ): HTMLElement {
-  const basePath = qualityBasePath(amoCode);
+  const basePath = qmsBasePath(amoCode);
   const tools = document.createElement("section");
   tools.className = "qms-sidebar-tools";
   tools.setAttribute("aria-label", "Quality navigation tools");
@@ -170,7 +178,7 @@ function createTools(
   const auditLinks = document.createElement("div");
   auditLinks.className = "qms-sidebar-audit__links";
   for (const shortcut of QMS_AUDIT_SHORTCUTS) {
-    auditLinks.append(createShortcutButton(shortcut, basePath, pathname, onNavigate));
+    auditLinks.append(createShortcutButton(shortcut, amoCode, pathname, onNavigate));
   }
   auditSection.append(auditHeading, auditLinks);
 
@@ -202,7 +210,7 @@ function refreshTools(
   pathname: string,
   onNavigate: (path: string) => void,
 ): void {
-  const basePath = qualityBasePath(amoCode);
+  const basePath = qmsBasePath(amoCode);
   const overview = nav.querySelector<HTMLButtonElement>(".qms-sidebar-overview-link");
   if (overview) {
     overview.onclick = () => onNavigate(basePath);
@@ -215,9 +223,8 @@ function refreshTools(
   for (const shortcut of QMS_AUDIT_SHORTCUTS) {
     const button = nav.querySelector<HTMLButtonElement>(`[data-qms-shortcut="${shortcut.id}"]`);
     if (!button) continue;
-    const path = `${basePath}/${shortcut.suffix}`;
-    const matchPrefixes = (shortcut.matchSuffixes || []).map((suffix) => `${basePath}/${suffix}`);
-    const active = matchesPath(pathname, path, matchPrefixes);
+    const path = auditShortcutPath(amoCode, shortcut);
+    const active = matchesPath(pathname, path, auditShortcutPrefixes(amoCode, shortcut));
     button.onclick = () => onNavigate(path);
     button.classList.toggle("qms-sidebar-audit-link--active", active);
     if (active) button.setAttribute("aria-current", "page");
@@ -232,11 +239,11 @@ function refreshTools(
 }
 
 export function isQualityNavigationPath(pathname: string, amoCode: string): boolean {
-  const basePath = qualityBasePath(amoCode);
+  const basePath = qmsBasePath(amoCode);
   return (
     pathname === basePath ||
     pathname.startsWith(`${basePath}/`) ||
-    pathname.startsWith(`/maintenance/${amoCode}/training/competence`)
+    pathname.startsWith(`/maintenance/${encodeURIComponent(amoCode)}/training/competence`)
   );
 }
 
