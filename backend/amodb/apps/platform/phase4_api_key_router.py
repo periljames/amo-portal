@@ -105,7 +105,7 @@ def install_canonical_api_key_create_route(platform_router: APIRouter) -> None:
         route_item
         for route_item in platform_router.routes
         if not (
-            str(getattr(route_item, "path", "")) == "/integrations/api-keys"
+            str(getattr(route_item, "path", "")).endswith("/integrations/api-keys")
             and "POST" in set(getattr(route_item, "methods", None) or ())
         )
     ]
