@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { commercialApi, type PlatformDataMode } from "../../services/commercialControl";
 import { platformApi, type PlatformUser } from "../../services/platformControl";
+import { phase4Api } from "../../services/platformPhase4";
 import {
   DataTable,
   EmptyState,
@@ -29,8 +30,8 @@ export default function PlatformUsersPage() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const users = usePlatformData(
-    () => platformApi.users({ q, status, tenant_id: tenantId || undefined, limit: PAGE_SIZE, offset }),
-    [q, status, tenantId, offset],
+    () => phase4Api.users({ data_mode: dataMode, q, status, tenant_id: tenantId || undefined, limit: PAGE_SIZE, offset }),
+    [dataMode, q, status, tenantId, offset],
     { pollMs: 20_000 },
   );
   const tenants = usePlatformData(
@@ -74,7 +75,7 @@ export default function PlatformUsersPage() {
   return (
     <PlatformShell
       title="Global User Hub"
-      subtitle="Search every account, filter by tenant, inspect security state and apply auditable session, password and access controls."
+      subtitle="Accounts, access and session controls for the selected environment."
       actions={<><div className="platform-mode-switch">{(["REAL", "DEMO"] as PlatformDataMode[]).map((mode) => <button key={mode} className={dataMode === mode ? "active" : ""} onClick={() => setFilters({ mode, tenant: null })}>{mode}</button>)}</div><button className="platform-btn" onClick={users.reload}>Refresh</button></>}
     >
       {users.error ? <ErrorState error={users.error} retry={users.reload} /> : null}
@@ -91,7 +92,7 @@ export default function PlatformUsersPage() {
 
       <section className="platform-commercial-layout">
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>User directory</h2><p>REAL and DEMO tenant filters remain isolated.</p></div><StatusBadge value={dataMode} /></div>
+          <div className="platform-section-title"><div><h2>User directory</h2><p>Only {dataMode.toLowerCase()} tenant accounts are shown.</p></div><StatusBadge value={dataMode} /></div>
           <div className="platform-toolbar">
             <input placeholder="Search name or email" value={q} onChange={(event) => setFilters({ q: event.target.value || null })} />
             <select value={tenantId} onChange={(event) => setFilters({ tenant: event.target.value || null })}><option value="">All {dataMode.toLowerCase()} tenants</option>{tenantOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.amo_code}</option>)}</select>
@@ -102,8 +103,8 @@ export default function PlatformUsersPage() {
         </div>
 
         <aside className="platform-card platform-commercial-sidebar">
-          <div className="platform-section-title"><div><h2>Account control</h2><p>High-impact actions require a recorded reason.</p></div></div>
-          {selected ? <div className="platform-stack-form"><div className="platform-subtle-panel"><strong>{selected.full_name}</strong><br /><small>{selected.email}</small><p>{selected.tenant_name || selected.amo_id || "Platform account"} · {selected.role}</p><StatusBadge value={selected.is_active ? "ACTIVE" : "DISABLED"} /></div><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="platform-btn" onClick={() => act(selected, "revoke-sessions")}>Revoke all sessions</button><button className="platform-btn" onClick={() => act(selected, "force-password-reset")}>Force password reset</button>{selected.is_active ? <button className="platform-btn danger" onClick={() => act(selected, "disable")}>Disable account</button> : <button className="platform-btn primary" onClick={() => act(selected, "enable")}>Enable account</button>}<small>Force password reset now persists <code>must_change_password</code> and revokes all existing tokens.</small></div> : <EmptyState label="Select Manage on a user to open account controls." />}
+          <div className="platform-section-title"><div><h2>Account control</h2><p>A reason is required.</p></div></div>
+          {selected ? <div className="platform-stack-form"><div className="platform-subtle-panel"><strong>{selected.full_name}</strong><br /><small>{selected.email}</small><p>{selected.tenant_name || selected.amo_id || "Platform account"} · {selected.role}</p><StatusBadge value={selected.is_active ? "ACTIVE" : "DISABLED"} /></div><label><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="platform-btn" onClick={() => act(selected, "revoke-sessions")}>Revoke all sessions</button><button className="platform-btn" onClick={() => act(selected, "force-password-reset")}>Force password reset</button>{selected.is_active ? <button className="platform-btn danger" data-confirm-message="Disable this account and revoke its active access?" onClick={() => act(selected, "disable")}>Disable account</button> : <button className="platform-btn primary" onClick={() => act(selected, "enable")}>Enable account</button>}</div> : <EmptyState label="Select a user to open account controls." />}
         </aside>
       </section>
     </PlatformShell>
