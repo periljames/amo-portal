@@ -327,37 +327,53 @@ function ensureGraphFocus(): {
 function installGraphFocus(): void {
   const focus = ensureGraphFocus();
   let source: HTMLElement | null = null;
+  let placeholder: Comment | null = null;
+
+  const dispatchResize = () => window.dispatchEvent(new Event("resize"));
 
   const close = () => {
     focus.root.classList.remove("is-open");
     focus.root.setAttribute("aria-hidden", "true");
     document.body.classList.remove("platform-graph-focus-open");
+    const returning = source;
+    if (returning && placeholder?.parentNode) placeholder.replaceWith(returning);
     focus.content.replaceChildren();
-    source?.focus({ preventScroll: true });
     source = null;
+    placeholder = null;
+    window.setTimeout(() => {
+      dispatchResize();
+      returning?.focus({ preventScroll: true });
+    }, 0);
   };
 
   const open = (surface: HTMLElement) => {
+    if (source || focus.root.contains(surface)) return;
     source = surface;
-    const clone = surface.cloneNode(true) as HTMLElement;
-    clone.removeAttribute("tabindex");
-    clone.removeAttribute("role");
-    clone.style.cursor = "default";
+    placeholder = document.createComment("platform-graph-focus-placeholder");
+    surface.replaceWith(placeholder);
+    surface.style.cursor = "default";
     focus.heading.textContent = graphTitle(surface);
-    focus.content.replaceChildren(clone);
+    focus.content.replaceChildren(surface);
     focus.root.classList.add("is-open");
     focus.root.setAttribute("aria-hidden", "false");
     document.body.classList.add("platform-graph-focus-open");
-    window.setTimeout(() => focus.close.focus(), 0);
+    window.setTimeout(() => {
+      dispatchResize();
+      focus.close.focus();
+    }, 0);
+  };
+
+  const prepareElement = (candidate: Element) => {
+    const surface = graphSurface(candidate) || (candidate.matches(GRAPH_SELECTOR) ? candidate as HTMLElement : null);
+    if (!surface || focus.root.contains(surface)) return;
+    if (!surface.hasAttribute("tabindex")) surface.tabIndex = 0;
+    if (!surface.hasAttribute("role")) surface.setAttribute("role", "button");
+    if (!surface.hasAttribute("aria-label")) surface.setAttribute("aria-label", `${graphTitle(surface)}. Activate to expand.`);
   };
 
   const prepare = (root: ParentNode = document) => {
-    root.querySelectorAll<HTMLElement>(GRAPH_SELECTOR).forEach((candidate) => {
-      const surface = graphSurface(candidate) || candidate;
-      if (!surface.hasAttribute("tabindex")) surface.tabIndex = 0;
-      if (!surface.hasAttribute("role")) surface.setAttribute("role", "button");
-      if (!surface.hasAttribute("aria-label")) surface.setAttribute("aria-label", `${graphTitle(surface)}. Activate to expand.`);
-    });
+    if (root instanceof Element) prepareElement(root);
+    root.querySelectorAll<HTMLElement>(GRAPH_SELECTOR).forEach(prepareElement);
   };
 
   prepare();
