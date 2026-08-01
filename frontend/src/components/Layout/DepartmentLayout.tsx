@@ -1,7 +1,12 @@
 import React, { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import LegacyDepartmentLayout from "./DepartmentLayout.legacy";
+import {
+  enhanceQmsSidebarNavigation,
+  isQualityNavigationPath,
+} from "./qmsSidebarNavigation";
+import "../../styles/components/qms-sidebar-navigation.css";
 
 /*
  * Quality navigation contract markers are implemented in
@@ -75,11 +80,20 @@ function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void 
  * updated in place; the department-only duplicate is suppressed. Publication
  * reader routes are treated as part of the Document Control department so their
  * subnavigation remains available.
+ *
+ * The Quality workspace receives a focused navigation layer without duplicating
+ * the legacy route source. Audit pages remain one click away, every Quality module
+ * is searchable, and the active audit destination is exposed consistently on
+ * desktop and mobile drawers.
  */
 const DepartmentLayout: React.FC<Props> = (props) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const isDocumentControlDomain = location.pathname.includes("/document-control") || location.pathname.includes("/publications") || location.pathname.includes("/manuals");
   const effectiveDepartment = isDocumentControlDomain ? "document-control" : props.activeDepartment;
+  const isQualityDomain =
+    effectiveDepartment === "quality" ||
+    isQualityNavigationPath(location.pathname, props.amoCode);
 
   useEffect(() => {
     const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
@@ -90,6 +104,34 @@ const DepartmentLayout: React.FC<Props> = (props) => {
     observer.observe(sidebar, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [isDocumentControlDomain]);
+
+  useEffect(() => {
+    if (!isQualityDomain) return undefined;
+
+    const sidebar = document.querySelector<HTMLElement>(".app-shell__sidebar, .sidebar");
+    if (!sidebar) return undefined;
+
+    const onNavigate = (path: string) => {
+      navigate(path);
+      if (typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches) {
+        sidebar.querySelector<HTMLButtonElement>(".sidebar__close-btn")?.click();
+      }
+    };
+
+    const apply = () => {
+      enhanceQmsSidebarNavigation({
+        sidebar,
+        amoCode: props.amoCode,
+        pathname: location.pathname,
+        onNavigate,
+      });
+    };
+
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(sidebar, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [isQualityDomain, location.pathname, navigate, props.amoCode]);
 
   return <LegacyDepartmentLayout {...props} activeDepartment={effectiveDepartment} />;
 };
