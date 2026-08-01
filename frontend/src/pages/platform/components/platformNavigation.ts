@@ -1,3 +1,4 @@
+import "./platformModeRuntime";
 import "./platformUxRuntime";
 
 export type PlatformNavItem = {
