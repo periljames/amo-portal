@@ -6,6 +6,7 @@ import {
 } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { PlatformDataMode, PlatformList } from "./commercialControl";
+import type { PlatformUser } from "./platformControl";
 
 export type DetailedSecurityAlert = {
   id: string;
@@ -118,6 +119,7 @@ export const phase4Api = {
   resolveSecurityAlert: (id: string, reason: string) => request<DetailedSecurityAlert>(`/platform/phase4/security/alerts/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ reason }) }),
   securityAudit: (params: { data_mode: PlatformDataMode; q?: string; tenant_id?: string; action?: string; limit?: number; offset?: number }) => request<PlatformList<DetailedAuditRecord>>(`/platform/phase4/security/audit${qs(params)}`),
   tenantOptions: (dataMode: PlatformDataMode, q?: string) => request<PlatformList<TenantOption>>(`/platform/phase4/tenants/select${qs({ data_mode: dataMode, q })}`),
+  users: (params: { data_mode: PlatformDataMode; q?: string; tenant_id?: string; status?: string; limit?: number; offset?: number }) => request<PlatformList<PlatformUser>>(`/platform/users${qs(params)}`),
   webhookDeliveries: (id: string) => request<{ webhook: Record<string, unknown>; items: WebhookDelivery[] }>(`/platform/phase4/webhooks/${encodeURIComponent(id)}/deliveries`),
   updateWebhook: (id: string, status: "ACTIVE" | "PAUSED" | "DISABLED", reason: string) => request<Record<string, unknown>>(`/platform/phase4/webhooks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status, reason }) }),
   infrastructureCapabilities: () => request<Record<string, { available?: boolean; reason?: string } | string[]>>("/platform/phase4/infrastructure/capabilities"),
