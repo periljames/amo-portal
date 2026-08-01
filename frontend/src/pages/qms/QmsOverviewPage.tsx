@@ -78,7 +78,24 @@ const QmsOverviewPage: React.FC = () => {
     return () => requestRef.current?.abort(new DOMException("QMS overview unmounted", "AbortError"));
   }, [load]);
 
-  const health = useMemo(() => deriveQmsOverviewHealth(dashboard), [dashboard]);
+  const health = useMemo(() => {
+    if (dashboard) return deriveQmsOverviewHealth(dashboard);
+    if (state === "error") {
+      return {
+        tone: "danger" as const,
+        label: "Overview unavailable",
+        summary: "The operational Quality dashboard could not be loaded.",
+        urgentCount: 0,
+      };
+    }
+    return {
+      tone: "neutral" as const,
+      label: "Loading overview",
+      summary: "Retrieving ranked Quality work and obligations.",
+      urgentCount: 0,
+    };
+  }, [dashboard, state]);
+
   const currentUser = getCachedUser();
   const diagnosticsAuthorized = Boolean(
     currentUser?.is_amo_admin ||
