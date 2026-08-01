@@ -29,7 +29,7 @@ def _first_matching_endpoint(api_router, path: str):
     return None
 
 
-def test_operational_dashboard_route_resolves_before_generic_catchall() -> None:
+def test_operational_dashboard_route_is_registered() -> None:
     canonical_path = "/api/maintenance/SAF/quality/dashboard-v2"
     legacy_path = "/api/maintenance/SAF/qms/dashboard-v2"
 
