@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PLATFORM_CONSOLE_LIVE_EVENT } from "./usePlatformRealtime";
 
@@ -19,12 +19,21 @@ export function usePlatformData<T>(
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const requestIdRef = useRef(0);
   const liveDebounceRef = useRef<number | null>(null);
+  const inFlightRef = useRef<{ key: symbol; promise: Promise<T> } | null>(null);
+  // A new key permits a new request immediately when the selected tenant,
+  // environment or tab changes while still deduplicating poll/focus/live races.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const executionKey = useMemo(() => Symbol("platform-data-scope"), deps);
 
   const execute = useCallback((showLoading = true) => {
+    const active = inFlightRef.current;
+    if (active?.key === executionKey) return active.promise;
+
     const requestId = ++requestIdRef.current;
     if (showLoading) setLoading(true);
     setError(null);
-    return loader()
+
+    const promise = loader()
       .then((value) => {
         if (requestId !== requestIdRef.current) return value;
         setData(value);
@@ -36,10 +45,14 @@ export function usePlatformData<T>(
         throw nextError;
       })
       .finally(() => {
+        if (inFlightRef.current?.promise === promise) inFlightRef.current = null;
         if (requestId === requestIdRef.current) setLoading(false);
       });
+
+    inFlightRef.current = { key: executionKey, promise };
+    return promise;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [executionKey, ...deps]);
 
   const reload = useCallback(() => {
     void execute(data === null).catch(() => undefined);
