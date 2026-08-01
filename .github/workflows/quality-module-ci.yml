@@ -21,9 +21,17 @@ on:
       - "frontend/src/pages/qms/**"
       - "frontend/src/pages/qualityAudits/**"
       - "frontend/src/components/QMS/**"
+      - "frontend/src/components/dashboard/QualityCockpit*.tsx"
+      - "frontend/src/dashboards/DashboardCockpit.tsx"
+      - "frontend/src/layouts/QmsShell.tsx"
       - "frontend/src/services/qms.ts"
+      - "frontend/src/services/qmsDashboard.ts"
+      - "frontend/src/services/qmsDashboard.test.ts"
       - "frontend/src/services/qmsAuditHubActions.ts"
       - "frontend/src/services/qmsAuditHubActions.test.ts"
+      - "frontend/src/types/qms.ts"
+      - "frontend/src/styles/qms-overview.css"
+      - "frontend/src/styles/qms-register.css"
       - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -78,7 +86,7 @@ jobs:
           assert revision is not None
           assert revision.down_revision == "workforce_20260721_complete"
           PY
-      - name: Run Quality backend and frontend contract check
+      - name: Run executable Quality contract check
         run: python -m amodb.scripts.quality_module_internal_check
       - name: Compile Quality backend
         run: >-
@@ -95,7 +103,7 @@ jobs:
           SECRET_KEY: quality-mapper-test-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
-      - name: Run Quality workflow and integration tests
+      - name: Run Quality workflow and dashboard tests
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
@@ -105,6 +113,7 @@ jobs:
           QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
+          amodb/apps/quality/tests/test_dashboard_v2_contract.py
           amodb/apps/quality/tests/test_quality_delivery_profile.py
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
@@ -194,12 +203,28 @@ jobs:
           --label "quality frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Run Quality service regression tests
+      - name: Run Quality frontend regressions
         run: npm run test:quality
       - name: Typecheck and production build
         run: npm run build
-      - name: Lint changed Quality service boundary
+      - name: Lint changed Quality boundaries
         run: >-
           npm exec -- eslint
+          src/router.tsx
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
+          src/services/qmsDashboard.ts
+          src/services/qmsDashboard.test.ts
+          src/pages/qms/QmsOverviewPage.tsx
+          src/pages/qms/QmsRegisterPage.tsx
+          src/pages/qms/QmsNotFoundPage.tsx
+          src/pages/qms/qmsOverviewModel.ts
+          src/pages/qms/qmsOverviewModel.test.ts
+          src/pages/qms/routes/qmsRouteRegistry.ts
+          src/pages/qms/routes/qmsRouteRegistry.test.ts
+          src/pages/qms/components/QmsActionQueue.tsx
+          src/pages/qms/components/QmsMyWork.tsx
+          src/pages/qms/components/QmsUpcomingObligations.tsx
+          src/pages/qms/components/QmsPerformanceSummary.tsx
+          src/pages/qms/components/QmsDiagnosticsDrawer.tsx
+          src/dashboards/DashboardCockpit.tsx

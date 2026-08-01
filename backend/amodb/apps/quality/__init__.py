@@ -40,3 +40,8 @@ def _deduplicate_exact_routes(api_router: APIRouter) -> None:
 
 _deduplicate_exact_routes(router)
 _deduplicate_exact_routes(public_router)
+
+# Import after the direct Quality routers are stable. The extension registers
+# /dashboard-v2 on the canonical tenant-scoped Quality router used by both ASGI
+# entrypoints.
+from . import dashboard_v2 as _dashboard_v2  # noqa: F401,E402

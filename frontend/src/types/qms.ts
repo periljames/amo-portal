@@ -28,7 +28,6 @@ export interface QmsSourceError {
   trace_id?: string;
 }
 
-
 export interface QmsDashboardResponse {
   tenant?: {
     amo_code: string;
@@ -41,6 +40,95 @@ export interface QmsDashboardResponse {
   source_errors?: QmsSourceError[];
   warning?: string | null;
   trace_id?: string | null;
+  elapsed_ms?: number | null;
+}
+
+export type QmsOperationalTone = "danger" | "warning" | "neutral" | "positive";
+export type QmsKpiDirection = "improving" | "deteriorating" | "flat" | "not_available";
+
+export interface QmsOperationalActionItem {
+  id: string;
+  label: string;
+  count: number;
+  oldest_age_days?: number | null;
+  owner_status?: string | null;
+  next_action: string;
+  route: string;
+  tone: QmsOperationalTone;
+  priority: number;
+  regulatory_consequence?: string | null;
+}
+
+export interface QmsOperationalWorkItem {
+  id: string;
+  title: string;
+  severity?: string | null;
+  created_at?: string | null;
+  route: string;
+}
+
+export interface QmsOperationalObligation {
+  id: string;
+  module?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  title: string;
+  date: string | null;
+  event_type?: string | null;
+  link?: string | null;
+  due_state?: string | null;
+  actionable?: boolean | null;
+  subtitle?: string | null;
+}
+
+export interface QmsOperationalKpi {
+  id: string;
+  label: string;
+  current: number | null;
+  target: number | null;
+  previous: number | null;
+  direction: QmsKpiDirection;
+  unit: string;
+  route: string;
+  data_status: "available" | "not_available";
+}
+
+export interface QmsOperationalSourceHealth {
+  status: "healthy" | "partial" | "unavailable";
+  error_count: number;
+  errors_by_source?: Record<string, number>;
+  errors?: QmsSourceError[];
+}
+
+export interface QmsOperationalDashboardResponse {
+  contract: "qms-operational-dashboard.v2";
+  tenant?: {
+    amo_code: string;
+    amo_id?: string;
+  };
+  as_of: string;
+  action_queue: QmsOperationalActionItem[];
+  my_work: QmsOperationalWorkItem[];
+  upcoming_obligations: QmsOperationalObligation[];
+  performance_kpis: QmsOperationalKpi[];
+  aging_buckets?: Record<string, Record<string, number>>;
+  unassigned_counts?: Record<string, number | null>;
+  severity_breakdown?: Record<string, Record<string, number>>;
+  period_comparisons?: {
+    status?: string;
+    note?: string;
+  };
+  data_freshness?: {
+    generated_at?: string;
+    counter_source?: string;
+    counter_as_of?: string;
+    calendar_start?: string;
+    calendar_end?: string;
+  };
+  source_health: QmsOperationalSourceHealth;
+  counters: QmsCounterMap;
+  trace_id?: string | null;
+  elapsed_ms?: number | null;
 }
 
 export interface QmsListResponse<T = Record<string, unknown>> {
@@ -67,6 +155,7 @@ export interface QmsCalendarResponse extends QmsListResponse {
   returned_count?: number;
   limit?: number;
   offset?: number;
+  source_errors?: QmsSourceError[];
   items?: Array<{
     id: string;
     module: string;
