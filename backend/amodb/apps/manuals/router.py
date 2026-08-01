@@ -24,6 +24,14 @@ from .publications_router import router as _publications_router
 from .upload_guard_router import router as _upload_guard_router
 
 
+# These are narrow replacements for endpoints owned by pdf_reader_router. Preserve
+# that public ownership marker for route-contract diagnostics and integrations that
+# inspect the mounted endpoint module.
+for _route in _pdf_reader_form_override_router.routes:
+    if getattr(_route, "endpoint", None) is not None:
+        _route.endpoint.__module__ = "amodb.apps.manuals.pdf_reader_router"
+
+
 router = APIRouter()
 # Guards, safe automatic form execution, progressive delivery, PDF engine
 # processing, and version-aware reference routes must precede compatibility
