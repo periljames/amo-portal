@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useLayoutEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import LegacyDepartmentLayout from "./DepartmentLayout.legacy";
@@ -6,6 +6,7 @@ import {
   enhanceQmsSidebarNavigation,
   isQualityNavigationPath,
 } from "./qmsSidebarNavigation";
+import { getCachedUser } from "../../services/auth";
 import "../../styles/components/qms-sidebar-navigation.css";
 
 /*
@@ -71,6 +72,15 @@ function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void 
   }
 }
 
+function setDesktopSidebarDefault(amoCode: string): void {
+  if (typeof window === "undefined" || !window.matchMedia("(min-width: 1025px)").matches) return;
+  const currentUser = getCachedUser();
+  const storageKey = `amo_sidebar_pinned:${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
+  if (window.localStorage.getItem(storageKey) === null) {
+    window.localStorage.setItem(storageKey, "1");
+  }
+}
+
 /**
  * Shared shell compatibility bridge.
  *
@@ -94,6 +104,10 @@ const DepartmentLayout: React.FC<Props> = (props) => {
   const isQualityDomain =
     effectiveDepartment === "quality" ||
     isQualityNavigationPath(location.pathname, props.amoCode);
+
+  useLayoutEffect(() => {
+    setDesktopSidebarDefault(props.amoCode);
+  }, [props.amoCode]);
 
   useEffect(() => {
     const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
