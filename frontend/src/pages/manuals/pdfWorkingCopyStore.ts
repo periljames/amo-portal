@@ -24,6 +24,7 @@ export type StoredPdfWorkingCopy = {
   savedAt: string;
   byteLength: number;
   bytes: ArrayBuffer;
+  editedPages?: number[];
 };
 
 export function pdfWorkingCopyKey(identity: PdfWorkingCopyIdentity): string {
@@ -44,6 +45,12 @@ function normalizedIdentity(identity: PdfWorkingCopyIdentity) {
     manualId: identity.manualId,
     revisionId: identity.revisionId,
   };
+}
+
+function normalizedPages(values: number[]): number[] {
+  return [...new Set(values)]
+    .filter((value) => Number.isInteger(value) && value > 0)
+    .sort((left, right) => left - right);
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -78,7 +85,7 @@ export function pdfWorkingCopyMatchesAuthoritativeSource(
 
 function authorizedDraft(identity: PdfWorkingCopyIdentity, result: StoredPdfWorkingCopy | null): StoredPdfWorkingCopy | null {
   if (!result || !pdfWorkingCopyMatchesAuthoritativeSource(identity, result.sourceSha256)) return null;
-  return result;
+  return { ...result, editedPages: normalizedPages(result.editedPages || []) };
 }
 
 export async function readPdfWorkingCopy(identity: PdfWorkingCopyIdentity): Promise<StoredPdfWorkingCopy | null> {
@@ -102,6 +109,7 @@ export async function savePdfWorkingCopy(
   filename: string,
   bytes: ArrayBuffer,
   sourceSha256?: string | null,
+  editedPages: number[] = [],
 ): Promise<StoredPdfWorkingCopy> {
   if (bytes.byteLength > MAX_PDF_WORKING_COPY_BYTES) throw new Error("The PDF working copy exceeds the 100 MB local draft limit");
   const authoritative = authoritativePdfSourceChecksum(identity.tenant, identity.manualId, identity.revisionId);
@@ -117,6 +125,7 @@ export async function savePdfWorkingCopy(
     savedAt: new Date().toISOString(),
     byteLength: bytes.byteLength,
     bytes,
+    editedPages: normalizedPages(editedPages),
   };
   const database = await openDatabase();
   return new Promise<StoredPdfWorkingCopy>((resolve, reject) => {
