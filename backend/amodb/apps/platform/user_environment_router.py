@@ -80,7 +80,7 @@ def install_environment_scoped_user_route(platform_router: APIRouter) -> None:
         route_item
         for route_item in platform_router.routes
         if not (
-            str(getattr(route_item, "path", "")) == "/users"
+            str(getattr(route_item, "path", "")).endswith("/users")
             and "GET" in set(getattr(route_item, "methods", None) or ())
         )
     ]
