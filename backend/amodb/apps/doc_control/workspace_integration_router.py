@@ -233,6 +233,47 @@ def create_verified_integration_link(
         entity_id=payload.entity_id,
         metadata=dict(payload.metadata),
     )
+
+    # The source module owns the record. Document Control keeps one link identity
+    # per document/source/relation and reuses it on retries instead of creating
+    # duplicate records or failing after an interrupted client request.
+    existing = (
+        db.query(dm.DocumentIntegrationLink)
+        .filter(
+            dm.DocumentIntegrationLink.tenant_id == tenant.amo_id,
+            dm.DocumentIntegrationLink.manual_id == payload.manual_id,
+            dm.DocumentIntegrationLink.source_module == payload.source_module,
+            dm.DocumentIntegrationLink.entity_type == payload.entity_type,
+            dm.DocumentIntegrationLink.entity_id == payload.entity_id,
+            dm.DocumentIntegrationLink.relation_type == payload.relation_type,
+        )
+        .first()
+    )
+    if existing:
+        before = _integration_payload(existing)
+        existing.revision_id = payload.revision_id
+        existing.change_request_id = payload.change_request_id
+        existing.workflow_id = payload.workflow_id
+        existing.blocking = payload.blocking
+        existing.status_snapshot = verification["status_snapshot"]
+        existing.metadata_json = {
+            **dict(existing.metadata_json or {}),
+            **dict(payload.metadata),
+            **verification,
+        }
+        after = _integration_payload(existing)
+        audit(
+            db,
+            tenant,
+            request,
+            "document.integration_link.reused",
+            "document_integration_link",
+            existing.id,
+            {"before": before, "after": after, "idempotent": True},
+        )
+        db.commit()
+        return {**after, "idempotent_reuse": True}
+
     verified_payload = payload.model_copy(
         update={
             "status_snapshot": verification["status_snapshot"],
