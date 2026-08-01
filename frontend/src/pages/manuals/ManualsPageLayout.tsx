@@ -16,7 +16,6 @@ export default function ManualsPageLayout({ title, subtitle, actions, children }
     <div className="manuals-page-shell publications-page-shell">
       <div className="manuals-page-shell__header">
         <div>
-          <p style={{ margin: "0 0 0.25rem", fontSize: "0.66rem", fontWeight: 750, letterSpacing: "0.07em", textTransform: "uppercase", opacity: 0.66 }}>Controlled Publications</p>
           <h1 className="manuals-page-shell__title">{title}</h1>
           {subtitle ? <p className="manuals-page-shell__subtitle">{subtitle}</p> : null}
         </div>
