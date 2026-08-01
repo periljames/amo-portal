@@ -55,7 +55,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.audit.view",
     section: "assurance",
     defaultView: "dashboard",
-    validViews: ["dashboard", "program", "programme", "schedule", "register", "checklists", "reports", "templates", "new", "plan", "bin"],
+    validViews: ["dashboard", "program", "schedule", "register", "checklists", "reports", "templates", "new", "plan", "bin"],
     componentType: "specialist",
     allowRecordDetails: true,
   },
