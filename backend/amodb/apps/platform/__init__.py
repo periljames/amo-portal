@@ -38,6 +38,7 @@ from .phase4_api_key_router import (  # noqa: E402
     install_canonical_api_key_create_route,
     router as phase4_api_key_router,
 )
+from .user_environment_router import install_environment_scoped_user_route  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
@@ -48,9 +49,10 @@ from .resend_email_router import router as resend_email_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
-# Preserve the public endpoint used by the console while replacing its legacy
-# implementation, which ignored requested scopes and expiration.
+# Preserve public console endpoint contracts while replacing legacy handlers
+# that ignored API key expiration or mixed REAL and DEMO user records.
 install_canonical_api_key_create_route(router)
+install_environment_scoped_user_route(router)
 
 # ``amodb.main`` already mounts this package router at /platform. Keeping the
 # expansion here preserves one audited top-level control-plane namespace while
