@@ -116,6 +116,8 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "_saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook",
         "install_tenant_provider_override_policy()",
         "router.include_router(tenant_saas_router)",
+        "router.include_router(commercial_router)",
+        "router.include_router(phase4_router)",
     ),
     BACKEND_ROOT / "amodb/apps/platform/saas_usage.py": (
         "ON CONFLICT (amo_id, meter_key)",
@@ -123,6 +125,49 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "def flush_with_requeue",
         "application._api_usage_pending.get(pending_amo_id, 0) + quantity",
         "application._flush_api_usage_metrics = flush_with_requeue",
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/commercial_models.py": (
+        "class CommercialModule",
+        "class ProductPlan",
+        "class PriceBookEntry",
+        "class TenantSubscription",
+        "class SubscriptionItem",
+        "class EntitlementOverride",
+        "class PaymentTransaction",
+        "class InvoiceLineItem",
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/commercial_services.py": (
+        'VALID_DATA_MODES = {"REAL", "DEMO"}',
+        "ALL is intentionally unsupported",
+        "def provision_tenant",
+        "def reconcile_subscription",
+        "def create_invoice",
+        "def record_payment",
+        "def force_password_reset",
+        "def commercial_summary",
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/commercial_router.py": (
+        'APIRouter(prefix="/commercial"',
+        '@router.get("/data-modes")',
+        '@router.post("/tenants/provision"',
+        '@router.post("/subscriptions/{subscription_id}/reconcile")',
+        '@router.post("/invoices/{invoice_id}/payments"',
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/phase4_router.py": (
+        'APIRouter(prefix="/phase4"',
+        'data_mode: str = Query("REAL")',
+        "normalize_data_mode(data_mode)",
+        '@router.post("/security/alerts/{alert_id}/resolve")',
+        '@router.get("/webhooks/{webhook_id}/deliveries")',
+        '"available": False',
+        '@router.post("/tenants/{tenant_id}/support-sessions")',
+    ),
+    BACKEND_ROOT / "amodb/alembic/versions/plat_20260801_commercial_control.py": (
+        'revision: str = "plat_20260801_commercial_v2"',
+        'down_revision: Union[str, Sequence[str], None] = "saas_20260731_route_latency_hist"',
+        "data_mode IN ('REAL','DEMO')",
+        '"platform_tenant_subscriptions"',
+        '"platform_payment_transactions"',
     ),
     BACKEND_ROOT / "amodb/apps/realtime/broker_auth.py": (
         'GATEWAY_SHARED_SUBSCRIPTION = "$share/amo-portal-gateway/amo/+/user/+/outbox"',
@@ -174,6 +219,22 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "checkout:",
         "fiscalize:",
     ),
+    FRONTEND_ROOT / "src/services/commercialControl.ts": (
+        'export type PlatformDataMode = "REAL" | "DEMO"',
+        "Platform data mode must be REAL or DEMO.",
+        "extendSessionIfNeeded",
+        "handleAuthFailure",
+        "provisionTenant:",
+        "recordPayment:",
+    ),
+    FRONTEND_ROOT / "src/services/platformPhase4.ts": (
+        "data_mode: PlatformDataMode",
+        "phase4-unauthorized",
+        "securityAlerts:",
+        "webhookDeliveries:",
+        "transitionMaintenance:",
+        "startSupportSession:",
+    ),
     FRONTEND_ROOT / "src/pages/AdminSaaSSettingsPage.tsx": (
         "Integrations & automation setup",
         "Enter tenant-specific secret values",
@@ -190,13 +251,41 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         'export { default } from "./AdminSaaSSettingsPage"',
     ),
     FRONTEND_ROOT / "src/pages/platform/PlatformTenantsPage.tsx": (
-        "Open integrations & pipeline",
-        "tenant_id=${encodeURIComponent(selected)}",
+        '(["REAL", "DEMO"] as PlatformDataMode[])',
+        'drawer === "provision"',
+        'activeTab === "subscription"',
+        "commercialApi.forcePasswordReset",
+        "commercialApi.createEntitlementOverride",
+    ),
+    FRONTEND_ROOT / "src/pages/platform/PlatformBillingPage.tsx": (
+        '(["REAL", "DEMO"] as PlatformDataMode[])',
+        '"modules", "plans", "price-books", "prices", "subscriptions", "invoices", "payments"',
+        "commercialApi.createPrice",
+        "commercialApi.createInvoice",
+        "commercialApi.recordPayment",
+    ),
+    FRONTEND_ROOT / "src/pages/platform/PlatformSecurityPage.tsx": (
+        "data_mode: dataMode",
+        "phase4Api.resolveSecurityAlert",
+        "Evidence",
+        "User agent",
+    ),
+    FRONTEND_ROOT / "src/pages/platform/PlatformInfrastructurePage.tsx": (
+        "phase4Api.infrastructureCapabilities",
+        "databaseFailover?.available",
+        "phase4Api.transitionMaintenance",
+        'scope === "TENANT"',
     ),
     FRONTEND_ROOT / "src/styles/adminSaaSSettings.css": (
         ".saas-admin__provider-layout",
         ".saas-admin__readiness-grid",
         '[data-theme="dark"] .saas-admin',
+    ),
+    FRONTEND_ROOT / "src/styles/platform-commercial-control.css": (
+        ".platform-mode-switch",
+        ".platform-commercial-layout",
+        ".platform-commercial-drawer",
+        "prefers-reduced-motion",
     ),
     ROOT / "deploy/saas/docker-compose.yml": (
         "working_dir: /app/backend",
@@ -218,6 +307,11 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
 FORBIDDEN: dict[Path, tuple[str, ...]] = {
     FRONTEND_ROOT / "src/services/platformControl.ts": (
         "VITE_OPENAI_API_KEY",
+        "VITE_STRIPE_SECRET",
+        'endSession("manual")',
+    ),
+    FRONTEND_ROOT / "src/services/commercialControl.ts": (
+        'type PlatformDataMode = "REAL" | "DEMO" | "ALL"',
         "VITE_STRIPE_SECRET",
     ),
     FRONTEND_ROOT / "src/services/saasSettings.ts": (
@@ -253,6 +347,7 @@ EXTRA_COMPILE = (
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_side_effect_safety.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_admin_and_webhooks.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_verified_tenant_pipeline.py",
+    BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_commercial_control_plane.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_broker_auth.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_messaging_hardening.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_security_hardening.py",
@@ -310,7 +405,7 @@ def main() -> int:
             compile_rows.append({"path": str(path.relative_to(ROOT)), "passed": False, "error": str(exc)})
 
     package = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
-    expected_script = "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
+    expected_script = "vitest run src/services/platformControl.test.ts src/services/commercialControl.test.ts src/services/platformPhase4.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
     actual_script = package.get("scripts", {}).get("test:platform")
     script_ok = actual_script == expected_script
     passed = passed and script_ok
