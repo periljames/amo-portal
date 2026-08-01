@@ -1,4 +1,5 @@
 import "./platformModeRuntime";
+import "./platformGraphFocus";
 import "./platformUxRuntime";
 
 export type PlatformNavItem = {
