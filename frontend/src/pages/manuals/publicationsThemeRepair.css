@@ -1,0 +1,68 @@
+.publications-page-shell {
+  --paper: var(--surface-elevated);
+  --ink: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.publications-page-shell .manuals-page-shell__header,
+.publications-overview-strip,
+.publications-register,
+.publications-featured-grid button,
+.publications-register__search,
+.publications-table,
+.publications-upload-dialog,
+.publications-upload-item,
+.publications-upload-fields input,
+.publications-upload-fields textarea,
+.publications-upload-dialog footer button {
+  background: var(--surface-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.publications-page-shell :is(
+  .manuals-page-shell__subtitle,
+  .publications-overview-strip span,
+  .publications-featured-grid small,
+  .publications-featured-grid em,
+  .publications-table td > small,
+  .publications-upload-dialog header p,
+  .publications-upload-item__head span,
+  .publications-upload-fields label span,
+  .publications-upload-dialog footer > span
+) {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.publications-register__toolbar p,
+.publications-section-heading p {
+  display: none;
+}
+
+.publications-table th {
+  background: color-mix(in srgb, var(--surface-elevated) 88%, var(--surface-soft));
+  color: var(--text-secondary);
+}
+
+.publications-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface));
+}
+
+.publications-open-button {
+  background: var(--surface-soft);
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
+  color: color-mix(in srgb, var(--accent-primary) 64%, var(--text-primary));
+}
+
+.publications-register__search input,
+.publications-upload-fields input,
+.publications-upload-fields textarea {
+  background: var(--input-bg);
+  color: var(--text-primary);
+}
+
+body[data-color-scheme="light"] .publications-page-shell {
+  --paper: #fff;
+  --ink: #0f172a;
+}
