@@ -15,11 +15,28 @@ export const platformNavSections: PlatformNavSection[] = [
   {
     label: "Platform",
     items: [
-      { to: "/platform/control", label: "Overview", mark: "OV", description: "Health, work queue and platform status" },
-      { to: "/platform/tenants", label: "Tenants & Institutions", mark: "TI", description: "Tenant lifecycle, access and modules", badgeKey: "active_tenants" },
-      { to: "/platform/users", label: "Global User Hub", mark: "UH", description: "Users, sessions and account controls", badgeKey: "total_users" },
-      { to: "/platform/billing", label: "Subscription & Billing", mark: "BI", description: "Plans, invoices, fiscalization and revenue", badgeKey: "overdue_invoices" },
-      { to: "/platform/analytics", label: "Platform Analytics", mark: "AN", description: "Traffic, latency, usage and tenant load" },
+      { to: "/platform/control", label: "Overview", mark: "OV", description: "Health, live trends, work queue and platform status" },
+      { to: "/platform/tenants", label: "Tenants & Institutions", mark: "TI", description: "Provisioning, profiles, users, modules and tenant controls", badgeKey: "active_tenants" },
+      { to: "/platform/users", label: "Global User Hub", mark: "UH", description: "Users, sessions, onboarding and security controls", badgeKey: "total_users" },
+      { to: "/platform/analytics", label: "Platform Analytics", mark: "AN", description: "Traffic, latency, bandwidth, usage and tenant load" },
+    ],
+  },
+  {
+    label: "Products",
+    items: [
+      { to: "/platform/billing?tab=modules", label: "Module Catalog", mark: "MC", description: "Canonical modules, routes, dependencies and availability" },
+      { to: "/platform/billing?tab=plans", label: "Plans & Bundles", mark: "PB", description: "Product plans, included modules and trial policy" },
+      { to: "/platform/billing?tab=price-books", label: "Price Books", mark: "BK", description: "REAL or DEMO markets, currencies and tax basis" },
+      { to: "/platform/billing?tab=prices", label: "Versioned Prices", mark: "VP", description: "Effective prices and external provider mappings" },
+    ],
+  },
+  {
+    label: "Commercial",
+    items: [
+      { to: "/platform/billing?tab=overview", label: "Commercial Overview", mark: "CO", description: "Revenue by currency, outstanding balance and risk", badgeKey: "overdue_invoices" },
+      { to: "/platform/billing?tab=subscriptions", label: "Subscriptions", mark: "SU", description: "Trials, renewals, plans, terms and reconciliation" },
+      { to: "/platform/billing?tab=invoices", label: "Invoices", mark: "IN", description: "Structured line items, balances and fiscal state" },
+      { to: "/platform/billing?tab=payments", label: "Payments", mark: "PY", description: "Payment evidence, ledger entries and reconciliation" },
     ],
   },
   {
