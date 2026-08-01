@@ -96,11 +96,13 @@ def _rebuild_subscription_items(
         if not module:
             continue
         item = existing.get(module_id)
-        if not item:
+        is_new = item is None
+        if is_new:
             item = SubscriptionItem(
                 subscription_id=row.id,
                 module_id=module_id,
                 effective_from=now,
+                unit_amount_cents=0,
             )
             db.add(item)
         price = services.active_price_for(
@@ -111,10 +113,15 @@ def _rebuild_subscription_items(
             billing_term=row.billing_term,
             at=now,
         )
-        item.price_entry_id = price.id if price else None
+        if price:
+            item.price_entry_id = price.id
+            item.unit_amount_cents = int(price.unit_amount_cents or 0)
+        else:
+            item.price_entry_id = None
+            if is_new:
+                item.unit_amount_cents = 0
         item.status = "ACTIVE"
         item.quantity = max(1, int(row.quantity or 1))
-        item.unit_amount_cents = int(price.unit_amount_cents or 0) if price else 0
         item.limits_json = {
             **(module.default_limits_json or {}),
             **(link.limits_json or {}),
