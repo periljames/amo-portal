@@ -31,6 +31,11 @@ def _request(range_header: str | None = None) -> Request:
     )
 
 
+def _frontend(path: str) -> str:
+    repository_root = Path(__file__).resolve().parents[5]
+    return (repository_root / path).read_text(encoding="utf-8")
+
+
 def test_exact_pdf_stream_honours_single_byte_ranges(tmp_path: Path) -> None:
     source = tmp_path / "approved.pdf"
     source.write_bytes(b"%PDF-1.7\n0123456789abcdef")
@@ -108,30 +113,33 @@ def test_progressive_reader_routes_precede_legacy_routes() -> None:
 
 
 def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
-    repository_root = Path(__file__).resolve().parents[5]
-    service = (repository_root / "frontend/src/services/publications.ts").read_text(encoding="utf-8")
-    reader_page = (repository_root / "frontend/src/pages/manuals/PublicationsReaderPage.tsx").read_text(encoding="utf-8")
-    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
-    styles = (repository_root / "frontend/src/pages/manuals/pdfReaderEngine.css").read_text(encoding="utf-8")
+    service = _frontend("frontend/src/services/publications.ts")
+    reader_page = _frontend("frontend/src/pages/manuals/PublicationsReaderPage.tsx")
+    bridge = _frontend("frontend/src/pages/manuals/PdfReaderCore.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV2.css")
 
     assert "rangeChunkSize: 512 * 1024" in service
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
     assert "fetchPublicationBlob(viewerPdfPath)" not in reader_page
-    assert "renderForms={fillMode && canFill}" in core
+    assert 'renderMode="canvas"' in core
+    assert "renderForms={safeForm}" in core
     assert "getFieldObjects" in core
-    assert "32%" in styles
+    assert "PdfReaderCoreV2" in bridge
+    assert "UNCONTROLLED DRAFT" in core
     assert "pointer-events: none" in styles
-    assert "content-visibility: auto" in styles
+    assert "content-visibility: auto" not in styles
+    assert 'renderMode="none"' not in core
 
 
 def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None:
-    repository_root = Path(__file__).resolve().parents[5]
-    config = (repository_root / "frontend/src/pages/manuals/pdfReaderConfig.ts").read_text(encoding="utf-8")
-    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
-    viewer = (repository_root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
-    linked_panel = (repository_root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
+    config = _frontend("frontend/src/pages/manuals/pdfReaderConfig.ts")
+    bridge = _frontend("frontend/src/pages/manuals/PdfReaderCore.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    viewer = _frontend("frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx")
+    linked_panel = _frontend("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
 
     assert "export const PDF_DOCUMENT_OPTIONS = Object.freeze" in config
     assert "options={PDF_DOCUMENT_OPTIONS}" in core
@@ -140,19 +148,41 @@ def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None
     assert "<PdfDocument" not in linked_panel
     assert "PdfReaderCore" in viewer
     assert "PdfReaderCore" in linked_panel
-    assert "inspectionGenerationRef" in core
-    assert "handleDocumentLoad" in core
+    assert "PdfReaderCoreV2" in bridge
+    assert "const loadDocument = useCallback" in core
+    assert "onLoadSuccess={loadDocument}" in core
     assert "onLoadSuccess={async" not in core
-    assert "error={<div" in core
+    assert "onLoadError=" in core
 
 
 def test_progress_refresh_does_not_clear_an_already_loaded_pdf() -> None:
-    repository_root = Path(__file__).resolve().parents[5]
-    core = (repository_root / "frontend/src/pages/manuals/PdfReaderCore.tsx").read_text(encoding="utf-8")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
 
-    source_reset_body = core.split("documentRef.current = null;", 1)[1].split("}, [fileUrl, localDraft?.savedAt]);", 1)[0]
-    assert "setPageCount(0)" in source_reset_body
-    assert "initialPage" not in source_reset_body
-    assert "const initialPageRef = useRef(initialPage)" in core
-    assert 'jumpToPage(initialPage, "auto")' in core
-    assert "const restoredPage = clampPdfValue(initialPageRef.current" in core
+    assert "setPageCount(0)" not in core
+    assert "setRendered(nearbyPages(restored, count))" in core
+    assert "const restored = clampPdfValue(initialPage, 1, count)" in core
+    assert "setPageCount(count)" in core
+    assert "setCurrentPage(restored)" in core
+
+
+def test_reader_renders_visible_pages_instead_of_blank_virtual_pages() -> None:
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV2.css")
+
+    assert "nearbyPages(page, pageCount)" in core
+    assert "rendered.has(page)" in core
+    assert 'renderMode="canvas"' in core
+    assert 'renderMode="none"' not in core
+    assert "content-visibility" not in styles
+    assert "opacity: 1 !important" in styles
+    assert "visibility: visible !important" in styles
+
+
+def test_reader_exposes_exactly_three_download_outputs() -> None:
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+
+    assert core.count("Original PDF") == 1
+    assert core.count("Editable PDF") == 1
+    assert core.count("Completed form pages") == 1
+    assert "editedPages.length ? editedPages : formPages" in core
+    assert "flattenPdfWorkingCopy" in core
