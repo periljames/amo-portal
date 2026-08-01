@@ -1,0 +1,142 @@
+.platform-graph-safe-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1340;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(2, 6, 23, .58);
+  backdrop-filter: blur(10px) saturate(.72);
+  transition: opacity .2s ease;
+}
+
+.platform-graph-safe-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.platform-graph-safe-toolbar {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 1370;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: min(1120px, calc(100vw - 32px));
+  min-height: 44px;
+  padding: 7px 9px 7px 14px;
+  border: 1px solid rgba(var(--platform-accent-rgb, 59, 103, 242), .36);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--platform-surface, #0f172a) 94%, transparent);
+  color: var(--platform-text, #f8fafc);
+  box-shadow: 0 18px 50px rgba(2, 6, 23, .36);
+  backdrop-filter: blur(16px);
+  transform: translate(-50%, -8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .2s cubic-bezier(.22, 1, .36, 1), opacity .2s ease;
+}
+
+.platform-graph-safe-backdrop.is-open .platform-graph-safe-toolbar {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.platform-graph-safe-toolbar strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .92rem;
+}
+
+.platform-graph-safe-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.05rem;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.platform-graph-safe-close:hover {
+  transform: rotate(90deg);
+  border-color: rgba(var(--platform-accent-rgb, 59, 103, 242), .58);
+  background: rgba(var(--platform-accent-rgb, 59, 103, 242), .1);
+}
+
+.platform-graph-expanded {
+  position: fixed !important;
+  inset: 70px max(16px, calc((100vw - 1180px) / 2)) 20px !important;
+  z-index: 1360 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: clamp(16px, 2.2vw, 30px) !important;
+  overflow: auto !important;
+  border: 1px solid rgba(var(--platform-accent-rgb, 59, 103, 242), .38) !important;
+  border-radius: 18px !important;
+  background: var(--platform-surface, #0f172a) !important;
+  color: var(--platform-text, #f8fafc) !important;
+  box-shadow: 0 34px 100px rgba(2, 6, 23, .58) !important;
+  transform: none !important;
+  cursor: default !important;
+  isolation: isolate;
+}
+
+.platform-graph-expanded .platform-sparkline,
+.platform-graph-expanded .echarts-for-react,
+.platform-graph-expanded .recharts-responsive-container,
+.platform-graph-expanded canvas,
+.platform-graph-expanded svg {
+  width: 100% !important;
+  min-height: min(62vh, 620px) !important;
+}
+
+.platform-graph-expanded > svg.platform-sparkline {
+  min-height: min(58vh, 560px) !important;
+}
+
+body.platform-graph-safe-open {
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .platform-graph-safe-toolbar {
+    top: 8px;
+    width: calc(100vw - 16px);
+  }
+
+  .platform-graph-expanded {
+    inset: 60px 8px 8px !important;
+    padding: 12px !important;
+    border-radius: 13px !important;
+  }
+
+  .platform-graph-expanded .platform-sparkline,
+  .platform-graph-expanded .echarts-for-react,
+  .platform-graph-expanded .recharts-responsive-container,
+  .platform-graph-expanded canvas,
+  .platform-graph-expanded svg {
+    min-height: 70vh !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-graph-safe-backdrop,
+  .platform-graph-safe-toolbar,
+  .platform-graph-safe-close {
+    transition-duration: .01ms !important;
+  }
+}
