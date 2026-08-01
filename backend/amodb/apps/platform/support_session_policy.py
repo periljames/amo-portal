@@ -35,7 +35,7 @@ def install_canonical_support_session_route(platform_router: APIRouter) -> None:
         route_item
         for route_item in platform_router.routes
         if not (
-            str(getattr(route_item, "path", "")) == "/support-sessions"
+            str(getattr(route_item, "path", "")).endswith("/support-sessions")
             and "POST" in set(getattr(route_item, "methods", None) or ())
         )
     ]
