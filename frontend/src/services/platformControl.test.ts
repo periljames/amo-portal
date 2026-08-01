@@ -79,6 +79,12 @@ describe("platform SaaS control API", () => {
     expect(platformSharedSource).toContain('setAccessState(fallbackUser ? "allowed" : "denied");');
   });
 
+  it("uses query-aware commercial navigation so only one billing item is active", () => {
+    expect(platformSharedSource).toContain("function navTarget(item: PlatformNavItem)");
+    expect(platformSharedSource).toContain("const currentTab = new URLSearchParams(search).get(\"tab\")");
+    expect(platformSharedSource).toContain("navIsActive(item, location.pathname, location.search)");
+  });
+
   it("does not return a tenant login to a denied platform route", () => {
     const handlerStart = platformSharedSource.indexOf("const signInWithPlatformAccount");
     const handlerEnd = platformSharedSource.indexOf("\n  };", handlerStart);
@@ -207,12 +213,32 @@ describe("platform SaaS control API", () => {
       .rejects.toThrow("eTIMS adapter is not certified");
   });
 
-  it("invalidates the session on 401", async () => {
+  it("invalidates a rejected token without issuing a manual logout", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }));
 
     await expect(platformApi.saasCapabilities())
       .rejects.toThrow("Session expired. Please sign in again.");
-    expect(endSession).toHaveBeenCalledWith("manual");
+    expect(handleAuthFailure).toHaveBeenCalledWith("platform-control-unauthorized");
+    expect(endSession).not.toHaveBeenCalled();
+  });
+
+  it("marks activity and awaits near-expiry session extension", async () => {
+    extendSessionIfNeeded.mockReturnValue(Promise.resolve(null));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await platformApi.tenants({ data_mode: "REAL" });
+
+    expect(extendSessionIfNeeded).toHaveBeenCalledWith(
+      "platform-control:/platform/tenants?data_mode=REAL",
+    );
+    expect(markSessionActivity).toHaveBeenCalledWith(
+      "platform-control:success:/platform/tenants?data_mode=REAL",
+    );
   });
 
   it("returns a deterministic write timeout", async () => {
