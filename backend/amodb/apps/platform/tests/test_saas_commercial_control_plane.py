@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.platform import commercial_router, commercial_services, phase4_router
+from amodb.apps.platform import commercial_services
+
+commercial_router = importlib.import_module("amodb.apps.platform.commercial_router")
+phase4_router = importlib.import_module("amodb.apps.platform.phase4_router")
+phase4_api_key_router = importlib.import_module("amodb.apps.platform.phase4_api_key_router")
 
 
 def test_data_mode_accepts_only_real_or_demo():
@@ -121,3 +126,29 @@ def test_phase4_source_uses_normal_timedelta_and_explicit_environment_scope():
     assert '__import__("datetime").timedelta' not in source
     assert "data_mode: str = Query(\"REAL\")" in source
     assert "normalize_data_mode(data_mode)" in source
+
+
+def test_commercial_integrity_covers_plan_changes_pricing_and_scheduled_cancellation():
+    repository_root = Path(__file__).resolve().parents[5]
+    source = (repository_root / "backend" / "amodb" / "apps" / "platform" / "commercial_integrity.py").read_text(encoding="utf-8")
+    assert "_rebuild_subscription_items" in source
+    assert "plan_price" in source
+    assert "Scheduled cancellation reached the current period end" in source
+    assert '_CURRENT_SUBSCRIPTION_STATUSES = services.ACTIVE_SUBSCRIPTION_STATUSES | {"DRAFT", "PAUSED"}' in source
+    assert 'row.price_book_id = book.id if book else None' in source
+
+
+def test_scheduled_cancellation_runs_on_a_write_session_lifecycle():
+    repository_root = Path(__file__).resolve().parents[5]
+    source = (repository_root / "backend" / "amodb" / "apps" / "platform" / "commercial_lifecycle.py").read_text(encoding="utf-8")
+    assert "WriteSessionLocal" in source
+    assert "commercial-subscription-lifecycle" in source
+    assert "_apply_due_cancellations(db, commit=True)" in source
+
+
+def test_canonical_api_key_route_persists_and_validates_expiry():
+    source = Path(phase4_api_key_router.__file__).read_text(encoding="utf-8")
+    assert '"/integrations/api-keys"' in source
+    assert "expires_at=expires_at" in source
+    assert "expires_at must be in the future" in source
+    assert "install_canonical_api_key_create_route" in source
