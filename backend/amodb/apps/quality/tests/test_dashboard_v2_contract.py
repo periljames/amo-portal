@@ -1,13 +1,57 @@
 from __future__ import annotations
 
-from amodb.apps.quality.canonical_router import router as canonical_router
-from amodb.apps.quality.dashboard_v2 import DASHBOARD_V2_CONTRACT, _build_action_queue
+from starlette.routing import Match
+
+from amodb.apps.quality.canonical_router import legacy_router, router as canonical_router
+from amodb.apps.quality.dashboard_v2 import (
+    DASHBOARD_V2_CONTRACT,
+    _build_action_queue,
+    qms_operational_dashboard_v2,
+)
 
 
-def test_operational_dashboard_route_is_registered() -> None:
-    paths = {str(getattr(route, "path", "")) for route in canonical_router.routes}
-    assert "/api/maintenance/{amo_code}/quality/dashboard-v2" in paths
+def _first_matching_endpoint(api_router, path: str):
+    scope = {
+        "type": "http",
+        "path": path,
+        "root_path": "",
+        "method": "GET",
+        "scheme": "http",
+        "query_string": b"",
+        "headers": [],
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    }
+    for route in api_router.routes:
+        match, _ = route.matches(scope)
+        if match == Match.FULL:
+            return getattr(route, "endpoint", None)
+    return None
+
+
+def test_operational_dashboard_route_resolves_before_generic_catchall() -> None:
+    canonical_path = "/api/maintenance/SAF/quality/dashboard-v2"
+    legacy_path = "/api/maintenance/SAF/qms/dashboard-v2"
+
+    assert _first_matching_endpoint(canonical_router, canonical_path) is qms_operational_dashboard_v2
+    assert _first_matching_endpoint(legacy_router, legacy_path) is qms_operational_dashboard_v2
     assert DASHBOARD_V2_CONTRACT == "qms-operational-dashboard.v2"
+
+
+def test_operational_dashboard_route_is_before_module_catchall() -> None:
+    for api_router in (canonical_router, legacy_router):
+        dashboard_index = next(
+            index
+            for index, route in enumerate(api_router.routes)
+            if getattr(route, "endpoint", None) is qms_operational_dashboard_v2
+        )
+        catchall_index = next(
+            index
+            for index, route in enumerate(api_router.routes)
+            if str(getattr(route, "path", "")).endswith("/{module_path:path}")
+            and "GET" in set(getattr(route, "methods", None) or ())
+        )
+        assert dashboard_index < catchall_index
 
 
 def test_action_queue_is_ranked_and_bounded() -> None:
