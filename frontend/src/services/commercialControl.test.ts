@@ -32,9 +32,9 @@ describe("canonical commercial control API", () => {
     markSessionActivity.mockReset();
   });
 
-  it("rejects ALL before issuing a request", async () => {
+  it("rejects ALL before issuing a request", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    await expect(commercialApi.summary("ALL" as never)).rejects.toThrow(
+    expect(() => commercialApi.summary("ALL" as never)).toThrow(
       "Platform data mode must be REAL or DEMO.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
