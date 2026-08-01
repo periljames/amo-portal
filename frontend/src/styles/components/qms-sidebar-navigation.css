@@ -1,0 +1,195 @@
+.sidebar__qms-nav--enhanced {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.sidebar__qms-nav--enhanced > .sidebar__qms-node {
+  border-left: 2px solid transparent;
+  padding-left: 6px;
+}
+
+.sidebar__qms-nav--enhanced > .sidebar__qms-node--core {
+  border-left-color: color-mix(in srgb, var(--border) 72%, var(--accent-primary) 28%);
+}
+
+.sidebar__qms-nav--enhanced > .sidebar__qms-node--audit {
+  border-left-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent 92%);
+  border-radius: 0 8px 8px 0;
+}
+
+.sidebar__qms-nav--enhanced > .sidebar__qms-node--audit > .sidebar__item .sidebar__item-label {
+  font-weight: 700;
+}
+
+.qms-sidebar-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 4px 4px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.qms-sidebar-tools__heading,
+.qms-sidebar-audit__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.qms-sidebar-tools__title,
+.qms-sidebar-audit__heading,
+.qms-sidebar-tools__module-label,
+.qms-sidebar-search__label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qms-sidebar-overview-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 3px 5px;
+  border-radius: 5px;
+}
+
+.qms-sidebar-overview-link:hover,
+.qms-sidebar-overview-link:focus-visible,
+.qms-sidebar-overview-link--active {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.qms-sidebar-audit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent-primary);
+}
+
+.qms-sidebar-audit__heading {
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.qms-sidebar-audit__links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.qms-sidebar-audit-link {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  padding: 6px 7px;
+  text-align: left;
+}
+
+.qms-sidebar-audit-link:hover,
+.qms-sidebar-audit-link:focus-visible {
+  background: var(--hover);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.qms-sidebar-audit-link--active {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent 85%);
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border) 55%);
+  color: var(--text);
+}
+
+.qms-sidebar-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qms-sidebar-search__input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent 22%);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 9px;
+  outline: none;
+}
+
+.qms-sidebar-search__input::placeholder {
+  color: var(--text-secondary);
+}
+
+.qms-sidebar-search__input:focus {
+  border-color: color-mix(in srgb, var(--accent-primary) 58%, var(--border) 42%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 14%, transparent 86%);
+}
+
+.qms-sidebar-tools__module-label {
+  margin-top: 1px;
+}
+
+.qms-sidebar-empty {
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sidebar__qms-nav--enhanced .sidebar__item {
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.sidebar__qms-nav--enhanced .sidebar__item--sub {
+  min-height: 30px;
+}
+
+.app-shell--v2 .sidebar__nav {
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 1024px) {
+  .qms-sidebar-audit__links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qms-sidebar-audit-link {
+    min-height: 34px;
+  }
+}
+
+body[data-color-scheme="light"] .sidebar__qms-nav--enhanced > .sidebar__qms-node--audit {
+  background: color-mix(in srgb, var(--accent-primary) 7%, transparent 93%);
+}
+
+body[data-color-scheme="light"] .qms-sidebar-search__input {
+  background: var(--surface);
+  color: var(--text-primary);
+}
