@@ -12,6 +12,7 @@ from .saas_execution_policy import install_saas_execution_policy
 from .saas_fiscalization_policy import install_fiscalization_enqueue_policy
 from .saas_provider_network import install_provider_network_hardening
 from .resend_email_policy import install_resend_email_provider
+from .commercial_integrity import install_commercial_integrity_policy
 from .router import router
 
 # Replace the legacy platform-only Stripe verifier before the webhook route is
@@ -20,14 +21,15 @@ from .router import router
 _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
 # Enforce credential inheritance, terminal fiscalization, provider execution,
-# frontend-link and outbound network rules before superuser or tenant routes
-# capture the shared service functions.
+# frontend-link, commercial lifecycle and outbound network rules before route
+# modules capture the shared service functions.
 install_tenant_provider_override_policy()
 install_fiscalization_enqueue_policy()
 install_saas_execution_policy()
 install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
+install_commercial_integrity_policy()
 
 from .console_router import router as console_router  # noqa: E402
 from .commercial_router import router as commercial_router  # noqa: E402
@@ -36,6 +38,7 @@ from .phase4_api_key_router import router as phase4_api_key_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
+from .commercial_lifecycle import install_commercial_lifecycle  # noqa: E402
 from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
@@ -64,6 +67,10 @@ install_legacy_command_queue()
 # Usage aggregation remains batched per API worker, but database increments are
 # atomic across workers and failed batches are restored before the next flush.
 install_usage_meter_hardening(router)
+
+# Scheduled cancellations are applied by a write-session lifecycle worker so
+# read endpoints stay side-effect free while access stops at the exact period end.
+install_commercial_lifecycle(router)
 
 # Route latency and request distributions are process-local while requests are
 # active. Persist each worker's current bucket on a real lifecycle timer so the
