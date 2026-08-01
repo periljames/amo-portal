@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,16 @@ def _price_book_for_update(db: Session, row: TenantSubscription, value: Any) -> 
     if not book or book.status != "ACTIVE" or book.data_mode != _tenant_mode(db, row.tenant_id):
         raise ValueError("Price book does not match the tenant environment")
     return book
+
+
+def _is_due_cancellation(row: TenantSubscription, *, now: datetime | None = None) -> bool:
+    current = now or services.utcnow()
+    return bool(
+        row.cancel_at_period_end
+        and row.current_period_end
+        and row.current_period_end <= current
+        and row.status in (services.ACTIVE_SUBSCRIPTION_STATUSES | {"PAUSED"})
+    )
 
 
 def _subscription_amount(db: Session, row: TenantSubscription, *, at: datetime | None = None) -> int:
@@ -138,7 +148,12 @@ def _rebuild_subscription_items(
     )
 
 
-def _apply_due_cancellations(db: Session, *, tenant_id: str | None = None) -> int:
+def _apply_due_cancellations(
+    db: Session,
+    *,
+    tenant_id: str | None = None,
+    commit: bool = True,
+) -> int:
     now = services.utcnow()
     query = db.query(TenantSubscription).filter(
         TenantSubscription.cancel_at_period_end.is_(True),
@@ -148,7 +163,7 @@ def _apply_due_cancellations(db: Session, *, tenant_id: str | None = None) -> in
     )
     if tenant_id:
         query = query.filter(TenantSubscription.tenant_id == tenant_id)
-    rows = query.all()
+    rows = query.with_for_update(skip_locked=True).all()
     for row in rows:
         before = services.subscription_snapshot(row)
         row.status = "CANCELLED"
@@ -191,7 +206,8 @@ def _apply_due_cancellations(db: Session, *, tenant_id: str | None = None) -> in
             legacy.effective_to = legacy.effective_to or now
     if rows:
         db.flush()
-        db.commit()
+        if commit:
+            db.commit()
     return len(rows)
 
 
@@ -210,13 +226,10 @@ def install_commercial_integrity_policy() -> None:
     if _INSTALLED:
         return
 
-    original_update_subscription = services.update_subscription
     original_transition_subscription = services.transition_subscription
     original_update_tenant_profile = services.update_tenant_profile
-    original_list_subscriptions = services.list_subscriptions
     original_subscription_payload = services.subscription_payload
     original_resolved_entitlements = services.resolved_entitlements
-    original_tenant_control_plane = services.tenant_control_plane
     original_commercial_summary = services.commercial_summary
 
     def update_subscription(
@@ -229,47 +242,79 @@ def install_commercial_integrity_policy() -> None:
         row = db.get(TenantSubscription, subscription_id)
         if not row:
             raise ValueError("Subscription not found")
-        next_payload = dict(payload)
-        clear_price_book = "price_book_id" in next_payload and not str(next_payload.get("price_book_id") or "").strip()
-        selected_book = _price_book_for_update(db, row, next_payload.get("price_book_id")) if "price_book_id" in next_payload else None
-        plan_changed = "plan_id" in next_payload and str(next_payload.get("plan_id") or "") != row.plan_id
-        pricing_changed = any(key in next_payload for key in ("price_book_id", "billing_term", "quantity"))
+        before = services.subscription_snapshot(row)
 
-        if clear_price_book:
-            next_payload.pop("price_book_id", None)
-        result = original_update_subscription(
+        if "plan_id" in payload:
+            plan = db.get(ProductPlan, str(payload.get("plan_id") or ""))
+            if not plan or plan.status != "ACTIVE":
+                raise ValueError("An active plan is required")
+            row.plan_id = plan.id
+
+        if "price_book_id" in payload:
+            book = _price_book_for_update(db, row, payload.get("price_book_id"))
+            row.price_book_id = book.id if book else None
+            row.currency = book.currency if book else str(payload.get("currency") or row.currency or "USD").upper()
+
+        if "billing_term" in payload:
+            term = str(payload.get("billing_term") or "").strip().upper()
+            if term not in services.VALID_BILLING_TERMS:
+                raise ValueError("Unsupported billing term")
+            row.billing_term = term
+            if row.status in services.ACTIVE_SUBSCRIPTION_STATUSES:
+                start = row.current_period_start or services.utcnow()
+                row.current_period_start = start
+                row.current_period_end = services.period_end(start, term)
+
+        for field in (
+            "external_customer_ref",
+            "external_subscription_ref",
+            "provider",
+            "auto_collection",
+            "cancel_at_period_end",
+        ):
+            if field in payload:
+                setattr(row, field, payload[field])
+        if "quantity" in payload:
+            row.quantity = max(1, int(payload.get("quantity") or 1))
+        if "metadata" in payload:
+            row.metadata_json = dict(payload.get("metadata") or {})
+
+        row.updated_by = actor_user_id
+        reason = str(payload.get("reason") or "Subscription updated")
+        _rebuild_subscription_items(
             db,
-            subscription_id=subscription_id,
-            payload=next_payload,
+            row=row,
             actor_user_id=actor_user_id,
+            reason=reason,
         )
-        row = db.get(TenantSubscription, subscription_id)
-        if not row:
-            return result
-        if clear_price_book:
-            row.price_book_id = None
-            row.currency = str(payload.get("currency") or row.currency or "USD").upper()
-        elif selected_book:
-            row.price_book_id = selected_book.id
-            row.currency = selected_book.currency
-        if plan_changed or pricing_changed:
-            _rebuild_subscription_items(
-                db,
-                row=row,
-                actor_user_id=actor_user_id,
-                reason=str(payload.get("reason") or "Subscription configuration changed"),
-            )
-            services.reconcile_subscription(
-                db,
-                row=row,
-                actor_user_id=actor_user_id,
-                reason="Reconcile rebuilt subscription items",
-                commit=False,
-            )
-            db.commit()
-            db.refresh(row)
-            return services.subscription_payload(db, row, include_events=True)
-        return result
+        db.add(SubscriptionEvent(
+            subscription_id=row.id,
+            event_type="UPDATED",
+            actor_user_id=actor_user_id,
+            reason=reason,
+            before_json=before,
+            after_json=services.subscription_snapshot(row),
+        ))
+        services.audit(
+            db,
+            actor_user_id=actor_user_id,
+            action="commercial.subscription.updated",
+            tenant_id=row.tenant_id,
+            entity_type="tenant_subscription",
+            entity_id=row.id,
+            reason=reason,
+            details={"before": before, "after": services.subscription_snapshot(row)},
+        )
+        services.reconcile_subscription(
+            db,
+            row=row,
+            actor_user_id=actor_user_id,
+            reason="Canonical subscription updated",
+            commit=False,
+        )
+        db.commit()
+        db.refresh(row)
+        return services.subscription_payload(db, row, include_events=True)
 
     def transition_subscription(
         db: Session,
@@ -319,37 +364,40 @@ def install_commercial_integrity_policy() -> None:
             actor_user_id=actor_user_id,
         )
 
-    def list_subscriptions(db: Session, **kwargs: Any) -> list[dict[str, Any]]:
-        _apply_due_cancellations(db, tenant_id=kwargs.get("tenant_id"))
-        return original_list_subscriptions(db, **kwargs)
-
     def subscription_payload(db: Session, row: TenantSubscription, **kwargs: Any) -> dict[str, Any]:
-        _apply_due_cancellations(db, tenant_id=row.tenant_id)
-        fresh = db.get(TenantSubscription, row.id) or row
-        return original_subscription_payload(db, fresh, **kwargs)
+        result = original_subscription_payload(db, row, **kwargs)
+        if _is_due_cancellation(row):
+            result["status"] = "CANCELLED"
+            result["cancel_at_period_end"] = False
+            result["cancelled_at"] = row.current_period_end
+            result["lifecycle_pending_persistence"] = True
+        return result
 
     def resolved_entitlements(db: Session, *, tenant_id: str) -> list[dict[str, Any]]:
-        _apply_due_cancellations(db, tenant_id=tenant_id)
-        return original_resolved_entitlements(db, tenant_id=tenant_id)
-
-    def tenant_control_plane(db: Session, *, tenant_id: str) -> dict[str, Any]:
-        _apply_due_cancellations(db, tenant_id=tenant_id)
-        return original_tenant_control_plane(db, tenant_id=tenant_id)
+        current = db.query(TenantSubscription).filter(
+            TenantSubscription.tenant_id == tenant_id,
+            TenantSubscription.status.in_(services.ACTIVE_SUBSCRIPTION_STATUSES | {"PAUSED"}),
+        ).order_by(TenantSubscription.updated_at.desc()).first()
+        resolved = original_resolved_entitlements(db, tenant_id=tenant_id)
+        if current and _is_due_cancellation(current):
+            return [item for item in resolved if item.get("source") == "OVERRIDE"]
+        return resolved
 
     def commercial_summary(db: Session, *, data_mode: str) -> dict[str, Any]:
         mode = services.normalize_data_mode(data_mode)
-        _apply_due_cancellations(db)
         result = original_commercial_summary(db, data_mode=mode)
         tenant_filter = account_models.AMO.is_demo.is_(mode == "DEMO")
         rows = db.query(TenantSubscription).join(
             account_models.AMO,
             account_models.AMO.id == TenantSubscription.tenant_id,
-        ).filter(
-            tenant_filter,
-            TenantSubscription.status.in_(services.ACTIVE_SUBSCRIPTION_STATUSES),
-        ).all()
+        ).filter(tenant_filter).all()
+        counts = {state: 0 for state in services.VALID_SUBSCRIPTION_STATUSES}
         revenue: dict[str, dict[str, int]] = {}
         for row in rows:
+            effective_status = "CANCELLED" if _is_due_cancellation(row) else row.status
+            counts[effective_status] = counts.get(effective_status, 0) + 1
+            if effective_status not in services.ACTIVE_SUBSCRIPTION_STATUSES:
+                continue
             monthly = _monthly_amount(_subscription_amount(db, row), row.billing_term)
             bucket = revenue.setdefault(row.currency, {
                 "mrr_cents": 0,
@@ -359,20 +407,19 @@ def install_commercial_integrity_policy() -> None:
             })
             bucket["mrr_cents"] += monthly
             bucket["arr_cents"] += monthly * 12
-            if row.status == "PAST_DUE":
+            if effective_status == "PAST_DUE":
                 bucket["at_risk_cents"] += monthly
-            if row.status == "TRIALING":
+            if effective_status == "TRIALING":
                 bucket["trial_pipeline_cents"] += monthly
+        result["subscriptions"] = counts
         result["revenue_by_currency"] = revenue
         return result
 
     services.update_subscription = update_subscription
     services.transition_subscription = transition_subscription
     services.update_tenant_profile = update_tenant_profile
-    services.list_subscriptions = list_subscriptions
     services.subscription_payload = subscription_payload
     services.resolved_entitlements = resolved_entitlements
-    services.tenant_control_plane = tenant_control_plane
     services.commercial_summary = commercial_summary
     _INSTALLED = True
 
@@ -380,6 +427,7 @@ def install_commercial_integrity_policy() -> None:
 __all__ = [
     "install_commercial_integrity_policy",
     "_apply_due_cancellations",
+    "_is_due_cancellation",
     "_rebuild_subscription_items",
     "_subscription_amount",
 ]
