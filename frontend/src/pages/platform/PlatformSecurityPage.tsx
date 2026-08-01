@@ -33,12 +33,12 @@ export default function PlatformSecurityPage() {
   const summaryQuery = usePlatformData(() => platformApi.securitySummary(), [], { pollMs: 15_000 });
   const tenants = usePlatformData(() => phase4Api.tenantOptions(dataMode), [dataMode], { pollMs: 30_000 });
   const alertsQuery = usePlatformData(
-    () => tab === "alerts" ? phase4Api.securityAlerts({ q, tenant_id: tenantId || undefined, severity: severity || undefined, status: status || undefined, limit: 150 }) : Promise.resolve({ items: [] }),
+    () => tab === "alerts" ? phase4Api.securityAlerts({ data_mode: dataMode, q, tenant_id: tenantId || undefined, severity: severity || undefined, status: status || undefined, limit: 150 }) : Promise.resolve({ items: [] }),
     [tab, q, tenantId, severity, status, dataMode],
     { pollMs: 10_000 },
   );
   const auditQuery = usePlatformData(
-    () => tab === "audit" ? phase4Api.securityAudit({ q, tenant_id: tenantId || undefined, limit: 150 }) : Promise.resolve({ items: [] }),
+    () => tab === "audit" ? phase4Api.securityAudit({ data_mode: dataMode, q, tenant_id: tenantId || undefined, limit: 150 }) : Promise.resolve({ items: [] }),
     [tab, q, tenantId, dataMode],
     { pollMs: 10_000 },
   );
@@ -55,12 +55,14 @@ export default function PlatformSecurityPage() {
 
   const resolveAlert = async () => {
     if (!selectedAlert) return;
-    setActionError(null); setNotice(null);
+    setActionError(null);
+    setNotice(null);
     try {
       const resolved = await phase4Api.resolveSecurityAlert(selectedAlert.id, reason);
       setSelectedAlert(resolved);
       setNotice("Security alert resolved with evidence and reason retained.");
-      alertsQuery.reload(); summaryQuery.reload();
+      alertsQuery.reload();
+      summaryQuery.reload();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     }
@@ -95,8 +97,8 @@ export default function PlatformSecurityPage() {
         </section>
       ) : (
         <section className="platform-commercial-layout">
-          <div className="platform-card"><div className="platform-section-title"><div><h2>Privileged audit log</h2><p>Reasons, actor, tenant, entity and request context.</p></div><StatusBadge value={`${auditQuery.data?.total ?? auditRecords.length} MATCHED`} /></div>{auditQuery.error ? <ErrorState error={auditQuery.error} retry={auditQuery.reload} /> : auditRecords.length ? <DataTable><thead><tr><th>Created</th><th>Action</th><th>Module</th><th>Tenant</th><th>Entity</th><th>Reason</th><th>Open</th></tr></thead><tbody>{auditRecords.map((record) => <tr key={record.id}><td>{new Date(record.created_at).toLocaleString()}</td><td><strong>{record.action}</strong></td><td>{record.module}</td><td>{record.tenant_id || "Platform"}</td><td>{record.entity_type || "—"}<br /><small>{record.entity_id}</small></td><td>{record.reason || "No reason recorded"}</td><td><button className="platform-btn" onClick={() => setSelectedAudit(record)}>Inspect</button></td></tr>)}</tbody></DataTable> : <EmptyState label="No audit records match the filters." />}</div>
-          <aside className="platform-card platform-commercial-sidebar"><h2>Audit evidence</h2>{selectedAudit ? <div className="platform-stack-form"><div className="platform-subtle-panel"><strong>{selectedAudit.action}</strong><p>{selectedAudit.reason || "No reason recorded."}</p></div><label><span>Actor</span><input readOnly value={selectedAudit.actor_user_id || "System"} /></label><label><span>Tenant</span><input readOnly value={selectedAudit.tenant_id || "Platform"} /></label><label><span>IP address</span><input readOnly value={selectedAudit.ip_address || "Not recorded"} /></label><label><span>User agent</span><textarea readOnly value={selectedAudit.user_agent || "Not recorded"} /></label><label><span>Details</span><textarea readOnly rows={10} value={JSON.stringify(selectedAudit.details || {}, null, 2)} /></label></div> : <EmptyState label="Select Inspect to view audit evidence." />}</aside>
+          <div className="platform-card"><div className="platform-section-title"><div><h2>Privileged audit log</h2><p>Reasons, actor, tenant, entity and request context.</p></div><StatusBadge value={`${auditQuery.data?.total ?? auditRecords.length} MATCHED`} /></div>{auditQuery.error ? <ErrorState error={auditQuery.error} retry={auditQuery.reload} /> : auditRecords.length ? <DataTable><thead><tr><th>Created</th><th>Action</th><th>Module</th><th>Tenant</th><th>Entity</th><th>Reason</th><th>Open</th></tr></thead><tbody>{auditRecords.map((record) => <tr key={record.id}><td>{new Date(record.created_at).toLocaleString()}</td><td><strong>{record.action}</strong></td><td>{record.module}</td><td>{record.tenant_name || record.tenant_id || "Platform"}</td><td>{record.entity_type || "—"}<br /><small>{record.entity_id}</small></td><td>{record.reason || "No reason recorded"}</td><td><button className="platform-btn" onClick={() => setSelectedAudit(record)}>Inspect</button></td></tr>)}</tbody></DataTable> : <EmptyState label="No audit records match the filters." />}</div>
+          <aside className="platform-card platform-commercial-sidebar"><h2>Audit evidence</h2>{selectedAudit ? <div className="platform-stack-form"><div className="platform-subtle-panel"><strong>{selectedAudit.action}</strong><p>{selectedAudit.reason || "No reason recorded."}</p></div><label><span>Actor</span><input readOnly value={selectedAudit.actor_user_id || "System"} /></label><label><span>Tenant</span><input readOnly value={selectedAudit.tenant_name || selectedAudit.tenant_id || "Platform"} /></label><label><span>IP address</span><input readOnly value={selectedAudit.ip_address || "Not recorded"} /></label><label><span>User agent</span><textarea readOnly value={selectedAudit.user_agent || "Not recorded"} /></label><label><span>Details</span><textarea readOnly rows={10} value={JSON.stringify(selectedAudit.details || {}, null, 2)} /></label></div> : <EmptyState label="Select Inspect to view audit evidence." />}</aside>
         </section>
       )}
     </PlatformShell>
