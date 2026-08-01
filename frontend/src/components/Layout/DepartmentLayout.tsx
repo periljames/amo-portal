@@ -72,10 +72,19 @@ function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void 
   }
 }
 
-function setDesktopSidebarDefault(amoCode: string): void {
+function setDesktopSidebarDefault(amoCode: string, qualityUpgrade: boolean): void {
   if (typeof window === "undefined" || !window.matchMedia("(min-width: 1025px)").matches) return;
   const currentUser = getCachedUser();
-  const storageKey = `amo_sidebar_pinned:${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
+  const identity = `${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
+  const storageKey = `amo_sidebar_pinned:${identity}`;
+  const qualityUpgradeKey = `amo_sidebar_quality_navigation_v2:${identity}`;
+
+  if (qualityUpgrade && window.localStorage.getItem(qualityUpgradeKey) !== "1") {
+    window.localStorage.setItem(storageKey, "1");
+    window.localStorage.setItem(qualityUpgradeKey, "1");
+    return;
+  }
+
   if (window.localStorage.getItem(storageKey) === null) {
     window.localStorage.setItem(storageKey, "1");
   }
@@ -106,8 +115,8 @@ const DepartmentLayout: React.FC<Props> = (props) => {
     isQualityNavigationPath(location.pathname, props.amoCode);
 
   useLayoutEffect(() => {
-    setDesktopSidebarDefault(props.amoCode);
-  }, [props.amoCode]);
+    setDesktopSidebarDefault(props.amoCode, isQualityDomain);
+  }, [isQualityDomain, props.amoCode]);
 
   useEffect(() => {
     const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
