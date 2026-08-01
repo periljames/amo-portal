@@ -38,6 +38,7 @@ from .phase4_api_key_router import (  # noqa: E402
     install_canonical_api_key_create_route,
     router as phase4_api_key_router,
 )
+from .support_session_policy import install_canonical_support_session_route  # noqa: E402
 from .user_environment_router import install_environment_scoped_user_route  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
@@ -50,8 +51,9 @@ from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
 # Preserve public console endpoint contracts while replacing legacy handlers
-# that ignored API key expiration or mixed REAL and DEMO user records.
+# that ignored expiration, support-session controls or environment isolation.
 install_canonical_api_key_create_route(router)
+install_canonical_support_session_route(router)
 install_environment_scoped_user_route(router)
 
 # ``amodb.main`` already mounts this package router at /platform. Keeping the
