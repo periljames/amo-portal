@@ -2,6 +2,7 @@ import type { PropsWithChildren, ReactNode } from "react";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { useManualRouteContext } from "./context";
+import "./publicationsThemeRepair.css";
 
 type Props = PropsWithChildren<{
   title: string;
