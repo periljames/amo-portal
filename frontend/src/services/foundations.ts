@@ -1,13 +1,18 @@
 // src/services/foundations.ts
-import { apiGet, apiPost, apiPut } from "./crs";
+import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
 import type {
+  AirportCatalogSearchRead,
   AvailabilityCreate,
   AvailabilityRead,
+  BaseLocationConsensusRead,
+  BaseLocationObservationCreate,
   BaseStationCreate,
   BaseStationRead,
   BaseStationUpdate,
   FoundationContracts,
+  LocationEvaluationRead,
+  LocationEvaluationRequest,
   PersonnelIdentityHealth,
   UserBaseAssignmentCreate,
   UserBaseAssignmentRead,
@@ -43,6 +48,58 @@ export function createBaseStation(payload: BaseStationCreate): Promise<BaseStati
 
 export function updateBaseStation(baseStationId: string, payload: BaseStationUpdate): Promise<BaseStationRead> {
   return apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
+}
+
+export function searchAirportCatalog(params: {
+  q: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  limit?: number;
+}): Promise<AirportCatalogSearchRead> {
+  return apiGet<AirportCatalogSearchRead>(`/foundations/airport-catalog/search${toQuery(params)}`, {
+    headers: authHeaders(),
+  });
+}
+
+export function contributeBaseLocation(
+  baseStationId: string,
+  payload: BaseLocationObservationCreate,
+): Promise<BaseLocationConsensusRead> {
+  return apiPost<BaseLocationConsensusRead>(
+    `/foundations/base-stations/${encodeURIComponent(baseStationId)}/location-observations`,
+    payload,
+    { headers: authHeaders() },
+  );
+}
+
+export function getBaseLocationConsensus(baseStationId: string): Promise<BaseLocationConsensusRead> {
+  return apiGet<BaseLocationConsensusRead>(
+    `/foundations/base-stations/${encodeURIComponent(baseStationId)}/location-consensus`,
+    { headers: authHeaders() },
+  );
+}
+
+export function approveBaseLocationConsensus(
+  baseStationId: string,
+  expectedSampleCount: number,
+): Promise<BaseStationRead> {
+  return apiPost<BaseStationRead>(
+    `/foundations/base-stations/${encodeURIComponent(baseStationId)}/location-consensus/approve`,
+    { expected_sample_count: expectedSampleCount },
+    { headers: authHeaders() },
+  );
+}
+
+export function clearBaseLocationObservations(baseStationId: string): Promise<void> {
+  return apiDelete<void>(
+    `/foundations/base-stations/${encodeURIComponent(baseStationId)}/location-observations`,
+    undefined,
+    { headers: authHeaders() },
+  );
+}
+
+export function evaluateBaseLocation(payload: LocationEvaluationRequest): Promise<LocationEvaluationRead> {
+  return apiPost<LocationEvaluationRead>("/foundations/location/evaluate", payload, { headers: authHeaders() });
 }
 
 export function createUserBaseAssignment(payload: UserBaseAssignmentCreate): Promise<UserBaseAssignmentRead> {
