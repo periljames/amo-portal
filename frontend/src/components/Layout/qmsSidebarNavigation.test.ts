@@ -25,7 +25,9 @@ describe("QMS sidebar navigation", () => {
       "register",
       "new",
       "checklists",
+      "templates",
       "reports",
+      "bin",
     ]);
     expect(new Set(QMS_AUDIT_DESTINATIONS.map((item) => item.id)).size).toBe(
       QMS_AUDIT_DESTINATIONS.length,
@@ -37,9 +39,12 @@ describe("QMS sidebar navigation", () => {
     }
   });
 
-  it("keeps the operational Quality calendar views directly reachable", () => {
+  it("keeps every functional Quality calendar view directly reachable", () => {
     expect(QMS_CALENDAR_DESTINATIONS.map((item) => item.view)).toEqual([
       "month",
+      "week",
+      "year",
+      "list",
       "audits",
       "cars",
       "training",
