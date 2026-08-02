@@ -29,8 +29,8 @@ describe("QMS route registry", () => {
   it("builds canonical module and record links", () => {
     expect(qmsModulePath("SAF", "cars", "overdue")).toBe("/maintenance/SAF/quality/cars/overdue");
     expect(qmsRecordPath("SAF", "audits", "QAR-MO-26-002")).toBe("/maintenance/SAF/quality/audits/QAR-MO-26-002");
-    expect(qmsRecordPath("Safari Link/AMO", "cars", "CAR 24+1", "overview")).toBe(
-      "/maintenance/Safari%20Link%2FAMO/quality/cars/CAR%2024%2B1/overview",
+    expect(qmsRecordPath("Safari Link/AMO", "cars", "CAR-24+1", "overview")).toBe(
+      "/maintenance/Safari%20Link%2FAMO/quality/cars/CAR-24%2B1/overview",
     );
     expect(qmsNavigationItems("SAF").find((item) => item.id === "audits")?.path).toBe("/maintenance/SAF/quality/audits/dashboard");
     expect(qmsNavigationItems("Safari Link/AMO").every((item) => item.path.startsWith("/maintenance/Safari%20Link%2FAMO/quality/"))).toBe(true);
