@@ -75,12 +75,17 @@ export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
   { id: "audit-plan", label: "Prepare / plan audit", moduleId: "audits", view: "plan", keywords: "preparation prep scope team notice" },
   { id: "audit-register", label: "Audit register", moduleId: "audits", view: "register", keywords: "all audits open closed" },
   { id: "audit-new", label: "Create audit", moduleId: "audits", view: "new", keywords: "new initiate" },
-  { id: "audit-checklists", label: "Checklist library", moduleId: "audits", view: "checklists", keywords: "questions template working paper" },
+  { id: "audit-checklists", label: "Checklist library", moduleId: "audits", view: "checklists", keywords: "questions working paper" },
+  { id: "audit-templates", label: "Audit templates", moduleId: "audits", view: "templates", keywords: "template notice checklist preparation" },
   { id: "audit-reports", label: "Issued reports", moduleId: "audits", view: "reports", keywords: "report archive issued" },
+  { id: "audit-bin", label: "Recycle bin", moduleId: "audits", view: "bin", keywords: "deleted restored audit" },
 ] as const;
 
 export const QMS_CALENDAR_DESTINATIONS: readonly QmsRegisteredDestination[] = [
-  { id: "calendar-month", label: "Calendar", moduleId: "calendar", view: "month", keywords: "month dates planner" },
+  { id: "calendar-month", label: "Month", moduleId: "calendar", view: "month", keywords: "calendar dates planner" },
+  { id: "calendar-week", label: "Week", moduleId: "calendar", view: "week", keywords: "calendar dates planner" },
+  { id: "calendar-year", label: "Year", moduleId: "calendar", view: "year", keywords: "calendar programme annual" },
+  { id: "calendar-agenda", label: "Agenda", moduleId: "calendar", view: "list", keywords: "list upcoming deadlines" },
   { id: "calendar-audits", label: "Audit dates", moduleId: "calendar", view: "audits", keywords: "audit schedule inspection" },
   { id: "calendar-cars", label: "CAR deadlines", moduleId: "calendar", view: "cars", keywords: "corrective action due overdue" },
   { id: "calendar-training", label: "Training expiries", moduleId: "calendar", view: "training", keywords: "competence expiry" },
@@ -126,6 +131,14 @@ export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
 
 function normalise(value: string | null | undefined): string {
   return String(value || "").trim().toLowerCase();
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function pathWithoutTrailingSlash(path: string): string {
@@ -373,7 +386,7 @@ function createPanel(
   if (activeAudit) {
     sections.append(createSection(
       "current-audit",
-      `Current audit · ${decodeURIComponent(activeAudit.auditKey)}`,
+      `Current audit · ${safeDecode(activeAudit.auditKey)}`,
       "Move through the active audit without returning to the register",
       currentAuditLinks(activeAudit, search),
       pathname,
@@ -386,7 +399,7 @@ function createPanel(
   sections.append(createSection(
     "calendar",
     "Quality calendar",
-    "Audit dates, CAR deadlines, training expiries and reviews",
+    "Month, agenda, audit dates, CAR deadlines, training and reviews",
     QMS_CALENDAR_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination)),
     pathname,
     search,
