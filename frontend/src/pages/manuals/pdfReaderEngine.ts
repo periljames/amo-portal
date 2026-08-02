@@ -65,7 +65,9 @@ export function isPdfDraftLifecycleCurrent(savingLifecycle: number, currentLifec
 }
 
 export function resolvePdfReaderScrollRoot(readerRoot: HTMLElement): HTMLElement | null {
-  const viewport = readerRoot.querySelector<HTMLElement>(":scope > .pdf-engine-viewport");
+  const viewport =
+    readerRoot.querySelector<HTMLElement>(":scope > .pdfv2-viewport")
+    ?? readerRoot.querySelector<HTMLElement>(":scope > .pdf-engine-viewport");
   if (viewport && ["auto", "scroll"].includes(window.getComputedStyle(viewport).overflowY)) return viewport;
   return readerRoot.closest<HTMLElement>(".app-shell__scroll");
 }
