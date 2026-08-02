@@ -145,6 +145,11 @@ function pathWithoutTrailingSlash(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
+function matchesPrefix(current: string, prefix: string): boolean {
+  const clean = pathWithoutTrailingSlash(prefix);
+  return current === clean || current.startsWith(`${clean}/`);
+}
+
 function matchesPath(pathname: string, link: NavigationLink, search: string): boolean {
   const current = pathWithoutTrailingSlash(pathname);
   const target = pathWithoutTrailingSlash(link.path.split("?")[0]);
@@ -156,11 +161,11 @@ function matchesPath(pathname: string, link: NavigationLink, search: string): bo
   }
 
   if (link.activeMode === "prefix") {
-    return current === target || current.startsWith(`${target}/`);
+    return matchesPrefix(current, target) || (link.matchPrefixes || []).some((prefix) => matchesPrefix(current, prefix));
   }
 
   if (current === target) return true;
-  return (link.matchPrefixes || []).some((prefix) => current.startsWith(pathWithoutTrailingSlash(prefix)));
+  return (link.matchPrefixes || []).some((prefix) => matchesPrefix(current, prefix));
 }
 
 function registeredDestinationPath(amoCode: string, destination: QmsRegisteredDestination): string {
@@ -282,6 +287,7 @@ function createSection(
 
 function moduleLinksForGroup(amoCode: string, group: QmsNavigationGroup, aerodocEnabled: boolean): NavigationLink[] {
   const links: NavigationLink[] = [];
+  const basePath = qmsBasePath(amoCode);
   for (const moduleId of group.moduleIds) {
     if (moduleId === "aerodoc" && !aerodocEnabled) continue;
     const module = QMS_ROUTE_REGISTRY.find((candidate) => candidate.id === moduleId);
@@ -292,6 +298,7 @@ function moduleLinksForGroup(amoCode: string, group: QmsNavigationGroup, aerodoc
       path: qmsModulePath(amoCode, module.id),
       keywords: `${module.label} ${module.section}`,
       activeMode: "prefix",
+      matchPrefixes: [`${basePath}/${module.segment}`],
     });
   }
 
@@ -302,6 +309,7 @@ function moduleLinksForGroup(amoCode: string, group: QmsNavigationGroup, aerodoc
       path: qmsTrainingPath(amoCode, "dashboard"),
       keywords: "training competence matrix expiry qualifications",
       activeMode: "prefix",
+      matchPrefixes: [`/maintenance/${encodeURIComponent(amoCode)}/training/competence`],
     });
   }
   return links;
@@ -346,11 +354,30 @@ function createPanel(
   helper.textContent = "Routes grouped by work";
   header.append(title, helper);
 
+  const basePath = qmsBasePath(amoCode);
   const quickLinks: NavigationLink[] = [
-    { id: "quick-overview", label: "Overview", path: qmsBasePath(amoCode) },
-    { id: "quick-work", label: "My work", path: qmsModulePath(amoCode, "inbox", "assigned-to-me"), activeMode: "prefix" },
-    { id: "quick-calendar", label: "Calendar", path: qmsModulePath(amoCode, "calendar", "month"), activeMode: "prefix" },
-    { id: "quick-audits", label: "Audits", path: qmsModulePath(amoCode, "audits", "dashboard"), activeMode: "prefix" },
+    { id: "quick-overview", label: "Overview", path: basePath },
+    {
+      id: "quick-work",
+      label: "My work",
+      path: qmsModulePath(amoCode, "inbox", "assigned-to-me"),
+      activeMode: "prefix",
+      matchPrefixes: [`${basePath}/inbox`],
+    },
+    {
+      id: "quick-calendar",
+      label: "Calendar",
+      path: qmsModulePath(amoCode, "calendar", "month"),
+      activeMode: "prefix",
+      matchPrefixes: [`${basePath}/calendar`],
+    },
+    {
+      id: "quick-audits",
+      label: "Audits",
+      path: qmsModulePath(amoCode, "audits", "dashboard"),
+      activeMode: "prefix",
+      matchPrefixes: [`${basePath}/audits`],
+    },
   ];
   const quick = document.createElement("div");
   quick.className = "qms-navigation-quick";
