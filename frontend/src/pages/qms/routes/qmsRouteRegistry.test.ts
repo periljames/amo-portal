@@ -72,7 +72,7 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/documents/7f14b288/revisions/91/view").kind).toBe("known");
   });
 
-  it("does not silently accept misspelled modules, views, or record tails", () => {
+  it("does not silently accept misspelled modules or views", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/carrs/overdue").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/ovverdue").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedul").kind).toBe("unknown");
