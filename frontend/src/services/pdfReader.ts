@@ -21,6 +21,8 @@ export type PdfReaderCapabilities = {
   can_download_working: boolean;
   can_flatten: boolean;
   can_submit: boolean;
+  automatic_form_execution?: boolean;
+  form_download_mode?: "CHANGED_FORM_PAGES" | string | null;
 };
 
 export type FlattenedPdfResult = {
@@ -31,6 +33,7 @@ export type FlattenedPdfResult = {
   outputSha256?: string | null;
   pageCount?: number | null;
   flattenedPages?: number | null;
+  selectedPages?: number[];
 };
 
 function revisionPath(tenant: string, manualId: string, revisionId: string): string {
@@ -69,6 +72,14 @@ function contentDispositionFilename(response: Response, fallback: string): strin
   return plain || fallback;
 }
 
+function selectedPageHeader(value: string | null): number[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isInteger(item) && item > 0);
+}
+
 export async function getPdfReaderCapabilities(
   tenant: string,
   manualId: string,
@@ -89,9 +100,15 @@ export async function flattenPdfWorkingCopy(
   manualId: string,
   revisionId: string,
   file: File,
+  completedPageNumbers: number[] = [],
 ): Promise<FlattenedPdfResult> {
   const body = new FormData();
   body.append("artifact", file);
+  body.append("page_numbers_json", JSON.stringify(
+    [...new Set(completedPageNumbers)]
+      .filter((page) => Number.isInteger(page) && page > 0)
+      .sort((left, right) => left - right),
+  ));
   const response = await authenticatedFetch(`${revisionPath(tenant, manualId, revisionId)}/flatten.pdf`, {
     method: "POST",
     body,
@@ -99,12 +116,13 @@ export async function flattenPdfWorkingCopy(
   const blob = await response.blob();
   return {
     blob,
-    filename: contentDispositionFilename(response, file.name.replace(/\.pdf$/i, "_FLATTENED.pdf")),
+    filename: contentDispositionFilename(response, file.name.replace(/\.pdf$/i, "_COMPLETED_PAGES.pdf")),
     sourceSha256: response.headers.get("X-PDF-Template-SHA256"),
     workingSha256: response.headers.get("X-PDF-Working-SHA256"),
     outputSha256: response.headers.get("X-PDF-Output-SHA256"),
     pageCount: Number(response.headers.get("X-PDF-Page-Count") || 0) || null,
     flattenedPages: Number(response.headers.get("X-PDF-Flattened-Pages") || 0) || null,
+    selectedPages: selectedPageHeader(response.headers.get("X-PDF-Selected-Pages")),
   };
 }
 

@@ -17,18 +17,28 @@ from . import router_legacy as _legacy
 from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
+from .pdf_reader_form_override_router import router as _pdf_reader_form_override_router
 from .pdf_reader_router import router as _pdf_reader_router
 from .publications_fast_reader_router import router as _fast_reader_router
 from .publications_router import router as _publications_router
 from .upload_guard_router import router as _upload_guard_router
 
 
+# These are narrow replacements for endpoints owned by pdf_reader_router. Preserve
+# that public ownership marker for route-contract diagnostics and integrations that
+# inspect the mounted endpoint module.
+for _route in _pdf_reader_form_override_router.routes:
+    if getattr(_route, "endpoint", None) is not None:
+        _route.endpoint.__module__ = "amodb.apps.manuals.pdf_reader_router"
+
+
 router = APIRouter()
-# Guards, progressive delivery, PDF engine processing, and version-aware
-# reference routes must precede compatibility routes because Starlette resolves
-# identical paths in declaration order. Reader knowledge routes authorize both
-# the source and target documents.
+# Guards, safe automatic form execution, progressive delivery, PDF engine
+# processing, and version-aware reference routes must precede compatibility
+# routes because Starlette resolves identical paths in declaration order.
+# Reader knowledge routes authorize both the source and target documents.
 router.include_router(_upload_guard_router)
+router.include_router(_pdf_reader_form_override_router)
 router.include_router(_pdf_reader_router)
 router.include_router(_fast_reader_router)
 router.include_router(publication_tree_router)

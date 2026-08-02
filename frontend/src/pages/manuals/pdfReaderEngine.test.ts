@@ -122,19 +122,32 @@ describe("controlled PDF reader engine", () => {
     expect(isPdfDraftLifecycleCurrent(3, 4)).toBe(false);
   });
 
-  it("selects only the current compact reader's direct scrolling viewport", () => {
+  it("selects the compact reader's direct scrolling viewport", () => {
     const shell = {} as HTMLElement;
-    const viewport = {} as HTMLElement;
+    const compactViewport = {} as HTMLElement;
     let overflowY = "auto";
     const reader = {
-      querySelector: vi.fn(() => viewport),
+      querySelector: vi.fn((selector: string) => selector.includes("pdfv2") ? compactViewport : null),
       closest: vi.fn(() => shell),
     } as unknown as HTMLElement;
     vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY }) });
 
-    expect(resolvePdfReaderScrollRoot(reader)).toBe(viewport);
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(compactViewport);
     overflowY = "visible";
     expect(resolvePdfReaderScrollRoot(reader)).toBe(shell);
+    expect(reader.querySelector).toHaveBeenCalledWith(":scope > .pdfv2-viewport");
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the legacy direct scrolling viewport", () => {
+    const legacyViewport = {} as HTMLElement;
+    const reader = {
+      querySelector: vi.fn((selector: string) => selector.includes("pdf-engine") ? legacyViewport : null),
+      closest: vi.fn(() => null),
+    } as unknown as HTMLElement;
+    vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY: "auto" }) });
+
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(legacyViewport);
     expect(reader.querySelector).toHaveBeenCalledWith(":scope > .pdf-engine-viewport");
     vi.unstubAllGlobals();
   });
