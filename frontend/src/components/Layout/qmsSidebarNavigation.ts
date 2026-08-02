@@ -1,241 +1,182 @@
 import {
+  QMS_ROUTE_REGISTRY,
   qmsBasePath,
   qmsModulePath,
+  qmsTrainingPath,
 } from "../../pages/qms/routes/qmsRouteRegistry";
 
-type QmsAuditShortcut = {
+type QmsRegisteredDestination = {
   id: string;
   label: string;
-  view: "dashboard" | "program" | "schedule" | "checklists" | "reports";
-  matchRelativePrefixes?: string[];
+  moduleId: string;
+  view: string;
+  keywords?: string;
+  matchRelativePrefixes?: readonly string[];
+};
+
+type QmsWorkspaceTab = {
+  id: string;
+  label: string;
+  tab: "war-room" | "checklist" | "findings" | "cars" | "evidence" | "report" | "closeout";
+};
+
+type QmsNavigationGroup = {
+  id: string;
+  label: string;
+  description: string;
+  moduleIds: readonly string[];
 };
 
 type QmsSidebarEnhancementOptions = {
   sidebar: HTMLElement;
   amoCode: string;
   pathname: string;
+  search: string;
   onNavigate: (path: string) => void;
 };
 
-const QUALITY_NAV_SELECTOR = '.sidebar__qms-nav[aria-label="Quality modules"]';
+type NavigationLink = {
+  id: string;
+  label: string;
+  path: string;
+  keywords?: string;
+  matchPrefixes?: readonly string[];
+  activeMode?: "exact" | "prefix" | "tab";
+  tab?: string;
+};
 
-export const QMS_AUDIT_SHORTCUTS: readonly QmsAuditShortcut[] = [
-  { id: "dashboard", label: "Dashboard", view: "dashboard" },
-  { id: "programme", label: "Programme", view: "program" },
+const QUALITY_NAV_SELECTOR = '.sidebar__qms-nav[aria-label="Quality modules"]';
+const STATIC_AUDIT_SEGMENTS = new Set([
+  "dashboard",
+  "program",
+  "programme",
+  "schedule",
+  "schedules",
+  "register",
+  "checklists",
+  "reports",
+  "templates",
+  "new",
+  "plan",
+  "bin",
+]);
+
+export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
+  { id: "audit-dashboard", label: "Audit dashboard", moduleId: "audits", view: "dashboard", keywords: "assurance overview" },
+  { id: "audit-programme", label: "Annual programme", moduleId: "audits", view: "program", keywords: "programme plan year" },
   {
-    id: "schedule",
-    label: "Schedule",
+    id: "audit-schedule",
+    label: "Audit schedule",
+    moduleId: "audits",
     view: "schedule",
+    keywords: "calendar dates planner",
     matchRelativePrefixes: ["audits/schedules/"],
   },
-  { id: "checklists", label: "Checklists", view: "checklists" },
-  { id: "reports", label: "Reports", view: "reports" },
+  { id: "audit-plan", label: "Prepare / plan audit", moduleId: "audits", view: "plan", keywords: "preparation prep scope team notice" },
+  { id: "audit-register", label: "Audit register", moduleId: "audits", view: "register", keywords: "all audits open closed" },
+  { id: "audit-new", label: "Create audit", moduleId: "audits", view: "new", keywords: "new initiate" },
+  { id: "audit-checklists", label: "Checklist library", moduleId: "audits", view: "checklists", keywords: "questions template working paper" },
+  { id: "audit-reports", label: "Issued reports", moduleId: "audits", view: "reports", keywords: "report archive issued" },
 ] as const;
 
-const MODULE_SEARCH_ALIASES: Record<string, string> = {
-  audits: "audit inspection programme program schedule checklist report",
-  "car / capa": "corrective action preventive action root cause overdue due soon closure",
-  findings: "nonconformity non-conformity observation audit finding",
-  "controlled documents": "document control manual procedure revision approval distribution archive obsolete",
-  "risk & opportunities": "risk opportunity hazard mitigation treatment matrix",
-  "training & competence": "training competence matrix expiry overdue qualification",
-  suppliers: "supplier vendor approved list evaluation",
-  "equipment & calibration": "tool equipment calibration expiry register",
-  "management review": "management review meeting actions minutes",
-  "external interface": "regulator authority external finding",
-};
+export const QMS_CALENDAR_DESTINATIONS: readonly QmsRegisteredDestination[] = [
+  { id: "calendar-month", label: "Calendar", moduleId: "calendar", view: "month", keywords: "month dates planner" },
+  { id: "calendar-audits", label: "Audit dates", moduleId: "calendar", view: "audits", keywords: "audit schedule inspection" },
+  { id: "calendar-cars", label: "CAR deadlines", moduleId: "calendar", view: "cars", keywords: "corrective action due overdue" },
+  { id: "calendar-training", label: "Training expiries", moduleId: "calendar", view: "training", keywords: "competence expiry" },
+  { id: "calendar-review", label: "Management reviews", moduleId: "calendar", view: "management-review", keywords: "review meeting" },
+] as const;
+
+export const QMS_AUDIT_WORKSPACE_TABS: readonly QmsWorkspaceTab[] = [
+  { id: "audit-war-room", label: "War room", tab: "war-room" },
+  { id: "audit-prep", label: "Prep & checklist", tab: "checklist" },
+  { id: "audit-findings", label: "Findings", tab: "findings" },
+  { id: "audit-cars", label: "CARs", tab: "cars" },
+  { id: "audit-evidence", label: "Evidence", tab: "evidence" },
+  { id: "audit-report", label: "Report", tab: "report" },
+  { id: "audit-closeout", label: "Closeout", tab: "closeout" },
+] as const;
+
+export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
+  {
+    id: "assurance",
+    label: "Assurance & corrective action",
+    description: "Findings, CARs, risk and change control",
+    moduleIds: ["findings", "cars", "risk", "change-control"],
+  },
+  {
+    id: "controls",
+    label: "System controls",
+    description: "Processes, documents, competence and operational controls",
+    moduleIds: ["system", "documents", "suppliers", "equipment-calibration", "external-interface"],
+  },
+  {
+    id: "review",
+    label: "Review, reports & evidence",
+    description: "Management review, analytics and retained evidence",
+    moduleIds: ["management-review", "reports", "evidence-vault"],
+  },
+  {
+    id: "administration",
+    label: "Administration",
+    description: "Quality configuration and enabled specialist tools",
+    moduleIds: ["settings", "aerodoc"],
+  },
+] as const;
 
 function normalise(value: string | null | undefined): string {
   return String(value || "").trim().toLowerCase();
 }
 
-function directModuleButton(node: HTMLElement): HTMLButtonElement | null {
-  return node.querySelector<HTMLButtonElement>(":scope > button");
+function pathWithoutTrailingSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-function moduleLabel(node: HTMLElement): string {
-  const button = directModuleButton(node);
-  return String(
-    button?.querySelector<HTMLElement>(".sidebar__item-label")?.textContent ||
-      button?.getAttribute("aria-label") ||
-      button?.textContent ||
-      "",
-  ).trim();
+function matchesPath(pathname: string, link: NavigationLink, search: string): boolean {
+  const current = pathWithoutTrailingSlash(pathname);
+  const target = pathWithoutTrailingSlash(link.path.split("?")[0]);
+
+  if (link.activeMode === "tab") {
+    if (current !== target) return false;
+    const params = new URLSearchParams(search);
+    return (params.get("tab") || "war-room") === link.tab;
+  }
+
+  if (link.activeMode === "prefix") {
+    return current === target || current.startsWith(`${target}/`);
+  }
+
+  if (current === target) return true;
+  return (link.matchPrefixes || []).some((prefix) => current.startsWith(pathWithoutTrailingSlash(prefix)));
 }
 
-function moduleSearchText(node: HTMLElement): string {
-  const label = moduleLabel(node);
-  const lowerLabel = normalise(label);
-  const childText = normalise(node.textContent);
-  return `${lowerLabel} ${childText} ${MODULE_SEARCH_ALIASES[lowerLabel] || ""}`.trim();
+function registeredDestinationPath(amoCode: string, destination: QmsRegisteredDestination): string {
+  return qmsModulePath(amoCode, destination.moduleId, destination.view);
 }
 
-function matchesPath(pathname: string, path: string, matchPrefixes: string[] = []): boolean {
-  return pathname === path || pathname === `${path}/` || matchPrefixes.some((prefix) => pathname.startsWith(prefix));
-}
-
-function auditShortcutPath(amoCode: string, shortcut: QmsAuditShortcut): string {
-  return qmsModulePath(amoCode, "audits", shortcut.view);
-}
-
-function auditShortcutPrefixes(amoCode: string, shortcut: QmsAuditShortcut): string[] {
+function registeredDestinationLink(amoCode: string, destination: QmsRegisteredDestination): NavigationLink {
   const basePath = qmsBasePath(amoCode);
-  return (shortcut.matchRelativePrefixes || []).map((relative) => `${basePath}/${relative}`);
+  return {
+    id: destination.id,
+    label: destination.label,
+    path: registeredDestinationPath(amoCode, destination),
+    keywords: destination.keywords,
+    matchPrefixes: (destination.matchRelativePrefixes || []).map((relative) => `${basePath}/${relative}`),
+  };
 }
 
-function createShortcutButton(
-  shortcut: QmsAuditShortcut,
-  amoCode: string,
-  pathname: string,
-  onNavigate: (path: string) => void,
-): HTMLButtonElement {
-  const path = auditShortcutPath(amoCode, shortcut);
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "qms-sidebar-audit-link";
-  button.dataset.qmsPath = path;
-  button.dataset.qmsShortcut = shortcut.id;
-  button.textContent = shortcut.label;
-  button.setAttribute("aria-label", `Open audit ${shortcut.label.toLowerCase()}`);
-  button.onclick = () => onNavigate(path);
-
-  const active = matchesPath(pathname, path, auditShortcutPrefixes(amoCode, shortcut));
-  button.classList.toggle("qms-sidebar-audit-link--active", active);
-  if (active) button.setAttribute("aria-current", "page");
-
-  return button;
+export function getActiveAuditWorkspace(pathname: string, amoCode: string): { auditKey: string; basePath: string } | null {
+  const prefix = `${qmsBasePath(amoCode)}/audits/`;
+  if (!pathname.startsWith(prefix)) return null;
+  const [auditKey] = pathname.slice(prefix.length).split("/").filter(Boolean);
+  if (!auditKey || STATIC_AUDIT_SEGMENTS.has(auditKey)) return null;
+  return { auditKey, basePath: `${prefix}${auditKey}` };
 }
 
-function applyModuleFilter(nav: HTMLElement, query: string): void {
-  const normalisedQuery = normalise(query);
-  const nodes = Array.from(nav.querySelectorAll<HTMLElement>(":scope > .sidebar__qms-node"));
-  let visibleCount = 0;
-
-  for (const node of nodes) {
-    const visible = !normalisedQuery || moduleSearchText(node).includes(normalisedQuery);
-    node.hidden = !visible;
-    if (visible) visibleCount += 1;
-  }
-
-  const emptyState = nav.querySelector<HTMLElement>(":scope > .qms-sidebar-empty");
-  if (emptyState) emptyState.hidden = visibleCount > 0;
-}
-
-function markCoreModules(nav: HTMLElement): void {
-  const nodes = Array.from(nav.querySelectorAll<HTMLElement>(":scope > .sidebar__qms-node"));
-  for (const node of nodes) {
-    const label = normalise(moduleLabel(node));
-    node.classList.toggle("sidebar__qms-node--audit", label === "audits");
-    node.classList.toggle("sidebar__qms-node--core", ["audits", "findings", "car / capa"].includes(label));
-
-    const button = directModuleButton(node);
-    if (!button) continue;
-    if (label === "audits") {
-      button.setAttribute("aria-description", "Primary audit workspace with direct shortcuts above");
-      button.title = "Audit dashboard";
-    }
-  }
-}
-
-function createTools(
-  nav: HTMLElement,
-  amoCode: string,
-  pathname: string,
-  onNavigate: (path: string) => void,
-): HTMLElement {
-  const basePath = qmsBasePath(amoCode);
-  const tools = document.createElement("section");
-  tools.className = "qms-sidebar-tools";
-  tools.setAttribute("aria-label", "Quality navigation tools");
-
-  const heading = document.createElement("div");
-  heading.className = "qms-sidebar-tools__heading";
-
-  const title = document.createElement("span");
-  title.className = "qms-sidebar-tools__title";
-  title.textContent = "Quality navigation";
-
-  const overview = document.createElement("button");
-  overview.type = "button";
-  overview.className = "qms-sidebar-overview-link";
-  overview.textContent = "Overview";
-  overview.dataset.qmsPath = basePath;
-  overview.onclick = () => onNavigate(basePath);
-  const overviewActive = pathname === basePath || pathname === `${basePath}/`;
-  overview.classList.toggle("qms-sidebar-overview-link--active", overviewActive);
-  if (overviewActive) overview.setAttribute("aria-current", "page");
-
-  heading.append(title, overview);
-
-  const auditSection = document.createElement("section");
-  auditSection.className = "qms-sidebar-audit";
-  auditSection.setAttribute("aria-label", "Audit workspace shortcuts");
-
-  const auditHeading = document.createElement("div");
-  auditHeading.className = "qms-sidebar-audit__heading";
-  auditHeading.textContent = "Audit workspace";
-
-  const auditLinks = document.createElement("div");
-  auditLinks.className = "qms-sidebar-audit__links";
-  for (const shortcut of QMS_AUDIT_SHORTCUTS) {
-    auditLinks.append(createShortcutButton(shortcut, amoCode, pathname, onNavigate));
-  }
-  auditSection.append(auditHeading, auditLinks);
-
-  const searchLabel = document.createElement("label");
-  searchLabel.className = "qms-sidebar-search";
-  const searchText = document.createElement("span");
-  searchText.className = "qms-sidebar-search__label";
-  searchText.textContent = "Find a module";
-  const search = document.createElement("input");
-  search.type = "search";
-  search.className = "qms-sidebar-search__input";
-  search.placeholder = "Search Quality modules";
-  search.autocomplete = "off";
-  search.setAttribute("aria-label", "Search Quality modules");
-  search.oninput = () => applyModuleFilter(nav, search.value);
-  searchLabel.append(searchText, search);
-
-  const moduleLabelElement = document.createElement("div");
-  moduleLabelElement.className = "qms-sidebar-tools__module-label";
-  moduleLabelElement.textContent = "All Quality modules";
-
-  tools.append(heading, auditSection, searchLabel, moduleLabelElement);
-  return tools;
-}
-
-function refreshTools(
-  nav: HTMLElement,
-  amoCode: string,
-  pathname: string,
-  onNavigate: (path: string) => void,
-): void {
-  const basePath = qmsBasePath(amoCode);
-  const overview = nav.querySelector<HTMLButtonElement>(".qms-sidebar-overview-link");
-  if (overview) {
-    overview.onclick = () => onNavigate(basePath);
-    const active = pathname === basePath || pathname === `${basePath}/`;
-    overview.classList.toggle("qms-sidebar-overview-link--active", active);
-    if (active) overview.setAttribute("aria-current", "page");
-    else overview.removeAttribute("aria-current");
-  }
-
-  for (const shortcut of QMS_AUDIT_SHORTCUTS) {
-    const button = nav.querySelector<HTMLButtonElement>(`[data-qms-shortcut="${shortcut.id}"]`);
-    if (!button) continue;
-    const path = auditShortcutPath(amoCode, shortcut);
-    const active = matchesPath(pathname, path, auditShortcutPrefixes(amoCode, shortcut));
-    button.onclick = () => onNavigate(path);
-    button.classList.toggle("qms-sidebar-audit-link--active", active);
-    if (active) button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
-  }
-
-  const search = nav.querySelector<HTMLInputElement>(".qms-sidebar-search__input");
-  if (search) {
-    search.oninput = () => applyModuleFilter(nav, search.value);
-    applyModuleFilter(nav, search.value);
-  }
+export function buildAuditWorkspaceTabPath(basePath: string, tab: QmsWorkspaceTab["tab"], search = ""): string {
+  const params = new URLSearchParams(search);
+  params.set("tab", tab);
+  return `${basePath}?${params.toString()}`;
 }
 
 export function isQualityNavigationPath(pathname: string, amoCode: string): boolean {
@@ -247,32 +188,313 @@ export function isQualityNavigationPath(pathname: string, amoCode: string): bool
   );
 }
 
+function createNavigationButton(
+  link: NavigationLink,
+  pathname: string,
+  search: string,
+  onNavigate: (path: string) => void,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "qms-nav-link";
+  button.dataset.qmsNavId = link.id;
+  button.dataset.qmsPath = link.path;
+  button.dataset.qmsActiveMode = link.activeMode || "exact";
+  button.dataset.qmsSearch = normalise(`${link.label} ${link.keywords || ""}`);
+  if (link.matchPrefixes?.length) button.dataset.qmsMatchPrefixes = link.matchPrefixes.join("\n");
+  if (link.tab) button.dataset.qmsTab = link.tab;
+
+  const label = document.createElement("span");
+  label.className = "qms-nav-link__label";
+  label.textContent = link.label;
+  button.append(label);
+
+  button.onclick = () => onNavigate(link.path);
+  setButtonActive(button, matchesPath(pathname, link, search));
+  return button;
+}
+
+function setButtonActive(button: HTMLButtonElement, active: boolean): void {
+  button.classList.toggle("qms-nav-link--active", active);
+  if (active) button.setAttribute("aria-current", "page");
+  else button.removeAttribute("aria-current");
+}
+
+function linkFromButton(button: HTMLButtonElement): NavigationLink {
+  return {
+    id: button.dataset.qmsNavId || "qms-link",
+    label: button.textContent || "Quality page",
+    path: button.dataset.qmsPath || "#",
+    matchPrefixes: button.dataset.qmsMatchPrefixes?.split("\n").filter(Boolean),
+    activeMode: (button.dataset.qmsActiveMode as NavigationLink["activeMode"]) || "exact",
+    tab: button.dataset.qmsTab,
+  };
+}
+
+function createSection(
+  id: string,
+  label: string,
+  description: string,
+  links: readonly NavigationLink[],
+  pathname: string,
+  search: string,
+  onNavigate: (path: string) => void,
+  options: { prominent?: boolean; open?: boolean } = {},
+): HTMLDetailsElement {
+  const details = document.createElement("details");
+  details.className = `qms-nav-section${options.prominent ? " qms-nav-section--prominent" : ""}`;
+  details.dataset.qmsSection = id;
+  details.open = Boolean(options.open || links.some((link) => matchesPath(pathname, link, search)));
+
+  const summary = document.createElement("summary");
+  summary.className = "qms-nav-section__summary";
+  const summaryText = document.createElement("span");
+  summaryText.className = "qms-nav-section__summary-text";
+  const title = document.createElement("strong");
+  title.textContent = label;
+  const helper = document.createElement("small");
+  helper.textContent = description;
+  summaryText.append(title, helper);
+  summary.append(summaryText);
+
+  const list = document.createElement("div");
+  list.className = "qms-nav-section__links";
+  for (const link of links) {
+    list.append(createNavigationButton(link, pathname, search, onNavigate));
+  }
+
+  details.append(summary, list);
+  return details;
+}
+
+function moduleLinksForGroup(amoCode: string, group: QmsNavigationGroup, aerodocEnabled: boolean): NavigationLink[] {
+  const links: NavigationLink[] = [];
+  for (const moduleId of group.moduleIds) {
+    if (moduleId === "aerodoc" && !aerodocEnabled) continue;
+    const module = QMS_ROUTE_REGISTRY.find((candidate) => candidate.id === moduleId);
+    if (!module) continue;
+    links.push({
+      id: `module-${module.id}`,
+      label: module.navigationLabel,
+      path: qmsModulePath(amoCode, module.id),
+      keywords: `${module.label} ${module.section}`,
+      activeMode: "prefix",
+    });
+  }
+
+  if (group.id === "controls") {
+    links.splice(2, 0, {
+      id: "module-training",
+      label: "Training & competence",
+      path: qmsTrainingPath(amoCode, "dashboard"),
+      keywords: "training competence matrix expiry qualifications",
+      activeMode: "prefix",
+    });
+  }
+  return links;
+}
+
+function legacyAeroDocEnabled(nav: HTMLElement): boolean {
+  return Array.from(nav.querySelectorAll<HTMLElement>(":scope > .sidebar__qms-node"))
+    .some((node) => normalise(node.textContent).includes("aerodoc"));
+}
+
+function currentAuditLinks(
+  workspace: { auditKey: string; basePath: string },
+  search: string,
+): NavigationLink[] {
+  return QMS_AUDIT_WORKSPACE_TABS.map((item) => ({
+    id: item.id,
+    label: item.label,
+    path: buildAuditWorkspaceTabPath(workspace.basePath, item.tab, search),
+    keywords: `current audit workflow ${item.label}`,
+    activeMode: "tab",
+    tab: item.tab,
+  }));
+}
+
+function createPanel(
+  nav: HTMLElement,
+  amoCode: string,
+  pathname: string,
+  search: string,
+  onNavigate: (path: string) => void,
+): HTMLElement {
+  const panel = document.createElement("section");
+  panel.className = "qms-navigation-panel";
+  panel.dataset.qmsAmoCode = amoCode;
+  panel.setAttribute("aria-label", "Quality navigation");
+
+  const header = document.createElement("div");
+  header.className = "qms-navigation-panel__header";
+  const title = document.createElement("strong");
+  title.textContent = "Quality workspace";
+  const helper = document.createElement("span");
+  helper.textContent = "Routes grouped by work";
+  header.append(title, helper);
+
+  const quickLinks: NavigationLink[] = [
+    { id: "quick-overview", label: "Overview", path: qmsBasePath(amoCode) },
+    { id: "quick-work", label: "My work", path: qmsModulePath(amoCode, "inbox", "assigned-to-me"), activeMode: "prefix" },
+    { id: "quick-calendar", label: "Calendar", path: qmsModulePath(amoCode, "calendar", "month"), activeMode: "prefix" },
+    { id: "quick-audits", label: "Audits", path: qmsModulePath(amoCode, "audits", "dashboard"), activeMode: "prefix" },
+  ];
+  const quick = document.createElement("div");
+  quick.className = "qms-navigation-quick";
+  quick.setAttribute("aria-label", "Primary Quality destinations");
+  for (const link of quickLinks) quick.append(createNavigationButton(link, pathname, search, onNavigate));
+
+  const searchLabel = document.createElement("label");
+  searchLabel.className = "qms-navigation-search";
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "qms-navigation-search__input";
+  searchInput.placeholder = "Find a Quality page";
+  searchInput.autocomplete = "off";
+  searchInput.setAttribute("aria-label", "Find a Quality page");
+  searchLabel.append(searchInput);
+
+  const sections = document.createElement("div");
+  sections.className = "qms-navigation-sections";
+
+  const auditLinks = QMS_AUDIT_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination));
+  sections.append(createSection(
+    "audits",
+    "Audit workflow",
+    "Programme, planning, preparation, execution and reporting",
+    auditLinks,
+    pathname,
+    search,
+    onNavigate,
+    { prominent: true },
+  ));
+
+  const activeAudit = getActiveAuditWorkspace(pathname, amoCode);
+  if (activeAudit) {
+    sections.append(createSection(
+      "current-audit",
+      `Current audit · ${decodeURIComponent(activeAudit.auditKey)}`,
+      "Move through the active audit without returning to the register",
+      currentAuditLinks(activeAudit, search),
+      pathname,
+      search,
+      onNavigate,
+      { prominent: true, open: true },
+    ));
+  }
+
+  sections.append(createSection(
+    "calendar",
+    "Quality calendar",
+    "Audit dates, CAR deadlines, training expiries and reviews",
+    QMS_CALENDAR_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination)),
+    pathname,
+    search,
+    onNavigate,
+  ));
+
+  const aerodocEnabled = legacyAeroDocEnabled(nav);
+  for (const group of QMS_NAVIGATION_GROUPS) {
+    sections.append(createSection(
+      group.id,
+      group.label,
+      group.description,
+      moduleLinksForGroup(amoCode, group, aerodocEnabled),
+      pathname,
+      search,
+      onNavigate,
+    ));
+  }
+
+  const empty = document.createElement("div");
+  empty.className = "qms-navigation-empty";
+  empty.textContent = "No Quality page matches that search.";
+  empty.hidden = true;
+
+  searchInput.oninput = () => applySearch(panel, searchInput.value);
+  panel.append(header, quick, searchLabel, sections, empty);
+  return panel;
+}
+
+function applySearch(panel: HTMLElement, query: string): void {
+  const value = normalise(query);
+  const sections = Array.from(panel.querySelectorAll<HTMLDetailsElement>(".qms-nav-section"));
+  let totalMatches = 0;
+
+  for (const section of sections) {
+    const links = Array.from(section.querySelectorAll<HTMLButtonElement>(".qms-nav-link"));
+    let matches = 0;
+    for (const link of links) {
+      const visible = !value || (link.dataset.qmsSearch || "").includes(value);
+      link.hidden = !visible;
+      if (visible) matches += 1;
+    }
+    section.hidden = Boolean(value && matches === 0);
+    if (value && matches > 0) section.open = true;
+    totalMatches += matches;
+  }
+
+  const empty = panel.querySelector<HTMLElement>(".qms-navigation-empty");
+  if (empty) empty.hidden = !value || totalMatches > 0;
+}
+
+function refreshPanel(
+  panel: HTMLElement,
+  pathname: string,
+  search: string,
+  onNavigate: (path: string) => void,
+): void {
+  const currentQuery = panel.querySelector<HTMLInputElement>(".qms-navigation-search__input")?.value || "";
+  for (const button of panel.querySelectorAll<HTMLButtonElement>(".qms-nav-link")) {
+    const link = linkFromButton(button);
+    button.onclick = () => onNavigate(link.path);
+    setButtonActive(button, matchesPath(pathname, link, search));
+  }
+
+  if (!currentQuery) {
+    for (const section of panel.querySelectorAll<HTMLDetailsElement>(".qms-nav-section")) {
+      const hasActive = Boolean(section.querySelector(".qms-nav-link--active"));
+      if (hasActive) section.open = true;
+    }
+  }
+  applySearch(panel, currentQuery);
+}
+
+function suppressLegacyNavigation(nav: HTMLElement): void {
+  nav.classList.remove("sidebar__qms-nav--enhanced");
+  nav.classList.add("sidebar__qms-nav--structured");
+  for (const node of nav.querySelectorAll<HTMLElement>(":scope > .sidebar__qms-node")) {
+    node.hidden = true;
+    node.setAttribute("aria-hidden", "true");
+  }
+  nav.querySelector(":scope > .qms-sidebar-tools")?.remove();
+  nav.querySelector(":scope > .qms-sidebar-empty")?.remove();
+}
+
 export function enhanceQmsSidebarNavigation({
   sidebar,
   amoCode,
   pathname,
+  search,
   onNavigate,
 }: QmsSidebarEnhancementOptions): void {
   const nav = sidebar.querySelector<HTMLElement>(QUALITY_NAV_SELECTOR);
   if (!nav) return;
 
-  nav.classList.add("sidebar__qms-nav--enhanced");
-  markCoreModules(nav);
-
-  let tools = nav.querySelector<HTMLElement>(":scope > .qms-sidebar-tools");
-  if (!tools) {
-    tools = createTools(nav, amoCode, pathname, onNavigate);
-    nav.prepend(tools);
+  suppressLegacyNavigation(nav);
+  const activeAudit = getActiveAuditWorkspace(pathname, amoCode);
+  const context = `${amoCode}:${activeAudit?.auditKey || "none"}`;
+  let panel = nav.querySelector<HTMLElement>(":scope > .qms-navigation-panel");
+  if (panel && panel.dataset.qmsContext !== context) {
+    panel.remove();
+    panel = null;
   }
 
-  let emptyState = nav.querySelector<HTMLElement>(":scope > .qms-sidebar-empty");
-  if (!emptyState) {
-    emptyState = document.createElement("div");
-    emptyState.className = "qms-sidebar-empty";
-    emptyState.textContent = "No Quality module matches that search.";
-    emptyState.hidden = true;
-    nav.append(emptyState);
+  if (!panel) {
+    panel = createPanel(nav, amoCode, pathname, search, onNavigate);
+    panel.dataset.qmsContext = context;
+    nav.prepend(panel);
   }
 
-  refreshTools(nav, amoCode, pathname, onNavigate);
+  refreshPanel(panel, pathname, search, onNavigate);
 }
