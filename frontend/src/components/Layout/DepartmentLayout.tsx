@@ -1,7 +1,13 @@
-import React, { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useEffect, useLayoutEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import LegacyDepartmentLayout from "./DepartmentLayout.legacy";
+import {
+  enhanceQmsSidebarNavigation,
+  isQualityNavigationPath,
+} from "./qmsSidebarNavigation";
+import { getCachedUser } from "../../services/auth";
+import "../../styles/components/qms-sidebar-navigation.css";
 
 /*
  * Quality navigation contract markers are implemented in
@@ -66,6 +72,24 @@ function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void 
   }
 }
 
+function setDesktopSidebarDefault(amoCode: string, qualityUpgrade: boolean): void {
+  if (typeof window === "undefined" || !window.matchMedia("(min-width: 1025px)").matches) return;
+  const currentUser = getCachedUser();
+  const identity = `${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
+  const storageKey = `amo_sidebar_pinned:${identity}`;
+  const qualityUpgradeKey = `amo_sidebar_quality_navigation_v2:${identity}`;
+
+  if (qualityUpgrade && window.localStorage.getItem(qualityUpgradeKey) !== "1") {
+    window.localStorage.setItem(storageKey, "1");
+    window.localStorage.setItem(qualityUpgradeKey, "1");
+    return;
+  }
+
+  if (window.localStorage.getItem(storageKey) === null) {
+    window.localStorage.setItem(storageKey, "1");
+  }
+}
+
 /**
  * Shared shell compatibility bridge.
  *
@@ -75,11 +99,24 @@ function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void 
  * updated in place; the department-only duplicate is suppressed. Publication
  * reader routes are treated as part of the Document Control department so their
  * subnavigation remains available.
+ *
+ * The Quality workspace receives a focused navigation layer without duplicating
+ * the legacy route source. Audit pages remain one click away, every Quality module
+ * is searchable, and the active audit destination is exposed consistently on
+ * desktop and mobile drawers.
  */
 const DepartmentLayout: React.FC<Props> = (props) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const isDocumentControlDomain = location.pathname.includes("/document-control") || location.pathname.includes("/publications") || location.pathname.includes("/manuals");
   const effectiveDepartment = isDocumentControlDomain ? "document-control" : props.activeDepartment;
+  const isQualityDomain =
+    effectiveDepartment === "quality" ||
+    isQualityNavigationPath(location.pathname, props.amoCode);
+
+  useLayoutEffect(() => {
+    setDesktopSidebarDefault(props.amoCode, isQualityDomain);
+  }, [isQualityDomain, props.amoCode]);
 
   useEffect(() => {
     const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
@@ -90,6 +127,34 @@ const DepartmentLayout: React.FC<Props> = (props) => {
     observer.observe(sidebar, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [isDocumentControlDomain]);
+
+  useEffect(() => {
+    if (!isQualityDomain) return undefined;
+
+    const sidebar = document.querySelector<HTMLElement>(".app-shell__sidebar, .sidebar");
+    if (!sidebar) return undefined;
+
+    const onNavigate = (path: string) => {
+      navigate(path);
+      if (typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches) {
+        sidebar.querySelector<HTMLButtonElement>(".sidebar__close-btn")?.click();
+      }
+    };
+
+    const apply = () => {
+      enhanceQmsSidebarNavigation({
+        sidebar,
+        amoCode: props.amoCode,
+        pathname: location.pathname,
+        onNavigate,
+      });
+    };
+
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(sidebar, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [isQualityDomain, location.pathname, navigate, props.amoCode]);
 
   return <LegacyDepartmentLayout {...props} activeDepartment={effectiveDepartment} />;
 };
