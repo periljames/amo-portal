@@ -100,10 +100,10 @@ function setDesktopSidebarDefault(amoCode: string, qualityUpgrade: boolean): voi
  * reader routes are treated as part of the Document Control department so their
  * subnavigation remains available.
  *
- * The Quality workspace receives a focused navigation layer without duplicating
- * the legacy route source. Audit pages remain one click away, every Quality module
- * is searchable, and the active audit destination is exposed consistently on
- * desktop and mobile drawers.
+ * The Quality workspace receives a grouped route layer without duplicating the
+ * legacy shell. Calendar and audit planning are direct destinations, the current
+ * audit exposes its complete workflow, and lower-frequency modules remain inside
+ * compact expandable sections.
  */
 const DepartmentLayout: React.FC<Props> = (props) => {
   const location = useLocation();
@@ -146,6 +146,7 @@ const DepartmentLayout: React.FC<Props> = (props) => {
         sidebar,
         amoCode: props.amoCode,
         pathname: location.pathname,
+        search: location.search,
         onNavigate,
       });
     };
@@ -154,7 +155,7 @@ const DepartmentLayout: React.FC<Props> = (props) => {
     const observer = new MutationObserver(apply);
     observer.observe(sidebar, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [isQualityDomain, location.pathname, navigate, props.amoCode]);
+  }, [isQualityDomain, location.pathname, location.search, navigate, props.amoCode]);
 
   return <LegacyDepartmentLayout {...props} activeDepartment={effectiveDepartment} />;
 };
