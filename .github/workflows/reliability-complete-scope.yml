@@ -14,7 +14,7 @@ jobs:
   complete-validate-publish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16
@@ -36,6 +36,7 @@ jobs:
       ENVIRONMENT: test
       TESTING: "true"
       RELIABILITY_SCHEDULER_ENABLED: "false"
+      PGPASSWORD: postgres
 
     steps:
       - name: Check out canonical Reliability branch
@@ -44,22 +45,40 @@ jobs:
           ref: agent/reliability-v2-foundation
           fetch-depth: 0
 
-      - name: Apply canonical backend completion
+      - name: Apply permanent canonical implementation
         run: |
           python backend/scripts/complete_reliability_backend.py
           python backend/scripts/strengthen_reliability_sod.py
+          python backend/scripts/fix_reliability_sod_escape.py
           python - <<'PY'
           from pathlib import Path
-          path = Path('backend/amodb/alembic/env.py')
-          text = path.read_text(encoding='utf-8')
+
+          env_path = Path('backend/amodb/alembic/env.py')
+          text = env_path.read_text(encoding='utf-8')
           text = text.replace(
               '    table = getattr(obj, "table", None) or getattr(compare_to, "table", None)\n    return table is not None and table.name in _RELIABILITY_TABLES',
               '    table = getattr(obj, "table", None)\n    if table is None:\n        table = getattr(compare_to, "table", None)\n    return table is not None and table.name in _RELIABILITY_TABLES',
           )
-          path.write_text(text, encoding='utf-8')
+          env_path.write_text(text, encoding='utf-8')
+
+          model_path = Path('backend/amodb/apps/reliability/models.py')
+          model = model_path.read_text(encoding='utf-8')
+          replacements = {
+              'validation_status = Column(String(24), nullable=False, default="VALID", index=True)':
+                  'validation_status = Column(String(24), nullable=False, default="VALID", server_default=text("\'VALID\'"), index=True)',
+              'validation_errors = Column(JSON, nullable=False, default=list)':
+                  'validation_errors = Column(JSON, nullable=False, default=list, server_default=text("\'[]\'"))',
+              'provenance_json = Column(JSON, nullable=False, default=dict)':
+                  'provenance_json = Column(JSON, nullable=False, default=dict, server_default=text("\'{}\'"))',
+          }
+          for old, new in replacements.items():
+              if old not in model:
+                  raise RuntimeError(f'Migration-safe Reliability model anchor missing: {old}')
+              model = model.replace(old, new, 1)
+          model_path.write_text(model, encoding='utf-8')
           PY
 
-      - name: Apply canonical frontend completion
+      - name: Apply permanent frontend implementation
         working-directory: frontend
         run: |
           node scripts/complete-reliability-service.mjs
@@ -90,7 +109,7 @@ jobs:
             backend/amodb/apps/reliability/advanced_scheduler.py \
             backend/amodb/apps/reliability/tests/test_complete_scope.py
 
-      - name: Upgrade current schema heads
+      - name: Upgrade current repository schema
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
 
@@ -107,7 +126,20 @@ jobs:
             alembic -c amodb/alembic.ini upgrade head
           fi
 
-      - name: Generate Reliability-only migration
+      - name: Seed a populated legacy Reliability row
+        run: |
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_ci -v ON_ERROR_STOP=1 <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO reliability_events (
+            amo_id, event_type, occurred_at, created_at, description
+          ) VALUES (
+            'legacy-reliability-migration-probe', 'DEFECT', now(), now(),
+            'Migration probe: existing Reliability row before advanced schema.'
+          );
+          SET session_replication_role = origin;
+          SQL
+
+      - name: Generate and finalize Reliability migration
         working-directory: backend
         env:
           RELIABILITY_AUTOGENERATE_ONLY: "true"
@@ -119,13 +151,30 @@ jobs:
           python scripts/finalize_reliability_migration.py
           python -m py_compile amodb/alembic/versions/*rel_20260803_complete_scope*.py
 
-      - name: Validate migration upgrade downgrade and clean metadata
+      - name: Validate upgrade downgrade and metadata parity
         working-directory: backend
         env:
           RELIABILITY_AUTOGENERATE_ONLY: "true"
         run: |
           alembic -c amodb/alembic.ini upgrade head
           alembic -c amodb/alembic.ini check
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_ci -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            probe record;
+          BEGIN
+            SELECT validation_status, validation_errors, provenance_json
+            INTO probe
+            FROM reliability_events
+            WHERE amo_id = 'legacy-reliability-migration-probe';
+            IF probe.validation_status <> 'VALID' THEN
+              RAISE EXCEPTION 'Legacy row validation status was not backfilled';
+            END IF;
+            IF probe.validation_errors IS NULL OR probe.provenance_json IS NULL THEN
+              RAISE EXCEPTION 'Legacy row JSON provenance defaults were not backfilled';
+            END IF;
+          END $$;
+          SQL
           alembic -c amodb/alembic.ini downgrade -1
           alembic -c amodb/alembic.ini upgrade head
           alembic -c amodb/alembic.ini check
@@ -190,8 +239,14 @@ jobs:
           import amodb.main
           configure_mappers()
           paths = {route.path for route in amodb.main.app.routes}
-          assert '/reliability/compliance' in paths
-          assert '/reliability/analytics' in paths
+          required = {
+              '/reliability/compliance', '/reliability/analytics',
+              '/reliability/sources', '/reliability/calculation-runs/execute',
+              '/reliability/programmes', '/reliability/changes',
+              '/reliability/handoffs', '/reliability/authority-submissions',
+              '/reliability/ai-reviews',
+          }
+          assert required.issubset(paths)
           assert all('/reliability/v2' not in path for path in paths)
           print(f'Imported app with {len(paths)} routes')
           PY
@@ -208,7 +263,7 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund
 
-      - name: Validate Reliability navigation and CSS
+      - name: Validate navigation and CSS contracts
         working-directory: frontend
         run: npm run test:tenant-shell
 
@@ -225,11 +280,11 @@ jobs:
           src/app/portalRouteManifest.test.ts
           src/app/routePreload.ts
 
-      - name: Build complete frontend
+      - name: Build complete portal frontend
         working-directory: frontend
         run: npm run build
 
-      - name: Enforce single canonical Reliability surface
+      - name: Enforce the single canonical Reliability surface
         run: |
           if grep -R '/reliability/v2' backend/amodb/apps/reliability frontend/src --exclude-dir=node_modules; then exit 1; fi
           test ! -e backend/amodb/apps/reliability/v2_router.py
@@ -237,9 +292,11 @@ jobs:
           test ! -e backend/amodb/apps/reliability/v2_schemas.py
           test ! -e frontend/src/services/reliabilityV2.ts
           test ! -e frontend/src/pages/ReliabilityReportsPage.tsx
-          if find backend -type f \( -name '*.pyc' -o -name 'reliability_v2_test.db' \) | grep .; then exit 1; fi
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+          if git ls-files | grep -E '(^|/)__pycache__/|\.pyc$|reliability_v2_test\.db$'; then exit 1; fi
 
-      - name: Record complete-scope validation
+      - name: Record completed scope
         run: |
           cat > docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md <<EOF
           # Reliability Complete-Scope Validation
@@ -251,25 +308,25 @@ jobs:
           ## Completed domain
 
           - canonical occurrence taxonomy and source ingestion with immutable provenance
-          - technical-log, operational-interruption, MEL/CDL, EHM, shop, QMS, SMS and Procurement source contracts
+          - technical-log, operational interruption, MEL/CDL, EHM, shop, QMS, SMS and Procurement source contracts
           - closed-loop FRACAS lifecycle, evidence chain, independent effectiveness approval and reopening
-          - versioned Reliability programmes, formulas, thresholds, responsibilities and authority conditions
-          - scheduled exposure-aware calculations with confidence intervals, small-fleet controls, source lineage and result hashes
+          - versioned Reliability programmes, formula definitions, thresholds, responsibilities and authority conditions
+          - scheduled exposure-aware calculations with confidence intervals, minimum-exposure and small-fleet controls, source lineage and result hashes
           - aircraft, ATA, component, engine and fleet analytics
           - review meetings, decisions, controlled changes and impact simulation
-          - Planning, Maintenance, Tech Records, QMS, SMS and Procurement handoffs with accountable task and target-record closure
-          - authority package preparation/submission segregation
+          - Planning, Maintenance, Tech Records, QMS, SMS and Procurement handoffs with accountable target tasks and completion evidence
+          - authority package preparation and submission segregation
           - capability-based permissions and append-only decision evidence
           - cited advisory AI reviews with independent human disposition and prohibited autonomous decisions
 
           ## Verified full stack
 
-          - clean PostgreSQL migration upgrade, downgrade and second upgrade
-          - Alembic metadata check reports no pending Reliability schema operations
-          - 21 Reliability capabilities and four controlled system roles seeded
-          - append-only PostgreSQL triggers present on audit, FRACAS evidence, stage history and calculation results
+          - populated-row PostgreSQL migration upgrade, downgrade and second upgrade
+          - Alembic metadata parity after each upgrade
+          - 21 Reliability capabilities and four controlled roles seeded
+          - append-only PostgreSQL guards on audit, FRACAS evidence, stage history and calculation results
           - complete FastAPI import and SQLAlchemy mapper configuration
-          - focused backend Reliability test suite
+          - focused backend Reliability tests
           - tenant navigation and CSS contract tests
           - scoped ESLint
           - complete TypeScript/Vite production build
@@ -277,20 +334,72 @@ jobs:
 
           ## Compliance boundary
 
-          Software controls and evidence do not independently declare regulatory compliance. The configured CAMO/certificate-holder, AMO/repair-station and authority responsibilities remain explicit and require accountable human approval.
+          Software controls and evidence support demonstration of compliance but do not independently declare regulatory compliance. CAMO/certificate-holder, AMO/repair-station and authority responsibilities remain explicit and require accountable human approval.
           EOF
 
-      - name: Publish complete implementation
+          cat > docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md <<'EOF'
+          # Reliability V2 Implementation Tracker
+
+          ## Canonical implementation
+
+          - [x] One frontend route tree: `/maintenance/:amoCode/reliability/*`
+          - [x] One backend prefix: `/reliability/*`
+          - [x] One canonical frontend client and workspace
+          - [x] No compatibility aliases, duplicate pages or `/v2` routes
+
+          ## Operational and compliance scope
+
+          - [x] Canonical occurrence taxonomy and immutable source provenance
+          - [x] Technical-log, flight interruption, MEL/CDL, EHM, shop, QMS, SMS and Procurement ingestion contracts
+          - [x] Idempotent batch processing, validation, duplicate detection and data-quality resolution
+          - [x] Full FRACAS lifecycle, root-cause evidence, actions, independent effectiveness approval, closure and reopening
+          - [x] Versioned programmes, metrics, formulas and threshold governance
+          - [x] Scheduled calculations, retained lineage, confidence intervals, minimum exposure and small-fleet controls
+          - [x] Fleet, aircraft, ATA, component and engine analytics
+          - [x] Reliability review meetings, immutable decisions and controlled changes
+          - [x] Planning, Maintenance, Tech Records, QMS, SMS and Procurement handoffs
+          - [x] Authority-profile package preparation, submission and decision tracking
+          - [x] Capability-based permissions, segregation of duties and append-only evidence
+          - [x] Explainable advisory AI with citations and independent human disposition
+          - [x] Responsive operational frontend for every controlled workflow
+
+          ## Validation
+
+          - [x] Populated PostgreSQL migration upgrade/downgrade/upgrade
+          - [x] Alembic metadata parity
+          - [x] Application import and mapper configuration
+          - [x] Backend Reliability tests
+          - [x] Navigation and CSS contracts
+          - [x] Scoped lint and full production frontend build
+          EOF
+
+      - name: Publish only permanent source
         run: |
           rm -f docs/reliability/.complete-scope-trigger
+          rm -f docs/reliability/.backend-diagnostic-trigger
+          rm -f docs/reliability/.complete-probe
+          rm -f docs/reliability/.complete-probe-result
+          rm -f docs/reliability/.complete-scope-diagnostic
+          rm -f docs/reliability/.fast-transform-trigger
+          rm -f docs/reliability/.frontend-diagnostic-v2-trigger
+          rm -f docs/reliability/FAST_TRANSFORM_DIAGNOSTIC.md
+          rm -f docs/reliability/FRONTEND_COMPLETE_DIAGNOSTIC.md
+          rm -f docs/reliability/BACKEND_MIGRATION_DIAGNOSTIC.md
           rm -f backend/scripts/complete_reliability_backend.py
           rm -f backend/scripts/strengthen_reliability_sod.py
+          rm -f backend/scripts/fix_reliability_sod_escape.py
           rm -f backend/scripts/finalize_reliability_migration.py
           rm -f frontend/scripts/complete-reliability-service.mjs
           rm -f frontend/scripts/complete-reliability-workspace.mjs
           rm -f frontend/scripts/strengthen-reliability-sod.mjs
           rm -f frontend/scripts/complete-reliability-css.mjs
+          rm -f .github/workflows/reliability-action-probe.yml
+          rm -f .github/workflows/reliability-backend-diagnostic.yml
+          rm -f .github/workflows/reliability-complete-diagnostic.yml
+          rm -f .github/workflows/reliability-fast-transform-diagnostic.yml
+          rm -f .github/workflows/reliability-frontend-diagnostic-v2.yml
           rm -f .github/workflows/reliability-complete-scope.yml
+          rm -rf backend/__pycache__
           find backend -type d -name __pycache__ -prune -exec rm -rf {} +
           find backend -type f -name '*.pyc' -delete
           git config user.name "github-actions[bot]"
