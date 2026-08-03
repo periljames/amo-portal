@@ -1,0 +1,1 @@
+Canonical Reliability source reachability marker. Temporary branch-only file; never published to PR #404.
