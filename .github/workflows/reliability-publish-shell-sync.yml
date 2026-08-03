@@ -1,0 +1,95 @@
+name: Publish Tenant Shell Synchronization Into Reliability
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.sync-current-shell
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Merge exact current tenant shell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin feat/global-tenant-navigation-quality-home
+          test "$(git rev-parse FETCH_HEAD)" = "309a8eac0aecfdbb19a1ecd71c83cdbaababb074"
+          git merge --no-edit --no-ff FETCH_HEAD
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Import backend and run canonical Reliability tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: '1'
+          DATABASE_URL: sqlite:///./canonical_reliability_sync_test.db
+          DATABASE_WRITE_URL: sqlite:///./canonical_reliability_sync_test.db
+          SECRET_KEY: canonical-reliability-sync-secret
+          QUALITY_SCHEMA_STRICT: '0'
+        run: |
+          python -c "import amodb.main; print('Synchronized Reliability application import passed')"
+          pytest -q amodb/apps/reliability/tests/test_canonical_foundation.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Test tenant navigation and CSS contract
+        working-directory: frontend
+        run: npm run test:tenant-shell
+      - name: Lint Reliability-owned boundaries
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/App.tsx
+          src/app/PortalRouteSurface.tsx
+          src/app/portalRouteManifest.ts
+          src/app/portalRouteManifest.test.ts
+          src/app/routePreload.ts
+          src/pages/reliability/ReliabilityWorkspacePage.tsx
+          src/pages/reliability/ReliabilityReportsView.tsx
+          src/services/reliability.ts
+      - name: Build complete frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Record synchronization and publish
+        run: |
+          cat >> docs/reliability/RELIABILITY_V2_VALIDATION.md <<EOF
+
+          ## Current tenant-shell synchronization
+
+          - Synchronized shell head: \`309a8eac0aecfdbb19a1ecd71c83cdbaababb074\`
+          - Merge diagnostic run: \`30808533950\`
+          - Synchronization run: \`${GITHUB_RUN_ID}\`
+          - UTC synchronization time: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+          - The merge completed with zero conflicted files.
+          - Post-merge backend import/tests, tenant-navigation tests, CSS contract, scoped ESLint and full production build passed.
+          EOF
+          rm -f backend/canonical_reliability_sync_test.db
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          rm -f docs/reliability/.sync-current-shell docs/reliability/SHELL_MERGE_DIAGNOSTIC.md
+          rm -f .github/workflows/reliability-publish-shell-sync.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "Record current tenant-shell synchronization"
+          git push origin HEAD:agent/reliability-v2-foundation
