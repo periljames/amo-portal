@@ -1,0 +1,50 @@
+.proc-module-header {
+  min-width: 0;
+  padding: clamp(15px, 2vw, 22px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--proc-border, var(--border, #d7deea));
+  border-radius: 12px;
+  background:
+    linear-gradient(118deg, color-mix(in srgb, var(--proc-primary, #2563eb) 9%, transparent), transparent 44%),
+    var(--proc-surface, var(--surface, #fff));
+  box-shadow: 0 10px 30px rgb(15 23 42 / 6%);
+}
+
+.proc-module-header > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.proc-module-header h1 {
+  margin: 0;
+  color: var(--proc-text, var(--text-primary, #172033));
+  font-size: clamp(1.25rem, 2.2vw, 1.75rem);
+  line-height: 1.15;
+  letter-spacing: -.025em;
+}
+
+.proc-module-header p {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--proc-muted, var(--text-secondary, #5f6b7c));
+  font-size: .75rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .proc-module-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proc-module-header * {
+    animation-duration: .001ms !important;
+    transition-duration: .001ms !important;
+  }
+}
