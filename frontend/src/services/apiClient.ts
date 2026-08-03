@@ -1,11 +1,20 @@
 // src/services/apiClient.ts
-import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
+import {
+  authHeaders,
+  extendSessionIfNeeded,
+  getCachedUser,
+  getContext,
+  handleAuthFailure,
+  markSessionActivity,
+} from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
 
 export type ApiClientOptions = RequestInit & {
   timeoutMs?: number;
   cacheTtlMs?: number;
+  persistCache?: boolean;
+  staleWhileOfflineMs?: number;
   offline?: PortalOfflineOptions;
 };
 
@@ -22,7 +31,9 @@ export class ApiClientError extends Error {
 }
 
 type CacheEntry = {
-  expiresAt: number;
+  scope: string;
+  freshUntil: number;
+  staleUntil: number;
   value: unknown;
 };
 
@@ -32,9 +43,12 @@ type ParsedResponse<T> = {
 };
 
 const DEFAULT_GET_CACHE_TTL_MS = 15_000;
+const DEFAULT_STALE_OFFLINE_MS = 15 * 60_000;
 const DEFAULT_DIRECT_DEV_BACKEND = "http://127.0.0.1:8080";
+const PERSISTED_CACHE_PREFIX = "amo_api_cache_v2:";
 const responseCache = new Map<string, CacheEntry>();
 const inFlightGets = new Map<string, Promise<unknown>>();
+let observedScope = "";
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException
@@ -46,29 +60,112 @@ function getMethod(options: RequestInit): string {
   return (options.method || "GET").toUpperCase();
 }
 
-function buildCacheKey(url: string, method: string, headers: Headers): string {
+export function currentApiCacheScope(): string {
+  const user = getCachedUser();
+  const context = getContext();
+  const userId = user?.id || "anonymous";
+  const amoId = user?.amo_id || "no-amo-id";
+  const tenant = (context.amoSlug || context.amoCode || "no-tenant").toLowerCase();
+  return `${userId}:${amoId}:${tenant}`;
+}
+
+function hashKey(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function persistedKey(cacheKey: string): string {
+  return `${PERSISTED_CACHE_PREFIX}${hashKey(cacheKey)}`;
+}
+
+function ensureScope(): string {
+  const next = currentApiCacheScope();
+  if (!observedScope) observedScope = next;
+  if (next !== observedScope) {
+    responseCache.clear();
+    inFlightGets.clear();
+    observedScope = next;
+  }
+  return next;
+}
+
+function buildCacheKey(url: string, method: string, headers: Headers, scope: string): string {
   const auth = headers.get("Authorization") || "anonymous";
   let tokenMarker = auth;
   if (auth.startsWith("Bearer ")) {
     const token = auth.slice(7);
-    tokenMarker = `bearer:${token.slice(0, 12)}:${token.slice(-12)}`;
+    tokenMarker = `bearer:${token.slice(0, 10)}:${token.slice(-10)}`;
   }
-  return `${method}:${url}:${tokenMarker}`;
+  return `${scope}:${method}:${url}:${tokenMarker}`;
 }
 
 function clearExpiredCache(now = Date.now()): void {
   for (const [key, entry] of responseCache) {
-    if (entry.expiresAt <= now) responseCache.delete(key);
+    if (entry.staleUntil <= now) responseCache.delete(key);
+  }
+}
+
+function clearPersistedApiCache(): void {
+  if (typeof window === "undefined") return;
+  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.sessionStorage.key(index);
+    if (key?.startsWith(PERSISTED_CACHE_PREFIX)) window.sessionStorage.removeItem(key);
   }
 }
 
 export function clearApiResponseCache(): void {
   responseCache.clear();
   inFlightGets.clear();
+  clearPersistedApiCache();
+  observedScope = currentApiCacheScope();
 }
 
 export function clearQmsApiResponseCache(): void {
   clearApiResponseCache();
+}
+
+function readPersistedCache(cacheKey: string, scope: string): CacheEntry | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.sessionStorage.getItem(persistedKey(cacheKey));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as CacheEntry;
+    if (parsed.scope !== scope || parsed.staleUntil <= Date.now()) {
+      window.sessionStorage.removeItem(persistedKey(cacheKey));
+      return null;
+    }
+    responseCache.set(cacheKey, parsed);
+    return parsed;
+  } catch {
+    window.sessionStorage.removeItem(persistedKey(cacheKey));
+    return null;
+  }
+}
+
+function writePersistedCache(cacheKey: string, entry: CacheEntry): void {
+  if (typeof window === "undefined") return;
+  try {
+    const serialized = JSON.stringify(entry);
+    if (serialized.length > 1_000_000) return;
+    window.sessionStorage.setItem(persistedKey(cacheKey), serialized);
+  } catch {
+    // Session storage can be unavailable or full; memory caching remains active.
+  }
+}
+
+function networkCacheMultiplier(): number {
+  if (typeof navigator === "undefined") return 1;
+  const connection = (navigator as Navigator & {
+    connection?: { effectiveType?: string; saveData?: boolean };
+  }).connection;
+  if (connection?.saveData) return 4;
+  if (connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g") return 4;
+  if (connection?.effectiveType === "3g") return 2;
+  return 1;
 }
 
 function isLocalDevSurface(): boolean {
@@ -87,21 +184,13 @@ function buildRequestUrls(path: string): string[] {
   const configuredBase = getApiBaseUrl();
   const primary = `${configuredBase}${cleanPath}`;
   const direct = `${resolveDirectDevBackend()}${cleanPath}`;
-
-  // Local Vite can lose its proxy socket when the backend restarts. Prefer the
-  // direct API and retain the same-origin proxy as a fallback.
-  if (isLocalDevSurface()) {
-    return direct === primary ? [primary] : [direct, primary];
-  }
-
+  if (isLocalDevSurface()) return direct === primary ? [primary] : [direct, primary];
   return [primary];
 }
 
 async function readResponseBody<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return (await response.json().catch(() => null)) as T;
-  }
+  if (contentType.includes("application/json")) return (await response.json().catch(() => null)) as T;
   return (await response.text().catch(() => "")) as T;
 }
 
@@ -169,7 +258,7 @@ async function fetchOnce<T>(
 }
 
 function isRetryableNetworkError(error: unknown): boolean {
-  if (error instanceof ApiClientError) return false;
+  if (error instanceof ApiClientError) return error.status >= 500;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     return message.includes("failed to fetch")
@@ -183,27 +272,42 @@ function isRetryableNetworkError(error: unknown): boolean {
 }
 
 export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
-  const { timeoutMs = 30000, cacheTtlMs, offline, headers, body, signal, ...rest } = options;
+  const {
+    timeoutMs = 30_000,
+    cacheTtlMs,
+    persistCache = false,
+    staleWhileOfflineMs = DEFAULT_STALE_OFFLINE_MS,
+    offline,
+    headers,
+    body,
+    signal,
+    ...rest
+  } = options;
   const finalHeaders = new Headers(authHeaders(headers));
-  if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) {
-    finalHeaders.set("Content-Type", "application/json");
-  }
+  if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) finalHeaders.set("Content-Type", "application/json");
 
   const method = getMethod(rest);
   markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
   void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
 
+  const scope = ensureScope();
   const urls = buildRequestUrls(path);
   const primaryUrl = urls[0];
   const canUseCache = method === "GET" && !body && cacheTtlMs !== 0;
-  const effectiveCacheTtlMs = cacheTtlMs ?? DEFAULT_GET_CACHE_TTL_MS;
-  const cacheKey = canUseCache ? buildCacheKey(primaryUrl, method, finalHeaders) : "";
+  const ttlMultiplier = networkCacheMultiplier();
+  const effectiveCacheTtlMs = Math.min((cacheTtlMs ?? DEFAULT_GET_CACHE_TTL_MS) * ttlMultiplier, 5 * 60_000);
+  const effectiveStaleMs = Math.max(staleWhileOfflineMs, effectiveCacheTtlMs);
+  const cacheKey = canUseCache ? buildCacheKey(primaryUrl, method, finalHeaders, scope) : "";
+  let staleEntry: CacheEntry | null = null;
 
   if (canUseCache) {
     const now = Date.now();
     clearExpiredCache(now);
-    const cached = responseCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) return cached.value as T;
+    const cached = responseCache.get(cacheKey) || (persistCache ? readPersistedCache(cacheKey, scope) : null);
+    if (cached) {
+      if (cached.freshUntil > now) return cached.value as T;
+      if (cached.staleUntil > now) staleEntry = cached;
+    }
     const inFlight = inFlightGets.get(cacheKey);
     if (inFlight) return inFlight as Promise<T>;
   }
@@ -215,12 +319,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
       try {
         const { response, body: responseBody } = await fetchOnce<T>(
           url,
-          {
-            ...rest,
-            method,
-            body,
-            headers: finalHeaders,
-          },
+          { ...rest, method, body, headers: finalHeaders },
           timeoutMs,
           signal,
           {
@@ -242,21 +341,38 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
 
         markSessionActivity(`api:${method.toLowerCase()}:ok:${path}`);
         if (canUseCache && effectiveCacheTtlMs > 0) {
-          responseCache.set(cacheKey, { expiresAt: Date.now() + effectiveCacheTtlMs, value: responseBody });
+          const now = Date.now();
+          const entry: CacheEntry = {
+            scope,
+            freshUntil: now + effectiveCacheTtlMs,
+            staleUntil: now + effectiveStaleMs,
+            value: responseBody,
+          };
+          responseCache.set(cacheKey, entry);
+          if (persistCache) writePersistedCache(cacheKey, entry);
+        } else if (method !== "GET") {
+          clearApiResponseCache();
         }
         return responseBody as T;
       } catch (error) {
         lastError = error;
-        const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !(signal?.aborted);
-        if (!canTryNext) throw error;
-        console.warn("[apiClient] direct request failed; retrying alternate backend route", { path, error });
+        const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
+        if (canTryNext) {
+          console.warn("[apiClient] direct request failed; retrying alternate backend route", { path, error });
+          continue;
+        }
+        if (staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
+          console.warn("[apiClient] serving tenant-scoped stale response after network failure", { path, error });
+          return staleEntry.value as T;
+        }
+        throw error;
       }
     }
+    if (staleEntry && staleEntry.scope === currentApiCacheScope()) return staleEntry.value as T;
     throw lastError instanceof Error ? lastError : new Error("Request failed.");
-  })()
-    .finally(() => {
-      if (canUseCache) inFlightGets.delete(cacheKey);
-    });
+  })().finally(() => {
+    if (canUseCache) inFlightGets.delete(cacheKey);
+  });
 
   if (canUseCache) inFlightGets.set(cacheKey, requestPromise as Promise<unknown>);
   return requestPromise;
