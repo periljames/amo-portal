@@ -40,6 +40,17 @@ def test_backend_exposes_document_list_upload_download_and_void_routes():
     assert "require_roles(*QUALITY_DOCUMENT_ROLES)" in source
 
 
+def test_document_list_has_stable_pagination():
+    service = read("amodb/apps/procurement/document_service.py")
+    router = read("amodb/apps/procurement/document_router.py")
+    assert "offset: int = 0" in service
+    assert ".offset(bounded_offset)" in service
+    assert "ProcurementDocument.id.desc()" in service
+    assert "offset: int = Query(0, ge=0)" in router
+    assert "limit: int = Query(100, ge=1, le=500)" in router
+    assert "offset=offset" in router
+
+
 def test_migration_extends_procurement_branch():
     source = read("amodb/alembic/versions/procure_20260803_docs.py")
     assert 'revision = "procure_20260803_docs"' in source
@@ -47,10 +58,16 @@ def test_migration_extends_procurement_branch():
     assert "ProcurementDocument.__table__.create" in source
 
 
-def test_quality_evidence_can_only_be_voided_by_quality():
+def test_quality_evidence_decisions_are_independent_and_final():
     service = read("amodb/apps/procurement/document_service.py")
     router = read("amodb/apps/procurement/document_router.py")
     assert "Only Quality may void a record flagged as Quality evidence." in service
+    assert "Only evidence submitted for Quality review can receive a Quality decision." in service
+    assert "The evidence uploader cannot verify or reject the same evidence." in service
+    assert "The Quality evidence already has a final verification decision." in service
+    assert "not record.is_quality_evidence" in service
+    assert "record.verification_status != document_models.ProcurementDocumentVerificationStatus.PENDING" in service
+    assert "record.uploaded_by_user_id" in service
     assert "actor_is_quality=current_user.role in" in router
 
 
@@ -70,14 +87,23 @@ def test_frontend_uses_controlled_upload_and_distinct_feedback():
     assert "Promise.allSettled" in module
     assert 'activeDepartment="procurement"' in module
     assert "ProcurementDocumentCenter" in module
+    assert "currentUserId={user?.id || null}" in module
     assert "FormData" in service
     assert "Drop a completed form or supporting file" in document_center
     assert "SHA-256" in document_center
     for source in ["PHYSICAL_FORM", "DMS_CONTROLLED", "EXTERNAL_SOFTWARE"]:
         assert source in document_center
     assert "verifyProcurementDocument" in document_center
+    assert "document.is_quality_evidence" in document_center
+    assert 'document.verification_status === "PENDING"' in document_center
+    assert "document.uploaded_by_user_id" in document_center
+    assert "Load older evidence" in document_center
+    assert "offset: documents.length" not in document_center
+    assert "loadPage(documents.length, false)" in document_center
     assert "XMLHttpRequest" in service
     assert "xhr.upload.onprogress" in service
+    assert 'params.set("offset"' in service
+    assert 'params.set("limit"' in service
     assert "playNotificationCue" in notifications
     for cue in ["success", "warning", "error"]:
         assert f'cue === "{cue}"' in notifications
@@ -104,6 +130,9 @@ def test_procurement_routes_do_not_reintroduce_stores_aliases():
     module = read("../frontend/src/pages/procurement/ProcurementModule.tsx")
     router = read("../frontend/src/router.tsx")
     preload = read("../frontend/src/app/routePreload.ts")
+    inventory_router = read("amodb/apps/inventory/router.py")
     assert 'part === "stores"' not in module
     assert 'parts[2] === "procurement" || parts[2] === "stores"' not in router
     assert 'procurement(?:\\/|$)' in preload
+    assert '"/purchasing/' not in inventory_router
+    assert "procurement_service" not in inventory_router
