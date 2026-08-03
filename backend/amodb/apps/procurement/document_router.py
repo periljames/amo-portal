@@ -9,11 +9,16 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
+from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 
 from . import document_schemas, document_service, service
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/api/maintenance/{amo_code}/procurement",
+    tags=["procurement documents"],
+    dependencies=[Depends(require_module("finance_inventory"))],
+)
 
 DOCUMENT_ROLES = (
     account_models.AccountRole.AMO_ADMIN,
