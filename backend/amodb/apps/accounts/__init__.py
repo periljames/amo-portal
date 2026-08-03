@@ -11,7 +11,7 @@ from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
 from . import models, schemas, services  # noqa: F401
-from . import admin_profile_router, department_home_router
+from . import admin_profile_router, department_home_router, router_amo_assets
 from .admin_profile_access import active_admin_profile_session
 from .admin_profile_concurrency import (
     lock_admin_grant_for_approval,
@@ -21,6 +21,9 @@ from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
 from . import router_admin as _router_admin
 from . import router_public as _router_public
+
+
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def _attach_route_dependency(route: APIRoute, dependency) -> None:
@@ -65,6 +68,16 @@ for _route in _admin_routes.routes:
         _attach_route_dependency(_route, lock_admin_grant_for_approval)
 _attach_router_dependency(_admin_routes, require_active_admin_profile)
 
+# AMO logo and CRS-template mutations are mounted by main.py through a separate
+# router, so they must receive the same elevated-session requirement explicitly.
+# Read-only asset retrieval remains available to normal authenticated tenant users.
+for _route in router_amo_assets.router.routes:
+    if (
+        isinstance(_route, APIRoute)
+        and bool((_route.methods or set()) & _MUTATING_METHODS)
+    ):
+        _attach_route_dependency(_route, require_active_admin_profile)
+
 # Revoke elevated Admin Profile sessions within the same server-side logout
 # transaction. The normal logout endpoint still owns access-token revocation and
 # audit logging.
@@ -87,6 +100,7 @@ __all__ = [
     "services",
     "admin_profile_router",
     "department_home_router",
+    "router_amo_assets",
     "active_admin_profile_session",
     "lock_admin_grant_for_approval",
     "serialized_approval_count",
