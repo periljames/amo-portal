@@ -31,6 +31,7 @@ import "./styles/components/data-table.css";
 import "./styles/components/empty-state.css";
 import "./styles/components/inline-error.css";
 import "./styles/components/toast.css";
+import "./styles/components/procurement-shell.css";
 import "./styles/components/drawer.css";
 import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
