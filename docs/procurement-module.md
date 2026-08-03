@@ -77,7 +77,7 @@ PROCUREMENT_DOCUMENT_DIR=/srv/amo/uploads/procurement-documents
 
 ## Validation
 
-The focused Procurement validation executes all three source-contract suites, Python compilation for Procurement and Inventory, and the strict production frontend typecheck/build. Repository-wide release, Document Control, Publications, migration, browser-acceptance, and performance gates remain the final merge checks.
+The focused Procurement validation executes all three source-contract suites, Python compilation for Procurement and Inventory, scoped ESLint for Procurement-owned frontend surfaces, and the strict production frontend typecheck/build. Repository-wide release, Document Control, Publications, migration, browser-acceptance, and performance gates remain the final merge checks.
 
 ## Acceptance checklist
 
