@@ -25,11 +25,24 @@ type AdminProfileSessionResponse = AdminProfileState & {
   message?: string | null;
 };
 
+export class StaleAdminProfileResponseError extends Error {
+  constructor() {
+    super("Admin Profile response belongs to a previous authentication session.");
+    this.name = "StaleAdminProfileResponseError";
+  }
+}
+
 function currentUserId(): string {
   try {
     return getCachedUser()?.id || "anonymous";
   } catch {
     return "anonymous";
+  }
+}
+
+function assertCurrentRequester(requesterId: string): void {
+  if (requesterId === "anonymous" || currentUserId() !== requesterId) {
+    throw new StaleAdminProfileResponseError();
   }
 }
 
@@ -129,12 +142,16 @@ export function readCachedAdminProfileState(amoCode: string): AdminProfileState 
   }
 }
 
-function cacheState(amoCode: string, state: AdminProfileState): AdminProfileState {
+function cacheState(
+  amoCode: string,
+  requesterId: string,
+  state: AdminProfileState,
+): AdminProfileState {
+  assertCurrentRequester(requesterId);
   if (typeof window !== "undefined") {
-    const userId = currentUserId();
-    window.sessionStorage.setItem(storageKey(amoCode, userId), JSON.stringify(state));
-    scheduleExpiry(amoCode, userId, state);
-    dispatchState(amoCode, userId, state);
+    window.sessionStorage.setItem(storageKey(amoCode, requesterId), JSON.stringify(state));
+    scheduleExpiry(amoCode, requesterId, state);
+    dispatchState(amoCode, requesterId, state);
   }
   return state;
 }
@@ -152,29 +169,32 @@ export function onAdminProfileChange(
 }
 
 export async function fetchAdminProfileState(amoCode: string): Promise<AdminProfileState> {
+  const requesterId = currentUserId();
   const state = await apiRequest<AdminProfileState>(apiPath(amoCode, "state"), {
     timeoutMs: 8_000,
     cacheTtlMs: 5_000,
   });
-  return cacheState(amoCode, state);
+  return cacheState(amoCode, requesterId, state);
 }
 
 export async function activateAdminProfile(amoCode: string): Promise<AdminProfileState> {
+  const requesterId = currentUserId();
   const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "activate"), {
     method: "POST",
     timeoutMs: 10_000,
     cacheTtlMs: 0,
   });
-  return cacheState(amoCode, state);
+  return cacheState(amoCode, requesterId, state);
 }
 
 export async function deactivateAdminProfile(amoCode: string): Promise<AdminProfileState> {
+  const requesterId = currentUserId();
   const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "deactivate"), {
     method: "POST",
     timeoutMs: 10_000,
     cacheTtlMs: 0,
   });
-  return cacheState(amoCode, state);
+  return cacheState(amoCode, requesterId, state);
 }
 
 export function clearCachedAdminProfileState(amoCode: string): void {
