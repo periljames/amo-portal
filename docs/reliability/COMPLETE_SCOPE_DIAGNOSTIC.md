@@ -1,7 +1,7 @@
 # Complete Reliability Full-Stack Diagnostic
 
-- Run: `30819386656`
-- Source: `37d59c7ade378d3d97a9f3a930bd46926b88c50b`
+- Run: `30820031085`
+- Source: `7ab84a4be585a1088b1dd28fdf0d9638c9644d56`
 
 | Stage | Exit code |
 |---|---:|
@@ -18,11 +18,11 @@
 | existing_upgrade | 0 |
 | legacy_probe | 0 |
 | migration_generate | 1 |
-| migration_upgrade | 0 |
+| migration_upgrade | 1 |
 | migration_check | 1 |
-| legacy_verify | 0 |
-| migration_downgrade | 0 |
-| migration_reupgrade | 0 |
+| legacy_verify | 1 |
+| migration_downgrade | 1 |
+| migration_reupgrade | 1 |
 | migration_recheck | 1 |
 | app_import | 0 |
 | backend_tests | 0 |
@@ -111,6 +111,7 @@ INFO  [alembic.runtime.migration] Running upgrade  -> plat_p7_20260501, platform
 INFO  [alembic.runtime.migration] Running upgrade plat_p7_20260501 -> plat_20260627_support, tenant support sessions for platform read-only and approved admin access
 INFO  [alembic.runtime.migration] Running upgrade plat_20260627_support -> qual_20260627_wf_close, close quality audit workflow gaps
 INFO  [alembic.runtime.migration] Running upgrade b7d9f3a1c2e4 -> aa11bb22cc33, add training certificate issuance tables
+INFO  [alembic.runtime.migration] Running upgrade  -> phase0_20260604, phase0 shared foundations base stations
 INFO  [alembic.runtime.migration] Running upgrade qms_p2_20260426 -> qms_p3_20260501, global superuser tenant safety and QMS phase 3 hardening
 INFO  [alembic.runtime.migration] Running upgrade qms_p3_20260501 -> qms_p4_20260501, phase 4 QMS route tree and workflow hardening
 INFO  [alembic.runtime.migration] Running upgrade p0a6_train_record -> p0a7_train_record_dedupe, Deduplicate current training records and enforce one active record per user/course.
@@ -121,7 +122,6 @@ INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33, b2c3d4e5f6g7, c1
 INFO  [alembic.runtime.migration] Running upgrade c8d1e2f3a4b5 -> d9e2f3a4b5c6, hard drop post-cutover legacy tables after retention approval
 INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33 -> training_20260627_auditor_access, add training auditor access grants
 INFO  [alembic.runtime.migration] Running upgrade training_20260627_auditor_access -> train_20260627_final, training final report settings and QR verification
-INFO  [alembic.runtime.migration] Running upgrade qual_20260627_wf_close -> qual_20260704_scopes, add explicit audit scope management fields
 INFO  [alembic.runtime.migration] Running upgrade qual_20260627_wf_close -> qual_20260627_scope, tenant audit scopes and scope-based QAR references
 INFO  [alembic.runtime.migration] Running upgrade qual_20260627_scope -> qual_20260628_scope_fix, Repair audit-scope columns after legacy scope migration.
 INFO  [alembic.runtime.migration] Running upgrade qual_20260628_scope_fix -> qual_20260628_lvl4, allow level 4 observation findings
@@ -130,6 +130,7 @@ INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b, 9c6a7d2e8f10, a1
 INFO  [alembic.runtime.migration] Running upgrade u9v8w7x6y5z4 -> v0a1b2c3d4e5, ensure user group runtime columns exist
 INFO  [alembic.runtime.migration] Running upgrade s9t8u7v6w5x4 -> phase2_4_20260605, QMS calendar performance and training currency integrity indexes.
 INFO  [alembic.runtime.migration] Running upgrade phase2_4_20260605 -> phase2_5_20260605, Restore QMS calendar performance and preserve canonical QMS styling support.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_car_attachment_description, Add CAR attachment descriptions.
 INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_notification_action_links, Add actionable QMS notification links.
 INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_finding_attachment_description_repair, Repair finding evidence attachment description column.
 INFO  [alembic.runtime.migration] Running upgrade phase2_5_20260605 -> phase2_9_20260605, QMS timezone runtime bridge migration.
@@ -137,10 +138,6 @@ INFO  [alembic.runtime.migration] Running upgrade phase2_9_20260605 -> phase2_10
 INFO  [alembic.runtime.migration] Running upgrade phase2_5_20260605 -> phase2_6_20260605, QMS calendar visibility and source diagnostics indexes.
 INFO  [alembic.runtime.migration] Running upgrade phase2_6_20260605 -> phase2_7_20260605, QMS calendar authoritative date and visibility indexes.
 INFO  [alembic.runtime.migration] Running upgrade phase2_7_20260605 -> phase2_8_20260605, QMS calendar stability, tenant timezone, and configurable public holidays.
-INFO  [alembic.runtime.migration] Running upgrade  -> phase0_20260604, phase0 shared foundations base stations
-INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_car_attachment_description, Add CAR attachment descriptions.
-INFO  [alembic.runtime.migration] Running upgrade qual_20260704_scopes -> saas_20260731_route_latency_hist, add mergeable route latency histograms
-INFO  [alembic.runtime.migration] Running upgrade saas_20260731_route_latency_hist -> foundation_20260731_geofence, add private base geofence and location consensus fields
 INFO  [alembic.runtime.migration] Running upgrade phase0_20260604 -> phase1_20260604, phase1 core duty rostering
 INFO  [alembic.runtime.migration] Running upgrade phase1_20260604 -> phase2_2_20260605, Phase 2.2 QMS and Training performance indexes.
 INFO  [alembic.runtime.migration] Running upgrade phase2_2_20260605 -> phase2_3_20260605, Phase 2.3 QMS dashboard hotfix indexes.
@@ -173,6 +170,9 @@ INFO  [alembic.runtime.migration] Running upgrade f4a5b6c7d8e9, qms_p4_20260501,
 INFO  [alembic.runtime.migration] Running upgrade m4a5n6u7a8l9 -> qms_20260704_car_attach_repair, repair missing quality CAR attachments table
 INFO  [alembic.runtime.migration] Running upgrade rostering_20260724_governance -> rostering_20260728_automation_policy, Add tenant roster-generation policy and immutable automation runs.
 INFO  [alembic.runtime.migration] Running upgrade rostering_20260724_governance -> document_control_20260724_domain, Create the canonical Document Control governance domain.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260627_wf_close -> qual_20260704_scopes, add explicit audit scope management fields
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_scopes -> saas_20260731_route_latency_hist, add mergeable route latency histograms
+INFO  [alembic.runtime.migration] Running upgrade saas_20260731_route_latency_hist -> foundation_20260731_geofence, add private base geofence and location consensus fields
 INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_domain -> document_control_20260724_scope_fk, Converge audit-scope foreign keys after parallel Quality branches.
 INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_scope_fk -> document_control_20260724_distribution_integrity, Enforce Document Control distribution recipient integrity.
 INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_distribution_integrity -> document_control_20260725_integrity, Enforce final Document Control lifecycle integrity.
@@ -181,10 +181,10 @@ INFO  [alembic.runtime.migration] Running upgrade document_control_20260729_know
 INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_domain -> notifications_20260729_delivery, Complete central email delivery policy and Resend event persistence.
 INFO  [alembic.runtime.migration] Running upgrade notifications_20260729_delivery -> accounts_20260803_admin_profile, Add governed tenant Admin Profile grants, sessions and audit events.
 Hard-drop migration skipped (no-op). Missing required env flags: AMO_ALLOW_HARD_DROP_LEGACY, AMO_RETENTION_APPROVED, AMO_CUTOVER_GATES_PASSED. Expected preconditions: runtime verification passed, hidden-writer audit complete, dual-write completed, parity thresholds met for 2 cycles, rollback path retired, retention/compliance sign-off recorded.
-Alembic compatibility repair: skipped redundant version deletion for c1d2e3f4a5b7; marker already absent
 Alembic compatibility repair: skipped redundant version deletion for a1b2c3d4e5f6; marker already absent
+Alembic compatibility repair: skipped redundant version deletion for b2c3d4e5f6g7; marker already absent
 Alembic compatibility repair: skipped redundant version deletion for d9e2f3a4b5c6; marker already absent
-Alembic compatibility repair: converted missing-source version update b2c3d4e5f6g7 -> amo_20260501_gsu_scope into an insert
+Alembic compatibility repair: skipped redundant version deletion for c1d2e3f4a5b7; marker already absent
 ```
 
 ### legacy_probe
@@ -196,60 +196,64 @@ SET
 
 ### migration_generate
 ```text
-INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_program_items_id_seq' as owned by integer column 'maintenance_program_items_legacy(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'quality_tenant_backfill_issues_id_seq' as owned by integer column 'quality_tenant_backfill_issues(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoices_id_seq' as owned by integer column 'finance_invoices(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_entries_id_seq' as owned by integer column 'journal_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'component_instances_id_seq' as owned by integer column 'component_instances(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_step_executions_id_seq' as owned by integer column 'task_step_executions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'inventory_movement_ledger_id_seq' as owned by integer column 'inventory_movement_ledger(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_execution_evidence_id_seq' as owned by integer column 'technical_production_execution_evidence(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_snapshots_id_seq' as owned by integer column 'aircraft_import_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipt_lines_id_seq' as owned by integer column 'goods_receipt_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alert_rules_id_seq' as owned by integer column 'reliability_alert_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_configuration_events_id_seq' as owned by integer column 'aircraft_configuration_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_uplifts_id_seq' as owned by integer column 'oil_uplifts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_templates_id_seq' as owned by integer column 'aircraft_import_templates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
 /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py:428: SAWarning: Did not recognize type 'ltree' of column 'storage_location_path'
   context.run_migrations()
-INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipt_lines_id_seq' as owned by integer column 'goods_receipt_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'gl_accounts_id_seq' as owned by integer column 'gl_accounts(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'customers_id_seq' as owned by integer column 'customers(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_publication_matches_id_seq' as owned by integer column 'technical_airworthiness_publication_matches(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoices_id_seq' as owned by integer column 'finance_invoices(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_execution_evidence_id_seq' as owned by integer column 'technical_production_execution_evidence(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'currencies_id_seq' as owned by integer column 'currencies(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'inspector_signoffs_id_seq' as owned by integer column 'inspector_signoffs(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_actions_id_seq' as owned by integer column 'technical_compliance_actions(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_entries_id_seq' as owned by integer column 'journal_entries(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'task_steps_id_seq' as owned by integer column 'task_steps(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'crs_signoff_id_seq' as owned by integer column 'crs_signoff(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_configuration_events_id_seq' as owned by integer column 'aircraft_configuration_events(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_action_history_id_seq' as owned by integer column 'technical_compliance_action_history(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_consumption_rates_id_seq' as owned by integer column 'oil_consumption_rates(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_payments_id_seq' as owned by integer column 'finance_payments(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_documents_id_seq' as owned by integer column 'aircraft_documents(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_utilization_daily_id_seq' as owned by integer column 'aircraft_utilization_daily(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_preview_rows_id_seq' as owned by integer column 'aircraft_import_preview_rows(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_templates_id_seq' as owned by integer column 'aircraft_import_templates(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'accounting_periods_id_seq' as owned by integer column 'accounting_periods(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'currencies_id_seq' as owned by integer column 'currencies(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'tax_codes_id_seq' as owned by integer column 'tax_codes(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_items_id_seq' as owned by integer column 'technical_airworthiness_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'quality_tenant_backfill_issues_id_seq' as owned by integer column 'quality_tenant_backfill_issues(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_publications_id_seq' as owned by integer column 'technical_airworthiness_publications(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_watchlists_id_seq' as owned by integer column 'technical_airworthiness_watchlists(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alerts_id_seq' as owned by integer column 'reliability_alerts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notifications_id_seq' as owned by integer column 'reliability_notifications(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'defect_reports_id_seq' as owned by integer column 'defect_reports(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'task_step_executions_id_seq' as owned by integer column 'task_step_executions(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_components_id_seq' as owned by integer column 'aircraft_components(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_action_history_id_seq' as owned by integer column 'technical_compliance_action_history(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_payments_id_seq' as owned by integer column 'finance_payments(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_utilization_daily_id_seq' as owned by integer column 'aircraft_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_usage_id_seq' as owned by integer column 'aircraft_usage(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'inspector_signoffs_id_seq' as owned by integer column 'inspector_signoffs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'accounting_periods_id_seq' as owned by integer column 'accounting_periods(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'crs_signoff_id_seq' as owned by integer column 'crs_signoff(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_utilization_daily_id_seq' as owned by integer column 'engine_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_documents_id_seq' as owned by integer column 'aircraft_documents(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_events_id_seq' as owned by integer column 'reliability_events(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_cases_id_seq' as owned by integer column 'fracas_cases(id)', assuming SERIAL and omitting
 INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.source_record_id'
@@ -290,28 +294,87 @@ INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_validation_status' on '('validation_status',)'
 INFO  [alembic.autogenerate.compare] Detected added unique constraint 'uq_reliability_event_source_record' on '('amo_id', 'source_system', 'source_record_id')'
 Generating /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py ...  done
-Traceback (most recent call last):
-  File "/home/runner/work/amo-portal/amo-portal/backend/scripts/finalize_reliability_migration.py", line 246, in <module>
-    main()
-  File "/home/runner/work/amo-portal/amo-portal/backend/scripts/finalize_reliability_migration.py", line 229, in main
-    raise RuntimeError(f"Expected one generated Reliability migration, found {len(candidates)}")
-RuntimeError: Expected one generated Reliability migration, found 0
+Finalized rel_20260803_complete_scope_complete_reliability_full_stack_scope.py with capability seeding and append-only guards.
+Sorry: IndentationError: unexpected indent (rel_20260803_complete_scope_complete_reliability_full_stack_scope.py, line 170)
 ```
 
 ### migration_upgrade
 ```text
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
-INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag -> rel_20260803_complete_scope, complete Reliability full stack scope
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
+    CommandLine(prog=prog).main(argv=argv)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
+    self.run_cmd(cfg, options)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
+    fn(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
+    script.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
+    util.load_python_file(self.dir, "env.py")
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
+    run_migrations_online()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 405, in run_migrations_online
+    _assert_no_duplicate_revisions()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 211, in _assert_no_duplicate_revisions
+    for revision in script.walk_revisions():
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 263, in walk_revisions
+    for rev in self.revision_map.iterate_revisions(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 814, in iterate_revisions
+    revisions, heads = fn(
+                       ^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1447, in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1234, in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 544, in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 768, in _resolve_revision_number
+    self._revision_map
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
+    obj.__dict__[self.__name__] = result = self.fget(obj)
+                                           ^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 209, in _revision_map
+    for revision in self._generator():
+                    ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 155, in _load_revisions
+    script = Script._from_path(self, real_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 1033, in _from_path
+    module = util.load_python_file(dir_, filename)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 170
+    op.execute("""
+IndentationError: unexpected indent
 ```
 
 ### migration_check
 ```text
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-
-The above exception was the direct cause of the following exception:
-
 Traceback (most recent call last):
   File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -336,109 +399,214 @@ Traceback (most recent call last):
   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
   File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
     run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 138, in _autogen_for_tables
-    _compare_tables(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 264, in _compare_tables
-    with _compare_columns(
-         ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/contextlib.py", line 137, in __enter__
-    return next(self.gen)
-           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 413, in _compare_columns
-    comparators.dispatch("column")(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 1169, in _compare_server_default
-    is_diff = autogen_context.migration_context._compare_server_default(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 750, in _compare_server_default
-    return self.impl.compare_server_default(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/postgresql.py", line 148, in compare_server_default
-    return not conn.scalar(
-               ^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1308, in scalar
-    return meth(
-           ^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 544, in _execute_on_scalar
-    return self._execute_on_connection(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 405, in run_migrations_online
+    _assert_no_duplicate_revisions()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 211, in _assert_no_duplicate_revisions
+    for revision in script.walk_revisions():
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 263, in walk_revisions
+    for rev in self.revision_map.iterate_revisions(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 814, in iterate_revisions
+    revisions, heads = fn(
+                       ^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1447, in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1234, in _parse_upgrade_target
+    return self.get_revisions(target)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist: json = unknown
-LINE 1: SELECT '[]'::json = '[]' AS anon_1
-                          ^
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-[SQL: SELECT '[]'::json = '[]' AS anon_1]
-(Background on this error at: https://sqlalche.me/e/20/f405)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 544, in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 768, in _resolve_revision_number
+    self._revision_map
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
+    obj.__dict__[self.__name__] = result = self.fget(obj)
+                                           ^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 209, in _revision_map
+    for revision in self._generator():
+                    ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 155, in _load_revisions
+    script = Script._from_path(self, real_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 1033, in _from_path
+    module = util.load_python_file(dir_, filename)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 170
+    op.execute("""
+IndentationError: unexpected indent
 ```
 
 ### legacy_verify
 ```text
- validation_status | validation_errors | provenance_json 
--------------------+-------------------+-----------------
- VALID             | []                | {}
-(1 row)
-
+ERROR:  column "validation_status" does not exist
+LINE 1: SELECT validation_status, validation_errors, provenance_json...
+               ^
 ```
 
 ### migration_downgrade
 ```text
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
-INFO  [alembic.runtime.migration] Running downgrade rel_20260803_complete_scope -> rel_20260803_merge_heads_diag, complete Reliability full stack scope
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
+    CommandLine(prog=prog).main(argv=argv)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
+    self.run_cmd(cfg, options)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
+    fn(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 530, in downgrade
+    script.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
+    util.load_python_file(self.dir, "env.py")
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
+    run_migrations_online()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 405, in run_migrations_online
+    _assert_no_duplicate_revisions()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 211, in _assert_no_duplicate_revisions
+    for revision in script.walk_revisions():
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 263, in walk_revisions
+    for rev in self.revision_map.iterate_revisions(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 814, in iterate_revisions
+    revisions, heads = fn(
+                       ^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1447, in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1234, in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 544, in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 768, in _resolve_revision_number
+    self._revision_map
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
+    obj.__dict__[self.__name__] = result = self.fget(obj)
+                                           ^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 209, in _revision_map
+    for revision in self._generator():
+                    ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 155, in _load_revisions
+    script = Script._from_path(self, real_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 1033, in _from_path
+    module = util.load_python_file(dir_, filename)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 170
+    op.execute("""
+IndentationError: unexpected indent
 ```
 
 ### migration_reupgrade
 ```text
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
-INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag -> rel_20260803_complete_scope, complete Reliability full stack scope
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
+    CommandLine(prog=prog).main(argv=argv)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
+    self.run_cmd(cfg, options)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
+    fn(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
+    script.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
+    util.load_python_file(self.dir, "env.py")
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
+    run_migrations_online()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 405, in run_migrations_online
+    _assert_no_duplicate_revisions()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 211, in _assert_no_duplicate_revisions
+    for revision in script.walk_revisions():
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 263, in walk_revisions
+    for rev in self.revision_map.iterate_revisions(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 814, in iterate_revisions
+    revisions, heads = fn(
+                       ^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1447, in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1234, in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 544, in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 768, in _resolve_revision_number
+    self._revision_map
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
+    obj.__dict__[self.__name__] = result = self.fget(obj)
+                                           ^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 209, in _revision_map
+    for revision in self._generator():
+                    ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 155, in _load_revisions
+    script = Script._from_path(self, real_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 1033, in _from_path
+    module = util.load_python_file(dir_, filename)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 170
+    op.execute("""
+IndentationError: unexpected indent
 ```
 
 ### migration_recheck
 ```text
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-
-The above exception was the direct cause of the following exception:
-
 Traceback (most recent call last):
   File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -463,77 +631,53 @@ Traceback (most recent call last):
   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
   File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
     run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 138, in _autogen_for_tables
-    _compare_tables(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 264, in _compare_tables
-    with _compare_columns(
-         ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/contextlib.py", line 137, in __enter__
-    return next(self.gen)
-           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 413, in _compare_columns
-    comparators.dispatch("column")(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 1169, in _compare_server_default
-    is_diff = autogen_context.migration_context._compare_server_default(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 750, in _compare_server_default
-    return self.impl.compare_server_default(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/postgresql.py", line 148, in compare_server_default
-    return not conn.scalar(
-               ^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1308, in scalar
-    return meth(
-           ^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 544, in _execute_on_scalar
-    return self._execute_on_connection(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 405, in run_migrations_online
+    _assert_no_duplicate_revisions()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 211, in _assert_no_duplicate_revisions
+    for revision in script.walk_revisions():
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 263, in walk_revisions
+    for rev in self.revision_map.iterate_revisions(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 814, in iterate_revisions
+    revisions, heads = fn(
+                       ^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1447, in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 1234, in _parse_upgrade_target
+    return self.get_revisions(target)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist: json = unknown
-LINE 1: SELECT '[]'::json = '[]' AS anon_1
-                          ^
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-[SQL: SELECT '[]'::json = '[]' AS anon_1]
-(Background on this error at: https://sqlalche.me/e/20/f405)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 544, in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 768, in _resolve_revision_number
+    self._revision_map
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
+    obj.__dict__[self.__name__] = result = self.fget(obj)
+                                           ^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/revision.py", line 209, in _revision_map
+    for revision in self._generator():
+                    ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 155, in _load_revisions
+    script = Script._from_path(self, real_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 1033, in _from_path
+    module = util.load_python_file(dir_, filename)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 170
+    op.execute("""
+IndentationError: unexpected indent
 ```
 
 ### app_import
@@ -642,7 +786,7 @@ amodb/apps/reliability/tests/test_notifications.py::test_notifications_use_effec
     created_at=datetime.utcnow(),
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-19 passed, 114 warnings in 1.11s
+19 passed, 114 warnings in 1.01s
 ```
 
 ### governance
@@ -659,13 +803,13 @@ amodb/apps/reliability/tests/test_notifications.py::test_notifications_use_effec
 
 [1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/home/runner/work/amo-portal/amo-portal/frontend[39m
 
- [32m✓[39m src/services/departmentHome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m src/app/portalRouteManifest.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/services/departmentHome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/app/portalRouteManifest.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
-[2m   Start at [22m 13:49:05
-[2m   Duration [22m 368ms[2m (transform 277ms, setup 0ms, import 365ms, tests 19ms, environment 0ms)[22m
+[2m   Start at [22m 13:56:53
+[2m   Duration [22m 368ms[2m (transform 283ms, setup 0ms, import 344ms, tests 17ms, environment 0ms)[22m
 
 
 > frontend@0.0.0 check:css
@@ -780,5 +924,5 @@ CSS contract passed for 60 stylesheets.
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
-[32m✓ built in 14.36s[39m
+[32m✓ built in 14.53s[39m
 ```
