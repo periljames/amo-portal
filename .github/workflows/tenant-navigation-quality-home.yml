@@ -1,0 +1,139 @@
+name: Tenant Navigation and Quality Home CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/accounts/admin_profile_router.py"
+      - "backend/amodb/apps/accounts/__init__.py"
+      - "backend/amodb/apps/accounts/tests/test_admin_profile_governance.py"
+      - "backend/amodb/apps/quality/tenant_security.py"
+      - "backend/amodb/apps/quality/tests/test_tenant_route_isolation.py"
+      - "frontend/src/App.tsx"
+      - "frontend/src/app/TenantRouteBoundary.tsx"
+      - "frontend/src/app/portalRouteManifest.ts"
+      - "frontend/src/app/portalRouteManifest.test.ts"
+      - "frontend/src/components/Layout/DepartmentLayout.tsx"
+      - "frontend/src/pages/qms/QmsOverviewPage.tsx"
+      - "frontend/src/services/adminProfileMode.ts"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/qmsDashboard.ts"
+      - "frontend/src/styles/components/tenant-shell*.css"
+      - "frontend/src/styles/qms-dashboard*.css"
+      - "frontend/src/styles/qms-overview.css"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/tenant-navigation-quality-home.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-navigation-quality-home-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "tenant shell frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Run tenant navigation and Quality regressions
+        run: npm run test:quality
+      - name: Lint changed tenant shell boundaries
+        run: >-
+          npm exec -- eslint
+          src/App.tsx
+          src/app/TenantRouteBoundary.tsx
+          src/app/portalRouteManifest.ts
+          src/app/portalRouteManifest.test.ts
+          src/components/Layout/DepartmentLayout.tsx
+          src/pages/qms/QmsOverviewPage.tsx
+          src/services/adminProfileMode.ts
+          src/services/apiClient.ts
+          src/services/qmsDashboard.ts
+      - name: Typecheck and production build
+        run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "tenant governance backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile administration and tenant security modules
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts/admin_profile_router.py
+          amodb/apps/accounts/__init__.py
+          amodb/apps/quality/tenant_security.py
+      - name: Import full application with SQLite test configuration
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: tenant-navigation-test-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: python -c "import amodb.main; print('Application imported with canonical tenant routes')"
+      - name: Run tenant isolation and admin governance tests
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: tenant-navigation-test-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: >-
+          pytest -q
+          amodb/apps/accounts/tests/test_admin_profile_governance.py
+          amodb/apps/quality/tests/test_tenant_route_isolation.py
+          amodb/apps/quality/tests/test_dashboard_v2_contract.py
+          amodb/apps/quality/tests/test_audit_reference_integrity.py
+      - name: Verify Alembic graph is loadable and unique
+        env:
+          DATABASE_URL: ""
+          DATABASE_WRITE_URL: ""
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          print("Alembic heads:", heads)
+          assert heads
+          assert len(heads) == len(set(heads)), heads
+          PY
