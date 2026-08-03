@@ -7,14 +7,24 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICES = ROOT / "backend/amodb/apps/reliability/advanced_services.py"
 
 
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"Expected one {label}, found {count}")
+    return text.replace(old, new, 1)
+
+
 def main() -> None:
     text = SERVICES.read_text(encoding="utf-8")
     import_anchor = "from . import models as legacy\n"
     import_replacement = "from . import models as legacy\nfrom . import internal_collectors\n"
     if import_replacement not in text:
-        if import_anchor not in text:
-            raise RuntimeError("Reliability internal collector import anchor is missing")
-        text = text.replace(import_anchor, import_replacement, 1)
+        text = replace_once(
+            text,
+            import_anchor,
+            import_replacement,
+            "internal collector import anchor",
+        )
 
     start = text.index("def harvest_internal_sources(\n")
     end = text.index("\ndef ensure_fracas_lifecycle(\n", start)
@@ -131,8 +141,59 @@ def main() -> None:
     return results
 
 '''
-    SERVICES.write_text(text[:start] + replacement + text[end + 1 :], encoding="utf-8")
-    print("Authoritative internal Reliability collectors wired.")
+    text = text[:start] + replacement + text[end + 1 :]
+
+    old_data_sources = '''            data_sources_json=[
+                {"type": "TECH_LOG", "required": True},
+                {"type": "FLIGHT_OPERATIONS", "required": True},
+                {"type": "MAINTENANCE", "required": True},
+                {"type": "EHM", "required": False},
+            ],'''
+    new_data_sources = '''            data_sources_json=[
+                {"type": "TECH_LOG", "transport": "INTERNAL", "required": True},
+                {"type": "MAINTENANCE", "transport": "INTERNAL", "required": True},
+                {"type": "TECH_RECORDS", "transport": "INTERNAL", "required": True},
+                {"type": "FLIGHT_OPERATIONS", "transport": "PUSH", "required": True},
+                {"type": "MEL_CDL", "transport": "PUSH", "required": False},
+                {"type": "EHM", "transport": "INTERNAL", "required": False},
+                {"type": "QMS", "transport": "INTERNAL", "required": False},
+                {"type": "PROCUREMENT", "transport": "INTERNAL", "required": False},
+                {"type": "COMPONENT_SHOP", "transport": "PUSH", "required": False},
+                {"type": "SMS", "transport": "PUSH", "required": False},
+            ],'''
+    text = replace_once(
+        text,
+        old_data_sources,
+        new_data_sources,
+        "programme data-source contract",
+    )
+
+    old_specs = '''    source_specs = [
+        ("TECHLOG-INTERNAL", "Maintenance defect task cards", "TECH_LOG", "INTERNAL", 60),
+        ("OPS-PUSH", "Flight operations interruptions", "FLIGHT_OPERATIONS", "PUSH", None),
+        ("MEL-CDL-PUSH", "MEL and CDL deferrals", "MEL_CDL", "PUSH", None),
+        ("EHM-INTERNAL", "Engine trend shifts", "EHM", "INTERNAL", 60),
+        ("SHOP-PUSH", "Component shop findings", "COMPONENT_SHOP", "PUSH", None),
+        ("QMS-PUSH", "Quality findings and supplier escapes", "QMS", "PUSH", None),
+        ("SMS-PUSH", "Safety occurrence linkage", "SMS", "PUSH", None),
+        ("PROCUREMENT-PUSH", "Supplier and batch performance", "PROCUREMENT", "PUSH", None),
+    ]'''
+    new_specs = '''    source_specs = [
+        ("TECHLOG-INTERNAL", "Authoritative technical-log defect reports", "TECH_LOG", "INTERNAL", 60),
+        ("MAINT-INTERNAL", "Maintenance defect, non-routine and deferred task cards", "MAINTENANCE", "INTERNAL", 60),
+        ("TECHRECORDS-INTERNAL", "Aircraft component configuration events", "TECH_RECORDS", "INTERNAL", 60),
+        ("OPS-PUSH", "Flight operations interruptions", "FLIGHT_OPERATIONS", "PUSH", None),
+        ("MEL-CDL-PUSH", "External MEL and CDL control feed", "MEL_CDL", "PUSH", None),
+        ("EHM-INTERNAL", "Engine trend shifts", "EHM", "INTERNAL", 60),
+        ("QMS-INTERNAL", "Reliability corrective-action records", "QMS", "INTERNAL", 60),
+        ("PROCUREMENT-INTERNAL", "Receiving inspection escapes and quality holds", "PROCUREMENT", "INTERNAL", 60),
+        ("SHOP-PUSH", "Component shop findings", "COMPONENT_SHOP", "PUSH", None),
+        ("SMS-PUSH", "Safety occurrence linkage", "SMS", "PUSH", None),
+    ]'''
+    text = replace_once(text, old_specs, new_specs, "Reliability bootstrap source specifications")
+
+    SERVICES.write_text(text, encoding="utf-8")
+    print("Authoritative internal Reliability collectors and bootstrap contracts wired.")
 
 
 if __name__ == "__main__":
