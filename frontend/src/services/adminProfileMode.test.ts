@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearAllCachedAdminProfileStates,
   onAdminProfileChange,
   readCachedAdminProfileState,
 } from "./adminProfileMode";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
+
+  get length(): number {
+    return this.values.size;
+  }
 
   getItem(key: string): string | null {
     return this.values.get(key) ?? null;
@@ -19,22 +24,41 @@ class MemoryStorage {
   removeItem(key: string): void {
     this.values.delete(key);
   }
+
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null;
+  }
+
+  clear(): void {
+    this.values.clear();
+  }
 }
 
 describe("Admin Profile client lifecycle", () => {
+  let sessionStorage: MemoryStorage;
+  let localStorage: MemoryStorage;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-03T12:00:00Z"));
 
+    sessionStorage = new MemoryStorage();
+    localStorage = new MemoryStorage();
+    localStorage.setItem("amo_current_user", JSON.stringify({ id: "user-a" }));
+
     const target = new EventTarget() as EventTarget & {
       sessionStorage: MemoryStorage;
+      localStorage: MemoryStorage;
       setTimeout: typeof globalThis.setTimeout;
       clearTimeout: typeof globalThis.clearTimeout;
     };
-    target.sessionStorage = new MemoryStorage();
+    target.sessionStorage = sessionStorage;
+    target.localStorage = localStorage;
     target.setTimeout = globalThis.setTimeout.bind(globalThis);
     target.clearTimeout = globalThis.clearTimeout.bind(globalThis);
     vi.stubGlobal("window", target);
+    vi.stubGlobal("sessionStorage", sessionStorage);
+    vi.stubGlobal("localStorage", localStorage);
 
     if (typeof globalThis.CustomEvent === "undefined") {
       class TestCustomEvent<T> extends Event {
@@ -49,15 +73,16 @@ describe("Admin Profile client lifecycle", () => {
   });
 
   afterEach(() => {
+    clearAllCachedAdminProfileStates();
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it("publishes an inactive state when the backend expiry time is reached", () => {
+  it("publishes an inactive state for the same user when backend expiry is reached", () => {
     const amoCode = "tenant-a";
-    window.sessionStorage.setItem(
-      `amo_admin_profile_session:${amoCode}`,
+    sessionStorage.setItem(
+      `amo_admin_profile_session:user-a:${amoCode}`,
       JSON.stringify({
         eligible: true,
         active: true,
@@ -67,13 +92,15 @@ describe("Admin Profile client lifecycle", () => {
       }),
     );
 
-    const observed: boolean[] = [];
-    const unsubscribe = onAdminProfileChange(({ state }) => observed.push(state.active));
+    const observed: Array<{ userId: string; active: boolean }> = [];
+    const unsubscribe = onAdminProfileChange(({ userId, state }) => {
+      observed.push({ userId, active: state.active });
+    });
 
     expect(readCachedAdminProfileState(amoCode)?.active).toBe(true);
     vi.advanceTimersByTime(1_050);
 
-    expect(observed).toEqual([false]);
+    expect(observed).toEqual([{ userId: "user-a", active: false }]);
     expect(readCachedAdminProfileState(amoCode)).toMatchObject({
       eligible: true,
       active: false,
@@ -81,5 +108,28 @@ describe("Admin Profile client lifecycle", () => {
       expires_at: null,
     });
     unsubscribe();
+  });
+
+  it("never returns another user's cached elevation in the same tenant tab", () => {
+    const amoCode = "tenant-a";
+    sessionStorage.setItem(
+      `amo_admin_profile_session:user-a:${amoCode}`,
+      JSON.stringify({
+        eligible: true,
+        active: true,
+        session_id: "session-user-a",
+        expires_at: "2026-08-03T12:10:00Z",
+      }),
+    );
+
+    expect(readCachedAdminProfileState(amoCode)?.session_id).toBe("session-user-a");
+
+    localStorage.setItem("amo_current_user", JSON.stringify({ id: "user-b" }));
+
+    expect(readCachedAdminProfileState(amoCode)).toBeNull();
+    expect(sessionStorage.getItem(`amo_admin_profile_session:user-a:${amoCode}`)).not.toBeNull();
+
+    clearAllCachedAdminProfileStates();
+    expect(sessionStorage.length).toBe(0);
   });
 });
