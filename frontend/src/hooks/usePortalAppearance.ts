@@ -29,6 +29,11 @@ export function initialisePortalAppearance(): void {
   applyAppearance(readDensity(), readMotion());
 }
 
+// DepartmentLayout imports this module before React commits the shell. Applying
+// the stored values here avoids a comfortable/full-motion flash before the hook
+// effects run, while the hook remains the only writer after user interaction.
+initialisePortalAppearance();
+
 export function usePortalAppearance() {
   const [density, setDensity] = useState<PortalDensity>(readDensity);
   const [motion, setMotion] = useState<PortalMotion>(readMotion);
