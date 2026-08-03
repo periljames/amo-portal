@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from types import SimpleNamespace
 
+from amodb import main as app_main
 from amodb.apps.accounts.models import AccountRole
 from amodb.apps.reliability import advanced_scheduler, router, services
 
@@ -112,6 +113,18 @@ def test_disabled_scheduler_does_not_create_worker(monkeypatch):
     monkeypatch.setattr(advanced_scheduler.threading, "Thread", forbidden_thread)
     advanced_scheduler.start_reliability_scheduler()
     assert advanced_scheduler._thread is None
+
+
+def test_scheduler_is_wired_to_bounded_application_lifecycle():
+    startup_source = inspect.getsource(app_main._schema_preflight)
+    shutdown_source = inspect.getsource(app_main._flush_usage_metrics_on_shutdown)
+    bounded_source = inspect.getsource(app_main._run_shutdown_step)
+
+    assert "reliability_scheduler.start_reliability_scheduler()" in startup_source
+    assert "reliability_scheduler.stop_reliability_scheduler" in shutdown_source
+    assert "_run_shutdown_step" in shutdown_source
+    assert "future.result(timeout=timeout_seconds)" in bounded_source
+    assert "pool.shutdown(wait=False" in bounded_source
 
 
 def test_fracas_evidence_export_is_tenant_scoped_and_audited():
