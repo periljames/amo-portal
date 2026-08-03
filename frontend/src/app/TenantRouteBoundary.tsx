@@ -8,13 +8,13 @@ import {
 } from "../services/auth";
 import {
   fetchAdminProfileState,
+  onAdminProfileChange,
   readCachedAdminProfileState,
   type AdminProfileState,
 } from "../services/adminProfileMode";
 import {
   getAllowedDepartments,
   getAssignedDepartment,
-  isAdminUser,
   isDepartmentId,
   type DepartmentId,
 } from "../utils/departmentAccess";
@@ -66,8 +66,14 @@ function isPublicTenantRoute(parts: string[]): boolean {
 function routeDepartment(parts: string[]): DepartmentId | null {
   const segment = normalizeDepartmentCode(parts[2] || "");
   if (segment === "ehm") return "reliability";
-  if (segment && DEPARTMENT_SEGMENTS.has(segment as DepartmentId) && isDepartmentId(segment)) return segment;
+  if (segment && DEPARTMENT_SEGMENTS.has(segment as DepartmentId) && isDepartmentId(segment)) {
+    return segment;
+  }
   return null;
+}
+
+function sameTenant(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -75,42 +81,46 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   const routeParts = useMemo(() => segments(location.pathname), [location.pathname]);
   const currentUser = getCachedUser();
   const isTenantRoute = routeParts[0] === "maintenance" && Boolean(routeParts[1]);
+  const isPublicRoute = isTenantRoute && isPublicTenantRoute(routeParts);
   const routeTenant = isTenantRoute ? routeParts[1] : "";
   const isAdminRoute = isTenantRoute && routeParts[2] === "admin";
-  const isEligibleAdmin = Boolean(currentUser && isAdminUser(currentUser));
   const cachedAdminState = routeTenant ? readCachedAdminProfileState(routeTenant) : null;
   const [adminState, setAdminState] = useState<AdminProfileState | null>(cachedAdminState);
-  const [adminStateResolved, setAdminStateResolved] = useState(!isEligibleAdmin || Boolean(cachedAdminState));
+  const [adminStateResolved, setAdminStateResolved] = useState(Boolean(cachedAdminState));
 
   useEffect(() => {
-    if (!isTenantRoute || !currentUser || !isAdminUser(currentUser)) {
+    if (!isTenantRoute || isPublicRoute || !currentUser) {
       setAdminState(null);
       setAdminStateResolved(true);
       return;
     }
-    const cached = readCachedAdminProfileState(routeTenant);
-    if (cached) {
-      setAdminState(cached);
-      setAdminStateResolved(true);
-    } else {
-      setAdminStateResolved(false);
-    }
-    let active = true;
-    fetchAdminProfileState(routeTenant)
-      .then((state) => {
-        if (!active) return;
-        setAdminState(state);
-        setAdminStateResolved(true);
-      })
-      .catch(() => {
-        if (!active) return;
-        setAdminState({ eligible: false, active: false });
-        setAdminStateResolved(true);
-      });
-    return () => { active = false; };
-  }, [currentUser?.id, isTenantRoute, routeTenant]);
 
-  if (!isTenantRoute || isPublicTenantRoute(routeParts) || !currentUser) return <>{children}</>;
+    let active = true;
+    const applyState = (state: AdminProfileState) => {
+      if (!active) return;
+      setAdminState(state);
+      setAdminStateResolved(true);
+    };
+
+    const cached = readCachedAdminProfileState(routeTenant);
+    if (cached) applyState(cached);
+    else setAdminStateResolved(false);
+
+    const unsubscribe = onAdminProfileChange(({ amoCode, state }) => {
+      if (sameTenant(amoCode, routeTenant)) applyState(state);
+    });
+
+    fetchAdminProfileState(routeTenant)
+      .then(applyState)
+      .catch(() => applyState({ eligible: false, active: false }));
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [currentUser?.id, isPublicRoute, isTenantRoute, routeTenant]);
+
+  if (!isTenantRoute || isPublicRoute || !currentUser) return <>{children}</>;
 
   if (currentUser.is_superuser || currentUser.role === "SUPERUSER") {
     return <Navigate to="/platform/control" replace state={{ blockedTenantPath: location.pathname }} />;
@@ -122,20 +132,27 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
     return <Navigate to={`/maintenance/${encodeURIComponent(canonicalTenant)}`} replace state={{ blockedTenantPath: location.pathname }} />;
   }
 
-  if (isEligibleAdmin && !adminStateResolved) {
-    return <div className="page-loading" role="status" aria-live="polite"><div className="page-loading__card">Confirming access profile…</div></div>;
-  }
-
   const assigned = getAssignedDepartment(currentUser, getContext().department);
-  const allAllowed = getAllowedDepartments(currentUser, assigned).filter(
-    (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
-  );
   const normalAllowed: Array<Exclude<DepartmentId, "admin">> =
     assigned && assigned !== "admin" ? [assigned] : [];
-  const allowed = isEligibleAdmin && adminState?.active
-    ? allAllowed
-    : normalAllowed;
-  const homeDepartment = allowed[0];
+  const elevatedUser = adminState?.active
+    ? { ...currentUser, is_amo_admin: true }
+    : currentUser;
+  const elevatedAllowed = getAllowedDepartments(elevatedUser, assigned).filter(
+    (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
+  );
+  const allowed = adminState?.active ? elevatedAllowed : normalAllowed;
+  const homeDepartment =
+    (assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : null)
+    || allowed[0];
+
+  if (isAdminRoute && !adminStateResolved) {
+    return (
+      <div className="page-loading" role="status" aria-live="polite">
+        <div className="page-loading__card">Confirming Admin profile…</div>
+      </div>
+    );
+  }
 
   if (!homeDepartment) {
     return <Navigate to={`/maintenance/${encodeURIComponent(canonicalTenant)}/login`} replace state={{ accessConfigurationError: true }} />;
@@ -145,7 +162,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (routeParts.length === 2) return <Navigate to={home} replace />;
 
   if (isAdminRoute) {
-    if (!isEligibleAdmin || !adminState?.active) {
+    if (!adminState?.eligible || !adminState.active) {
       return <Navigate to={home} replace state={{ blockedAdminPath: location.pathname }} />;
     }
     return <>{children}</>;
