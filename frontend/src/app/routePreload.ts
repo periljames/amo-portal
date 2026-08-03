@@ -27,7 +27,7 @@ const loadMaintenanceCloseoutPage: RouteLoader = () => import("../pages/maintena
 const loadMaintenanceReportsPage: RouteLoader = () => import("../pages/maintenance/MaintenanceReportsPage");
 const loadMaintenanceSettingsPage: RouteLoader = () => import("../pages/maintenance/MaintenanceSettingsPage");
 const loadManualsDashboardPage: RouteLoader = () => import("../pages/manuals/ManualsDashboardPage");
-const loadReliabilityReportsPage: RouteLoader = () => import("../pages/ReliabilityReportsPage");
+const loadReliabilityWorkspacePage: RouteLoader = () => import("../pages/reliability/ReliabilityWorkspacePage");
 const loadEhmDashboardPage: RouteLoader = () => import("../pages/ehm/EhmDashboardPage");
 const loadAdminOverviewPage: RouteLoader = () => import("../pages/AdminOverviewPage");
 const loadAdminDashboardPage: RouteLoader = () => import("../pages/AdminDashboardPage");
@@ -52,7 +52,7 @@ const routeLoaders: Array<{ test: RegExp; loaders: RouteLoader[] }> = [
   { test: /\/qms(?:\/|$)/, loaders: [loadQmsCanonicalPage] },
   { test: /\/manuals(?:\/|$)/, loaders: [loadManualsDashboardPage] },
   { test: /\/reliability\/ehm(?:\/|$)/, loaders: [loadEhmDashboardPage] },
-  { test: /\/reliability(?:\/|$)/, loaders: [loadReliabilityReportsPage] },
+  { test: /\/reliability(?:\/|$)/, loaders: [loadReliabilityWorkspacePage] },
   { test: /\/admin\/billing(?:\/|$)/, loaders: [loadSubscriptionManagementPage] },
   { test: /\/admin\/users(?:\/|$)/, loaders: [loadAdminDashboardPage] },
   { test: /\/admin(?:\/|$)/, loaders: [loadAdminOverviewPage] },

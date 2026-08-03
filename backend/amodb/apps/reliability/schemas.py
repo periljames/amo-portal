@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -918,3 +918,44 @@ class ReliabilityPullRead(BaseModel):
 # Ensure models are fully resolved for OpenAPI generation under Pydantic v2 + postponed annotations.
 ReliabilityDefectRead.model_rebuild()
 ReliabilityPullRead.model_rebuild()
+
+# Canonical Reliability workspace read models
+class ReliabilityWorkbenchCounts(BaseModel):
+    open_alerts: int = 0
+    critical_alerts: int = 0
+    active_cases: int = 0
+    overdue_actions: int = 0
+    engine_shifts: int = 0
+    recent_events: int = 0
+    data_quality_issues: int = 0
+
+
+class ReliabilityPriorityItem(BaseModel):
+    kind: Literal["ALERT", "OVERDUE_ACTION", "ENGINE_SHIFT", "DATA_QUALITY"]
+    severity: ReliabilitySeverityEnum
+    title: str
+    summary: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+    due_date: Optional[date] = None
+    relative_path: str
+    entity_id: Optional[str] = None
+
+
+class ReliabilityDataFreshness(BaseModel):
+    source: str
+    status: Literal["CURRENT", "STALE", "MISSING", "FAILED", "PENDING"]
+    latest_record_at: Optional[datetime] = None
+    age_days: Optional[int] = None
+    issue_count: int = 0
+    detail: Optional[str] = None
+
+
+class ReliabilityWorkbenchSnapshot(BaseModel):
+    generated_at: datetime
+    counts: ReliabilityWorkbenchCounts
+    priorities: List[ReliabilityPriorityItem] = Field(default_factory=list)
+    recent_events: List[ReliabilityEventRead] = Field(default_factory=list)
+    active_cases: List[FRACASCaseRead] = Field(default_factory=list)
+    open_alerts: List[ReliabilityAlertRead] = Field(default_factory=list)
+    engine_shifts: List[EngineTrendStatusRead] = Field(default_factory=list)
+    data_freshness: List[ReliabilityDataFreshness] = Field(default_factory=list)

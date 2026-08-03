@@ -263,18 +263,45 @@ function departmentBranch(
     label: "Reliability",
     icon: "reliability",
     path: `${base}/reliability`,
-    children: [{
-      id: "reliability-analysis",
-      label: "Analysis",
-      path: `${base}/reliability`,
-      children: [
-        { id: "reliability-home", label: "Home", path: `${base}/reliability`, exact: true },
-        { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability/reports` },
-        { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
-        { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
-        { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
-      ],
-    }],
+    children: [
+      {
+        id: "reliability-command",
+        label: "Command",
+        path: `${base}/reliability`,
+        children: [
+          { id: "reliability-workbench", label: "Workbench", path: `${base}/reliability`, exact: true },
+          { id: "reliability-events", label: "Occurrences", path: `${base}/reliability/events` },
+          { id: "reliability-alerts", label: "Alerts", path: `${base}/reliability/alerts` },
+          { id: "reliability-fracas", label: "FRACAS", path: `${base}/reliability/cases` },
+        ],
+      },
+      {
+        id: "reliability-analysis",
+        label: "Analysis",
+        path: `${base}/reliability/fleet`,
+        children: [
+          { id: "reliability-fleet", label: "Fleet", path: `${base}/reliability/fleet` },
+          { id: "reliability-systems", label: "ATA Systems", path: `${base}/reliability/systems` },
+          { id: "reliability-components", label: "Components", path: `${base}/reliability/components` },
+          { id: "reliability-engines", label: "Engine Trends", path: `${base}/reliability/engines` },
+          { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
+          { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
+          { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
+        ],
+      },
+      {
+        id: "reliability-governance",
+        label: "Governance",
+        path: `${base}/reliability/program`,
+        children: [
+          { id: "reliability-program", label: "Programme", path: `${base}/reliability/program` },
+          { id: "reliability-changes", label: "Programme Changes", path: `${base}/reliability/changes` },
+          { id: "reliability-meetings", label: "Review Meetings", path: `${base}/reliability/meetings` },
+          { id: "reliability-reports", label: "Controlled Reports", path: `${base}/reliability/reports` },
+          { id: "reliability-data-quality", label: "Data Quality", path: `${base}/reliability/data-quality` },
+        ],
+      },
+    ],
   };
   if (department === "safety") return simpleDepartmentBranch(base, "safety", "Safety Management", "safety");
   if (department === "stores") return simpleDepartmentBranch(base, "stores", "Procurement & Stores", "stores");

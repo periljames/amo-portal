@@ -1,6 +1,7 @@
 // src/services/reliability.ts
 import { getToken, handleAuthFailure, markSessionActivity } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { apiRequest } from "./apiClient";
 import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 
 const API_BASE = getApiBaseUrl();
@@ -138,9 +139,231 @@ export async function downloadReliabilityReport(
 export async function downloadFracasEvidencePack(caseId: number): Promise<DownloadedFile> {
   markSessionActivity("fracas-export");
   return downloadWithXhr({
-    url: `${API_BASE}/reliability/fracas/${caseId}/evidence-pack`,
+    url: `${API_BASE}/reliability/fracas/cases/${caseId}/evidence-pack`,
     headers: buildAuthHeader(),
     fallbackFilename: `fracas-${caseId}-evidence-pack.zip`,
     retries: 3,
   });
+}
+
+export type ReliabilitySeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type ReliabilityEventType = "DEFECT" | "REMOVAL" | "INSTALLATION" | "OCTM" | "ECTM" | "FRACAS" | "OTHER";
+export type ReliabilityAlertStatus = "OPEN" | "ACKNOWLEDGED" | "CLOSED";
+export type FracasStatus = "OPEN" | "IN_ANALYSIS" | "ACTIONS" | "MONITORING" | "CLOSED";
+export type EngineTrendStatus = "Trend Normal" | "Trend Shift";
+
+export type ReliabilityEvent = {
+  id: number;
+  amo_id: string;
+  aircraft_serial_number?: string | null;
+  engine_position?: string | null;
+  component_id?: number | null;
+  work_order_id?: number | null;
+  task_card_id?: number | null;
+  event_type: ReliabilityEventType;
+  severity?: ReliabilitySeverity | null;
+  ata_chapter?: string | null;
+  reference_code?: string | null;
+  source_system?: string | null;
+  description?: string | null;
+  operator_event_id?: string | null;
+  occurred_at: string;
+  created_at: string;
+};
+
+export type ReliabilityAlert = {
+  id: number;
+  amo_id: string;
+  kpi_id?: number | null;
+  threshold_set_id?: number | null;
+  alert_code: string;
+  status: ReliabilityAlertStatus;
+  severity: ReliabilitySeverity;
+  message?: string | null;
+  triggered_at: string;
+  resolved_at?: string | null;
+  acknowledged_at?: string | null;
+  created_at: string;
+};
+
+export type FracasCase = {
+  id: number;
+  amo_id: string;
+  title: string;
+  description?: string | null;
+  status: FracasStatus;
+  severity?: ReliabilitySeverity | null;
+  classification?: string | null;
+  aircraft_serial_number?: string | null;
+  engine_position?: string | null;
+  component_id?: number | null;
+  work_order_id?: number | null;
+  task_card_id?: number | null;
+  reliability_event_id?: number | null;
+  opened_at: string;
+  closed_at?: string | null;
+  root_cause?: string | null;
+  corrective_action_summary?: string | null;
+  verification_notes?: string | null;
+  verified_at?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FracasAction = {
+  id: number;
+  fracas_case_id: number;
+  status: "OPEN" | "IN_PROGRESS" | "DONE" | "VERIFIED" | "CANCELLED";
+  description: string;
+  owner_user_id?: string | null;
+  due_date?: string | null;
+  completed_at?: string | null;
+  verified_at?: string | null;
+};
+
+export type EngineTrend = {
+  id: number;
+  amo_id: string;
+  aircraft_serial_number: string;
+  engine_position: string;
+  engine_serial_number?: string | null;
+  current_status?: EngineTrendStatus | null;
+  previous_status?: EngineTrendStatus | null;
+  last_upload_date?: string | null;
+  last_trend_date?: string | null;
+  last_review_date?: string | null;
+  reviewed_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReliabilityPriority = {
+  kind: "ALERT" | "OVERDUE_ACTION" | "ENGINE_SHIFT" | "DATA_QUALITY";
+  severity: ReliabilitySeverity;
+  title: string;
+  summary?: string | null;
+  occurred_at?: string | null;
+  due_date?: string | null;
+  relative_path: string;
+  entity_id?: string | null;
+};
+
+export type ReliabilityFreshness = {
+  source: string;
+  status: "CURRENT" | "STALE" | "MISSING" | "FAILED" | "PENDING";
+  latest_record_at?: string | null;
+  age_days?: number | null;
+  issue_count: number;
+  detail?: string | null;
+};
+
+export type ReliabilityWorkbench = {
+  generated_at: string;
+  counts: {
+    open_alerts: number;
+    critical_alerts: number;
+    active_cases: number;
+    overdue_actions: number;
+    engine_shifts: number;
+    recent_events: number;
+    data_quality_issues: number;
+  };
+  priorities: ReliabilityPriority[];
+  recent_events: ReliabilityEvent[];
+  active_cases: FracasCase[];
+  open_alerts: ReliabilityAlert[];
+  engine_shifts: EngineTrend[];
+  data_freshness: ReliabilityFreshness[];
+};
+
+function queryString(values: Record<string, string | number | undefined | null>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export function getReliabilityWorkbench(limit = 8): Promise<ReliabilityWorkbench> {
+  return apiRequest(`/reliability/workbench${queryString({ limit })}`, {
+    cacheTtlMs: 30_000,
+    persistCache: true,
+    staleWhileOfflineMs: 30 * 60_000,
+  });
+}
+
+export function listReliabilityEvents(filters: {
+  eventType?: ReliabilityEventType;
+  severity?: ReliabilitySeverity;
+  aircraftSerialNumber?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ReliabilityEvent[]> {
+  return apiRequest(`/reliability/events${queryString({
+    event_type: filters.eventType,
+    severity: filters.severity,
+    aircraft_serial_number: filters.aircraftSerialNumber,
+    q: filters.q,
+    limit: filters.limit ?? 100,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 20_000, persistCache: true });
+}
+
+export function getReliabilityEvent(eventId: number): Promise<ReliabilityEvent> {
+  return apiRequest(`/reliability/events/${eventId}`, { cacheTtlMs: 20_000 });
+}
+
+export function listReliabilityAlerts(filters: {
+  status?: ReliabilityAlertStatus;
+  severity?: ReliabilitySeverity;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ReliabilityAlert[]> {
+  return apiRequest(`/reliability/alerts${queryString({
+    status: filters.status,
+    severity: filters.severity,
+    limit: filters.limit ?? 100,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 15_000, persistCache: true });
+}
+
+export function getReliabilityAlert(alertId: number): Promise<ReliabilityAlert> {
+  return apiRequest(`/reliability/alerts/${alertId}`, { cacheTtlMs: 15_000 });
+}
+
+export function listFracasCases(filters: {
+  status?: FracasStatus;
+  severity?: ReliabilitySeverity;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<FracasCase[]> {
+  return apiRequest(`/reliability/fracas/cases${queryString({
+    status: filters.status,
+    severity: filters.severity,
+    limit: filters.limit ?? 100,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 15_000, persistCache: true });
+}
+
+export function getFracasCase(caseId: number): Promise<FracasCase> {
+  return apiRequest(`/reliability/fracas/cases/${caseId}`, { cacheTtlMs: 15_000 });
+}
+
+export function listFracasActions(caseId: number): Promise<FracasAction[]> {
+  return apiRequest(`/reliability/fracas/cases/${caseId}/actions`, { cacheTtlMs: 15_000 });
+}
+
+export function listEngineTrendStatuses(filters: {
+  currentStatus?: EngineTrendStatus;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<EngineTrend[]> {
+  return apiRequest(`/reliability/engine-trends/fleet-status${queryString({
+    current_status: filters.currentStatus,
+    limit: filters.limit ?? 100,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 30_000, persistCache: true });
 }

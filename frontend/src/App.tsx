@@ -20,27 +20,22 @@ const App: React.FC = () => {
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
 
-  useEffect(() => {
-    document.body.dataset.theme = theme;
-  }, [theme]);
-
+  useEffect(() => { document.body.dataset.theme = theme; }, [theme]);
   void scheme;
 
-  useEffect(() => {
-    return onSessionEvent((detail) => {
-      if (detail.type === "authenticated") {
-        void queryClient.cancelQueries();
-        clearApiResponseCache();
-        resetLoading();
-      }
-      if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
-        void queryClient.cancelQueries();
-        queryClient.clear();
-        clearApiResponseCache();
-        resetLoading();
-      }
-    });
-  }, [queryClient]);
+  useEffect(() => onSessionEvent((detail) => {
+    if (detail.type === "authenticated") {
+      void queryClient.cancelQueries();
+      clearApiResponseCache();
+      resetLoading();
+    }
+    if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+      void queryClient.cancelQueries();
+      queryClient.clear();
+      clearApiResponseCache();
+      resetLoading();
+    }
+  }), [queryClient]);
 
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
@@ -49,17 +44,14 @@ const App: React.FC = () => {
       if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
       try {
         const url = new URL(anchor.href, window.location.origin);
-        if (url.origin !== window.location.origin) return;
-        void preloadRoute(`${url.pathname}${url.search}`).catch(() => undefined);
+        if (url.origin === window.location.origin) void preloadRoute(`${url.pathname}${url.search}`).catch(() => undefined);
       } catch {
         // Ignore malformed or non-route links.
       }
     };
-
     const onPointerOver = (event: PointerEvent) => preloadFromTarget(event.target);
     const onFocusIn = (event: FocusEvent) => preloadFromTarget(event.target);
     const onPointerDown = (event: PointerEvent) => preloadFromTarget(event.target);
-
     document.addEventListener("pointerover", onPointerOver, { passive: true, capture: true });
     document.addEventListener("focusin", onFocusIn, { capture: true });
     document.addEventListener("pointerdown", onPointerDown, { passive: true, capture: true });
@@ -70,14 +62,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  return (
-    <ToastProvider>
-      <GlobalLoadingBar />
-      <TenantRouteBoundary>
-        <AppRouter />
-      </TenantRouteBoundary>
-    </ToastProvider>
-  );
+  return <ToastProvider><GlobalLoadingBar /><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></ToastProvider>;
 };
 
 export default App;

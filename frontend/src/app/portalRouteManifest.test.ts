@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PortalUser } from "../services/auth";
 import {
@@ -6,6 +6,25 @@ import {
   flattenPortalNavigation,
   type PortalNavItem,
 } from "./portalRouteManifest";
+
+const storage = new Map<string, string>();
+const localStorageMock: Storage = {
+  get length() { return storage.size; },
+  clear() { storage.clear(); },
+  getItem(key: string) { return storage.get(key) ?? null; },
+  key(index: number) { return Array.from(storage.keys())[index] ?? null; },
+  removeItem(key: string) { storage.delete(key); },
+  setItem(key: string, value: string) { storage.set(key, String(value)); },
+};
+
+beforeEach(() => {
+  storage.clear();
+  vi.stubGlobal("localStorage", localStorageMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function user(overrides: Partial<PortalUser> = {}): PortalUser {
   return {
@@ -118,7 +137,19 @@ describe("portal route manifest", () => {
     }));
     const paths = new Map(items.map((item) => [item.id, item.path]));
 
+    expect(paths.get("reliability-workbench")).toBe("/maintenance/tenant-a/reliability");
+    expect(paths.get("reliability-events")).toBe("/maintenance/tenant-a/reliability/events");
+    expect(paths.get("reliability-alerts")).toBe("/maintenance/tenant-a/reliability/alerts");
+    expect(paths.get("reliability-fracas")).toBe("/maintenance/tenant-a/reliability/cases");
+    expect(paths.get("reliability-fleet")).toBe("/maintenance/tenant-a/reliability/fleet");
+    expect(paths.get("reliability-systems")).toBe("/maintenance/tenant-a/reliability/systems");
+    expect(paths.get("reliability-components")).toBe("/maintenance/tenant-a/reliability/components");
+    expect(paths.get("reliability-engines")).toBe("/maintenance/tenant-a/reliability/engines");
+    expect(paths.get("reliability-program")).toBe("/maintenance/tenant-a/reliability/program");
+    expect(paths.get("reliability-changes")).toBe("/maintenance/tenant-a/reliability/changes");
+    expect(paths.get("reliability-meetings")).toBe("/maintenance/tenant-a/reliability/meetings");
     expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
+    expect(paths.get("reliability-data-quality")).toBe("/maintenance/tenant-a/reliability/data-quality");
     expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
     expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
     expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
