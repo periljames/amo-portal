@@ -1,7 +1,7 @@
 # Complete Reliability Full-Stack Diagnostic
 
-- Run: `30818219002`
-- Source: `d5cf684a40a479a28a9923fd2194180f5a085f70`
+- Run: `30818848395`
+- Source: `6075b2edff45417dbe380c3253e69e2ccedfbdba`
 
 | Stage | Exit code |
 |---|---:|
@@ -9,6 +9,7 @@
 | sod_patch | 0 |
 | sod_escape | 0 |
 | model_defaults | 0 |
+| autogenerate_isolation | 0 |
 | frontend_service | 0 |
 | frontend_workspace | 0 |
 | frontend_sod | 0 |
@@ -17,12 +18,12 @@
 | existing_upgrade | 0 |
 | legacy_probe | 0 |
 | migration_generate | 1 |
-| migration_upgrade | 0 |
-| migration_check | 1 |
+| migration_upgrade | 1 |
+| migration_check | 255 |
 | legacy_verify | 1 |
 | migration_downgrade | 255 |
-| migration_reupgrade | 0 |
-| migration_recheck | 1 |
+| migration_reupgrade | 1 |
+| migration_recheck | 255 |
 | app_import | 0 |
 | backend_tests | 0 |
 | governance | 0 |
@@ -50,6 +51,11 @@ Generated Reliability approval newline corrected.
 ### model_defaults
 ```text
 Applied migration-safe defaults.
+```
+
+### autogenerate_isolation
+```text
+Reliability Alembic autogeneration isolated from unrelated metadata.
 ```
 
 ### frontend_service
@@ -176,9 +182,9 @@ INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_doma
 INFO  [alembic.runtime.migration] Running upgrade notifications_20260729_delivery -> accounts_20260803_admin_profile, Add governed tenant Admin Profile grants, sessions and audit events.
 Hard-drop migration skipped (no-op). Missing required env flags: AMO_ALLOW_HARD_DROP_LEGACY, AMO_RETENTION_APPROVED, AMO_CUTOVER_GATES_PASSED. Expected preconditions: runtime verification passed, hidden-writer audit complete, dual-write completed, parity thresholds met for 2 cycles, rollback path retired, retention/compliance sign-off recorded.
 Alembic compatibility repair: skipped redundant version deletion for d9e2f3a4b5c6; marker already absent
-Alembic compatibility repair: skipped redundant version deletion for c1d2e3f4a5b7; marker already absent
 Alembic compatibility repair: skipped redundant version deletion for b2c3d4e5f6g7; marker already absent
-Alembic compatibility repair: converted missing-source version update a1b2c3d4e5f6 -> amo_20260501_gsu_scope into an insert
+Alembic compatibility repair: skipped redundant version deletion for a1b2c3d4e5f6; marker already absent
+Alembic compatibility repair: converted missing-source version update c1d2e3f4a5b7 -> amo_20260501_gsu_scope into an insert
 ```
 
 ### legacy_probe
@@ -190,98 +196,130 @@ SET
 
 ### migration_generate
 ```text
-Generating /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_merge_heads_diag_merge_heads_for_reliability_diagnostic.py ...  done
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
-INFO  [alembic.runtime.migration] Running upgrade accounts_20260803_admin_profile, document_control_20260729_ai_assisted_search, foundation_20260731_geofence, p0a7_train_record_dedupe, qms_20260607_read_stability, qms_20260704_car_attach_repair, rostering_20260728_automation_policy, saas_p5_20260501, train_20260627_final -> rel_20260803_merge_heads_diag, merge heads for Reliability diagnostic
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_ledger_entries_amo_id' on 'ledger_entries'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_ledger_entries_entry_type' on 'ledger_entries'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_ledger_entries_license_id' on 'ledger_entries'
+INFO  [alembic.autogenerate.compare] Detected removed table 'ledger_entries'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_public_holiday_calendars_amo_id' on 'public_holiday_calendars'
+INFO  [alembic.autogenerate.compare] Detected removed index 'uq_public_holiday_calendar_code' on 'public_holiday_calendars'
+INFO  [alembic.autogenerate.compare] Detected removed table 'public_holiday_calendars'
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_status_aircraft' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_status_engine' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_statuses_aircraft_serial_number' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_statuses_amo_id' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_statuses_engine_position' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_engine_trend_statuses_engine_serial_number' on 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed table 'engine_trend_statuses'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_chat_thread_members_user_active' on 'chat_thread_members'
+INFO  [alembic.autogenerate.compare] Detected removed table 'chat_thread_members'
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_events_id_seq' as owned by integer column 'reliability_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_cases_id_seq' as owned by integer column 'fracas_cases(id)', assuming SERIAL and omitting
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_verification_status' on '('verification_status',)'
+INFO  [alembic.autogenerate.compare] Detected server default on column 'aircraft_components.is_installed'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_components_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_components_amo_position' on '('amo_id', 'position')'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_components_is_installed' on '('is_installed',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_aircraft_components_verification_status' on '('verification_status',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_fracas_cases_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_fracas_cases_id' on '('id',)'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.source_record_id'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.source_payload_hash'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.validation_status'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.validation_errors'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.provenance_json'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.operation_stage'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.flight_number'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.origin_station'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.destination_station'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.delay_minutes'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.mel_reference'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.cdl_reference'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.deferral_expires_at'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.part_number'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.component_serial_number'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.confirmed_failure'
+INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.repeat_key'
+INFO  [alembic.autogenerate.compare] Detected type change from VARCHAR(length=12) to Enum('DEFECT', 'REPEAT_DEFECT', 'PILOT_REPORT', 'CABIN_REPORT', 'TECHNICAL_DELAY', 'TECHNICAL_CANCELLATION', 'RETURN_TO_GATE', 'AIR_TURNBACK', 'DIVERSION', 'IN_FLIGHT_SHUTDOWN', 'ABORTED_TAKEOFF', 'MEL_DEFERRAL', 'CDL_DEFERRAL', 'UNSCHEDULED_REMOVAL', 'SCHEDULED_REMOVAL', 'REMOVAL', 'INSTALLATION', 'SHOP_FINDING', 'NO_FAULT_FOUND', 'OCTM', 'ECTM', 'EHM_ALERT', 'FRACAS', 'MAINTENANCE_ERROR', 'SUPPLIER_ESCAPE', 'SAFETY_EVENT', 'OTHER', name='reliability_event_type_enum', native_enum=False) on 'reliability_events.event_type'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_ata_chapter' on '('ata_chapter',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_cdl_reference' on '('cdl_reference',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_component_identity' on '('amo_id', 'part_number', 'component_serial_number')'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_component_serial_number' on '('component_serial_number',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_deferral_expires_at' on '('deferral_expires_at',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_flight_number' on '('flight_number',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_id' on '('id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_mel_reference' on '('mel_reference',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_operation_stage' on '('operation_stage',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_operator_event_id' on '('operator_event_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_part_number' on '('part_number',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_repeat_key' on '('repeat_key',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_severity' on '('severity',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_source_payload_hash' on '('source_payload_hash',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_source_record_id' on '('source_record_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_source_system' on '('source_system',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_validation_status' on '('validation_status',)'
+INFO  [alembic.autogenerate.compare] Detected added unique constraint 'uq_reliability_event_source_record' on '('amo_id', 'source_system', 'source_record_id')'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_task_cards_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_task_cards_operator_event_id' on '('operator_event_id',)'
+INFO  [alembic.autogenerate.compare] Detected server default on column 'tasks.priority'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_closed_at' on '('closed_at',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_due_at' on '('due_at',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_entity_id' on '('entity_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_entity_type' on '('entity_type',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_escalated_at' on '('escalated_at',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_id' on '('id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_owner_user_id' on '('owner_user_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_status' on '('status',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_tasks_supervisor_user_id' on '('supervisor_user_id',)'
+INFO  [alembic.autogenerate.compare] Detected NOT NULL on column 'users.amo_id'
+INFO  [alembic.autogenerate.compare] Detected NOT NULL on column 'users.staff_code'
+INFO  [alembic.autogenerate.compare] Detected server default on column 'users.is_auditor'
+INFO  [alembic.autogenerate.compare] Detected server default on column 'users.must_change_password'
+INFO  [alembic.autogenerate.compare] Detected removed index 'idx_users_is_auditor' on 'users'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_users_amo_id_display' on 'users'
+INFO  [alembic.autogenerate.compare] Detected removed index 'ix_users_platform_superuser' on 'users'
+INFO  [alembic.autogenerate.compare] Detected removed index 'uq_users_global_superuser_email' on 'users'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_users_is_auditor' on '('is_auditor',)'
+INFO  [alembic.autogenerate.compare] Detected removed foreign key (amo_id)(id) on table users
+INFO  [alembic.autogenerate.compare] Detected added foreign key (amo_id)(id) on table users
+INFO  [alembic.autogenerate.compare] Detected changed index 'ix_work_orders_wo_number' on 'work_orders': unique=True to unique=False
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_work_orders_amo_id' on '('amo_id',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_work_orders_closure_reason' on '('closure_reason',)'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_work_orders_operator_event_id' on '('operator_event_id',)'
+Generating /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py ...  done
 Traceback (most recent call last):
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
-    CommandLine(prog=prog).main(argv=argv)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
-    self.run_cmd(cfg, options)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
-    fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 309, in revision
-    script_directory.run_env()
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
-    util.load_python_file(self.dir, "env.py")
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
-    module = load_module_py(module_id, path)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
-    spec.loader.exec_module(module)  # type: ignore
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 402, in <module>
-    run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 392, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 285, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 135, in _autogen_for_tables
-    [(table.schema, table.name) for table in autogen_context.sorted_tables]
-                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 482, in sorted_tables
-    result.extend(m.sorted_tables)
-                  ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 5682, in sorted_tables
-    return ddl.sort_tables(
-           ^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1318, in sort_tables
-    for (t, fkcs) in sort_tables_and_constraints(
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1394, in sort_tables_and_constraints
-    dependent_on = fkc.referred_table
-                   ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 4799, in referred_table
-    return self.elements[0].column.table
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3199, in column
-    return self._resolve_column()
-           ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3222, in _resolve_column
-    raise exc.NoReferencedTableError(
-sqlalchemy.exc.NoReferencedTableError: Foreign key associated with column 'document_applicability_rules.revision_id' could not find table 'manual_revisions' with which to generate a foreign key to target column 'id'
+  File "/home/runner/work/amo-portal/amo-portal/backend/scripts/finalize_reliability_migration.py", line 246, in <module>
+    main()
+  File "/home/runner/work/amo-portal/amo-portal/backend/scripts/finalize_reliability_migration.py", line 229, in main
+    raise RuntimeError(f"Expected one generated Reliability migration, found {len(candidates)}")
+RuntimeError: Expected one generated Reliability migration, found 0
 ```
 
 ### migration_upgrade
 ```text
 INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
 INFO  [alembic.runtime.migration] Will assume transactional DDL.
-```
+INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag -> rel_20260803_complete_scope, complete Reliability full stack scope
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.DependentObjectsStillExist: cannot drop table roster_versions because other objects depend on it
+DETAIL:  constraint fk_roster_assignments_version_id_roster_versions on table roster_assignments depends on table roster_versions
+constraint fk_roster_validation_findings_version_id_roster_versions on table roster_validation_findings depends on table roster_versions
+constraint fk_roster_publication_acknowledgements_version_id_roste_fd04 on table roster_publication_acknowledgements depends on table roster_versions
+constraint fk_roster_rule_exceptions_version_id_roster_versions on table roster_rule_exceptions depends on table roster_versions
+constraint fk_roster_department_approvals_version_id_roster_versions on table roster_department_approvals depends on table roster_versions
+constraint fk_roster_generation_runs_version_id_roster_versions on table roster_generation_runs depends on table roster_versions
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 
-### migration_check
-```text
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
+
+The above exception was the direct cause of the following exception:
+
 Traceback (most recent call last):
   File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -292,8 +330,8 @@ Traceback (most recent call last):
     self.run_cmd(cfg, options)
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
     fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 363, in check
-    script_directory.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
+    script.run_env()
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
     util.load_python_file(self.dir, "env.py")
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
@@ -304,58 +342,71 @@ Traceback (most recent call last):
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "<frozen importlib._bootstrap_external>", line 999, in exec_module
   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 402, in <module>
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
     run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 392, in run_migrations_online
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
     context.run_migrations()
   File "<string>", line 8, in run_migrations
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
     self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 135, in _autogen_for_tables
-    [(table.schema, table.name) for table in autogen_context.sorted_tables]
-                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 482, in sorted_tables
-    result.extend(m.sorted_tables)
-                  ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 5682, in sorted_tables
-    return ddl.sort_tables(
-           ^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1318, in sort_tables
-    for (t, fkcs) in sort_tables_and_constraints(
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1394, in sort_tables_and_constraints
-    dependent_on = fkc.referred_table
-                   ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 4799, in referred_table
-    return self.elements[0].column.table
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3199, in column
-    return self._resolve_column()
-           ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3222, in _resolve_column
-    raise exc.NoReferencedTableError(
-sqlalchemy.exc.NoReferencedTableError: Foreign key associated with column 'document_applicability_rules.revision_id' could not find table 'manual_revisions' with which to generate a foreign key to target column 'id'
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 627, in run_migrations
+    step.migration_fn(**kw)
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 632, in upgrade
+    op.drop_table('roster_versions')
+  File "<string>", line 8, in drop_table
+  File "<string>", line 3, in drop_table
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/ops.py", line 1436, in drop_table
+    operations.invoke(op)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/base.py", line 454, in invoke
+    return fn(self, operation)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/toimpl.py", line 85, in drop_table
+    operations.impl.drop_table(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/impl.py", line 446, in drop_table
+    self._exec(schema.DropTable(table, **kw))
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/impl.py", line 246, in _exec
+    return conn.execute(construct, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.InternalError: (psycopg2.errors.DependentObjectsStillExist) cannot drop table roster_versions because other objects depend on it
+DETAIL:  constraint fk_roster_assignments_version_id_roster_versions on table roster_assignments depends on table roster_versions
+constraint fk_roster_validation_findings_version_id_roster_versions on table roster_validation_findings depends on table roster_versions
+constraint fk_roster_publication_acknowledgements_version_id_roste_fd04 on table roster_publication_acknowledgements depends on table roster_versions
+constraint fk_roster_rule_exceptions_version_id_roster_versions on table roster_rule_exceptions depends on table roster_versions
+constraint fk_roster_department_approvals_version_id_roster_versions on table roster_department_approvals depends on table roster_versions
+constraint fk_roster_generation_runs_version_id_roster_versions on table roster_generation_runs depends on table roster_versions
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+
+[SQL: 
+DROP TABLE roster_versions]
+(Background on this error at: https://sqlalche.me/e/20/2j85)
+```
+
+### migration_check
+```text
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+ERROR [alembic.util.messaging] Target database is not up to date.
+FAILED: Target database is not up to date.
 ```
 
 ### legacy_verify
@@ -377,12 +428,24 @@ FAILED: Ambiguous walk
 ```text
 INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
 INFO  [alembic.runtime.migration] Will assume transactional DDL.
-```
+INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag -> rel_20260803_complete_scope, complete Reliability full stack scope
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.DependentObjectsStillExist: cannot drop table roster_versions because other objects depend on it
+DETAIL:  constraint fk_roster_assignments_version_id_roster_versions on table roster_assignments depends on table roster_versions
+constraint fk_roster_validation_findings_version_id_roster_versions on table roster_validation_findings depends on table roster_versions
+constraint fk_roster_publication_acknowledgements_version_id_roste_fd04 on table roster_publication_acknowledgements depends on table roster_versions
+constraint fk_roster_rule_exceptions_version_id_roster_versions on table roster_rule_exceptions depends on table roster_versions
+constraint fk_roster_department_approvals_version_id_roster_versions on table roster_department_approvals depends on table roster_versions
+constraint fk_roster_generation_runs_version_id_roster_versions on table roster_generation_runs depends on table roster_versions
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 
-### migration_recheck
-```text
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
+
+The above exception was the direct cause of the following exception:
+
 Traceback (most recent call last):
   File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -393,8 +456,8 @@ Traceback (most recent call last):
     self.run_cmd(cfg, options)
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
     fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 363, in check
-    script_directory.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
+    script.run_env()
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
     util.load_python_file(self.dir, "env.py")
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
@@ -405,58 +468,71 @@ Traceback (most recent call last):
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "<frozen importlib._bootstrap_external>", line 999, in exec_module
   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 402, in <module>
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
     run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 392, in run_migrations_online
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
     context.run_migrations()
   File "<string>", line 8, in run_migrations
   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
     self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 135, in _autogen_for_tables
-    [(table.schema, table.name) for table in autogen_context.sorted_tables]
-                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 482, in sorted_tables
-    result.extend(m.sorted_tables)
-                  ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 5682, in sorted_tables
-    return ddl.sort_tables(
-           ^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1318, in sort_tables
-    for (t, fkcs) in sort_tables_and_constraints(
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1394, in sort_tables_and_constraints
-    dependent_on = fkc.referred_table
-                   ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 4799, in referred_table
-    return self.elements[0].column.table
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 1226, in __get__
-    obj.__dict__[self.__name__] = result = self.fget(obj)
-                                           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3199, in column
-    return self._resolve_column()
-           ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 3222, in _resolve_column
-    raise exc.NoReferencedTableError(
-sqlalchemy.exc.NoReferencedTableError: Foreign key associated with column 'document_applicability_rules.revision_id' could not find table 'manual_revisions' with which to generate a foreign key to target column 'id'
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 627, in run_migrations
+    step.migration_fn(**kw)
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rel_20260803_complete_scope_complete_reliability_full_stack_scope.py", line 632, in upgrade
+    op.drop_table('roster_versions')
+  File "<string>", line 8, in drop_table
+  File "<string>", line 3, in drop_table
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/ops.py", line 1436, in drop_table
+    operations.invoke(op)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/base.py", line 454, in invoke
+    return fn(self, operation)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/operations/toimpl.py", line 85, in drop_table
+    operations.impl.drop_table(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/impl.py", line 446, in drop_table
+    self._exec(schema.DropTable(table, **kw))
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/impl.py", line 246, in _exec
+    return conn.execute(construct, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.InternalError: (psycopg2.errors.DependentObjectsStillExist) cannot drop table roster_versions because other objects depend on it
+DETAIL:  constraint fk_roster_assignments_version_id_roster_versions on table roster_assignments depends on table roster_versions
+constraint fk_roster_validation_findings_version_id_roster_versions on table roster_validation_findings depends on table roster_versions
+constraint fk_roster_publication_acknowledgements_version_id_roste_fd04 on table roster_publication_acknowledgements depends on table roster_versions
+constraint fk_roster_rule_exceptions_version_id_roster_versions on table roster_rule_exceptions depends on table roster_versions
+constraint fk_roster_department_approvals_version_id_roster_versions on table roster_department_approvals depends on table roster_versions
+constraint fk_roster_generation_runs_version_id_roster_versions on table roster_generation_runs depends on table roster_versions
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+
+[SQL: 
+DROP TABLE roster_versions]
+(Background on this error at: https://sqlalche.me/e/20/2j85)
+```
+
+### migration_recheck
+```text
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+ERROR [alembic.util.messaging] Target database is not up to date.
+FAILED: Target database is not up to date.
 ```
 
 ### app_import
@@ -587,8 +663,8 @@ amodb/apps/reliability/tests/test_notifications.py::test_notifications_use_effec
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
-[2m   Start at [22m 13:33:30
-[2m   Duration [22m 350ms[2m (transform 263ms, setup 0ms, import 364ms, tests 16ms, environment 0ms)[22m
+[2m   Start at [22m 13:41:49
+[2m   Duration [22m 361ms[2m (transform 300ms, setup 0ms, import 366ms, tests 17ms, environment 0ms)[22m
 
 
 > frontend@0.0.0 check:css
@@ -703,5 +779,5 @@ CSS contract passed for 60 stylesheets.
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
-[32m✓ built in 14.04s[39m
+[32m✓ built in 14.77s[39m
 ```
