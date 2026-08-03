@@ -1,0 +1,133 @@
+name: Reliability Merge Readiness
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/reliability/**"
+      - "backend/amodb/alembic/env.py"
+      - "backend/amodb/alembic/versions/rel_*.py"
+      - "backend/amodb/main.py"
+      - "frontend/src/pages/reliability/**"
+      - "frontend/src/services/reliability.ts"
+      - "frontend/src/styles/reliability-v2.css"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/app/portalRouteManifest.ts"
+      - "frontend/src/app/portalRouteManifest.test.ts"
+      - "frontend/src/app/routePreload.ts"
+      - "frontend/src/portalRoutes.tsx"
+      - ".github/workflows/reliability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reliability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_reliability_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_reliability_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_ci
+      WRITE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_ci
+      SECRET_KEY: reliability-ci-secret
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Prepare Alembic version storage
+        run: |
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_ci -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE IF NOT EXISTS alembic_version (
+            version_num varchar(255) NOT NULL PRIMARY KEY
+          );
+          ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255);
+          SQL
+
+      - name: Compile and import Reliability backend
+        working-directory: backend
+        run: |
+          python -m py_compile amodb/apps/reliability/*.py amodb/apps/reliability/tests/*.py amodb/alembic/env.py amodb/main.py
+          python - <<'PY'
+          from sqlalchemy.orm import configure_mappers
+          import amodb.main
+          configure_mappers()
+          paths = {route.path for route in amodb.main.app.routes}
+          required = {
+              "/reliability/compliance",
+              "/reliability/analytics",
+              "/reliability/sources",
+              "/reliability/calculation-runs/execute",
+              "/reliability/programmes",
+              "/reliability/changes",
+              "/reliability/handoffs",
+              "/reliability/authority-submissions",
+              "/reliability/ai-reviews",
+          }
+          assert required.issubset(paths), sorted(required - paths)
+          assert all("/reliability/v2" not in path for path in paths)
+          PY
+
+      - name: Validate Alembic graph and clean PostgreSQL upgrade
+        working-directory: backend
+        run: |
+          alembic -c amodb/alembic.ini heads
+          test "$(alembic -c amodb/alembic.ini heads | wc -l | tr -d ' ')" -eq 1
+          alembic -c amodb/alembic.ini upgrade head
+          RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini check
+
+      - name: Run Reliability tests only
+        working-directory: backend
+        run: pytest -q amodb/apps/reliability/tests
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate Reliability navigation and UI
+        working-directory: frontend
+        run: |
+          npm run test:tenant-shell
+          npx eslint \
+            src/services/reliability.ts \
+            src/pages/reliability/ReliabilityWorkspacePage.tsx \
+            src/pages/reliability/ReliabilityAdvancedViews.tsx \
+            src/pages/reliability/ReliabilityReportsView.tsx \
+            src/app/PortalRouteSurface.tsx \
+            src/app/portalRouteManifest.ts \
+            src/app/portalRouteManifest.test.ts \
+            src/app/routePreload.ts
+          npm run build
