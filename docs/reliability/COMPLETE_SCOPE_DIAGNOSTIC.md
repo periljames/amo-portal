@@ -1,7 +1,7 @@
 # Complete Reliability Full-Stack Diagnostic
 
-- Run: `30821205604`
-- Source: `7dad23fd2fdfe23faa8313d4f03d0b28f0c1a5dc`
+- Run: `30821801040`
+- Source: `f5cf332a35ff755aa581b47ac32cfb8bed52961e`
 
 | Stage | Exit code |
 |---|---:|
@@ -19,11 +19,11 @@
 | legacy_probe | 0 |
 | migration_generate | 0 |
 | migration_upgrade | 0 |
-| migration_check | 1 |
+| migration_check | 0 |
 | legacy_verify | 0 |
 | migration_downgrade | 0 |
 | migration_reupgrade | 0 |
-| migration_recheck | 1 |
+| migration_recheck | 0 |
 | app_import | 0 |
 | backend_tests | 0 |
 | governance | 0 |
@@ -181,10 +181,10 @@ INFO  [alembic.runtime.migration] Running upgrade document_control_20260729_know
 INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_domain -> notifications_20260729_delivery, Complete central email delivery policy and Resend event persistence.
 INFO  [alembic.runtime.migration] Running upgrade notifications_20260729_delivery -> accounts_20260803_admin_profile, Add governed tenant Admin Profile grants, sessions and audit events.
 Hard-drop migration skipped (no-op). Missing required env flags: AMO_ALLOW_HARD_DROP_LEGACY, AMO_RETENTION_APPROVED, AMO_CUTOVER_GATES_PASSED. Expected preconditions: runtime verification passed, hidden-writer audit complete, dual-write completed, parity thresholds met for 2 cycles, rollback path retired, retention/compliance sign-off recorded.
-Alembic compatibility repair: skipped redundant version deletion for c1d2e3f4a5b7; marker already absent
 Alembic compatibility repair: skipped redundant version deletion for d9e2f3a4b5c6; marker already absent
 Alembic compatibility repair: skipped redundant version deletion for a1b2c3d4e5f6; marker already absent
-Alembic compatibility repair: converted missing-source version update b2c3d4e5f6g7 -> amo_20260501_gsu_scope into an insert
+Alembic compatibility repair: skipped redundant version deletion for b2c3d4e5f6g7; marker already absent
+Alembic compatibility repair: skipped redundant version deletion for c1d2e3f4a5b7; marker already absent
 ```
 
 ### legacy_probe
@@ -196,66 +196,66 @@ SET
 
 ### migration_generate
 ```text
-INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_fracas_stage_events_amo_id' on '('amo_id',)'
-INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_fracas_stage_events_lifecycle_id' on '('lifecycle_id',)'
-INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'defect_reports_id_seq' as owned by integer column 'defect_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_assignments_id_seq' as owned by integer column 'task_assignments(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_kpis_id_seq' as owned by integer column 'reliability_kpis(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_uplifts_id_seq' as owned by integer column 'oil_uplifts(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'gl_accounts_id_seq' as owned by integer column 'gl_accounts(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_configuration_events_id_seq' as owned by integer column 'aircraft_configuration_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'tax_codes_id_seq' as owned by integer column 'tax_codes(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_consumption_rates_id_seq' as owned by integer column 'oil_consumption_rates(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_threshold_sets_id_seq' as owned by integer column 'reliability_threshold_sets(id)', assuming SERIAL and omitting
+/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py:434: SAWarning: Did not recognize type 'ltree' of column 'storage_location_path'
+  context.run_migrations()
+INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_program_items_id_seq' as owned by integer column 'maintenance_program_items_legacy(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'customers_id_seq' as owned by integer column 'customers(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alert_rules_id_seq' as owned by integer column 'reliability_alert_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_utilization_daily_id_seq' as owned by integer column 'engine_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'vendors_id_seq' as owned by integer column 'vendors(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_publication_matches_id_seq' as owned by integer column 'technical_airworthiness_publication_matches(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'inspector_signoffs_id_seq' as owned by integer column 'inspector_signoffs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_actions_id_seq' as owned by integer column 'technical_compliance_actions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'accounting_periods_id_seq' as owned by integer column 'accounting_periods(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_uplifts_id_seq' as owned by integer column 'oil_uplifts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_entries_id_seq' as owned by integer column 'journal_entries(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'currencies_id_seq' as owned by integer column 'currencies(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipt_lines_id_seq' as owned by integer column 'goods_receipt_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'work_log_entries_id_seq' as owned by integer column 'work_log_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alerts_id_seq' as owned by integer column 'reliability_alerts(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'quality_tenant_backfill_issues_id_seq' as owned by integer column 'quality_tenant_backfill_issues(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notifications_id_seq' as owned by integer column 'reliability_notifications(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_utilization_daily_id_seq' as owned by integer column 'engine_utilization_daily(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'crs_signoff_id_seq' as owned by integer column 'crs_signoff(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'inventory_serials_id_seq' as owned by integer column 'inventory_serials(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'inventory_lots_id_seq' as owned by integer column 'inventory_lots(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_usage_id_seq' as owned by integer column 'aircraft_usage(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alert_rules_id_seq' as owned by integer column 'reliability_alert_rules(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
-/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py:428: SAWarning: Did not recognize type 'ltree' of column 'storage_location_path'
-  context.run_migrations()
-INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_documents_id_seq' as owned by integer column 'aircraft_documents(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'task_steps_id_seq' as owned by integer column 'task_steps(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_utilization_daily_id_seq' as owned by integer column 'aircraft_utilization_daily(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_preview_rows_id_seq' as owned by integer column 'aircraft_import_preview_rows(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'defect_reports_id_seq' as owned by integer column 'defect_reports(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_action_history_id_seq' as owned by integer column 'technical_compliance_action_history(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'task_step_executions_id_seq' as owned by integer column 'task_step_executions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'part_movement_ledger_id_seq' as owned by integer column 'part_movement_ledger(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_preview_rows_id_seq' as owned by integer column 'aircraft_import_preview_rows(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_execution_evidence_id_seq' as owned by integer column 'technical_production_execution_evidence(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_usage_id_seq' as owned by integer column 'aircraft_usage(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_templates_id_seq' as owned by integer column 'aircraft_import_templates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notifications_id_seq' as owned by integer column 'reliability_notifications(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'work_orders_id_seq' as owned by integer column 'work_orders(id)', assuming SERIAL and omitting
-INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_events_id_seq' as owned by integer column 'reliability_events(id)', assuming SERIAL and omitting
 INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_cases_id_seq' as owned by integer column 'fracas_cases(id)', assuming SERIAL and omitting
 INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.source_record_id'
 INFO  [alembic.autogenerate.compare] Detected added column 'reliability_events.source_payload_hash'
@@ -287,7 +287,7 @@ INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_operation_stage' on '('operation_stage',)'
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_operator_event_id' on '('operator_event_id',)'
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_part_number' on '('part_number',)'
-INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_repeat_key' on '('amo_id', 'repeat_key')'
+INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_repeat_key' on '('repeat_key',)'
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_severity' on '('severity',)'
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_source_payload_hash' on '('source_payload_hash',)'
 INFO  [alembic.autogenerate.compare] Detected added index 'ix_reliability_events_source_record_id' on '('source_record_id',)'
@@ -307,106 +307,67 @@ INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag 
 
 ### migration_check
 ```text
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
-    CommandLine(prog=prog).main(argv=argv)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
-    self.run_cmd(cfg, options)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
-    fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 363, in check
-    script_directory.run_env()
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
-    util.load_python_file(self.dir, "env.py")
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
-    module = load_module_py(module_id, path)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
-    spec.loader.exec_module(module)  # type: ignore
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
-    run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 138, in _autogen_for_tables
-    _compare_tables(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 264, in _compare_tables
-    with _compare_columns(
-         ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/contextlib.py", line 137, in __enter__
-    return next(self.gen)
-           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 413, in _compare_columns
-    comparators.dispatch("column")(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 1169, in _compare_server_default
-    is_diff = autogen_context.migration_context._compare_server_default(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 750, in _compare_server_default
-    return self.impl.compare_server_default(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/postgresql.py", line 148, in compare_server_default
-    return not conn.scalar(
-               ^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1308, in scalar
-    return meth(
-           ^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 544, in _execute_on_scalar
-    return self._execute_on_connection(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist: json = unknown
-LINE 1: SELECT '[]'::json = '[]' AS anon_1
-                          ^
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-[SQL: SELECT '[]'::json = '[]' AS anon_1]
-(Background on this error at: https://sqlalche.me/e/20/f405)
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_preview_rows_id_seq' as owned by integer column 'aircraft_import_preview_rows(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_entries_id_seq' as owned by integer column 'journal_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_execution_evidence_id_seq' as owned by integer column 'technical_production_execution_evidence(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_documents_id_seq' as owned by integer column 'aircraft_documents(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'currencies_id_seq' as owned by integer column 'currencies(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_steps_id_seq' as owned by integer column 'task_steps(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_snapshots_id_seq' as owned by integer column 'aircraft_import_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_items_id_seq' as owned by integer column 'technical_airworthiness_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoices_id_seq' as owned by integer column 'finance_invoices(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_action_history_id_seq' as owned by integer column 'technical_compliance_action_history(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_utilization_daily_id_seq' as owned by integer column 'aircraft_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_usage_id_seq' as owned by integer column 'aircraft_usage(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipts_id_seq' as owned by integer column 'goods_receipts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'inspector_signoffs_id_seq' as owned by integer column 'inspector_signoffs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_consumption_rates_id_seq' as owned by integer column 'oil_consumption_rates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_assignments_id_seq' as owned by integer column 'task_assignments(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notifications_id_seq' as owned by integer column 'reliability_notifications(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_payments_id_seq' as owned by integer column 'finance_payments(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'part_movement_ledger_id_seq' as owned by integer column 'part_movement_ledger(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'accounting_periods_id_seq' as owned by integer column 'accounting_periods(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_step_executions_id_seq' as owned by integer column 'task_step_executions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'crs_signoff_id_seq' as owned by integer column 'crs_signoff(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'quality_tenant_backfill_issues_id_seq' as owned by integer column 'quality_tenant_backfill_issues(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
+/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py:434: SAWarning: Did not recognize type 'ltree' of column 'storage_location_path'
+  context.run_migrations()
+INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipt_lines_id_seq' as owned by integer column 'goods_receipt_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_configuration_events_id_seq' as owned by integer column 'aircraft_configuration_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'defect_reports_id_seq' as owned by integer column 'defect_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'gl_accounts_id_seq' as owned by integer column 'gl_accounts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alert_rules_id_seq' as owned by integer column 'reliability_alert_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_templates_id_seq' as owned by integer column 'aircraft_import_templates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_utilization_daily_id_seq' as owned by integer column 'engine_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_uplifts_id_seq' as owned by integer column 'oil_uplifts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
+No new upgrade operations detected.
 ```
 
 ### legacy_verify
@@ -434,106 +395,64 @@ INFO  [alembic.runtime.migration] Running upgrade rel_20260803_merge_heads_diag 
 
 ### migration_recheck
 ```text
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
-    CommandLine(prog=prog).main(argv=argv)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
-    self.run_cmd(cfg, options)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
-    fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 363, in check
-    script_directory.run_env()
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
-    util.load_python_file(self.dir, "env.py")
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
-    module = load_module_py(module_id, path)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
-    spec.loader.exec_module(module)  # type: ignore
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 438, in <module>
-    run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 428, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 615, in run_migrations
-    for step in self._migrations_fn(heads, self):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 352, in retrieve_migrations
-    revision_context.run_autogenerate(rev, context)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 570, in run_autogenerate
-    self._run_environment(rev, migration_context, True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/api.py", line 617, in _run_environment
-    compare._populate_migration_script(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 66, in _populate_migration_script
-    _produce_net_changes(autogen_context, upgrade_ops)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 99, in _produce_net_changes
-    comparators.dispatch("schema", autogen_context.dialect.name)(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 138, in _autogen_for_tables
-    _compare_tables(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 264, in _compare_tables
-    with _compare_columns(
-         ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/contextlib.py", line 137, in __enter__
-    return next(self.gen)
-           ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 413, in _compare_columns
-    comparators.dispatch("column")(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/langhelpers.py", line 315, in go
-    fn(*arg, **kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/autogenerate/compare.py", line 1169, in _compare_server_default
-    is_diff = autogen_context.migration_context._compare_server_default(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 750, in _compare_server_default
-    return self.impl.compare_server_default(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/ddl/postgresql.py", line 148, in compare_server_default
-    return not conn.scalar(
-               ^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1308, in scalar
-    return meth(
-           ^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 544, in _execute_on_scalar
-    return self._execute_on_connection(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist: json = unknown
-LINE 1: SELECT '[]'::json = '[]' AS anon_1
-                          ^
-HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
-
-[SQL: SELECT '[]'::json = '[]' AS anon_1]
-(Background on this error at: https://sqlalche.me/e/20/f405)
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_items_id_seq' as owned by integer column 'technical_airworthiness_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_logbook_entries_id_seq' as owned by integer column 'technical_logbook_entries(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_compliance_action_history_id_seq' as owned by integer column 'technical_compliance_action_history(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'part_movement_ledger_id_seq' as owned by integer column 'part_movement_ledger(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_snapshots_id_seq' as owned by integer column 'aircraft_import_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_reconciliation_logs_id_seq' as owned by integer column 'aircraft_import_reconciliation_logs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'task_step_executions_id_seq' as owned by integer column 'task_step_executions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'tax_codes_id_seq' as owned by integer column 'tax_codes(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'inspector_signoffs_id_seq' as owned by integer column 'inspector_signoffs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_record_settings_id_seq' as owned by integer column 'technical_record_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_deferrals_id_seq' as owned by integer column 'technical_deferrals(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'journal_lines_id_seq' as owned by integer column 'journal_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoices_id_seq' as owned by integer column 'finance_invoices(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'inventory_parts_id_seq' as owned by integer column 'inventory_parts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'maintenance_statuses_id_seq' as owned by integer column 'maintenance_statuses_legacy(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_execution_evidence_id_seq' as owned by integer column 'technical_production_execution_evidence(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notifications_id_seq' as owned by integer column 'reliability_notifications(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_maintenance_records_id_seq' as owned by integer column 'technical_maintenance_records(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_aircraft_utilisation_id_seq' as owned by integer column 'technical_aircraft_utilisation_legacy(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_alert_rules_id_seq' as owned by integer column 'reliability_alert_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_invoice_lines_id_seq' as owned by integer column 'finance_invoice_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'finance_credit_notes_id_seq' as owned by integer column 'finance_credit_notes(id)', assuming SERIAL and omitting
+/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py:434: SAWarning: Did not recognize type 'ltree' of column 'storage_location_path'
+  context.run_migrations()
+INFO  [alembic.ddl.postgresql] Detected sequence named 'payment_allocations_id_seq' as owned by integer column 'payment_allocations(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'currencies_id_seq' as owned by integer column 'currencies(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_usage_id_seq' as owned by integer column 'aircraft_usage(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_orders_id_seq' as owned by integer column 'purchase_orders(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'platform_settings_id_seq' as owned by integer column 'platform_settings(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_consumption_rates_id_seq' as owned by integer column 'oil_consumption_rates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_flight_snapshots_id_seq' as owned by integer column 'engine_flight_snapshots(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_documents_id_seq' as owned by integer column 'aircraft_documents(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'oil_uplifts_id_seq' as owned by integer column 'oil_uplifts(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_utilization_daily_id_seq' as owned by integer column 'engine_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_notification_rules_id_seq' as owned by integer column 'reliability_notification_rules(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'fracas_actions_id_seq' as owned by integer column 'fracas_actions(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'accounting_periods_id_seq' as owned by integer column 'accounting_periods(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'shop_visits_id_seq' as owned by integer column 'shop_visits(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'crs_signoff_id_seq' as owned by integer column 'crs_signoff(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'goods_receipt_lines_id_seq' as owned by integer column 'goods_receipt_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_production_release_gates_id_seq' as owned by integer column 'technical_production_release_gates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'purchase_order_lines_id_seq' as owned by integer column 'purchase_order_lines(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'removal_events_id_seq' as owned by integer column 'removal_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_preview_rows_id_seq' as owned by integer column 'aircraft_import_preview_rows(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_import_templates_id_seq' as owned by integer column 'aircraft_import_templates(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_program_items_id_seq' as owned by integer column 'aircraft_program_items(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_configuration_events_id_seq' as owned by integer column 'aircraft_configuration_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'engine_trend_statuses_id_seq' as owned by integer column 'engine_trend_statuses(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'quality_tenant_backfill_issues_id_seq' as owned by integer column 'quality_tenant_backfill_issues(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_exception_queue_id_seq' as owned by integer column 'technical_exception_queue(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_reports_id_seq' as owned by integer column 'reliability_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'aircraft_utilization_daily_id_seq' as owned by integer column 'aircraft_utilization_daily(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'defect_reports_id_seq' as owned by integer column 'defect_reports(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'reliability_control_chart_configs_id_seq' as owned by integer column 'reliability_control_chart_configs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'technical_airworthiness_compliance_events_id_seq' as owned by integer column 'technical_airworthiness_compliance_events(id)', assuming SERIAL and omitting
+No new upgrade operations detected.
 ```
 
 ### app_import
@@ -642,7 +561,7 @@ amodb/apps/reliability/tests/test_notifications.py::test_notifications_use_effec
     created_at=datetime.utcnow(),
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-19 passed, 114 warnings in 1.06s
+19 passed, 114 warnings in 1.10s
 ```
 
 ### governance
@@ -659,13 +578,13 @@ amodb/apps/reliability/tests/test_notifications.py::test_notifications_use_effec
 
 [1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/home/runner/work/amo-portal/amo-portal/frontend[39m
 
- [32m✓[39m src/services/departmentHome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
- [32m✓[39m src/app/portalRouteManifest.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/services/departmentHome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m src/app/portalRouteManifest.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 10[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
-[2m   Start at [22m 14:11:43
-[2m   Duration [22m 356ms[2m (transform 284ms, setup 0ms, import 358ms, tests 16ms, environment 0ms)[22m
+[2m   Start at [22m 14:19:25
+[2m   Duration [22m 367ms[2m (transform 298ms, setup 0ms, import 369ms, tests 23ms, environment 0ms)[22m
 
 
 > frontend@0.0.0 check:css
@@ -780,5 +699,5 @@ CSS contract passed for 60 stylesheets.
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
-[32m✓ built in 15.02s[39m
+[32m✓ built in 14.61s[39m
 ```
