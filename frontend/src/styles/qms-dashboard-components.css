@@ -1,0 +1,173 @@
+.qms-dashboard-action-list,
+.qms-dashboard-work-list,
+.qms-dashboard-obligations,
+.qms-dashboard-kpis { display: grid; min-width: 0; }
+
+.qms-dashboard-action-list { gap: 0.38rem; }
+.qms-dashboard-action {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0.45rem 0.58rem;
+  border: 1px solid var(--qms-border-soft);
+  border-left: 3px solid currentColor;
+  border-radius: 6px;
+  background: var(--qms-surface);
+  color: var(--qms-text);
+  text-align: left;
+  cursor: pointer;
+}
+.qms-dashboard-action:hover { background: color-mix(in srgb, var(--qms-accent) 4%, var(--qms-surface)); }
+.qms-dashboard-action--danger { color: var(--qms-danger); }
+.qms-dashboard-action--warning { color: var(--qms-warning); }
+.qms-dashboard-action--positive { color: var(--qms-positive); }
+.qms-dashboard-action--neutral { color: var(--qms-muted); }
+.qms-dashboard-action__count { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; background: color-mix(in srgb, currentColor 10%, var(--qms-surface)); color: currentColor; font-size: 1rem; font-weight: 850; }
+.qms-dashboard-action__copy { display: grid; gap: 0.08rem; min-width: 0; }
+.qms-dashboard-action__copy strong { overflow: hidden; color: var(--qms-text); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-action__copy small { overflow: hidden; color: var(--qms-muted); font-size: 0.63rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-action > svg { color: var(--qms-muted); }
+
+.qms-dashboard-work-list > button,
+.qms-dashboard-obligations > button,
+.qms-dashboard-kpis > button {
+  border: 0;
+  border-top: 1px solid var(--qms-border-soft);
+  background: transparent;
+  color: var(--qms-text);
+  text-align: left;
+  cursor: pointer;
+}
+.qms-dashboard-work-list > button:first-child,
+.qms-dashboard-obligations > button:first-child,
+.qms-dashboard-kpis > button:first-child { border-top: 0; }
+.qms-dashboard-work-list > button:hover,
+.qms-dashboard-obligations > button:hover,
+.qms-dashboard-kpis > button:hover { background: color-mix(in srgb, var(--qms-accent) 4%, var(--qms-surface)); }
+
+.qms-dashboard-work-list > button {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 47px;
+  padding: 0.38rem 0.45rem;
+}
+.qms-dashboard-work-list__marker { align-self: stretch; border-radius: 999px; background: var(--qms-muted); }
+.qms-severity--critical,
+.qms-severity--high { background: var(--qms-danger); }
+.qms-severity--medium,
+.qms-severity--warning { background: var(--qms-warning); }
+.qms-severity--low,
+.qms-severity--positive { background: var(--qms-positive); }
+.qms-dashboard-work-list > button > span:nth-child(2) { display: grid; gap: 0.08rem; min-width: 0; }
+.qms-dashboard-work-list strong { overflow: hidden; font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-work-list small { color: var(--qms-muted); font-size: 0.61rem; }
+.qms-dashboard-work-list svg { color: var(--qms-muted); }
+
+.qms-dashboard-obligations > button {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  gap: 0.58rem;
+  align-items: center;
+  min-width: 0;
+  min-height: 47px;
+  padding: 0.36rem 0.42rem;
+}
+.qms-dashboard-obligations > button:disabled { cursor: default; opacity: 0.82; }
+.qms-dashboard-obligations time { color: var(--qms-muted); font-size: 0.63rem; font-weight: 750; }
+.qms-dashboard-obligations > button > span:nth-child(2) { display: grid; gap: 0.08rem; min-width: 0; }
+.qms-dashboard-obligations strong { overflow: hidden; font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-obligations small { overflow: hidden; color: var(--qms-muted); font-size: 0.61rem; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-due { max-width: 8rem; padding: 0.22rem 0.38rem; border-radius: 999px; background: var(--qms-surface-muted); color: var(--qms-muted); font-size: 0.56rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
+.qms-dashboard-due--overdue { background: color-mix(in srgb, var(--qms-danger) 11%, var(--qms-surface)); color: var(--qms-danger); }
+.qms-dashboard-due--today,
+.qms-dashboard-due--due_soon { background: color-mix(in srgb, var(--qms-warning) 12%, var(--qms-surface)); color: var(--qms-warning); }
+
+.qms-dashboard-kpis {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 0.42rem;
+  border-top: 1px solid var(--qms-border-soft);
+}
+.qms-dashboard-kpis > button {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  min-height: 74px;
+  padding: 0.5rem;
+  border-top: 0;
+  border-left: 1px solid var(--qms-border-soft);
+}
+.qms-dashboard-kpis > button:first-child { border-left: 0; }
+.qms-dashboard-kpis > button > span:first-child { display: grid; gap: 0.12rem; min-width: 0; }
+.qms-dashboard-kpis strong { font-size: 0.9rem; }
+.qms-dashboard-kpis small { overflow: hidden; color: var(--qms-muted); font-size: 0.58rem; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.qms-dashboard-direction { justify-self: start; padding: 0.16rem 0.3rem; border-radius: 999px; background: var(--qms-surface-muted); color: var(--qms-muted); font-size: 0.53rem; font-weight: 800; text-transform: capitalize; }
+.qms-dashboard-direction--improving { background: color-mix(in srgb, var(--qms-positive) 10%, var(--qms-surface)); color: var(--qms-positive); }
+.qms-dashboard-direction--deteriorating { background: color-mix(in srgb, var(--qms-danger) 10%, var(--qms-surface)); color: var(--qms-danger); }
+
+.qms-dashboard-legend {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 112px;
+  max-width: 150px;
+  padding-right: 0.35rem;
+}
+.qms-dashboard-legend span { display: flex; align-items: center; gap: 0.35rem; color: var(--qms-muted); font-size: 0.6rem; line-height: 1.2; text-transform: capitalize; }
+.qms-dashboard-legend i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 2px; }
+
+.qms-risk-matrix {
+  display: grid;
+  grid-template-columns: 62px repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(38px, auto);
+  width: 100%;
+  min-height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--qms-border);
+  border-radius: 6px;
+}
+.qms-risk-matrix > * { display: grid; place-items: center; padding: 0.35rem; border-right: 1px solid var(--qms-border-soft); border-bottom: 1px solid var(--qms-border-soft); font-size: 0.65rem; }
+.qms-risk-matrix > :nth-child(4n) { border-right: 0; }
+.qms-risk-matrix > :nth-last-child(-n + 4) { border-bottom: 0; }
+.qms-risk-matrix > div:not(.qms-risk-matrix__corner),
+.qms-risk-matrix > strong { background: var(--qms-surface-muted); color: var(--qms-muted); font-weight: 800; }
+.qms-risk-matrix > span { font-size: 0.76rem; font-weight: 850; }
+.qms-risk-matrix .is-low { background: color-mix(in srgb, #19a854 74%, var(--qms-surface)); color: #062f18; }
+.qms-risk-matrix .is-medium { background: color-mix(in srgb, #f2c230 78%, var(--qms-surface)); color: #3d2b00; }
+.qms-risk-matrix .is-high { background: color-mix(in srgb, #ef7e31 76%, var(--qms-surface)); color: #3c1600; }
+.qms-risk-matrix .is-critical { background: color-mix(in srgb, #dc3434 78%, var(--qms-surface)); color: #fff; }
+
+.is-spinning { animation: qms-spin 0.8s linear infinite; }
+@keyframes qms-spin { to { transform: rotate(360deg); } }
+
+body[data-color-scheme="dark"] .qms-overview-page,
+:root[data-color-scheme="dark"] .qms-overview-page {
+  --qms-chart-1: #6aaaf0;
+  --qms-chart-2: #28c4d9;
+  --qms-chart-3: #a98bf2;
+  --qms-chart-4: #f3b84b;
+  --qms-chart-5: #ef7184;
+}
+
+@media (max-width: 1220px) {
+  .qms-dashboard-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .qms-dashboard-kpis > button:nth-child(4) { border-left: 0; }
+}
+
+@media (max-width: 760px) {
+  .qms-dashboard-obligations > button { grid-template-columns: 58px minmax(0, 1fr); }
+  .qms-dashboard-due { grid-column: 2; justify-self: start; }
+  .qms-dashboard-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-dashboard-kpis > button:nth-child(odd) { border-left: 0; }
+  .qms-dashboard-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; padding: 0 0.5rem 0.5rem; }
+}
+
+@media (max-width: 470px) {
+  .qms-dashboard-kpis { grid-template-columns: minmax(0, 1fr); }
+  .qms-dashboard-kpis > button { border-left: 0; }
+  .qms-dashboard-action { grid-template-columns: 36px minmax(0, 1fr); }
+  .qms-dashboard-action > svg { display: none; }
+}
