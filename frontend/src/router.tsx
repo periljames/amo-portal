@@ -13,6 +13,7 @@ import { AppRouter as LegacyAppRouter } from "./router.legacy";
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
+const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -53,6 +54,15 @@ function isSegmentPath(pathname: string, segment: "manuals" | "publications"): b
   return (
     (parts[0] === "maintenance" && parts[2] === segment) ||
     (parts[0] === "t" && parts[2] === segment)
+  );
+}
+
+function isProcurementPath(pathname: string): boolean {
+  const parts = pathSegments(pathname);
+  return Boolean(
+    parts[0] === "maintenance" &&
+    parts[1] &&
+    (parts[2] === "procurement" || parts[2] === "stores")
   );
 }
 
@@ -189,6 +199,14 @@ function QmsNotFoundRouteSurface() {
   );
 }
 
+function ProcurementRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Procurement & Supply Chain…</div></div>}>
+      <WorkspaceRequireAuth><ProcurementModule /></WorkspaceRequireAuth>
+    </Suspense>
+  );
+}
+
 function DocumentControlRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
@@ -265,6 +283,7 @@ export const AppRouter: React.FC = () => {
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
   if (qmsRoute.kind === "unknown" && !isSupportedDocumentReaderPath(location.pathname)) return <QmsNotFoundRouteSurface />;
+  if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
   return <LegacyAppRouter />;
