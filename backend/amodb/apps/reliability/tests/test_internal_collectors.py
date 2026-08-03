@@ -45,6 +45,7 @@ def test_task_record_preserves_source_state_and_traceability():
     assert record["ata_chapter"] == "27"
     assert record["maintenance_status"] == "DEFERRED"
     assert record["mel_reference"] == "MEL 27-10-01"
+    assert record["external_id"] == "TASK_CARD_DEFERRAL:41"
 
 
 def test_unsupported_internal_source_does_not_query_or_invent_records():
@@ -59,17 +60,45 @@ def test_unsupported_internal_source_does_not_query_or_invent_records():
     db.query.assert_not_called()
 
 
-def test_authoritative_collector_registry_is_explicit():
-    expected = {"TECH_LOG", "MAINTENANCE", "TECH_RECORDS", "QMS", "PROCUREMENT"}
-    actual = {
-        source_type
-        for source_type in expected
-        if internal_collectors.collect_internal_records(
+def test_authoritative_collector_registry_is_explicit(monkeypatch):
+    expected = {
+        "TECH_LOG": "tech-log",
+        "MAINTENANCE": "maintenance",
+        "TECH_RECORDS": "tech-records",
+        "QMS": "qms",
+        "PROCUREMENT": "procurement",
+    }
+    monkeypatch.setattr(
+        internal_collectors,
+        "collect_tech_log_records",
+        lambda **_kwargs: ["tech-log"],
+    )
+    monkeypatch.setattr(
+        internal_collectors,
+        "collect_maintenance_records",
+        lambda **_kwargs: ["maintenance"],
+    )
+    monkeypatch.setattr(
+        internal_collectors,
+        "collect_technical_record_events",
+        lambda **_kwargs: ["tech-records"],
+    )
+    monkeypatch.setattr(
+        internal_collectors,
+        "collect_reliability_qms_records",
+        lambda **_kwargs: ["qms"],
+    )
+    monkeypatch.setattr(
+        internal_collectors,
+        "collect_procurement_quality_records",
+        lambda **_kwargs: ["procurement"],
+    )
+
+    for source_type, marker in expected.items():
+        assert internal_collectors.collect_internal_records(
             MagicMock(),
             source_type=source_type,
             amo_id="amo-1",
             cursor=MagicMock(),
-            limit=0,
-        ) == []
-    }
-    assert actual == expected
+            limit=1,
+        ) == [marker]
