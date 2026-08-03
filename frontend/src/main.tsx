@@ -20,26 +20,7 @@ import {
   replayOfflineMutations,
 } from "./services/offlinePersistence";
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
-import "./styles/tokens.css";
-import "./styles/base.css";
-import "./styles/global.css";
-import "./styles/qms.css";
-import "./styles/components/app-shell.css";
-import "./styles/components/page-header.css";
-import "./styles/components/section-card.css";
-import "./styles/components/data-table.css";
-import "./styles/components/empty-state.css";
-import "./styles/components/inline-error.css";
-import "./styles/components/toast.css";
-import "./styles/components/drawer.css";
-import "./styles/components/dashboard-cockpit.css";
-import "./styles/components/action-panel.css";
-import "./styles/components/planning-production.css";
-import "./styles/components/liquid-glass.css";
-import "./styles/rostering.css";
-// Theme adapters must load after all module CSS so literal legacy colours cannot win.
-import "./styles/theme-contract.css";
-import "./styles/theme-module-repairs.css";
+import "./styles/index.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
@@ -119,8 +100,6 @@ const queryClient = new QueryClient({
 let observedTenantScope = currentOfflineScope();
 
 function clearTenantScopedRuntimeState(): void {
-  // Context changes are synchronous. Cancel and clear before another persistence
-  // notification can write the previous AMO's QueryClient under the new scope.
   void queryClient.cancelQueries();
   queryClient.clear();
   clearApiResponseCache();
@@ -168,8 +147,6 @@ function installActiveAmoStorageGuard(): void {
 }
 
 const queryPersister = createPortalQueryPersister((_previousScope, nextScope) => {
-  // This callback is a second line of defence for context mutations that happen
-  // before the storage guard is installed or in non-browser test environments.
   if (nextScope === observedTenantScope) return;
   observedTenantScope = nextScope;
   clearTenantScopedRuntimeState();
@@ -259,8 +236,6 @@ if (typeof window !== "undefined") {
     }
 
     if (detail.type === "expired" || detail.type === "idle-logout") {
-      // Clear readable caches after involuntary expiry, but retain the scoped outbox.
-      // The user can sign in again and safely resume changes created while offline.
       observedTenantScope = currentOfflineScope();
       clearTenantScopedRuntimeState();
       void Promise.all([clearAllPortalApiCaches(), clearAllPortalQueryCaches()]);
@@ -274,8 +249,6 @@ if (typeof window !== "undefined") {
     }
   });
 
-  // Superuser AMO switching uses the branding event in the same tab. The scope
-  // comparison prevents ordinary logo/theme refreshes from clearing query data.
   window.addEventListener(BRANDING_EVENT, clearIfTenantScopeChanged);
   window.addEventListener("storage", (event) => {
     if (event.key && ACTIVE_AMO_STORAGE_KEYS.has(event.key)) clearIfTenantScopeChanged();
