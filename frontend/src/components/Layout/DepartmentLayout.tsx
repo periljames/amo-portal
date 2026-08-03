@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
+  Clock3,
   CreditCard,
   Factory,
   FileText,
@@ -27,10 +28,12 @@ import {
   PanelLeftOpen,
   Pin,
   PinOff,
+  Search,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Star,
   User,
   Users,
   Warehouse,
@@ -41,6 +44,7 @@ import {
 
 import {
   buildPortalNavigation,
+  flattenPortalNavigation,
   isPortalPathActive,
   type PortalNavGroup,
   type PortalNavIcon,
@@ -61,11 +65,11 @@ import {
   type AdminProfileState,
 } from "../../services/adminProfileMode";
 import { useColorScheme } from "../../hooks/useColorScheme";
+import { usePortalAppearance } from "../../hooks/usePortalAppearance";
 import { BrandContext } from "../Brand/BrandContext";
 import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
-import "../../styles/components/tenant-shell.css";
 
 type Props = {
   amoCode: string;
@@ -74,11 +78,25 @@ type Props = {
   showPollingErrorBanner?: boolean;
 };
 
+type AccentId = "tenant" | "blue" | "teal" | "green" | "amber" | "violet";
+
+type NavBranchProps = {
+  item: PortalNavItem;
+  pathname: string;
+  level: 0 | 1 | 2;
+  expanded: Set<string>;
+  favourites: Set<string>;
+  onToggle: (id: string) => void;
+  onFavourite: (item: PortalNavItem) => void;
+  onNavigate: (path: string) => void;
+};
+
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 60 * 1000;
 const SIDEBAR_MIN = 236;
 const SIDEBAR_MAX = 420;
 const SIDEBAR_DEFAULT = 284;
+const MAX_RECENT = 7;
 
 const ICONS: Record<PortalNavIcon, LucideIcon> = {
   home: Home,
@@ -103,41 +121,39 @@ const ICONS: Record<PortalNavIcon, LucideIcon> = {
   chart: BarChart3,
 };
 
-const ACCENTS = [
+const ACCENTS: Array<{ id: AccentId; label: string }> = [
   { id: "tenant", label: "Tenant" },
   { id: "blue", label: "Blue" },
   { id: "teal", label: "Teal" },
   { id: "green", label: "Green" },
   { id: "amber", label: "Amber" },
   { id: "violet", label: "Violet" },
-] as const;
-
-type AccentId = (typeof ACCENTS)[number]["id"];
-
-type NavBranchProps = {
-  item: PortalNavItem;
-  pathname: string;
-  level: 0 | 1 | 2;
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-  onNavigate: (path: string) => void;
-};
+];
 
 function clampSidebarWidth(value: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(value)));
 }
 
-function getStoredBoolean(key: string, fallback: boolean): boolean {
+function readBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
   const value = window.localStorage.getItem(key);
-  if (value === null) return fallback;
-  return value === "1";
+  return value === null ? fallback : value === "1";
 }
 
-function getStoredWidth(key: string): number {
+function readWidth(key: string): number {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT;
   const value = Number(window.localStorage.getItem(key));
   return Number.isFinite(value) ? clampSidebarWidth(value) : SIDEBAR_DEFAULT;
+}
+
+function readStringArray(key: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function labelForDepartment(value: string): string {
@@ -156,12 +172,24 @@ function labelForDepartment(value: string): string {
   return labels[value] || value.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function leafItems(groups: PortalNavGroup[]): PortalNavItem[] {
+  const flattened = flattenPortalNavigation(groups);
+  const seen = new Set<string>();
+  return flattened.filter((item) => {
+    if (item.children?.length || seen.has(item.path)) return false;
+    seen.add(item.path);
+    return true;
+  });
+}
+
 function NavBranch({
   item,
   pathname,
   level,
   expanded,
+  favourites,
   onToggle,
+  onFavourite,
   onNavigate,
 }: NavBranchProps): React.ReactElement {
   const active = isPortalPathActive(pathname, item);
@@ -169,10 +197,11 @@ function NavBranch({
   const open = expanded.has(item.id) || childActive;
   const Icon = level === 0 && item.icon ? ICONS[item.icon] : null;
   const nextLevel = Math.min(2, level + 1) as 0 | 1 | 2;
+  const isLeaf = !item.children?.length;
 
   return (
     <div className={`tenant-nav__branch tenant-nav__branch--level-${level}`}>
-      <div className={`tenant-nav__row${active ? " is-active" : ""}${childActive ? " has-active-child" : ""}`}>
+      <div className={`tenant-nav__row${active ? " is-active" : ""}${childActive ? " has-active-child" : ""}${isLeaf ? " is-leaf" : ""}`}>
         <button
           type="button"
           className="tenant-nav__link"
@@ -183,7 +212,18 @@ function NavBranch({
           {Icon ? <Icon size={17} strokeWidth={2} aria-hidden="true" /> : <span className="tenant-nav__rail" aria-hidden="true" />}
           <span>{item.label}</span>
         </button>
-        {item.children?.length ? (
+        {isLeaf ? (
+          <button
+            type="button"
+            className={`tenant-nav__favourite${favourites.has(item.id) ? " is-selected" : ""}`}
+            onClick={() => onFavourite(item)}
+            aria-label={`${favourites.has(item.id) ? "Remove" : "Add"} ${item.label} ${favourites.has(item.id) ? "from" : "to"} favourites`}
+            aria-pressed={favourites.has(item.id)}
+            title={favourites.has(item.id) ? "Remove favourite" : "Add favourite"}
+          >
+            <Star size={13} fill={favourites.has(item.id) ? "currentColor" : "none"} aria-hidden="true" />
+          </button>
+        ) : (
           <button
             type="button"
             className="tenant-nav__expand"
@@ -193,7 +233,7 @@ function NavBranch({
           >
             {open ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
           </button>
-        ) : null}
+        )}
       </div>
       {open && item.children?.length ? (
         <div className="tenant-nav__children">
@@ -204,7 +244,9 @@ function NavBranch({
               pathname={pathname}
               level={nextLevel}
               expanded={expanded}
+              favourites={favourites}
               onToggle={onToggle}
+              onFavourite={onFavourite}
               onNavigate={onNavigate}
             />
           ))}
@@ -218,13 +260,17 @@ function NavigationGroups({
   groups,
   pathname,
   expanded,
+  favourites,
   onToggle,
+  onFavourite,
   onNavigate,
 }: {
   groups: PortalNavGroup[];
   pathname: string;
   expanded: Set<string>;
+  favourites: Set<string>;
   onToggle: (id: string) => void;
+  onFavourite: (item: PortalNavItem) => void;
   onNavigate: (path: string) => void;
 }): React.ReactElement {
   return (
@@ -240,7 +286,9 @@ function NavigationGroups({
                 pathname={pathname}
                 level={0}
                 expanded={expanded}
+                favourites={favourites}
                 onToggle={onToggle}
+                onFavourite={onFavourite}
                 onNavigate={onNavigate}
               />
             ))}
@@ -264,14 +312,20 @@ const DepartmentLayout: React.FC<Props> = ({
   const pinnedKey = `amo_sidebar_pinned:${identity}`;
   const widthKey = `amo_sidebar_width:${identity}`;
   const accentKey = `amo_portal_accent:${identity}`;
+  const recentKey = `amo_portal_recent:${identity}`;
+  const favouritesKey = `amo_portal_favourites:${identity}`;
   const { scheme, setScheme } = useColorScheme();
+  const { density, setDensity, motion, setMotion } = usePortalAppearance();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [pinned, setPinned] = useState(() => getStoredBoolean(pinnedKey, false));
-  const [sidebarWidth, setSidebarWidth] = useState(() => getStoredWidth(widthKey));
+  const [pinned, setPinned] = useState(() => readBoolean(pinnedKey, false));
+  const [sidebarWidth, setSidebarWidth] = useState(() => readWidth(widthKey));
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [profileOpen, setProfileOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [recentPaths, setRecentPaths] = useState<string[]>(() => readStringArray(recentKey));
+  const [favourites, setFavourites] = useState<Set<string>>(() => new Set(readStringArray(favouritesKey)));
   const [accent, setAccent] = useState<AccentId>(() => {
     if (typeof window === "undefined") return "tenant";
     const saved = window.localStorage.getItem(accentKey) as AccentId | null;
@@ -284,6 +338,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const [idleSeconds, setIdleSeconds] = useState(Math.ceil(IDLE_WARNING_MS / 1000));
 
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
   const lastActivityRef = useRef(Date.now());
   const warningTimerRef = useRef<number | null>(null);
   const logoutTimerRef = useRef<number | null>(null);
@@ -299,35 +354,65 @@ const DepartmentLayout: React.FC<Props> = ({
     }),
     [activeDepartment, adminProfile?.active, amoCode, currentUser],
   );
-
+  const leaves = useMemo(() => leafItems(navigation), [navigation]);
   const homePath = navigation[0]?.items.find((item) => item.id === "home")?.path || `/maintenance/${encodeURIComponent(amoCode)}`;
+  const assignedWorkPath = leaves.find((item) => item.path.includes("/inbox/"))?.path || homePath;
+
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [];
+    return leaves
+      .filter((item) => `${item.label} ${item.path}`.toLowerCase().includes(query))
+      .slice(0, 12);
+  }, [leaves, searchQuery]);
+
+  const favouriteItems = useMemo(
+    () => leaves.filter((item) => favourites.has(item.id)),
+    [favourites, leaves],
+  );
+  const recentItems = useMemo(
+    () => recentPaths
+      .map((path) => leaves.find((item) => item.path === path))
+      .filter((item): item is PortalNavItem => Boolean(item)),
+    [leaves, recentPaths],
+  );
+
+  const visibleNavigation = useMemo<PortalNavGroup[]>(() => {
+    if (searchQuery.trim()) {
+      return [{ id: "search-results", label: "Search results", items: searchResults }];
+    }
+    const utility: PortalNavGroup[] = [];
+    if (favouriteItems.length) utility.push({ id: "favourites", label: "Favourites", items: favouriteItems });
+    if (recentItems.length) utility.push({ id: "recent", label: "Recent", items: recentItems });
+    return [...utility, ...navigation];
+  }, [favouriteItems, navigation, recentItems, searchQuery, searchResults]);
 
   useEffect(() => {
     let active = true;
     fetchAdminProfileState(amoCode)
-      .then((state) => {
-        if (active) setAdminProfile(state);
-      })
-      .catch(() => {
-        if (active && !adminProfile) setAdminProfile({ eligible: false, active: false });
-      });
+      .then((state) => { if (active) setAdminProfile(state); })
+      .catch(() => { if (active) setAdminProfile((previous) => previous || { eligible: false, active: false }); });
     return () => { active = false; };
   }, [amoCode]);
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
     document.documentElement.dataset.portalAccent = accent;
     document.body.dataset.portalAccent = accent;
     window.localStorage.setItem(accentKey, accent);
   }, [accent, accentKey]);
 
-  useEffect(() => {
-    window.localStorage.setItem(pinnedKey, pinned ? "1" : "0");
-  }, [pinned, pinnedKey]);
+  useEffect(() => { window.localStorage.setItem(pinnedKey, pinned ? "1" : "0"); }, [pinned, pinnedKey]);
+  useEffect(() => { window.localStorage.setItem(widthKey, String(sidebarWidth)); }, [sidebarWidth, widthKey]);
+  useEffect(() => { window.localStorage.setItem(recentKey, JSON.stringify(recentPaths)); }, [recentKey, recentPaths]);
+  useEffect(() => { window.localStorage.setItem(favouritesKey, JSON.stringify([...favourites])); }, [favourites, favouritesKey]);
 
   useEffect(() => {
-    window.localStorage.setItem(widthKey, String(sidebarWidth));
-  }, [sidebarWidth, widthKey]);
+    const best = [...leaves]
+      .filter((item) => isPortalPathActive(location.pathname, item))
+      .sort((left, right) => right.path.length - left.path.length)[0];
+    if (!best) return;
+    setRecentPaths((previous) => [best.path, ...previous.filter((path) => path !== best.path)].slice(0, MAX_RECENT));
+  }, [leaves, location.pathname]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -350,6 +435,40 @@ const DepartmentLayout: React.FC<Props> = ({
       window.removeEventListener("keydown", onKey);
     };
   }, [profileOpen]);
+
+  useEffect(() => {
+    if (!drawerOpen || pinned) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const sidebar = sidebarRef.current;
+    const focusable = () => Array.from(sidebar?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+    ) || []);
+    focusable()[0]?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDrawerOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previousFocus?.focus();
+    };
+  }, [drawerOpen, pinned]);
 
   useEffect(() => {
     const activeIds = new Set<string>();
@@ -377,9 +496,7 @@ const DepartmentLayout: React.FC<Props> = ({
     warningTimerRef.current = window.setTimeout(() => {
       setIdleWarning(true);
       setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
-      countdownRef.current = window.setInterval(() => {
-        setIdleSeconds((value) => Math.max(0, value - 1));
-      }, 1000);
+      countdownRef.current = window.setInterval(() => setIdleSeconds((value) => Math.max(0, value - 1)), 1000);
     }, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
     logoutTimerRef.current = window.setTimeout(() => {
       endSession("idle");
@@ -412,13 +529,14 @@ const DepartmentLayout: React.FC<Props> = ({
     const events = ["pointerdown", "keydown", "wheel", "touchstart", "focus"];
     events.forEach((name) => window.addEventListener(name, handleActivity, { passive: true, capture: true }));
     return () => {
-      events.forEach((name) => window.removeEventListener(name, handleActivity, { capture: true } as EventListenerOptions));
+      events.forEach((name) => window.removeEventListener(name, handleActivity, true));
       clearIdleTimers();
     };
   }, [clearIdleTimers, idleWarning, scheduleIdleTimers]);
 
   const navigateFromDrawer = useCallback((path: string) => {
     navigate(path);
+    setSearchQuery("");
     if (!pinned) setDrawerOpen(false);
   }, [navigate, pinned]);
 
@@ -427,6 +545,15 @@ const DepartmentLayout: React.FC<Props> = ({
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleFavourite = useCallback((item: PortalNavItem) => {
+    setFavourites((previous) => {
+      const next = new Set(previous);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
       return next;
     });
   }, []);
@@ -469,9 +596,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [amoCode, navigate]);
 
   const drawerVisible = pinned || drawerOpen;
-  const shellStyle = {
-    "--tenant-sidebar-width": `${sidebarWidth}px`,
-  } as React.CSSProperties;
+  const shellStyle = { "--tenant-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
 
   return (
     <BrandProvider nameOverride={amoCode.toUpperCase()} logoSource="amo">
@@ -485,7 +610,14 @@ const DepartmentLayout: React.FC<Props> = ({
               <button className="tenant-shell__scrim" type="button" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} />
             ) : null}
 
-            <aside className="tenant-shell__sidebar" aria-label="Portal navigation drawer" aria-hidden={!drawerVisible}>
+            <aside
+              ref={sidebarRef}
+              className="tenant-shell__sidebar"
+              aria-label="Portal navigation drawer"
+              aria-hidden={!drawerVisible}
+              role={!pinned ? "dialog" : undefined}
+              aria-modal={!pinned && drawerVisible ? true : undefined}
+            >
               <header className="tenant-shell__sidebar-header">
                 <button className="tenant-shell__brand" type="button" onClick={() => navigateFromDrawer(homePath)} title="Open department home">
                   <BrandLogo size={30} />
@@ -495,85 +627,62 @@ const DepartmentLayout: React.FC<Props> = ({
                   </span>
                 </button>
                 <div className="tenant-shell__sidebar-actions">
-                  <button
-                    type="button"
-                    className="tenant-shell__icon-button"
-                    onClick={() => setPinned((value) => !value)}
-                    aria-label={pinned ? "Unpin navigation" : "Pin navigation"}
-                    title={pinned ? "Unpin navigation" : "Pin navigation"}
-                  >
+                  <button type="button" className="tenant-shell__icon-button" onClick={() => setPinned((value) => !value)} aria-label={pinned ? "Unpin navigation" : "Pin navigation"} title={pinned ? "Unpin navigation" : "Pin navigation"}>
                     {pinned ? <PinOff size={16} /> : <Pin size={16} />}
                   </button>
                   {!pinned ? (
-                    <button type="button" className="tenant-shell__icon-button" onClick={() => setDrawerOpen(false)} aria-label="Close navigation">
-                      <X size={17} />
-                    </button>
+                    <button type="button" className="tenant-shell__icon-button" onClick={() => setDrawerOpen(false)} aria-label="Close navigation"><X size={17} /></button>
                   ) : null}
                 </div>
               </header>
 
+              <div className="tenant-shell__nav-tools">
+                <label className="tenant-shell__search">
+                  <Search size={15} aria-hidden="true" />
+                  <span className="sr-only">Search navigation</span>
+                  <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search pages" autoComplete="off" />
+                  {searchQuery ? <button type="button" onClick={() => setSearchQuery("")} aria-label="Clear navigation search"><X size={13} /></button> : null}
+                </label>
+                {!searchQuery && (favouriteItems.length || recentItems.length) ? (
+                  <div className="tenant-shell__nav-summary" aria-label="Navigation shortcuts">
+                    {favouriteItems.length ? <span><Star size={12} fill="currentColor" /> {favouriteItems.length} favourite{favouriteItems.length === 1 ? "" : "s"}</span> : null}
+                    {recentItems.length ? <span><Clock3 size={12} /> {recentItems.length} recent</span> : null}
+                  </div>
+                ) : null}
+              </div>
+
               <NavigationGroups
-                groups={navigation}
+                groups={visibleNavigation}
                 pathname={location.pathname}
                 expanded={expanded}
+                favourites={favourites}
                 onToggle={toggleExpanded}
+                onFavourite={toggleFavourite}
                 onNavigate={navigateFromDrawer}
               />
 
-              {pinned ? (
-                <button
-                  type="button"
-                  className="tenant-shell__resize-handle"
-                  onPointerDown={startResize}
-                  aria-label="Resize navigation"
-                  title="Drag to resize navigation"
-                />
-              ) : null}
+              {pinned ? <button type="button" className="tenant-shell__resize-handle" onPointerDown={startResize} aria-label="Resize navigation" title="Drag to resize navigation" /> : null}
             </aside>
 
             <div className="tenant-shell__workspace">
               <header className="tenant-shell__topbar">
                 <div className="tenant-shell__topbar-start">
-                  <button
-                    type="button"
-                    className="tenant-shell__menu-button"
-                    onClick={() => pinned ? setPinned(false) : setDrawerOpen((value) => !value)}
-                    aria-label={drawerVisible ? "Close navigation" : "Open navigation"}
-                    aria-expanded={drawerVisible}
-                    aria-controls="tenant-navigation"
-                  >
-                    {drawerVisible && !pinned ? <PanelLeftClose size={19} /> : pinned ? <PanelLeftClose size={19} /> : <Menu size={20} />}
+                  <button type="button" className="tenant-shell__menu-button" onClick={() => pinned ? setPinned(false) : setDrawerOpen((value) => !value)} aria-label={drawerVisible ? "Close navigation" : "Open navigation"} aria-expanded={drawerVisible} aria-controls="tenant-navigation">
+                    {drawerVisible || pinned ? <PanelLeftClose size={19} /> : <Menu size={20} />}
                   </button>
-                  <button className="tenant-shell__compact-brand" type="button" onClick={() => navigate(homePath)} aria-label="Open department home">
-                    <BrandLogo size={22} />
-                  </button>
+                  <button className="tenant-shell__compact-brand" type="button" onClick={() => navigate(homePath)} aria-label="Open department home"><BrandLogo size={22} /></button>
                   <div className="tenant-shell__context">
                     <strong>{labelForDepartment(activeDepartment)}</strong>
                     <span>{brand.name || amoCode.toUpperCase()}</span>
                   </div>
-                  {adminProfile?.active ? (
-                    <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Admin profile</span>
-                  ) : null}
+                  {adminProfile?.active ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Admin profile</span> : null}
                 </div>
 
                 <div className="tenant-shell__topbar-actions">
                   <LiveStatusIndicator compact />
-                  <button
-                    type="button"
-                    className="tenant-shell__icon-button"
-                    onClick={() => navigateFromDrawer(`/maintenance/${encodeURIComponent(amoCode)}/quality/inbox/assigned-to-me`)}
-                    aria-label="Notifications and assigned work"
-                    title="Notifications and assigned work"
-                  >
-                    <Bell size={17} />
-                  </button>
+                  <button type="button" className="tenant-shell__icon-button" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Notifications and assigned work" title="Notifications and assigned work"><Bell size={17} /></button>
                   <div className="tenant-shell__profile" ref={profileRef}>
-                    <button
-                      type="button"
-                      className="tenant-shell__profile-trigger"
-                      onClick={() => setProfileOpen((value) => !value)}
-                      aria-expanded={profileOpen}
-                    >
+                    <button type="button" className="tenant-shell__profile-trigger" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-haspopup="menu">
                       <span className="tenant-shell__avatar">
                         {(currentUser?.first_name?.[0] || currentUser?.full_name?.[0] || "U").toUpperCase()}
                         {(currentUser?.last_name?.[0] || "").toUpperCase()}
@@ -584,17 +693,13 @@ const DepartmentLayout: React.FC<Props> = ({
 
                     {profileOpen ? (
                       <div className="tenant-shell__profile-menu" role="menu">
-                        <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}>
-                          <User size={15} /> View profile
-                        </button>
-
+                        <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
                         {adminProfile?.eligible ? (
                           <button type="button" role="menuitem" onClick={() => void toggleAdminProfile()} disabled={adminProfileBusy}>
                             {adminProfile.active ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
                             {adminProfileBusy ? "Updating admin profile…" : adminProfile.active ? "Admin profile Off" : "Admin profile On"}
                           </button>
                         ) : null}
-
                         <button type="button" role="menuitem" onClick={() => setAppearanceOpen((value) => !value)} aria-expanded={appearanceOpen}>
                           <SlidersHorizontal size={15} /> Appearance
                           <ChevronRight size={14} className="tenant-shell__profile-chevron" />
@@ -610,19 +715,26 @@ const DepartmentLayout: React.FC<Props> = ({
                                 <option value="dark">Dark</option>
                               </select>
                             </label>
+                            <label>
+                              <span>Density</span>
+                              <select value={density} onChange={(event) => setDensity(event.target.value as "comfortable" | "compact")}>
+                                <option value="comfortable">Comfortable</option>
+                                <option value="compact">Compact</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>Motion</span>
+                              <select value={motion} onChange={(event) => setMotion(event.target.value as "system" | "full" | "reduced")}>
+                                <option value="system">System</option>
+                                <option value="full">Full</option>
+                                <option value="reduced">Reduced</option>
+                              </select>
+                            </label>
                             <div className="tenant-shell__accent-picker">
                               <span>Accent</span>
                               <div>
                                 {ACCENTS.map((item) => (
-                                  <button
-                                    key={item.id}
-                                    type="button"
-                                    className={`tenant-shell__accent tenant-shell__accent--${item.id}${accent === item.id ? " is-selected" : ""}`}
-                                    onClick={() => setAccent(item.id)}
-                                    aria-label={`Use ${item.label} accent`}
-                                    aria-pressed={accent === item.id}
-                                    title={item.label}
-                                  />
+                                  <button key={item.id} type="button" className={`tenant-shell__accent tenant-shell__accent--${item.id}${accent === item.id ? " is-selected" : ""}`} onClick={() => setAccent(item.id)} aria-label={`Use ${item.label} accent`} aria-pressed={accent === item.id} title={item.label} />
                                 ))}
                               </div>
                             </div>
@@ -631,9 +743,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
                         {adminProfileError ? <div className="tenant-shell__profile-error" role="alert">{adminProfileError}</div> : null}
                         <div className="tenant-shell__profile-divider" />
-                        <button type="button" role="menuitem" className="is-danger" onClick={handleSignOut}>
-                          <LogOut size={15} /> Sign out
-                        </button>
+                        <button type="button" role="menuitem" className="is-danger" onClick={handleSignOut}><LogOut size={15} /> Sign out</button>
                       </div>
                     ) : null}
                   </div>
@@ -641,30 +751,24 @@ const DepartmentLayout: React.FC<Props> = ({
               </header>
 
               <main className="tenant-shell__main">
-                {showPollingErrorBanner ? null : null}
+                {showPollingErrorBanner ? <div className="tenant-shell__status-banner" role="status">Live data is temporarily delayed. Cached tenant data remains visible.</div> : null}
                 <div className="tenant-shell__content">{children}</div>
               </main>
             </div>
 
             {idleWarning ? (
-              <div className="tenant-shell__session-overlay" role="dialog" aria-modal="true" aria-labelledby="idle-title">
+              <div className="tenant-shell__session-overlay" role="alertdialog" aria-modal="true" aria-labelledby="idle-title" aria-describedby="idle-description">
                 <div className="tenant-shell__session-card">
                   <h2 id="idle-title">Inactivity warning</h2>
-                  <p>Your session will end in <strong>{idleSeconds}s</strong>.</p>
+                  <p id="idle-description">Your session will end in <strong>{idleSeconds}s</strong>.</p>
                   <div>
                     <button type="button" className="btn btn-secondary" onClick={handleSignOut}>Sign out</button>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => {
-                        lastActivityRef.current = Date.now();
-                        setIdleWarning(false);
-                        void extendSession("idle-warning").catch(() => undefined);
-                        scheduleIdleTimers();
-                      }}
-                    >
-                      Stay signed in
-                    </button>
+                    <button type="button" className="btn btn-primary" autoFocus onClick={() => {
+                      lastActivityRef.current = Date.now();
+                      setIdleWarning(false);
+                      void extendSession("idle-warning").catch(() => undefined);
+                      scheduleIdleTimers();
+                    }}>Stay signed in</button>
                   </div>
                 </div>
               </div>
