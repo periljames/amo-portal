@@ -1,0 +1,54 @@
+name: Diagnose Reliability Transformations
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.fast-transform-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  transform:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+      - name: Apply transformations and record failures
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-fast
+          declare -A C
+          run() { local n="$1"; shift; "$@" >"/tmp/rel-fast/$n.log" 2>&1; C[$n]=$?; }
+          run backend python backend/scripts/complete_reliability_backend.py
+          run sod python backend/scripts/strengthen_reliability_sod.py
+          run service bash -lc 'cd frontend && node scripts/complete-reliability-service.mjs'
+          run workspace bash -lc 'cd frontend && node scripts/complete-reliability-workspace.mjs'
+          run fsod bash -lc 'cd frontend && node scripts/strengthen-reliability-sod.mjs'
+          run css bash -lc 'cd frontend && node scripts/complete-reliability-css.mjs'
+          run compile bash -lc 'python -m py_compile backend/amodb/apps/reliability/*.py backend/amodb/apps/reliability/tests/test_complete_scope.py backend/amodb/main.py backend/amodb/alembic/env.py'
+          run canonical bash -lc '! grep -R "/reliability/v2" backend/amodb/apps/reliability frontend/src --exclude-dir=node_modules && test ! -e frontend/src/services/reliabilityV2.ts && test ! -e frontend/src/pages/ReliabilityReportsPage.tsx'
+          run routes bash -lc 'grep -q "advanced_reliability_router" backend/amodb/apps/reliability/router.py && grep -q "ReliabilityAdvancedView" frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx && grep -q "reliability-compliance" frontend/src/app/portalRouteManifest.ts'
+          {
+            echo '# Reliability Fast Transformation Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            for n in backend sod service workspace fsod css compile canonical routes; do echo "| $n | ${C[$n]:-999} |"; done
+            for n in backend sod service workspace fsod css compile canonical routes; do
+              echo; echo "## $n"; echo '```text'; tail -n 120 "/tmp/rel-fast/$n.log"; echo '```';
+            done
+          } > docs/reliability/FAST_TRANSFORM_DIAGNOSTIC.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reliability/FAST_TRANSFORM_DIAGNOSTIC.md
+          git commit -m "Record Reliability transformation diagnostic"
+          git push origin HEAD:agent/reliability-v2-foundation
