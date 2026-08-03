@@ -7,9 +7,11 @@ on:
       - "backend/amodb/apps/accounts/admin_profile_access.py"
       - "backend/amodb/apps/accounts/admin_profile_concurrency.py"
       - "backend/amodb/apps/accounts/admin_profile_guard.py"
+      - "backend/amodb/apps/accounts/admin_profile_logout.py"
       - "backend/amodb/apps/accounts/admin_profile_router.py"
       - "backend/amodb/apps/accounts/department_home_router.py"
       - "backend/amodb/apps/accounts/router_admin.py"
+      - "backend/amodb/apps/accounts/router_public.py"
       - "backend/amodb/apps/accounts/router_user_directory.py"
       - "backend/amodb/apps/accounts/__init__.py"
       - "backend/amodb/apps/accounts/tests/test_admin_profile_governance.py"
@@ -30,12 +32,14 @@ on:
       - "frontend/src/app/portalRouteManifest.test.ts"
       - "frontend/src/app/routeGuards.ts"
       - "frontend/src/components/Layout/DepartmentLayout.tsx"
+      - "frontend/src/components/Layout/DepartmentLayoutImpl.tsx"
       - "frontend/src/hooks/usePortalAppearance.ts"
       - "frontend/src/pages/DepartmentHomePage.tsx"
       - "frontend/src/pages/qms/QmsOverviewPage.tsx"
       - "frontend/src/pages/qms/qmsOverviewModel.ts"
       - "frontend/src/pages/qms/qmsOverviewModel.test.ts"
       - "frontend/src/services/adminProfileMode.ts"
+      - "frontend/src/services/adminProfileMode.test.ts"
       - "frontend/src/services/apiClient.ts"
       - "frontend/src/services/departmentHome.ts"
       - "frontend/src/services/departmentHome.test.ts"
@@ -96,12 +100,14 @@ jobs:
           src/app/portalRouteManifest.test.ts
           src/app/routeGuards.ts
           src/components/Layout/DepartmentLayout.tsx
+          src/components/Layout/DepartmentLayoutImpl.tsx
           src/hooks/usePortalAppearance.ts
           src/pages/DepartmentHomePage.tsx
           src/pages/qms/QmsOverviewPage.tsx
           src/pages/qms/qmsOverviewModel.ts
           src/pages/qms/qmsOverviewModel.test.ts
           src/services/adminProfileMode.ts
+          src/services/adminProfileMode.test.ts
           src/services/apiClient.ts
           src/services/departmentHome.ts
           src/services/departmentHome.test.ts
@@ -141,9 +147,11 @@ jobs:
           amodb/apps/accounts/admin_profile_access.py
           amodb/apps/accounts/admin_profile_concurrency.py
           amodb/apps/accounts/admin_profile_guard.py
+          amodb/apps/accounts/admin_profile_logout.py
           amodb/apps/accounts/admin_profile_router.py
           amodb/apps/accounts/department_home_router.py
           amodb/apps/accounts/router_admin.py
+          amodb/apps/accounts/router_public.py
           amodb/apps/accounts/router_user_directory.py
           amodb/apps/accounts/__init__.py
           amodb/apps/quality/tenant_security.py
