@@ -12,6 +12,8 @@ on:
       - "backend/amodb/apps/quality/tenant_security.py"
       - "backend/amodb/apps/quality/tests/test_tenant_route_isolation.py"
       - "frontend/scripts/check-css-contract.mjs"
+      - "frontend/tests/e2e/tenant-shell-theme.spec.ts"
+      - "frontend/playwright.tenant.config.ts"
       - "frontend/src/App.tsx"
       - "frontend/src/main.tsx"
       - "frontend/src/router.tsx"
@@ -48,7 +50,7 @@ concurrency:
 jobs:
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: frontend
@@ -76,6 +78,8 @@ jobs:
         run: >-
           npm exec -- eslint
           scripts/check-css-contract.mjs
+          tests/e2e/tenant-shell-theme.spec.ts
+          playwright.tenant.config.ts
           src/App.tsx
           src/main.tsx
           src/router.tsx
@@ -97,6 +101,10 @@ jobs:
           src/services/qmsDashboard.test.ts
       - name: Typecheck and production build
         run: npm run build
+      - name: Install Chromium for focused render smoke tests
+        run: npx playwright install --with-deps chromium
+      - name: Verify light and dark tenant layouts at desktop and mobile sizes
+        run: npm run test:tenant-render
 
   backend:
     runs-on: ubuntu-latest
