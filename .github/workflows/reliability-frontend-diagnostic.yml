@@ -1,0 +1,109 @@
+name: Diagnose Transformed Reliability Frontend
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.canonical-rebuild-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Transform and diagnose frontend
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/reliability-frontend docs/reliability backend/scripts frontend/src/pages/reliability frontend/src/services frontend/src/styles
+          git fetch origin agent/reliability-v2-backup:refs/remotes/origin/agent/reliability-v2-backup > /tmp/reliability-frontend/fetch.log 2>&1
+          git show origin/agent/reliability-v2-backup:backend/scripts/canonicalise_reliability_module.py > backend/scripts/canonicalise_reliability_module.py
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md > docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md > docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md
+          git show origin/agent/reliability-v2-backup:frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx > frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx
+          git show origin/agent/reliability-v2-backup:frontend/src/services/reliabilityV2.ts > frontend/src/services/reliabilityV2.ts
+          git show origin/agent/reliability-v2-backup:frontend/src/styles/reliability-v2.css > frontend/src/styles/reliability-v2.css
+          python - <<'PY' > /tmp/reliability-frontend/prepare.log 2>&1
+          from pathlib import Path
+          path = Path('backend/scripts/canonicalise_reliability_module.py')
+          text = path.read_text(encoding='utf-8')
+          needle = '    text = text.replace("current_user.amo_id", "_amo_id(current_user)")\n'
+          replacement = needle + '    text = text.replace("amo_id = _amo_id(current_user)\\n    if not amo_id:", "amo_id = current_user.effective_amo_id\\n    if not amo_id:")\n'
+          if replacement not in text:
+              if needle not in text:
+                  raise SystemExit('Tenant replacement anchor not found')
+              text = text.replace(needle, replacement, 1)
+          text = text.replace('"/events/{event_id}"', '"/events/{event_id:int}"')
+          text = text.replace('"/alerts/{alert_id}"', '"/alerts/{alert_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}"', '"/fracas/cases/{case_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}/actions"', '"/fracas/cases/{case_id:int}/actions"')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python backend/scripts/canonicalise_reliability_module.py > /tmp/reliability-frontend/canonicalize.log 2>&1
+          CANON_RC=$?
+          python backend/scripts/finalize_reliability_rebuild.py > /tmp/reliability-frontend/finalize.log 2>&1
+          FINALIZE_RC=$?
+          python backend/scripts/patch_reliability_route_surface.py > /tmp/reliability-frontend/surface.log 2>&1
+          SURFACE_RC=$?
+          (cd frontend && npm ci --prefer-offline --no-audit --fund=false) > /tmp/reliability-frontend/npm.log 2>&1
+          NPM_RC=$?
+          if [ "$NPM_RC" -eq 0 ]; then
+            (cd frontend && npm run test:tenant-shell) > /tmp/reliability-frontend/navigation.log 2>&1
+            NAV_RC=$?
+            (cd frontend && npm exec -- eslint src/App.tsx src/app/PortalRouteSurface.tsx src/app/portalRouteManifest.ts src/app/portalRouteManifest.test.ts src/app/routePreload.ts src/pages/reliability/ReliabilityWorkspacePage.tsx src/pages/reliability/ReliabilityReportsView.tsx src/services/reliability.ts) > /tmp/reliability-frontend/lint.log 2>&1
+            LINT_RC=$?
+            (cd frontend && npm run build) > /tmp/reliability-frontend/build.log 2>&1
+            BUILD_RC=$?
+          else
+            NAV_RC=99
+            LINT_RC=99
+            BUILD_RC=99
+          fi
+          cat > /tmp/reliability-frontend/report.md <<EOF
+          # Transformed Reliability Frontend Diagnostic
+
+          - Run: \`${GITHUB_RUN_ID}\`
+          - Source SHA: \`${GITHUB_SHA}\`
+          - UTC: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+
+          | Stage | Exit code |
+          |---|---:|
+          | Canonical replacement | ${CANON_RC} |
+          | Navigation/preload finalizer | ${FINALIZE_RC} |
+          | Portal route surface patch | ${SURFACE_RC} |
+          | Frontend dependency install | ${NPM_RC} |
+          | Tenant navigation/CSS tests | ${NAV_RC} |
+          | Reliability-owned ESLint | ${LINT_RC} |
+          | Full production build | ${BUILD_RC} |
+          EOF
+          for stage in canonicalize finalize surface npm navigation lint build; do
+            printf '\n### %s\n\n```text\n' "$stage" >> /tmp/reliability-frontend/report.md
+            tail -n 50 "/tmp/reliability-frontend/${stage}.log" >> /tmp/reliability-frontend/report.md 2>/dev/null
+            printf '\n```\n' >> /tmp/reliability-frontend/report.md
+          done
+          git reset --hard HEAD
+          git clean -fdx
+          mkdir -p docs/reliability
+          cp /tmp/reliability-frontend/report.md docs/reliability/FRONTEND_REBUILD_DIAGNOSTIC.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reliability/FRONTEND_REBUILD_DIAGNOSTIC.md
+          git commit -m "Record transformed Reliability frontend diagnostics"
+          git push origin HEAD:agent/reliability-v2-foundation
