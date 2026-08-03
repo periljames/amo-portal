@@ -62,7 +62,7 @@ function isProcurementPath(pathname: string): boolean {
   return Boolean(
     parts[0] === "maintenance" &&
     parts[1] &&
-    (parts[2] === "procurement" || parts[2] === "stores")
+    parts[2] === "procurement"
   );
 }
 
