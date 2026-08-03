@@ -1,0 +1,293 @@
+=== ALEMBIC HEADS ===
+Rev: document_control_20260729_ai_assisted_search (head)
+Parent: document_control_20260729_knowledge_graph
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/document_control_20260729_ai_assisted_search.py
+
+    Add scalable controlled-document full-text indexes.
+    
+    Revision ID: document_control_20260729_ai_assisted_search
+    Revises: document_control_20260729_knowledge_graph
+    Create Date: 2026-07-29
+    
+    The indexes accelerate permission-filtered retrieval over existing controlled section
+    headings and block text. They do not copy document content to a separate store and do
+    not alter approved source files or revision checksums.
+
+Rev: foundation_20260731_geofence (head)
+Parent: saas_20260731_route_latency_hist
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/foundation_20260731_geofence.py
+
+    add private base geofence and location consensus fields
+    
+    Revision ID: foundation_20260731_geofence
+    Revises: saas_20260731_route_latency_hist
+    Create Date: 2026-07-31
+
+Rev: notifications_20260729_delivery (head)
+Parent: document_control_20260724_domain
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/notifications_20260729_delivery_policy.py
+
+    Complete central email delivery policy and Resend event persistence.
+    
+    Revision ID: notifications_20260729_delivery
+    Revises: document_control_20260724_domain
+    Create Date: 2026-07-29
+
+Rev: p0a7_train_record_dedupe (head)
+Parent: p0a6_train_record
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/p0a7_training_record_deduplicate_current.py
+
+    Deduplicate current training records and enforce one active record per user/course.
+    
+    Revision ID: p0a7_train_record_dedupe
+    Revises: p0a6_train_record
+    Create Date: 2026-06-08 00:00:00.000000
+    
+    This migration is idempotent and PostgreSQL-focused. It retains historical records by
+    marking older active records as RENEWED. It does not delete training evidence.
+
+Rev: procure_20260803_docs (head)
+Parent: procurement_20260803_full_domain
+Branch names: procurement
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/procure_20260803_docs.py
+
+    Add immutable Procurement document linkage and retained evidence records.
+    
+    Revision ID: procure_20260803_docs
+    Revises: procurement_20260803_full_domain
+    Create Date: 2026-08-03
+
+Rev: qms_20260607_read_stability (head)
+Parent: <base>
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/qms_20260607_read_stability_indexes.py
+
+    QMS dashboard/calendar read stability indexes.
+    
+    Revision ID: qms_20260607_read_stability
+    Revises: None
+    Create Date: 2026-06-07
+    
+    This historical branch may run before tenant-normalisation branches. Indexes are
+    therefore created only when every referenced column exists; a terminal SaaS
+    finalizer reapplies the complete set after schema convergence.
+
+Rev: qms_20260704_car_attach_repair (head)
+Parent: m4a5n6u7a8l9
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/qms_20260704_repair_car_attachments_table.py
+
+    repair missing quality CAR attachments table
+    
+    Revision ID: qms_20260704_car_attach_repair
+    Revises: m4a5n6u7a8l9
+    Create Date: 2026-07-04 00:00:00.000000
+
+Rev: rostering_20260728_automation_policy (head)
+Parent: rostering_20260724_governance
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/rostering_20260728_automation_policy.py
+
+    Add tenant roster-generation policy and immutable automation runs.
+    
+    Revision ID: rostering_20260728_automation_policy
+    Revises: rostering_20260724_governance
+    Create Date: 2026-07-28
+
+Rev: saas_p5_20260501 (head) (mergepoint)
+Merges: f4a5b6c7d8e9, qms_p4_20260501, amo_20260501_gsu_scope
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/saas_p5_20260501_platform_email_controls.py
+
+    platform email settings and merge SaaS/QMS heads
+    
+    Revision ID: saas_p5_20260501
+    Revises: f4a5b6c7d8e9, qms_p4_20260501, amo_20260501_gsu_scope
+    Create Date: 2026-05-01
+
+Rev: train_20260627_final (head)
+Parent: training_20260627_auditor_access
+Path: /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/training_20260627_final_pass.py
+
+    training final report settings and QR verification
+    
+    Revision ID: train_20260627_final
+    Revises: training_20260627_auditor_access
+    Create Date: 2026-06-27
+
+
+=== PROCUREMENT REVISIONS ===
+procurement_20260803_full_domain resolved /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/procurement_20260803_full_domain.py down= 2c4d7e9f0a1b
+procure_20260803_docs resolved /home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/procure_20260803_docs.py down= procurement_20260803_full_domain
+
+=== CLEAN POSTGRES UPGRADE ===
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> b9a8860cf4f2, initial schema
+INFO  [alembic.runtime.migration] Running upgrade b9a8860cf4f2 -> 54c8ea152b4c, Harden models: constraints, indexes, table naming
+INFO  [alembic.runtime.migration] Running upgrade 54c8ea152b4c -> 70a4e360dd80, add qms tables
+INFO  [alembic.runtime.migration] Running upgrade 70a4e360dd80 -> ab12cd34ef56, add aircraft import templates table
+INFO  [alembic.runtime.migration] Running upgrade ab12cd34ef56 -> 3a1d2f1b6c4f, Add template_type to aircraft import templates.
+INFO  [alembic.runtime.migration] Running upgrade 70a4e360dd80 -> e1b2c3d4e5f6, add import reconciliation tables
+INFO  [alembic.runtime.migration] Running upgrade e1b2c3d4e5f6 -> c2f4c8b2f1d0, add decision to import reconciliation logs
+INFO  [alembic.runtime.migration] Running upgrade c2f4c8b2f1d0 -> f4c7f0c1d2ab, add verification status to fleet records
+INFO  [alembic.runtime.migration] Running upgrade f4c7f0c1d2ab -> 9c6a7d2e8f10, add reliability core models
+INFO  [alembic.runtime.migration] Running upgrade 9c6a7d2e8f10 -> b7d9f3a1c2e4, add reliability audit fields
+INFO  [alembic.runtime.migration] Running upgrade f4c7f0c1d2ab -> a5c1d2e3f4b6, Add bootstrap workflow indexes without assuming branch-local columns exist.
+INFO  [alembic.runtime.migration] Running upgrade b7d9f3a1c2e4 -> c4d2a7b9f1e0, scope component instances to amo
+INFO  [alembic.runtime.migration] Running upgrade c4d2a7b9f1e0 -> d1a2f3b4c5e6, add reliability notifications and reports
+INFO  [alembic.runtime.migration] Running upgrade d1a2f3b4c5e6 -> e4b7d1a2c3f4, add multi-tenant workflow scaffold
+INFO  [alembic.runtime.migration] Running upgrade f4c7f0c1d2ab -> f5a8b9c1d2e3, add integrations tables
+INFO  [alembic.runtime.migration] Running upgrade f5a8b9c1d2e3 -> f6b7c8d9e0f1, add integration inbound events
+INFO  [alembic.runtime.migration] Running upgrade f6b7c8d9e0f1 -> f7c8d9e0f1a2, add demo context
+INFO  [alembic.runtime.migration] Running upgrade f7c8d9e0f1a2, e4b7d1a2c3f4 -> f8a1b2c3d4e6, harden part movement audit fields
+INFO  [alembic.runtime.migration] Running upgrade f8a1b2c3d4e6 -> i1a2b3c4d5e6, create platform settings table
+INFO  [alembic.runtime.migration] Running upgrade i1a2b3c4d5e6 -> g1b2c3d4e5f6, Add platform branding fields.
+INFO  [alembic.runtime.migration] Running upgrade f4c7f0c1d2ab -> 8b7c1f0a9c2d, add lockout count to users
+INFO  [alembic.runtime.migration] Running upgrade 8b7c1f0a9c2d, 3a1d2f1b6c4f -> 8e1ae4ea5206, merge import heads
+INFO  [alembic.runtime.migration] Running upgrade 8e1ae4ea5206 -> 0f1e4ad3c5b1, Add aircraft_documents table for regulatory compliance tracking.
+INFO  [alembic.runtime.migration] Running upgrade 0f1e4ad3c5b1 -> a1b2c3d4e5f7, add engine trend statuses and snapshot context fields
+INFO  [alembic.runtime.migration] Running upgrade a1b2c3d4e5f7 -> c6a9f2d1e7ab, add aircraft import preview tables
+INFO  [alembic.runtime.migration] Running upgrade g1b2c3d4e5f6 -> h1e2m3l4o5g6, add EHM raw logs and parsed records
+INFO  [alembic.runtime.migration] Running upgrade 0f1e4ad3c5b1 -> 2c4d7e9f0a1b, Add finance and inventory module tables.
+INFO  [alembic.runtime.migration] Running upgrade 0f1e4ad3c5b1 -> 1b2c3d4e6f70, add billing and licensing tables
+INFO  [alembic.runtime.migration] Running upgrade 1b2c3d4e6f70 -> d2f8c9a1b4e7, Add must_change_password flag to users.
+INFO  [alembic.runtime.migration] Running upgrade d2f8c9a1b4e7 -> e3f1a2b3c4d5, seed platform superuser
+INFO  [alembic.runtime.migration] Running upgrade e3f1a2b3c4d5 -> 4c2d5e6f8a9b, add missing trial fields to tenant_licenses
+INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, f8a1b2c3d4e6 -> e41af43f2beb, merge heads
+INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, h1e2m3l4o5g6 -> j1k2l3m4n5o6, merge heads after EHM and platform settings updates
+INFO  [alembic.runtime.migration] Running upgrade j1k2l3m4n5o6 -> k1b2c3d4e5f6, add idempotency keys table
+INFO  [alembic.runtime.migration] Running upgrade k1b2c3d4e5f6 -> l1b2c3d4e5f7, add catalog sku usage limits
+INFO  [alembic.runtime.migration] Running upgrade l1b2c3d4e5f7 -> m1b2c3d4e5f8, add billing audit logs table
+INFO  [alembic.runtime.migration] Running upgrade m1b2c3d4e5f8 -> c9f1b2a3d4e5, add car attachments
+INFO  [alembic.runtime.migration] Running upgrade c9f1b2a3d4e5 -> d2c3e4f5a6b7, add car responses
+INFO  [alembic.runtime.migration] Running upgrade m1b2c3d4e5f8 -> n1b2c3d4e5f9, add car attachments
+INFO  [alembic.runtime.migration] Running upgrade k1b2c3d4e5f6 -> t9r8e7c6h5n4, add technical records module
+INFO  [alembic.runtime.migration] Running upgrade e41af43f2beb -> p0a1_authz_core_tables, P0 authorization core tables
+INFO  [alembic.runtime.migration] Running upgrade p0a1_authz_core_tables -> p0a2_quality_amo_id_norm, P0 Quality ``amo_id`` normalization with parallel-branch safety.
+INFO  [alembic.runtime.migration] Running upgrade p0a2_quality_amo_id_norm -> p0a3_compliance_event_ledger, P0 compliance event ledger
+INFO  [alembic.runtime.migration] Running upgrade p0a3_compliance_event_ledger -> p0a4_training_gate_fields, P0 training-gate fields with parallel-branch safety.
+INFO  [alembic.runtime.migration] Running upgrade n1b2c3d4e5f9 -> p1q2r3s4t5u6, update audit_events schema for qms audit logging
+INFO  [alembic.runtime.migration] Running upgrade p1q2r3s4t5u6 -> q1w2e3r4t5u7, add workflow verification and approval fields
+INFO  [alembic.runtime.migration] Running upgrade q1w2e3r4t5u7 -> r1s2t3u4v5w6, add tasks table
+INFO  [alembic.runtime.migration] Running upgrade r1s2t3u4v5w6 -> s1t2u3v4w5x6, add email logs
+INFO  [alembic.runtime.migration] Running upgrade s1t2u3v4w5x6 -> t1u2v3w4x5y6, add audit schedules and auditor flag
+INFO  [alembic.runtime.migration] Running upgrade t1u2v3w4x5y6 -> u1v2w3x4y5z6, add auditee_email to qms_audits
+INFO  [alembic.runtime.migration] Running upgrade u1v2w3x4y5z6 -> v1w2x3y4z5a6, Ensure observer auditor user id exists on qms_audits.
+INFO  [alembic.runtime.migration] Running upgrade v1w2x3y4z5a6 -> w2x3y4z5a6b7, Ensure assistant auditor user id exists on qms_audits.
+INFO  [alembic.runtime.migration] Running upgrade n1b2c3d4e5f9 -> q1w2e3r4t5y6, add platform performance settings
+INFO  [alembic.runtime.migration] Running upgrade q1w2e3r4t5y6 -> z9y8x7w6v5u4, add user token revoked at
+INFO  [alembic.runtime.migration] Running upgrade f8a1b2c3d4e6 -> b1c2d3e4f5a6, add car attachment sha256
+INFO  [alembic.runtime.migration] Running upgrade d2c3e4f5a6b7 -> c3d4e5f6a7b8, enforce audit car workflow fields
+INFO  [alembic.runtime.migration] Running upgrade b1c2d3e4f5a6, d2c3e4f5a6b7, e41af43f2beb, w2x3y4z5a6b7, z9y8x7w6v5u4 -> y3z4a5b6c7d8, ensure runtime schema columns for auth/realtime compatibility
+INFO  [alembic.runtime.migration] Running upgrade y3z4a5b6c7d8 -> z1y2x3w4v5u6, add composite audit_events replay index
+INFO  [alembic.runtime.migration] Running upgrade z1y2x3w4v5u6 -> s9t8u7v6w5x4, ensure car attachment sha256 column
+INFO  [alembic.runtime.migration] Running upgrade s9t8u7v6w5x4 -> a4d6f8b0c2e1, create missing billing invoice and quality CAR tables
+INFO  [alembic.runtime.migration] Running upgrade z9y8x7w6v5u4 -> a7b8c9d0e1f2, add qms audit reference counters
+INFO  [alembic.runtime.migration] Running upgrade a7b8c9d0e1f2 -> c1d2e3f4a5b7, scope qms audit refs per amo
+INFO  [alembic.runtime.migration] Running upgrade a4d6f8b0c2e1 -> b7c8d9e0f1a3, add qms notifications table
+INFO  [alembic.runtime.migration] Running upgrade b7c8d9e0f1a3 -> d6e7f8a9b0c1, sync quality_cars workflow columns with ORM model
+INFO  [alembic.runtime.migration] Running upgrade c3d4e5f6a7b8, d6e7f8a9b0c1 -> r9t8m7q6p5n4, add realtime tables
+INFO  [alembic.runtime.migration] Running upgrade r9t8m7q6p5n4 -> a1b2c3d4e5f6, add user availability table for qms manpower
+INFO  [alembic.runtime.migration] Running upgrade y3z4a5b6c7d8 -> m2n3u4a5l6s7, add manuals reader controlled revisions scaffold
+INFO  [alembic.runtime.migration] Running upgrade m2n3u4a5l6s7, a1b2c3d4e5f6 -> 463febfffd67, merge manuals and manpower heads
+INFO  [alembic.runtime.migration] Running upgrade 463febfffd67 -> d0c1b2a3e4f5, add doc control module tables
+INFO  [alembic.runtime.migration] Running upgrade t9r8e7c6h5n4 -> a1b2c3d4e9f0, add planning production watchlists
+INFO  [alembic.runtime.migration] Running upgrade a1b2c3d4e9f0 -> b2c3d4e5f6g7, add production execution release tables
+INFO  [alembic.runtime.migration] Running upgrade d0c1b2a3e4f5, t9r8e7c6h5n4 -> aerodoc_hybrid_dms, add aerodoc hybrid dms columns and physical copy tables
+INFO  [alembic.runtime.migration] Running upgrade aerodoc_hybrid_dms -> b1a2e3r4o5d6, enable ltree and index physical copy location paths
+INFO  [alembic.runtime.migration] Running upgrade b1a2e3r4o5d6 -> c9d8e7f6a5b4, block deletion of published manual revisions
+INFO  [alembic.runtime.migration] Running upgrade c9d8e7f6a5b4 -> d7e6f5a4b3c2, add manual document_versions and document_sections tables
+INFO  [alembic.runtime.migration] Running upgrade p0a4_training_gate_fields -> p0a5_train_plan, P0 training course planning fields with parallel-branch safety.
+INFO  [alembic.runtime.migration] Running upgrade p0a5_train_plan -> p0a6_train_record, P0 training record integrity fields
+INFO  [alembic.runtime.migration] Running upgrade b7d9f3a1c2e4 -> aa11bb22cc33, add training certificate issuance tables
+INFO  [alembic.runtime.migration] Running upgrade  -> plat_p7_20260501, platform control plane tables and SaaS superadmin expansion
+INFO  [alembic.runtime.migration] Running upgrade plat_p7_20260501 -> plat_20260627_support, tenant support sessions for platform read-only and approved admin access
+INFO  [alembic.runtime.migration] Running upgrade plat_20260627_support -> qual_20260627_wf_close, close quality audit workflow gaps
+INFO  [alembic.runtime.migration] Running upgrade p0a6_train_record -> qms_p1_rls_20260426, phase1 qms tenant guardrails
+INFO  [alembic.runtime.migration] Running upgrade qms_p1_rls_20260426 -> qms_p2_20260426, complete canonical qms tenant-scoped tables and RLS
+INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b -> procurement_20260803_full_domain, Create the tenant-scoped aviation procurement and supply-chain domain.
+INFO  [alembic.runtime.migration] Running upgrade procurement_20260803_full_domain -> procure_20260803_docs, Add immutable Procurement document linkage and retained evidence records.
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.DuplicateTable: relation "ix_procurement_documents_sha256" already exists
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
+    CommandLine(prog=prog).main(argv=argv)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
+    self.run_cmd(cfg, options)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
+    fn(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
+    script.run_env()
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
+    util.load_python_file(self.dir, "env.py")
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 362, in <module>
+    run_migrations_online()
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 352, in run_migrations_online
+    context.run_migrations()
+  File "<string>", line 8, in run_migrations
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
+    self.get_context().run_migrations(**kw)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 627, in run_migrations
+    step.migration_fn(**kw)
+  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/procure_20260803_docs.py", line 22, in upgrade
+    document_models.ProcurementDocument.__table__.create(op.get_bind(), checkfirst=True)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 1288, in create
+    bind._run_ddl_visitor(ddl.SchemaGenerator, self, checkfirst=checkfirst)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2459, in _run_ddl_visitor
+    ).traverse_single(element)
+      ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+           ^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+           ^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.DuplicateTable) relation "ix_procurement_documents_sha256" already exists
+
+[SQL: CREATE INDEX ix_procurement_documents_sha256 ON procurement_documents (sha256)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+
+UPGRADE_EXIT_STATUS=1
