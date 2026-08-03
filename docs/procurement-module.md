@@ -34,6 +34,7 @@ Stores remains a separate inventory and custody department at `/maintenance/{amo
 
 - Supplier eligibility requires an active, unexpired approval scope covering the purchased category.
 - Active supplier, purchase-order or receipt Quality holds block controlled actions.
+- Requisitions follow `DRAFT → SUBMITTED → technical approval → budget approval → SOURCING → APPROVED`; there is no direct sourcing bypass.
 - Requesters cannot approve their own requisitions.
 - Purchase-order creators and requesters cannot approve their own orders.
 - Receivers cannot independently inspect or release the same receipt.
@@ -41,6 +42,7 @@ Stores remains a separate inventory and custody department at `/maintenance/{amo
 - Serviceable inventory movements are created only after inspection acceptance and Quality release.
 - Invoice matching uses approved purchase-order value and Quality-released receipt value.
 - Procurement actions are tenant-scoped and recorded in Procurement and shared audit event ledgers.
+- Retained evidence defaults to the persistent mounted root `/srv/amo/uploads/procurement-documents` and can be overridden with `PROCUREMENT_DOCUMENT_DIR`.
 
 ## API
 
@@ -64,6 +66,12 @@ alembic -c backend/amodb/alembic.ini upgrade heads
 
 Migrations: `procurement_20260803_full_domain`, `procure_20260803_docs`
 
+Set the persistent evidence root in the deployment environment:
+
+```bash
+PROCUREMENT_DOCUMENT_DIR=/srv/amo/uploads/procurement-documents
+```
+
 ## Acceptance checklist
 
 - [x] Procurement is a first-class department.
@@ -72,17 +80,19 @@ Migrations: `procurement_20260803_full_domain`, `procure_20260803_docs`
 - [x] Stores is separate and is not a route alias.
 - [x] Supplier approval and scope controls are enforced server-side.
 - [x] Requisition, RFQ, quotation and purchase-order workflows are implemented.
+- [x] Requisition technical and budget approvals cannot be bypassed before sourcing.
 - [x] Multi-stage approval and segregation of duties are enforced server-side.
 - [x] Receipt, quarantine, inspection and Quality release are implemented.
 - [x] Finance vendor and invoice-matching links are implemented.
 - [x] Planning, Production, Maintenance, Quality, Stores and Finance links are represented.
-- [x] Legacy purchasing endpoints are not exposed by the Inventory router.
+- [x] Legacy purchasing endpoints, fields and service helpers are removed.
 - [x] Tenant isolation and append-only event evidence are implemented.
 - [x] Signed physical forms and external-system exports can be uploaded and linked to exact records.
 - [x] File size, extension, MIME, signature, duplicate hash and safe-path checks are enforced.
-- [x] Quality evidence enters a pending state and can only be verified, rejected or voided by Quality authority.
+- [x] Quality evidence enters a pending state and can only be verified, rejected or voided by independent Quality authority.
 - [x] DMS document and revision IDs, physical storage references and external-system links are supported without forcing a duplicate upload.
+- [x] Evidence records use a persistent mounted storage root.
 - [x] Upload progress, drag-and-drop, file-type guidance, empty states and recovery actions are exposed in the UI.
 - [x] Success, warning and failure feedback uses distinct visual and audio cues.
 - [x] Loading, refresh, upload and modal transitions respect reduced-motion preferences.
-- [x] Source-contract regression tests cover routing, quarantine, supplier gates and cross-module links.
+- [x] Source-contract regression tests cover routing, quarantine, supplier gates, lifecycle, evidence retention and cross-module links.
