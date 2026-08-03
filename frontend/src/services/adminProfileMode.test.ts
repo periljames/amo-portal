@@ -6,6 +6,7 @@ vi.mock("./apiClient", () => ({
   apiRequest: apiRequestMock,
 }));
 
+import { emitSessionEvent } from "./auth";
 import {
   clearAllCachedAdminProfileStates,
   fetchAdminProfileState,
@@ -164,5 +165,28 @@ describe("Admin Profile client lifecycle", () => {
     await expect(pending).rejects.toBeInstanceOf(StaleAdminProfileResponseError);
     expect(sessionStorage.getItem(`amo_admin_profile_session:user-a:${amoCode}`)).toBeNull();
     expect(sessionStorage.getItem(`amo_admin_profile_session:user-b:${amoCode}`)).toBeNull();
+  });
+
+  it("discards an in-flight response after logout and re-login to the same account", async () => {
+    const amoCode = "tenant-a";
+    let resolveRequest!: (state: AdminProfileState) => void;
+    apiRequestMock.mockImplementationOnce(() => new Promise<AdminProfileState>((resolve) => {
+      resolveRequest = resolve;
+    }));
+
+    const pending = fetchAdminProfileState(amoCode);
+
+    emitSessionEvent({ type: "manual-logout" });
+    emitSessionEvent({ type: "authenticated" });
+    resolveRequest({
+      eligible: true,
+      active: true,
+      session_id: "session-before-logout",
+      expires_at: "2026-08-03T12:10:00Z",
+      grant_type: "TEMPORARY",
+    });
+
+    await expect(pending).rejects.toBeInstanceOf(StaleAdminProfileResponseError);
+    expect(sessionStorage.getItem(`amo_admin_profile_session:user-a:${amoCode}`)).toBeNull();
   });
 });
