@@ -2,6 +2,7 @@ import { apiRequest } from "./apiClient";
 
 const STORAGE_PREFIX = "amo_admin_profile_session";
 const CHANGE_EVENT = "amo-admin-profile-change";
+const API_PREFIX = "/accounts/admin/admin-profile";
 
 export type AdminProfileState = {
   eligible: boolean;
@@ -18,6 +19,10 @@ type AdminProfileSessionResponse = AdminProfileState & {
 
 function storageKey(amoCode: string): string {
   return `${STORAGE_PREFIX}:${amoCode.toLowerCase()}`;
+}
+
+function apiPath(amoCode: string, action: "state" | "activate" | "deactivate"): string {
+  return `${API_PREFIX}/${encodeURIComponent(amoCode)}/${action}`;
 }
 
 export function readCachedAdminProfileState(amoCode: string): AdminProfileState | null {
@@ -58,26 +63,28 @@ export function onAdminProfileChange(
 }
 
 export async function fetchAdminProfileState(amoCode: string): Promise<AdminProfileState> {
-  const state = await apiRequest<AdminProfileState>(
-    `/accounts/admin-profile/${encodeURIComponent(amoCode)}/state`,
-    { timeoutMs: 8_000, cacheTtlMs: 5_000 },
-  );
+  const state = await apiRequest<AdminProfileState>(apiPath(amoCode, "state"), {
+    timeoutMs: 8_000,
+    cacheTtlMs: 5_000,
+  });
   return cacheState(amoCode, state);
 }
 
 export async function activateAdminProfile(amoCode: string): Promise<AdminProfileState> {
-  const state = await apiRequest<AdminProfileSessionResponse>(
-    `/accounts/admin-profile/${encodeURIComponent(amoCode)}/activate`,
-    { method: "POST", timeoutMs: 10_000, cacheTtlMs: 0 },
-  );
+  const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "activate"), {
+    method: "POST",
+    timeoutMs: 10_000,
+    cacheTtlMs: 0,
+  });
   return cacheState(amoCode, state);
 }
 
 export async function deactivateAdminProfile(amoCode: string): Promise<AdminProfileState> {
-  const state = await apiRequest<AdminProfileSessionResponse>(
-    `/accounts/admin-profile/${encodeURIComponent(amoCode)}/deactivate`,
-    { method: "POST", timeoutMs: 10_000, cacheTtlMs: 0 },
-  );
+  const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "deactivate"), {
+    method: "POST",
+    timeoutMs: 10_000,
+    cacheTtlMs: 0,
+  });
   return cacheState(amoCode, state);
 }
 
