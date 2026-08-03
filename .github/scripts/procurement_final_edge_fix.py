@@ -110,7 +110,7 @@ def test_document_file_cleanup_is_transaction_boundary_safe():
     service = read("amodb/apps/procurement/document_service.py")
     router = read("amodb/apps/procurement/document_router.py")
     create_block = service.split("def create_document(", 1)[1].split("def list_documents(", 1)[0]
-    route_block = router.split("def procurement_document_link(", 1)[1].split("@router.get(\"/documents/{document_id}/download\")", 1)[0]
+    route_block = router.split("def procurement_document_link(", 1)[1].split('@router.get("/documents/{document_id}/download")', 1)[0]
     assert "if target_path is not None:" in create_block
     assert "target_path.unlink(missing_ok=True)" in create_block
     assert "response = _serialize(record, amo_code)" in route_block
@@ -151,7 +151,7 @@ checks = {
     "post-commit refresh": "db.refresh(record)",
     "public sourcing bypass schema": "SEND_TO_SOURCING",
 }
-route_block = router.read_text(encoding="utf-8").split("def procurement_document_link(", 1)[1].split("@router.get(\"/documents/{document_id}/download\")", 1)[0]
+route_block = router.read_text(encoding="utf-8").split("def procurement_document_link(", 1)[1].split('@router.get("/documents/{document_id}/download")', 1)[0]
 if checks["post-commit refresh"] in route_block:
     raise SystemExit("Post-commit document refresh remains")
 for path in [schemas, procurement_router]:
