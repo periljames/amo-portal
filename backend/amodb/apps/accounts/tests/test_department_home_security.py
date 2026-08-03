@@ -23,6 +23,7 @@ def user(**overrides):
         "id": "user-a",
         "amo_id": "amo-a",
         "effective_amo_id": "amo-a",
+        "auth_session_id": "browser-a",
         "department_id": None,
         "is_superuser": False,
         "is_amo_admin": False,
@@ -140,5 +141,34 @@ def test_grantee_session_lookup_does_not_require_legacy_admin_role() -> None:
     ) is True
 
     sql = str(db.execute.call_args.args[0]).upper()
+    params = db.execute.call_args.args[1]
     assert "ADMIN_PROFILE_SESSIONS" in sql
     assert "ADMIN_ACCESS_GRANTS" in sql
+    assert "S.AUTH_SESSION_ID = :AUTH_SESSION_ID" in sql
+    assert ":IMPLICIT_ADMIN = TRUE" in sql
+    assert params["auth_session_id"] == "browser-a"
+    assert params["implicit_admin"] is False
+
+
+def test_downgraded_admin_grantless_session_does_not_open_department_homes() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+
+    assert active_admin_profile_session(
+        db,
+        user(role="TECHNICIAN", is_amo_admin=False),
+        SimpleNamespace(id="amo-a"),
+    ) is False
+    assert db.execute.call_args.args[1]["implicit_admin"] is False
+
+
+def test_other_browser_session_cannot_inherit_department_elevation() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+
+    assert active_admin_profile_session(
+        db,
+        user(role="AMO_ADMIN", is_amo_admin=True, auth_session_id="browser-b"),
+        SimpleNamespace(id="amo-a"),
+    ) is False
+    assert db.execute.call_args.args[1]["auth_session_id"] == "browser-b"
