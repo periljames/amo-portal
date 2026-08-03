@@ -11,7 +11,8 @@ import { submitProcurementForm } from "./procurementActions";
 import ProcurementDocumentCenter from "./ProcurementDocumentCenter";
 import { Command, Control, Orders, Receiving, Requests, Sourcing, Suppliers } from "./ProcurementSections";
 import { renderFields } from "./ProcurementForms";
-import { EMPTY, NAV, ModalShell, dateLabel, humanize, type FormState, type Modal, type Section, type WorkspaceData } from "./procurementUiShared";
+import { ModalShell } from "./procurementUiShared";
+import { EMPTY, NAV, dateLabel, humanize, type FormState, type Modal, type Section, type WorkspaceData } from "./procurementUiModel";
 import "../../styles/procurement.css";
 
 const QUALITY_ROLES = new Set(["QUALITY_MANAGER", "QUALITY_INSPECTOR", "AMO_ADMIN", "SUPERUSER"]);

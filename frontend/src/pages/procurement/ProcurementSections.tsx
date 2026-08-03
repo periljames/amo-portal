@@ -35,10 +35,8 @@ import type {
   ProcurementRFQ,
   ProcurementSupplier,
 } from "../../types/procurement";
+import { Empty, RecordActions, Skeleton } from "./procurementUiShared";
 import {
-  Empty,
-  RecordActions,
-  Skeleton,
   badgeClass,
   dateLabel,
   humanize,
@@ -47,7 +45,7 @@ import {
   type Modal,
   type Section,
   type WorkspaceData,
-} from "./procurementUiShared";
+} from "./procurementUiModel";
 
 type OpenModal = (modal: Exclude<Modal, null>, initial?: FormState) => void;
 type LinkDocument = (type: ProcurementDocumentEntityType, id: number) => void;

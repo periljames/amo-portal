@@ -1,5 +1,6 @@
 import React from "react";
-import { Field, humanize, money, type FormState, type Modal, type WorkspaceData } from "./procurementUiShared";
+import { Field } from "./procurementUiShared";
+import { humanize, money, type FormState, type Modal, type WorkspaceData } from "./procurementUiModel";
 
 export function renderFields(modal: Exclude<Modal, null>, form: FormState, setValue: (name: string, value: string | boolean) => void, data: WorkspaceData) {
   const value = (name: string) => String(form[name] || "");

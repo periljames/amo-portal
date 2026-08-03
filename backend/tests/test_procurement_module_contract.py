@@ -66,7 +66,7 @@ def test_module_exposes_only_canonical_department_routes() -> None:
     router = _read(PROCUREMENT / "router.py")
     frontend_router = _read(FRONTEND / "router.tsx")
     module = _read(FRONTEND / "pages" / "procurement" / "ProcurementModule.tsx")
-    shared_ui = _read(FRONTEND / "pages" / "procurement" / "procurementUiShared.tsx")
+    shared_ui = _read(FRONTEND / "pages" / "procurement" / "procurementUiModel.ts")
     department_access = _read(FRONTEND / "utils" / "departmentAccess.ts")
 
     assert 'prefix="/api/maintenance/{amo_code}/procurement"' in router

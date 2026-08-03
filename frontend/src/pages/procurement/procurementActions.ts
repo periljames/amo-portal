@@ -11,7 +11,7 @@ import {
   inspectProcurementReceipt,
 } from "../../services/procurement";
 import type { ProcurementRequisition } from "../../types/procurement";
-import type { FormState, Modal, WorkspaceData } from "./procurementUiShared";
+import type { FormState, Modal, WorkspaceData } from "./procurementUiModel";
 
 export async function submitProcurementForm(
   amoCode: string,

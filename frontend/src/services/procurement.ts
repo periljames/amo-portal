@@ -20,7 +20,7 @@ function base(amoCode: string): string {
   return `/api/maintenance/${encodeURIComponent(amoCode)}/procurement`;
 }
 
-function json<T>(method: string, body?: unknown): RequestInit {
+function json(method: string, body?: unknown): RequestInit {
   return {
     method,
     body: body === undefined ? undefined : JSON.stringify(body),
