@@ -20,10 +20,7 @@ def _value(value: Any) -> str:
 
 def _explicit_deferral_type(task: work_models.TaskCard) -> str:
     text = " ".join(
-        filter(
-            None,
-            [task.task_code, task.title, task.description],
-        )
+        filter(None, [task.task_code, task.title, task.description])
     ).upper()
     if "MEL" in text:
         return "MEL_DEFERRAL"
@@ -33,15 +30,14 @@ def _explicit_deferral_type(task: work_models.TaskCard) -> str:
 
 
 def _task_record(task: work_models.TaskCard) -> Dict[str, Any]:
-    event_type = (
-        _explicit_deferral_type(task)
-        if _value(task.status) == "DEFERRED"
-        else "DEFECT"
-    )
+    deferred = _value(task.status) == "DEFERRED"
+    event_type = _explicit_deferral_type(task) if deferred else "DEFECT"
+    identity = "TASK_CARD_DEFERRAL" if deferred else "TASK_CARD"
+    occurred_at = task.updated_at if deferred else (task.actual_start or task.created_at)
     return {
-        "external_id": f"TASK_CARD:{task.id}:{task.updated_at.isoformat()}",
+        "external_id": f"{identity}:{task.id}",
         "event_type": event_type,
-        "occurred_at": (task.actual_start or task.created_at).isoformat(),
+        "occurred_at": occurred_at.isoformat(),
         "aircraft_serial_number": task.aircraft_serial_number,
         "ata_chapter": task.ata_chapter,
         "reference_code": task.task_code or str(task.id),
@@ -148,9 +144,12 @@ def collect_technical_record_events(
     for event in events:
         event_value = _value(event.event_type)
         task = db.get(work_models.TaskCard, event.task_card_id) if event.task_card_id else None
-        scheduled = bool(
-            task and task.category == work_models.TaskCategoryEnum.SCHEDULED
+        component = (
+            db.get(reliability_models.ComponentInstance, event.component_instance_id)
+            if event.component_instance_id
+            else None
         )
+        scheduled = bool(task and task.category == work_models.TaskCategoryEnum.SCHEDULED)
         if event_value == "INSTALL":
             event_type = "INSTALLATION"
         elif event_value in {"REMOVE", "SWAP"}:
@@ -163,21 +162,20 @@ def collect_technical_record_events(
                 "event_type": event_type,
                 "occurred_at": event.occurred_at.isoformat(),
                 "aircraft_serial_number": event.aircraft_serial_number,
+                "ata_chapter": component.ata if component else None,
                 "reference_code": event.removal_tracking_id or str(event.id),
                 "description": (
                     f"{event_value} {event.part_number or event.from_part_number or 'component'} "
                     f"at {event.position or 'unrecorded position'}"
                 ),
-                "part_number": event.part_number or event.from_part_number,
-                "component_serial_number": event.serial_number or event.from_serial_number,
+                "part_number": event.part_number or event.from_part_number or (component.part_number if component else None),
+                "component_serial_number": event.serial_number or event.from_serial_number or (component.serial_number if component else None),
                 "work_order_id": event.work_order_id,
                 "task_card_id": event.task_card_id,
                 "component_instance_id": event.component_instance_id,
                 "position": event.position,
                 "removal_tracking_id": event.removal_tracking_id,
-                "removal_classification_basis": (
-                    "SCHEDULED_TASK" if scheduled else "UNSCHEDULED_OR_UNCLASSIFIED"
-                ),
+                "removal_classification_basis": "SCHEDULED_TASK" if scheduled else "UNSCHEDULED_OR_UNCLASSIFIED",
             }
         )
     return records
@@ -257,11 +255,7 @@ def collect_procurement_quality_records(
                 "severity": "CRITICAL" if inspection.suspected_unapproved_part else "HIGH",
                 "part_number": line.part_number if line else None,
                 "component_serial_number": line.serial_number if line else None,
-                "supplier_id": (
-                    receipt.purchase_order.supplier_id
-                    if receipt and receipt.purchase_order
-                    else None
-                ),
+                "supplier_id": receipt.purchase_order.supplier_id if receipt and receipt.purchase_order else None,
                 "procurement_receipt_id": receipt.id if receipt else None,
                 "inspection_disposition": _value(inspection.disposition),
                 "suspected_unapproved_part": inspection.suspected_unapproved_part,
