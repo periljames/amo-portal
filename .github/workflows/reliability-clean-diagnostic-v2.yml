@@ -1,0 +1,62 @@
+name: Reliability Clean Diagnostic V2
+
+on:
+  push:
+    branches: [agent/reliability-v2-clean]
+    paths: [docs/reliability/.clean-diagnostic-v2-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-clean
+          fetch-depth: 0
+      - shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-clean
+          git fetch origin agent/reliability-v2-foundation feat/global-tenant-navigation-quality-home --force > /tmp/rel-clean/fetch.log 2>&1
+          A=$?
+          git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/apps/reliability frontend/src/pages/reliability frontend/src/services/reliability.ts frontend/src/styles/reliability-v2.css > /tmp/rel-clean/overlay.log 2>&1
+          B=$?
+          git diff --binary 309a8eac0aecfdbb19a1ecd71c83cdbaababb074 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/alembic/env.py backend/amodb/main.py frontend/src/App.tsx frontend/src/app/PortalRouteSurface.tsx frontend/src/app/portalRouteManifest.ts frontend/src/app/portalRouteManifest.test.ts frontend/src/app/routePreload.ts frontend/src/portalRoutes.tsx > /tmp/rel-clean/shared.patch 2> /tmp/rel-clean/make-patch.log
+          C=$?
+          git apply --3way /tmp/rel-clean/shared.patch > /tmp/rel-clean/apply.log 2>&1
+          D=$?
+          git status --short > /tmp/rel-clean/status.log 2>&1
+          E=$?
+          {
+            echo '# Reliability Clean Overlay Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            echo "| fetch | $A |"
+            echo "| overlay | $B |"
+            echo "| make patch | $C |"
+            echo "| apply patch | $D |"
+            echo "| status | $E |"
+            for name in fetch overlay make-patch apply status; do
+              echo
+              echo "## $name"
+              echo '```text'
+              tail -n 160 "/tmp/rel-clean/$name.log"
+              echo '```'
+            done
+          } > /tmp/rel-clean/report.md
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p docs/reliability
+          cp /tmp/rel-clean/report.md docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md
+          git commit -m 'Record Reliability clean overlay diagnostic'
+          git push origin HEAD:agent/reliability-v2-clean
