@@ -7,10 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from amodb.apps.accounts import admin_profile_router as profile_router
 from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
 from amodb.apps.accounts.admin_profile_router import (
+    REQUIRED_SCHEMA_TABLES,
     _as_utc,
     _assert_tenant_member,
+    _ensure_schema,
     _is_implicit_admin,
     _is_management_approver,
 )
@@ -65,6 +68,35 @@ def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
     aware = datetime(2026, 8, 3, 10, 0, 0, tzinfo=timezone.utc)
     assert _as_utc(naive).tzinfo == timezone.utc
     assert _as_utc(aware) == aware
+
+
+def test_admin_profile_schema_check_accepts_migrated_tables_without_runtime_ddl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    inspector = SimpleNamespace(get_table_names=lambda: sorted(REQUIRED_SCHEMA_TABLES))
+    monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
+
+    _ensure_schema(db)
+
+    db.get_bind.assert_called_once_with()
+    db.execute.assert_not_called()
+
+
+def test_admin_profile_schema_check_fails_closed_when_migration_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    inspector = SimpleNamespace(get_table_names=lambda: ["users", "amos"])
+    monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
+
+    with pytest.raises(HTTPException) as exc:
+        _ensure_schema(db)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "ADMIN_PROFILE_SCHEMA_NOT_MIGRATED"
+    assert sorted(exc.value.detail["missing_tables"]) == sorted(REQUIRED_SCHEMA_TABLES)
+    db.execute.assert_not_called()
 
 
 def test_profile_governance_routes_are_the_only_tenant_admin_exemption() -> None:
