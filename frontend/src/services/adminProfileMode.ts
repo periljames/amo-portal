@@ -3,6 +3,7 @@ import { apiRequest } from "./apiClient";
 const STORAGE_PREFIX = "amo_admin_profile_session";
 const CHANGE_EVENT = "amo-admin-profile-change";
 const API_PREFIX = "/accounts/admin/admin-profile";
+const expiryTimers = new Map<string, number>();
 
 export type AdminProfileState = {
   eligible: boolean;
@@ -25,6 +26,58 @@ function apiPath(amoCode: string, action: "state" | "activate" | "deactivate"): 
   return `${API_PREFIX}/${encodeURIComponent(amoCode)}/${action}`;
 }
 
+function dispatchState(amoCode: string, state: AdminProfileState): void {
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { amoCode, state } }));
+}
+
+function clearExpiryTimer(amoCode: string): void {
+  if (typeof window === "undefined") return;
+  const key = amoCode.toLowerCase();
+  const timer = expiryTimers.get(key);
+  if (timer !== undefined) window.clearTimeout(timer);
+  expiryTimers.delete(key);
+}
+
+function inactiveState(state: AdminProfileState): AdminProfileState {
+  return {
+    ...state,
+    active: false,
+    session_id: null,
+    expires_at: null,
+  };
+}
+
+function scheduleExpiry(amoCode: string, state: AdminProfileState): void {
+  if (typeof window === "undefined") return;
+  clearExpiryTimer(amoCode);
+  if (!state.active || !state.expires_at) return;
+
+  const expiry = Date.parse(state.expires_at);
+  if (!Number.isFinite(expiry)) return;
+  const delay = Math.max(0, expiry - Date.now() + 25);
+  const key = amoCode.toLowerCase();
+  const timer = window.setTimeout(() => {
+    expiryTimers.delete(key);
+    const raw = window.sessionStorage.getItem(storageKey(amoCode));
+    if (!raw) return;
+    try {
+      const current = JSON.parse(raw) as AdminProfileState;
+      if (!current.active || current.session_id !== state.session_id) return;
+      if (current.expires_at && Date.parse(current.expires_at) > Date.now()) {
+        scheduleExpiry(amoCode, current);
+        return;
+      }
+      const expired = inactiveState(current);
+      window.sessionStorage.setItem(storageKey(amoCode), JSON.stringify(expired));
+      dispatchState(amoCode, expired);
+    } catch {
+      window.sessionStorage.removeItem(storageKey(amoCode));
+      dispatchState(amoCode, inactiveState(state));
+    }
+  }, delay);
+  expiryTimers.set(key, timer);
+}
+
 export function readCachedAdminProfileState(amoCode: string): AdminProfileState | null {
   if (typeof window === "undefined") return null;
   const raw = window.sessionStorage.getItem(storageKey(amoCode));
@@ -32,11 +85,15 @@ export function readCachedAdminProfileState(amoCode: string): AdminProfileState 
   try {
     const parsed = JSON.parse(raw) as AdminProfileState;
     if (parsed.active && parsed.expires_at && Date.parse(parsed.expires_at) <= Date.now()) {
-      window.sessionStorage.removeItem(storageKey(amoCode));
-      return { ...parsed, active: false, session_id: null };
+      const expired = inactiveState(parsed);
+      window.sessionStorage.setItem(storageKey(amoCode), JSON.stringify(expired));
+      clearExpiryTimer(amoCode);
+      return expired;
     }
+    scheduleExpiry(amoCode, parsed);
     return parsed;
   } catch {
+    clearExpiryTimer(amoCode);
     window.sessionStorage.removeItem(storageKey(amoCode));
     return null;
   }
@@ -45,7 +102,8 @@ export function readCachedAdminProfileState(amoCode: string): AdminProfileState 
 function cacheState(amoCode: string, state: AdminProfileState): AdminProfileState {
   if (typeof window !== "undefined") {
     window.sessionStorage.setItem(storageKey(amoCode), JSON.stringify(state));
-    window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { amoCode, state } }));
+    scheduleExpiry(amoCode, state);
+    dispatchState(amoCode, state);
   }
   return state;
 }
@@ -90,5 +148,6 @@ export async function deactivateAdminProfile(amoCode: string): Promise<AdminProf
 
 export function clearCachedAdminProfileState(amoCode: string): void {
   if (typeof window === "undefined") return;
+  clearExpiryTimer(amoCode);
   window.sessionStorage.removeItem(storageKey(amoCode));
 }
