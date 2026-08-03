@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from fastapi.routing import APIRoute
 
 from amodb.apps.accounts import admin_profile_router as profile_router
+from amodb.apps.accounts import department_home_router as home_router
 from amodb.apps.accounts.admin_profile_concurrency import serialized_approval_count
 from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
 from amodb.apps.accounts.admin_profile_router import (
@@ -54,16 +55,13 @@ def test_platform_superuser_cannot_become_tenant_admin_profile() -> None:
     assert "support-session" in str(exc.value.detail).lower()
 
 
-def test_existing_amo_admin_is_eligible_but_quality_manager_is_only_an_approver() -> None:
+def test_existing_admin_and_governance_approver_rules() -> None:
     assert _is_implicit_admin(actor(role="AMO_ADMIN", is_amo_admin=True)) is True
     assert _is_implicit_admin(actor(role="QUALITY_MANAGER", is_amo_admin=False)) is False
     assert _is_management_approver(actor(role="QUALITY_MANAGER")) is True
-    assert _is_management_approver(actor(role="TECHNICIAN", position_title="Technician")) is False
-
-
-def test_accountable_and_hr_managers_are_governance_approvers() -> None:
     assert _is_management_approver(actor(role="VIEW_ONLY", position_title="Accountable Manager")) is True
     assert _is_management_approver(actor(role="VIEW_ONLY", position_title="HR Manager")) is True
+    assert _is_management_approver(actor(role="TECHNICIAN", position_title="Technician")) is False
 
 
 def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
@@ -73,10 +71,11 @@ def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
     assert _as_utc(aware) == aware
 
 
-def test_admin_profile_module_remains_importable_for_monkeypatching() -> None:
+def test_accounts_package_preserves_router_modules_for_monkeypatching() -> None:
     assert hasattr(profile_router, "inspect")
-    assert hasattr(profile_router, "_admin_profile_active")
     assert hasattr(profile_router, "router")
+    assert hasattr(home_router, "_admin_profile_active")
+    assert hasattr(home_router, "router")
 
 
 def test_admin_profile_schema_check_accepts_migrated_tables_without_runtime_ddl(
