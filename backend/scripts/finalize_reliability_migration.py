@@ -100,16 +100,16 @@ def helper_block() -> str:
         "reliability_calculation_runs",
     ]
     trigger_sql = "\n".join(
-        f'''        op.execute("""
-        DROP TRIGGER IF EXISTS trg_{table}_append_only ON {table};
-        CREATE TRIGGER trg_{table}_append_only
-        BEFORE UPDATE OR DELETE ON {table}
-        FOR EACH ROW EXECUTE FUNCTION prevent_reliability_append_only_mutation();
-        """)'''
+        f'''    op.execute("""
+    DROP TRIGGER IF EXISTS trg_{table}_append_only ON {table};
+    CREATE TRIGGER trg_{table}_append_only
+    BEFORE UPDATE OR DELETE ON {table}
+    FOR EACH ROW EXECUTE FUNCTION prevent_reliability_append_only_mutation();
+    """)'''
         for table in protected_tables
     )
     drop_trigger_sql = "\n".join(
-        f'''        op.execute("DROP TRIGGER IF EXISTS trg_{table}_append_only ON {table}")'''
+        f'''    op.execute("DROP TRIGGER IF EXISTS trg_{table}_append_only ON {table}")'''
         for table in protected_tables
     )
     return f'''
