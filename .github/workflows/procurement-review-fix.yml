@@ -1,11 +1,11 @@
 name: Procurement Review Fix
 
 on:
-  push:
+  pull_request:
     branches:
       - agent/procurement-ui-document-controls
     paths:
-      - .github/workflows/procurement-review-fix.yml
+      - .github/procurement-review-fix.trigger
 
 permissions:
   contents: write
@@ -65,21 +65,18 @@ jobs:
           ''',
               '',
           )
-
           replace_once(
               models,
               '    legacy_purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True)\n',
               '',
           )
-
           replace_once(
               document_service,
               'DOCUMENT_ROOT = Path(os.getenv("PROCUREMENT_DOCUMENT_DIR", "uploads/procurement-documents")).resolve()',
               'DOCUMENT_ROOT = Path(os.getenv("PROCUREMENT_DOCUMENT_DIR", "/srv/amo/uploads/procurement-documents")).resolve()',
           )
 
-          env_text = env_file.read_text(encoding="utf-8")
-          if "PROCUREMENT_DOCUMENT_DIR=" not in env_text:
+          if "PROCUREMENT_DOCUMENT_DIR=" not in env_file.read_text(encoding="utf-8"):
               replace_once(
                   env_file,
                   'EHM_LOG_UPLOAD_DIR=/srv/amo/uploads/ehm\n',
@@ -142,18 +139,10 @@ def test_requisition_actions_match_backend_lifecycle():
         assert f'item.id, "{action}"' in sections
 ''', encoding="utf-8")
 
-          checks = {
-              "legacy helper": "assert_legacy_purchase_order_eligible",
-              "legacy PO field": "legacy_purchase_order_id",
-              "sourcing bypass": 'elif action == "SEND_TO_SOURCING"',
-          }
-          procurement_sources = "\n".join(
-              path.read_text(encoding="utf-8")
-              for path in [service, models]
-          )
-          for label, token in checks.items():
-              if token in procurement_sources:
-                  raise SystemExit(f"{label} remains: {token}")
+          combined = service.read_text(encoding="utf-8") + models.read_text(encoding="utf-8")
+          for token in ["assert_legacy_purchase_order_eligible", "legacy_purchase_order_id", 'elif action == "SEND_TO_SOURCING"']:
+              if token in combined:
+                  raise SystemExit(f"Forbidden legacy or bypass token remains: {token}")
           if 'item.id, "TECHNICAL_REVIEW"' in sections.read_text(encoding="utf-8"):
               raise SystemExit("Unsupported frontend TECHNICAL_REVIEW action remains")
           PY
