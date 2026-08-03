@@ -1,13 +1,13 @@
 """Add controlled procurement document evidence.
 
-Revision ID: procurement_20260803_document_evidence
+Revision ID: proc_doc_evidence_20260803
 Revises: procurement_20260803_full_domain
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "procurement_20260803_document_evidence"
+revision = "proc_doc_evidence_20260803"
 down_revision = "procurement_20260803_full_domain"
 branch_labels = None
 depends_on = None
