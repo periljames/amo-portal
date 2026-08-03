@@ -1,0 +1,58 @@
+name: Diagnose Complete Reliability Frontend
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.frontend-diagnostic-v2-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  frontend:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Run complete frontend diagnostic
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-front
+          declare -A C
+          run() { local n="$1"; shift; "$@" >"/tmp/rel-front/$n.log" 2>&1; C[$n]=$?; echo "$n=${C[$n]}"; }
+          run service bash -lc 'cd frontend && node scripts/complete-reliability-service.mjs'
+          run workspace bash -lc 'cd frontend && node scripts/complete-reliability-workspace.mjs'
+          run sod bash -lc 'cd frontend && node scripts/strengthen-reliability-sod.mjs'
+          run css bash -lc 'cd frontend && node scripts/complete-reliability-css.mjs'
+          run install bash -lc 'cd frontend && npm ci --no-audit --no-fund'
+          run navigation bash -lc 'cd frontend && npm run test:tenant-shell'
+          run lint bash -lc 'cd frontend && npx eslint src/services/reliability.ts src/pages/reliability/ReliabilityWorkspacePage.tsx src/pages/reliability/ReliabilityAdvancedViews.tsx src/pages/reliability/ReliabilityReportsView.tsx src/app/PortalRouteSurface.tsx src/app/portalRouteManifest.ts src/app/portalRouteManifest.test.ts src/app/routePreload.ts'
+          run build bash -lc 'cd frontend && npm run build'
+          run contracts bash -lc '! grep -R "/reliability/v2" frontend/src --exclude-dir=node_modules && test ! -e frontend/src/services/reliabilityV2.ts && test ! -e frontend/src/pages/ReliabilityReportsPage.tsx && grep -q "reliability-compliance" frontend/src/app/portalRouteManifest.ts && grep -q "ReliabilityAdvancedView" frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx'
+          {
+            echo '# Complete Reliability Frontend Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            for n in service workspace sod css install navigation lint build contracts; do echo "| $n | ${C[$n]:-999} |"; done
+            for n in service workspace sod css navigation lint build contracts; do echo; echo "## $n"; echo '```text'; tail -n 180 "/tmp/rel-front/$n.log"; echo '```'; done
+          } > docs/reliability/FRONTEND_COMPLETE_DIAGNOSTIC.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reliability/FRONTEND_COMPLETE_DIAGNOSTIC.md
+          git commit -m "Record complete Reliability frontend diagnostic"
+          git push origin HEAD:agent/reliability-v2-foundation
