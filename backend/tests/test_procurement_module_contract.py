@@ -7,6 +7,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 PROCUREMENT = BACKEND / "amodb" / "apps" / "procurement"
 FRONTEND = BACKEND.parent / "frontend" / "src"
+DOC = BACKEND.parent / "docs" / "procurement-module.md"
 
 
 def _read(path: Path) -> str:
@@ -35,7 +36,7 @@ def test_receiving_is_quarantined_until_quality_release() -> None:
     assert 'condition=inventory_models.InventoryConditionEnum.SERVICEABLE' in service
     assert service.index('condition=inventory_models.InventoryConditionEnum.SERVICEABLE') > service.index('def release_receipt(')
     assert 'models.InventoryConditionEnum.QUARANTINE' in inventory_schemas
-    assert inventory_router.count('condition = models.InventoryConditionEnum.QUARANTINE') >= 2
+    assert inventory_router.count('condition = models.InventoryConditionEnum.QUARANTINE') >= 1
 
 
 def test_segregation_of_duties_is_backend_enforced() -> None:
@@ -46,39 +47,42 @@ def test_segregation_of_duties_is_backend_enforced() -> None:
     assert 'The receiver cannot release the same receipt.' in service
 
 
-def test_supplier_quality_gate_covers_new_and_legacy_orders() -> None:
+def test_supplier_quality_gate_is_canonical() -> None:
     service = _read(PROCUREMENT / "service.py")
     inventory_router = _read(BACKEND / "amodb" / "apps" / "inventory" / "router.py")
+    models = _read(PROCUREMENT / "models.py")
 
     assert 'def assert_supplier_eligible(' in service
-    assert 'def assert_legacy_purchase_order_eligible(' in service
-    assert 'procurement_service.assert_legacy_purchase_order_eligible' in inventory_router
     assert 'Supplier approval scope does not cover every purchase-order category.' in service
     assert 'Supplier has an active Quality hold.' in service
+    assert 'assert_legacy_purchase_order_eligible' not in service
+    assert 'legacy_purchase_order_id' not in models
+    assert '/purchasing/' not in inventory_router
 
 
-def test_module_exposes_manageable_department_routes() -> None:
+def test_module_exposes_only_canonical_department_routes() -> None:
     router = _read(PROCUREMENT / "router.py")
     frontend_router = _read(FRONTEND / "router.tsx")
     module = _read(FRONTEND / "pages" / "procurement" / "ProcurementModule.tsx")
+    department_access = _read(FRONTEND / "utils" / "departmentAccess.ts")
 
     assert 'prefix="/api/maintenance/{amo_code}/procurement"' in router
     for endpoint in [
-        '"/dashboard"',
-        '"/reference-data"',
-        '"/requisitions"',
-        '"/rfqs"',
-        '"/quotes"',
-        '"/purchase-orders"',
-        '"/receipts"',
-        '"/suppliers"',
-        '"/quality-holds"',
-        '"/finance/three-way-match"',
+        '"/dashboard"', '"/reference-data"', '"/requisitions"', '"/rfqs"',
+        '"/quotes"', '"/purchase-orders"', '"/receipts"', '"/suppliers"',
+        '"/quality-holds"', '"/finance/three-way-match"',
     ]:
         assert endpoint in router
 
-    assert 'parts[2] === "procurement" || parts[2] === "stores"' in frontend_router
-    for label in ["Home", "Requests", "Sourcing", "Orders", "Receiving", "Suppliers", "Control"]:
+    assert 'parts[2] === "procurement"' in frontend_router
+    assert 'parts[2] === "procurement" || parts[2] === "stores"' not in frontend_router
+    assert 'part === "stores"' not in module
+    assert 'activeDepartment="procurement"' in module
+    assert '{ id: "procurement", label: "Procurement & Supply Chain" }' in department_access
+    assert '{ id: "stores", label: "Stores & Inventory" }' in department_access
+    assert 'case "PROCUREMENT_OFFICER":' in department_access
+    assert 'return "procurement"' in department_access
+    for label in ["Command", "Requests", "Sourcing", "Orders", "Receiving", "Suppliers", "Quality Control", "Documents"]:
         assert f'label: "{label}"' in module
 
 
@@ -87,15 +91,20 @@ def test_cross_module_linkage_is_explicit() -> None:
     module = _read(FRONTEND / "pages" / "procurement" / "ProcurementModule.tsx")
 
     for foreign_table in [
-        'ForeignKey("vendors.id"',
-        'ForeignKey("inventory_parts.id"',
-        'ForeignKey("inventory_locations.id"',
-        'ForeignKey("work_orders.id"',
-        'ForeignKey("task_cards.id"',
-        'ForeignKey("aircraft.serial_number"',
+        'ForeignKey("vendors.id"', 'ForeignKey("inventory_parts.id"',
+        'ForeignKey("inventory_locations.id"', 'ForeignKey("work_orders.id"',
+        'ForeignKey("task_cards.id"', 'ForeignKey("aircraft.serial_number"',
         'ForeignKey("inventory_movement_ledger.id"',
     ]:
         assert foreign_table in models
 
-    for workspace in ["planning", "production", "maintenance", "quality", "finance"]:
+    for workspace in ["planning", "production", "maintenance", "quality", "finance", "documents"]:
         assert workspace in module
+
+
+def test_documented_scope_is_complete() -> None:
+    doc = _read(DOC)
+    assert 'Stores remains a separate inventory and custody department' in doc
+    assert 'compatibility alias' not in doc
+    assert 'deprecated' not in doc
+    assert doc.count('- [x]') >= 13
