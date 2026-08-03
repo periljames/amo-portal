@@ -6,8 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 
 from amodb.apps.accounts import admin_profile_router as profile_router
+from amodb.apps.accounts.admin_profile_concurrency import serialized_approval_count
 from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
 from amodb.apps.accounts.admin_profile_router import (
     REQUIRED_SCHEMA_TABLES,
@@ -17,6 +19,7 @@ from amodb.apps.accounts.admin_profile_router import (
     _is_implicit_admin,
     _is_management_approver,
 )
+from amodb.apps.accounts.router_admin import router as protected_admin_router
 
 
 def actor(**overrides):
@@ -70,6 +73,12 @@ def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
     assert _as_utc(aware) == aware
 
 
+def test_admin_profile_module_remains_importable_for_monkeypatching() -> None:
+    assert hasattr(profile_router, "inspect")
+    assert hasattr(profile_router, "_admin_profile_active")
+    assert hasattr(profile_router, "router")
+
+
 def test_admin_profile_schema_check_accepts_migrated_tables_without_runtime_ddl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -97,6 +106,23 @@ def test_admin_profile_schema_check_fails_closed_when_migration_is_missing(
     assert exc.value.detail["code"] == "ADMIN_PROFILE_SCHEMA_NOT_MIGRATED"
     assert sorted(exc.value.detail["missing_tables"]) == sorted(REQUIRED_SCHEMA_TABLES)
     db.execute.assert_not_called()
+
+
+def test_all_registered_tenant_admin_routes_have_profile_dependency() -> None:
+    normal_routes = [
+        route
+        for route in protected_admin_router.routes
+        if isinstance(route, APIRoute) and "/admin-profile/" not in route.path
+    ]
+    assert normal_routes
+    unprotected = [
+        route.path
+        for route in normal_routes
+        if require_active_admin_profile not in {
+            dependency.call for dependency in route.dependant.dependencies
+        }
+    ]
+    assert unprotected == []
 
 
 def test_profile_governance_routes_are_the_only_tenant_admin_exemption() -> None:
@@ -143,3 +169,31 @@ def test_platform_superuser_stays_on_separate_control_plane() -> None:
         db,
     ) is current
     db.execute.assert_not_called()
+
+
+def test_postgres_approval_count_locks_grant_before_counting() -> None:
+    db = MagicMock()
+    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    lock_result = MagicMock()
+    count_result = MagicMock()
+    count_result.scalar.return_value = 2
+    db.execute.side_effect = [lock_result, count_result]
+
+    assert serialized_approval_count(db, "grant-1") == 2
+
+    lock_sql = str(db.execute.call_args_list[0].args[0]).upper()
+    count_sql = str(db.execute.call_args_list[1].args[0]).upper()
+    assert "FOR UPDATE" in lock_sql
+    assert "COUNT(DISTINCT APPROVER_USER_ID)" in count_sql
+
+
+def test_sqlite_approval_count_avoids_unsupported_row_lock() -> None:
+    db = MagicMock()
+    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    count_result = MagicMock()
+    count_result.scalar.return_value = 1
+    db.execute.return_value = count_result
+
+    assert serialized_approval_count(db, "grant-1") == 1
+    assert db.execute.call_count == 1
+    assert "FOR UPDATE" not in str(db.execute.call_args.args[0]).upper()
