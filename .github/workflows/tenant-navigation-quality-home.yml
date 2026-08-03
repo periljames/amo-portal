@@ -3,12 +3,16 @@ name: Tenant Navigation and Quality Home CI
 on:
   pull_request:
     paths:
+      - "backend/amodb/apps/accounts/admin_profile_guard.py"
       - "backend/amodb/apps/accounts/admin_profile_router.py"
       - "backend/amodb/apps/accounts/__init__.py"
       - "backend/amodb/apps/accounts/tests/test_admin_profile_governance.py"
       - "backend/amodb/apps/quality/tenant_security.py"
       - "backend/amodb/apps/quality/tests/test_tenant_route_isolation.py"
       - "frontend/src/App.tsx"
+      - "frontend/src/router.tsx"
+      - "frontend/src/portalRoutes.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/app/TenantRouteBoundary.tsx"
       - "frontend/src/app/portalRouteManifest.ts"
       - "frontend/src/app/portalRouteManifest.test.ts"
@@ -61,6 +65,8 @@ jobs:
         run: >-
           npm exec -- eslint
           src/App.tsx
+          src/router.tsx
+          src/app/PortalRouteSurface.tsx
           src/app/TenantRouteBoundary.tsx
           src/app/portalRouteManifest.ts
           src/app/portalRouteManifest.test.ts
@@ -96,6 +102,7 @@ jobs:
       - name: Compile administration and tenant security modules
         run: >-
           python -m compileall -q
+          amodb/apps/accounts/admin_profile_guard.py
           amodb/apps/accounts/admin_profile_router.py
           amodb/apps/accounts/__init__.py
           amodb/apps/quality/tenant_security.py
