@@ -87,7 +87,7 @@ fs.writeFileSync(workspacePath, workspace.replace(/\s+$/, "") + "\n", "utf8");
 
 const advancedPath = path.join(root, "src/pages/reliability/ReliabilityAdvancedViews.tsx");
 let advanced = fs.readFileSync(advancedPath, "utf8");
-advanced = advanced.replace("  transitionReliabilityAiReview,\n", "  decideReliabilityAiReview,\n");
+advanced = advanced.replace("  transitionReliabilityAiReview,\n", "");
 advanced = advanced.replaceAll("transitionReliabilityAiReview(", "decideReliabilityAiReview(");
 fs.writeFileSync(advancedPath, advanced.replace(/\s+$/, "") + "\n", "utf8");
 
