@@ -56,6 +56,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: frontend
+      - name: Apply deterministic blocker fixes
+        run: python backend/scripts/fix_reliability_completion_blockers.py
+      - name: Widen Alembic revision storage for existing long revision IDs
+        run: |
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_diagnostic -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE IF NOT EXISTS alembic_version (
+            version_num varchar(255) NOT NULL PRIMARY KEY
+          );
+          ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255);
+          SQL
       - name: Run deterministic completion diagnostic
         continue-on-error: true
         run: python backend/scripts/run_reliability_completion_diagnostic.py
