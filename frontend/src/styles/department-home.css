@@ -12,6 +12,20 @@
   flex-wrap: wrap;
 }
 
+.department-home__live-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 0 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 44%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-success) 10%, var(--surface-elevated));
+  color: var(--accent-success);
+  font-size: 0.62rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .department-home__button {
   display: inline-flex;
   align-items: center;
@@ -81,14 +95,8 @@
   background: var(--surface-elevated);
 }
 
-.department-home__metric > svg {
-  color: var(--accent-primary);
-}
-
-.department-home__metric > span {
-  display: grid;
-  min-width: 0;
-}
+.department-home__metric > svg { color: var(--accent-primary); }
+.department-home__metric > span { display: grid; min-width: 0; }
 .department-home__metric strong { font-size: 1.18rem; line-height: 1; }
 .department-home__metric small { margin-top: 0.22rem; color: var(--text-secondary); font-size: 0.63rem; line-height: 1.25; }
 .department-home__metric--danger { border-left: 3px solid var(--accent-danger); }
@@ -131,10 +139,7 @@
 
 .department-home__list,
 .department-home__alerts,
-.department-home__quick-actions {
-  display: grid;
-  min-width: 0;
-}
+.department-home__quick-actions { display: grid; min-width: 0; }
 
 .department-home__list > button,
 .department-home__quick-actions > button {
@@ -207,10 +212,7 @@
 .department-home__alert svg { color: var(--accent-warning); }
 .department-home__alert--danger svg { color: var(--accent-danger); }
 
-.department-home__activity {
-  display: grid;
-  gap: 0.42rem;
-}
+.department-home__activity { display: grid; gap: 0.42rem; }
 .department-home__activity-item {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr);
@@ -241,6 +243,9 @@
   text-align: center;
 }
 
+.department-home__spin { animation: department-home-spin 0.8s linear infinite; }
+@keyframes department-home-spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 1200px) {
   .department-home__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .department-home__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -254,4 +259,8 @@
 
 @media (max-width: 440px) {
   .department-home__metrics { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .department-home__spin { animation: none; }
 }
