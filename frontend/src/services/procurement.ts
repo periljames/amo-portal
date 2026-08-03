@@ -1,6 +1,11 @@
 import { apiRequest } from "./apiClient";
+import { authHeaders } from "./auth";
+import { getApiBaseUrl } from "./config";
 import type {
   ProcurementDashboard,
+  ProcurementDocument,
+  ProcurementDocumentEntityType,
+  ProcurementDocumentUpload,
   ProcurementPurchaseOrder,
   ProcurementReferenceData,
   ProcurementQualityHold,
@@ -194,4 +199,74 @@ export function createProcurementInvoiceMatch(
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return apiRequest(`${base(amoCode)}/finance/three-way-match`, json("POST", payload));
+}
+
+export function listProcurementDocuments(
+  amoCode: string,
+  filters: { entityType?: ProcurementDocumentEntityType; entityId?: string; activeOnly?: boolean } = {},
+): Promise<ProcurementDocument[]> {
+  const params = new URLSearchParams();
+  if (filters.entityType) params.set("entity_type", filters.entityType);
+  if (filters.entityId) params.set("entity_id", filters.entityId);
+  if (filters.activeOnly === false) params.set("active_only", "false");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiRequest<ProcurementDocument[]>(`${base(amoCode)}/documents${suffix}`, { cacheTtlMs: 0 });
+}
+
+export function uploadProcurementDocument(
+  amoCode: string,
+  payload: ProcurementDocumentUpload,
+): Promise<ProcurementDocument> {
+  const body = new FormData();
+  body.append("entity_type", payload.entityType);
+  body.append("entity_id", payload.entityId);
+  body.append("document_type", payload.documentType);
+  body.append("title", payload.title);
+  body.append("source", payload.source);
+  if (payload.documentNumber) body.append("document_number", payload.documentNumber);
+  if (payload.revision) body.append("revision", payload.revision);
+  if (payload.documentDate) body.append("document_date", payload.documentDate);
+  if (payload.notes) body.append("notes", payload.notes);
+  body.append("is_quality_evidence", String(Boolean(payload.isQualityEvidence)));
+  if (payload.qmsReference) body.append("qms_reference", payload.qmsReference);
+  body.append("file", payload.file, payload.file.name);
+  return apiRequest<ProcurementDocument>(`${base(amoCode)}/documents`, {
+    method: "POST",
+    body,
+    timeoutMs: 90_000,
+  });
+}
+
+export function voidProcurementDocument(
+  amoCode: string,
+  documentId: number,
+  reason: string,
+): Promise<ProcurementDocument> {
+  return apiRequest<ProcurementDocument>(
+    `${base(amoCode)}/documents/${documentId}/void`,
+    json("POST", { reason }),
+  );
+}
+
+export async function downloadProcurementDocument(
+  amoCode: string,
+  document: ProcurementDocument,
+): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}${base(amoCode)}/documents/${document.id}/download`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(body?.detail || "The retained document could not be downloaded.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = document.original_filename;
+  window.document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
