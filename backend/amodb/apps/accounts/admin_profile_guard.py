@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -15,12 +16,31 @@ from . import models
 PROFILE_ROUTE_MARKER = "/accounts/admin/admin-profile/"
 
 
+def _mark_request_as_admin_profile(user: models.User) -> None:
+    """Expose elevation to legacy dependencies without persisting role changes.
+
+    Existing administration handlers still depend on `require_admin` or
+    `require_roles(..., AMO_ADMIN)`. FastAPI resolves this router dependency
+    first and reuses the same current-user object for later dependencies.
+    `set_committed_value` changes only the request-scoped ORM identity state and
+    does not mark the mapped role fields dirty for database persistence.
+    """
+    try:
+        set_committed_value(user, "is_amo_admin", True)
+        set_committed_value(user, "role", models.AccountRole.AMO_ADMIN)
+    except Exception:
+        # Lightweight test doubles are not SQLAlchemy-mapped instances.
+        setattr(user, "is_amo_admin", True)
+        setattr(user, "role", models.AccountRole.AMO_ADMIN)
+    setattr(user, "_admin_profile_elevated", True)
+
+
 def require_active_admin_profile(
     request: Request,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> models.User:
-    """Protect every tenant administration API with an active elevated session.
+    """Protect every tenant administration API with active governed elevation.
 
     The profile state/activation/deactivation and grant-governance endpoints are
     exempt because they are the controlled entry point into elevation. Platform
@@ -38,24 +58,36 @@ def require_active_admin_profile(
             detail="A tenant identity is required for administration.",
         )
 
+    now = datetime.now(timezone.utc)
     try:
         session = db.execute(
             text(
                 """
-                SELECT id
-                FROM admin_profile_sessions
-                WHERE amo_id = :amo_id
-                  AND user_id = :user_id
-                  AND revoked_at IS NULL
-                  AND expires_at > :now
-                ORDER BY activated_at DESC
+                SELECT s.id
+                FROM admin_profile_sessions s
+                LEFT JOIN admin_access_grants g ON g.id = s.grant_id
+                WHERE s.amo_id = :amo_id
+                  AND s.user_id = :user_id
+                  AND s.revoked_at IS NULL
+                  AND s.expires_at > :now
+                  AND (
+                    s.grant_id IS NULL
+                    OR (
+                      g.amo_id = s.amo_id
+                      AND g.user_id = s.user_id
+                      AND g.status = 'ACTIVE'
+                      AND (g.valid_from IS NULL OR g.valid_from <= :now)
+                      AND (g.valid_until IS NULL OR g.valid_until > :now)
+                    )
+                  )
+                ORDER BY s.activated_at DESC
                 LIMIT 1
                 """
             ),
             {
                 "amo_id": str(amo_id),
                 "user_id": str(current_user.id),
-                "now": datetime.now(timezone.utc),
+                "now": now,
             },
         ).first()
     except SQLAlchemyError as exc:
@@ -69,4 +101,6 @@ def require_active_admin_profile(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Activate Admin profile before using tenant administration APIs.",
         )
+
+    _mark_request_as_admin_profile(current_user)
     return current_user
