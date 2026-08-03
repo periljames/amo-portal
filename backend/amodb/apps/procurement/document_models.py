@@ -78,7 +78,7 @@ class ProcurementDocument(Base):
     stored_path = Column(Text, nullable=True)
     mime_type = Column(String(128), nullable=True)
     size_bytes = Column(BigInteger, nullable=True)
-    sha256 = Column(String(64), nullable=True, index=True)
+    sha256 = Column(String(64), nullable=True)
 
     physical_reference = Column(String(255), nullable=True, index=True)
     physical_location = Column(String(255), nullable=True)
