@@ -235,6 +235,10 @@ class EffectivenessReviewCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=12000)
 
 
+class EffectivenessReviewApproval(BaseModel):
+    rationale: str = Field(min_length=5, max_length=12000)
+
+
 class EffectivenessReviewRead(ORMModel):
     id: str
     lifecycle_id: str

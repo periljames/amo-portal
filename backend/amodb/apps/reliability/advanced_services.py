@@ -1187,7 +1187,6 @@ def create_effectiveness_review(
     case_id: int,
     payload: schemas.EffectivenessReviewCreate,
     actor_user_id: str,
-    approve: bool,
 ) -> domain.ReliabilityEffectivenessReview:
     lifecycle = ensure_fracas_lifecycle(db, amo_id=amo_id, case_id=case_id, actor_user_id=actor_user_id)
     if lifecycle.stage not in {"EFFECTIVENESS", "REOPENED", "CLOSED"}:
@@ -1204,8 +1203,8 @@ def create_effectiveness_review(
         evidence_json=payload.evidence_json,
         notes=payload.notes,
         reviewer_user_id=actor_user_id,
-        approved_by_user_id=actor_user_id if approve else None,
-        approved_at=utcnow() if approve else None,
+        approved_by_user_id=None,
+        approved_at=None,
     )
     db.add(review)
     db.flush()
@@ -1215,7 +1214,49 @@ def create_effectiveness_review(
         entity_type="FRACAS_CASE",
         entity_id=str(case_id),
         action="EFFECTIVENESS_REVIEW_RECORDED",
-        payload={"review_id": review.id, "outcome": review.outcome, "approved": bool(review.approved_at)},
+        payload={"review_id": review.id, "outcome": review.outcome, "approved": False},
+        actor_user_id=actor_user_id,
+    )
+    db.commit()
+    db.refresh(review)
+    return review
+
+
+def approve_effectiveness_review(
+    db: Session,
+    *,
+    amo_id: str,
+    case_id: int,
+    review_id: str,
+    rationale: str,
+    actor_user_id: str,
+) -> domain.ReliabilityEffectivenessReview:
+    lifecycle = ensure_fracas_lifecycle(db, amo_id=amo_id, case_id=case_id, actor_user_id=actor_user_id)
+    review = (
+        db.query(domain.ReliabilityEffectivenessReview)
+        .filter(
+            domain.ReliabilityEffectivenessReview.amo_id == amo_id,
+            domain.ReliabilityEffectivenessReview.lifecycle_id == lifecycle.id,
+            domain.ReliabilityEffectivenessReview.id == review_id,
+        )
+        .first()
+    )
+    if not review:
+        raise HTTPException(status_code=404, detail="Effectiveness review not found.")
+    if review.approved_at:
+        raise HTTPException(status_code=409, detail="Effectiveness review is already approved.")
+    if str(review.reviewer_user_id) == str(actor_user_id):
+        raise HTTPException(status_code=409, detail="The effectiveness reviewer cannot approve their own review.")
+    review.approved_by_user_id = actor_user_id
+    review.approved_at = utcnow()
+    review.notes = f"{review.notes or ''}\nApproval rationale: {rationale}".strip()
+    append_audit(
+        db,
+        amo_id=amo_id,
+        entity_type="FRACAS_CASE",
+        entity_id=str(case_id),
+        action="EFFECTIVENESS_REVIEW_APPROVED",
+        payload={"review_id": review.id, "outcome": review.outcome, "rationale": rationale},
         actor_user_id=actor_user_id,
     )
     db.commit()
@@ -1357,6 +1398,8 @@ def transition_programme_version(
     if payload.to_status not in PROGRAMME_TRANSITIONS.get(version.status, set()):
         raise HTTPException(status_code=409, detail=f"Programme transition {version.status} -> {payload.to_status} is not permitted.")
     if payload.to_status == "APPROVED":
+        if str(version.created_by_user_id) == str(actor_user_id):
+            raise HTTPException(status_code=409, detail="The programme-version author cannot approve their own version.")
         metric_count = db.query(func.count(domain.ReliabilityMetricDefinition.id)).filter(
             domain.ReliabilityMetricDefinition.programme_version_id == version.id,
             domain.ReliabilityMetricDefinition.active.is_(True),
@@ -1503,6 +1546,7 @@ def create_threshold(
         minimum_exposure=payload.minimum_exposure,
         rationale=payload.rationale,
         effective_from=payload.effective_from,
+        created_by_user_id=actor_user_id,
     )
     db.add(threshold)
     try:
@@ -1560,6 +1604,8 @@ def transition_threshold(
     }
     if payload.to_status not in allowed.get(threshold.status, set()):
         raise HTTPException(status_code=409, detail=f"Threshold transition {threshold.status} -> {payload.to_status} is not permitted.")
+    if payload.to_status in {"APPROVED", "EFFECTIVE"} and str(threshold.created_by_user_id) == str(actor_user_id):
+        raise HTTPException(status_code=409, detail="The threshold author cannot approve or activate their own threshold.")
     old = threshold.status
     threshold.status = payload.to_status
     if payload.to_status in {"APPROVED", "EFFECTIVE"}:
@@ -1929,9 +1975,12 @@ def _metric_scopes(db: Session, *, amo_id: str, metric: domain.ReliabilityMetric
     if metric.scope_type == "FLEET":
         return ["FLEET"]
     if metric.scope_type == "AIRCRAFT":
-        return [str(item) for item in db.query(fleet_models.Aircraft.serial_number).filter(
-            fleet_models.Aircraft.amo_id == amo_id, fleet_models.Aircraft.is_active.is_(True)
-        ).scalars().all()]
+        return [
+            str(row[0])
+            for row in db.query(fleet_models.Aircraft.serial_number)
+            .filter(fleet_models.Aircraft.amo_id == amo_id, fleet_models.Aircraft.is_active.is_(True))
+            .all()
+        ]
     column = {
         "ATA": legacy.ReliabilityEvent.ata_chapter,
         "COMPONENT": legacy.ReliabilityEvent.part_number,
@@ -1939,9 +1988,13 @@ def _metric_scopes(db: Session, *, amo_id: str, metric: domain.ReliabilityMetric
     }.get(metric.scope_type)
     if column is None:
         return ["FLEET"]
-    return [str(item) for item in db.query(column).filter(
-        legacy.ReliabilityEvent.amo_id == amo_id, column.isnot(None)
-    ).distinct().scalars().all()]
+    return [
+        str(row[0])
+        for row in db.query(column)
+        .filter(legacy.ReliabilityEvent.amo_id == amo_id, column.isnot(None))
+        .distinct()
+        .all()
+    ]
 
 
 def run_due_metrics(
@@ -2009,9 +2062,12 @@ def analytics(
     if scope_type == "FLEET":
         scope_ids = ["FLEET"]
     elif scope_type == "AIRCRAFT":
-        scope_ids = [str(item) for item in db.query(fleet_models.Aircraft.serial_number).filter(
-            fleet_models.Aircraft.amo_id == amo_id, fleet_models.Aircraft.is_active.is_(True)
-        ).scalars().all()]
+        scope_ids = [
+            str(row[0])
+            for row in db.query(fleet_models.Aircraft.serial_number)
+            .filter(fleet_models.Aircraft.amo_id == amo_id, fleet_models.Aircraft.is_active.is_(True))
+            .all()
+        ]
     else:
         column = {
             "ATA": legacy.ReliabilityEvent.ata_chapter,
@@ -2020,9 +2076,13 @@ def analytics(
         }.get(scope_type)
         if column is None:
             raise HTTPException(status_code=422, detail="Unsupported analytics scope.")
-        scope_ids = [str(item) for item in db.query(column).filter(
-            legacy.ReliabilityEvent.amo_id == amo_id, column.isnot(None)
-        ).distinct().scalars().all()]
+        scope_ids = [
+            str(row[0])
+            for row in db.query(column)
+            .filter(legacy.ReliabilityEvent.amo_id == amo_id, column.isnot(None))
+            .distinct()
+            .all()
+        ]
     rows: List[schemas.AnalyticsRow] = []
     fleet_size = db.query(func.count(fleet_models.Aircraft.serial_number)).filter(
         fleet_models.Aircraft.amo_id == amo_id, fleet_models.Aircraft.is_active.is_(True)
@@ -2151,6 +2211,8 @@ def transition_meeting(
     if payload.to_status == "HELD" and not meeting.attendees_json:
         raise HTTPException(status_code=409, detail="Meeting attendees must be recorded.")
     if payload.to_status == "APPROVED":
+        if str(meeting.chaired_by_user_id) == str(actor_user_id):
+            raise HTTPException(status_code=409, detail="The meeting chair cannot independently approve their own minutes.")
         meeting.minutes = payload.minutes or meeting.minutes
         if not meeting.minutes:
             raise HTTPException(status_code=409, detail="Meeting minutes are required before approval.")
@@ -2310,6 +2372,8 @@ def transition_change(
         raise HTTPException(status_code=404, detail="Change proposal not found.")
     if payload.to_status not in CHANGE_TRANSITIONS.get(proposal.status, set()):
         raise HTTPException(status_code=409, detail=f"Change transition {proposal.status} -> {payload.to_status} is not permitted.")
+    if payload.to_status == "APPROVED" and str(proposal.created_by_user_id) == str(actor_user_id):
+        raise HTTPException(status_code=409, detail="The change author cannot approve their own proposal.")
     if payload.to_status in {"APPROVED", "IMPLEMENTED"} and not proposal.impact_assessment_json:
         raise HTTPException(status_code=409, detail="A controlled impact assessment is required.")
     if payload.to_status == "IMPLEMENTED" and not proposal.simulation_json:
@@ -2469,7 +2533,11 @@ def create_authority_submission(
 ) -> domain.ReliabilityAuthoritySubmission:
     if not any([payload.programme_version_id, payload.change_proposal_id, payload.meeting_id]):
         raise HTTPException(status_code=422, detail="An authority submission must reference a programme version, change or meeting.")
-    submission = domain.ReliabilityAuthoritySubmission(amo_id=amo_id, **payload.model_dump())
+    submission = domain.ReliabilityAuthoritySubmission(
+        amo_id=amo_id,
+        created_by_user_id=actor_user_id,
+        **payload.model_dump(),
+    )
     db.add(submission)
     db.flush()
     append_audit(
@@ -2517,6 +2585,8 @@ def transition_authority_submission(
     if payload.to_status == "SUBMITTED":
         if submission.status != "READY":
             raise HTTPException(status_code=409, detail="Only a READY package can be submitted.")
+        if str(submission.created_by_user_id) == str(actor_user_id):
+            raise HTTPException(status_code=409, detail="The authority-package preparer cannot submit their own package.")
         submission.submitted_by_user_id = actor_user_id
         submission.submitted_at = utcnow()
     if payload.to_status in {"ACCEPTED", "REJECTED"}:
@@ -2710,6 +2780,8 @@ def decide_ai_review(
         raise HTTPException(status_code=404, detail="AI review not found.")
     if review.status not in {"DRAFT", "REVIEWED"}:
         raise HTTPException(status_code=409, detail="This AI review already has a final human decision.")
+    if str(review.created_by_user_id) == str(actor_user_id):
+        raise HTTPException(status_code=409, detail="The AI-review requester cannot provide the final human disposition.")
     review.status = payload.decision
     review.review_notes = payload.review_notes
     review.reviewed_by_user_id = actor_user_id

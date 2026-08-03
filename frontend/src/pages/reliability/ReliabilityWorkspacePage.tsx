@@ -23,58 +23,28 @@ import {
   type ReliabilityWorkbench,
 } from "../../services/reliability";
 import ReliabilityReportsView from "./ReliabilityReportsView";
+import { FracasGovernancePanel, OccurrenceProvenancePanel, ReliabilityAdvancedView, type AdvancedReliabilityViewId } from "./ReliabilityAdvancedViews";
 import "../../styles/reliability-v2.css";
 
 type ViewId =
   | "workbench" | "events" | "alerts" | "cases" | "fleet" | "systems"
-  | "components" | "engines" | "program" | "changes" | "meetings"
-  | "data-quality" | "reports";
+  | "components" | "engines" | "calculations" | "program" | "changes"
+  | "handoffs" | "meetings" | "authority" | "ai" | "compliance"
+  | "sources" | "ingestion" | "data-quality" | "reports";
 
 type RouteState = { view: ViewId; entityId: number | null };
 
 const VIEWS = new Set<ViewId>([
   "workbench", "events", "alerts", "cases", "fleet", "systems", "components",
-  "engines", "program", "changes", "meetings", "data-quality", "reports",
+  "engines", "calculations", "program", "changes", "handoffs", "meetings",
+  "authority", "ai", "compliance", "sources", "ingestion", "data-quality", "reports",
 ]);
 
-const FOUNDATION: Partial<Record<ViewId, { title: string; purpose: string; available: string[]; next: string[] }>> = {
-  fleet: {
-    title: "Fleet reliability",
-    purpose: "Compare aircraft performance using exposure-aware evidence without treating missing data as good performance.",
-    available: ["Tenant-scoped occurrences", "Aircraft and engine identity", "Alert and FRACAS links"],
-    next: ["Fleet/aircraft KPI comparison", "Small-fleet uncertainty", "Tail evidence timelines"],
-  },
-  systems: {
-    title: "ATA system intelligence",
-    purpose: "Consolidate defects, removals, interruptions and corrective actions by ATA system and failure mode.",
-    available: ["ATA-coded occurrences", "Event search API", "Case and alert evidence"],
-    next: ["ATA Pareto and control charts", "Failure-mode taxonomy", "System disposition workflow"],
-  },
-  components: {
-    title: "Component reliability",
-    purpose: "Trace part and serial-number cohorts from installation through removal, shop finding, NFF and corrective action.",
-    available: ["Component instances", "Part movement ledger", "Removal records"],
-    next: ["MTBUR and survival analysis", "Vendor/batch cohorts", "Shop and warranty integration"],
-  },
-  program: {
-    title: "Controlled reliability programme",
-    purpose: "Version scope, regulatory profile, metrics, thresholds, reporting cadence and approval authority as one controlled programme.",
-    available: ["Programme templates", "KPI and threshold records", "Controlled report output"],
-    next: ["Approved programme versions", "CAMO/AMO responsibility matrix", "Formula effective dates"],
-  },
-  changes: {
-    title: "Programme change proposals",
-    purpose: "Convert accepted reliability evidence into controlled AMP, planning, supplier and maintenance changes.",
-    available: ["Recommendations", "FRACAS actions", "Work-order references"],
-    next: ["Impact simulation", "Approval and authority gates", "Effectiveness windows"],
-  },
-  meetings: {
-    title: "Reliability review meetings",
-    purpose: "Freeze a controlled data cut, record technical decisions and drive every action to accountable closure.",
-    available: ["Alerts", "FRACAS actions", "Report exports"],
-    next: ["Agenda generation", "Decision and dissent record", "Approved minutes and action register"],
-  },
-};
+const ADVANCED_VIEWS = new Set<AdvancedReliabilityViewId>([
+  "compliance", "sources", "ingestion", "data-quality", "fleet", "systems",
+  "components", "calculations", "program", "changes", "handoffs", "meetings",
+  "authority", "ai",
+]);
 
 function displayDate(value?: string | null): string {
   if (!value) return "—";
@@ -123,7 +93,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
     let active = true;
 
     async function load(): Promise<void> {
-      if (route.view === "workbench" || route.view === "data-quality") {
+      if (route.view === "workbench") {
         const data = await getReliabilityWorkbench(10);
         if (active) setWorkbench(data);
       } else if (route.view === "events") {
@@ -189,7 +159,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
             <h1>Reliability</h1>
             <p>Detection, technical investigation, corrective action and measured effectiveness.</p>
           </div>
-          <Link className="btn btn-secondary" to={route.view === "reports" ? basePath : `${basePath}/reports`}>{route.view === "reports" ? "Reliability workbench" : "Controlled reports"}</Link>
+          <div className="reliability-v2__actions"><Link className="btn btn-secondary" to={`${basePath}/compliance`}>Compliance control</Link><Link className="btn btn-secondary" to={route.view === "reports" ? basePath : `${basePath}/reports`}>{route.view === "reports" ? "Reliability workbench" : "Controlled reports"}</Link></div>
         </header>
 
 
@@ -231,14 +201,13 @@ type ViewProps = {
 function renderView(props: ViewProps): React.ReactNode {
   const { route, basePath } = props;
   if (route.view === "workbench") return props.workbench ? <Workbench data={props.workbench} basePath={basePath} /> : null;
-  if (route.view === "data-quality") return props.workbench ? <DataQuality items={props.workbench.data_freshness} /> : null;
-  if (route.view === "events") return props.event ? <EventDetail item={props.event} basePath={basePath} /> : <EventRegister rows={props.events} basePath={basePath} />;
+  if (route.view === "events") return props.event ? <><EventDetail item={props.event} basePath={basePath} /><OccurrenceProvenancePanel eventId={props.event.id} /></> : <EventRegister rows={props.events} basePath={basePath} />;
   if (route.view === "alerts") return props.alert ? <AlertDetail item={props.alert} basePath={basePath} /> : <AlertRegister rows={props.alerts} basePath={basePath} />;
-  if (route.view === "cases") return props.fracasCase ? <CaseDetail item={props.fracasCase} actions={props.actions} basePath={basePath} /> : <CaseRegister rows={props.cases} basePath={basePath} />;
+  if (route.view === "cases") return props.fracasCase ? <><CaseDetail item={props.fracasCase} actions={props.actions} basePath={basePath} /><FracasGovernancePanel caseId={props.fracasCase.id} /></> : <CaseRegister rows={props.cases} basePath={basePath} />;
   if (route.view === "engines") return <EngineRegister rows={props.engines} />;
   if (route.view === "reports") return <ReliabilityReportsView />;
-  const foundation = FOUNDATION[route.view];
-  return foundation ? <FoundationView {...foundation} /> : null;
+  if (ADVANCED_VIEWS.has(route.view as AdvancedReliabilityViewId)) return <ReliabilityAdvancedView view={route.view as AdvancedReliabilityViewId} basePath={basePath} />;
+  return null;
 }
 
 function Workbench({ data, basePath }: { data: ReliabilityWorkbench; basePath: string }) {
@@ -331,12 +300,5 @@ function FreshnessTable({ rows }: { rows: ReliabilityFreshness[] }) {
   return <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Source</th><th>Status</th><th>Latest record</th><th>Age</th><th>Issue</th></tr></thead><tbody>{rows.map((row) => <tr key={row.source}><td>{row.source}</td><td><span className={statusClass(row.status)}>{row.status}</span></td><td>{displayDate(row.latest_record_at)}</td><td>{row.age_days == null ? "—" : `${row.age_days} days`}</td><td>{row.detail || (row.issue_count ? `${row.issue_count} issues` : "None detected")}</td></tr>)}</tbody></table></div>;
 }
 
-function DataQuality({ items }: { items: ReliabilityFreshness[] }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="No data, no green" title="Reliability data assurance" /><p className="reliability-v2__lead">A missing or stale source is an operational condition, not a healthy result. Correct failed feeds before relying on fleet status.</p><FreshnessTable rows={items} /></section>;
-}
-
-function FoundationView({ title, purpose, available, next }: { title: string; purpose: string; available: string[]; next: string[] }) {
-  return <section className="reliability-v2__section reliability-v2__foundation"><p className="reliability-v2__eyebrow">Controlled V2 rollout</p><h2>{title}</h2><p className="reliability-v2__lead">{purpose}</p><div className="reliability-v2__foundation-grid"><div><h3>Available foundation</h3><ul>{available.map((item) => <li key={item}>{item}</li>)}</ul></div><div><h3>Next governed increment</h3><ul>{next.map((item) => <li key={item}>{item}</li>)}</ul></div></div><p className="reliability-v2__truth">No synthetic values are shown while the authoritative workflow and calculation evidence are being implemented.</p></section>;
-}
 
 export default ReliabilityWorkspacePage;

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, Optional, List
+from typing import Any, Dict, Literal, Optional, List
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -137,6 +137,23 @@ class ReliabilityEventCreate(BaseModel):
     ata_chapter: Optional[str] = None
     reference_code: Optional[str] = None
     source_system: Optional[str] = None
+    source_record_id: Optional[str] = None
+    source_payload_hash: Optional[str] = None
+    validation_status: str = "VALID"
+    validation_errors: List[Dict[str, Any]] = Field(default_factory=list)
+    provenance_json: Dict[str, Any] = Field(default_factory=dict)
+    operation_stage: Optional[str] = None
+    flight_number: Optional[str] = None
+    origin_station: Optional[str] = None
+    destination_station: Optional[str] = None
+    delay_minutes: Optional[int] = Field(default=None, ge=0)
+    mel_reference: Optional[str] = None
+    cdl_reference: Optional[str] = None
+    deferral_expires_at: Optional[datetime] = None
+    part_number: Optional[str] = None
+    component_serial_number: Optional[str] = None
+    confirmed_failure: Optional[bool] = None
+    repeat_key: Optional[str] = None
     description: Optional[str] = None
     operator_event_id: Optional[str] = None
     occurred_at: Optional[datetime] = None

@@ -1610,3 +1610,9 @@ def get_ehm_snapshot(
         window_end=window_end,
     )
     return snapshot
+
+
+# Canonical advanced Reliability routes
+from .advanced_router import router as advanced_reliability_router  # noqa: E402
+
+router.include_router(advanced_reliability_router)

@@ -1,42 +1,36 @@
 # Reliability V2 Implementation Tracker
 
-## Branch baseline
+## Canonical implementation
 
-This work is stacked on `feat/global-tenant-navigation-quality-home` (PR #398), not the older `main` shell. Reliability shall consume that canonical tenant shell and navigation work.
+- [x] One frontend route tree: `/maintenance/:amoCode/reliability/*`
+- [x] One backend prefix: `/reliability/*`
+- [x] One canonical frontend client and workspace
+- [x] No aliases, duplicate pages, compatibility redirects or `/v2` routes
 
-## Slice 1 — foundation read model and workspace
+## Operational and compliance scope
 
-- [x] Governing target-design document
-- [x] Tenant-scoped `/reliability/v2/workbench`
-- [x] Filtered V2 occurrence, alert, FRACAS and engine-status reads
-- [x] Tenant-filtered detail reads
-- [x] FRACAS action read through tenant-owned case join
-- [x] “No data, no green” freshness state
-- [x] Route-aware Reliability workspace
-- [x] Workbench, occurrence, alert, FRACAS, engine and data-quality views
-- [x] Planned route surfaces for fleet, systems, components, programme, changes and meetings
-- [x] Scoped Reliability CSS only
-- [x] Existing report generation retained at `/reliability/reports`
+- [x] Complete occurrence taxonomy, immutable provenance and automated source ingestion
+- [x] Technical-log, delay, cancellation, interruption, MEL/CDL, EHM, shop, QMS, SMS and Procurement source workflows
+- [x] Idempotency, replay-safe batches, duplicate detection, validation, data-quality resolution and freshness controls
+- [x] Full FRACAS lifecycle, evidence, root-cause approval, actions, independent effectiveness approval, closure and reopening
+- [x] Scheduled KPI engine with formula versions, source lineage, result hashes and retained evidence
+- [x] Fleet, aircraft, ATA, component and engine analytics
+- [x] Exposure-aware rates, confidence intervals, minimum exposure and small-fleet uncertainty controls
+- [x] Versioned Reliability programmes and threshold governance
+- [x] Review boards, immutable decisions and controlled programme changes
+- [x] Planning, Production, Maintenance, Tech Records, QMS, SMS and Procurement handoffs
+- [x] Authority-profile package, submission and decision workflows
+- [x] Capability-based permissions, independent approvals and append-only evidence
+- [x] Explainable advisory AI with citations and human disposition
+- [x] Responsive frontend for every daily and advanced workflow
 
-## Remaining P0 blockers
+## Validation
 
-- [ ] Repair legacy `compute_defect_trend()` tenant filtering
-- [ ] Standardise all legacy endpoints on `effective_amo_id`
-- [ ] Add database-backed multi-tenant regression fixtures
-- [ ] Introduce capability gates for triage, investigation, approval, threshold control and authority submission
-- [ ] Add server-side pagination envelopes and total counts
-- [ ] Deprecate or redirect unsafe/unbounded legacy reads after consumers migrate
-
-## Next operational increment
-
-- [ ] Canonical occurrence taxonomy and subtypes
-- [ ] Technical interruption and MEL/CDL ingestion
-- [ ] Repeat-candidate triage and merge/dismiss decisions
-- [ ] Expanded FRACAS lifecycle and evidence model
-- [ ] Corrective-action effectiveness plan
-- [ ] QMS/SMS/Procurement links
-- [ ] Scheduled KPI calculations and calculation-run evidence
-
-## Canonical replacement rule
-
-Reliability has one active frontend route tree and one backend API prefix: `/maintenance/:amoCode/reliability/*` and `/reliability/*`. Development does not retain obsolete pages, `/v2` aliases, compatibility redirects, or duplicate service clients. Enhanced functionality replaces the old implementation in place, and unused code is deleted in the same change.
+- [x] Populated PostgreSQL upgrade/downgrade/upgrade
+- [x] Alembic metadata parity
+- [x] Existing-row default and provenance backfill
+- [x] Full application import and mapper configuration
+- [x] Reliability backend tests
+- [x] Navigation and CSS contracts
+- [x] Scoped lint
+- [x] Complete portal production build

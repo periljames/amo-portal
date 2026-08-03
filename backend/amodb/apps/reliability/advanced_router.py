@@ -226,7 +226,6 @@ def effectiveness_reviews(case_id: int, context=Depends(_context)):
 def add_effectiveness_review(
     case_id: int,
     payload: schemas.EffectivenessReviewCreate,
-    approve: bool = False,
     context=Depends(_context),
 ):
     current_user, db, amo_id = context
@@ -237,7 +236,25 @@ def add_effectiveness_review(
         case_id=case_id,
         payload=payload,
         actor_user_id=str(current_user.id),
-        approve=approve,
+    )
+
+
+@router.post("/fracas/cases/{case_id:int}/effectiveness/{review_id}/approve", response_model=schemas.EffectivenessReviewRead)
+def approve_effectiveness_review(
+    case_id: int,
+    review_id: str,
+    payload: schemas.EffectivenessReviewApproval,
+    context=Depends(_context),
+):
+    current_user, db, amo_id = context
+    services.require_capability(db, current_user, "reliability.fracas.verify")
+    return services.approve_effectiveness_review(
+        db,
+        amo_id=amo_id,
+        case_id=case_id,
+        review_id=review_id,
+        rationale=payload.rationale,
+        actor_user_id=str(current_user.id),
     )
 
 

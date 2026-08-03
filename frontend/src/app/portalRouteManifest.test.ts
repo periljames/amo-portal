@@ -150,6 +150,13 @@ describe("portal route manifest", () => {
     expect(paths.get("reliability-meetings")).toBe("/maintenance/tenant-a/reliability/meetings");
     expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
     expect(paths.get("reliability-data-quality")).toBe("/maintenance/tenant-a/reliability/data-quality");
+    expect(paths.get("reliability-sources")).toBe("/maintenance/tenant-a/reliability/sources");
+    expect(paths.get("reliability-ingestion")).toBe("/maintenance/tenant-a/reliability/ingestion");
+    expect(paths.get("reliability-calculations")).toBe("/maintenance/tenant-a/reliability/calculations");
+    expect(paths.get("reliability-compliance")).toBe("/maintenance/tenant-a/reliability/compliance");
+    expect(paths.get("reliability-handoffs")).toBe("/maintenance/tenant-a/reliability/handoffs");
+    expect(paths.get("reliability-authority")).toBe("/maintenance/tenant-a/reliability/authority");
+    expect(paths.get("reliability-ai")).toBe("/maintenance/tenant-a/reliability/ai");
     expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
     expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
     expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
