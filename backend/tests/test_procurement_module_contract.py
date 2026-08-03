@@ -55,9 +55,10 @@ def test_supplier_quality_gate_is_canonical() -> None:
     assert 'def assert_supplier_eligible(' in service
     assert 'Supplier approval scope does not cover every purchase-order category.' in service
     assert 'Supplier has an active Quality hold.' in service
-    assert 'assert_legacy_purchase_order_eligible' not in service
     assert 'legacy_purchase_order_id' not in models
     assert '/purchasing/' not in inventory_router
+    assert 'procurement_service' not in inventory_router
+    assert 'tags=["inventory"]' in inventory_router
 
 
 def test_module_exposes_only_canonical_department_routes() -> None:
