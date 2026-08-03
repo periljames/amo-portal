@@ -9,6 +9,7 @@ import { useColorScheme } from "./hooks/useColorScheme";
 import { ToastProvider } from "./components/feedback/ToastProvider";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import { onSessionEvent } from "./services/auth";
+import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
 import { clearApiResponseCache } from "./services/apiClient";
 import { preloadRoute } from "./app/routePreload";
@@ -30,12 +31,14 @@ const App: React.FC = () => {
     return onSessionEvent((detail) => {
       if (detail.type === "authenticated") {
         void queryClient.cancelQueries();
+        clearAllCachedAdminProfileStates();
         clearApiResponseCache();
         resetLoading();
       }
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
         void queryClient.cancelQueries();
         queryClient.clear();
+        clearAllCachedAdminProfileStates();
         clearApiResponseCache();
         resetLoading();
       }
