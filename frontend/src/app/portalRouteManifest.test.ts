@@ -107,4 +107,37 @@ describe("portal route manifest", () => {
     expect(items.every((item) => item.path.startsWith("/maintenance/tenant-a"))).toBe(true);
     expect(items.some((item) => item.path.includes("tenant-b"))).toBe(false);
   });
+
+  it("publishes explicit routes for Reliability and EHM destinations", () => {
+    const admin = user({ role: "AMO_ADMIN", is_amo_admin: true });
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: admin,
+      contextDepartment: "reliability",
+      adminModeActive: true,
+    }));
+    const paths = new Map(items.map((item) => [item.id, item.path]));
+
+    expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
+    expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
+    expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
+    expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
+  });
+
+  it("provides real home, operations and configuration routes for simple departments", () => {
+    const admin = user({ role: "AMO_ADMIN", is_amo_admin: true });
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: admin,
+      contextDepartment: "safety",
+      adminModeActive: true,
+    }));
+    const paths = new Set(items.map((item) => item.path));
+
+    for (const department of ["safety", "stores", "workshops"]) {
+      expect(paths.has(`/maintenance/tenant-a/${department}`)).toBe(true);
+      expect(paths.has(`/maintenance/tenant-a/${department}/operations`)).toBe(true);
+      expect(paths.has(`/maintenance/tenant-a/${department}/settings`)).toBe(true);
+    }
+  });
 });
