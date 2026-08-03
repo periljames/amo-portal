@@ -285,7 +285,7 @@ export function uploadProcurementDocument(
         }
         return;
       }
-      reject(new Error(uploadError(xhr));
+      reject(new Error(uploadError(xhr)));
     };
     xhr.onerror = () => reject(new Error("The upload connection failed. Check network access and retry."));
     xhr.ontimeout = () => reject(new Error("The document upload timed out. Check the connection and retry."));
