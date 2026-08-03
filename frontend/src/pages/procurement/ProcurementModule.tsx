@@ -1,4 +1,5 @@
-import React, { FormEvent, useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { AlertTriangle, ChevronRight, LoaderCircle, PackageCheck, Plus, RefreshCw, Search, ShieldAlert, UsersRound } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
@@ -10,7 +11,7 @@ import { submitProcurementForm } from "./procurementActions";
 import ProcurementDocumentCenter from "./ProcurementDocumentCenter";
 import { Command, Control, Orders, Receiving, Requests, Sourcing, Suppliers } from "./ProcurementSections";
 import { renderFields } from "./ProcurementForms";
-import { EMPTY, NAV, ModalShell, badgeClass, dateLabel, humanize, type FormState, type Modal, type Section, type WorkspaceData } from "./procurementUiShared";
+import { EMPTY, NAV, ModalShell, dateLabel, humanize, type FormState, type Modal, type Section, type WorkspaceData } from "./procurementUiShared";
 import "../../styles/procurement.css";
 
 const QUALITY_ROLES = new Set(["QUALITY_MANAGER", "QUALITY_INSPECTOR", "AMO_ADMIN", "SUPERUSER"]);
