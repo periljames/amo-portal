@@ -1,0 +1,58 @@
+name: Procurement TypeScript Fix
+
+on:
+  push:
+    branches:
+      - agent/procurement-ux-document-control-review
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/procurement-ux-document-control-review
+          fetch-depth: 0
+      - name: Apply bounded TypeScript corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          module = Path('frontend/src/pages/procurement/ProcurementModule.tsx')
+          source = module.read_text(encoding='utf-8')
+          source = source.replace(
+              '(next as Record<string, unknown>)[key] = result.value;',
+              '(next as unknown as Record<string, unknown>)[key] = result.value;',
+          )
+          source = source.replace(
+              'approveProcurementPurchaseOrder(locationCode(), item.id, nextStage(item.status), "Approved from Procurement workspace.")',
+              'approveProcurementPurchaseOrder(locationCode(), item.id, nextStage(item.status)!, "Approved from Procurement workspace.")',
+          )
+          source = source.replace(
+              'function renderFields(modal: Exclude<Modal, null>, form: FormState, setValue: (name: string, value: string | boolean) => void, data: LoadState) {',
+              'function renderFields(modal: Exclude<Modal, null>, form: FormState, setValue: (name: string, value: string | boolean) => void, data: LoadState): React.ReactNode {',
+          )
+          module.write_text(source, encoding='utf-8')
+
+          role_access = Path('frontend/src/utils/roleAccess.ts')
+          source = role_access.read_text(encoding='utf-8')
+          source = source.replace(
+              'if (["STORES", "STORES_MANAGER", "STOREKEEPER"].includes(role)) caps.add("stores");',
+              'if ((["STORES", "STORES_MANAGER", "STOREKEEPER"] as AccountRole[]).includes(role)) caps.add("stores");',
+          )
+          role_access.write_text(source, encoding='utf-8')
+          PY
+      - name: Commit corrections
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/procurement/ProcurementModule.tsx frontend/src/utils/roleAccess.ts
+          git commit -m "Fix Procurement frontend type integration"
+          git push origin HEAD:agent/procurement-ux-document-control-review
