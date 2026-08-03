@@ -185,11 +185,16 @@ def _allowed_departments(db: Session, user: models.User, amo: models.AMO) -> set
     return allowed
 
 
-def _task_payload(task: Task, amo_code: str, department: str) -> dict[str, Any]:
+def _safe_task_route(task: Task, amo_code: str, department: str) -> str:
     metadata = task.metadata_json if isinstance(task.metadata_json, dict) else {}
     route = metadata.get("route") if isinstance(metadata, dict) else None
-    if not isinstance(route, str) or not route.startswith("/"):
-        route = f"/maintenance/{amo_code}/{department}"
+    expected_prefix = f"/maintenance/{amo_code}/"
+    if not isinstance(route, str) or not route.startswith(expected_prefix):
+        return f"/maintenance/{amo_code}/{department}"
+    return route
+
+
+def _task_payload(task: Task, amo_code: str, department: str) -> dict[str, Any]:
     return {
         "id": str(task.id),
         "title": task.title,
@@ -197,7 +202,7 @@ def _task_payload(task: Task, amo_code: str, department: str) -> dict[str, Any]:
         "priority": int(task.priority or 3),
         "status": getattr(task.status, "value", task.status),
         "due_at": task.due_at.isoformat() if task.due_at else None,
-        "route": route,
+        "route": _safe_task_route(task, amo_code, department),
         "entity_type": task.entity_type,
         "entity_id": task.entity_id,
     }
@@ -226,18 +231,16 @@ def get_department_home(
         Task.owner_user_id == current_user.id,
         Task.status.in_(open_statuses),
     )
-    assigned = assigned_query.order_by(Task.priority.asc(), Task.due_at.asc().nullslast()).limit(12).all()
-    approvals = (
-        db.query(Task)
-        .filter(
-            Task.amo_id == amo.id,
-            Task.supervisor_user_id == current_user.id,
-            Task.status.in_(open_statuses),
-        )
-        .order_by(Task.priority.asc(), Task.due_at.asc().nullslast())
-        .limit(8)
-        .all()
+    approval_query = db.query(Task).filter(
+        Task.amo_id == amo.id,
+        Task.supervisor_user_id == current_user.id,
+        Task.status.in_(open_statuses),
     )
+    ordering = (Task.priority.asc(), Task.due_at.is_(None), Task.due_at.asc())
+    assigned_total = assigned_query.count()
+    approvals_total = approval_query.count()
+    assigned = assigned_query.order_by(*ordering).limit(12).all()
+    approvals = approval_query.order_by(*ordering).limit(8).all()
     schedule = (
         assigned_query
         .filter(Task.due_at.isnot(None), Task.due_at <= now + timedelta(days=30))
@@ -271,7 +274,7 @@ def get_department_home(
             "tone": "danger",
             "title": task.title,
             "message": "Assigned task is overdue.",
-            "route": _task_payload(task, amo_code, department_code)["route"],
+            "route": _safe_task_route(task, amo_code, department_code),
         }
         for task in assigned
         if task.due_at and task.due_at < now
@@ -285,8 +288,8 @@ def get_department_home(
         "department": department_code,
         "generated_at": now.isoformat(),
         "summary": {
-            "assigned_open": len(assigned),
-            "approvals_open": len(approvals),
+            "assigned_open": assigned_total,
+            "approvals_open": approvals_total,
             "overdue": overdue,
             "due_soon": due_soon,
             "high_priority": high_priority,
