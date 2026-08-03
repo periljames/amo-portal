@@ -1,0 +1,74 @@
+name: Reliability V5 Staging Diagnostic
+
+on:
+  push:
+    branches: [agent/reliability-v5-staging-diagnostic]
+    paths: [docs/reliability/.v5-staging-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v5-staging-diagnostic
+          fetch-depth: 0
+      - name: Reconstruct and test final staging
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-stage
+          declare -A C
+          run_stage() { local n="$1"; shift; "$@" >"/tmp/rel-stage/$n.log" 2>&1; C[$n]=$?; echo "$n=${C[$n]}"; }
+
+          cat > /tmp/rel-stage/reconstruct.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          git fetch origin agent/reliability-v2-foundation feat/global-tenant-navigation-quality-home agent/reliability-v2-collectors-prep --force
+          git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/apps/reliability docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md docs/reliability/RELIABILITY_V2_VALIDATION.md docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md frontend/src/pages/reliability frontend/src/services/reliability.ts frontend/src/styles/reliability-v2.css
+          git rm -f --ignore-unmatch frontend/src/pages/ReliabilityReportsPage.tsx
+          git diff --binary 309a8eac0aecfdbb19a1ecd71c83cdbaababb074 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/alembic/env.py backend/amodb/main.py frontend/src/app/PortalRouteSurface.tsx frontend/src/app/portalRouteManifest.test.ts frontend/src/app/routePreload.ts frontend/src/portalRoutes.tsx > /tmp/rel-stage/shared.patch
+          git apply --3way /tmp/rel-stage/shared.patch
+          python backend/scripts/prepare_reliability_clean_tree.py
+          git checkout agent/reliability-v2-collectors-prep -- backend/amodb/apps/reliability/internal_collectors.py backend/amodb/apps/reliability/tests/test_internal_collectors.py backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py backend/scripts/apply_reliability_internal_collectors.py
+          python backend/scripts/apply_reliability_internal_collectors.py
+          rm -f backend/scripts/apply_reliability_internal_collectors.py
+          SH
+          chmod +x /tmp/rel-stage/reconstruct.sh
+          run_stage reconstruct /tmp/rel-stage/reconstruct.sh
+
+          cat > docs/reliability/RELIABILITY_CLEAN_REBUILD_VALIDATION.md <<'EOF'
+          # Staging diagnostic placeholder
+          EOF
+          rm -f .github/workflows/reliability-clean-rebuild.yml .github/workflows/reliability-clean-diagnostic-v2.yml .github/workflows/reliability-clean-publish-v4.yml .github/workflows/reliability-clean-publish-v5.yml
+          rm -f docs/reliability/.clean-rebuild-trigger docs/reliability/.clean-diagnostic-v2-trigger docs/reliability/.clean-publish-v4-trigger docs/reliability/.clean-publish-v5-trigger docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md
+          rm -f backend/scripts/prepare_reliability_clean_tree.py backend/scripts/validate_reliability_clean.py
+          run_stage stage bash -lc 'git add .gitignore .github/workflows/reliability.yml; git add backend/amodb/alembic/env.py backend/amodb/apps/reliability backend/amodb/main.py; git add docs/reliability/RELIABILITY_*.md; git add frontend/src/app/PortalRouteSurface.tsx frontend/src/app/portalRouteManifest.ts frontend/src/app/portalRouteManifest.test.ts frontend/src/app/routePreload.ts frontend/src/pages/reliability frontend/src/services/reliability.ts frontend/src/styles/reliability-v2.css frontend/src/portalRoutes.tsx; git add -u .github/workflows docs/reliability backend/scripts frontend/src/pages/ReliabilityReportsPage.tsx || true'
+          git show 3f9cf5531ee5e26a4f0738e12253844b48f1d674:backend/scripts/validate_reliability_clean.py > /tmp/rel-stage/validate.py
+          run_stage paths bash -lc 'PYTHONPATH=backend RELIABILITY_CLEAN_VALIDATION_MODE=paths python /tmp/rel-stage/validate.py'
+          run_stage diffcheck git diff --cached --check
+          run_stage status git diff --cached --name-status
+
+          {
+            echo '# Reliability V5 Staging Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            for n in reconstruct stage paths diffcheck status; do echo "| $n | ${C[$n]:-999} |"; done
+            for n in reconstruct stage paths diffcheck status; do echo; echo "## $n"; echo '```text'; tail -n 200 "/tmp/rel-stage/$n.log"; echo '```'; done
+          } > /tmp/rel-stage/report.md
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p docs/reliability
+          cp /tmp/rel-stage/report.md docs/reliability/V5_STAGING_DIAGNOSTIC.md
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/V5_STAGING_DIAGNOSTIC.md
+          git commit -m 'Record Reliability V5 staging diagnostic'
+          git push origin HEAD:agent/reliability-v5-staging-diagnostic
