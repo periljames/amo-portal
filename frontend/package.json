@@ -14,6 +14,7 @@
     "perf:rostering:browser": "node scripts/measure-rostering-load.mjs",
     "build:profile": "npm run build && npm run perf:report && npm run perf:rostering",
     "test:e2e": "playwright test",
+    "test:tenant-render": "playwright test --config playwright.tenant.config.ts",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
     "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/components/Layout/qmsSidebarNavigation.test.ts",
     "test:qms-overview": "vitest run src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts",
