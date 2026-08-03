@@ -145,3 +145,12 @@ def test_procurement_evidence_uses_persistent_upload_root():
     expected = "/srv/amo/uploads/procurement-documents"
     assert f'PROCUREMENT_DOCUMENT_DIR", "{expected}"' in service
     assert f"PROCUREMENT_DOCUMENT_DIR={expected}" in environment
+
+
+
+def test_quality_evidence_decision_is_atomic_and_shared_audited():
+    service = read("amodb/apps/procurement/document_service.py")
+    assert ".with_for_update()" in service
+    assert "audit_services.create_audit_event(" in service
+    assert "audit_schemas.AuditEventCreate(" in service
+    assert "after_json=detail" in service

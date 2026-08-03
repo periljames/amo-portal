@@ -12,6 +12,9 @@ from uuid import uuid4
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from amodb.apps.audit import schemas as audit_schemas
+from amodb.apps.audit import services as audit_services
+
 from . import document_models, models
 
 
@@ -68,6 +71,17 @@ def _event(
             actor_user_id=actor_user_id,
             detail=detail,
         )
+    )
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            action=action,
+            actor_user_id=actor_user_id,
+            after_json=detail,
+        ),
     )
 
 
@@ -448,7 +462,17 @@ def verify_document(
         document_models.ProcurementDocumentVerificationStatus.REJECTED,
     }:
         raise HTTPException(status_code=422, detail="Quality verification outcome must be VERIFIED or REJECTED.")
-    record = get_document(db, amo_id=amo_id, document_id=document_id)
+    record = (
+        db.query(document_models.ProcurementDocument)
+        .filter(
+            document_models.ProcurementDocument.amo_id == amo_id,
+            document_models.ProcurementDocument.id == document_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="The Procurement document was not found.")
     if record.status != document_models.ProcurementDocumentStatus.ACTIVE:
         raise HTTPException(status_code=409, detail="A void document cannot be verified.")
     if not record.is_quality_evidence:
