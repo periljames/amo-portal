@@ -24,8 +24,10 @@ from amodb.apps.accounts.admin_profile_router import (
     _is_implicit_admin,
     _is_management_approver,
 )
+from amodb.apps.accounts.models import AccountRole
 from amodb.apps.accounts.router_admin import router as protected_admin_router
 from amodb.apps.accounts.router_public import router as public_router
+from amodb.security import require_admin, require_roles
 
 
 def actor(**overrides):
@@ -172,12 +174,38 @@ def test_normal_tenant_admin_api_requires_active_backend_session() -> None:
 def test_active_backend_session_unlocks_tenant_admin_api() -> None:
     db = MagicMock()
     db.execute.return_value.first.return_value = ("session-1",)
-    current = actor(role="AMO_ADMIN", is_amo_admin=True)
-    assert require_active_admin_profile(
+    current = actor(role=AccountRole.AMO_ADMIN, is_amo_admin=True)
+    elevated = require_active_admin_profile(
         request("/accounts/admin/users"),
         current,
         db,
-    ) is current
+    )
+    assert elevated is current
+    assert elevated.is_amo_admin is True
+    assert elevated.role == AccountRole.AMO_ADMIN
+
+
+def test_approved_grantee_satisfies_legacy_admin_dependencies() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = ("session-1",)
+    current = actor(
+        role=AccountRole.TECHNICIAN,
+        is_amo_admin=False,
+        position_title="Technician",
+    )
+
+    elevated = require_active_admin_profile(
+        request("/accounts/admin/users"),
+        current,
+        db,
+    )
+
+    assert elevated is current
+    assert elevated.is_amo_admin is True
+    assert elevated.role == AccountRole.AMO_ADMIN
+    assert getattr(elevated, "_admin_profile_elevated", False) is True
+    assert require_admin(elevated) is elevated
+    assert require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)(elevated) is elevated
 
 
 def test_platform_superuser_stays_on_separate_control_plane() -> None:
