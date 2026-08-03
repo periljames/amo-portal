@@ -11,7 +11,7 @@ from amodb.database import get_db
 from amodb.apps.accounts import models as account_models
 from amodb.apps.procurement import service as procurement_service
 
-from . import schemas, services
+from . import models, schemas, services
 
 router = APIRouter(
     prefix="",
@@ -51,6 +51,8 @@ def receive_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
+    if payload.condition is None:
+        payload.condition = models.InventoryConditionEnum.QUARANTINE
     entry = services.receive_inventory(
         db,
         amo_id=_amo_id(current_user),
@@ -276,6 +278,9 @@ def create_goods_receipt(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
+    for line in payload.lines:
+        if line.condition is None:
+            line.condition = models.InventoryConditionEnum.QUARANTINE
     amo_id = _amo_id(current_user)
     if payload.purchase_order_id is not None:
         procurement_service.assert_legacy_purchase_order_eligible(
