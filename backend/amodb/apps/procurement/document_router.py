@@ -99,7 +99,8 @@ def procurement_documents_list(
     entity_id: Optional[str] = None,
     active_only: bool = True,
     verification_status: Optional[document_models.ProcurementDocumentVerificationStatus] = None,
-    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -111,6 +112,7 @@ def procurement_documents_list(
         entity_id=entity_id,
         active_only=active_only,
         verification_status=verification_status,
+        offset=offset,
         limit=limit,
     )
     return [_serialize(record, amo_code) for record in records]
