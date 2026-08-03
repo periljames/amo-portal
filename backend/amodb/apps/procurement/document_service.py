@@ -371,6 +371,7 @@ def list_documents(
     entity_id: str | None = None,
     active_only: bool = True,
     verification_status: document_models.ProcurementDocumentVerificationStatus | None = None,
+    offset: int = 0,
     limit: int = 200,
 ) -> list[document_models.ProcurementDocument]:
     query = db.query(document_models.ProcurementDocument).filter(document_models.ProcurementDocument.amo_id == amo_id)
@@ -382,7 +383,17 @@ def list_documents(
         query = query.filter(document_models.ProcurementDocument.status == document_models.ProcurementDocumentStatus.ACTIVE)
     if verification_status:
         query = query.filter(document_models.ProcurementDocument.verification_status == verification_status)
-    return query.order_by(document_models.ProcurementDocument.uploaded_at.desc()).limit(min(max(limit, 1), 500)).all()
+    bounded_offset = max(offset, 0)
+    bounded_limit = min(max(limit, 1), 500)
+    return (
+        query.order_by(
+            document_models.ProcurementDocument.uploaded_at.desc(),
+            document_models.ProcurementDocument.id.desc(),
+        )
+        .offset(bounded_offset)
+        .limit(bounded_limit)
+        .all()
+    )
 
 
 def get_document(db: Session, *, amo_id: str, document_id: int) -> document_models.ProcurementDocument:
@@ -440,6 +451,14 @@ def verify_document(
     record = get_document(db, amo_id=amo_id, document_id=document_id)
     if record.status != document_models.ProcurementDocumentStatus.ACTIVE:
         raise HTTPException(status_code=409, detail="A void document cannot be verified.")
+    if not record.is_quality_evidence:
+        raise HTTPException(status_code=409, detail="Only evidence submitted for Quality review can receive a Quality decision.")
+    if record.verification_status != document_models.ProcurementDocumentVerificationStatus.PENDING:
+        raise HTTPException(status_code=409, detail="The Quality evidence already has a final verification decision.")
+    if not actor_user_id:
+        raise HTTPException(status_code=403, detail="An authenticated Quality user is required for verification.")
+    if record.uploaded_by_user_id and str(record.uploaded_by_user_id) == str(actor_user_id):
+        raise HTTPException(status_code=409, detail="The evidence uploader cannot verify or reject the same evidence.")
     record.verification_status = outcome
     record.verification_notes = notes.strip()
     record.verified_by_user_id = actor_user_id
