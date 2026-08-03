@@ -154,3 +154,18 @@ def test_quality_evidence_decision_is_atomic_and_shared_audited():
     assert "audit_services.create_audit_event(" in service
     assert "audit_schemas.AuditEventCreate(" in service
     assert "after_json=detail" in service
+
+
+
+def test_document_file_cleanup_is_transaction_boundary_safe():
+    service = read("amodb/apps/procurement/document_service.py")
+    router = read("amodb/apps/procurement/document_router.py")
+    create_block = service.split("def create_document(", 1)[1].split("def list_documents(", 1)[0]
+    route_block = router.split("def procurement_document_link(", 1)[1].split('@router.get("/documents/{document_id}/download")', 1)[0]
+    assert "if target_path is not None:" in create_block
+    assert "target_path.unlink(missing_ok=True)" in create_block
+    assert "response = _serialize(record, amo_code)" in route_block
+    assert route_block.index("response = _serialize(record, amo_code)") < route_block.index("db.commit()")
+    assert "db.refresh(record)" not in route_block
+    assert "except HTTPException:" in route_block
+    assert route_block.count("document_service.discard_document_file(record)") == 2

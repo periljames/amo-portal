@@ -297,84 +297,89 @@ def create_document(
     mime_type: str | None = None
     size_bytes: int | None = None
     sha256: str | None = None
-    if file and file.filename:
-        target_path, original_filename, mime_type, size_bytes, sha256 = _write_file(
+    try:
+        if file and file.filename:
+            target_path, original_filename, mime_type, size_bytes, sha256 = _write_file(
+                amo_id=amo_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                file=file,
+            )
+            duplicate = (
+                db.query(document_models.ProcurementDocument.id)
+                .filter(
+                    document_models.ProcurementDocument.amo_id == amo_id,
+                    document_models.ProcurementDocument.entity_type == entity_type,
+                    document_models.ProcurementDocument.entity_id == entity_id,
+                    document_models.ProcurementDocument.sha256 == sha256,
+                    document_models.ProcurementDocument.status == document_models.ProcurementDocumentStatus.ACTIVE,
+                )
+                .first()
+            )
+            if duplicate:
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=409, detail="This exact document is already linked to the selected Procurement record.")
+
+        verification_status = (
+            document_models.ProcurementDocumentVerificationStatus.PENDING
+            if is_quality_evidence
+            else document_models.ProcurementDocumentVerificationStatus.NOT_REQUIRED
+        )
+        record = document_models.ProcurementDocument(
             amo_id=amo_id,
             entity_type=entity_type,
             entity_id=entity_id,
-            file=file,
+            document_type=document_type,
+            title=title,
+            document_number=_clean(document_number, 128),
+            revision=_clean(revision, 64),
+            document_date=document_date,
+            source=source,
+            original_filename=original_filename,
+            stored_path=str(target_path) if target_path else None,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            physical_reference=_clean(physical_reference, 255),
+            physical_location=_clean(physical_location, 255),
+            external_system=_clean(external_system, 128),
+            external_reference=_clean(external_reference, 255),
+            external_url=external_url,
+            dms_document_id=_clean(dms_document_id, 64),
+            dms_revision_id=_clean(dms_revision_id, 64),
+            notes=_clean(notes),
+            is_quality_evidence=is_quality_evidence,
+            qms_reference=_clean(qms_reference, 128),
+            verification_status=verification_status,
+            uploaded_by_user_id=actor_user_id,
         )
-        duplicate = (
-            db.query(document_models.ProcurementDocument.id)
-            .filter(
-                document_models.ProcurementDocument.amo_id == amo_id,
-                document_models.ProcurementDocument.entity_type == entity_type,
-                document_models.ProcurementDocument.entity_id == entity_id,
-                document_models.ProcurementDocument.sha256 == sha256,
-                document_models.ProcurementDocument.status == document_models.ProcurementDocumentStatus.ACTIVE,
-            )
-            .first()
+        db.add(record)
+        db.flush()
+        _event(
+            db,
+            amo_id=amo_id,
+            entity_type="ProcurementDocument",
+            entity_id=str(record.id),
+            action="link_document",
+            actor_user_id=actor_user_id,
+            detail={
+                "linked_entity_type": entity_type.value,
+                "linked_entity_id": entity_id,
+                "document_type": document_type,
+                "source": source.value,
+                "has_file": bool(target_path),
+                "sha256": sha256,
+                "physical_reference": record.physical_reference,
+                "external_reference": record.external_reference,
+                "dms_document_id": record.dms_document_id,
+                "quality_evidence": is_quality_evidence,
+            },
         )
-        if duplicate:
+        return record
+    except Exception:
+        if target_path is not None:
             target_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=409, detail="This exact document is already linked to the selected Procurement record.")
-
-    verification_status = (
-        document_models.ProcurementDocumentVerificationStatus.PENDING
-        if is_quality_evidence
-        else document_models.ProcurementDocumentVerificationStatus.NOT_REQUIRED
-    )
-    record = document_models.ProcurementDocument(
-        amo_id=amo_id,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        document_type=document_type,
-        title=title,
-        document_number=_clean(document_number, 128),
-        revision=_clean(revision, 64),
-        document_date=document_date,
-        source=source,
-        original_filename=original_filename,
-        stored_path=str(target_path) if target_path else None,
-        mime_type=mime_type,
-        size_bytes=size_bytes,
-        sha256=sha256,
-        physical_reference=_clean(physical_reference, 255),
-        physical_location=_clean(physical_location, 255),
-        external_system=_clean(external_system, 128),
-        external_reference=_clean(external_reference, 255),
-        external_url=external_url,
-        dms_document_id=_clean(dms_document_id, 64),
-        dms_revision_id=_clean(dms_revision_id, 64),
-        notes=_clean(notes),
-        is_quality_evidence=is_quality_evidence,
-        qms_reference=_clean(qms_reference, 128),
-        verification_status=verification_status,
-        uploaded_by_user_id=actor_user_id,
-    )
-    db.add(record)
-    db.flush()
-    _event(
-        db,
-        amo_id=amo_id,
-        entity_type="ProcurementDocument",
-        entity_id=str(record.id),
-        action="link_document",
-        actor_user_id=actor_user_id,
-        detail={
-            "linked_entity_type": entity_type.value,
-            "linked_entity_id": entity_id,
-            "document_type": document_type,
-            "source": source.value,
-            "has_file": bool(target_path),
-            "sha256": sha256,
-            "physical_reference": record.physical_reference,
-            "external_reference": record.external_reference,
-            "dms_document_id": record.dms_document_id,
-            "quality_evidence": is_quality_evidence,
-        },
-    )
-    return record
+        raise
 
 
 def list_documents(

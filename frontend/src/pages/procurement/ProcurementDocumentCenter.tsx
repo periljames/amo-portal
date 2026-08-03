@@ -435,7 +435,12 @@ export default function ProcurementDocumentCenter({
       const updated = mode === "VOID"
         ? await voidProcurementDocument(amoCode, document.id, reviewNotes.trim())
         : await verifyProcurementDocument(amoCode, document.id, mode === "VERIFY" ? "VERIFIED" : "REJECTED", reviewNotes.trim());
-      setDocuments((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setDocuments((current) => {
+        if (mode === "VOID" && !includeVoid) {
+          return current.filter((item) => item.id !== updated.id);
+        }
+        return current.map((item) => item.id === updated.id ? updated : item);
+      });
       pushToast({
         title: mode === "VOID" ? "Evidence voided" : mode === "VERIFY" ? "Evidence verified" : "Evidence rejected",
         message: `${document.title} remains retained with the control decision and audit trail.`,

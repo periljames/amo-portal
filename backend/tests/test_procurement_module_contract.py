@@ -128,3 +128,13 @@ def test_requisition_lifecycle_requires_technical_and_budget_approval() -> None:
     assert 'requisition.technical_reviewed_by_user_id = actor_user_id' in service
     assert 'requisition.budget_reviewed_by_user_id = actor_user_id' in service
     assert 'not requisition.technical_reviewed_by_user_id or not requisition.budget_reviewed_by_user_id' in service
+
+
+
+def test_deleted_sourcing_bypass_is_absent_from_public_api_contract() -> None:
+    service = _read(PROCUREMENT / "service.py")
+    schemas = _read(PROCUREMENT / "schemas.py")
+    router = _read(PROCUREMENT / "router.py")
+    assert "SEND_TO_SOURCING" not in service
+    assert "SEND_TO_SOURCING" not in schemas
+    assert "SEND_TO_SOURCING" not in router

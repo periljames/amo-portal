@@ -66,3 +66,11 @@ def test_requisition_actions_match_backend_lifecycle():
     assert 'item.id, "TECHNICAL_REVIEW"' not in sections
     for action in ["SUBMIT", "TECHNICAL_APPROVE", "BUDGET_APPROVE", "APPROVE"]:
         assert f'item.id, "{action}"' in sections
+
+
+
+def test_voiding_preserves_active_only_pagination_alignment():
+    documents = read("pages/procurement/ProcurementDocumentCenter.tsx")
+    assert 'mode === "VOID" && !includeVoid' in documents
+    assert "current.filter((item) => item.id !== updated.id)" in documents
+    assert "loadPage(documents.length, false)" in documents

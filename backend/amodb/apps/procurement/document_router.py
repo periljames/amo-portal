@@ -144,7 +144,9 @@ def procurement_document_link(
     current_user: account_models.User = Depends(require_roles(*DOCUMENT_UPLOAD_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
-    record = document_service.create_document(
+    record: document_models.ProcurementDocument | None = None
+    try:
+        record = document_service.create_document(
         db,
         amo_id=amo_id,
         entity_type=entity_type,
@@ -167,15 +169,20 @@ def procurement_document_link(
         notes=notes,
         is_quality_evidence=is_quality_evidence,
         qms_reference=qms_reference,
-    )
-    try:
+        )
+        response = _serialize(record, amo_code)
         db.commit()
-        db.refresh(record)
+    except HTTPException:
+        db.rollback()
+        if record is not None:
+            document_service.discard_document_file(record)
+        raise
     except Exception as exc:
         db.rollback()
-        document_service.discard_document_file(record)
+        if record is not None:
+            document_service.discard_document_file(record)
         raise HTTPException(status_code=500, detail="The document evidence could not be committed.") from exc
-    return _serialize(record, amo_code)
+    return response
 
 
 @router.get("/documents/{document_id}/download")

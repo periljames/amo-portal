@@ -229,7 +229,7 @@ def requisition_transition(
         raise HTTPException(status_code=403, detail="Technical approval role is required.")
     if payload.action == "BUDGET_APPROVE" and current_user.role not in FINANCE_APPROVAL_ROLES and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Finance approval role is required.")
-    if payload.action in {"SEND_TO_SOURCING", "APPROVE"} and current_user.role not in PROCUREMENT_ROLES and not current_user.is_superuser:
+    if payload.action == "APPROVE" and current_user.role not in PROCUREMENT_ROLES and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Procurement approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     requisition = service.transition_requisition(
