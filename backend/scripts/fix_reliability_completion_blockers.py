@@ -28,6 +28,21 @@ def main() -> None:
         "Fast Refresh route-state export",
     )
 
+    finalizer = ROOT / "backend/scripts/finalize_reliability_migration.py"
+    finalizer_text = finalizer.read_text(encoding="utf-8")
+    for role_id in (
+        "rel-role-viewer",
+        "rel-role-engineer",
+        "rel-role-manager",
+        "rel-role-authority",
+    ):
+        old = f"u.amo_id || ':' || u.id || ':{role_id}'"
+        new = f"u.amo_id || '|' || u.id || '|{role_id}'"
+        if old not in finalizer_text:
+            raise RuntimeError(f"Missing authorization identifier anchor for {role_id}")
+        finalizer_text = finalizer_text.replace(old, new, 1)
+    finalizer.write_text(finalizer_text, encoding="utf-8")
+
     diagnostic = ROOT / "backend/scripts/run_reliability_completion_diagnostic.py"
     if diagnostic.exists():
         replace_once(
