@@ -1,0 +1,142 @@
+name: Reliability V4 Diagnostic
+
+on:
+  push:
+    branches: [agent/reliability-v2-v4-diagnostic]
+    paths: [docs/reliability/.v4-diagnostic-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_reliability_diag
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_reliability_diag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_diag
+      WRITE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_diag
+      SECRET_KEY: reliability-diagnostic
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-v4-diagnostic
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run full diagnostic and publish matrix
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-v4
+          declare -A C
+          run_stage() {
+            local name="$1"
+            shift
+            echo "== $name =="
+            "$@" >"/tmp/rel-v4/${name}.log" 2>&1
+            C[$name]=$?
+            echo "$name=${C[$name]}"
+          }
+
+          cat > /tmp/rel-v4/reconstruct.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          git fetch origin agent/reliability-v2-foundation feat/global-tenant-navigation-quality-home --force
+          git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/apps/reliability docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md docs/reliability/RELIABILITY_V2_VALIDATION.md docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md frontend/src/pages/reliability frontend/src/services/reliability.ts frontend/src/styles/reliability-v2.css
+          git rm -f --ignore-unmatch frontend/src/pages/ReliabilityReportsPage.tsx
+          git diff --binary 309a8eac0aecfdbb19a1ecd71c83cdbaababb074 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/alembic/env.py backend/amodb/main.py frontend/src/app/PortalRouteSurface.tsx frontend/src/app/portalRouteManifest.test.ts frontend/src/app/routePreload.ts frontend/src/portalRoutes.tsx > /tmp/rel-v4/shared.patch
+          git apply --3way /tmp/rel-v4/shared.patch
+          test -z "$(git diff --name-only --diff-filter=U)"
+          python backend/scripts/prepare_reliability_clean_tree.py
+          SH
+          chmod +x /tmp/rel-v4/reconstruct.sh
+          run_stage reconstruct /tmp/rel-v4/reconstruct.sh
+
+          run_stage pip pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+          run_stage npm_install bash -lc 'cd frontend && npm ci --no-audit --no-fund'
+          run_stage compile bash -lc 'python -m py_compile backend/amodb/apps/reliability/*.py backend/amodb/apps/reliability/tests/*.py backend/amodb/alembic/env.py backend/amodb/main.py'
+          run_stage db_prepare bash -lc "psql -h 127.0.0.1 -U postgres -d amo_reliability_diag -v ON_ERROR_STOP=1 -c \"CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(255) NOT NULL PRIMARY KEY)\" && psql -h 127.0.0.1 -U postgres -d amo_reliability_diag -v ON_ERROR_STOP=1 -c \"ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255)\""
+          run_stage baseline bash -lc 'cd backend && alembic -c amodb/alembic.ini upgrade heads'
+          run_stage seed bash -lc "psql -h 127.0.0.1 -U postgres -d amo_reliability_diag -v ON_ERROR_STOP=1 -c \"SET session_replication_role=replica; INSERT INTO reliability_events (amo_id,event_type,occurred_at,created_at,description) VALUES ('legacy-reliability-diag','DEFECT',now(),now(),'Existing row'); SET session_replication_role=origin;\""
+
+          cat > /tmp/rel-v4/migrate.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd backend
+          rm -f amodb/alembic/versions/rel_20260803_complete_scope*.py amodb/alembic/versions/rel_20260803_merge_heads*.py
+          mapfile -t HEADS < <(alembic -c amodb/alembic.ini heads | awk '{print $1}')
+          if [ "${#HEADS[@]}" -gt 1 ]; then
+            alembic -c amodb/alembic.ini merge --rev-id rel_20260803_merge_heads -m "merge current heads before complete Reliability scope" "${HEADS[@]}"
+            alembic -c amodb/alembic.ini upgrade head
+          fi
+          git show 49950945ac32fd221b9303f0926ec2bb72f31d61:backend/scripts/finalize_reliability_migration.py > scripts/finalize_reliability_migration.py
+          RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini revision --autogenerate --rev-id rel_20260803_complete_scope -m "complete Reliability full stack scope"
+          python scripts/finalize_reliability_migration.py
+          rm -f scripts/finalize_reliability_migration.py
+          python -m py_compile amodb/alembic/versions/rel_20260803_*.py
+          SH
+          chmod +x /tmp/rel-v4/migrate.sh
+          run_stage migration_generate /tmp/rel-v4/migrate.sh
+          run_stage migration_upgrade bash -lc 'cd backend && RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini upgrade head'
+          run_stage migration_check bash -lc 'cd backend && RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini check'
+          run_stage backfill bash -lc "psql -h 127.0.0.1 -U postgres -d amo_reliability_diag -v ON_ERROR_STOP=1 -c \"DO \\\$\\\$ DECLARE p record; BEGIN SELECT validation_status,validation_errors,provenance_json INTO p FROM reliability_events WHERE amo_id='legacy-reliability-diag'; IF p.validation_status<>'VALID' OR p.validation_errors IS NULL OR p.provenance_json IS NULL THEN RAISE EXCEPTION 'backfill failed'; END IF; END \\\$\\\$;\""
+          run_stage downgrade bash -lc 'cd backend && alembic -c amodb/alembic.ini downgrade -1'
+          run_stage reupgrade bash -lc 'cd backend && alembic -c amodb/alembic.ini upgrade head'
+          run_stage recheck bash -lc 'cd backend && RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini check'
+          run_stage app_validation bash -lc 'cd backend && python scripts/validate_reliability_clean.py'
+          run_stage backend_tests bash -lc 'cd backend && pytest -q amodb/apps/reliability/tests'
+          run_stage shell_tests bash -lc 'cd frontend && npm run test:tenant-shell'
+          run_stage lint bash -lc 'cd frontend && npx eslint src/services/reliability.ts src/pages/reliability/ReliabilityWorkspacePage.tsx src/pages/reliability/ReliabilityAdvancedViews.tsx src/pages/reliability/ReliabilityReportsView.tsx src/app/PortalRouteSurface.tsx src/app/portalRouteManifest.ts src/app/portalRouteManifest.test.ts src/app/routePreload.ts'
+          run_stage build bash -lc 'cd frontend && npm run build'
+
+          {
+            echo '# Reliability V4 Full Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            for n in reconstruct pip npm_install compile db_prepare baseline seed migration_generate migration_upgrade migration_check backfill downgrade reupgrade recheck app_validation backend_tests shell_tests lint build; do echo "| $n | ${C[$n]:-999} |"; done
+            for n in reconstruct compile db_prepare baseline seed migration_generate migration_upgrade migration_check backfill downgrade reupgrade recheck app_validation backend_tests shell_tests lint build; do
+              echo; echo "## $n"; echo '```text'; tail -n 180 "/tmp/rel-v4/${n}.log"; echo '```'
+            done
+          } > /tmp/rel-v4/report.md
+
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p docs/reliability
+          cp /tmp/rel-v4/report.md docs/reliability/V4_FULL_DIAGNOSTIC.md
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/V4_FULL_DIAGNOSTIC.md
+          git commit -m 'Record Reliability V4 full diagnostic'
+          git push origin HEAD:agent/reliability-v2-v4-diagnostic
