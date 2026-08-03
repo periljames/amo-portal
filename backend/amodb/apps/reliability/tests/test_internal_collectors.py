@@ -71,27 +71,27 @@ def test_authoritative_collector_registry_is_explicit(monkeypatch):
     monkeypatch.setattr(
         internal_collectors,
         "collect_tech_log_records",
-        lambda **_kwargs: ["tech-log"],
+        lambda *_args, **_kwargs: ["tech-log"],
     )
     monkeypatch.setattr(
         internal_collectors,
         "collect_maintenance_records",
-        lambda **_kwargs: ["maintenance"],
+        lambda *_args, **_kwargs: ["maintenance"],
     )
     monkeypatch.setattr(
         internal_collectors,
         "collect_technical_record_events",
-        lambda **_kwargs: ["tech-records"],
+        lambda *_args, **_kwargs: ["tech-records"],
     )
     monkeypatch.setattr(
         internal_collectors,
         "collect_reliability_qms_records",
-        lambda **_kwargs: ["qms"],
+        lambda *_args, **_kwargs: ["qms"],
     )
     monkeypatch.setattr(
         internal_collectors,
         "collect_procurement_quality_records",
-        lambda **_kwargs: ["procurement"],
+        lambda *_args, **_kwargs: ["procurement"],
     )
 
     for source_type, marker in expected.items():
