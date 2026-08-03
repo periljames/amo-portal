@@ -15,16 +15,18 @@ This module is intentionally focused and aligned with the new accounts app:
 
 from __future__ import annotations
 
+import hashlib
 import os
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable, Union, Set
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from argon2 import PasswordHasher
@@ -66,6 +68,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # Current actor id for request-scoped access in routers.
 CURRENT_ACTOR_ID: ContextVar[Optional[str]] = ContextVar(
     "current_actor_id",
+    default=None,
+)
+
+# Authentication-session identity copied into refreshed JWTs. This differs from
+# the user id: concurrent browsers for the same account receive independent
+# values, so an elevated Admin Profile cannot leak between those sessions.
+CURRENT_AUTH_SESSION_ID: ContextVar[Optional[str]] = ContextVar(
+    "current_auth_session_id",
     default=None,
 )
 
@@ -129,6 +139,41 @@ def get_password_hash(password: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalise_auth_session_id(value: object) -> Optional[str]:
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 64:
+        return None
+    return candidate
+
+
+def _auth_session_id_from_token(token: str, payload: dict) -> str:
+    """Resolve a stable server-session id from a JWT.
+
+    New tokens carry an explicit UUID. A deterministic token hash keeps older
+    tokens isolated from one another during a rolling deployment without ever
+    treating the account id itself as the authentication session.
+    """
+    explicit = _normalise_auth_session_id(payload.get("auth_session_id"))
+    if explicit:
+        return explicit
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def bind_current_auth_session_id(value: str) -> Token:
+    normalised = _normalise_auth_session_id(value)
+    if not normalised:
+        raise ValueError("A valid authentication-session id is required.")
+    return CURRENT_AUTH_SESSION_ID.set(normalised)
+
+
+def reset_current_auth_session_id(token: Token) -> None:
+    CURRENT_AUTH_SESSION_ID.reset(token)
+
+
+def get_current_auth_session_id() -> Optional[str]:
+    return CURRENT_AUTH_SESSION_ID.get()
+
+
 def create_access_token(
     *,
     data: dict,
@@ -139,8 +184,19 @@ def create_access_token(
 
     The `data` dict should already include the subject, e.g.:
         {"sub": user.id, "amo_id": user.amo_id}
+
+    A fresh authentication-session id is created for a new login. The explicit
+    refresh dependency binds the current id into CURRENT_AUTH_SESSION_ID so a
+    token refresh stays within the same browser/device session.
     """
     to_encode = data.copy()
+
+    auth_session_id = (
+        _normalise_auth_session_id(to_encode.get("auth_session_id"))
+        or _normalise_auth_session_id(CURRENT_AUTH_SESSION_ID.get())
+        or str(uuid4())
+    )
+    to_encode["auth_session_id"] = auth_session_id
 
     expire = datetime.utcnow() + (
         expires_delta
@@ -205,13 +261,15 @@ def get_current_user(
     """
     Decode the JWT access token and return the corresponding User.
 
-    The token is expected to contain a `sub` claim with the user_id.
+    The token is expected to contain a `sub` claim with the user_id. Every token
+    also resolves to an authentication-session id used by governed elevation.
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
         user_id: Optional[Union[str, int]] = payload.get("sub")
         if user_id is None:
             raise _credentials_exception()
+        auth_session_id = _auth_session_id_from_token(token, payload)
     except JWTError:
         raise _credentials_exception()
 
@@ -238,6 +296,8 @@ def get_current_user(
         if issued_at_dt is None or issued_at_dt + timedelta(seconds=2) <= revoked_dt:
             raise _credentials_exception()
 
+    setattr(user, "auth_session_id", auth_session_id)
+    setattr(user, "_auth_session_id", auth_session_id)
     return user
 
 
@@ -332,7 +392,6 @@ def require_admin(
 
 def get_current_actor_id() -> Optional[str]:
     return CURRENT_ACTOR_ID.get()
-
 
 
 def require_capability(
