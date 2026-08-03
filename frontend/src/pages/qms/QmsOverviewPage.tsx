@@ -121,7 +121,7 @@ function EmptyChart({ message }: { message: string }): React.ReactElement {
   );
 }
 
-function ActionQueue({
+function QmsActionQueue({
   items,
   onNavigate,
 }: {
@@ -145,7 +145,7 @@ function ActionQueue({
   );
 }
 
-function WorkList({
+function QmsMyWork({
   items,
   onNavigate,
   empty,
@@ -171,7 +171,7 @@ function WorkList({
   );
 }
 
-function ObligationList({
+function QmsUpcomingObligations({
   items,
   onNavigate,
 }: {
@@ -182,7 +182,7 @@ function ObligationList({
   return (
     <div className="qms-dashboard-obligations">
       {items.slice(0, 8).map((item) => (
-        <button key={`${item.module || "qms"}-${item.id}`} type="button" onClick={() => onNavigate(item.link || "") } disabled={!item.link}>
+        <button key={`${item.module || "qms"}-${item.id}`} type="button" onClick={() => onNavigate(item.link || "")} disabled={!item.link}>
           <time dateTime={item.date || undefined}>{item.date ? new Date(item.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unscheduled"}</time>
           <span>
             <strong>{item.title}</strong>
@@ -195,7 +195,13 @@ function ObligationList({
   );
 }
 
-function KpiTable({ items, onNavigate }: { items: QmsOperationalKpi[]; onNavigate: (route: string) => void }): React.ReactElement {
+function QmsPerformanceSummary({
+  items,
+  onNavigate,
+}: {
+  items: QmsOperationalKpi[];
+  onNavigate: (route: string) => void;
+}): React.ReactElement {
   return (
     <div className="qms-dashboard-kpis">
       {items.map((item) => (
@@ -390,7 +396,7 @@ const QmsOverviewPage: React.FC = () => {
             </section>
 
             <DashboardPanel title="Priority action queue" subtitle="Ranked by regulatory and operational exposure" className="qms-dashboard-panel--span-2" action={<button type="button" onClick={() => go(routes.myWork)}>Open all work <ArrowRight size={14} /></button>}>
-              <ActionQueue items={dashboard.action_queue} onNavigate={go} />
+              <QmsActionQueue items={dashboard.action_queue} onNavigate={go} />
             </DashboardPanel>
 
             <DashboardPanel title="Findings by severity" subtitle="Open findings only">
@@ -447,21 +453,21 @@ const QmsOverviewPage: React.FC = () => {
                       <CartesianGrid stroke="var(--qms-grid)" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 10, fill: "var(--qms-muted)" }} />
                       <YAxis type="category" dataKey="name" width={145} tick={{ fontSize: 10, fill: "var(--qms-muted)" }} />
-                      <Tooltip formatter={(value, _name, item) => [`${value}${item.payload.unit === "%" ? "%" : item.payload.unit ? ` ${item.payload.unit}` : ""}`, "Current"]} />
+                      <Tooltip />
                       <Bar dataKey="value" fill="var(--qms-chart-1)" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               ) : <EmptyChart message="Performance values are not yet available from the source records." />}
-              <KpiTable items={dashboard.performance_kpis} onNavigate={go} />
+              <QmsPerformanceSummary items={dashboard.performance_kpis} onNavigate={go} />
             </DashboardPanel>
 
             <DashboardPanel title="My Quality work" subtitle="Assigned and unread work" action={<button type="button" onClick={() => go(routes.myWork)}>Open inbox <ArrowRight size={14} /></button>}>
-              <WorkList items={dashboard.my_work} onNavigate={go} empty="No assigned Quality work is currently listed." />
+              <QmsMyWork items={dashboard.my_work} onNavigate={go} empty="No assigned Quality work is currently listed." />
             </DashboardPanel>
 
             <DashboardPanel title="Upcoming obligations" subtitle="Next 30 days" className="qms-dashboard-panel--span-2" action={<button type="button" onClick={() => go(routes.calendar)}>Open calendar <ArrowRight size={14} /></button>}>
-              <ObligationList items={dashboard.upcoming_obligations} onNavigate={go} />
+              <QmsUpcomingObligations items={dashboard.upcoming_obligations} onNavigate={go} />
             </DashboardPanel>
 
             <QmsDiagnosticsDrawer dashboard={dashboard} authorized={diagnosticsAuthorized} />
