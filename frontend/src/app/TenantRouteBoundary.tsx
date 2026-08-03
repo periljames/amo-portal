@@ -132,7 +132,9 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const normalAllowed: Array<Exclude<DepartmentId, "admin">> =
     assigned && assigned !== "admin" ? [assigned] : [];
-  const allowed = isEligibleAdmin && adminState?.active ? allAllowed : normalAllowed.length ? normalAllowed : allAllowed;
+  const allowed = isEligibleAdmin && adminState?.active
+    ? allAllowed
+    : normalAllowed;
   const homeDepartment = allowed[0];
 
   if (!homeDepartment) {
