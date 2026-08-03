@@ -1,0 +1,366 @@
+name: Canonical Reliability Rebuild
+
+on:
+  pull_request:
+    branches:
+      - feat/global-tenant-navigation-quality-home
+    paths:
+      - .github/workflows/reliability-canonical-rebuild.yml
+      - docs/reliability/.canonical-rebuild-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild-validate-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Check out clean Reliability branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+
+      - name: Fetch temporary source backup
+        run: git fetch origin agent/reliability-v2-backup:refs/remotes/origin/agent/reliability-v2-backup
+
+      - name: Restore approved Reliability inputs only
+        run: |
+          mkdir -p backend/scripts docs/reliability frontend/src/pages/reliability frontend/src/services frontend/src/styles
+          git show origin/agent/reliability-v2-backup:backend/scripts/canonicalise_reliability_module.py > backend/scripts/canonicalise_reliability_module.py
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md > docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md > docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md
+          git show origin/agent/reliability-v2-backup:frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx > frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx
+          git show origin/agent/reliability-v2-backup:frontend/src/services/reliabilityV2.ts > frontend/src/services/reliabilityV2.ts
+          git show origin/agent/reliability-v2-backup:frontend/src/styles/reliability-v2.css > frontend/src/styles/reliability-v2.css
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare canonical replacement script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/scripts/canonicalise_reliability_module.py')
+          text = path.read_text(encoding='utf-8')
+          needle = '    text = text.replace("current_user.amo_id", "_amo_id(current_user)")\n'
+          replacement = needle + '    text = text.replace("amo_id = _amo_id(current_user)\\n    if not amo_id:", "amo_id = current_user.effective_amo_id\\n    if not amo_id:")\n'
+          if replacement not in text:
+              if needle not in text:
+                  raise SystemExit('Tenant replacement anchor not found')
+              text = text.replace(needle, replacement, 1)
+          text = text.replace('"/events/{event_id}"', '"/events/{event_id:int}"')
+          text = text.replace('"/alerts/{alert_id}"', '"/alerts/{alert_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}"', '"/fracas/cases/{case_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}/actions"', '"/fracas/cases/{case_id:int}/actions"')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Replace old Reliability implementation in place
+        run: python backend/scripts/canonicalise_reliability_module.py
+
+      - name: Integrate Reliability into latest canonical navigation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          manifest = Path('frontend/src/app/portalRouteManifest.ts')
+          text = manifest.read_text(encoding='utf-8')
+          old = '''  if (department === "reliability") return {
+            id: "department-reliability",
+    label: "Reliability",
+    icon: "reliability",
+    path: `${base}/reliability`,
+    children: [{
+      id: "reliability-analysis",
+      label: "Analysis",
+      path: `${base}/reliability`,
+      children: [
+        { id: "reliability-home", label: "Home", path: `${base}/reliability`, exact: true },
+        { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability/reports` },
+        { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
+        { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
+        { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
+      ],
+    }],
+  };
+'''
+          # Preserve the exact current-shell indentation if the compact block differs.
+          old = old.replace('            id:', '    id:', 1)
+          new = '''  if (department === "reliability") return {
+    id: "department-reliability",
+    label: "Reliability",
+    icon: "reliability",
+    path: `${base}/reliability`,
+    children: [
+      {
+        id: "reliability-command",
+        label: "Command",
+        path: `${base}/reliability`,
+        children: [
+          { id: "reliability-workbench", label: "Workbench", path: `${base}/reliability`, exact: true },
+          { id: "reliability-events", label: "Occurrences", path: `${base}/reliability/events` },
+          { id: "reliability-alerts", label: "Alerts", path: `${base}/reliability/alerts` },
+          { id: "reliability-fracas", label: "FRACAS", path: `${base}/reliability/cases` },
+        ],
+      },
+      {
+        id: "reliability-analysis",
+        label: "Analysis",
+        path: `${base}/reliability/fleet`,
+        children: [
+          { id: "reliability-fleet", label: "Fleet", path: `${base}/reliability/fleet` },
+          { id: "reliability-systems", label: "ATA Systems", path: `${base}/reliability/systems` },
+          { id: "reliability-components", label: "Components", path: `${base}/reliability/components` },
+          { id: "reliability-engines", label: "Engine Trends", path: `${base}/reliability/engines` },
+          { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
+          { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
+          { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
+        ],
+      },
+      {
+        id: "reliability-governance",
+        label: "Governance",
+        path: `${base}/reliability/program`,
+        children: [
+          { id: "reliability-program", label: "Programme", path: `${base}/reliability/program` },
+          { id: "reliability-changes", label: "Programme Changes", path: `${base}/reliability/changes` },
+          { id: "reliability-meetings", label: "Review Meetings", path: `${base}/reliability/meetings` },
+          { id: "reliability-reports", label: "Controlled Reports", path: `${base}/reliability/reports` },
+          { id: "reliability-data-quality", label: "Data Quality", path: `${base}/reliability/data-quality` },
+        ],
+      },
+    ],
+  };
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one current Reliability navigation block, found {text.count(old)}')
+          manifest.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          test_path = Path('frontend/src/app/portalRouteManifest.test.ts')
+          test_text = test_path.read_text(encoding='utf-8')
+          test_text = test_text.replace(
+              'import { describe, expect, it } from "vitest";',
+              'import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";',
+              1,
+          )
+          anchor = '''import {
+  buildPortalNavigation,
+  flattenPortalNavigation,
+  type PortalNavItem,
+} from "./portalRouteManifest";
+'''
+          setup = anchor + '''
+const storage = new Map<string, string>();
+const localStorageMock: Storage = {
+  get length() { return storage.size; },
+  clear() { storage.clear(); },
+  getItem(key: string) { return storage.get(key) ?? null; },
+  key(index: number) { return Array.from(storage.keys())[index] ?? null; },
+  removeItem(key: string) { storage.delete(key); },
+  setItem(key: string, value: string) { storage.set(key, String(value)); },
+};
+
+beforeEach(() => {
+  storage.clear();
+  vi.stubGlobal("localStorage", localStorageMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+'''
+          if test_text.count(anchor) != 1:
+              raise SystemExit('Navigation test import anchor not found')
+          test_text = test_text.replace(anchor, setup, 1)
+          old_assertions = '''    expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
+    expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
+    expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
+    expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
+'''
+          new_assertions = '''    expect(paths.get("reliability-workbench")).toBe("/maintenance/tenant-a/reliability");
+    expect(paths.get("reliability-events")).toBe("/maintenance/tenant-a/reliability/events");
+    expect(paths.get("reliability-alerts")).toBe("/maintenance/tenant-a/reliability/alerts");
+    expect(paths.get("reliability-fracas")).toBe("/maintenance/tenant-a/reliability/cases");
+    expect(paths.get("reliability-fleet")).toBe("/maintenance/tenant-a/reliability/fleet");
+    expect(paths.get("reliability-systems")).toBe("/maintenance/tenant-a/reliability/systems");
+    expect(paths.get("reliability-components")).toBe("/maintenance/tenant-a/reliability/components");
+    expect(paths.get("reliability-engines")).toBe("/maintenance/tenant-a/reliability/engines");
+    expect(paths.get("reliability-program")).toBe("/maintenance/tenant-a/reliability/program");
+    expect(paths.get("reliability-changes")).toBe("/maintenance/tenant-a/reliability/changes");
+    expect(paths.get("reliability-meetings")).toBe("/maintenance/tenant-a/reliability/meetings");
+    expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
+    expect(paths.get("reliability-data-quality")).toBe("/maintenance/tenant-a/reliability/data-quality");
+    expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
+    expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
+    expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
+'''
+          if test_text.count(old_assertions) != 1:
+              raise SystemExit('Reliability navigation assertions not found')
+          test_path.write_text(test_text.replace(old_assertions, new_assertions, 1), encoding='utf-8')
+          PY
+
+      - name: Finalize preload and canonical backend tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          preload = Path('frontend/src/app/routePreload.ts')
+          text = preload.read_text(encoding='utf-8')
+          text = text.replace(
+              'const loadReliabilityReportsPage: RouteLoader = () => import("../pages/ReliabilityReportsPage");',
+              'const loadReliabilityWorkspacePage: RouteLoader = () => import("../pages/reliability/ReliabilityWorkspacePage");',
+          )
+          text = text.replace(
+              '{ test: /\\/reliability(?:\\/|$)/, loaders: [loadReliabilityReportsPage] },',
+              '{ test: /\\/reliability(?:\\/|$)/, loaders: [loadReliabilityWorkspacePage] },',
+          )
+          preload.write_text(text, encoding='utf-8')
+
+          Path('backend/amodb/apps/reliability/tests/test_canonical_foundation.py').write_text('''from datetime import datetime, timedelta, timezone
+
+from amodb.apps.reliability.router import router
+from amodb.apps.reliability.services import _reliability_freshness
+
+
+def test_router_exposes_one_canonical_reliability_surface():
+    paths = {route.path for route in router.routes}
+    assert "/reliability/workbench" in paths
+    assert "/reliability/events" in paths
+    assert "/reliability/events/{event_id:int}" in paths
+    assert "/reliability/alerts" in paths
+    assert "/reliability/alerts/{alert_id:int}" in paths
+    assert "/reliability/fracas/cases" in paths
+    assert "/reliability/fracas/cases/{case_id:int}" in paths
+    assert "/reliability/fracas/cases/{case_id:int}/actions" in paths
+    assert "/reliability/engine-trends/fleet-status" in paths
+    assert all("/v2" not in path for path in paths)
+    assert "/reliability/fracas/{fracas_case_id}/actions" not in paths
+
+
+def test_freshness_never_marks_missing_data_current():
+    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    missing = _reliability_freshness(source="Missing", latest=None, now=now)
+    stale = _reliability_freshness(source="Stale", latest=now - timedelta(days=8), now=now)
+    current = _reliability_freshness(source="Current", latest=now - timedelta(days=1), now=now)
+    assert missing.status == "MISSING"
+    assert stale.status == "STALE"
+    assert current.status == "CURRENT"
+''', encoding='utf-8')
+          PY
+
+      - name: Reject obsolete and parallel Reliability surfaces
+        run: |
+          if grep -R '/reliability/v2' backend/amodb/apps/reliability frontend/src --exclude-dir=node_modules; then exit 1; fi
+          if grep -R 'ReliabilityReportsPage' frontend/src; then exit 1; fi
+          test ! -e backend/amodb/apps/reliability/v2_router.py
+          test ! -e backend/amodb/apps/reliability/v2_services.py
+          test ! -e backend/amodb/apps/reliability/v2_schemas.py
+          test ! -e frontend/src/services/reliabilityV2.ts
+          test ! -e frontend/src/pages/ReliabilityReportsPage.tsx
+          if find backend -type f \( -name '*.pyc' -o -name 'reliability_v2_test.db' \) | grep .; then exit 1; fi
+
+      - name: Compile canonical backend
+        run: >-
+          python -m py_compile
+          backend/amodb/apps/reliability/router.py
+          backend/amodb/apps/reliability/schemas.py
+          backend/amodb/apps/reliability/services.py
+          backend/amodb/apps/reliability/tests/test_canonical_foundation.py
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Import application and run Reliability tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: '1'
+          DATABASE_URL: sqlite:///./canonical_reliability_test.db
+          DATABASE_WRITE_URL: sqlite:///./canonical_reliability_test.db
+          SECRET_KEY: canonical-reliability-validation-secret
+          QUALITY_SCHEMA_STRICT: '0'
+        run: |
+          python -c "import amodb.main; print('Canonical Reliability application import passed')"
+          pytest -q amodb/apps/reliability/tests/test_canonical_foundation.py
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Run tenant-shell navigation tests
+        working-directory: frontend
+        run: npm run test:tenant-shell
+
+      - name: Lint canonical Reliability boundaries
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/App.tsx
+          src/portalRoutes.tsx
+          src/app/portalRouteManifest.ts
+          src/app/portalRouteManifest.test.ts
+          src/app/routePreload.ts
+          src/pages/reliability/ReliabilityWorkspacePage.tsx
+          src/pages/reliability/ReliabilityReportsView.tsx
+          src/services/reliability.ts
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Record validation and remove temporary machinery
+        run: |
+          cat > docs/reliability/RELIABILITY_V2_VALIDATION.md <<EOF
+          # Reliability Canonical Replacement Validation
+
+          - Source shell head: \`476fc3a96a6cdefbd5bcb89dc01a25dbb3a96f7a\`
+          - GitHub Actions run: \`${GITHUB_RUN_ID}\`
+          - UTC validation time: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+
+          ## Architecture enforced
+
+          - one frontend route tree: \`/maintenance/:amoCode/reliability/*\`
+          - one backend API prefix: \`/reliability/*\`
+          - no \`/reliability/v2\` API, alias, compatibility redirect or duplicate service client
+          - no App-level Reliability interception or separate legacy reports page
+          - enhanced reports live inside the canonical Reliability workspace
+          - no tracked test database or Python cache artifacts
+
+          ## Passed checks
+
+          - backend compilation, application import and canonical route/freshness tests
+          - tenant-navigation regression tests against the latest shell
+          - scoped ESLint
+          - full TypeScript/Vite production build
+          EOF
+          rm -f backend/canonical_reliability_test.db
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          rm -f docs/reliability/.canonical-rebuild-trigger
+          rm backend/scripts/canonicalise_reliability_module.py
+          rm .github/workflows/reliability-canonical-rebuild.yml
+
+      - name: Publish clean canonical branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Rebuild Reliability as one canonical module"
+          git push origin HEAD:agent/reliability-v2-foundation
+          git push origin --delete agent/reliability-v2-backup || true
