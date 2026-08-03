@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 from types import SimpleNamespace
 
 from amodb import main as app_main
 from amodb.apps.accounts.models import AccountRole
-from amodb.apps.reliability import advanced_scheduler, router, services
+
+advanced_scheduler = importlib.import_module(
+    "amodb.apps.reliability.advanced_scheduler"
+)
+router_module = importlib.import_module("amodb.apps.reliability.router")
+services = importlib.import_module("amodb.apps.reliability.services")
 
 
 class _QueryRecorder:
@@ -71,8 +77,11 @@ def test_event_queries_are_bounded_even_for_direct_service_callers():
 
 
 def test_ehm_pagination_is_bounded_and_normalized():
-    assert router._normalize_ehm_pagination(10_000, -25) == (router.MAX_EHM_PAGE_SIZE, 0)
-    assert router._normalize_ehm_pagination(0, 12) == (100, 12)
+    assert router_module._normalize_ehm_pagination(10_000, -25) == (
+        router_module.MAX_EHM_PAGE_SIZE,
+        0,
+    )
+    assert router_module._normalize_ehm_pagination(0, 12) == (100, 12)
 
 
 def test_scheduler_start_is_idempotent_and_stop_joins(monkeypatch):
@@ -128,7 +137,7 @@ def test_scheduler_is_wired_to_bounded_application_lifecycle():
 
 
 def test_fracas_evidence_export_is_tenant_scoped_and_audited():
-    source = inspect.getsource(router.export_fracas_evidence_pack)
+    source = inspect.getsource(router_module.export_fracas_evidence_pack)
     assert "FRACASCase.amo_id == _amo_id(current_user)" in source
     assert "FRACASCase.id == fracas_case_id" in source
     assert "actor_user_id=current_user.id" in source
@@ -147,6 +156,6 @@ def test_fracas_evidence_export_is_restricted_to_authorized_participants():
     outsider = SimpleNamespace(id="outsider", role=AccountRole.TECHNICIAN)
     quality_manager = SimpleNamespace(id="quality", role=AccountRole.QUALITY_MANAGER)
 
-    assert router._can_export_fracas(participant, case) is True
-    assert router._can_export_fracas(quality_manager, case) is True
-    assert router._can_export_fracas(outsider, case) is False
+    assert router_module._can_export_fracas(participant, case) is True
+    assert router_module._can_export_fracas(quality_manager, case) is True
+    assert router_module._can_export_fracas(outsider, case) is False
