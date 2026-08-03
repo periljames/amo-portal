@@ -1,0 +1,69 @@
+name: Alembic Source Graph Probe
+
+on:
+  push:
+    branches:
+      - agent/procurement-ux-document-control-review
+
+permissions:
+  contents: read
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Inspect migration source graph
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          versions = Path('backend/amodb/alembic/versions')
+          revisions = {}
+          parents = {}
+          files = {}
+
+          def literal(node):
+              if isinstance(node, ast.Constant):
+                  return node.value
+              if isinstance(node, (ast.Tuple, ast.List)):
+                  return tuple(literal(item) for item in node.elts)
+              return None
+
+          for path in sorted(versions.glob('*.py')):
+              tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+              values = {}
+              for node in tree.body:
+                  if isinstance(node, ast.Assign):
+                      for target in node.targets:
+                          if isinstance(target, ast.Name) and target.id in {'revision', 'down_revision'}:
+                              values[target.id] = literal(node.value)
+              revision = values.get('revision')
+              if not isinstance(revision, str):
+                  continue
+              revisions[revision] = path.name
+              files[revision] = path
+              parent = values.get('down_revision')
+              if parent is None:
+                  parents[revision] = ()
+              elif isinstance(parent, str):
+                  parents[revision] = (parent,)
+              else:
+                  parents[revision] = tuple(parent)
+
+          referenced = {parent for values in parents.values() for parent in values}
+          heads = sorted(set(revisions) - referenced)
+          unresolved = sorted(parent for parent in referenced if parent not in revisions)
+          print('MIGRATION_COUNT', len(revisions))
+          print('HEADS')
+          for head in heads:
+              print(f'  {head} :: {revisions[head]} :: parents={parents[head]}')
+          print('UNRESOLVED')
+          for parent in unresolved:
+              print(f'  {parent}')
+          print('PROCUREMENT_CHAIN')
+          for revision, filename in sorted(revisions.items()):
+              if 'procure' in revision.lower() or 'procure' in filename.lower():
+                  print(f'  {revision} :: {filename} :: parents={parents[revision]}')
+          PY
