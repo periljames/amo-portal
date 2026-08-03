@@ -33,7 +33,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
 import bcrypt
 
-from .database import get_db, get_read_db
+from .database import get_db
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AccountRole
 
@@ -256,13 +256,13 @@ def _credentials_exception() -> HTTPException:
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_db),
 ) -> account_models.User:
-    """
-    Decode the JWT access token and return the corresponding User.
+    """Decode the JWT and load identity from the strongly consistent writer.
 
-    The token is expected to contain a `sub` claim with the user_id. Every token
-    also resolves to an authentication-session id used by governed elevation.
+    Authentication, token revocation, tenant membership and role decisions must
+    never trust a potentially lagging read replica. Read sessions remain suitable
+    only after this writer-side identity has authorized the requested operation.
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
@@ -303,9 +303,9 @@ def get_current_user(
 
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_db),
 ) -> account_models.User:
-    """Ensure the current user is active and attach request tenant context.
+    """Ensure the writer-side user is active and attach tenant context.
 
     Superusers remain platform actors, but their selected support AMO is exposed
     through ``active_amo_id``/``effective_amo_id`` so admin/support screens can
@@ -397,15 +397,11 @@ def get_current_actor_id() -> Optional[str]:
 def require_capability(
     capability_code: str,
 ) -> Callable[[account_models.User, Session], account_models.User]:
-    """Fail-closed capability gate (hard cutover mode).
-
-    - No legacy AMO_ADMIN fallback path.
-    - Capability datastore/query failures return 503 (authorization service unavailable).
-    """
+    """Fail-closed capability gate against the writer-side authorization state."""
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
-        db: Session = Depends(get_read_db),
+        db: Session = Depends(get_db),
     ) -> account_models.User:
         if getattr(current_user, "is_superuser", False):
             return current_user
@@ -458,27 +454,9 @@ def require_roles(
     """
     Dependency factory to enforce that the current user has one of the given roles.
 
-    Usage (with Enum):
-        @router.post(...)
-        def endpoint(
-            current_user: User = Depends(
-                require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)
-            )
-        ):
-            ...
-
-    Usage (with strings, useful in routers to avoid importing AccountRole):
-        @router.post(...)
-        def endpoint(
-            current_user: User = Depends(
-                require_roles("SUPERUSER", "AMO_ADMIN", "PLANNING_ENGINEER")
-            )
-        ):
-            ...
-
     Behaviour:
     - SUPERUSER always passes, even if not explicitly listed in `allowed_roles`.
-    - Otherwise, the user's `role` must be in the allowed set.
+    - Otherwise, the user's writer-side role must be in the allowed set.
     """
     normalised_roles: Set[AccountRole] = set()
     for r in allowed_roles:
