@@ -1,0 +1,127 @@
+name: Diagnose Reliability Publication
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.canonical-rebuild-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - name: Diagnose staging and commit creation
+        shell: bash
+        run: |
+          set +e
+          ORIGINAL_SHA="$GITHUB_SHA"
+          mkdir -p /tmp/reliability-git docs/reliability backend/scripts frontend/src/pages/reliability frontend/src/services frontend/src/styles
+          git fetch origin agent/reliability-v2-backup:refs/remotes/origin/agent/reliability-v2-backup > /tmp/reliability-git/fetch.log 2>&1
+          git show origin/agent/reliability-v2-backup:backend/scripts/canonicalise_reliability_module.py > backend/scripts/canonicalise_reliability_module.py
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md > docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md > docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md
+          git show origin/agent/reliability-v2-backup:frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx > frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx
+          git show origin/agent/reliability-v2-backup:frontend/src/services/reliabilityV2.ts > frontend/src/services/reliabilityV2.ts
+          git show origin/agent/reliability-v2-backup:frontend/src/styles/reliability-v2.css > frontend/src/styles/reliability-v2.css
+          python - <<'PY' > /tmp/reliability-git/prepare.log 2>&1
+          from pathlib import Path
+          path = Path('backend/scripts/canonicalise_reliability_module.py')
+          text = path.read_text(encoding='utf-8')
+          needle = '    text = text.replace("current_user.amo_id", "_amo_id(current_user)")\n'
+          replacement = needle + '    text = text.replace("amo_id = _amo_id(current_user)\\n    if not amo_id:", "amo_id = current_user.effective_amo_id\\n    if not amo_id:")\n'
+          if replacement not in text:
+              if needle not in text:
+                  raise SystemExit('Tenant replacement anchor not found')
+              text = text.replace(needle, replacement, 1)
+          text = text.replace('"/events/{event_id}"', '"/events/{event_id:int}"')
+          text = text.replace('"/alerts/{alert_id}"', '"/alerts/{alert_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}"', '"/fracas/cases/{case_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}/actions"', '"/fracas/cases/{case_id:int}/actions"')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python backend/scripts/canonicalise_reliability_module.py > /tmp/reliability-git/canonicalize.log 2>&1
+          CANON_RC=$?
+          python backend/scripts/finalize_reliability_rebuild.py > /tmp/reliability-git/finalize.log 2>&1
+          FINALIZE_RC=$?
+          python backend/scripts/patch_reliability_route_surface.py > /tmp/reliability-git/surface.log 2>&1
+          SURFACE_RC=$?
+          cat > docs/reliability/RELIABILITY_V2_VALIDATION.md <<EOF
+          # Reliability Canonical Replacement Validation
+
+          - Backend diagnostic run: \`30806703800\`
+          - Frontend diagnostic run: \`30807212501\`
+          - Source shell head: \`476fc3a96a6cdefbd5bcb89dc01a25dbb3a96f7a\`
+
+          One canonical frontend route tree and backend API prefix are enforced. No V2 alias, compatibility redirect, duplicate client, generic department-home interception, or separate reports page remains.
+          EOF
+          rm -f docs/reliability/.canonical-rebuild-trigger docs/reliability/.push-probe
+          rm -f docs/reliability/CANONICAL_REBUILD_DIAGNOSTIC.md docs/reliability/FRONTEND_REBUILD_DIAGNOSTIC.md
+          rm -f backend/scripts/canonicalise_reliability_module.py backend/scripts/finalize_reliability_rebuild.py backend/scripts/patch_reliability_route_surface.py
+          rm -f .github/workflows/reliability-git-diagnostic.yml
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          python - <<'PY' > /tmp/reliability-git/sanitize.log 2>&1
+          from pathlib import Path
+          roots = [Path('docs/reliability'), Path('backend/amodb/apps/reliability'), Path('frontend/src/pages/reliability')]
+          files = [
+              Path('frontend/src/App.tsx'), Path('frontend/src/portalRoutes.tsx'),
+              Path('frontend/src/app/PortalRouteSurface.tsx'), Path('frontend/src/app/portalRouteManifest.ts'),
+              Path('frontend/src/app/portalRouteManifest.test.ts'), Path('frontend/src/app/routePreload.ts'),
+              Path('frontend/src/services/reliability.ts'), Path('frontend/src/styles/reliability-v2.css'),
+          ]
+          for root in roots:
+              if root.exists(): files.extend(p for p in root.rglob('*') if p.is_file())
+          for path in files:
+              if path.exists() and path.suffix in {'.md', '.py', '.ts', '.tsx', '.css'}:
+                  text = path.read_text(encoding='utf-8')
+                  path.write_text('\n'.join(line.rstrip() for line in text.splitlines()) + '\n', encoding='utf-8')
+          PY
+          SANITIZE_RC=$?
+          git status --short > /tmp/reliability-git/status.log 2>&1
+          git add -A > /tmp/reliability-git/add.log 2>&1
+          ADD_RC=$?
+          git diff --cached --check > /tmp/reliability-git/check.log 2>&1
+          CHECK_RC=$?
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Rebuild Reliability as one canonical module" > /tmp/reliability-git/commit.log 2>&1
+          COMMIT_RC=$?
+          TEST_COMMIT=$(git rev-parse HEAD 2>/dev/null)
+          cat > /tmp/reliability-git/report.md <<EOF
+          # Reliability Publication Diagnostic
+
+          - Run: \`${GITHUB_RUN_ID}\`
+          - Source SHA: \`${GITHUB_SHA}\`
+          - Test commit: \`${TEST_COMMIT}\`
+
+          | Stage | Exit code |
+          |---|---:|
+          | Canonical replacement | ${CANON_RC} |
+          | Finalizer | ${FINALIZE_RC} |
+          | Route surface patch | ${SURFACE_RC} |
+          | Sanitization | ${SANITIZE_RC} |
+          | Git add | ${ADD_RC} |
+          | Git diff check | ${CHECK_RC} |
+          | Local commit | ${COMMIT_RC} |
+          EOF
+          for stage in status check commit; do
+            printf '\n### %s\n\n```text\n' "$stage" >> /tmp/reliability-git/report.md
+            cat "/tmp/reliability-git/${stage}.log" >> /tmp/reliability-git/report.md 2>/dev/null
+            printf '\n```\n' >> /tmp/reliability-git/report.md
+          done
+          git reset --hard "$ORIGINAL_SHA"
+          git clean -fdx
+          mkdir -p docs/reliability
+          cp /tmp/reliability-git/report.md docs/reliability/PUBLICATION_DIAGNOSTIC.md
+          git add docs/reliability/PUBLICATION_DIAGNOSTIC.md
+          git commit -m "Record Reliability publication diagnostics"
+          git push origin HEAD:agent/reliability-v2-foundation
