@@ -23,3 +23,11 @@
 - scoped ESLint on Reliability-owned routing and UI boundaries
 - full TypeScript/Vite production build
 - clean Git staging and local commit creation
+
+## Current tenant-shell synchronization
+
+- Synchronized shell head: `309a8eac0aecfdbb19a1ecd71c83cdbaababb074`
+- Merge diagnostic run: `30808533950`
+- Merge publication run: `30808850509`
+- UTC merge time: `2026-08-03T11:16:12Z`
+- The exact Git merge completed with zero conflicted files.
