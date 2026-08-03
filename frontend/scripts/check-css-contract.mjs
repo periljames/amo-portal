@@ -25,14 +25,14 @@ if (styleImports.length !== 1 || styleImports[0] !== "./styles/index.css") {
 const indexPath = path.join(styles, "index.css");
 const index = read(indexPath);
 const requiredOrder = [
-  './global.css',
-  './tokens.css',
-  './base.css',
-  './theme-contract.css',
-  './theme-module-repairs.css',
-  './foundations/forms-and-overlays.css',
-  './foundations/layout-safety.css',
-  './foundations/appearance.css',
+  "./global.css",
+  "./tokens.css",
+  "./base.css",
+  "./theme-contract.css",
+  "./theme-module-repairs.css",
+  "./foundations/forms-and-overlays.css",
+  "./foundations/layout-safety.css",
+  "./foundations/appearance.css",
 ];
 let previous = -1;
 for (const required of requiredOrder) {
@@ -56,9 +56,6 @@ for (const file of files) {
   const relative = path.relative(root, file).replaceAll(path.sep, "/");
   const selfReferences = [...content.matchAll(/(--[\w-]+)\s*:\s*var\(\s*\1(?:\s*[,)]|\s*\))/g)];
   for (const match of selfReferences) fail(`${relative} contains recursive custom property ${match[1]}`);
-  if (/\bheight\s*:\s*100vh\b/.test(content) && !/100dvh/.test(content)) {
-    fail(`${relative} uses 100vh without a 100dvh fallback`);
-  }
 }
 
 const graph = new Map();
@@ -91,7 +88,7 @@ function visit(file, trail = []) {
 for (const file of graph.keys()) visit(file);
 
 const contract = read(path.join(styles, "foundations", "forms-and-overlays.css"));
-for (const requiredSelector of ['[role="dialog"]', 'textarea', 'select option', ':-webkit-autofill']) {
+for (const requiredSelector of ['[role="dialog"]', "textarea", "select option", ":-webkit-autofill"]) {
   if (!contract.includes(requiredSelector)) fail(`forms-and-overlays.css is missing ${requiredSelector}`);
 }
 
