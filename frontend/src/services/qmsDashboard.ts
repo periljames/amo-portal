@@ -4,8 +4,10 @@ import type { QmsDashboardResponse, QmsOperationalDashboardResponse } from "../t
 
 export function getQmsDashboard(amoCode: string): Promise<QmsDashboardResponse> {
   return apiRequest<QmsDashboardResponse>(qmsPath(amoCode, "/dashboard-lite"), {
-    timeoutMs: 8_000,
-    cacheTtlMs: 20_000,
+    timeoutMs: 10_000,
+    cacheTtlMs: 30_000,
+    persistCache: true,
+    staleWhileOfflineMs: 30 * 60_000,
   });
 }
 
@@ -14,8 +16,10 @@ export function getQmsOperationalDashboard(
   signal?: AbortSignal,
 ): Promise<QmsOperationalDashboardResponse> {
   return apiRequest<QmsOperationalDashboardResponse>(qmsPath(amoCode, "/dashboard-v2"), {
-    timeoutMs: 12_000,
-    cacheTtlMs: 15_000,
+    timeoutMs: 15_000,
+    cacheTtlMs: 20_000,
+    persistCache: true,
+    staleWhileOfflineMs: 30 * 60_000,
     signal,
   });
 }
