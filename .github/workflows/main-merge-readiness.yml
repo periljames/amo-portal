@@ -8,11 +8,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: procurement-atomic-audit-fix-${{ github.event.pull_request.number }}
+  group: procurement-atomic-audit-cleanup-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  apply-procurement-atomic-audit-fix:
+  restore-standard-gate:
     if: github.event.pull_request.head.ref == 'agent/procurement-ui-document-controls' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -20,16 +20,16 @@ jobs:
         with:
           ref: agent/procurement-ui-document-controls
           fetch-depth: 0
-      - name: Apply atomic Quality evidence and shared audit fixes
-        run: python .github/scripts/procurement_atomic_audit_fix.py
-      - name: Verify source integrity
+      - name: Restore standard workflow and remove patch script
         run: |
-          python -m compileall -q backend/amodb/apps/procurement backend/tests
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/main-merge-readiness.yml
+          git rm -f .github/scripts/procurement_atomic_audit_fix.py
           git diff --check
-      - name: Commit fixes to PR branch
+      - name: Commit cleanup to PR branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/amodb/apps/procurement/document_service.py backend/tests/test_procurement_document_contract.py
-          git commit -m "Make Procurement evidence decisions atomic and auditable"
+          git add .github/workflows/main-merge-readiness.yml
+          git commit -m "Remove temporary atomic evidence correction script"
           git push origin HEAD:agent/procurement-ui-document-controls
