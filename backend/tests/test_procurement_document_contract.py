@@ -35,7 +35,8 @@ def test_backend_exposes_document_list_upload_download_and_void_routes():
 
 
 def test_migration_extends_procurement_branch():
-    source = read("amodb/alembic/versions/procurement_20260803_document_records.py")
+    source = read("amodb/alembic/versions/procure_20260803_docs.py")
+    assert 'revision = "procure_20260803_docs"' in source
     assert 'down_revision = "procurement_20260803_full_domain"' in source
     assert "ProcurementDocument.__table__.create" in source
 
