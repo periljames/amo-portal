@@ -53,12 +53,16 @@ def main() -> None:
     return metadata
 
 
+_RELIABILITY_AUTOGENERATE_ENABLED = (
+    os.getenv("RELIABILITY_AUTOGENERATE_ONLY", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
 # Target metadata for 'autogenerate'. Application migrations use the full model;
 # the Reliability completion migration uses an isolated, dependency-complete graph.
 target_metadata = (
     _build_reliability_metadata()
-    if os.getenv("RELIABILITY_AUTOGENERATE_ONLY", "0").strip().lower()
-    in {"1", "true", "yes", "on"}
+    if _RELIABILITY_AUTOGENERATE_ENABLED
     else Base.metadata
 )
 '''
@@ -69,7 +73,9 @@ target_metadata = (
             # You can add include_object / process_revision_directives here later if needed.
 '''
     online_replacement = '''            compare_type=True,
-            compare_server_default=True,
+            # PostgreSQL JSON has no equality operator; compare defaults only for
+            # ordinary application migrations, not the scoped Reliability graph.
+            compare_server_default=not _RELIABILITY_AUTOGENERATE_ENABLED,
             include_object=_reliability_include_object,
 '''
     text = replace_once(
@@ -88,12 +94,20 @@ target_metadata = (
             text,
             offline_anchor,
             '''        compare_type=True,
-        compare_server_default=True,
+        compare_server_default=not _RELIABILITY_AUTOGENERATE_ENABLED,
         include_object=_reliability_include_object,
     )
 ''',
             "offline Reliability include_object configuration",
         )
+    else:
+        offline_section, remainder = text.split("def _assert_no_duplicate_revisions", 1)
+        offline_section = offline_section.replace(
+            "compare_server_default=True,",
+            "compare_server_default=not _RELIABILITY_AUTOGENERATE_ENABLED,",
+            1,
+        )
+        text = offline_section + "def _assert_no_duplicate_revisions" + remainder
 
     ENV_PATH.write_text(text, encoding="utf-8")
     print("Reliability Alembic autogeneration isolated in offline and online contexts.")
