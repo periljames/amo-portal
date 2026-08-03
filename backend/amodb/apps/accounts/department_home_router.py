@@ -4,15 +4,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import and_, or_, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.audit.models import AuditEvent
 from amodb.apps.tasks.models import Task, TaskStatus
-from amodb.database import get_read_db
+from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 from . import models
+from .admin_profile_access import active_admin_profile_session
 
 
 router = APIRouter(prefix="/home", tags=["department_home"])
@@ -151,28 +151,11 @@ def _assert_tenant(user: models.User, amo: models.AMO) -> None:
 
 
 def _admin_profile_active(db: Session, user: models.User, amo: models.AMO) -> bool:
-    if not (getattr(user, "is_amo_admin", False) or _role(user) == "AMO_ADMIN"):
-        return False
-    try:
-        return db.execute(
-            text(
-                """
-                SELECT 1
-                FROM admin_profile_sessions
-                WHERE amo_id = :amo_id
-                  AND user_id = :user_id
-                  AND revoked_at IS NULL
-                  AND expires_at > :now
-                LIMIT 1
-                """
-            ),
-            {"amo_id": str(amo.id), "user_id": str(user.id), "now": _utcnow()},
-        ).first() is not None
-    except SQLAlchemyError:
-        return False
+    return active_admin_profile_session(db, user, amo)
 
 
 def _allowed_departments(db: Session, user: models.User, amo: models.AMO) -> set[str]:
+    """Resolve department authorization only from writer-side state."""
     allowed = set(ROLE_DEPARTMENTS.get(_role(user), set()))
     if getattr(user, "department_id", None):
         department = (
@@ -222,24 +205,28 @@ def get_department_home(
     department: str,
     response: Response,
     current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_read_db),
+    authorization_db: Session = Depends(get_db),
+    read_db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    amo = _resolve_amo(db, amo_code)
+    # Tenant membership, role, department assignment, grants and profile-session
+    # state are authoritative decisions and therefore use the writer. The replica
+    # is consulted only after authorization to compose operational payload data.
+    amo = _resolve_amo(authorization_db, amo_code)
     _assert_tenant(current_user, amo)
     department_code = _normalise_department(department)
     if not department_code or department_code not in SUPPORTED_DEPARTMENTS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department workspace was not found.")
-    if department_code not in _allowed_departments(db, current_user, amo):
+    if department_code not in _allowed_departments(authorization_db, current_user, amo):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Department access is not permitted for this user.")
 
     now = _utcnow()
     open_statuses = [TaskStatus.OPEN, TaskStatus.IN_PROGRESS]
-    assigned_query = db.query(Task).filter(
+    assigned_query = read_db.query(Task).filter(
         Task.amo_id == amo.id,
         Task.owner_user_id == current_user.id,
         Task.status.in_(open_statuses),
     )
-    approval_query = db.query(Task).filter(
+    approval_query = read_db.query(Task).filter(
         Task.amo_id == amo.id,
         Task.supervisor_user_id == current_user.id,
         Task.status.in_(open_statuses),
@@ -264,7 +251,7 @@ def get_department_home(
     high_priority = assigned_query.filter(Task.priority <= 2).count()
 
     recent_activity = (
-        db.query(AuditEvent)
+        read_db.query(AuditEvent)
         .filter(AuditEvent.amo_id == amo.id, AuditEvent.actor_user_id == current_user.id)
         .order_by(AuditEvent.occurred_at.desc())
         .limit(10)
