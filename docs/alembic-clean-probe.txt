@@ -204,90 +204,78 @@ INFO  [alembic.runtime.migration] Running upgrade p0a6_train_record -> qms_p1_rl
 INFO  [alembic.runtime.migration] Running upgrade qms_p1_rls_20260426 -> qms_p2_20260426, complete canonical qms tenant-scoped tables and RLS
 INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b -> procurement_20260803_full_domain, Create the tenant-scoped aviation procurement and supply-chain domain.
 INFO  [alembic.runtime.migration] Running upgrade procurement_20260803_full_domain -> procure_20260803_docs, Add immutable Procurement document linkage and retained evidence records.
-Traceback (most recent call last):
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-psycopg2.errors.DuplicateTable: relation "ix_procurement_documents_sha256" already exists
+INFO  [alembic.runtime.migration] Running upgrade  -> qms_20260607_read_stability, QMS dashboard/calendar read stability indexes.
+INFO  [alembic.runtime.migration] Running upgrade d7e6f5a4b3c2 -> m3a4n5u6l7s8, add manual audit log and ocr fields
+INFO  [alembic.runtime.migration] Running upgrade m3a4n5u6l7s8 -> m4a5n6u7a8l9, add manual source storage fields and reader progress
+INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33, b2c3d4e5f6g7, c1d2e3f4a5b7, d7e6f5a4b3c2, p0a4_training_gate_fields -> c8d1e2f3a4b5, rename post-cutover legacy tables to *_legacy
+INFO  [alembic.runtime.migration] Running upgrade c8d1e2f3a4b5 -> d9e2f3a4b5c6, hard drop post-cutover legacy tables after retention approval
+INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33 -> training_20260627_auditor_access, add training auditor access grants
+INFO  [alembic.runtime.migration] Running upgrade training_20260627_auditor_access -> train_20260627_final, training final report settings and QR verification
+INFO  [alembic.runtime.migration] Running upgrade qual_20260627_wf_close -> qual_20260627_scope, tenant audit scopes and scope-based QAR references
+INFO  [alembic.runtime.migration] Running upgrade qual_20260627_scope -> qual_20260628_scope_fix, Repair audit-scope columns after legacy scope migration.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260627_wf_close -> qual_20260704_scopes, add explicit audit scope management fields
+INFO  [alembic.runtime.migration] Running upgrade qms_p2_20260426 -> qms_p3_20260501, global superuser tenant safety and QMS phase 3 hardening
+INFO  [alembic.runtime.migration] Running upgrade qms_p3_20260501 -> qms_p4_20260501, phase 4 QMS route tree and workflow hardening
+INFO  [alembic.runtime.migration] Running upgrade p0a6_train_record -> p0a7_train_record_dedupe, Deduplicate current training records and enforce one active record per user/course.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260628_scope_fix -> qual_20260628_lvl4, allow level 4 observation findings
+INFO  [alembic.runtime.migration] Running upgrade qual_20260628_lvl4 -> qual_20260704_schedfix, repair schedule frequency width and training report settings
+INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b1c2d3e4f5a6, b2c3d4e5f6g7, c1d2e3f4a5b7, c3d4e5f6a7b8, d0c1b2a3e4f5, d7e6f5a4b3c2, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, p0a4_training_gate_fields, s9t8u7v6w5x4, w2x3y4z5a6b7 -> u9v8w7x6y5z4, Add user groups.
+INFO  [alembic.runtime.migration] Running upgrade u9v8w7x6y5z4 -> v0a1b2c3d4e5, ensure user group runtime columns exist
+INFO  [alembic.runtime.migration] Running upgrade s9t8u7v6w5x4 -> phase2_4_20260605, QMS calendar performance and training currency integrity indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_4_20260605 -> phase2_5_20260605, Restore QMS calendar performance and preserve canonical QMS styling support.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_car_attachment_description, Add CAR attachment descriptions.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_notification_action_links, Add actionable QMS notification links.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> quality_20260705_finding_attachment_description_repair, Repair finding evidence attachment description column.
+INFO  [alembic.runtime.migration] Running upgrade phase2_5_20260605 -> phase2_9_20260605, QMS timezone runtime bridge migration.
+INFO  [alembic.runtime.migration] Running upgrade phase2_9_20260605 -> phase2_10_20260605, QMS audit dashboard and calendar read stability indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_5_20260605 -> phase2_6_20260605, QMS calendar visibility and source diagnostics indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_6_20260605 -> phase2_7_20260605, QMS calendar authoritative date and visibility indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_7_20260605 -> phase2_8_20260605, QMS calendar stability, tenant timezone, and configurable public holidays.
+INFO  [alembic.runtime.migration] Running upgrade  -> phase0_20260604, phase0 shared foundations base stations
+INFO  [alembic.runtime.migration] Running upgrade phase0_20260604 -> phase1_20260604, phase1 core duty rostering
+INFO  [alembic.runtime.migration] Running upgrade phase1_20260604 -> phase2_2_20260605, Phase 2.2 QMS and Training performance indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_2_20260605 -> phase2_3_20260605, Phase 2.3 QMS dashboard hotfix indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_3_20260605, phase2_10_20260605 -> phase2_11_20260605, Merge QMS patch migration heads.
+INFO  [alembic.runtime.migration] Running upgrade phase2_11_20260605 -> phase2_12_20260607, QMS audit schedule tenant control and frontend-edit support.
+INFO  [alembic.runtime.migration] Running upgrade phase2_12_20260607 -> phase2_13_20260614, Add recycle bin support for QMS audit records and schedules.
+INFO  [alembic.runtime.migration] Running upgrade phase2_13_20260614 -> phase2_14_20260615, Add fast QMS calendar/dashboard integration indexes.
+INFO  [alembic.runtime.migration] Running upgrade phase2_14_20260615 -> phase2_14a_20260615, Compatibility marker for workstations that already stamped phase2_14a_20260615.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> qual_20260704_carresp, Repair missing CAR responses table for public invite submissions.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_schedfix -> qual_20260704_carattach, Repair missing CAR attachment table.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_carattach, qual_20260704_carresp, quality_20260705_car_attachment_description, quality_20260705_notification_action_links, quality_20260705_finding_attachment_description_repair -> qual_20260705_merge_heads, Merge July 2026 quality repair branches.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260705_merge_heads, phase2_14a_20260615 -> workforce_20260721_precreate
+INFO  [alembic.runtime.migration] Running upgrade workforce_20260721_precreate -> workforce_20260721_complete, complete workforce-integrated duty rostering
+INFO  [alembic.runtime.migration] Running upgrade workforce_20260721_complete -> quality_20260722_schema_integrity, Harden Quality tables previously created by runtime compatibility guards.
+INFO  [alembic.runtime.migration] Running upgrade quality_20260722_schema_integrity -> saas_20260722_control_plane, add durable SaaS control plane, billing providers, queue and support desk
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_control_plane -> saas_20260722_finalize_idx, Finalize deferred cross-branch schema work after SaaS/Quality convergence.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_finalize_idx -> saas_20260722_finalize_training, Finalize deferred Training planning and record-integrity changes.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_finalize_training, phase2_8_20260605 -> saas_20260722_qms_read_idx, Finalize canonical QMS and Training read indexes after schema convergence.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_qms_read_idx -> saas_20260722_messaging, Harden tenant messaging, receipts and in-app notifications.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_messaging -> saas_20260722_runtime_fence, Add queue lease fencing after messaging convergence.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_runtime_fence -> saas_20260722_side_effect_safe, Add durable source references and notification policy safety.
+INFO  [alembic.runtime.migration] Running upgrade saas_20260722_side_effect_safe -> rostering_20260724_governance, Add roster rule-set, approval authority and departmental approval governance.
+INFO  [alembic.runtime.migration] Running upgrade 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b2c3d4e5f6g7, c1d2e3f4a5b7, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, m4a5n6u7a8l9, qms_p2_20260426, s9t8u7v6w5x4, v0a1b2c3d4e5 -> amo_20260501_gsu_scope, make superusers global platform identities
+INFO  [alembic.runtime.migration] Running upgrade d9e2f3a4b5c6 -> e1f2a3b4c5d6, Add personnel profiles table and password audit/secondary phone columns.
+INFO  [alembic.runtime.migration] Running upgrade e1f2a3b4c5d6 -> f2a6c1d9b8e7, Add training course catalog import columns and defaults.
+INFO  [alembic.runtime.migration] Running upgrade f2a6c1d9b8e7 -> a3c9e7f1b2d4, Align training course status default with workbook domain.
+INFO  [alembic.runtime.migration] Running upgrade a3c9e7f1b2d4 -> c4b7e1d9f0a2, Add CHECK constraint for training course status domain.
+INFO  [alembic.runtime.migration] Running upgrade c4b7e1d9f0a2 -> f4a5b6c7d8e9, ensure training import columns present for environments that missed the catalog migration
+INFO  [alembic.runtime.migration] Running upgrade f4a5b6c7d8e9, qms_p4_20260501, amo_20260501_gsu_scope -> saas_p5_20260501, platform email settings and merge SaaS/QMS heads
+INFO  [alembic.runtime.migration] Running upgrade m4a5n6u7a8l9 -> qms_20260704_car_attach_repair, repair missing quality CAR attachments table
+INFO  [alembic.runtime.migration] Running upgrade rostering_20260724_governance -> rostering_20260728_automation_policy, Add tenant roster-generation policy and immutable automation runs.
+INFO  [alembic.runtime.migration] Running upgrade rostering_20260724_governance -> document_control_20260724_domain, Create the canonical Document Control governance domain.
+INFO  [alembic.runtime.migration] Running upgrade qual_20260704_scopes -> saas_20260731_route_latency_hist, add mergeable route latency histograms
+INFO  [alembic.runtime.migration] Running upgrade saas_20260731_route_latency_hist -> foundation_20260731_geofence, add private base geofence and location consensus fields
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_domain -> notifications_20260729_delivery, Complete central email delivery policy and Resend event persistence.
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_domain -> document_control_20260724_scope_fk, Converge audit-scope foreign keys after parallel Quality branches.
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_scope_fk -> document_control_20260724_distribution_integrity, Enforce Document Control distribution recipient integrity.
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260724_distribution_integrity -> document_control_20260725_integrity, Enforce final Document Control lifecycle integrity.
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260725_integrity -> document_control_20260729_knowledge_graph, Create governed documentation hierarchy and reference graph.
+INFO  [alembic.runtime.migration] Running upgrade document_control_20260729_knowledge_graph -> document_control_20260729_ai_assisted_search, Add scalable controlled-document full-text indexes.
+Hard-drop migration skipped (no-op). Missing required env flags: AMO_ALLOW_HARD_DROP_LEGACY, AMO_RETENTION_APPROVED, AMO_CUTOVER_GATES_PASSED. Expected preconditions: runtime verification passed, hidden-writer audit complete, dual-write completed, parity thresholds met for 2 cycles, rollback path retired, retention/compliance sign-off recorded.
+Alembic compatibility repair: skipped redundant version deletion for b2c3d4e5f6g7; marker already absent
+Alembic compatibility repair: skipped redundant version deletion for d9e2f3a4b5c6; marker already absent
+Alembic compatibility repair: skipped redundant version deletion for a1b2c3d4e5f6; marker already absent
+Alembic compatibility repair: converted missing-source version update c1d2e3f4a5b7 -> amo_20260501_gsu_scope into an insert
 
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/bin/alembic", line 6, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1033, in main
-    CommandLine(prog=prog).main(argv=argv)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 1023, in main
-    self.run_cmd(cfg, options)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/config.py", line 957, in run_cmd
-    fn(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/command.py", line 483, in upgrade
-    script.run_env()
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/script/base.py", line 545, in run_env
-    util.load_python_file(self.dir, "env.py")
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 116, in load_python_file
-    module = load_module_py(module_id, path)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/util/pyfiles.py", line 136, in load_module_py
-    spec.loader.exec_module(module)  # type: ignore
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 362, in <module>
-    run_migrations_online()
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/env.py", line 352, in run_migrations_online
-    context.run_migrations()
-  File "<string>", line 8, in run_migrations
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/environment.py", line 946, in run_migrations
-    self.get_context().run_migrations(**kw)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/alembic/runtime/migration.py", line 627, in run_migrations
-    step.migration_fn(**kw)
-  File "/home/runner/work/amo-portal/amo-portal/backend/amodb/alembic/versions/procure_20260803_docs.py", line 22, in upgrade
-    document_models.ProcurementDocument.__table__.create(op.get_bind(), checkfirst=True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/schema.py", line 1288, in create
-    bind._run_ddl_visitor(ddl.SchemaGenerator, self, checkfirst=checkfirst)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2459, in _run_ddl_visitor
-    ).traverse_single(element)
-      ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/visitors.py", line 661, in traverse_single
-    return meth(obj, **kw)
-           ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1026, in visit_table
-    self.traverse_single(index, create_ok=True)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/visitors.py", line 661, in traverse_single
-    return meth(obj, **kw)
-           ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 1063, in visit_index
-    CreateIndex(index)._invoke_with(self.connection)
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 321, in _invoke_with
-    return bind.execute(self)
-           ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
-    return meth(
-           ^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/sql/ddl.py", line 187, in _execute_on_connection
-    return connection._execute_ddl(
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1530, in _execute_ddl
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
-    self.dialect.do_execute(
-  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
-    cursor.execute(statement, parameters)
-sqlalchemy.exc.ProgrammingError: (psycopg2.errors.DuplicateTable) relation "ix_procurement_documents_sha256" already exists
-
-[SQL: CREATE INDEX ix_procurement_documents_sha256 ON procurement_documents (sha256)]
-(Background on this error at: https://sqlalche.me/e/20/f405)
-
-UPGRADE_EXIT_STATUS=1
+UPGRADE_EXIT_STATUS=0
