@@ -1,17 +1,18 @@
 # Reliability Fast Transformation Diagnostic
 
-- Run: `30812956159`
-- Source: `8887a68d949fc5779aa8f17795d9b06e2234494d`
+- Run: `30813145608`
+- Source: `9d096a44b12b7d9f19e6ab6f16bc475fed1897c8`
 
 | Stage | Exit |
 |---|---:|
 | backend | 0 |
 | sod | 0 |
+| sod_escape | 0 |
 | service | 0 |
 | workspace | 0 |
 | fsod | 0 |
 | css | 0 |
-| compile | 1 |
+| compile | 0 |
 | canonical | 0 |
 | routes | 0 |
 
@@ -23,6 +24,11 @@ Canonical Reliability backend completion patch applied.
 ## sod
 ```text
 Reliability segregation-of-duties controls applied.
+```
+
+## sod_escape
+```text
+Generated Reliability approval newline corrected.
 ```
 
 ## service
@@ -47,10 +53,6 @@ Complete Reliability workflow styles appended.
 
 ## compile
 ```text
-  File "backend/amodb/apps/reliability/advanced_services.py", line 1252
-    review.notes = f"{review.notes or ''}
-                   ^
-SyntaxError: unterminated f-string literal (detected at line 1252)
 ```
 
 ## canonical
