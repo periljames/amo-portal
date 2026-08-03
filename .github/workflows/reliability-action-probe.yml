@@ -1,0 +1,27 @@
+name: Reliability Action Probe
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.complete-probe
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+      - run: |
+          printf 'run=%s\nsha=%s\ntime=%s\n' "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > docs/reliability/.complete-probe-result
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reliability/.complete-probe-result
+          git commit -m "Record Reliability action probe"
+          git push origin HEAD:agent/reliability-v2-foundation
