@@ -208,6 +208,8 @@ export function listProcurementDocuments(
     entityId?: string;
     activeOnly?: boolean;
     verificationStatus?: string;
+    offset?: number;
+    limit?: number;
   } = {},
 ): Promise<ProcurementDocument[]> {
   const params = new URLSearchParams();
@@ -215,6 +217,8 @@ export function listProcurementDocuments(
   if (filters.entityId) params.set("entity_id", filters.entityId);
   if (filters.activeOnly === false) params.set("active_only", "false");
   if (filters.verificationStatus) params.set("verification_status", filters.verificationStatus);
+  if (filters.offset != null) params.set("offset", String(Math.max(0, filters.offset)));
+  if (filters.limit != null) params.set("limit", String(Math.min(500, Math.max(1, filters.limit))));
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiRequest<ProcurementDocument[]>(`${base(amoCode)}/documents${suffix}`, { cacheTtlMs: 0 });
 }
@@ -281,7 +285,7 @@ export function uploadProcurementDocument(
         }
         return;
       }
-      reject(new Error(uploadError(xhr)));
+      reject(new Error(uploadError(xhr));
     };
     xhr.onerror = () => reject(new Error("The upload connection failed. Check network access and retry."));
     xhr.ontimeout = () => reject(new Error("The document upload timed out. Check the connection and retry."));
