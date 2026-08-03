@@ -1,0 +1,22 @@
+export type ProcurementEvidence = {
+  id: number;
+  entity_type: string;
+  entity_id: string;
+  document_kind: string;
+  title: string;
+  source_type: "UPLOADED" | "PHYSICAL_RECORD" | "DMS_LINK";
+  status: string;
+  file_name?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  physical_reference?: string | null;
+  physical_location?: string | null;
+  dms_document_id?: string | null;
+  dms_revision_id?: string | null;
+  notes?: string | null;
+  is_verified: boolean;
+  verified_at?: string | null;
+  created_at: string;
+  download_url?: string | null;
+};
