@@ -24,6 +24,7 @@ REQUIRED_ROUTES = {
 
 EXACT_PATHS = {
     ".gitignore",
+    ".github/workflows/reliability.yml",
     "backend/amodb/alembic/env.py",
     "backend/amodb/main.py",
     "frontend/src/app/PortalRouteSurface.tsx",
@@ -47,9 +48,11 @@ TEMPORARY_DELETIONS = {
     ".github/workflows/reliability-clean-rebuild.yml",
     ".github/workflows/reliability-clean-diagnostic-v2.yml",
     ".github/workflows/reliability-clean-publish-v4.yml",
+    ".github/workflows/reliability-clean-publish-v5.yml",
     "docs/reliability/.clean-rebuild-trigger",
     "docs/reliability/.clean-diagnostic-v2-trigger",
     "docs/reliability/.clean-publish-v4-trigger",
+    "docs/reliability/.clean-publish-v5-trigger",
     "docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md",
     "backend/scripts/prepare_reliability_clean_tree.py",
     "backend/scripts/validate_reliability_clean.py",
