@@ -55,11 +55,8 @@ function tenantMatches(routeTenant: string): boolean {
   return candidates.includes(routeTenant.trim().toLowerCase());
 }
 
-function departmentHome(tenant: string, assigned: DepartmentId | null): string {
-  const safeTenant = encodeURIComponent(tenant);
-  if (!assigned || assigned === "admin") return `/maintenance/${safeTenant}`;
-  if (assigned === "document-control") return `/maintenance/${safeTenant}/document-control`;
-  return `/maintenance/${safeTenant}/${assigned}`;
+function departmentHome(tenant: string, department: Exclude<DepartmentId, "admin">): string {
+  return `/maintenance/${encodeURIComponent(tenant)}/${department}`;
 }
 
 function isPublicTenantRoute(parts: string[]): boolean {
@@ -118,7 +115,18 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   const assigned = getAssignedDepartment(currentUser, getContext().department);
-  const home = departmentHome(canonicalTenant, assigned);
+  const allowed = getAllowedDepartments(currentUser, assigned).filter(
+    (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
+  );
+  const homeDepartment: Exclude<DepartmentId, "admin"> =
+    assigned && assigned !== "admin" && allowed.includes(assigned)
+      ? assigned
+      : allowed[0] || "planning";
+  const home = departmentHome(canonicalTenant, homeDepartment);
+
+  // Resolve the tenant root before the old route-level default resolver can send
+  // an administrator back into /admin and create an inactive-profile loop.
+  if (routeParts.length === 2) return <Navigate to={home} replace />;
 
   if (isAdminRoute) {
     if (!isAdminUser(currentUser)) return <Navigate to={home} replace state={{ blockedAdminPath: location.pathname }} />;
@@ -131,8 +139,9 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
 
   const requested = normalizeDepartmentCode(routeParts[2] || "");
   if (requested && DEPARTMENT_SEGMENTS.has(requested as DepartmentId) && isDepartmentId(requested)) {
-    const allowed = getAllowedDepartments(currentUser, assigned);
-    if (!allowed.includes(requested)) return <Navigate to={home} replace state={{ blockedDepartmentPath: location.pathname }} />;
+    if (!allowed.includes(requested as Exclude<DepartmentId, "admin">)) {
+      return <Navigate to={home} replace state={{ blockedDepartmentPath: location.pathname }} />;
+    }
   }
 
   return <>{children}</>;
