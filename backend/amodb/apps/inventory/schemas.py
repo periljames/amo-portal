@@ -60,7 +60,10 @@ class InventoryReceiveRequest(InventoryMovementBase):
     part_description: Optional[str] = None
     is_serialized: Optional[bool] = None
     is_lot_controlled: Optional[bool] = None
-    condition: Optional[models.InventoryConditionEnum] = None
+    # Incoming material is not serviceable merely because it crossed the stores
+    # counter. Callers must explicitly request another condition; Procurement only
+    # does so after independent inspection and Quality release.
+    condition: Optional[models.InventoryConditionEnum] = models.InventoryConditionEnum.QUARANTINE
     received_date: Optional[date] = None
 
 
@@ -161,7 +164,7 @@ class GoodsReceiptLineCreate(BaseModel):
     serial_number: Optional[str] = None
     quantity: float = Field(..., gt=0)
     uom: str = "EA"
-    condition: Optional[models.InventoryConditionEnum] = None
+    condition: Optional[models.InventoryConditionEnum] = models.InventoryConditionEnum.QUARANTINE
     location_id: Optional[int] = None
 
 
