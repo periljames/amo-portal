@@ -28,12 +28,14 @@ def test_receiving_is_quarantined_until_quality_release() -> None:
     models = _read(PROCUREMENT / "models.py")
     service = _read(PROCUREMENT / "service.py")
     inventory_schemas = _read(BACKEND / "amodb" / "apps" / "inventory" / "schemas.py")
+    inventory_router = _read(BACKEND / "amodb" / "apps" / "inventory" / "router.py")
 
     assert 'default=ReceiptStatus.QUARANTINED' in models
     assert 'status=models.ReceiptStatus.QUARANTINED' in service
     assert 'condition=inventory_models.InventoryConditionEnum.SERVICEABLE' in service
     assert service.index('condition=inventory_models.InventoryConditionEnum.SERVICEABLE') > service.index('def release_receipt(')
     assert 'models.InventoryConditionEnum.QUARANTINE' in inventory_schemas
+    assert inventory_router.count('condition = models.InventoryConditionEnum.QUARANTINE') >= 2
 
 
 def test_segregation_of_duties_is_backend_enforced() -> None:
