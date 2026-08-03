@@ -27,6 +27,16 @@ def main() -> None:
         "",
         "Fast Refresh route-state export",
     )
+
+    diagnostic = ROOT / "backend/scripts/run_reliability_completion_diagnostic.py"
+    if diagnostic.exists():
+        replace_once(
+            diagnostic,
+            '    stages.append("model_defaults")\n\n    stage("frontend_service",',
+            '    stages.append("model_defaults")\n    stage("autogenerate_isolation", "python backend/scripts/isolate_reliability_autogenerate.py")\n\n    stage("frontend_service",',
+            "Reliability diagnostic metadata isolation stage",
+        )
+
     print("Reliability completion blockers corrected.")
 
 
