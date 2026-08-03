@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -223,11 +224,30 @@ def _drop_append_only_guards() -> None:
 '''
 
 
+def _find_generated_migration() -> Path:
+    filename_candidates = sorted(VERSIONS.glob(f"{REVISION}_*.py"))
+    if len(filename_candidates) == 1:
+        return filename_candidates[0]
+
+    revision_pattern = re.compile(
+        rf"^revision(?:\s*:\s*[^=]+)?\s*=\s*['\"]{re.escape(REVISION)}['\"]\s*$",
+        re.MULTILINE,
+    )
+    content_candidates = [
+        path
+        for path in VERSIONS.glob("*.py")
+        if revision_pattern.search(path.read_text(encoding="utf-8"))
+    ]
+    if len(content_candidates) != 1:
+        raise RuntimeError(
+            "Expected one generated Reliability migration; "
+            f"filename matches={len(filename_candidates)}, revision matches={len(content_candidates)}"
+        )
+    return content_candidates[0]
+
+
 def main() -> None:
-    candidates = [path for path in VERSIONS.glob("*.py") if f'revision = "{REVISION}"' in path.read_text(encoding="utf-8")]
-    if len(candidates) != 1:
-        raise RuntimeError(f"Expected one generated Reliability migration, found {len(candidates)}")
-    path = candidates[0]
+    path = _find_generated_migration()
     text = path.read_text(encoding="utf-8")
     if "_seed_reliability_authorization" in text:
         print(f"Migration {path.name} is already finalized.")
