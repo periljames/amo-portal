@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -19,6 +20,14 @@ from . import models
 router = APIRouter(prefix="/admin-profile", tags=["admin_profile"])
 SESSION_DURATION_MINUTES = 30
 REQUIRED_APPROVALS = 2
+REQUIRED_SCHEMA_TABLES = frozenset(
+    {
+        "admin_access_grants",
+        "admin_access_grant_approvals",
+        "admin_profile_sessions",
+        "admin_access_events",
+    }
+)
 
 
 class AdminGrantRequest(BaseModel):
@@ -68,71 +77,25 @@ def _is_management_approver(user: models.User) -> bool:
 
 
 def _ensure_schema(db: Session) -> None:
-    """Create the governance tables for development databases.
+    """Fail closed until the governed Admin Profile migration is installed."""
+    try:
+        existing = set(inspect(db.get_bind()).get_table_names())
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Administrator profile schema could not be verified.",
+        ) from exc
 
-    A matching Alembic revision is maintained separately. These idempotent DDL
-    statements keep a freshly checked-out development database usable before the
-    migration command is run and use portable TIMESTAMP declarations for SQLite
-    and PostgreSQL test environments.
-    """
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS admin_access_grants (
-            id VARCHAR(36) PRIMARY KEY,
-            amo_id VARCHAR(36) NOT NULL,
-            user_id VARCHAR(36) NOT NULL,
-            grant_type VARCHAR(16) NOT NULL,
-            valid_from TIMESTAMP NULL,
-            valid_until TIMESTAMP NULL,
-            status VARCHAR(16) NOT NULL,
-            reason TEXT NOT NULL,
-            requested_by_user_id VARCHAR(36) NOT NULL,
-            activated_at TIMESTAMP NULL,
-            revoked_at TIMESTAMP NULL,
-            revoked_by_user_id VARCHAR(36) NULL,
-            created_at TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP NOT NULL
+    missing = sorted(REQUIRED_SCHEMA_TABLES - existing)
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "ADMIN_PROFILE_SCHEMA_NOT_MIGRATED",
+                "message": "Run Alembic migrations before using Admin profile.",
+                "missing_tables": missing,
+            },
         )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS admin_access_grant_approvals (
-            id VARCHAR(36) PRIMARY KEY,
-            grant_id VARCHAR(36) NOT NULL,
-            approver_user_id VARCHAR(36) NOT NULL,
-            decision VARCHAR(16) NOT NULL,
-            comment TEXT NULL,
-            created_at TIMESTAMP NOT NULL,
-            CONSTRAINT uq_admin_grant_approver UNIQUE (grant_id, approver_user_id)
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS admin_profile_sessions (
-            id VARCHAR(36) PRIMARY KEY,
-            amo_id VARCHAR(36) NOT NULL,
-            user_id VARCHAR(36) NOT NULL,
-            grant_id VARCHAR(36) NULL,
-            activated_at TIMESTAMP NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            revoked_at TIMESTAMP NULL,
-            created_at TIMESTAMP NOT NULL
-        )
-    """))
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS admin_access_events (
-            id VARCHAR(36) PRIMARY KEY,
-            amo_id VARCHAR(36) NOT NULL,
-            actor_user_id VARCHAR(36) NOT NULL,
-            subject_user_id VARCHAR(36) NULL,
-            grant_id VARCHAR(36) NULL,
-            session_id VARCHAR(36) NULL,
-            event_type VARCHAR(64) NOT NULL,
-            detail TEXT NULL,
-            created_at TIMESTAMP NOT NULL
-        )
-    """))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_grants_amo_user_status ON admin_access_grants (amo_id, user_id, status)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_profile_sessions_amo_user ON admin_profile_sessions (amo_id, user_id, expires_at)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_access_events_amo_created ON admin_access_events (amo_id, created_at)"))
-    db.flush()
 
 
 def _record_event(
@@ -255,6 +218,17 @@ def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]
               AND expires_at <= :now
         """),
         {"now": now, "amo_id": str(amo.id), "user_id": str(user.id)},
+    )
+    db.execute(
+        text("""
+            UPDATE admin_access_grants
+            SET status = 'EXPIRED', updated_at = :now
+            WHERE amo_id = :amo_id
+              AND status = 'ACTIVE'
+              AND valid_until IS NOT NULL
+              AND valid_until <= :now
+        """),
+        {"now": now, "amo_id": str(amo.id)},
     )
     implicit = _is_implicit_admin(user)
     grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
