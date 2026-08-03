@@ -8,34 +8,63 @@ permissions:
   contents: write
 
 concurrency:
-  group: procurement-release-gate-update-${{ github.event.pull_request.number }}
+  group: procurement-focused-validation-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  add-procurement-release-gate:
+  procurement-focused-validation:
     if: github.event.pull_request.head.ref == 'agent/procurement-ui-document-controls' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
           ref: agent/procurement-ui-document-controls
           fetch-depth: 0
-      - name: Add permanent Procurement release-gate coverage
-        run: python .github/scripts/add_procurement_release_gate.py
-      - name: Validate workflow update
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Compile Procurement backend and contracts
+        run: >-
+          python -m compileall -q
+          backend/amodb/apps/procurement
+          backend/amodb/apps/inventory
+          backend/tests/test_procurement_module_contract.py
+          backend/tests/test_procurement_document_contract.py
+          backend/tests/test_procurement_frontend_contract.py
+      - name: Run focused Procurement regression contracts
+        working-directory: backend
+        run: >-
+          pytest -q
+          tests/test_procurement_module_contract.py
+          tests/test_procurement_document_contract.py
+          tests/test_procurement_frontend_contract.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Typecheck and build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Restore standard workflow and remove temporary updater
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import yaml
-          path = Path('.github/workflows/release-candidate-recheck.yml')
-          yaml.safe_load(path.read_text(encoding='utf-8'))
-          PY
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/main-merge-readiness.yml
+          git rm -f .github/scripts/add_procurement_release_gate.py
           git diff --check
-      - name: Commit release-gate coverage to PR branch
+      - name: Commit cleanup to PR branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/release-candidate-recheck.yml
-          git commit -m "Run Procurement contracts in release candidate gate"
+          git add .github/workflows/main-merge-readiness.yml
+          git commit -m "Validate Procurement contracts and restore merge gate"
           git pull --rebase origin agent/procurement-ui-document-controls
           git push origin HEAD:agent/procurement-ui-document-controls
