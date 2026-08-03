@@ -7,54 +7,40 @@ const HOME_RESPONSE = {
   amo: { id: "amo-a", code: "AMO-A", slug: "tenant-a", name: "Tenant A Aviation" },
   department: "planning",
   generated_at: "2026-08-03T09:00:00Z",
-  summary: {
-    assigned_open: 5,
-    approvals_open: 2,
-    overdue: 1,
-    due_soon: 3,
-    high_priority: 2,
-  },
-  alerts: [
-    {
-      id: "alert-1",
-      tone: "danger",
-      title: "Overdue planning review",
-      message: "Assigned task is overdue.",
-      route: "/maintenance/tenant-a/planning",
-    },
-  ],
-  assigned_work: [
-    {
-      id: "task-1",
-      title: "Review maintenance forecast and due list",
-      description: "Confirm the next planning window.",
-      priority: 1,
-      status: "OPEN",
-      due_at: "2026-08-04T09:00:00Z",
-      route: "/maintenance/tenant-a/planning/forecast-due-list",
-      entity_type: "planning-review",
-      entity_id: "review-1",
-    },
-  ],
+  summary: { assigned_open: 5, approvals_open: 2, overdue: 1, due_soon: 3, high_priority: 2 },
+  alerts: [{
+    id: "alert-1",
+    tone: "danger",
+    title: "Overdue planning review",
+    message: "Assigned task is overdue.",
+    route: "/maintenance/tenant-a/planning",
+  }],
+  assigned_work: [{
+    id: "task-1",
+    title: "Review maintenance forecast and due list",
+    description: "Confirm the next planning window.",
+    priority: 1,
+    status: "OPEN",
+    due_at: "2026-08-04T09:00:00Z",
+    route: "/maintenance/tenant-a/planning/forecast-due-list",
+    entity_type: "planning-review",
+    entity_id: "review-1",
+  }],
   approvals: [],
   schedule: [],
-  recent_activity: [
-    {
-      id: "activity-1",
-      action: "forecast_reviewed",
-      entity_type: "planning-review",
-      entity_id: "review-1",
-      occurred_at: "2026-08-03T08:30:00Z",
-    },
-  ],
-  quick_actions: [
-    {
-      id: "planning-1",
-      label: "Open forecast",
-      description: "Review upcoming maintenance exposure",
-      route: "/maintenance/tenant-a/planning/forecast-due-list",
-    },
-  ],
+  recent_activity: [{
+    id: "activity-1",
+    action: "forecast_reviewed",
+    entity_type: "planning-review",
+    entity_id: "review-1",
+    occurred_at: "2026-08-03T08:30:00Z",
+  }],
+  quick_actions: [{
+    id: "planning-1",
+    label: "Open forecast",
+    description: "Review upcoming maintenance exposure",
+    route: "/maintenance/tenant-a/planning/forecast-due-list",
+  }],
   news: [],
   source_health: { tasks: "healthy", activity: "healthy", news: "not_configured" },
 };
@@ -107,11 +93,12 @@ async function prepare(page: Page, theme: Theme): Promise<void> {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
   });
   await page.route("http://127.0.0.1:8080/**", async (route) => {
-    if (route.request().url().includes("/auth/home/tenant-a/planning")) {
+    const url = route.request().url();
+    if (url.includes("/auth/home/tenant-a/planning")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HOME_RESPONSE) });
       return;
     }
-    if (route.request().url().includes("/accounts/admin/admin-profile/")) {
+    if (url.includes("/accounts/admin/admin-profile/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
       return;
     }
@@ -174,13 +161,14 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText("Forecast / Due List", { exact: true })).toBeVisible();
 
       const searchColors = await search.evaluate((element) => {
-        const style = getComputedStyle(element);
-        return { foreground: style.color, background: style.backgroundColor };
+        const field = getComputedStyle(element);
+        const surface = getComputedStyle(element.parentElement as HTMLElement);
+        return { foreground: field.color, background: surface.backgroundColor };
       });
       expect(contrast(searchColors.foreground, searchColors.background)).toBeGreaterThanOrEqual(4.5);
 
       await page.keyboard.press("Escape");
-      if (viewport.name === "mobile") await expect(drawer).toHaveAttribute("aria-hidden", "true");
+      await expect(drawer).toHaveAttribute("aria-hidden", "true");
 
       await page.locator(".tenant-shell__profile-trigger").click();
       await page.getByRole("menuitem", { name: "Appearance" }).click();
