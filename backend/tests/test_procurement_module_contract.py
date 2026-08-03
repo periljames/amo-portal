@@ -59,6 +59,7 @@ def test_supplier_quality_gate_is_canonical() -> None:
     assert '/purchasing/' not in inventory_router
     assert 'procurement_service' not in inventory_router
     assert 'tags=["inventory"]' in inventory_router
+    assert 'assert_legacy_purchase_order_eligible' not in service
 
 
 def test_module_exposes_only_canonical_department_routes() -> None:
@@ -111,3 +112,19 @@ def test_documented_scope_is_complete() -> None:
     assert 'compatibility alias' not in doc
     assert 'deprecated' not in doc
     assert doc.count('- [x]') >= 13
+
+
+
+def test_requisition_lifecycle_requires_technical_and_budget_approval() -> None:
+    service = _read(PROCUREMENT / "service.py")
+    sections = _read(FRONTEND / "pages" / "procurement" / "ProcurementSections.tsx")
+
+    assert 'elif action == "SEND_TO_SOURCING"' not in service
+    assert 'item.id, "TECHNICAL_REVIEW"' not in sections
+    assert 'item.id, "SUBMIT"' in sections
+    assert 'item.id, "TECHNICAL_APPROVE"' in sections
+    assert 'item.id, "BUDGET_APPROVE"' in sections
+    assert 'item.id, "APPROVE"' in sections
+    assert 'requisition.technical_reviewed_by_user_id = actor_user_id' in service
+    assert 'requisition.budget_reviewed_by_user_id = actor_user_id' in service
+    assert 'not requisition.technical_reviewed_by_user_id or not requisition.budget_reviewed_by_user_id' in service

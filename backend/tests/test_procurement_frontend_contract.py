@@ -58,3 +58,11 @@ def test_evidence_register_pages_and_enforces_independent_quality_actions():
     assert "currentUserId={user?.id || null}" in module
     assert "offset?: number" in service
     assert "limit?: number" in service
+
+
+
+def test_requisition_actions_match_backend_lifecycle():
+    sections = read("pages/procurement/ProcurementSections.tsx")
+    assert 'item.id, "TECHNICAL_REVIEW"' not in sections
+    for action in ["SUBMIT", "TECHNICAL_APPROVE", "BUDGET_APPROVE", "APPROVE"]:
+        assert f'item.id, "{action}"' in sections

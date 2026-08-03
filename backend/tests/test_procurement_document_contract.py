@@ -136,3 +136,12 @@ def test_procurement_routes_do_not_reintroduce_stores_aliases():
     assert 'procurement(?:\\/|$)' in preload
     assert '"/purchasing/' not in inventory_router
     assert "procurement_service" not in inventory_router
+
+
+
+def test_procurement_evidence_uses_persistent_upload_root():
+    service = read("amodb/apps/procurement/document_service.py")
+    environment = (ROOT.parent / ".env.example").read_text(encoding="utf-8")
+    expected = "/srv/amo/uploads/procurement-documents"
+    assert f'PROCUREMENT_DOCUMENT_DIR", "{expected}"' in service
+    assert f"PROCUREMENT_DOCUMENT_DIR={expected}" in environment

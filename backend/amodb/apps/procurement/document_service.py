@@ -16,7 +16,7 @@ from . import document_models, models
 
 
 MAX_DOCUMENT_BYTES = int(os.getenv("PROCUREMENT_DOCUMENT_MAX_BYTES", str(25 * 1024 * 1024)))
-DOCUMENT_ROOT = Path(os.getenv("PROCUREMENT_DOCUMENT_DIR", "uploads/procurement-documents")).resolve()
+DOCUMENT_ROOT = Path(os.getenv("PROCUREMENT_DOCUMENT_DIR", "/srv/amo/uploads/procurement-documents")).resolve()
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 MIME_BY_EXTENSION = {
     ".pdf": {"application/pdf", "application/octet-stream"},
