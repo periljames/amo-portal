@@ -58,321 +58,327 @@ export type PortalNavigationContext = {
   adminModeActive?: boolean;
 };
 
-type FeatureItem = {
+type FeatureRoute = {
   id: string;
   label: string;
   suffix: string;
   feature: ModuleFeature;
 };
 
-type FeatureGroup = {
+type FeatureSection = {
   id: string;
   label: string;
-  items: FeatureItem[];
+  routes: FeatureRoute[];
 };
 
-const PLANNING_GROUPS: FeatureGroup[] = [
+type FeatureTuple = readonly [string, string, string, ModuleFeature];
+
+function featureRoute(values: FeatureTuple): FeatureRoute {
+  return { id: values[0], label: values[1], suffix: values[2], feature: values[3] };
+}
+
+const PLANNING: FeatureSection[] = [
   {
     id: "planning-control",
     label: "Control",
-    items: [
-      { id: "planning-dashboard", label: "Dashboard", suffix: "dashboard", feature: "planning.dashboard" },
-      { id: "planning-utilisation", label: "Utilisation Monitoring", suffix: "utilisation-monitoring", feature: "planning.utilisation-monitoring" },
-      { id: "planning-forecast", label: "Forecast / Due List", suffix: "forecast-due-list", feature: "planning.forecast-due-list" },
-      { id: "planning-amp", label: "AMP", suffix: "amp", feature: "planning.amp" },
-    ],
+    routes: [
+      ["planning-dashboard", "Dashboard", "dashboard", "planning.dashboard"],
+      ["planning-utilisation", "Utilisation Monitoring", "utilisation-monitoring", "planning.utilisation-monitoring"],
+      ["planning-forecast", "Forecast / Due List", "forecast-due-list", "planning.forecast-due-list"],
+      ["planning-amp", "AMP", "amp", "planning.amp"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "planning-work",
     label: "Work",
-    items: [
-      { id: "planning-task-library", label: "Task Library", suffix: "task-library", feature: "planning.task-library" },
-      { id: "planning-work-packages", label: "Work Packages", suffix: "work-packages", feature: "planning.work-packages" },
-      { id: "planning-work-orders", label: "Work Orders", suffix: "work-orders", feature: "planning.work-orders" },
-      { id: "planning-deferments", label: "Deferments", suffix: "deferments", feature: "planning.deferments" },
-    ],
+    routes: [
+      ["planning-task-library", "Task Library", "task-library", "planning.task-library"],
+      ["planning-work-packages", "Work Packages", "work-packages", "planning.work-packages"],
+      ["planning-work-orders", "Work Orders", "work-orders", "planning.work-orders"],
+      ["planning-deferments", "Deferments", "deferments", "planning.deferments"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "planning-assurance",
     label: "Assurance",
-    items: [
-      { id: "planning-ad-sb-eo", label: "AD / SB / EO Control", suffix: "ad-sb-eo-control", feature: "planning.ad-sb-eo-control" },
-      { id: "planning-non-routine", label: "Non-Routine Review", suffix: "non-routine-review", feature: "planning.non-routine-review" },
-      { id: "planning-watchlists", label: "Watchlists", suffix: "watchlists", feature: "planning.watchlists" },
-      { id: "planning-publications", label: "Publication Review", suffix: "publication-review", feature: "planning.publication-review" },
-      { id: "planning-compliance", label: "Compliance Actions", suffix: "compliance-actions", feature: "planning.compliance-actions" },
-    ],
+    routes: [
+      ["planning-ad-sb-eo", "AD / SB / EO Control", "ad-sb-eo-control", "planning.ad-sb-eo-control"],
+      ["planning-non-routine", "Non-Routine Review", "non-routine-review", "planning.non-routine-review"],
+      ["planning-watchlists", "Watchlists", "watchlists", "planning.watchlists"],
+      ["planning-publications", "Publication Review", "publication-review", "planning.publication-review"],
+      ["planning-compliance", "Compliance Actions", "compliance-actions", "planning.compliance-actions"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
 ];
 
-const PRODUCTION_GROUPS: FeatureGroup[] = [
+const PRODUCTION: FeatureSection[] = [
   {
     id: "production-control",
     label: "Control",
-    items: [
-      { id: "production-dashboard", label: "Dashboard", suffix: "dashboard", feature: "production.dashboard" },
-      { id: "production-board", label: "Control Board", suffix: "control-board", feature: "production.control-board" },
-    ],
+    routes: [
+      ["production-dashboard", "Dashboard", "dashboard", "production.dashboard"],
+      ["production-board", "Control Board", "control-board", "production.control-board"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "production-execution",
     label: "Execution",
-    items: [
-      { id: "production-work", label: "Work Order Execution", suffix: "work-order-execution", feature: "production.work-order-execution" },
-      { id: "production-findings", label: "Findings / Non-Routines", suffix: "findings", feature: "production.findings" },
-      { id: "production-materials", label: "Materials / Parts", suffix: "materials", feature: "production.materials" },
-    ],
+    routes: [
+      ["production-work", "Work Order Execution", "work-order-execution", "production.work-order-execution"],
+      ["production-findings", "Findings / Non-Routines", "findings", "production.findings"],
+      ["production-materials", "Materials / Parts", "materials", "production.materials"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "production-release",
     label: "Release",
-    items: [
-      { id: "production-review", label: "Review / Inspection", suffix: "review-inspection", feature: "production.review-inspection" },
-      { id: "production-release-prep", label: "Release Preparation", suffix: "release-prep", feature: "production.release-prep" },
-      { id: "production-compliance", label: "Compliance Items", suffix: "compliance-items", feature: "production.compliance-items" },
-    ],
+    routes: [
+      ["production-review", "Review / Inspection", "review-inspection", "production.review-inspection"],
+      ["production-release-prep", "Release Preparation", "release-prep", "production.release-prep"],
+      ["production-compliance", "Compliance Items", "compliance-items", "production.compliance-items"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
 ];
 
-const MAINTENANCE_GROUPS: FeatureGroup[] = [
+const MAINTENANCE: FeatureSection[] = [
   {
     id: "maintenance-work",
     label: "Work",
-    items: [
-      { id: "maintenance-dashboard", label: "Dashboard", suffix: "dashboard", feature: "maintenance.dashboard" },
-      { id: "maintenance-orders", label: "Work Orders", suffix: "work-orders", feature: "maintenance.work-orders" },
-      { id: "maintenance-packages", label: "Work Packages", suffix: "work-packages", feature: "maintenance.work-packages" },
-    ],
+    routes: [
+      ["maintenance-dashboard", "Dashboard", "dashboard", "maintenance.dashboard"],
+      ["maintenance-orders", "Work Orders", "work-orders", "maintenance.work-orders"],
+      ["maintenance-packages", "Work Packages", "work-packages", "maintenance.work-packages"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "maintenance-execution",
     label: "Execution",
-    items: [
-      { id: "maintenance-defects", label: "Defects", suffix: "defects", feature: "maintenance.defects" },
-      { id: "maintenance-non-routines", label: "Non-Routines", suffix: "non-routines", feature: "maintenance.non-routines" },
-      { id: "maintenance-parts", label: "Parts / Tools", suffix: "parts-tools", feature: "maintenance.parts-tools" },
-    ],
+    routes: [
+      ["maintenance-defects", "Defects", "defects", "maintenance.defects"],
+      ["maintenance-non-routines", "Non-Routines", "non-routines", "maintenance.non-routines"],
+      ["maintenance-parts", "Parts / Tools", "parts-tools", "maintenance.parts-tools"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "maintenance-assurance",
     label: "Assurance",
-    items: [
-      { id: "maintenance-inspections", label: "Inspections", suffix: "inspections", feature: "maintenance.inspections" },
-      { id: "maintenance-closeout", label: "Closeout", suffix: "closeout", feature: "maintenance.closeout" },
-      { id: "maintenance-reports", label: "Reports", suffix: "reports", feature: "maintenance.reports" },
-      { id: "maintenance-settings", label: "Settings", suffix: "settings", feature: "maintenance.settings" },
-    ],
+    routes: [
+      ["maintenance-inspections", "Inspections", "inspections", "maintenance.inspections"],
+      ["maintenance-closeout", "Closeout", "closeout", "maintenance.closeout"],
+      ["maintenance-reports", "Reports", "reports", "maintenance.reports"],
+      ["maintenance-settings", "Settings", "settings", "maintenance.settings"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
 ];
 
-const RECORDS_GROUPS: FeatureGroup[] = [
+const RECORDS: FeatureSection[] = [
   {
     id: "records-fleet",
     label: "Fleet Records",
-    items: [
-      { id: "records-dashboard", label: "Dashboard", suffix: "", feature: "production.records.dashboard" },
-      { id: "records-aircraft", label: "Aircraft Records", suffix: "aircraft", feature: "production.records.aircraft" },
-      { id: "records-logbooks", label: "Logbooks", suffix: "logbooks", feature: "production.records.logbooks" },
-      { id: "records-maintenance", label: "Maintenance Records", suffix: "maintenance-records", feature: "production.records.maintenance-records" },
-    ],
+    routes: [
+      ["records-dashboard", "Dashboard", "", "production.records.dashboard"],
+      ["records-aircraft", "Aircraft Records", "aircraft", "production.records.aircraft"],
+      ["records-logbooks", "Logbooks", "logbooks", "production.records.logbooks"],
+      ["records-maintenance", "Maintenance Records", "maintenance-records", "production.records.maintenance-records"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "records-airworthiness",
     label: "Airworthiness",
-    items: [
-      { id: "records-deferrals", label: "Deferrals", suffix: "deferrals", feature: "production.records.deferrals" },
-      { id: "records-airworthiness-register", label: "AD / SB", suffix: "airworthiness", feature: "production.records.airworthiness" },
-      { id: "records-llp", label: "LLP / Components", suffix: "llp", feature: "production.records.llp-components" },
-    ],
+    routes: [
+      ["records-deferrals", "Deferrals", "deferrals", "production.records.deferrals"],
+      ["records-ad-sb", "AD / SB", "airworthiness", "production.records.airworthiness"],
+      ["records-llp", "LLP / Components", "llp", "production.records.llp-components"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "records-control",
     label: "Control",
-    items: [
-      { id: "records-reconciliation", label: "Reconciliation", suffix: "reconciliation", feature: "production.records.reconciliation" },
-      { id: "records-traceability", label: "Traceability", suffix: "traceability", feature: "production.records.traceability" },
-      { id: "records-packs", label: "Packs", suffix: "packs", feature: "production.records.packs" },
-      { id: "records-settings", label: "Settings", suffix: "settings", feature: "production.records.settings" },
-    ],
+    routes: [
+      ["records-reconciliation", "Reconciliation", "reconciliation", "production.records.reconciliation"],
+      ["records-traceability", "Traceability", "traceability", "production.records.traceability"],
+      ["records-packs", "Packs", "packs", "production.records.packs"],
+      ["records-settings", "Settings", "settings", "production.records.settings"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
 ];
 
-const ROSTERING_GROUPS: FeatureGroup[] = [
+const ROSTERING: FeatureSection[] = [
   {
     id: "rostering-personal",
     label: "Personal",
-    items: [
-      { id: "rostering-my-roster", label: "My Roster", suffix: "my-roster", feature: "rostering.my-roster" },
-    ],
+    routes: [
+      ["rostering-my-roster", "My Roster", "my-roster", "rostering.my-roster"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "rostering-planning",
     label: "Planning",
-    items: [
-      { id: "rostering-calendar", label: "Calendar", suffix: "calendar", feature: "rostering.calendar" },
-      { id: "rostering-board", label: "Planning Board", suffix: "planning-board", feature: "rostering.planning-board" },
-      { id: "rostering-training", label: "Training Impact", suffix: "training-impact", feature: "rostering.training-impact" },
-    ],
+    routes: [
+      ["rostering-calendar", "Calendar", "calendar", "rostering.calendar"],
+      ["rostering-board", "Planning Board", "planning-board", "rostering.planning-board"],
+      ["rostering-training", "Training Impact", "training-impact", "rostering.training-impact"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
   {
     id: "rostering-control",
     label: "Control",
-    items: [
-      { id: "rostering-dashboard", label: "Dashboard", suffix: "dashboard", feature: "rostering.dashboard" },
-      { id: "rostering-reports", label: "Reports", suffix: "reports", feature: "rostering.reports" },
-      { id: "rostering-settings", label: "Settings", suffix: "settings", feature: "rostering.settings" },
-    ],
+    routes: [
+      ["rostering-dashboard", "Dashboard", "dashboard", "rostering.dashboard"],
+      ["rostering-reports", "Reports", "reports", "rostering.reports"],
+      ["rostering-settings", "Settings", "settings", "rostering.settings"],
+    ].map((values) => featureRoute(values as FeatureTuple)),
   },
 ];
 
-const DOCUMENT_CONTROL_GROUPS: PortalNavItem[] = [
-  {
-    id: "doc-library",
-    label: "Library",
-    path: "library",
-    children: [
-      { id: "doc-controlled-library", label: "Controlled Library", path: "library" },
-      { id: "doc-records", label: "Generated Records", path: "records" },
-      { id: "doc-registers", label: "Registers", path: "registers" },
-      { id: "doc-copies", label: "Controlled Copies", path: "controlled-copies" },
-      { id: "doc-external", label: "External Sources", path: "external-sources" },
-    ],
-  },
-  {
-    id: "doc-workflow",
-    label: "Workflow",
-    path: "drafts",
-    children: [
-      { id: "doc-drafts", label: "Drafts & Approval", path: "drafts" },
-      { id: "doc-change", label: "Change Proposals", path: "change-proposals" },
-      { id: "doc-reviews", label: "Review Planner", path: "reviews" },
-      { id: "doc-tr", label: "Temporary Revisions", path: "tr" },
-    ],
-  },
-  {
-    id: "doc-governance",
-    label: "Governance",
-    path: "authority",
-    children: [
-      { id: "doc-authority", label: "Authority", path: "authority" },
-      { id: "doc-distribution", label: "Distribution & ACK", path: "distribution" },
-      { id: "doc-archive", label: "Archive / Obsolete", path: "archive" },
-      { id: "doc-integrations", label: "Integrations", path: "integrations" },
-      { id: "doc-settings", label: "Settings", path: "settings" },
-    ],
-  },
-];
+function tenantBase(amoCode: string): string {
+  return `/maintenance/${encodeURIComponent(amoCode)}`;
+}
 
-function featureGroups(
-  amoCode: string,
-  department: string,
-  groups: FeatureGroup[],
+function joinPath(base: string, suffix: string): string {
+  return suffix ? `${base}/${suffix}` : base;
+}
+
+function featureSections(
+  base: string,
+  sections: FeatureSection[],
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): PortalNavItem[] {
-  const base = `/maintenance/${encodeURIComponent(amoCode)}/${department}`;
-  return groups
-    .map((group) => ({
-      id: group.id,
-      label: group.label,
-      path: `${base}/${group.items[0]?.suffix || ""}`.replace(/\/$/, ""),
-      children: group.items
-        .filter((item) => canViewFeature(user, item.feature, contextDepartment))
-        .map((item) => ({
-          id: item.id,
-          label: item.label,
-          path: `${base}/${item.suffix}`.replace(/\/$/, ""),
-        })),
-    }))
-    .filter((group) => group.children.length > 0);
+  return sections.flatMap((section) => {
+    const children = section.routes
+      .filter((route) => canViewFeature(user, route.feature, contextDepartment))
+      .map<PortalNavItem>((route) => ({
+        id: route.id,
+        label: route.label,
+        path: joinPath(base, route.suffix),
+      }));
+    if (!children.length) return [];
+    return [{ id: section.id, label: section.label, path: children[0].path, children }];
+  });
 }
 
-function qmsGroups(amoCode: string): PortalNavItem[] {
-  const sectionLabels: Record<QmsModuleRoute["section"], string> = {
+function qualitySections(amoCode: string): PortalNavItem[] {
+  const labels: Record<QmsModuleRoute["section"], string> = {
     command: "Command",
     assurance: "Assurance",
     control: "Control",
     reporting: "Reporting",
     administration: "Administration",
   };
-  const grouped = new Map<QmsModuleRoute["section"], PortalNavItem[]>();
+  const groups = new Map<QmsModuleRoute["section"], PortalNavItem[]>();
   for (const route of qmsNavigationItems(amoCode)) {
     if (!hasQmsRolePermission(route.permission)) continue;
-    const items = grouped.get(route.section) || [];
-    items.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path });
-    grouped.set(route.section, items);
+    const children = groups.get(route.section) || [];
+    children.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path });
+    groups.set(route.section, children);
   }
-  return Array.from(grouped.entries()).map(([section, children]) => ({
+  return Array.from(groups.entries()).map(([section, children]) => ({
     id: `qms-${section}`,
-    label: sectionLabels[section],
-    path: children[0]?.path || `/maintenance/${encodeURIComponent(amoCode)}/quality`,
+    label: labels[section],
+    path: children[0].path,
     children,
   }));
 }
 
-function documentControlGroups(amoCode: string): PortalNavItem[] {
-  const base = `/maintenance/${encodeURIComponent(amoCode)}/document-control`;
-  return DOCUMENT_CONTROL_GROUPS.map((group) => ({
-    ...group,
-    path: `${base}/${group.path}`,
-    children: group.children?.map((child) => ({ ...child, path: `${base}/${child.path}` })),
-  }));
+function documentControlSections(base: string): PortalNavItem[] {
+  const section = (
+    id: string,
+    label: string,
+    routes: Array<[string, string, string]>,
+  ): PortalNavItem => ({
+    id,
+    label,
+    path: joinPath(base, routes[0][2]),
+    children: routes.map(([routeId, routeLabel, suffix]) => ({
+      id: routeId,
+      label: routeLabel,
+      path: joinPath(base, suffix),
+    })),
+  });
+  return [
+    section("doc-library", "Library", [
+      ["doc-controlled-library", "Controlled Library", "library"],
+      ["doc-records", "Generated Records", "records"],
+      ["doc-registers", "Registers", "registers"],
+      ["doc-copies", "Controlled Copies", "controlled-copies"],
+      ["doc-external", "External Sources", "external-sources"],
+    ]),
+    section("doc-workflow", "Workflow", [
+      ["doc-drafts", "Drafts & Approval", "drafts"],
+      ["doc-change", "Change Proposals", "change-proposals"],
+      ["doc-reviews", "Review Planner", "reviews"],
+      ["doc-tr", "Temporary Revisions", "tr"],
+    ]),
+    section("doc-governance", "Governance", [
+      ["doc-authority", "Authority", "authority"],
+      ["doc-distribution", "Distribution & ACK", "distribution"],
+      ["doc-archive", "Archive / Obsolete", "archive"],
+      ["doc-integrations", "Integrations", "integrations"],
+      ["doc-settings", "Settings", "settings"],
+    ]),
+  ];
 }
 
 function departmentHomePath(amoCode: string, department: DepartmentId | null): string {
-  const safe = encodeURIComponent(amoCode);
-  if (!department || department === "admin") return `/maintenance/${safe}`;
-  if (department === "document-control") return `/maintenance/${safe}/document-control`;
-  return `/maintenance/${safe}/${department}`;
+  const base = tenantBase(amoCode);
+  if (!department || department === "admin") return base;
+  return `${base}/${department}`;
 }
 
 function departmentBranch(
   amoCode: string,
-  department: DepartmentId,
+  department: Exclude<DepartmentId, "admin">,
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): PortalNavItem | null {
-  const base = `/maintenance/${encodeURIComponent(amoCode)}`;
-  switch (department) {
-    case "planning":
-      return { id: "department-planning", label: "Planning", icon: "planning", path: `${base}/planning`, children: featureGroups(amoCode, "planning", PLANNING_GROUPS, user, contextDepartment) };
-    case "production":
-      return { id: "department-production", label: "Production", icon: "production", path: `${base}/production`, children: featureGroups(amoCode, "production", PRODUCTION_GROUPS, user, contextDepartment) };
-    case "maintenance":
-      return { id: "department-maintenance", label: "Maintenance", icon: "maintenance", path: `${base}/maintenance`, children: featureGroups(amoCode, "maintenance", MAINTENANCE_GROUPS, user, contextDepartment) };
-    case "quality":
-      return { id: "department-quality", label: "Quality & Compliance", icon: "quality", path: `${base}/quality`, children: qmsGroups(amoCode) };
-    case "document-control":
-      return { id: "department-document-control", label: "Document Control", icon: "documents", path: `${base}/document-control`, children: documentControlGroups(amoCode) };
-    case "reliability":
-      return {
-        id: "department-reliability",
-        label: "Reliability",
-        icon: "reliability",
+  const base = tenantBase(amoCode);
+  if (department === "planning") {
+    return { id: "department-planning", label: "Planning", icon: "planning", path: `${base}/planning`, children: featureSections(`${base}/planning`, PLANNING, user, contextDepartment) };
+  }
+  if (department === "production") {
+    return { id: "department-production", label: "Production", icon: "production", path: `${base}/production`, children: featureSections(`${base}/production`, PRODUCTION, user, contextDepartment) };
+  }
+  if (department === "maintenance") {
+    return { id: "department-maintenance", label: "Maintenance", icon: "maintenance", path: `${base}/maintenance`, children: featureSections(`${base}/maintenance`, MAINTENANCE, user, contextDepartment) };
+  }
+  if (department === "quality") {
+    return { id: "department-quality", label: "Quality & Compliance", icon: "quality", path: `${base}/quality`, children: qualitySections(amoCode) };
+  }
+  if (department === "document-control") {
+    return { id: "department-document-control", label: "Document Control", icon: "documents", path: `${base}/document-control`, children: documentControlSections(`${base}/document-control`) };
+  }
+  if (department === "reliability") {
+    return {
+      id: "department-reliability",
+      label: "Reliability",
+      icon: "reliability",
+      path: `${base}/reliability`,
+      children: [{
+        id: "reliability-analysis",
+        label: "Analysis",
         path: `${base}/reliability`,
         children: [
-          {
-            id: "reliability-analysis",
-            label: "Analysis",
-            path: `${base}/reliability`,
-            children: [
-              { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability` },
-              { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
-              { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
-              { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
-            ],
-          },
+          { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability` },
+          { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
+          { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
+          { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
         ],
-      };
-    case "safety":
-      return { id: "department-safety", label: "Safety Management", icon: "safety", path: `${base}/safety` };
-    case "stores":
-      return { id: "department-stores", label: "Procurement & Stores", icon: "stores", path: `${base}/stores` };
-    case "workshops":
-      return { id: "department-workshops", label: "Workshops", icon: "workshops", path: `${base}/workshops` };
-    default:
-      return null;
+      }],
+    };
   }
+  const simple: Record<"safety" | "stores" | "workshops", { label: string; icon: PortalNavIcon }> = {
+    safety: { label: "Safety Management", icon: "safety" },
+    stores: { label: "Procurement & Stores", icon: "stores" },
+    workshops: { label: "Workshops", icon: "workshops" },
+  };
+  const entry = simple[department as keyof typeof simple];
+  return entry ? {
+    id: `department-${department}`,
+    label: entry.label,
+    icon: entry.icon,
+    path: `${base}/${department}`,
+  } : null;
 }
 
 function supportingBranches(
@@ -380,21 +386,18 @@ function supportingBranches(
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): PortalNavItem[] {
-  const base = `/maintenance/${encodeURIComponent(amoCode)}`;
-  const branches: PortalNavItem[] = [];
-
-  const records = featureGroups(amoCode, "production/records", RECORDS_GROUPS, user, contextDepartment);
-  if (records.length) {
-    branches.push({ id: "technical-records", label: "Technical Records", icon: "records", path: `${base}/production/records`, children: records });
+  const base = tenantBase(amoCode);
+  const result: PortalNavItem[] = [];
+  const recordSections = featureSections(`${base}/production/records`, RECORDS, user, contextDepartment);
+  if (recordSections.length) {
+    result.push({ id: "technical-records", label: "Technical Records", icon: "records", path: `${base}/production/records`, children: recordSections });
   }
-
-  const rostering = featureGroups(amoCode, "rostering", ROSTERING_GROUPS, user, contextDepartment);
-  if (rostering.length) {
-    branches.push({ id: "duty-rostering", label: "Duty Rostering", icon: "rostering", path: `${base}/rostering`, children: rostering });
+  const rosterSections = featureSections(`${base}/rostering`, ROSTERING, user, contextDepartment);
+  if (rosterSections.length) {
+    result.push({ id: "duty-rostering", label: "Duty Rostering", icon: "rostering", path: `${base}/rostering`, children: rosterSections });
   }
-
   if (hasQmsRolePermission("qms.training.view")) {
-    branches.push({
+    result.push({
       id: "training-competence",
       label: "Training & Competence",
       icon: "training",
@@ -426,44 +429,48 @@ function supportingBranches(
       ],
     });
   }
-
-  return branches;
+  return result;
 }
 
 function adminGroups(amoCode: string): PortalNavGroup[] {
-  const base = `/maintenance/${encodeURIComponent(amoCode)}/admin`;
+  const base = `${tenantBase(amoCode)}/admin`;
+  const adminItem = (id: string, label: string, suffix: string, icon: PortalNavIcon): PortalNavItem => ({
+    id,
+    label,
+    icon,
+    path: joinPath(base, suffix),
+    adminOnly: true,
+  });
   return [
     {
       id: "admin-organisation",
       label: "Organisation",
       items: [
-        { id: "admin-overview", label: "Administration Overview", icon: "settings", path: `${base}/overview`, adminOnly: true },
-        { id: "admin-amos", label: "AMO Management", icon: "home", path: `${base}/amos`, adminOnly: true },
-        { id: "admin-assets", label: "AMO Assets", icon: "documents", path: `${base}/amo-assets`, adminOnly: true },
+        adminItem("admin-overview", "Administration Overview", "overview", "settings"),
+        adminItem("admin-amos", "AMO Management", "amos", "home"),
+        adminItem("admin-assets", "AMO Assets", "amo-assets", "documents"),
       ],
     },
     {
       id: "admin-access",
       label: "People & Access",
-      items: [
-        { id: "admin-users", label: "User Management", icon: "users", path: `${base}/users`, adminOnly: true },
-      ],
+      items: [adminItem("admin-users", "User Management", "users", "users")],
     },
     {
       id: "admin-configuration",
       label: "Portal Configuration",
       items: [
-        { id: "admin-settings", label: "Usage & Limits", icon: "settings", path: `${base}/settings`, adminOnly: true },
-        { id: "admin-email", label: "Email Server", icon: "mail", path: `${base}/email-settings`, adminOnly: true },
-        { id: "admin-email-logs", label: "Email Logs", icon: "mail", path: `${base}/email-logs`, adminOnly: true },
+        adminItem("admin-settings", "Usage & Limits", "settings", "settings"),
+        adminItem("admin-email", "Email Server", "email-settings", "mail"),
+        adminItem("admin-email-logs", "Email Logs", "email-logs", "mail"),
       ],
     },
     {
       id: "admin-commercial",
       label: "Commercial",
       items: [
-        { id: "admin-billing", label: "Billing & Usage", icon: "billing", path: `${base}/billing`, adminOnly: true },
-        { id: "admin-invoices", label: "Invoices", icon: "billing", path: `${base}/invoices`, adminOnly: true },
+        adminItem("admin-billing", "Billing & Usage", "billing", "billing"),
+        adminItem("admin-invoices", "Invoices", "invoices", "billing"),
       ],
     },
   ];
@@ -474,43 +481,50 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   if (!user) return [];
 
   const assigned = getAssignedDepartment(user, contextDepartment);
-  const allowed = getAllowedDepartments(user, assigned).filter((department) => department !== "admin");
-  const departmentScope = adminModeActive && isAdminUser(user)
+  const allowed = getAllowedDepartments(user, assigned).filter(
+    (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
+  );
+  const departmentScope: Array<Exclude<DepartmentId, "admin">> = adminModeActive && isAdminUser(user)
     ? allowed
-    : assigned && allowed.includes(assigned)
+    : assigned && assigned !== "admin" && allowed.includes(assigned)
       ? [assigned]
       : allowed.slice(0, 1);
 
-  const homePath = departmentHomePath(amoCode, assigned);
+  const base = tenantBase(amoCode);
   const groups: PortalNavGroup[] = [
     {
       id: "workspace",
       label: "Workspace",
       items: [
-        { id: "home", label: "Home", icon: "home", path: homePath, exact: true },
-        { id: "my-training", label: "My Training", icon: "training", path: `/maintenance/${encodeURIComponent(amoCode)}/training` },
-        { id: "my-roster", label: "My Roster", icon: "calendar", path: `/maintenance/${encodeURIComponent(amoCode)}/rostering/my-roster` },
+        { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, assigned), exact: true },
+        { id: "my-training", label: "My Training", icon: "training", path: `${base}/training` },
+        { id: "my-roster", label: "My Roster", icon: "calendar", path: `${base}/rostering/my-roster` },
       ],
     },
   ];
 
-  const departmentItems = departmentScope
+  const departments = departmentScope
     .map((department) => departmentBranch(amoCode, department, user, contextDepartment))
     .filter((item): item is PortalNavItem => Boolean(item));
-  departmentItems.push(...supportingBranches(amoCode, user, contextDepartment));
-  if (departmentItems.length) groups.push({ id: "departments", label: adminModeActive ? "Department Workspaces" : "Department", items: departmentItems });
-
+  departments.push(...supportingBranches(amoCode, user, contextDepartment));
+  if (departments.length) {
+    groups.push({
+      id: "departments",
+      label: adminModeActive ? "Department Workspaces" : "Department",
+      items: departments,
+    });
+  }
   if (adminModeActive && isAdminUser(user)) groups.push(...adminGroups(amoCode));
   return groups;
 }
 
 export function flattenPortalNavigation(groups: PortalNavGroup[]): PortalNavItem[] {
   const flattened: PortalNavItem[] = [];
-  const walk = (item: PortalNavItem) => {
+  const visit = (item: PortalNavItem) => {
     flattened.push(item);
-    item.children?.forEach(walk);
+    item.children?.forEach(visit);
   };
-  groups.forEach((group) => group.items.forEach(walk));
+  groups.forEach((group) => group.items.forEach(visit));
   return flattened;
 }
 
