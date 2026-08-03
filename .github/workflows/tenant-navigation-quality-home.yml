@@ -4,13 +4,17 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - "backend/amodb/apps/accounts/admin_profile_access.py"
       - "backend/amodb/apps/accounts/admin_profile_concurrency.py"
       - "backend/amodb/apps/accounts/admin_profile_guard.py"
       - "backend/amodb/apps/accounts/admin_profile_router.py"
       - "backend/amodb/apps/accounts/department_home_router.py"
+      - "backend/amodb/apps/accounts/router_admin.py"
+      - "backend/amodb/apps/accounts/router_user_directory.py"
       - "backend/amodb/apps/accounts/__init__.py"
       - "backend/amodb/apps/accounts/tests/test_admin_profile_governance.py"
       - "backend/amodb/apps/accounts/tests/test_department_home_security.py"
+      - "backend/amodb/apps/accounts/tests/test_user_directory_pagination.py"
       - "backend/amodb/apps/quality/tenant_security.py"
       - "backend/amodb/apps/quality/tests/test_tenant_route_isolation.py"
       - "frontend/scripts/check-css-contract.mjs"
@@ -134,10 +138,13 @@ jobs:
       - name: Compile tenant governance, homes and isolation modules
         run: >-
           python -m compileall -q
+          amodb/apps/accounts/admin_profile_access.py
           amodb/apps/accounts/admin_profile_concurrency.py
           amodb/apps/accounts/admin_profile_guard.py
           amodb/apps/accounts/admin_profile_router.py
           amodb/apps/accounts/department_home_router.py
+          amodb/apps/accounts/router_admin.py
+          amodb/apps/accounts/router_user_directory.py
           amodb/apps/accounts/__init__.py
           amodb/apps/quality/tenant_security.py
       - name: Import the application with the test database
@@ -161,6 +168,7 @@ jobs:
           pytest -q
           amodb/apps/accounts/tests/test_admin_profile_governance.py
           amodb/apps/accounts/tests/test_department_home_security.py
+          amodb/apps/accounts/tests/test_user_directory_pagination.py
           amodb/apps/quality/tests/test_tenant_route_isolation.py
       - name: Verify the Alembic graph remains loadable
         env:
