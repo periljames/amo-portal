@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 from amodb.database import get_db
 from amodb.apps.accounts import models as account_models
+from amodb.apps.procurement import service as procurement_service
 
 from . import schemas, services
 
@@ -33,6 +34,10 @@ PURCHASING_ROLES = [
 ]
 
 
+def _amo_id(current_user: account_models.User) -> str:
+    return str(getattr(current_user, "effective_amo_id", None) or current_user.amo_id)
+
+
 @router.post(
     "/inventory/receive",
     response_model=schemas.InventoryLedgerRead,
@@ -48,7 +53,7 @@ def receive_inventory(
         payload.idempotency_key = idempotency_key
     entry = services.receive_inventory(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         payload=payload,
         actor_user_id=current_user.id,
     )
@@ -70,7 +75,12 @@ def inspect_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entries = services.inspect_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entries = services.inspect_inventory(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     for entry in entries:
         db.refresh(entry)
@@ -90,7 +100,12 @@ def transfer_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entry = services.transfer_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entry = services.transfer_inventory(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(entry)
     return entry
@@ -109,7 +124,12 @@ def issue_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entry = services.issue_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entry = services.issue_inventory(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(entry)
     return entry
@@ -128,7 +148,12 @@ def return_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entry = services.return_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entry = services.return_inventory(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(entry)
     return entry
@@ -147,7 +172,12 @@ def scrap_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entry = services.scrap_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entry = services.scrap_inventory(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(entry)
     return entry
@@ -162,7 +192,7 @@ def list_on_hand(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return services.list_on_hand(db, amo_id=current_user.amo_id, part_number=part_number)
+    return services.list_on_hand(db, amo_id=_amo_id(current_user), part_number=part_number)
 
 
 @router.get(
@@ -175,13 +205,14 @@ def list_ledger(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return services.list_ledger(db, amo_id=current_user.amo_id, skip=skip, limit=limit)
+    return services.list_ledger(db, amo_id=_amo_id(current_user), skip=skip, limit=limit)
 
 
 @router.post(
     "/purchasing/purchase-orders",
     response_model=schemas.PurchaseOrderRead,
     status_code=status.HTTP_201_CREATED,
+    deprecated=True,
 )
 def create_purchase_order(
     payload: schemas.PurchaseOrderCreate,
@@ -191,7 +222,12 @@ def create_purchase_order(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    po = services.create_purchase_order(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    po = services.create_purchase_order(
+        db,
+        amo_id=_amo_id(current_user),
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(po)
     return po
@@ -200,15 +236,24 @@ def create_purchase_order(
 @router.post(
     "/purchasing/purchase-orders/{purchase_order_id}/approve",
     response_model=schemas.PurchaseOrderRead,
+    deprecated=True,
 )
 def approve_purchase_order(
     purchase_order_id: int,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(require_roles(*PURCHASING_ROLES)),
 ):
+    amo_id = _amo_id(current_user)
+    # The legacy endpoint remains for integrations, but it can no longer bypass
+    # QMS supplier approval and scope controls.
+    procurement_service.assert_legacy_purchase_order_eligible(
+        db,
+        amo_id=amo_id,
+        purchase_order_id=purchase_order_id,
+    )
     po = services.approve_purchase_order(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=amo_id,
         purchase_order_id=purchase_order_id,
         actor_user_id=current_user.id,
     )
@@ -221,6 +266,7 @@ def approve_purchase_order(
     "/purchasing/goods-receipts",
     response_model=schemas.GoodsReceiptRead,
     status_code=status.HTTP_201_CREATED,
+    deprecated=True,
 )
 def create_goods_receipt(
     payload: schemas.GoodsReceiptCreate,
@@ -230,9 +276,16 @@ def create_goods_receipt(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
+    amo_id = _amo_id(current_user)
+    if payload.purchase_order_id is not None:
+        procurement_service.assert_legacy_purchase_order_eligible(
+            db,
+            amo_id=amo_id,
+            purchase_order_id=payload.purchase_order_id,
+        )
     receipt = services.create_goods_receipt(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=amo_id,
         payload=payload,
         actor_user_id=current_user.id,
     )
