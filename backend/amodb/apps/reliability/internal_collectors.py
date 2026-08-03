@@ -19,9 +19,7 @@ def _value(value: Any) -> str:
 
 
 def _explicit_deferral_type(task: work_models.TaskCard) -> str:
-    text = " ".join(
-        filter(None, [task.task_code, task.title, task.description])
-    ).upper()
+    text = " ".join(filter(None, [task.task_code, task.title, task.description])).upper()
     if "MEL" in text:
         return "MEL_DEFERRAL"
     if "CDL" in text:
@@ -143,12 +141,26 @@ def collect_technical_record_events(
     records: List[Dict[str, Any]] = []
     for event in events:
         event_value = _value(event.event_type)
-        task = db.get(work_models.TaskCard, event.task_card_id) if event.task_card_id else None
-        component = (
-            db.get(reliability_models.ComponentInstance, event.component_instance_id)
-            if event.component_instance_id
-            else None
-        )
+        task = None
+        if event.task_card_id:
+            task = (
+                db.query(work_models.TaskCard)
+                .filter(
+                    work_models.TaskCard.amo_id == amo_id,
+                    work_models.TaskCard.id == event.task_card_id,
+                )
+                .first()
+            )
+        component = None
+        if event.component_instance_id:
+            component = (
+                db.query(reliability_models.ComponentInstance)
+                .filter(
+                    reliability_models.ComponentInstance.amo_id == amo_id,
+                    reliability_models.ComponentInstance.id == event.component_instance_id,
+                )
+                .first()
+            )
         scheduled = bool(task and task.category == work_models.TaskCategoryEnum.SCHEDULED)
         if event_value == "INSTALL":
             event_type = "INSTALLATION"
@@ -168,14 +180,24 @@ def collect_technical_record_events(
                     f"{event_value} {event.part_number or event.from_part_number or 'component'} "
                     f"at {event.position or 'unrecorded position'}"
                 ),
-                "part_number": event.part_number or event.from_part_number or (component.part_number if component else None),
-                "component_serial_number": event.serial_number or event.from_serial_number or (component.serial_number if component else None),
+                "part_number": (
+                    event.part_number
+                    or event.from_part_number
+                    or (component.part_number if component else None)
+                ),
+                "component_serial_number": (
+                    event.serial_number
+                    or event.from_serial_number
+                    or (component.serial_number if component else None)
+                ),
                 "work_order_id": event.work_order_id,
                 "task_card_id": event.task_card_id,
                 "component_instance_id": event.component_instance_id,
                 "position": event.position,
                 "removal_tracking_id": event.removal_tracking_id,
-                "removal_classification_basis": "SCHEDULED_TASK" if scheduled else "UNSCHEDULED_OR_UNCLASSIFIED",
+                "removal_classification_basis": (
+                    "SCHEDULED_TASK" if scheduled else "UNSCHEDULED_OR_UNCLASSIFIED"
+                ),
             }
         )
     return records
@@ -243,19 +265,40 @@ def collect_procurement_quality_records(
     )
     records: List[Dict[str, Any]] = []
     for inspection in inspections:
-        receipt = inspection.receipt
+        receipt = (
+            db.query(procurement_models.ProcurementReceipt)
+            .filter(
+                procurement_models.ProcurementReceipt.amo_id == amo_id,
+                procurement_models.ProcurementReceipt.id == inspection.receipt_id,
+            )
+            .first()
+        )
         line = receipt.lines[0] if receipt and receipt.lines else None
+        purchase_order = None
+        if receipt:
+            purchase_order = (
+                db.query(procurement_models.ProcurementPurchaseOrder)
+                .filter(
+                    procurement_models.ProcurementPurchaseOrder.amo_id == amo_id,
+                    procurement_models.ProcurementPurchaseOrder.id == receipt.purchase_order_id,
+                )
+                .first()
+            )
         records.append(
             {
                 "external_id": f"PROCUREMENT_INSPECTION:{inspection.id}",
                 "event_type": "SUPPLIER_ESCAPE",
                 "occurred_at": inspection.completed_at.isoformat(),
                 "reference_code": receipt.receipt_number if receipt else str(inspection.id),
-                "description": inspection.findings or inspection.conditions or "Receiving inspection quality escape",
+                "description": (
+                    inspection.findings
+                    or inspection.conditions
+                    or "Receiving inspection quality escape"
+                ),
                 "severity": "CRITICAL" if inspection.suspected_unapproved_part else "HIGH",
                 "part_number": line.part_number if line else None,
                 "component_serial_number": line.serial_number if line else None,
-                "supplier_id": receipt.purchase_order.supplier_id if receipt and receipt.purchase_order else None,
+                "supplier_id": purchase_order.supplier_id if purchase_order else None,
                 "procurement_receipt_id": receipt.id if receipt else None,
                 "inspection_disposition": _value(inspection.disposition),
                 "suspected_unapproved_part": inspection.suspected_unapproved_part,
@@ -269,7 +312,8 @@ def collect_procurement_quality_records(
             .filter(
                 procurement_models.ProcurementQualityHold.amo_id == amo_id,
                 procurement_models.ProcurementQualityHold.placed_at > cursor,
-                procurement_models.ProcurementQualityHold.status == procurement_models.QualityHoldStatus.ACTIVE,
+                procurement_models.ProcurementQualityHold.status
+                == procurement_models.QualityHoldStatus.ACTIVE,
             )
             .order_by(procurement_models.ProcurementQualityHold.placed_at.asc())
             .limit(remaining)
