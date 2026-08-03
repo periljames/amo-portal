@@ -17,6 +17,7 @@ fs.writeFileSync(servicePath, service.replace(/\s+$/, "") + "\n", "utf8");
 
 const viewPath = path.join(root, "src/pages/reliability/ReliabilityAdvancedViews.tsx");
 let view = fs.readFileSync(viewPath, "utf8");
+view = view.replace("import React, { useCallback, useEffect, useMemo, useState } from \"react\";", "import React, { useCallback, useEffect, useState } from \"react\";");
 view = view.replace("  addFracasEvidence,\n", "  addFracasEvidence,\n  approveEffectivenessReview,\n");
 view = view.replace(
   `void action(() => addEffectivenessReview(caseId, { review_date: data.get("review_date"), metric_code: data.get("metric_code") || null, baseline_value: data.get("baseline_value") || null, current_value: data.get("current_value") || null, acceptance_criteria: data.get("acceptance_criteria"), outcome: data.get("outcome"), evidence_json: [], notes: data.get("notes") || null }, data.get("approve") === "on"));`,
