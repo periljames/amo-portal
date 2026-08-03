@@ -67,7 +67,7 @@ class ProcurementDocument(Base):
     stored_path = Column(Text, nullable=False)
     mime_type = Column(String(128), nullable=False)
     size_bytes = Column(Integer, nullable=False)
-    sha256 = Column(String(64), nullable=False, index=True)
+    sha256 = Column(String(64), nullable=False)
     notes = Column(Text, nullable=True)
     is_quality_evidence = Column(Boolean, nullable=False, default=False, index=True)
     qms_reference = Column(String(128), nullable=True, index=True)
