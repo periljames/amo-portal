@@ -5,8 +5,8 @@ import {
   listProcurementDocuments,
   uploadProcurementDocument,
   verifyProcurementDocument,
-} from "../../services/procurement";
-import type { ProcurementDocument } from "../../types/procurement";
+} from "../../services/procurementDocuments";
+import type { ProcurementEvidence } from "../../types/procurementDocuments";
 
 type Mode = "UPLOAD" | "PHYSICAL_RECORD" | "DMS_LINK";
 type Feedback = (tone: "success" | "error" | "warning" | "info", message: string, detail?: string) => void;
@@ -19,7 +19,7 @@ function formatBytes(value?: number | null): string {
 
 export default function ProcurementDocumentCenter({ amoCode, onFeedback }: { amoCode: string; onFeedback: Feedback }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [documents, setDocuments] = useState<ProcurementDocument[]>([]);
+  const [documents, setDocuments] = useState<ProcurementEvidence[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
