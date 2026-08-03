@@ -38,12 +38,12 @@ export type PortalNavigationContext = {
 type FeatureRoute = { id: string; label: string; suffix: string; feature: ModuleFeature };
 type FeatureSection = { id: string; label: string; routes: FeatureRoute[] };
 
-const feature = (
-  id: string,
-  label: string,
-  suffix: string,
-  permission: ModuleFeature,
-): FeatureRoute => ({ id, label, suffix, feature: permission });
+const feature = (id: string, label: string, suffix: string, permission: ModuleFeature): FeatureRoute => ({
+  id,
+  label,
+  suffix,
+  feature: permission,
+});
 
 const PLANNING: FeatureSection[] = [
   { id: "planning-control", label: "Control", routes: [
@@ -210,6 +210,30 @@ function documentControlSections(base: string): PortalNavItem[] {
   ];
 }
 
+function simpleDepartmentBranch(
+  base: string,
+  department: "safety" | "stores" | "workshops",
+  label: string,
+  icon: PortalNavIcon,
+): PortalNavItem {
+  return {
+    id: `department-${department}`,
+    label,
+    icon,
+    path: `${base}/${department}`,
+    children: [{
+      id: `${department}-workspace`,
+      label: "Workspace",
+      path: `${base}/${department}`,
+      children: [
+        { id: `${department}-home`, label: "Home", path: `${base}/${department}`, exact: true },
+        { id: `${department}-operations`, label: "Operations", path: `${base}/${department}/operations` },
+        { id: `${department}-settings`, label: "Configuration", path: `${base}/${department}/settings` },
+      ],
+    }],
+  };
+}
+
 function departmentHomePath(amoCode: string, department: DepartmentId | null): string {
   const base = tenantBase(amoCode);
   return !department || department === "admin" ? base : `${base}/${department}`;
@@ -244,20 +268,18 @@ function departmentBranch(
       label: "Analysis",
       path: `${base}/reliability`,
       children: [
-        { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability` },
+        { id: "reliability-home", label: "Home", path: `${base}/reliability`, exact: true },
+        { id: "reliability-reports", label: "Reliability Reports", path: `${base}/reliability/reports` },
         { id: "ehm-dashboard", label: "EHM Dashboard", path: `${base}/ehm/dashboard` },
         { id: "ehm-trends", label: "EHM Trends", path: `${base}/ehm/trends` },
         { id: "ehm-uploads", label: "EHM Uploads", path: `${base}/ehm/uploads` },
       ],
     }],
   };
-  const simple: Partial<Record<Exclude<DepartmentId, "admin">, { label: string; icon: PortalNavIcon }>> = {
-    safety: { label: "Safety Management", icon: "safety" },
-    stores: { label: "Procurement & Stores", icon: "stores" },
-    workshops: { label: "Workshops", icon: "workshops" },
-  };
-  const entry = simple[department];
-  return entry ? { id: `department-${department}`, label: entry.label, icon: entry.icon, path: `${base}/${department}` } : null;
+  if (department === "safety") return simpleDepartmentBranch(base, "safety", "Safety Management", "safety");
+  if (department === "stores") return simpleDepartmentBranch(base, "stores", "Procurement & Stores", "stores");
+  if (department === "workshops") return simpleDepartmentBranch(base, "workshops", "Workshops", "workshops");
+  return null;
 }
 
 function supportingBranches(amoCode: string, user: PortalUser | null, contextDepartment?: string | null): PortalNavItem[] {
