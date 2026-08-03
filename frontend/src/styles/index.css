@@ -8,8 +8,9 @@
  * 4. theme adapters;
  * 5. final accessibility, form, overlay and layout safety contracts.
  *
- * Application entry points must import this file only. Page-specific styles may
- * remain colocated with their page when they are lazy-loaded with that page.
+ * Application entry points import this file only. Large page-specific styles
+ * remain imported by their lazy page component so they are code-split and easy
+ * to trace. A page stylesheet must not redefine semantic theme tokens.
  */
 
 @import "./global.css";

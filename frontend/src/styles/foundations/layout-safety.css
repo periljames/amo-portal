@@ -52,9 +52,7 @@ body {
   max-width: 100%;
 }
 
-.tenant-shell__content > * {
-  width: 100%;
-}
+.tenant-shell__content > * { width: 100%; }
 
 :where(img, video, canvas, svg):not([data-allow-overflow="true"]) {
   max-width: 100%;
@@ -69,9 +67,7 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-:where(table) {
-  border-collapse: collapse;
-}
+:where(table) { border-collapse: collapse; }
 
 :where(td, th, p, li, dd, dt, label, .description, .subtitle, .copy) {
   overflow-wrap: anywhere;
@@ -85,23 +81,27 @@ body {
   flex-wrap: wrap;
 }
 
-:where(.dashboard-grid, .card-grid, .metric-grid, .form-grid) > * {
-  min-width: 0;
-}
+:where(.dashboard-grid, .card-grid, .metric-grid, .form-grid) > * { min-width: 0; }
 
 :where(.recharts-responsive-container, .echarts-for-react, .chart-container) {
   min-width: 0 !important;
   max-width: 100% !important;
 }
 
-:where(.sticky, [data-sticky="true"]) {
-  max-width: 100%;
-}
+:where(.sticky, [data-sticky="true"]) { max-width: 100%; }
 
-/* Keep floating controls clear of safe areas and mobile browser chrome. */
 :where(.portal-offline-indicator, .floating-action, .floating-control) {
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100dvh - 1rem);
   margin-bottom: env(safe-area-inset-bottom, 0px);
   margin-right: env(safe-area-inset-right, 0px);
+}
+
+:where(.popover, .dropdown-menu, .context-menu, .menu-surface) {
+  max-width: min(30rem, calc(100vw - 1rem));
+  max-height: min(80dvh, 42rem);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 900px) {
@@ -109,9 +109,7 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
   }
 
-  :where(.page-header, .admin-page-header, .qms-page-header) {
-    max-width: 100%;
-  }
+  :where(.page-header, .admin-page-header, .qms-page-header) { max-width: 100%; }
 }
 
 @media (max-width: 560px) {

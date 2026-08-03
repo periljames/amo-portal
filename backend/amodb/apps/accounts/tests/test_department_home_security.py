@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -7,8 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from amodb.apps.accounts.department_home_router import (
+    QUICK_ACTIONS,
     _allowed_departments,
     _assert_tenant,
+    _is_overdue,
     _normalise_department,
     _safe_task_route,
 )
@@ -56,6 +59,20 @@ def test_task_routes_cannot_escape_the_current_tenant_namespace() -> None:
     assert _safe_task_route(safe, "tenant-a", "planning") == "/maintenance/tenant-a/planning/work-orders"
     assert _safe_task_route(foreign, "tenant-a", "planning") == "/maintenance/tenant-a/planning"
     assert _safe_task_route(external, "tenant-a", "planning") == "/maintenance/tenant-a/planning"
+
+
+def test_overdue_detection_accepts_naive_and_aware_database_datetimes() -> None:
+    now = datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc)
+    assert _is_overdue(datetime(2026, 8, 3, 9, 0), now) is True
+    assert _is_overdue(now - timedelta(minutes=1), now) is True
+    assert _is_overdue(now + timedelta(minutes=1), now) is False
+    assert _is_overdue(None, now) is False
+
+
+def test_simple_department_actions_stay_inside_their_own_route_namespace() -> None:
+    for department in ("safety", "stores", "workshops"):
+        assert QUICK_ACTIONS[department]
+        assert all(suffix.startswith(f"/{department}/") for _label, _description, suffix in QUICK_ACTIONS[department])
 
 
 def test_role_driven_access_does_not_open_unrelated_departments(monkeypatch) -> None:

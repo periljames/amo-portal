@@ -180,10 +180,11 @@ function ActivityList({ items }: { items: DepartmentHomeActivity[] }): React.Rea
 }
 
 const DepartmentHomePage: React.FC = () => {
-  const params = useParams<{ amoCode?: string; department?: string }>();
+  const params = useParams<{ amoCode?: string; department?: string; section?: string }>();
   const navigate = useNavigate();
   const amoCode = params.amoCode || "UNKNOWN";
   const department = params.department || "planning";
+  const section = params.section || "home";
   const controllerRef = useRef<AbortController | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const [home, setHome] = useState<DepartmentHomeResponse | null>(null);
@@ -214,6 +215,7 @@ const DepartmentHomePage: React.FC = () => {
   }, [load]);
 
   const title = useMemo(() => departmentTitle(department), [department]);
+  const sectionLabel = useMemo(() => humanise(section), [section]);
   const go = useCallback((path: string) => {
     if (path) navigate(path);
   }, [navigate]);
@@ -224,14 +226,14 @@ const DepartmentHomePage: React.FC = () => {
         <PageHeader
           compact
           eyebrow="Department workspace"
-          title={`${title} home`}
+          title={`${title} ${sectionLabel.toLowerCase()}`}
           subtitle={`Live assigned work, approvals, obligations and recent activity for ${home?.amo.name || amoCode}.`}
-          breadcrumbs={[{ label: title }, { label: "Home" }]}
-          meta={home ? <span className="qms-overview-health qms-tone--positive">Live tenant data</span> : undefined}
+          breadcrumbs={[{ label: title, to: `/maintenance/${encodeURIComponent(amoCode)}/${department}` }, { label: sectionLabel }]}
+          meta={home ? <span className="department-home__live-badge">Live tenant data</span> : undefined}
           actions={
             <div className="department-home__actions">
               <button className="department-home__button" type="button" onClick={() => void load()} disabled={state === "loading"}>
-                <RefreshCw size={14} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" />
+                <RefreshCw size={14} className={state === "loading" ? "department-home__spin" : ""} aria-hidden="true" />
                 Refresh
               </button>
             </div>
@@ -240,7 +242,7 @@ const DepartmentHomePage: React.FC = () => {
 
         {state === "loading" && !home ? (
           <div className="department-home__status" role="status" aria-live="polite">
-            <RefreshCw size={16} className="is-spinning" aria-hidden="true" /> Loading departmental workspace…
+            <RefreshCw size={16} className="department-home__spin" aria-hidden="true" /> Loading departmental workspace…
           </div>
         ) : null}
 
@@ -284,27 +286,21 @@ const DepartmentHomePage: React.FC = () => {
               <Panel title="Urgent alerts" subtitle="Current assigned exposure">
                 <AlertList items={home.alerts} onNavigate={go} />
               </Panel>
-
               <Panel title="My assigned work" subtitle="Open and in-progress tasks" wide>
                 <TaskList items={home.assigned_work} empty="No open work is currently assigned to you." onNavigate={go} />
               </Panel>
-
               <Panel title="Approvals" subtitle="Items awaiting your decision">
                 <TaskList items={home.approvals} empty="No approvals are currently waiting for you." onNavigate={go} />
               </Panel>
-
               <Panel title="Upcoming schedule" subtitle="Dated work within the next 30 days" wide>
                 <TaskList items={home.schedule} empty="No dated obligations are currently scheduled." onNavigate={go} />
               </Panel>
-
               <Panel title="Quick actions" subtitle="Permission-filtered workspace shortcuts">
                 <QuickActions items={home.quick_actions} onNavigate={go} />
               </Panel>
-
               <Panel title="Recent activity" subtitle="Your latest governed actions" wide>
                 <ActivityList items={home.recent_activity} />
               </Panel>
-
               <Panel title="Department news" subtitle="Organisation and department communications">
                 {home.news.length ? (
                   <div className="department-home__list">
