@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 
+from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
 from amodb.apps.accounts.admin_profile_router import (
     _as_utc,
     _assert_tenant_member,
@@ -26,6 +28,10 @@ def actor(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def request(path: str):
+    return SimpleNamespace(url=SimpleNamespace(path=path))
 
 
 def test_admin_profile_rejects_cross_tenant_actor() -> None:
@@ -59,3 +65,49 @@ def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
     aware = datetime(2026, 8, 3, 10, 0, 0, tzinfo=timezone.utc)
     assert _as_utc(naive).tzinfo == timezone.utc
     assert _as_utc(aware) == aware
+
+
+def test_profile_governance_routes_are_the_only_tenant_admin_exemption() -> None:
+    db = MagicMock()
+    current = actor(role="AMO_ADMIN", is_amo_admin=True)
+    assert require_active_admin_profile(
+        request("/accounts/admin/admin-profile/safarilink/state"),
+        current,
+        db,
+    ) is current
+    db.execute.assert_not_called()
+
+
+def test_normal_tenant_admin_api_requires_active_backend_session() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        require_active_admin_profile(
+            request("/accounts/admin/users"),
+            actor(role="AMO_ADMIN", is_amo_admin=True),
+            db,
+        )
+    assert exc.value.status_code == 403
+    assert "activate admin profile" in str(exc.value.detail).lower()
+
+
+def test_active_backend_session_unlocks_tenant_admin_api() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = ("session-1",)
+    current = actor(role="AMO_ADMIN", is_amo_admin=True)
+    assert require_active_admin_profile(
+        request("/accounts/admin/users"),
+        current,
+        db,
+    ) is current
+
+
+def test_platform_superuser_stays_on_separate_control_plane() -> None:
+    db = MagicMock()
+    current = actor(is_superuser=True, amo_id=None, effective_amo_id=None, role="SUPERUSER")
+    assert require_active_admin_profile(
+        request("/accounts/admin/platform/metrics"),
+        current,
+        db,
+    ) is current
+    db.execute.assert_not_called()
