@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/amodb/security.py"
       - "backend/amodb/alembic/versions/accounts_20260803_admin_profile_governance.py"
+      - "backend/amodb/alembic/versions/accounts_20260803_auth_session.py"
       - "backend/amodb/apps/accounts/admin_profile_access.py"
       - "backend/amodb/apps/accounts/admin_profile_concurrency.py"
       - "backend/amodb/apps/accounts/admin_profile_guard.py"
@@ -149,6 +150,7 @@ jobs:
           python -m compileall -q
           amodb/security.py
           amodb/alembic/versions/accounts_20260803_admin_profile_governance.py
+          amodb/alembic/versions/accounts_20260803_auth_session.py
           amodb/apps/accounts/admin_profile_access.py
           amodb/apps/accounts/admin_profile_concurrency.py
           amodb/apps/accounts/admin_profile_guard.py
