@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 from urllib.parse import urlparse
 
 import psycopg2
@@ -43,6 +42,18 @@ PATH_PREFIXES = (
     "docs/reliability/RELIABILITY_",
     "frontend/src/pages/reliability/",
 )
+
+TEMPORARY_DELETIONS = {
+    ".github/workflows/reliability-clean-rebuild.yml",
+    ".github/workflows/reliability-clean-diagnostic-v2.yml",
+    ".github/workflows/reliability-clean-publish-v4.yml",
+    "docs/reliability/.clean-rebuild-trigger",
+    "docs/reliability/.clean-diagnostic-v2-trigger",
+    "docs/reliability/.clean-publish-v4-trigger",
+    "docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md",
+    "backend/scripts/prepare_reliability_clean_tree.py",
+    "backend/scripts/validate_reliability_clean.py",
+}
 
 
 def validate_application_and_database() -> None:
@@ -87,14 +98,27 @@ def validate_application_and_database() -> None:
 
 
 def validate_staged_paths() -> None:
-    paths = subprocess.check_output(
-        ["git", "diff", "--cached", "--name-only"],
+    status_lines = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-status"],
         text=True,
     ).splitlines()
+    status_by_path: dict[str, str] = {}
+    for line in status_lines:
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            status_by_path[parts[-1]] = parts[0]
+    paths = list(status_by_path)
     unapproved = [
         path
         for path in paths
-        if path not in EXACT_PATHS and not path.startswith(PATH_PREFIXES)
+        if path not in EXACT_PATHS
+        and path not in TEMPORARY_DELETIONS
+        and not path.startswith(PATH_PREFIXES)
+    ]
+    wrong_temp_status = [
+        path
+        for path in TEMPORARY_DELETIONS
+        if path in status_by_path and status_by_path[path] != "D"
     ]
     artifacts = [
         path
@@ -105,11 +129,13 @@ def validate_staged_paths() -> None:
         or path.endswith(".db")
         or "node_modules/" in path
     ]
-    if unapproved or artifacts:
-        raise RuntimeError(f"Unapproved paths={unapproved}; generated artifacts={artifacts}")
+    if unapproved or wrong_temp_status or artifacts:
+        raise RuntimeError(
+            f"Unapproved={unapproved}; temporary-not-deleted={wrong_temp_status}; artifacts={artifacts}"
+        )
     if not paths:
         raise RuntimeError("No permanent Reliability changes are staged")
-    print(f"Approved permanent paths: {len(paths)}")
+    print(f"Approved staged paths: {len(paths)}")
 
 
 if __name__ == "__main__":
