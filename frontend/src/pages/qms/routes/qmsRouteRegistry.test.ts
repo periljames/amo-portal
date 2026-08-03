@@ -5,6 +5,7 @@ import {
   classifyQmsPath,
   qmsModulePath,
   qmsNavigationItems,
+  qmsRecordPath,
 } from "./qmsRouteRegistry";
 
 describe("QMS route registry", () => {
@@ -25,8 +26,12 @@ describe("QMS route registry", () => {
     }
   });
 
-  it("builds canonical navigation links from the registry", () => {
+  it("builds canonical module and record links", () => {
     expect(qmsModulePath("SAF", "cars", "overdue")).toBe("/maintenance/SAF/quality/cars/overdue");
+    expect(qmsRecordPath("SAF", "audits", "QAR-MO-26-002")).toBe("/maintenance/SAF/quality/audits/QAR-MO-26-002");
+    expect(qmsRecordPath("Safari Link/AMO", "cars", "CAR-24+1", "overview")).toBe(
+      "/maintenance/Safari%20Link%2FAMO/quality/cars/CAR-24%2B1/overview",
+    );
     expect(qmsNavigationItems("SAF").find((item) => item.id === "audits")?.path).toBe("/maintenance/SAF/quality/audits/dashboard");
     expect(qmsNavigationItems("Safari Link/AMO").every((item) => item.path.startsWith("/maintenance/Safari%20Link%2FAMO/quality/"))).toBe(true);
   });
@@ -44,11 +49,27 @@ describe("QMS route registry", () => {
     }
   });
 
-  it("recognises overview, specialist, and dynamic record routes", () => {
+  it("recognises overview and specialist record workspaces", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality").kind).toBe("overview");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedule").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/fieldwork").kind).toBe("known");
+  });
+
+  it("accepts human-readable audit and CAR references", () => {
+    expect(classifyQmsPath("/maintenance/safarilink/quality/audits/QAR-MO-26-002?tab=war-room")).toMatchObject({
+      kind: "known",
+      amoCode: "safarilink",
+      module: expect.objectContaining({ id: "audits" }),
+    });
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/checklist").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedules/AUD-SCH-2026-04").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/cars/CAR-2026-014/evidence").kind).toBe("known");
+  });
+
+  it("recognises controlled document reader routes in the registry", () => {
+    expect(classifyQmsPath("/maintenance/SAF/quality/documents/reader/DOC-24/revisions/REV-3/view").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/documents/7f14b288/revisions/91/view").kind).toBe("known");
   });
 
   it("does not silently accept misspelled modules or views", () => {
@@ -56,6 +77,8 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/ovverdue").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedul").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/findings/register/unexpected-tail").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/unregistered-stage").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/%2E%2E?tab=war-room").kind).toBe("unknown");
   });
 
   it("maps intentional legacy aliases to canonical destinations", () => {

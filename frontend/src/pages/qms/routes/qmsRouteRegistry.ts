@@ -1,6 +1,12 @@
 export type QmsRouteComponentType = "overview" | "canonical" | "specialist" | "redirect" | "external";
 export type QmsRouteSection = "command" | "assurance" | "control" | "reporting" | "administration";
 
+export type QmsDynamicRecordRoute = {
+  prefix?: readonly string[];
+  allowBare?: boolean;
+  allowedTails?: readonly string[];
+};
+
 export type QmsModuleRoute = {
   id: string;
   segment: string;
@@ -12,6 +18,7 @@ export type QmsModuleRoute = {
   validViews: readonly string[];
   componentType: QmsRouteComponentType;
   allowRecordDetails?: boolean;
+  recordRoutes?: readonly QmsDynamicRecordRoute[];
   legacyAliases?: readonly string[];
 };
 
@@ -22,6 +29,30 @@ export type QmsPathClassification = {
   module?: QmsModuleRoute;
   canonicalTarget?: string;
 };
+
+const AUDIT_WORKSPACE_TAILS = [
+  "overview",
+  "war-room",
+  "checklist",
+  "fieldwork",
+  "findings",
+  "cars",
+  "evidence",
+  "report",
+  "closeout",
+] as const;
+
+const CAR_WORKSPACE_TAILS = [
+  "overview",
+  "response",
+  "containment",
+  "root-cause",
+  "actions",
+  "evidence",
+  "review",
+  "effectiveness",
+  "closeout",
+] as const;
 
 const MODULES: readonly QmsModuleRoute[] = [
   {
@@ -58,6 +89,10 @@ const MODULES: readonly QmsModuleRoute[] = [
     validViews: ["dashboard", "program", "schedule", "register", "checklists", "reports", "templates", "new", "plan", "bin"],
     componentType: "specialist",
     allowRecordDetails: true,
+    recordRoutes: [
+      { prefix: ["schedules"], allowBare: true },
+      { allowBare: true, allowedTails: AUDIT_WORKSPACE_TAILS },
+    ],
   },
   {
     id: "findings",
@@ -82,6 +117,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     validViews: ["register", "new", "overdue", "due-soon", "awaiting-auditee", "awaiting-quality-review", "awaiting-effectiveness-review", "closed"],
     componentType: "specialist",
     allowRecordDetails: true,
+    recordRoutes: [{ allowBare: true, allowedTails: CAR_WORKSPACE_TAILS }],
   },
   {
     id: "risk",
@@ -244,8 +280,50 @@ function pathSegments(pathname: string): string[] {
   return pathname.split("?")[0].split("#")[0].split("/").filter(Boolean).map(decodeSegment);
 }
 
-function isLikelyRecordId(value: string): boolean {
-  return /^\d+$/.test(value) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(value);
+function isSafeRecordKey(value: string): boolean {
+  const key = value.trim();
+  if (!key || key === "." || key === ".." || key.length > 160) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9._~:@+-]*$/.test(key) && /\d/.test(key);
+}
+
+function isSafeTail(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]*$/.test(value);
+}
+
+function matchesDynamicRecordRoute(moduleSegments: string[], route: QmsDynamicRecordRoute): boolean {
+  const prefix = [...(route.prefix || [])];
+  if (moduleSegments.length < prefix.length + 1) return false;
+  if (!prefix.every((segment, index) => moduleSegments[index] === segment)) return false;
+
+  const recordKey = moduleSegments[prefix.length];
+  if (!isSafeRecordKey(recordKey)) return false;
+
+  const tail = moduleSegments.slice(prefix.length + 1);
+  if (tail.length === 0) return route.allowBare !== false;
+  return tail.length === 1 && Boolean(route.allowedTails?.includes(tail[0]));
+}
+
+function matchesDocumentReaderRoute(moduleSegments: string[]): boolean {
+  const readerRoute =
+    moduleSegments.length === 5 &&
+    moduleSegments[0] === "reader" &&
+    isSafeRecordKey(moduleSegments[1]) &&
+    moduleSegments[2] === "revisions" &&
+    isSafeRecordKey(moduleSegments[3]) &&
+    moduleSegments[4] === "view";
+
+  const revisionRoute =
+    moduleSegments.length === 4 &&
+    isSafeRecordKey(moduleSegments[0]) &&
+    moduleSegments[1] === "revisions" &&
+    isSafeRecordKey(moduleSegments[2]) &&
+    moduleSegments[3] === "view";
+
+  return readerRoute || revisionRoute;
+}
+
+function findModule(moduleId: string): QmsModuleRoute | undefined {
+  return MODULES.find((candidate) => candidate.id === moduleId || candidate.segment === moduleId);
 }
 
 export function qmsBasePath(amoCode: string): string {
@@ -253,13 +331,22 @@ export function qmsBasePath(amoCode: string): string {
 }
 
 export function qmsModulePath(amoCode: string, moduleId: string, view?: string): string {
-  const module = MODULES.find((candidate) => candidate.id === moduleId || candidate.segment === moduleId);
+  const module = findModule(moduleId);
   if (!module) throw new Error(`Unknown QMS module: ${moduleId}`);
   const selectedView = view || module.defaultView;
   if (!module.validViews.includes(selectedView)) {
     throw new Error(`Unknown QMS view: ${module.segment}/${selectedView}`);
   }
   return `${qmsBasePath(amoCode)}/${module.segment}/${selectedView}`;
+}
+
+export function qmsRecordPath(amoCode: string, moduleId: string, recordKey: string, tail?: string): string {
+  const module = findModule(moduleId);
+  if (!module) throw new Error(`Unknown QMS module: ${moduleId}`);
+  if (!module.allowRecordDetails) throw new Error(`QMS module does not expose record routes: ${module.segment}`);
+  if (!isSafeRecordKey(recordKey)) throw new Error(`Unsafe QMS record key: ${recordKey}`);
+  if (tail && !isSafeTail(tail)) throw new Error(`Unsafe QMS record tail: ${tail}`);
+  return `${qmsBasePath(amoCode)}/${module.segment}/${encodeSegment(recordKey)}${tail ? `/${encodeSegment(tail)}` : ""}`;
 }
 
 export function qmsTrainingPath(amoCode: string, view = "dashboard"): string {
@@ -321,25 +408,28 @@ export function classifyQmsPath(pathname: string): QmsPathClassification {
   const module = MODULES.find((candidate) => candidate.segment === relativeSegments[0]);
   if (!module) return { kind: "unknown", amoCode, relativePath };
 
-  const view = relativeSegments[1] || module.defaultView;
+  const moduleSegments = relativeSegments.slice(1);
+  const view = moduleSegments[0] || module.defaultView;
+
+  if (module.segment === "documents" && matchesDocumentReaderRoute(moduleSegments)) {
+    return { kind: "known", amoCode, relativePath, module };
+  }
+
   if (module.validViews.includes(view)) {
-    if (relativeSegments.length <= 2) return { kind: "known", amoCode, relativePath, module };
+    return moduleSegments.length <= 1
+      ? { kind: "known", amoCode, relativePath, module }
+      : { kind: "unknown", amoCode, relativePath, module };
+  }
 
-    if (module.segment === "documents") {
-      const documentReader = relativeSegments[1] === "reader" && relativeSegments[3] === "revisions" && relativeSegments[5] === "view";
-      const documentRevision = isLikelyRecordId(relativeSegments[1]) && relativeSegments[2] === "revisions" && isLikelyRecordId(relativeSegments[3]) && relativeSegments[4] === "view";
-      if (documentReader || documentRevision) return { kind: "known", amoCode, relativePath, module };
+  if (module.recordRoutes?.some((route) => matchesDynamicRecordRoute(moduleSegments, route))) {
+    return { kind: "known", amoCode, relativePath, module };
+  }
+
+  if (module.allowRecordDetails && isSafeRecordKey(view)) {
+    const tail = moduleSegments.slice(1);
+    if (tail.length === 0 || (tail.length === 1 && tail[0] === "overview")) {
+      return { kind: "known", amoCode, relativePath, module };
     }
-
-    return { kind: "unknown", amoCode, relativePath, module };
-  }
-
-  if (module.segment === "audits" && view === "schedules" && isLikelyRecordId(relativeSegments[2] || "")) {
-    return { kind: "known", amoCode, relativePath, module };
-  }
-
-  if (module.allowRecordDetails && isLikelyRecordId(view)) {
-    return { kind: "known", amoCode, relativePath, module };
   }
 
   return { kind: "unknown", amoCode, relativePath, module };

@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const pageSource = readFileSync(new URL("../WorkforceRosteringPagesV2.tsx", import.meta.url), "utf8");
-const assistantSource = readFileSync(new URL("../components/DutyLocationAssistant.tsx", import.meta.url), "utf8");
-const foundationService = readFileSync(new URL("../../../services/foundations.ts", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("./WorkforceRosteringPagesV2.tsx", import.meta.url), "utf8");
+const assistantSource = readFileSync(new URL("./components/DutyLocationAssistant.tsx", import.meta.url), "utf8");
+const foundationService = readFileSync(new URL("../../services/foundations.ts", import.meta.url), "utf8");
 
 describe("private duty-location guidance", () => {
   it("loads as a separate lazy employee self-service surface", () => {

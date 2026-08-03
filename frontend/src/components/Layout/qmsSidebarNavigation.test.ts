@@ -14,6 +14,7 @@ import {
   classifyQmsPath,
   qmsModulePath,
 } from "../../pages/qms/routes/qmsRouteRegistry";
+import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 
 describe("QMS sidebar navigation", () => {
   it("keeps the complete audit preparation and reporting route set directly reachable", () => {
@@ -93,6 +94,20 @@ describe("QMS sidebar navigation", () => {
       `${auditPath}?source=register&tab=checklist`,
     );
     expect(getActiveAuditWorkspace("/maintenance/safarilink/quality/audits/plan", "safarilink")).toBeNull();
+  });
+
+  it("keeps reference-based audit workspaces canonical and active", () => {
+    const auditPath = buildAuditWorkspacePath({
+      amoCode: "safarilink",
+      department: "quality",
+      auditRef: "QAR/MO/26/002",
+    });
+    expect(auditPath).toBe("/maintenance/safarilink/quality/audits/QAR-MO-26-002");
+    expect(classifyQmsPath(`${auditPath}?tab=war-room`)).toMatchObject({ kind: "known" });
+    expect(getActiveAuditWorkspace(auditPath, "safarilink")).toEqual({
+      auditKey: "QAR-MO-26-002",
+      basePath: auditPath,
+    });
   });
 
   it("recognises Quality and competence routes as part of the Quality workspace", () => {

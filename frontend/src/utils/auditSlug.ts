@@ -1,3 +1,5 @@
+import { qmsRecordPath } from "../pages/qms/routes/qmsRouteRegistry";
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isUuidLike(value: string): boolean {
@@ -19,5 +21,5 @@ export function buildAuditWorkspacePath(params: {
   department: string;
   auditRef: string;
 }): string {
-  return `/maintenance/${params.amoCode}/qms/audits/${toAuditReferenceSlug(params.auditRef)}`;
+  return qmsRecordPath(params.amoCode, "audits", toAuditReferenceSlug(params.auditRef));
 }
