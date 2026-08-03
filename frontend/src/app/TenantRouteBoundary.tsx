@@ -106,7 +106,8 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
     if (cached) applyState(cached);
     else setAdminStateResolved(false);
 
-    const unsubscribe = onAdminProfileChange(({ amoCode, state }) => {
+    const unsubscribe = onAdminProfileChange(({ amoCode, userId, state }) => {
+      if (userId !== currentUser.id) return;
       if (sameTenant(amoCode, routeTenant)) applyState(state);
     });
 
