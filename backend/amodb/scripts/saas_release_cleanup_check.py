@@ -52,6 +52,45 @@ def _assert_before(text: str, needles: tuple[str, ...], boundary: str) -> None:
         assert text.index(needle) < boundary_index, f"{needle} must run before {boundary}"
 
 
+def _assert_change_aware_merge_gate(workflow: str) -> None:
+    """Validate project selection and real behavior without fixing YAML layout."""
+    required_surfaces = (
+        "backend",
+        "frontend",
+        "schema",
+        "accounts",
+        "quality",
+        "workforce",
+        "rostering",
+        "platform",
+        "tenant_shell",
+        "offline",
+    )
+    assert "name: Main Merge Readiness" in workflow
+    assert "Detect affected project surfaces" in workflow
+    assert "git diff --name-only" in workflow
+    for surface in required_surfaces:
+        assert f"{surface}: ${{{{ steps.paths.outputs.{surface} }}}}" in workflow
+    for job in (
+        "schema-postgres:",
+        "backend-regressions:",
+        "frontend-regressions:",
+        "merge-readiness:",
+    ):
+        assert job in workflow
+    for behavior in (
+        "alembic -c amodb/alembic.ini upgrade heads",
+        "pytest -q amodb/apps/accounts/tests",
+        "npm run test:quality",
+        "npm run test:tenant-shell",
+        "npm run test:platform",
+        "src/services/offlineHttp.test.ts",
+        "success|skipped",
+    ):
+        assert behavior in workflow
+    assert "continue-on-error: true" not in workflow
+
+
 def main() -> int:
     checks: dict[str, dict[str, Any]] = {}
 
@@ -92,7 +131,7 @@ def main() -> int:
         "owner": "frontend/src/portalRoutes.tsx",
         "canonical_router": "frontend/src/router.tsx",
     }
-    checks["duplicate-legacy-route-files-removed"] = {
+    checks["duplicate-route-files-removed"] = {
         "passed": True,
         "removed": [
             "frontend/src/router.legacy.tsx",
@@ -171,16 +210,8 @@ def main() -> int:
     }
 
     merge_workflow = _read(ROOT / ".github/workflows/main-merge-readiness.yml")
-    for token in (
-        "name: Main Merge Readiness",
-        "alembic -c amodb/alembic.ini upgrade heads",
-        "amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests",
-        "npm run test:quality",
-        "npm run test:platform",
-        "src/services/offlineHttp.test.ts",
-    ):
-        assert token in merge_workflow, token
-    checks["integrated-main-merge-gate"] = {"passed": True}
+    _assert_change_aware_merge_gate(merge_workflow)
+    checks["change-aware-main-merge-gate"] = {"passed": True}
 
     recheck_workflow = _read(ROOT / ".github/workflows/recheck-transient-ci.yml")
     for token in (
