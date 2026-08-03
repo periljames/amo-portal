@@ -6,23 +6,26 @@ on:
       - agent/procurement-ux-document-control-review
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   graph:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: agent/procurement-ux-document-control-review
+          fetch-depth: 0
       - name: Inspect migration source graph
         run: |
-          python - <<'PY'
+          python - <<'PY' > /tmp/alembic-graph-probe.txt
           import ast
           from pathlib import Path
 
           versions = Path('backend/amodb/alembic/versions')
           revisions = {}
           parents = {}
-          files = {}
 
           def literal(node):
               if isinstance(node, ast.Constant):
@@ -43,7 +46,6 @@ jobs:
               if not isinstance(revision, str):
                   continue
               revisions[revision] = path.name
-              files[revision] = path
               parent = values.get('down_revision')
               if parent is None:
                   parents[revision] = ()
@@ -67,3 +69,13 @@ jobs:
               if 'procure' in revision.lower() or 'procure' in filename.lower():
                   print(f'  {revision} :: {filename} :: parents={parents[revision]}')
           PY
+          cat /tmp/alembic-graph-probe.txt
+      - name: Publish graph probe
+        run: |
+          mkdir -p docs
+          cp /tmp/alembic-graph-probe.txt docs/alembic-graph-probe.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/alembic-graph-probe.txt
+          git commit -m "Record Alembic source graph probe"
+          git push origin HEAD:agent/procurement-ux-document-control-review
