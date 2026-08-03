@@ -4,11 +4,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - "backend/amodb/security.py"
+      - "backend/amodb/alembic/versions/accounts_20260803_admin_profile_governance.py"
       - "backend/amodb/apps/accounts/admin_profile_access.py"
       - "backend/amodb/apps/accounts/admin_profile_concurrency.py"
       - "backend/amodb/apps/accounts/admin_profile_guard.py"
       - "backend/amodb/apps/accounts/admin_profile_logout.py"
       - "backend/amodb/apps/accounts/admin_profile_router.py"
+      - "backend/amodb/apps/accounts/auth_session_context.py"
       - "backend/amodb/apps/accounts/department_home_router.py"
       - "backend/amodb/apps/accounts/router_admin.py"
       - "backend/amodb/apps/accounts/router_public.py"
@@ -144,11 +147,14 @@ jobs:
       - name: Compile tenant governance, homes and isolation modules
         run: >-
           python -m compileall -q
+          amodb/security.py
+          amodb/alembic/versions/accounts_20260803_admin_profile_governance.py
           amodb/apps/accounts/admin_profile_access.py
           amodb/apps/accounts/admin_profile_concurrency.py
           amodb/apps/accounts/admin_profile_guard.py
           amodb/apps/accounts/admin_profile_logout.py
           amodb/apps/accounts/admin_profile_router.py
+          amodb/apps/accounts/auth_session_context.py
           amodb/apps/accounts/department_home_router.py
           amodb/apps/accounts/router_admin.py
           amodb/apps/accounts/router_public.py
