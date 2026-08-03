@@ -1,4 +1,4 @@
-name: Reliability Clean Rebuild
+name: Reliability Clean Rebuild Diagnostic
 
 on:
   push:
@@ -11,387 +11,63 @@ permissions:
   contents: write
 
 jobs:
-  rebuild-validate-publish:
+  diagnose-source-overlay:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amo_reliability_clean
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d amo_reliability_clean"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-    env:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_clean
-      WRITE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_clean
-      SECRET_KEY: reliability-clean-rebuild-secret
-      ENVIRONMENT: test
-      TESTING: "true"
-      RELIABILITY_SCHEDULER_ENABLED: "false"
-      PGPASSWORD: postgres
-
     steps:
-      - name: Check out clean branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: agent/reliability-v2-clean
           fetch-depth: 0
 
-      - name: Fetch source and baseline history
+      - name: Diagnose clean source reconstruction
+        shell: bash
         run: |
-          git fetch origin agent/reliability-v2-foundation feat/global-tenant-navigation-quality-home --force
-          git cat-file -e 00851d2556c2ec6ac0525dc7c4f3648812c171ab^{commit}
-          git cat-file -e 309a8eac0aecfdbb19a1ecd71c83cdbaababb074^{commit}
-
-      - name: Overlay canonical Reliability-owned files
-        run: |
-          git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- \
-            backend/amodb/apps/reliability \
-            docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md \
-            docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md \
-            docs/reliability/RELIABILITY_V2_VALIDATION.md \
-            docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md \
-            frontend/src/pages/reliability \
-            frontend/src/services/reliability.ts \
-            frontend/src/styles/reliability-v2.css
-          git rm -f --ignore-unmatch frontend/src/pages/ReliabilityReportsPage.tsx
-
-      - name: Three-way apply shared integration delta
-        run: |
-          git diff --binary \
-            309a8eac0aecfdbb19a1ecd71c83cdbaababb074 \
-            00851d2556c2ec6ac0525dc7c4f3648812c171ab \
-            -- \
-            backend/amodb/alembic/env.py \
-            backend/amodb/main.py \
-            frontend/src/App.tsx \
-            frontend/src/app/PortalRouteSurface.tsx \
-            frontend/src/app/portalRouteManifest.ts \
-            frontend/src/app/portalRouteManifest.test.ts \
-            frontend/src/app/routePreload.ts \
-            frontend/src/portalRoutes.tsx \
-            > /tmp/reliability-shared.patch
-          git apply --3way /tmp/reliability-shared.patch
-
-      - name: Harden repository ignore rules
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.gitignore')
-          text = path.read_text(encoding='utf-8') if path.exists() else ''
-          required = [
-              '.venv/',
-              'venv/',
-              '__pycache__/',
-              '*.py[cod]',
-              '.pytest_cache/',
-              'node_modules/',
-              'frontend/dist/',
-              '*.db',
-          ]
-          missing = [item for item in required if item not in text.splitlines()]
-          if missing:
-              if text and not text.endswith('\n'):
-                  text += '\n'
-              text += '\n# Local environments and generated build/runtime files\n'
-              text += '\n'.join(missing) + '\n'
-              path.write_text(text, encoding='utf-8')
-          PY
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies
-        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-
-      - name: Prepare migration database
-        run: |
-          psql -h 127.0.0.1 -U postgres -d amo_reliability_clean -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE TABLE IF NOT EXISTS alembic_version (
-            version_num varchar(255) NOT NULL PRIMARY KEY
-          );
-          ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255);
-          SQL
-
-      - name: Compile canonical backend
-        run: |
-          python -m py_compile \
-            backend/amodb/apps/reliability/models.py \
-            backend/amodb/apps/reliability/schemas.py \
-            backend/amodb/apps/reliability/router.py \
-            backend/amodb/apps/reliability/advanced_models.py \
-            backend/amodb/apps/reliability/advanced_schemas.py \
-            backend/amodb/apps/reliability/advanced_services.py \
-            backend/amodb/apps/reliability/advanced_router.py \
-            backend/amodb/apps/reliability/advanced_scheduler.py
-
-      - name: Upgrade current baseline and seed populated Reliability row
-        working-directory: backend
-        run: |
-          alembic -c amodb/alembic.ini upgrade heads
-          psql -h 127.0.0.1 -U postgres -d amo_reliability_clean -v ON_ERROR_STOP=1 <<'SQL'
-          SET session_replication_role = replica;
-          INSERT INTO reliability_events (
-            amo_id, event_type, occurred_at, created_at, description
-          ) VALUES (
-            'legacy-reliability-clean-probe', 'DEFECT', now(), now(),
-            'Existing Reliability row before clean advanced migration.'
-          );
-          SET session_replication_role = origin;
-          SQL
-
-      - name: Generate current-head Reliability migration
-        working-directory: backend
-        env:
-          RELIABILITY_AUTOGENERATE_ONLY: "true"
-        run: |
-          rm -f amodb/alembic/versions/rel_20260803_complete_scope*.py
-          rm -f amodb/alembic/versions/rel_20260803_merge_heads*.py
-          mapfile -t HEADS < <(alembic -c amodb/alembic.ini heads | awk '{print $1}')
-          echo "Current Alembic heads: ${HEADS[*]}"
-          if [ "${#HEADS[@]}" -gt 1 ]; then
-            alembic -c amodb/alembic.ini merge \
-              --rev-id rel_20260803_merge_heads \
-              -m "merge current heads before complete Reliability scope" \
-              "${HEADS[@]}"
-            alembic -c amodb/alembic.ini upgrade head
-          fi
-          git show 49950945ac32fd221b9303f0926ec2bb72f31d61:backend/scripts/finalize_reliability_migration.py \
-            > scripts/finalize_reliability_migration.py
-          alembic -c amodb/alembic.ini revision \
-            --autogenerate \
-            --rev-id rel_20260803_complete_scope \
-            -m "complete Reliability full stack scope"
-          python scripts/finalize_reliability_migration.py
-          python -m py_compile amodb/alembic/versions/rel_20260803_*.py
-          rm -f scripts/finalize_reliability_migration.py
-
-      - name: Validate migration parity and existing-row backfill
-        working-directory: backend
-        env:
-          RELIABILITY_AUTOGENERATE_ONLY: "true"
-        run: |
-          alembic -c amodb/alembic.ini upgrade head
-          alembic -c amodb/alembic.ini check
-          psql -h 127.0.0.1 -U postgres -d amo_reliability_clean -v ON_ERROR_STOP=1 <<'SQL'
-          DO $$
-          DECLARE probe record;
-          BEGIN
-            SELECT validation_status, validation_errors, provenance_json
-            INTO probe
-            FROM reliability_events
-            WHERE amo_id = 'legacy-reliability-clean-probe';
-            IF probe.validation_status <> 'VALID' THEN
-              RAISE EXCEPTION 'Legacy row validation status was not backfilled';
-            END IF;
-            IF probe.validation_errors IS NULL OR probe.provenance_json IS NULL THEN
-              RAISE EXCEPTION 'Legacy row JSON defaults were not backfilled';
-            END IF;
-          END $$;
-          SQL
-          alembic -c amodb/alembic.ini downgrade -1
-          alembic -c amodb/alembic.ini upgrade head
-          alembic -c amodb/alembic.ini check
-
-      - name: Verify governance and application contracts
-        working-directory: backend
-        run: |
-          python - <<'PY'
-          import os
-          import psycopg2
-          from urllib.parse import urlparse
-          from sqlalchemy.orm import configure_mappers
-          import amodb.main
-
-          configure_mappers()
-          paths = {route.path for route in amodb.main.app.routes}
-          required = {
-              '/reliability/compliance',
-              '/reliability/analytics',
-              '/reliability/sources',
-              '/reliability/calculation-runs/execute',
-              '/reliability/programmes',
-              '/reliability/changes',
-              '/reliability/handoffs',
-              '/reliability/authority-submissions',
-              '/reliability/ai-reviews',
+          set +e
+          mkdir -p /tmp/reliability-clean
+          declare -A CODES
+          run_stage() {
+            local name="$1"
+            shift
+            "$@" >"/tmp/reliability-clean/${name}.log" 2>&1
+            CODES[$name]=$?
+            echo "$name=${CODES[$name]}"
           }
-          assert required.issubset(paths), sorted(required - paths)
-          assert all('/reliability/v2' not in path for path in paths)
 
-          parsed = urlparse(os.environ['DATABASE_URL'].replace('postgresql+psycopg2://', 'postgresql://'))
-          conn = psycopg2.connect(
-              host=parsed.hostname,
-              port=parsed.port,
-              dbname=parsed.path.lstrip('/'),
-              user=parsed.username,
-              password=parsed.password,
-          )
-          cur = conn.cursor()
-          cur.execute("SELECT count(*) FROM auth_capability_definitions WHERE module='reliability'")
-          assert cur.fetchone()[0] == 21
-          cur.execute("SELECT count(*) FROM auth_role_definitions WHERE code LIKE 'RELIABILITY_%'")
-          assert cur.fetchone()[0] == 4
-          cur.execute("""
-              SELECT count(*) FROM pg_trigger
-              WHERE tgname IN (
-                'trg_reliability_audit_events_append_only',
-                'trg_reliability_fracas_evidence_append_only',
-                'trg_reliability_fracas_stage_events_append_only',
-                'trg_reliability_calculation_runs_append_only'
-              ) AND NOT tgisinternal
-          """)
-          assert cur.fetchone()[0] == 4
-          cur.close()
-          conn.close()
-          PY
-          pytest -q amodb/apps/reliability/tests
+          run_stage fetch git fetch origin agent/reliability-v2-foundation feat/global-tenant-navigation-quality-home --force
+          run_stage source_commit git cat-file -e '00851d2556c2ec6ac0525dc7c4f3648812c171ab^{commit}'
+          run_stage base_commit git cat-file -e '309a8eac0aecfdbb19a1ecd71c83cdbaababb074^{commit}'
+          run_stage overlay bash -lc "git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/apps/reliability docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md docs/reliability/RELIABILITY_V2_VALIDATION.md docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md frontend/src/pages/reliability frontend/src/services/reliability.ts frontend/src/styles/reliability-v2.css"
+          run_stage obsolete_page git rm -f --ignore-unmatch frontend/src/pages/ReliabilityReportsPage.tsx
+          run_stage make_patch bash -lc "git diff --binary 309a8eac0aecfdbb19a1ecd71c83cdbaababb074 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/alembic/env.py backend/amodb/main.py frontend/src/App.tsx frontend/src/app/PortalRouteSurface.tsx frontend/src/app/portalRouteManifest.ts frontend/src/app/portalRouteManifest.test.ts frontend/src/app/routePreload.ts frontend/src/portalRoutes.tsx > /tmp/reliability-clean/shared.patch"
+          run_stage apply_patch git apply --3way /tmp/reliability-clean/shared.patch
+          run_stage status git status --short
+          run_stage diffcheck git diff --check
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          {
+            echo '# Reliability Clean Rebuild Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            for name in fetch source_commit base_commit overlay obsolete_page make_patch apply_patch status diffcheck; do
+              echo "| $name | ${CODES[$name]:-999} |"
+            done
+            for name in fetch source_commit base_commit overlay obsolete_page make_patch apply_patch status diffcheck; do
+              echo
+              echo "## $name"
+              echo '```text'
+              tail -n 160 "/tmp/reliability-clean/${name}.log"
+              echo '```'
+            done
+          } > docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md
 
-      - name: Install and validate frontend
-        working-directory: frontend
-        run: |
-          npm ci --no-audit --no-fund
-          npm run test:tenant-shell
-          npx eslint \
-            src/services/reliability.ts \
-            src/pages/reliability/ReliabilityWorkspacePage.tsx \
-            src/pages/reliability/ReliabilityAdvancedViews.tsx \
-            src/pages/reliability/ReliabilityReportsView.tsx \
-            src/app/PortalRouteSurface.tsx \
-            src/app/portalRouteManifest.ts \
-            src/app/portalRouteManifest.test.ts \
-            src/app/routePreload.ts
-          npm run build
-
-      - name: Record clean rebuild evidence
-        run: |
-          cat > docs/reliability/RELIABILITY_CLEAN_REBUILD_VALIDATION.md <<EOF
-          # Reliability Clean Rebuild Validation
-
-          - Run: \`${GITHUB_RUN_ID}\`
-          - Clean baseline: \`${GITHUB_SHA}\`
-          - Source implementation: \`00851d2556c2ec6ac0525dc7c4f3648812c171ab\`
-          - UTC: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
-
-          The branch was rebuilt from the current shared-shell head, not from the polluted publication tree.
-
-          ## Passed gates
-
-          - three-way shared-file integration
-          - Python compilation and complete application import
-          - current-head Alembic merge and generated Reliability migration
-          - populated-row upgrade, metadata parity, downgrade and re-upgrade
-          - existing-row provenance/default backfill
-          - 21 capabilities, four controlled roles and four append-only guards
-          - complete Reliability backend tests
-          - tenant-shell navigation and CSS contracts
-          - scoped ESLint and full production build
-          - path allowlist with no virtual environment, cache, test database or staging machinery changes
-          EOF
-
-      - name: Remove temporary rebuild machinery
-        run: |
-          rm -f .github/workflows/reliability-clean-rebuild.yml
-          rm -f docs/reliability/.clean-rebuild-trigger
-          rm -f backend/scripts/finalize_reliability_migration.py
-          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
-          find backend -type f -name '*.pyc' -delete
-
-      - name: Stage only approved permanent paths
-        run: |
-          git add .gitignore
-          git add backend/amodb/alembic/env.py
-          git add backend/amodb/alembic/versions/rel_20260803_*.py
-          git add backend/amodb/apps/reliability
-          git add backend/amodb/main.py
-          git add docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md
-          git add docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md
-          git add docs/reliability/RELIABILITY_V2_VALIDATION.md
-          git add docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md
-          git add docs/reliability/RELIABILITY_CLEAN_REBUILD_VALIDATION.md
-          git add frontend/src/App.tsx
-          git add frontend/src/app/PortalRouteSurface.tsx
-          git add frontend/src/app/portalRouteManifest.ts
-          git add frontend/src/app/portalRouteManifest.test.ts
-          git add frontend/src/app/routePreload.ts
-          git add frontend/src/pages/reliability
-          git add frontend/src/services/reliability.ts
-          git add frontend/src/styles/reliability-v2.css
-          git add frontend/src/portalRoutes.tsx
-          git add -u frontend/src/pages/ReliabilityReportsPage.tsx || true
-          git add -u .github/workflows/reliability-clean-rebuild.yml || true
-          git add -u docs/reliability/.clean-rebuild-trigger || true
-
-      - name: Enforce path and artifact cleanliness
-        run: |
-          python - <<'PY'
-          import subprocess
-
-          paths = subprocess.check_output(
-              ['git', 'diff', '--cached', '--name-only'], text=True
-          ).splitlines()
-          exact = {
-              '.gitignore',
-              'backend/amodb/alembic/env.py',
-              'backend/amodb/main.py',
-              'frontend/src/App.tsx',
-              'frontend/src/app/PortalRouteSurface.tsx',
-              'frontend/src/app/portalRouteManifest.ts',
-              'frontend/src/app/portalRouteManifest.test.ts',
-              'frontend/src/app/routePreload.ts',
-              'frontend/src/portalRoutes.tsx',
-              'frontend/src/services/reliability.ts',
-              'frontend/src/styles/reliability-v2.css',
-              'frontend/src/pages/ReliabilityReportsPage.tsx',
-              '.github/workflows/reliability-clean-rebuild.yml',
-              'docs/reliability/.clean-rebuild-trigger',
-          }
-          prefixes = (
-              'backend/amodb/apps/reliability/',
-              'backend/amodb/alembic/versions/rel_20260803_',
-              'docs/reliability/RELIABILITY_',
-              'frontend/src/pages/reliability/',
-          )
-          bad = [path for path in paths if path not in exact and not path.startswith(prefixes)]
-          artifacts = [
-              path for path in paths
-              if path.startswith('.venv/')
-              or '/__pycache__/' in path
-              or path.endswith('.pyc')
-              or path.endswith('.db')
-              or 'node_modules/' in path
-          ]
-          if bad or artifacts:
-              raise SystemExit(f'Unapproved paths={bad}; generated artifacts={artifacts}')
-          if any('/reliability/v2' in path for path in paths):
-              raise SystemExit('Parallel Reliability v2 path detected')
-          print(f'Approved staged paths: {len(paths)}')
-          PY
-          git diff --cached --check
-          test -n "$(git diff --cached --name-only)"
-
-      - name: Publish clean canonical branch
-        run: |
+          git reset --hard HEAD
+          git clean -fd
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Rebuild complete Reliability module cleanly"
+          git add docs/reliability/CLEAN_REBUILD_DIAGNOSTIC.md
+          git commit -m "Record Reliability clean rebuild diagnostic"
           git push origin HEAD:agent/reliability-v2-clean
