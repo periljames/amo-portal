@@ -34,10 +34,10 @@ def test_backend_exposes_document_list_upload_download_and_void_routes():
     assert "require_roles(*DOCUMENT_CONTROL_ROLES)" in source
 
 
-def test_migration_extends_release_integration_head():
+def test_migration_extends_canonical_procurement_head():
     source = read("amodb/alembic/versions/procure_20260803_docs.py")
     assert 'revision = "procure_20260803_docs"' in source
-    assert 'down_revision = "7d9e0a1b2c3d"' in source
+    assert 'down_revision = "procurement_20260803_full_domain"' in source
     assert "ProcurementDocument.__table__.create" in source
 
 
