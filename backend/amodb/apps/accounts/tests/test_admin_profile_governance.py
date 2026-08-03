@@ -10,8 +10,12 @@ from fastapi.routing import APIRoute
 
 from amodb.apps.accounts import admin_profile_router as profile_router
 from amodb.apps.accounts import department_home_router as home_router
-from amodb.apps.accounts.admin_profile_concurrency import serialized_approval_count
+from amodb.apps.accounts.admin_profile_concurrency import (
+    lock_admin_grant_for_approval,
+    serialized_approval_count,
+)
 from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
+from amodb.apps.accounts.admin_profile_logout import revoke_admin_profile_on_logout
 from amodb.apps.accounts.admin_profile_router import (
     REQUIRED_SCHEMA_TABLES,
     _as_utc,
@@ -21,6 +25,7 @@ from amodb.apps.accounts.admin_profile_router import (
     _is_management_approver,
 )
 from amodb.apps.accounts.router_admin import router as protected_admin_router
+from amodb.apps.accounts.router_public import router as public_router
 
 
 def actor(**overrides):
@@ -39,6 +44,10 @@ def actor(**overrides):
 
 def request(path: str):
     return SimpleNamespace(url=SimpleNamespace(path=path))
+
+
+def dependency_calls(route: APIRoute) -> set[object]:
+    return {dependency.call for dependency in route.dependant.dependencies}
 
 
 def test_admin_profile_rejects_cross_tenant_actor() -> None:
@@ -114,17 +123,29 @@ def test_all_registered_tenant_admin_routes_have_profile_dependency() -> None:
         if isinstance(route, APIRoute) and "/admin-profile/" not in route.path
     ]
     assert normal_routes
-    unprotected = [
+    assert [
         route.path
         for route in normal_routes
-        if require_active_admin_profile not in {
-            dependency.call for dependency in route.dependant.dependencies
-        }
+        if require_active_admin_profile not in dependency_calls(route)
+    ] == []
+
+
+def test_approval_route_locks_grant_before_endpoint_execution() -> None:
+    routes = [
+        route
+        for route in protected_admin_router.routes
+        if isinstance(route, APIRoute)
+        and route.path.endswith("/approve")
+        and "/admin-profile/" in route.path
+        and "POST" in (route.methods or set())
     ]
-    assert unprotected == []
+    assert len(routes) == 1
+    calls = dependency_calls(routes[0])
+    assert lock_admin_grant_for_approval in calls
+    assert require_active_admin_profile in calls
 
 
-def test_profile_governance_routes_are_the_only_tenant_admin_exemption() -> None:
+def test_profile_governance_routes_are_the_only_tenant_admin_guard_exemption() -> None:
     db = MagicMock()
     current = actor(role="AMO_ADMIN", is_amo_admin=True)
     assert require_active_admin_profile(
@@ -170,29 +191,58 @@ def test_platform_superuser_stays_on_separate_control_plane() -> None:
     db.execute.assert_not_called()
 
 
-def test_postgres_approval_count_locks_grant_before_counting() -> None:
+def test_postgres_approval_dependency_locks_before_insert() -> None:
     db = MagicMock()
     db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
-    lock_result = MagicMock()
-    count_result = MagicMock()
-    count_result.scalar.return_value = 2
-    db.execute.side_effect = [lock_result, count_result]
 
-    assert serialized_approval_count(db, "grant-1") == 2
+    lock_admin_grant_for_approval("grant-1", db)
 
-    lock_sql = str(db.execute.call_args_list[0].args[0]).upper()
-    count_sql = str(db.execute.call_args_list[1].args[0]).upper()
-    assert "FOR UPDATE" in lock_sql
-    assert "COUNT(DISTINCT APPROVER_USER_ID)" in count_sql
+    assert db.execute.call_count == 1
+    assert "FOR UPDATE" in str(db.execute.call_args.args[0]).upper()
 
 
-def test_sqlite_approval_count_avoids_unsupported_row_lock() -> None:
+def test_sqlite_approval_dependency_skips_unsupported_row_lock() -> None:
     db = MagicMock()
     db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
-    count_result = MagicMock()
-    count_result.scalar.return_value = 1
-    db.execute.return_value = count_result
 
-    assert serialized_approval_count(db, "grant-1") == 1
+    lock_admin_grant_for_approval("grant-1", db)
+
+    db.execute.assert_not_called()
+
+
+def test_serialized_count_only_counts_after_prelock() -> None:
+    db = MagicMock()
+    db.execute.return_value.scalar.return_value = 2
+
+    assert serialized_approval_count(db, "grant-1") == 2
     assert db.execute.call_count == 1
-    assert "FOR UPDATE" not in str(db.execute.call_args.args[0]).upper()
+    sql = str(db.execute.call_args.args[0]).upper()
+    assert "COUNT(DISTINCT APPROVER_USER_ID)" in sql
+    assert "FOR UPDATE" not in sql
+
+
+def test_logout_route_revokes_admin_profile_session() -> None:
+    routes = [
+        route
+        for route in public_router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/auth/logout"
+        and "POST" in (route.methods or set())
+    ]
+    assert len(routes) == 1
+    assert revoke_admin_profile_on_logout in dependency_calls(routes[0])
+
+
+def test_logout_revocation_updates_live_profile_sessions() -> None:
+    db = MagicMock()
+    current = actor(role="TECHNICIAN", is_amo_admin=False)
+
+    revoke_admin_profile_on_logout(current, db)
+
+    assert db.begin_nested.call_count == 2
+    assert db.execute.call_count == 2
+    update_sql = str(db.execute.call_args_list[0].args[0]).upper()
+    event_sql = str(db.execute.call_args_list[1].args[0]).upper()
+    assert "UPDATE ADMIN_PROFILE_SESSIONS" in update_sql
+    assert "REVOKED_AT" in update_sql
+    assert "ADMIN_PROFILE_REVOKED_ON_LOGOUT" in event_sql
