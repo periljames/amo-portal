@@ -1,7 +1,7 @@
 """Add immutable Procurement document linkage and retained evidence records.
 
 Revision ID: procure_20260803_docs
-Revises: 7d9e0a1b2c3d
+Revises: procurement_20260803_full_domain
 Create Date: 2026-08-03
 """
 
@@ -13,7 +13,7 @@ from amodb.apps.procurement import document_models
 
 
 revision = "procure_20260803_docs"
-down_revision = "7d9e0a1b2c3d"
+down_revision = "procurement_20260803_full_domain"
 branch_labels = None
 depends_on = None
 
