@@ -177,3 +177,61 @@ export type ProcurementQualityHold = {
   qms_car_id?: string | null;
   placed_at: string;
 };
+
+export type ProcurementDocumentEntityType =
+  | "REQUISITION"
+  | "RFQ"
+  | "QUOTE"
+  | "PURCHASE_ORDER"
+  | "RECEIPT"
+  | "SUPPLIER"
+  | "QUALITY_HOLD";
+
+export type ProcurementDocumentSource =
+  | "PHYSICAL_FORM"
+  | "EXTERNAL_SOFTWARE"
+  | "EMAIL"
+  | "SUPPLIER_PORTAL"
+  | "PORTAL_EXPORT"
+  | "OTHER";
+
+export type ProcurementDocument = {
+  id: number;
+  entity_type: ProcurementDocumentEntityType;
+  entity_id: string;
+  document_type: string;
+  title: string;
+  document_number?: string | null;
+  revision?: string | null;
+  document_date?: string | null;
+  source: ProcurementDocumentSource;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  notes?: string | null;
+  is_quality_evidence: boolean;
+  qms_reference?: string | null;
+  status: "ACTIVE" | "VOID";
+  uploaded_by_user_id?: string | null;
+  uploaded_at: string;
+  voided_by_user_id?: string | null;
+  voided_at?: string | null;
+  void_reason?: string | null;
+  download_url: string;
+};
+
+export type ProcurementDocumentUpload = {
+  entityType: ProcurementDocumentEntityType;
+  entityId: string;
+  documentType: string;
+  title: string;
+  source: ProcurementDocumentSource;
+  documentNumber?: string;
+  revision?: string;
+  documentDate?: string;
+  notes?: string;
+  isQualityEvidence?: boolean;
+  qmsReference?: string;
+  file: File;
+};
