@@ -1,4 +1,5 @@
-import React, { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import {
   AlertTriangle,
   ArchiveX,
