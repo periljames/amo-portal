@@ -1,6 +1,7 @@
 import React from "react";
 import { BadgeCheck, ClipboardCheck, FileText, HandCoins, LoaderCircle, Paperclip, ShieldCheck, ShoppingCart, Truck, UsersRound, X } from "lucide-react";
 import type { ProcurementDashboard, ProcurementPurchaseOrder, ProcurementQualityHold, ProcurementQuote, ProcurementReceipt, ProcurementReferenceData, ProcurementRequisition, ProcurementRFQ, ProcurementSupplier } from "../../types/procurement";
+import "../../styles/procurement-workspace.css";
 
 export type Section = "command" | "requests" | "sourcing" | "orders" | "receiving" | "suppliers" | "control" | "documents";
 export type Modal = "requisition" | "supplier" | "scope" | "rfq" | "quote" | "po" | "receipt" | "inspection" | "hold" | "match" | null;
