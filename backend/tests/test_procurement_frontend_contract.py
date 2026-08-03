@@ -42,3 +42,19 @@ def test_every_operational_register_exposes_evidence_linking():
     sections = read("pages/procurement/ProcurementSections.tsx")
     for entity in ["REQUISITION", "RFQ", "QUOTE", "PURCHASE_ORDER", "RECEIPT", "SUPPLIER", "QUALITY_HOLD"]:
         assert f'linkDocument("{entity}"' in sections
+
+
+def test_evidence_register_pages_and_enforces_independent_quality_actions():
+    module = read("pages/procurement/ProcurementModule.tsx")
+    documents = read("pages/procurement/ProcurementDocumentCenter.tsx")
+    service = read("services/procurement.ts")
+    assert "PAGE_SIZE = 100" in documents
+    assert "loadPage(documents.length, false)" in documents
+    assert "Load older evidence" in documents
+    assert "mergeUnique" in documents
+    assert "document.is_quality_evidence" in documents
+    assert 'document.verification_status === "PENDING"' in documents
+    assert "document.uploaded_by_user_id" in documents
+    assert "currentUserId={user?.id || null}" in module
+    assert "offset?: number" in service
+    assert "limit?: number" in service
