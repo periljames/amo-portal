@@ -27,6 +27,7 @@ jobs:
           run() { local n="$1"; shift; "$@" >"/tmp/rel-fast/$n.log" 2>&1; C[$n]=$?; }
           run backend python backend/scripts/complete_reliability_backend.py
           run sod python backend/scripts/strengthen_reliability_sod.py
+          run sod_escape python backend/scripts/fix_reliability_sod_escape.py
           run service bash -lc 'cd frontend && node scripts/complete-reliability-service.mjs'
           run workspace bash -lc 'cd frontend && node scripts/complete-reliability-workspace.mjs'
           run fsod bash -lc 'cd frontend && node scripts/strengthen-reliability-sod.mjs'
@@ -42,8 +43,8 @@ jobs:
             echo
             echo '| Stage | Exit |'
             echo '|---|---:|'
-            for n in backend sod service workspace fsod css compile canonical routes; do echo "| $n | ${C[$n]:-999} |"; done
-            for n in backend sod service workspace fsod css compile canonical routes; do
+            for n in backend sod sod_escape service workspace fsod css compile canonical routes; do echo "| $n | ${C[$n]:-999} |"; done
+            for n in backend sod sod_escape service workspace fsod css compile canonical routes; do
               echo; echo "## $n"; echo '```text'; tail -n 120 "/tmp/rel-fast/$n.log"; echo '```';
             done
           } > docs/reliability/FAST_TRANSFORM_DIAGNOSTIC.md
