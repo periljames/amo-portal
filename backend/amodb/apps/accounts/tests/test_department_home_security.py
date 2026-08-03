@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from amodb.apps.accounts.admin_profile_access import active_admin_profile_session
 from amodb.apps.accounts.department_home_router import (
     QUICK_ACTIONS,
     _allowed_departments,
@@ -106,3 +107,38 @@ def test_active_admin_profile_opens_only_supported_tenant_departments(monkeypatc
     assert "quality" in allowed
     assert "document-control" in allowed
     assert "admin" not in allowed
+
+
+def test_active_approved_grantee_opens_supported_department_homes(monkeypatch) -> None:
+    db = MagicMock()
+    monkeypatch.setattr(
+        "amodb.apps.accounts.department_home_router._admin_profile_active",
+        lambda *_args, **_kwargs: True,
+    )
+
+    allowed = _allowed_departments(
+        db,
+        user(role="TECHNICIAN", is_amo_admin=False),
+        SimpleNamespace(id="amo-a"),
+    )
+
+    assert "maintenance" in allowed
+    assert "planning" in allowed
+    assert "quality" in allowed
+    assert "document-control" in allowed
+    assert "admin" not in allowed
+
+
+def test_grantee_session_lookup_does_not_require_legacy_admin_role() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = (1,)
+
+    assert active_admin_profile_session(
+        db,
+        user(role="TECHNICIAN", is_amo_admin=False),
+        SimpleNamespace(id="amo-a"),
+    ) is True
+
+    sql = str(db.execute.call_args.args[0]).upper()
+    assert "ADMIN_PROFILE_SESSIONS" in sql
+    assert "ADMIN_ACCESS_GRANTS" in sql
