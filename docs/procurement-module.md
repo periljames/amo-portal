@@ -41,7 +41,8 @@ Stores remains a separate inventory and custody department at `/maintenance/{amo
 - Incoming material enters quarantine.
 - Serviceable inventory movements are created only after inspection acceptance and Quality release.
 - Invoice matching uses approved purchase-order value and Quality-released receipt value.
-- Procurement actions are tenant-scoped and recorded in Procurement and shared audit event ledgers.
+- Procurement actions, including evidence links, Quality decisions and voids, are recorded in both Procurement and shared audit event ledgers.
+- Quality evidence decisions lock the selected database row so only one concurrent verification or rejection can become final.
 - Retained evidence defaults to the persistent mounted root `/srv/amo/uploads/procurement-documents` and can be overridden with `PROCUREMENT_DOCUMENT_DIR`.
 
 ## API
@@ -56,7 +57,7 @@ Root: `/api/maintenance/{amo_code}/procurement`
 - Receipts, inspection and Quality release
 - Quality holds
 - Finance three-way matching
-- Retained Procurement evidence list, optional file upload, physical-record registration, DMS/external-system links, download, Quality verification and immutable void
+- Retained Procurement evidence list, optional file upload, physical-record registration, DMS/external-system links, download, atomic Quality verification and immutable void
 
 ## Deployment
 
@@ -90,9 +91,11 @@ PROCUREMENT_DOCUMENT_DIR=/srv/amo/uploads/procurement-documents
 - [x] Signed physical forms and external-system exports can be uploaded and linked to exact records.
 - [x] File size, extension, MIME, signature, duplicate hash and safe-path checks are enforced.
 - [x] Quality evidence enters a pending state and can only be verified, rejected or voided by independent Quality authority.
+- [x] Concurrent Quality evidence decisions are serialized so the first committed decision remains final.
+- [x] Evidence link, verification, rejection and void actions are written to both Procurement and shared audit ledgers.
 - [x] DMS document and revision IDs, physical storage references and external-system links are supported without forcing a duplicate upload.
 - [x] Evidence records use a persistent mounted storage root.
 - [x] Upload progress, drag-and-drop, file-type guidance, empty states and recovery actions are exposed in the UI.
 - [x] Success, warning and failure feedback uses distinct visual and audio cues.
 - [x] Loading, refresh, upload and modal transitions respect reduced-motion preferences.
-- [x] Source-contract regression tests cover routing, quarantine, supplier gates, lifecycle, evidence retention and cross-module links.
+- [x] Source-contract regression tests cover routing, quarantine, supplier gates, lifecycle, evidence retention, atomic decisions, dual-ledger audit and cross-module links.
