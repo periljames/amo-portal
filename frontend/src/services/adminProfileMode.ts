@@ -1,10 +1,20 @@
 import { apiRequest } from "./apiClient";
-import { getCachedUser } from "./auth";
+import { getCachedUser, onSessionEvent } from "./auth";
 
 const STORAGE_PREFIX = "amo_admin_profile_session";
 const CHANGE_EVENT = "amo-admin-profile-change";
 const API_PREFIX = "/accounts/admin/admin-profile";
 const expiryTimers = new Map<string, number>();
+const AUTH_SESSION_BOUNDARY_EVENTS = new Set<string>([
+  "authenticated",
+  "manual-logout",
+  "idle-logout",
+  "expired",
+]);
+
+let authSessionGeneration = 0;
+let trackedWindow: EventTarget | null = null;
+let stopSessionTracking: (() => void) | null = null;
 
 export type AdminProfileState = {
   eligible: boolean;
@@ -25,11 +35,29 @@ type AdminProfileSessionResponse = AdminProfileState & {
   message?: string | null;
 };
 
+type AdminProfileRequester = {
+  userId: string;
+  authGeneration: number;
+};
+
 export class StaleAdminProfileResponseError extends Error {
   constructor() {
     super("Admin Profile response belongs to a previous authentication session.");
     this.name = "StaleAdminProfileResponseError";
   }
+}
+
+function ensureAuthSessionTracking(): void {
+  if (typeof window === "undefined") return;
+  if (trackedWindow === window && stopSessionTracking) return;
+
+  stopSessionTracking?.();
+  trackedWindow = window;
+  stopSessionTracking = onSessionEvent((detail) => {
+    if (AUTH_SESSION_BOUNDARY_EVENTS.has(detail.type)) {
+      authSessionGeneration += 1;
+    }
+  });
 }
 
 function currentUserId(): string {
@@ -40,8 +68,21 @@ function currentUserId(): string {
   }
 }
 
-function assertCurrentRequester(requesterId: string): void {
-  if (requesterId === "anonymous" || currentUserId() !== requesterId) {
+function captureRequester(): AdminProfileRequester {
+  ensureAuthSessionTracking();
+  return {
+    userId: currentUserId(),
+    authGeneration: authSessionGeneration,
+  };
+}
+
+function assertCurrentRequester(requester: AdminProfileRequester): void {
+  ensureAuthSessionTracking();
+  if (
+    requester.userId === "anonymous"
+    || currentUserId() !== requester.userId
+    || authSessionGeneration !== requester.authGeneration
+  ) {
     throw new StaleAdminProfileResponseError();
   }
 }
@@ -121,6 +162,7 @@ function scheduleExpiry(
 
 export function readCachedAdminProfileState(amoCode: string): AdminProfileState | null {
   if (typeof window === "undefined") return null;
+  ensureAuthSessionTracking();
   const userId = currentUserId();
   const key = storageKey(amoCode, userId);
   const raw = window.sessionStorage.getItem(key);
@@ -144,14 +186,14 @@ export function readCachedAdminProfileState(amoCode: string): AdminProfileState 
 
 function cacheState(
   amoCode: string,
-  requesterId: string,
+  requester: AdminProfileRequester,
   state: AdminProfileState,
 ): AdminProfileState {
-  assertCurrentRequester(requesterId);
+  assertCurrentRequester(requester);
   if (typeof window !== "undefined") {
-    window.sessionStorage.setItem(storageKey(amoCode, requesterId), JSON.stringify(state));
-    scheduleExpiry(amoCode, requesterId, state);
-    dispatchState(amoCode, requesterId, state);
+    window.sessionStorage.setItem(storageKey(amoCode, requester.userId), JSON.stringify(state));
+    scheduleExpiry(amoCode, requester.userId, state);
+    dispatchState(amoCode, requester.userId, state);
   }
   return state;
 }
@@ -160,6 +202,7 @@ export function onAdminProfileChange(
   callback: (detail: AdminProfileChangeDetail) => void,
 ): () => void {
   if (typeof window === "undefined") return () => undefined;
+  ensureAuthSessionTracking();
   const listener = (event: Event) => {
     const custom = event as CustomEvent<AdminProfileChangeDetail>;
     if (custom.detail) callback(custom.detail);
@@ -169,32 +212,32 @@ export function onAdminProfileChange(
 }
 
 export async function fetchAdminProfileState(amoCode: string): Promise<AdminProfileState> {
-  const requesterId = currentUserId();
+  const requester = captureRequester();
   const state = await apiRequest<AdminProfileState>(apiPath(amoCode, "state"), {
     timeoutMs: 8_000,
     cacheTtlMs: 5_000,
   });
-  return cacheState(amoCode, requesterId, state);
+  return cacheState(amoCode, requester, state);
 }
 
 export async function activateAdminProfile(amoCode: string): Promise<AdminProfileState> {
-  const requesterId = currentUserId();
+  const requester = captureRequester();
   const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "activate"), {
     method: "POST",
     timeoutMs: 10_000,
     cacheTtlMs: 0,
   });
-  return cacheState(amoCode, requesterId, state);
+  return cacheState(amoCode, requester, state);
 }
 
 export async function deactivateAdminProfile(amoCode: string): Promise<AdminProfileState> {
-  const requesterId = currentUserId();
+  const requester = captureRequester();
   const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "deactivate"), {
     method: "POST",
     timeoutMs: 10_000,
     cacheTtlMs: 0,
   });
-  return cacheState(amoCode, requesterId, state);
+  return cacheState(amoCode, requester, state);
 }
 
 export function clearCachedAdminProfileState(amoCode: string): void {
