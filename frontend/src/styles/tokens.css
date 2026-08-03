@@ -1,8 +1,64 @@
-:root {
+/* Canonical portal design tokens.
+ * This file loads after global.css and therefore owns every semantic variable.
+ * Module styles must consume these tokens instead of introducing theme literals.
+ */
+
+:root,
+html[data-color-scheme="dark"],
+body[data-color-scheme="dark"] {
+  color-scheme: dark;
+
+  --bg-base: #0b1220;
+  --bg-base-alt: #020617;
+  --bg-accent: rgba(56, 189, 248, 0.22);
+  --bg-accent-2: rgba(45, 212, 191, 0.18);
+
+  --surface: #111a2b;
+  --surface-elevated: #172235;
+  --surface-soft: #0f1929;
+  --surface-border: #42526a;
+  --border-subtle: #35445b;
+  --panel-divider: #2b394d;
+  --menu-surface: #121c2d;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #9aa9bc;
+  --text-inverse: #0f172a;
+
+  --brand: #d7b84a;
+  --brand-weak: rgba(215, 184, 74, 0.16);
+  --brand-accent: var(--brand);
+  --brand-accent-soft: var(--brand-weak);
+  --brand-accent-secondary: #efcf62;
+  --brand-accent-contrast: #111827;
+
+  --accent-primary: var(--brand-accent);
+  --accent-primary-soft: var(--brand-accent-soft);
+  --accent-info: #38bdf8;
+  --accent-success: #4ade80;
+  --accent-warning: #fb923c;
+  --accent-danger: #f87171;
+
+  --input-bg: #101a2b;
+  --input-bg-focus: #162238;
+  --input-border: #5b6c84;
+  --input-placeholder: #a7b4c6;
+
+  --alert-error-text: #fecaca;
+  --alert-error-bg: rgba(248, 113, 113, 0.12);
+  --alert-error-border: rgba(248, 113, 113, 0.58);
+  --alert-warning-text: #fed7aa;
+  --alert-warning-bg: rgba(251, 146, 60, 0.12);
+  --alert-success-text: #bbf7d0;
+  --alert-success-bg: rgba(74, 222, 128, 0.11);
+
+  --shadow-soft: 0 18px 45px rgba(2, 6, 23, 0.42);
+  --shadow-card: 0 12px 32px rgba(2, 6, 23, 0.32);
+  --blur-strength: 18px;
+
   --bg: var(--bg-base);
   --text: var(--text-primary);
-  --surface: var(--surface);
-  --surface-2: var(--surface-elevated);
   --surface-0: var(--surface-soft);
   --surface-1: var(--surface);
   --surface-2: var(--surface-elevated);
@@ -10,32 +66,108 @@
   --text-1: var(--text-primary);
   --text-2: var(--text-secondary);
   --text-3: var(--text-muted);
-  --hover: rgba(148, 163, 184, 0.16);
-  --brand: #8b6f00;
-  --brand-weak: rgba(139, 111, 0, 0.12);
+  --hover: rgba(255, 255, 255, 0.07);
   --danger: var(--accent-danger);
   --warning: var(--accent-warning);
-  --success: #22c55e;
-  --focus-ring: var(--brand);
+  --success: var(--accent-success);
+  --focus-ring: var(--accent-primary);
 
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 20px;
-
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 24px;
-  --s-6: 32px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --s-1: var(--space-1);
+  --s-2: var(--space-2);
+  --s-3: var(--space-3);
+  --s-4: var(--space-4);
+  --s-5: var(--space-5);
+  --s-6: var(--space-6);
   --s-7: 40px;
   --s-8: 48px;
 
-  --content-max: 1400px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --radius-card: var(--radius-md);
+  --r-sm: var(--radius-sm);
+  --r-md: var(--radius-md);
+  --r-lg: var(--radius-lg);
+  --r-xl: 20px;
 
-  --sh-1: 0 10px 30px rgba(15, 23, 42, 0.35);
-  --sh-2: 0 16px 40px rgba(15, 23, 42, 0.45);
+  --content-max: 1600px;
+  --header-h: 50px;
+  --sh-1: var(--shadow-card);
+  --sh-2: var(--shadow-soft);
+}
 
-  --header-h: 56px;
+html[data-color-scheme="light"],
+body[data-color-scheme="light"] {
+  color-scheme: light;
+
+  --bg-base: #edf2f7;
+  --bg-base-alt: #f8fafc;
+  --bg-accent: rgba(37, 99, 235, 0.07);
+  --bg-accent-2: rgba(15, 143, 139, 0.06);
+
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-soft: #f4f7fb;
+  --surface-border: #c4ceda;
+  --border-subtle: #d1d9e3;
+  --panel-divider: #dbe2ea;
+  --menu-surface: #ffffff;
+
+  --text-primary: #111827;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #f8fafc;
+
+  --brand: #1d4ed8;
+  --brand-weak: rgba(29, 78, 216, 0.12);
+  --brand-accent: var(--brand);
+  --brand-accent-soft: var(--brand-weak);
+  --brand-accent-secondary: #2563eb;
+  --brand-accent-contrast: #ffffff;
+
+  --accent-primary: var(--brand-accent);
+  --accent-primary-soft: var(--brand-accent-soft);
+  --accent-info: #0369a1;
+  --accent-success: #15803d;
+  --accent-warning: #b45309;
+  --accent-danger: #b91c1c;
+
+  --input-bg: #ffffff;
+  --input-bg-focus: #ffffff;
+  --input-border: #94a3b8;
+  --input-placeholder: #64748b;
+
+  --alert-error-text: #991b1b;
+  --alert-error-bg: #fef2f2;
+  --alert-error-border: #fca5a5;
+  --alert-warning-text: #92400e;
+  --alert-warning-bg: #fffbeb;
+  --alert-success-text: #166534;
+  --alert-success-bg: #f0fdf4;
+
+  --shadow-soft: 0 16px 38px rgba(15, 23, 42, 0.14);
+  --shadow-card: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --blur-strength: 16px;
+
+  --bg: var(--bg-base);
+  --text: var(--text-primary);
+  --surface-0: var(--surface-soft);
+  --surface-1: var(--surface);
+  --surface-2: var(--surface-elevated);
+  --border: var(--surface-border);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+  --hover: rgba(15, 23, 42, 0.055);
+  --danger: var(--accent-danger);
+  --warning: var(--accent-warning);
+  --success: var(--accent-success);
+  --focus-ring: var(--accent-primary);
 }
