@@ -9,6 +9,7 @@ export type DepartmentId =
   | "quality"
   | "reliability"
   | "safety"
+  | "procurement"
   | "stores"
   | "workshops"
   | "admin";
@@ -21,7 +22,8 @@ export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
   { id: "quality", label: "Quality & Compliance" },
   { id: "reliability", label: "Reliability" },
   { id: "safety", label: "Safety Management" },
-  { id: "stores", label: "Procurement & Supply Chain" },
+  { id: "procurement", label: "Procurement & Supply Chain" },
+  { id: "stores", label: "Stores & Inventory" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
 ];
@@ -66,10 +68,11 @@ function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
       return "quality";
     case "SAFETY_MANAGER":
       return "safety";
+    case "PROCUREMENT_OFFICER":
+      return "procurement";
     case "STORES":
     case "STORES_MANAGER":
     case "STOREKEEPER":
-    case "PROCUREMENT_OFFICER":
       return "stores";
     default:
       return null;
@@ -108,6 +111,26 @@ export function getAllowedDepartments(
   for (const dept of getRoleDrivenDepartments(user, assignedDepartment)) {
     departments.add(dept);
   }
+
+  const procurementCollaborators = new Set([
+    "PROCUREMENT_OFFICER",
+    "STORES",
+    "STORES_MANAGER",
+    "STOREKEEPER",
+    "QUALITY_MANAGER",
+    "QUALITY_INSPECTOR",
+    "FINANCE_MANAGER",
+    "ACCOUNTS_OFFICER",
+    "PLANNING_ENGINEER",
+    "PRODUCTION_ENGINEER",
+    "CERTIFYING_ENGINEER",
+    "CERTIFYING_TECHNICIAN",
+    "TECHNICIAN",
+  ]);
+  if (user?.role && procurementCollaborators.has(user.role)) {
+    departments.add("procurement");
+  }
+
   return Array.from(departments);
 }
 
