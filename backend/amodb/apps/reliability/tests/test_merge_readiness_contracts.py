@@ -116,10 +116,11 @@ def test_disabled_scheduler_does_not_create_worker(monkeypatch):
 
 def test_fracas_evidence_export_is_tenant_scoped_and_audited():
     source = inspect.getsource(router.export_fracas_evidence_pack)
-    assert "FRACASCase.amo_id == amo_id" in source
+    assert "FRACASCase.amo_id == _amo_id(current_user)" in source
     assert "FRACASCase.id == fracas_case_id" in source
     assert "actor_user_id=current_user.id" in source
     assert "correlation_id=generate_uuid7()" in source
+    assert "amo_id=_amo_id(current_user)" in source
 
 
 def test_fracas_evidence_export_is_restricted_to_authorized_participants():
