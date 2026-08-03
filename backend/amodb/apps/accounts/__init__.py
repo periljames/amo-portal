@@ -19,6 +19,7 @@ from .admin_profile_concurrency import (
 )
 from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
+from .auth_session_context import bind_auth_session_to_token_refresh
 from . import router_admin as _router_admin
 from . import router_public as _router_public
 
@@ -78,16 +79,15 @@ for _route in router_amo_assets.router.routes:
     ):
         _attach_route_dependency(_route, require_active_admin_profile)
 
-# Revoke elevated Admin Profile sessions within the same server-side logout
-# transaction. The normal logout endpoint still owns access-token revocation and
-# audit logging.
+# Revoke elevated profiles during logout and preserve the exact server-side
+# authentication-session identity when issuing a refreshed JWT.
 for _route in _router_public.router.routes:
-    if (
-        isinstance(_route, APIRoute)
-        and _route.path == "/auth/logout"
-        and "POST" in (_route.methods or set())
-    ):
+    if not isinstance(_route, APIRoute):
+        continue
+    if _route.path == "/auth/logout" and "POST" in (_route.methods or set()):
         _attach_route_dependency(_route, revoke_admin_profile_on_logout)
+    if _route.path == "/auth/extend-session" and "POST" in (_route.methods or set()):
+        _attach_route_dependency(_route, bind_auth_session_to_token_refresh)
 
 # Mounted below the authenticated /auth surface. The endpoint independently
 # resolves the AMO and validates effective department access before returning any
@@ -102,6 +102,7 @@ __all__ = [
     "department_home_router",
     "router_amo_assets",
     "active_admin_profile_session",
+    "bind_auth_session_to_token_refresh",
     "lock_admin_grant_for_approval",
     "serialized_approval_count",
     "require_active_admin_profile",
