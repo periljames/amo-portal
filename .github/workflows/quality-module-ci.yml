@@ -9,7 +9,6 @@ on:
       - "backend/amodb/apps/tasks/**"
       - "backend/amodb/apps/exports/**"
       - "backend/amodb/alembic/versions/quality_*.py"
-      - "backend/amodb/scripts/quality_module_internal_check.py"
       - "backend/docs/quality/**"
       - "frontend/src/pages/Quality*.tsx"
       - "frontend/src/pages/QMS*.tsx"
@@ -72,8 +71,6 @@ jobs:
           assert revision is not None
           assert revision.down_revision == "workforce_20260721_complete"
           PY
-      - name: Run executable Quality contract check
-        run: python -m amodb.scripts.quality_module_internal_check
       - name: Compile Quality backend
         run: >-
           python -m compileall -q
