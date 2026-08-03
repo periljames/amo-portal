@@ -21,7 +21,7 @@ export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
   { id: "quality", label: "Quality & Compliance" },
   { id: "reliability", label: "Reliability" },
   { id: "safety", label: "Safety Management" },
-  { id: "stores", label: "Procurement & Stores" },
+  { id: "stores", label: "Procurement & Supply Chain" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
 ];
