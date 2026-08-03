@@ -5,7 +5,7 @@ on:
     branches:
       - agent/reliability-v2-foundation
     paths:
-      - docs/reliability/.completion-diagnostic-v3-trigger
+      - docs/reliability/completion-diagnostic-v3-trigger.txt
 
 permissions:
   contents: write
