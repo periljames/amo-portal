@@ -1,0 +1,36 @@
+MIGRATION_COUNT 97
+HEADS
+  amo_20260501_gsu_scope :: amo_20260501_global_superuser_scope.py :: parents=('2c4d7e9f0a1b', '9c6a7d2e8f10', 'a1b2c3d4e5f6', 'a5c1d2e3f4b6', 'b2c3d4e5f6g7', 'c1d2e3f4a5b7', 'd9e2f3a4b5c6', 'e4b7d1a2c3f4', 'g1b2c3d4e5f6', 'l1b2c3d4e5f7', 'm4a5n6u7a8l9', 'qms_p2_20260426', 's9t8u7v6w5x4', 'v0a1b2c3d4e5')
+  document_control_20260729_ai_assisted_search :: document_control_20260729_ai_assisted_search.py :: parents=('document_control_20260729_knowledge_graph',)
+  notifications_20260729_delivery :: notifications_20260729_delivery_policy.py :: parents=('document_control_20260724_domain',)
+  p0a7_train_record_dedupe :: p0a7_training_record_deduplicate_current.py :: parents=('p0a6_train_record',)
+  plat_p7_20260501 :: plat_p7_20260501_platform_control_plane.py :: parents=()
+  procure_20260803_docs :: procure_20260803_docs.py :: parents=('7d9e0a1b2c3d',)
+  procurement_20260803_full_domain :: procurement_20260803_full_domain.py :: parents=('2c4d7e9f0a1b',)
+  qms_20260607_read_stability :: qms_20260607_read_stability_indexes.py :: parents=()
+  qms_p4_20260501 :: qms_p4_20260501_phase4_route_tree_workflow_hardening.py :: parents=('qms_p3_20260501',)
+  qual_20260628_lvl4 :: quality_20260628_level4_findings.py :: parents=('qual_20260628_scope_fix',)
+  quality_20260705_car_attachment_description :: quality_20260705_car_attachment_description.py :: parents=('qual_20260704_schedfix',)
+  quality_20260705_finding_attachment_description_repair :: quality_20260705_finding_attachment_description_repair.py :: parents=('qual_20260704_schedfix',)
+  quality_20260705_notification_action_links :: quality_20260705_notification_action_links.py :: parents=('qual_20260704_schedfix',)
+  rostering_20260728_automation_policy :: rostering_20260728_automation_policy.py :: parents=('rostering_20260724_governance',)
+UNRESOLVED
+  0f1e4ad3c5b1
+  463febfffd67
+  7d9e0a1b2c3d
+  aa11bb22cc33
+  d1a2f3b4c5e6
+  d6e7f8a9b0c1
+  e41af43f2beb
+  f4c7f0c1d2ab
+  f8a1b2c3d4e6
+  i1a2b3c4d5e6
+  j1k2l3m4n5o6
+  m1b2c3d4e5f8
+  q1w2e3r4t5y6
+  qual_20260628_scope_fix
+  qual_20260704_schedfix
+  qual_20260705_merge_heads
+PROCUREMENT_CHAIN
+  procure_20260803_docs :: procure_20260803_docs.py :: parents=('7d9e0a1b2c3d',)
+  procurement_20260803_full_domain :: procurement_20260803_full_domain.py :: parents=('2c4d7e9f0a1b',)
