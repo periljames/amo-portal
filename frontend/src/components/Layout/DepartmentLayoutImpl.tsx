@@ -93,6 +93,7 @@ type NavBranchProps = {
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 60 * 1000;
+const IDLE_RESET_THROTTLE_MS = 1_000;
 const SIDEBAR_MIN = 236;
 const SIDEBAR_MAX = 420;
 const SIDEBAR_DEFAULT = 284;
@@ -299,7 +300,7 @@ function NavigationGroups({
   );
 }
 
-const DepartmentLayout: React.FC<Props> = ({
+const DepartmentLayoutImpl: React.FC<Props> = ({
   amoCode,
   activeDepartment,
   children,
@@ -340,6 +341,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const profileRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
   const lastActivityRef = useRef(Date.now());
+  const idleWarningRef = useRef(false);
   const warningTimerRef = useRef<number | null>(null);
   const logoutTimerRef = useRef<number | null>(null);
   const countdownRef = useRef<number | null>(null);
@@ -494,11 +496,13 @@ const DepartmentLayout: React.FC<Props> = ({
   const scheduleIdleTimers = useCallback(() => {
     clearIdleTimers();
     warningTimerRef.current = window.setTimeout(() => {
+      idleWarningRef.current = true;
       setIdleWarning(true);
       setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
       countdownRef.current = window.setInterval(() => setIdleSeconds((value) => Math.max(0, value - 1)), 1000);
     }, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
     logoutTimerRef.current = window.setTimeout(() => {
+      idleWarningRef.current = false;
       endSession("idle");
       navigate(`/maintenance/${encodeURIComponent(amoCode)}/login`, { replace: true });
     }, IDLE_TIMEOUT_MS);
@@ -508,14 +512,24 @@ const DepartmentLayout: React.FC<Props> = ({
     scheduleIdleTimers();
     let lastBroadcast = 0;
     let lastExtend = 0;
+    let lastTimerReset = Date.now();
+    const immediateResetEvents = new Set(["pointerdown", "keydown", "touchstart", "focus"]);
+
     const handleActivity = (event: Event) => {
       const now = Date.now();
       lastActivityRef.current = now;
-      if (idleWarning) {
+
+      if (idleWarningRef.current) {
+        idleWarningRef.current = false;
         setIdleWarning(false);
         setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
+      }
+
+      if (immediateResetEvents.has(event.type) || now - lastTimerReset >= IDLE_RESET_THROTTLE_MS) {
+        lastTimerReset = now;
         scheduleIdleTimers();
       }
+
       if (now - lastBroadcast > 10_000) {
         lastBroadcast = now;
         markSessionActivity(event.type);
@@ -532,7 +546,7 @@ const DepartmentLayout: React.FC<Props> = ({
       events.forEach((name) => window.removeEventListener(name, handleActivity, true));
       clearIdleTimers();
     };
-  }, [clearIdleTimers, idleWarning, scheduleIdleTimers]);
+  }, [clearIdleTimers, scheduleIdleTimers]);
 
   const navigateFromDrawer = useCallback((path: string) => {
     navigate(path);
@@ -591,9 +605,11 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [adminProfile, adminProfileBusy, amoCode, homePath, navigate]);
 
   const handleSignOut = useCallback(() => {
+    idleWarningRef.current = false;
+    clearIdleTimers();
     endSession("manual");
     navigate(`/maintenance/${encodeURIComponent(amoCode)}/login`, { replace: true });
-  }, [amoCode, navigate]);
+  }, [amoCode, clearIdleTimers, navigate]);
 
   const drawerVisible = pinned || drawerOpen;
   const shellStyle = { "--tenant-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
@@ -765,7 +781,9 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button type="button" className="btn btn-secondary" onClick={handleSignOut}>Sign out</button>
                     <button type="button" className="btn btn-primary" autoFocus onClick={() => {
                       lastActivityRef.current = Date.now();
+                      idleWarningRef.current = false;
                       setIdleWarning(false);
+                      setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
                       void extendSession("idle-warning").catch(() => undefined);
                       scheduleIdleTimers();
                     }}>Stay signed in</button>
@@ -780,4 +798,4 @@ const DepartmentLayout: React.FC<Props> = ({
   );
 };
 
-export default DepartmentLayout;
+export default DepartmentLayoutImpl;
