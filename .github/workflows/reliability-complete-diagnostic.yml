@@ -1,0 +1,145 @@
+name: Diagnose Complete Reliability Full Stack
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.complete-scope-diagnostic
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_reliability_diagnostic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_reliability_diagnostic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_diagnostic
+      WRITE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_diagnostic
+      SECRET_KEY: reliability-diagnostic-secret
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run diagnostic stages and publish report
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/reliability-diagnostic
+          declare -A CODES
+
+          run_stage() {
+            local name="$1"
+            shift
+            echo "Running $name"
+            "$@" >"/tmp/reliability-diagnostic/${name}.log" 2>&1
+            CODES[$name]=$?
+            echo "$name=${CODES[$name]}"
+          }
+
+          run_stage backend_patch python backend/scripts/complete_reliability_backend.py
+          run_stage sod_patch python backend/scripts/strengthen_reliability_sod.py
+          run_stage env_patch python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/amodb/alembic/env.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '    table = getattr(obj, "table", None) or getattr(compare_to, "table", None)\n    return table is not None and table.name in _RELIABILITY_TABLES',
+              '    table = getattr(obj, "table", None)\n    if table is None:\n        table = getattr(compare_to, "table", None)\n    return table is not None and table.name in _RELIABILITY_TABLES',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          run_stage frontend_service bash -lc 'cd frontend && node scripts/complete-reliability-service.mjs'
+          run_stage frontend_workspace bash -lc 'cd frontend && node scripts/complete-reliability-workspace.mjs'
+          run_stage frontend_sod bash -lc 'cd frontend && node scripts/strengthen-reliability-sod.mjs'
+          run_stage frontend_css bash -lc 'cd frontend && node scripts/complete-reliability-css.mjs'
+          run_stage pip_install pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+          run_stage py_compile bash -lc 'python -m py_compile backend/amodb/apps/reliability/*.py backend/amodb/apps/reliability/tests/test_complete_scope.py'
+          run_stage existing_upgrade bash -lc 'cd backend && alembic -c amodb/alembic.ini upgrade heads'
+
+          cat > /tmp/reliability-diagnostic/generate_migration.sh <<'SH'
+          #!/usr/bin/env bash
+          set -e
+          cd backend
+          mapfile -t HEADS < <(alembic -c amodb/alembic.ini heads | awk '{print $1}')
+          if [ "${#HEADS[@]}" -gt 1 ]; then
+            alembic -c amodb/alembic.ini merge --rev-id rel_20260803_merge_heads_diag -m "merge heads for Reliability diagnostic" "${HEADS[@]}"
+            alembic -c amodb/alembic.ini upgrade head
+          fi
+          RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini revision --autogenerate --rev-id rel_20260803_complete_scope -m "complete Reliability full stack scope"
+          python scripts/finalize_reliability_migration.py
+          SH
+          chmod +x /tmp/reliability-diagnostic/generate_migration.sh
+          run_stage migration_generate /tmp/reliability-diagnostic/generate_migration.sh
+          run_stage migration_upgrade bash -lc 'cd backend && RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini upgrade head'
+          run_stage migration_check bash -lc 'cd backend && RELIABILITY_AUTOGENERATE_ONLY=true alembic -c amodb/alembic.ini check'
+          run_stage migration_downgrade bash -lc 'cd backend && alembic -c amodb/alembic.ini downgrade -1'
+          run_stage migration_reupgrade bash -lc 'cd backend && alembic -c amodb/alembic.ini upgrade head'
+          run_stage app_import bash -lc 'cd backend && python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; configure_mappers(); print(len(amodb.main.app.routes))"'
+          run_stage backend_tests bash -lc 'cd backend && pytest -q amodb/apps/reliability/tests'
+          run_stage npm_install bash -lc 'cd frontend && npm ci --no-audit --no-fund'
+          run_stage navigation bash -lc 'cd frontend && npm run test:tenant-shell'
+          run_stage lint bash -lc 'cd frontend && npx eslint src/services/reliability.ts src/pages/reliability/ReliabilityWorkspacePage.tsx src/pages/reliability/ReliabilityAdvancedViews.tsx src/pages/reliability/ReliabilityReportsView.tsx src/app/PortalRouteSurface.tsx src/app/portalRouteManifest.ts src/app/portalRouteManifest.test.ts src/app/routePreload.ts'
+          run_stage build bash -lc 'cd frontend && npm run build'
+
+          {
+            echo '# Complete Reliability Full-Stack Diagnostic'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo "- Source: \`${GITHUB_SHA}\`"
+            echo "- UTC: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`"
+            echo
+            echo '| Stage | Exit code |'
+            echo '|---|---:|'
+            for stage in backend_patch sod_patch env_patch frontend_service frontend_workspace frontend_sod frontend_css pip_install py_compile existing_upgrade migration_generate migration_upgrade migration_check migration_downgrade migration_reupgrade app_import backend_tests npm_install navigation lint build; do
+              echo "| ${stage} | ${CODES[$stage]:-999} |"
+            done
+            echo
+            echo '## Failure and output tails'
+            for stage in backend_patch sod_patch env_patch frontend_service frontend_workspace frontend_sod frontend_css py_compile existing_upgrade migration_generate migration_upgrade migration_check migration_downgrade migration_reupgrade app_import backend_tests navigation lint build; do
+              echo
+              echo "### ${stage}"
+              echo '```text'
+              tail -n 100 "/tmp/reliability-diagnostic/${stage}.log" 2>/dev/null || true
+              echo '```'
+            done
+          } > docs/reliability/COMPLETE_SCOPE_DIAGNOSTIC.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reliability/COMPLETE_SCOPE_DIAGNOSTIC.md
+          git commit -m "Record complete Reliability full-stack diagnostic" || true
+          git push origin HEAD:agent/reliability-v2-foundation
