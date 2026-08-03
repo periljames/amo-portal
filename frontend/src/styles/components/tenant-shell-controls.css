@@ -10,15 +10,73 @@
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
-  color: var(--text-primary, var(--text, #172033));
+  color: var(--text-primary);
   cursor: pointer;
 }
 
 .tenant-shell__compact-brand { width: 32px; height: 32px; }
 .tenant-shell__menu-button:hover,
 .tenant-shell__icon-button:hover,
-.tenant-shell__compact-brand:hover { border-color: var(--surface-border, var(--border)); background: var(--tenant-nav-hover); }
-.tenant-shell :where(button, a, select):focus-visible { outline: 2px solid var(--tenant-focus); outline-offset: 2px; }
+.tenant-shell__compact-brand:hover { border-color: var(--surface-border); background: var(--tenant-nav-hover); }
+.tenant-shell :where(button, a, select, input):focus-visible { outline: 2px solid var(--tenant-focus); outline-offset: 2px; }
+
+.tenant-shell__search {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 0.42rem;
+  border: 1px solid var(--input-border);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text-secondary);
+}
+
+.tenant-shell__search:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--portal-focus);
+}
+
+.tenant-shell__search input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 0.35rem;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+  font-size: 0.72rem;
+}
+
+.tenant-shell__search > button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.tenant-shell__search > button:hover { background: var(--tenant-nav-hover); color: var(--text-primary); }
+
+.tenant-shell__nav-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+.tenant-shell__nav-summary span { display: inline-flex; align-items: center; gap: 0.24rem; }
+.tenant-shell__nav-summary span:first-child { color: var(--accent-primary); }
 
 .tenant-shell__admin-chip {
   display: inline-flex;
@@ -44,10 +102,10 @@
   max-width: 15rem;
   height: 36px;
   padding: 0 0.5rem 0 0.25rem;
-  border: 1px solid var(--surface-border, var(--border));
+  border: 1px solid var(--surface-border);
   border-radius: 999px;
-  background: var(--surface-elevated, #fff);
-  color: var(--text-primary, var(--text));
+  background: var(--surface-elevated);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
@@ -79,12 +137,15 @@
   right: 0;
   z-index: 100;
   display: grid;
-  width: min(21rem, calc(100vw - 1rem));
+  width: min(22rem, calc(100vw - 1rem));
+  max-height: min(80dvh, 42rem);
+  overflow-y: auto;
   padding: 0.38rem;
-  border: 1px solid var(--surface-border, var(--border));
+  border: 1px solid var(--surface-border);
   border-radius: 10px;
-  background: var(--menu-surface, var(--surface-elevated, #fff));
-  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.2);
+  background: var(--menu-surface);
+  color: var(--text-primary);
+  box-shadow: var(--portal-shadow);
 }
 
 .tenant-shell__profile-menu > button {
@@ -96,7 +157,7 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--text-primary, var(--text));
+  color: var(--text-primary);
   font-size: 0.72rem;
   font-weight: 650;
   text-align: left;
@@ -105,29 +166,32 @@
 
 .tenant-shell__profile-menu > button:hover { background: var(--tenant-nav-hover); }
 .tenant-shell__profile-menu > button:disabled { cursor: wait; opacity: 0.62; }
-.tenant-shell__profile-menu > button.is-danger { color: var(--accent-danger, #c62828); }
+.tenant-shell__profile-menu > button.is-danger { color: var(--accent-danger); }
 .tenant-shell__profile-chevron { margin-left: auto; }
-.tenant-shell__profile-divider { height: 1px; margin: 0.3rem 0; background: var(--surface-border, var(--border)); }
-.tenant-shell__profile-error { margin: 0.3rem; padding: 0.5rem; border-radius: 6px; background: color-mix(in srgb, var(--accent-danger) 10%, var(--surface)); color: var(--accent-danger); font-size: 0.68rem; line-height: 1.35; }
+.tenant-shell__profile-divider { height: 1px; margin: 0.3rem 0; background: var(--surface-border); }
+.tenant-shell__profile-error { margin: 0.3rem; padding: 0.5rem; border: 1px solid var(--alert-error-border); border-radius: 6px; background: var(--alert-error-bg); color: var(--alert-error-text); font-size: 0.68rem; line-height: 1.35; }
 
 .tenant-shell__appearance {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
   margin: 0.2rem 0.25rem 0.35rem;
   padding: 0.65rem;
-  border: 1px solid var(--surface-border, var(--border));
+  border: 1px solid var(--surface-border);
   border-radius: 8px;
-  background: var(--surface, #f8fafc);
+  background: var(--surface-soft);
+  color: var(--text-primary);
 }
 
 .tenant-shell__appearance label,
-.tenant-shell__accent-picker { display: grid; gap: 0.35rem; }
+.tenant-shell__accent-picker { display: grid; gap: 0.35rem; min-width: 0; }
 .tenant-shell__appearance label > span,
 .tenant-shell__accent-picker > span { color: var(--text-secondary); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
-.tenant-shell__appearance select { width: 100%; height: 34px; padding: 0 0.45rem; border: 1px solid var(--surface-border, var(--border)); border-radius: 6px; background: var(--surface-elevated); color: var(--text-primary); font: inherit; font-size: 0.72rem; }
+.tenant-shell__appearance select { width: 100%; height: 34px; padding: 0 0.45rem; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg); color: var(--text-primary); font: inherit; font-size: 0.72rem; }
+.tenant-shell__accent-picker { grid-column: 1 / -1; }
 .tenant-shell__accent-picker > div { display: flex; gap: 0.45rem; flex-wrap: wrap; }
 .tenant-shell__accent { width: 24px; height: 24px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--accent-primary); cursor: pointer; }
-.tenant-shell__accent--tenant { background: linear-gradient(135deg, var(--brand-accent, var(--accent-primary)) 50%, var(--text-primary) 50%); }
+.tenant-shell__accent--tenant { background: linear-gradient(135deg, var(--brand-accent) 50%, var(--text-primary) 50%); }
 .tenant-shell__accent--blue { background: #2563eb; }
 .tenant-shell__accent--teal { background: #0f8f8b; }
 .tenant-shell__accent--green { background: #16834a; }
@@ -142,22 +206,23 @@
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(2, 8, 23, 0.54);
+  background: var(--portal-overlay);
   backdrop-filter: blur(5px);
 }
 
 .tenant-shell__session-card {
   width: min(26rem, 100%);
   padding: 1.15rem;
-  border: 1px solid var(--surface-border, var(--border));
+  border: 1px solid var(--surface-border);
   border-radius: 12px;
-  background: var(--surface-elevated, #fff);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
   box-shadow: 0 28px 70px rgba(2, 8, 23, 0.32);
 }
 
-.tenant-shell__session-card h2 { margin: 0 0 0.45rem; font-size: 1.05rem; }
+.tenant-shell__session-card h2 { margin: 0 0 0.45rem; color: var(--text-primary); font-size: 1.05rem; }
 .tenant-shell__session-card p { margin: 0; color: var(--text-secondary); font-size: 0.78rem; }
-.tenant-shell__session-card > div { display: flex; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; }
+.tenant-shell__session-card > div { display: flex; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; flex-wrap: wrap; }
 
 @media (max-width: 900px) {
   .tenant-shell__profile-name,
@@ -170,4 +235,6 @@
   .tenant-shell__context strong { max-width: 38vw; font-size: 0.75rem; }
   .tenant-shell__profile-trigger { width: 34px; padding: 0; justify-content: center; border-color: transparent; background: transparent; }
   .tenant-shell__profile-trigger > svg { display: none; }
+  .tenant-shell__appearance { grid-template-columns: minmax(0, 1fr); }
+  .tenant-shell__accent-picker { grid-column: auto; }
 }
