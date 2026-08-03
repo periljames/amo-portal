@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def replace_once(path: Path, old: str, new: str, label: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"Expected one {label} in {path}, found {count}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def main() -> None:
+    replace_once(
+        ROOT / "backend/amodb/apps/reliability/tests/test_router.py",
+        '        amo_id="amo-1",\n',
+        '        amo_id=str(amo.id),\n',
+        "tenant-aware trend test identifier",
+    )
+    replace_once(
+        ROOT / "frontend/scripts/complete-reliability-workspace.mjs",
+        "workspace = workspace.replace('function routeState(pathname: string): RouteState {', 'export function routeState(pathname: string): RouteState {');\n",
+        "",
+        "Fast Refresh route-state export",
+    )
+    print("Reliability completion blockers corrected.")
+
+
+if __name__ == "__main__":
+    main()
