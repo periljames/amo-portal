@@ -1,4 +1,4 @@
-name: Alembic Source Graph Probe
+name: Alembic Clean Schema Probe
 
 on:
   push:
@@ -12,108 +12,79 @@ jobs:
   graph:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: procurement_alembic_probe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d procurement_alembic_probe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      SECRET_KEY: procurement-alembic-probe-secret
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/procurement_alembic_probe
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/procurement_alembic_probe
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/procurement_alembic_probe
     steps:
       - uses: actions/checkout@v6
         with:
           ref: agent/procurement-ux-document-control-review
           fetch-depth: 0
-      - name: Inspect migration source graph
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Inspect and upgrade source graph
+        working-directory: backend
         run: |
-          python - <<'PY' > /tmp/alembic-graph-probe.txt
-          import ast
-          from collections import defaultdict, deque
-          from pathlib import Path
+          set +e
+          {
+            echo "=== ALEMBIC HEADS ==="
+            alembic -c amodb/alembic.ini heads --verbose
+            echo
+            echo "=== PROCUREMENT REVISIONS ==="
+            python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
 
-          versions = Path('backend/amodb/alembic/versions')
-          revisions = {}
-          parents = {}
-
-          def literal(node):
-              if isinstance(node, ast.Constant):
-                  return node.value
-              if isinstance(node, (ast.Tuple, ast.List)):
-                  return tuple(literal(item) for item in node.elts)
-              return None
-
-          for path in sorted(versions.glob('*.py')):
-              tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-              values = {}
-              for node in tree.body:
-                  if isinstance(node, ast.Assign):
-                      for target in node.targets:
-                          if isinstance(target, ast.Name) and target.id in {'revision', 'down_revision'}:
-                              values[target.id] = literal(node.value)
-              revision = values.get('revision')
-              if not isinstance(revision, str):
-                  continue
-              revisions[revision] = path.name
-              parent = values.get('down_revision')
-              if parent is None:
-                  parents[revision] = ()
-              elif isinstance(parent, str):
-                  parents[revision] = (parent,)
-              else:
-                  parents[revision] = tuple(parent)
-
-          children = defaultdict(list)
-          for child, values in parents.items():
-              for parent in values:
-                  children[parent].append(child)
-
-          referenced = {parent for values in parents.values() for parent in values}
-          heads = sorted(set(revisions) - referenced)
-          unresolved = sorted(parent for parent in referenced if parent not in revisions)
-          print('MIGRATION_COUNT', len(revisions))
-          print('HEADS')
-          for head in heads:
-              print(f'  {head} :: {revisions[head]} :: parents={parents[head]}')
-          print('UNRESOLVED')
-          for parent in unresolved:
-              print(f'  {parent}')
-
-          target = 'procurement_20260803_full_domain'
-          print('DIRECT_CHILDREN_OF_PROCUREMENT_FULL_DOMAIN')
-          for child in sorted(children.get(target, [])):
-              print(f'  {child} :: {revisions.get(child)} :: parents={parents.get(child)}')
-
-          print('DESCENDANTS_OF_PROCUREMENT_FULL_DOMAIN')
-          queue = deque([(target, 0)])
-          seen = {target}
-          while queue:
-              parent, depth = queue.popleft()
-              for child in sorted(children.get(parent, [])):
-                  if child in seen:
-                      continue
-                  seen.add(child)
-                  print(f'  {"  " * depth}{child} :: {revisions.get(child)} :: parents={parents.get(child)}')
-                  queue.append((child, depth + 1))
-
-          print('ANCESTRY_FROM_HEADS')
-          for head in heads:
-              print(f'  HEAD {head}')
-              queue = deque([(head, 0)])
-              seen = set()
-              while queue:
-                  revision, depth = queue.popleft()
-                  if revision in seen or depth > 18:
-                      continue
-                  seen.add(revision)
-                  print(f'    {"  " * depth}{revision} :: {revisions.get(revision, "missing")} :: parents={parents.get(revision, ())}')
-                  for parent in parents.get(revision, ()):
-                      queue.append((parent, depth + 1))
-
-          print('PROCUREMENT_CHAIN')
-          for revision, filename in sorted(revisions.items()):
-              if 'procure' in revision.lower() or 'procure' in filename.lower():
-                  print(f'  {revision} :: {filename} :: parents={parents[revision]}')
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          for revision_id in ("procurement_20260803_full_domain", "procure_20260803_docs"):
+              try:
+                  revision = script.get_revision(revision_id)
+                  print(revision_id, "resolved", revision.path, "down=", revision.down_revision)
+              except Exception as exc:
+                  print(revision_id, "FAILED", repr(exc))
           PY
-          cat /tmp/alembic-graph-probe.txt
-      - name: Publish graph probe
+            echo
+            echo "=== CLEAN POSTGRES UPGRADE ==="
+            alembic -c amodb/alembic.ini upgrade heads
+            status=$?
+            echo
+            echo "UPGRADE_EXIT_STATUS=$status"
+            exit $status
+          } 2>&1 | tee /tmp/alembic-clean-probe.txt
+          exit ${PIPESTATUS[0]}
+      - name: Publish clean schema probe
+        if: always()
         run: |
           mkdir -p docs
-          cp /tmp/alembic-graph-probe.txt docs/alembic-graph-probe.txt
+          cp /tmp/alembic-clean-probe.txt docs/alembic-clean-probe.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/alembic-graph-probe.txt
-          git commit -m "Record detailed Alembic source graph probe"
+          git add docs/alembic-clean-probe.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Record Alembic clean schema probe"
           git push origin HEAD:agent/procurement-ux-document-control-review
