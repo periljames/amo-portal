@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const apiRequestMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./apiClient", () => ({
+  apiRequest: apiRequestMock,
+}));
+
 import {
   clearAllCachedAdminProfileStates,
+  fetchAdminProfileState,
   onAdminProfileChange,
   readCachedAdminProfileState,
+  StaleAdminProfileResponseError,
+  type AdminProfileState,
 } from "./adminProfileMode";
 
 class MemoryStorage {
@@ -41,6 +50,7 @@ describe("Admin Profile client lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-03T12:00:00Z"));
+    apiRequestMock.mockReset();
 
     sessionStorage = new MemoryStorage();
     localStorage = new MemoryStorage();
@@ -131,5 +141,28 @@ describe("Admin Profile client lifecycle", () => {
 
     clearAllCachedAdminProfileStates();
     expect(sessionStorage.length).toBe(0);
+  });
+
+  it("discards an in-flight response when the authenticated user changes", async () => {
+    const amoCode = "tenant-a";
+    let resolveRequest!: (state: AdminProfileState) => void;
+    apiRequestMock.mockImplementationOnce(() => new Promise<AdminProfileState>((resolve) => {
+      resolveRequest = resolve;
+    }));
+
+    const pending = fetchAdminProfileState(amoCode);
+
+    localStorage.setItem("amo_current_user", JSON.stringify({ id: "user-b" }));
+    resolveRequest({
+      eligible: true,
+      active: true,
+      session_id: "session-user-a",
+      expires_at: "2026-08-03T12:10:00Z",
+      grant_type: "TEMPORARY",
+    });
+
+    await expect(pending).rejects.toBeInstanceOf(StaleAdminProfileResponseError);
+    expect(sessionStorage.getItem(`amo_admin_profile_session:user-a:${amoCode}`)).toBeNull();
+    expect(sessionStorage.getItem(`amo_admin_profile_session:user-b:${amoCode}`)).toBeNull();
   });
 });
