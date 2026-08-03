@@ -1,0 +1,31 @@
+name: Delete Reliability Rebuild Backup
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.delete-rebuild-backup
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - name: Delete temporary branch and cleanup files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git push origin --delete agent/reliability-canonical-backup
+          rm -f docs/reliability/.delete-rebuild-backup
+          rm -f .github/workflows/reliability-delete-backup.yml
+          git add -A
+          git commit -m "Remove temporary Reliability rebuild branch"
+          git push origin HEAD:agent/reliability-v2-foundation
