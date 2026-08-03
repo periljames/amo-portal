@@ -138,7 +138,6 @@ def test_procurement_routes_do_not_reintroduce_stores_aliases():
     assert "procurement_service" not in inventory_router
 
 
-
 def test_procurement_evidence_uses_persistent_upload_root():
     service = read("amodb/apps/procurement/document_service.py")
     environment = (ROOT.parent / ".env.example").read_text(encoding="utf-8")
@@ -147,14 +146,12 @@ def test_procurement_evidence_uses_persistent_upload_root():
     assert f"PROCUREMENT_DOCUMENT_DIR={expected}" in environment
 
 
-
 def test_quality_evidence_decision_is_atomic_and_shared_audited():
     service = read("amodb/apps/procurement/document_service.py")
     assert ".with_for_update()" in service
     assert "audit_services.create_audit_event(" in service
     assert "audit_schemas.AuditEventCreate(" in service
     assert "after_json=detail" in service
-
 
 
 def test_document_file_cleanup_is_transaction_boundary_safe():
@@ -169,3 +166,15 @@ def test_document_file_cleanup_is_transaction_boundary_safe():
     assert "db.refresh(record)" not in route_block
     assert "except HTTPException:" in route_block
     assert route_block.count("document_service.discard_document_file(record)") == 2
+
+
+def test_requisition_contract_and_void_pagination_exclude_bypasses():
+    schemas = read("amodb/apps/procurement/schemas.py")
+    router = read("amodb/apps/procurement/router.py")
+    service = read("amodb/apps/procurement/service.py")
+    document_center = read("../frontend/src/pages/procurement/ProcurementDocumentCenter.tsx")
+    assert "SEND_TO_SOURCING" not in schemas
+    assert "SEND_TO_SOURCING" not in router
+    assert "SEND_TO_SOURCING" not in service
+    assert 'mode === "VOID" && !includeVoid' in document_center
+    assert "current.filter((item) => item.id !== updated.id)" in document_center
