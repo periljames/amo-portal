@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import ActionFeedback from "./ActionFeedback";
 import ProcurementDocumentCenter from "./ProcurementDocumentCenter";
 import { useActionFeedback } from "../../hooks/useActionFeedback";
+import "../../styles/procurementEnhancements.css";
 
 export default function ProcurementEnhancementDock() {
   const location = useLocation();
