@@ -8,11 +8,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: procurement-review-fix-${{ github.event.pull_request.number }}
+  group: procurement-review-cleanup-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  apply-procurement-review-fix:
+  restore-standard-gate:
     if: github.event.pull_request.head.ref == 'agent/procurement-ui-document-controls' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -20,16 +20,16 @@ jobs:
         with:
           ref: agent/procurement-ui-document-controls
           fetch-depth: 0
-      - name: Apply final Procurement corrections
-        run: python .github/scripts/procurement_review_fix.py
-      - name: Verify source integrity
+      - name: Restore standard workflow and remove patch scaffolding
         run: |
-          python -m compileall -q backend/amodb/apps/procurement backend/tests
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/main-merge-readiness.yml
+          git rm -f .github/workflows/procurement-review-fix.yml .github/scripts/procurement_review_fix.py
           git diff --check
-      - name: Commit corrections to PR branch
+      - name: Commit cleanup to PR branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .env.example backend/amodb/apps/procurement/service.py backend/amodb/apps/procurement/models.py backend/amodb/apps/procurement/document_service.py frontend/src/pages/procurement/ProcurementSections.tsx backend/tests/test_procurement_module_contract.py backend/tests/test_procurement_document_contract.py backend/tests/test_procurement_frontend_contract.py
-          git commit -m "Clear final Procurement review blockers"
+          git add .github/workflows/main-merge-readiness.yml
+          git commit -m "Remove temporary Procurement correction scaffolding"
           git push origin HEAD:agent/procurement-ui-document-controls
