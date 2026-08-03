@@ -28,6 +28,7 @@ REQUIRED_SCHEMA_TABLES = frozenset(
         "admin_access_events",
     }
 )
+REQUIRED_SESSION_COLUMNS = frozenset({"auth_session_id"})
 
 
 class AdminGrantRequest(BaseModel):
@@ -76,10 +77,30 @@ def _is_management_approver(user: models.User) -> bool:
     )
 
 
+def _auth_session_id(user: models.User) -> str:
+    value = str(
+        getattr(user, "auth_session_id", None)
+        or getattr(user, "_auth_session_id", None)
+        or ""
+    ).strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication session identity is unavailable. Sign in again.",
+        )
+    return value
+
+
 def _ensure_schema(db: Session) -> None:
     """Fail closed until the governed Admin Profile migration is installed."""
     try:
-        existing = set(inspect(db.get_bind()).get_table_names())
+        schema = inspect(db.get_bind())
+        existing = set(schema.get_table_names())
+        session_columns = (
+            {str(column["name"]) for column in schema.get_columns("admin_profile_sessions")}
+            if "admin_profile_sessions" in existing
+            else set()
+        )
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -87,13 +108,15 @@ def _ensure_schema(db: Session) -> None:
         ) from exc
 
     missing = sorted(REQUIRED_SCHEMA_TABLES - existing)
-    if missing:
+    missing_columns = sorted(REQUIRED_SESSION_COLUMNS - session_columns)
+    if missing or missing_columns:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "ADMIN_PROFILE_SCHEMA_NOT_MIGRATED",
                 "message": "Run Alembic migrations before using Admin profile.",
                 "missing_tables": missing,
+                "missing_session_columns": missing_columns,
             },
         )
 
@@ -188,19 +211,49 @@ def _eligible_grant(db: Session, *, amo_id: str, user_id: str, now: datetime) ->
     return dict(row) if row else None
 
 
-def _active_session(db: Session, *, amo_id: str, user_id: str, now: datetime) -> dict[str, Any] | None:
+def _active_session(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    auth_session_id: str,
+    implicit_admin: bool,
+    now: datetime,
+) -> dict[str, Any] | None:
     row = db.execute(
         text("""
-            SELECT id, grant_id, activated_at, expires_at
-            FROM admin_profile_sessions
-            WHERE amo_id = :amo_id
-              AND user_id = :user_id
-              AND revoked_at IS NULL
-              AND expires_at > :now
-            ORDER BY activated_at DESC
+            SELECT s.id, s.grant_id, s.activated_at, s.expires_at
+            FROM admin_profile_sessions s
+            LEFT JOIN admin_access_grants g ON g.id = s.grant_id
+            WHERE s.amo_id = :amo_id
+              AND s.user_id = :user_id
+              AND s.auth_session_id = :auth_session_id
+              AND s.revoked_at IS NULL
+              AND s.expires_at > :now
+              AND (
+                (
+                  :implicit_admin = TRUE
+                  AND s.grant_id IS NULL
+                )
+                OR (
+                  s.grant_id IS NOT NULL
+                  AND g.amo_id = s.amo_id
+                  AND g.user_id = s.user_id
+                  AND g.status = 'ACTIVE'
+                  AND (g.valid_from IS NULL OR g.valid_from <= :now)
+                  AND (g.valid_until IS NULL OR g.valid_until > :now)
+                )
+              )
+            ORDER BY s.activated_at DESC
             LIMIT 1
         """),
-        {"amo_id": amo_id, "user_id": user_id, "now": now},
+        {
+            "amo_id": amo_id,
+            "user_id": user_id,
+            "auth_session_id": auth_session_id,
+            "implicit_admin": implicit_admin,
+            "now": now,
+        },
     ).mappings().first()
     return dict(row) if row else None
 
@@ -208,6 +261,7 @@ def _active_session(db: Session, *, amo_id: str, user_id: str, now: datetime) ->
 def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]:
     _ensure_schema(db)
     now = _utcnow()
+    auth_session_id = _auth_session_id(user)
     db.execute(
         text("""
             UPDATE admin_profile_sessions
@@ -232,11 +286,18 @@ def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]
     )
     implicit = _is_implicit_admin(user)
     grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
-    session = _active_session(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
+    session = _active_session(
+        db,
+        amo_id=str(amo.id),
+        user_id=str(user.id),
+        auth_session_id=auth_session_id,
+        implicit_admin=implicit,
+        now=now,
+    )
     eligible = implicit or grant is not None
     return {
         "eligible": eligible,
-        "active": bool(eligible and session),
+        "active": bool(session),
         "session_id": session.get("id") if session else None,
         "expires_at": session.get("expires_at") if session else None,
         "grant_type": "PERMANENT" if implicit else (grant.get("grant_type") if grant else None),
@@ -283,6 +344,7 @@ def activate_admin_profile(
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
     now = _utcnow()
+    auth_session_id = _auth_session_id(current_user)
     implicit = _is_implicit_admin(current_user)
     grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(current_user.id), now=now)
     if not implicit and not grant:
@@ -292,9 +354,17 @@ def activate_admin_profile(
         text("""
             UPDATE admin_profile_sessions
             SET revoked_at = :now
-            WHERE amo_id = :amo_id AND user_id = :user_id AND revoked_at IS NULL
+            WHERE amo_id = :amo_id
+              AND user_id = :user_id
+              AND auth_session_id = :auth_session_id
+              AND revoked_at IS NULL
         """),
-        {"now": now, "amo_id": str(amo.id), "user_id": str(current_user.id)},
+        {
+            "now": now,
+            "amo_id": str(amo.id),
+            "user_id": str(current_user.id),
+            "auth_session_id": auth_session_id,
+        },
     )
     expires_at = now + timedelta(minutes=SESSION_DURATION_MINUTES)
     grant_valid_until = _as_utc(grant.get("valid_until")) if grant else None
@@ -304,10 +374,10 @@ def activate_admin_profile(
     db.execute(
         text("""
             INSERT INTO admin_profile_sessions (
-                id, amo_id, user_id, grant_id, activated_at,
+                id, amo_id, user_id, auth_session_id, grant_id, activated_at,
                 expires_at, revoked_at, created_at
             ) VALUES (
-                :id, :amo_id, :user_id, :grant_id, :activated_at,
+                :id, :amo_id, :user_id, :auth_session_id, :grant_id, :activated_at,
                 :expires_at, NULL, :created_at
             )
         """),
@@ -315,6 +385,7 @@ def activate_admin_profile(
             "id": session_id,
             "amo_id": str(amo.id),
             "user_id": str(current_user.id),
+            "auth_session_id": auth_session_id,
             "grant_id": grant.get("id") if grant else None,
             "activated_at": now,
             "expires_at": expires_at,
@@ -329,6 +400,7 @@ def activate_admin_profile(
         grant_id=grant.get("id") if grant else None,
         session_id=session_id,
         event_type="ADMIN_PROFILE_ACTIVATED",
+        detail=f"Authentication session {auth_session_id}",
     )
     db.commit()
     return _state(db, amo=amo, user=current_user)
@@ -344,13 +416,22 @@ def deactivate_admin_profile(
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
     now = _utcnow()
+    auth_session_id = _auth_session_id(current_user)
     db.execute(
         text("""
             UPDATE admin_profile_sessions
             SET revoked_at = :now
-            WHERE amo_id = :amo_id AND user_id = :user_id AND revoked_at IS NULL
+            WHERE amo_id = :amo_id
+              AND user_id = :user_id
+              AND auth_session_id = :auth_session_id
+              AND revoked_at IS NULL
         """),
-        {"now": now, "amo_id": str(amo.id), "user_id": str(current_user.id)},
+        {
+            "now": now,
+            "amo_id": str(amo.id),
+            "user_id": str(current_user.id),
+            "auth_session_id": auth_session_id,
+        },
     )
     _record_event(
         db,
@@ -358,6 +439,7 @@ def deactivate_admin_profile(
         actor_user_id=str(current_user.id),
         subject_user_id=str(current_user.id),
         event_type="ADMIN_PROFILE_DEACTIVATED",
+        detail=f"Authentication session {auth_session_id}",
     )
     db.commit()
     return _state(db, amo=amo, user=current_user)
@@ -578,9 +660,9 @@ def revoke_admin_grant(
         text("""
             UPDATE admin_profile_sessions
             SET revoked_at = :now
-            WHERE amo_id = :amo_id AND user_id = :user_id AND revoked_at IS NULL
+            WHERE grant_id = :grant_id AND revoked_at IS NULL
         """),
-        {"now": now, "amo_id": str(amo.id), "user_id": str(grant["user_id"])},
+        {"now": now, "grant_id": grant_id},
     )
     _record_event(
         db,
