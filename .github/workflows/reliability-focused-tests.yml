@@ -1,0 +1,77 @@
+name: Reliability Focused Regressions
+
+on:
+  push:
+    branches: [agent/reliability-v2-collectors-prep]
+    paths: [docs/reliability/.focused-tests-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      WRITE_DATABASE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: reliability-focused-tests
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-collectors-prep
+          fetch-depth: 0
+      - name: Reconstruct tested Reliability backend
+        run: |
+          git checkout 00851d2556c2ec6ac0525dc7c4f3648812c171ab -- backend/amodb/apps/reliability backend/amodb/main.py
+          git checkout HEAD -- \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py \
+            backend/scripts/apply_reliability_internal_collectors.py
+          python backend/scripts/apply_reliability_internal_collectors.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install and test
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/rel-focused
+          pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt > /tmp/rel-focused/pip.log 2>&1
+          A=$?
+          python -m py_compile backend/amodb/apps/reliability/internal_collectors.py backend/amodb/apps/reliability/advanced_services.py backend/amodb/apps/reliability/tests/test_internal_collectors.py backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py > /tmp/rel-focused/compile.log 2>&1
+          B=$?
+          (cd backend && pytest -q amodb/apps/reliability/tests/test_internal_collectors.py amodb/apps/reliability/tests/test_merge_readiness_contracts.py) > /tmp/rel-focused/tests.log 2>&1
+          C=$?
+          {
+            echo '# Reliability Focused Regression Proof'
+            echo
+            echo "- Run: \`${GITHUB_RUN_ID}\`"
+            echo
+            echo '| Stage | Exit |'
+            echo '|---|---:|'
+            echo "| pip | $A |"
+            echo "| compile | $B |"
+            echo "| tests | $C |"
+            echo
+            echo '## Tests'
+            echo '```text'
+            tail -n 220 /tmp/rel-focused/tests.log
+            echo '```'
+          } > /tmp/rel-focused/report.md
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p docs/reliability
+          cp /tmp/rel-focused/report.md docs/reliability/FOCUSED_TESTS.md
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/FOCUSED_TESTS.md
+          git commit -m 'Record focused Reliability regression proof'
+          git push origin HEAD:agent/reliability-v2-collectors-prep
