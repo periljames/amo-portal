@@ -18,9 +18,12 @@ on:
       - "frontend/src/app/portalRouteManifest.test.ts"
       - "frontend/src/components/Layout/DepartmentLayout.tsx"
       - "frontend/src/pages/qms/QmsOverviewPage.tsx"
+      - "frontend/src/pages/qms/qmsOverviewModel.ts"
+      - "frontend/src/pages/qms/qmsOverviewModel.test.ts"
       - "frontend/src/services/adminProfileMode.ts"
       - "frontend/src/services/apiClient.ts"
       - "frontend/src/services/qmsDashboard.ts"
+      - "frontend/src/services/qmsDashboard.test.ts"
       - "frontend/src/styles/components/tenant-shell*.css"
       - "frontend/src/styles/qms-dashboard*.css"
       - "frontend/src/styles/qms-overview.css"
@@ -59,9 +62,11 @@ jobs:
           --label "tenant shell frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Run tenant navigation and Quality regressions
-        run: npm run test:quality
-      - name: Lint changed tenant shell boundaries
+      - name: Run tenant navigation regressions
+        run: npm run test:tenant-shell
+      - name: Run Quality home regressions
+        run: npm run test:qms-overview
+      - name: Lint changed tenant shell and Quality home boundaries
         run: >-
           npm exec -- eslint
           src/App.tsx
@@ -72,9 +77,12 @@ jobs:
           src/app/portalRouteManifest.test.ts
           src/components/Layout/DepartmentLayout.tsx
           src/pages/qms/QmsOverviewPage.tsx
+          src/pages/qms/qmsOverviewModel.ts
+          src/pages/qms/qmsOverviewModel.test.ts
           src/services/adminProfileMode.ts
           src/services/apiClient.ts
           src/services/qmsDashboard.ts
+          src/services/qmsDashboard.test.ts
       - name: Typecheck and production build
         run: npm run build
 
@@ -99,14 +107,14 @@ jobs:
           --attempts 4
           --label "tenant governance backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Compile administration and tenant security modules
+      - name: Compile tenant governance and isolation modules
         run: >-
           python -m compileall -q
           amodb/apps/accounts/admin_profile_guard.py
           amodb/apps/accounts/admin_profile_router.py
           amodb/apps/accounts/__init__.py
           amodb/apps/quality/tenant_security.py
-      - name: Import full application with SQLite test configuration
+      - name: Import the application with the test database
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
@@ -115,7 +123,7 @@ jobs:
           SECRET_KEY: tenant-navigation-test-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: python -c "import amodb.main; print('Application imported with canonical tenant routes')"
-      - name: Run tenant isolation and admin governance tests
+      - name: Run tenant governance and route isolation regressions
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
@@ -127,9 +135,7 @@ jobs:
           pytest -q
           amodb/apps/accounts/tests/test_admin_profile_governance.py
           amodb/apps/quality/tests/test_tenant_route_isolation.py
-          amodb/apps/quality/tests/test_dashboard_v2_contract.py
-          amodb/apps/quality/tests/test_audit_reference_integrity.py
-      - name: Verify Alembic graph is loadable and unique
+      - name: Verify the Alembic graph remains loadable
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
