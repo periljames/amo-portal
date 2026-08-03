@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 
 from amodb.apps.accounts.admin_profile_access import active_admin_profile_session
 from amodb.apps.accounts.department_home_router import (
@@ -15,7 +17,10 @@ from amodb.apps.accounts.department_home_router import (
     _is_overdue,
     _normalise_department,
     _safe_task_route,
+    router as department_home_router,
 )
+from amodb.database import get_db, get_read_db
+from amodb.security import get_current_active_user, get_current_user
 
 
 def user(**overrides):
@@ -75,6 +80,24 @@ def test_simple_department_actions_stay_inside_their_own_route_namespace() -> No
     for department in ("safety", "stores", "workshops"):
         assert QUICK_ACTIONS[department]
         assert all(suffix.startswith(f"/{department}/") for _label, _description, suffix in QUICK_ACTIONS[department])
+
+
+def test_security_identity_and_role_dependencies_use_the_writer_database() -> None:
+    assert signature(get_current_user).parameters["db"].default.dependency is get_db
+    assert signature(get_current_active_user).parameters["db"].default.dependency is get_db
+
+
+def test_department_home_uses_writer_for_authorization_and_replica_for_payload() -> None:
+    routes = [
+        route
+        for route in department_home_router.routes
+        if isinstance(route, APIRoute) and route.path == "/home/{amo_code}/{department}"
+    ]
+    assert len(routes) == 1
+    direct_dependencies = {dependency.call for dependency in routes[0].dependant.dependencies}
+    assert get_current_active_user in direct_dependencies
+    assert get_db in direct_dependencies
+    assert get_read_db in direct_dependencies
 
 
 def test_role_driven_access_does_not_open_unrelated_departments(monkeypatch) -> None:
