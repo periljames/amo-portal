@@ -7,12 +7,20 @@ ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT / "backend/amodb/alembic/env.py"
 
 
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"Expected one {label}, found {count}")
+    return text.replace(old, new, 1)
+
+
 def main() -> None:
     text = ENV_PATH.read_text(encoding="utf-8")
-    text = text.replace(
+    text = replace_once(
+        text,
         "from sqlalchemy import inspect, pool, text  # kept for compatibility with typical alembic templates",
         "from sqlalchemy import MetaData, inspect, pool, text  # kept for compatibility with typical alembic templates",
-        1,
+        "SQLAlchemy metadata import",
     )
     anchor = "# Target metadata for 'autogenerate'\ntarget_metadata = Base.metadata\n"
     replacement = '''def _build_reliability_metadata() -> MetaData:
@@ -54,11 +62,41 @@ target_metadata = (
     else Base.metadata
 )
 '''
-    if anchor not in text:
-        raise RuntimeError("Alembic target_metadata anchor not found")
-    text = text.replace(anchor, replacement, 1)
+    text = replace_once(text, anchor, replacement, "Alembic target_metadata anchor")
+
+    online_anchor = '''            compare_type=True,
+            compare_server_default=True,
+            # You can add include_object / process_revision_directives here later if needed.
+'''
+    online_replacement = '''            compare_type=True,
+            compare_server_default=True,
+            include_object=_reliability_include_object,
+'''
+    text = replace_once(
+        text,
+        online_anchor,
+        online_replacement,
+        "online Reliability include_object configuration",
+    )
+
+    offline_anchor = '''        compare_type=True,
+        compare_server_default=True,
+    )
+'''
+    if "include_object=_reliability_include_object" not in text.split("def run_migrations_offline", 1)[1].split("def _assert_no_duplicate_revisions", 1)[0]:
+        text = replace_once(
+            text,
+            offline_anchor,
+            '''        compare_type=True,
+        compare_server_default=True,
+        include_object=_reliability_include_object,
+    )
+''',
+            "offline Reliability include_object configuration",
+        )
+
     ENV_PATH.write_text(text, encoding="utf-8")
-    print("Reliability Alembic autogeneration isolated from unrelated metadata.")
+    print("Reliability Alembic autogeneration isolated in offline and online contexts.")
 
 
 if __name__ == "__main__":
