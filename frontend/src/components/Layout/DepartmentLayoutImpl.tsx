@@ -61,6 +61,7 @@ import {
   activateAdminProfile,
   deactivateAdminProfile,
   fetchAdminProfileState,
+  onAdminProfileChange,
   readCachedAdminProfileState,
   type AdminProfileState,
 } from "../../services/adminProfileMode";
@@ -391,11 +392,21 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
   useEffect(() => {
     let active = true;
+    const unsubscribe = onAdminProfileChange(({ amoCode: changedAmoCode, userId, state }) => {
+      if (!active || userId !== currentUser?.id) return;
+      if (changedAmoCode.trim().toLowerCase() !== amoCode.trim().toLowerCase()) return;
+      setAdminProfile(state);
+    });
+
     fetchAdminProfileState(amoCode)
       .then((state) => { if (active) setAdminProfile(state); })
       .catch(() => { if (active) setAdminProfile((previous) => previous || { eligible: false, active: false }); });
-    return () => { active = false; };
-  }, [amoCode]);
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [amoCode, currentUser?.id]);
 
   useEffect(() => {
     document.documentElement.dataset.portalAccent = accent;
