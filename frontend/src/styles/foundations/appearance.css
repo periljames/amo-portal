@@ -1,0 +1,108 @@
+/* User appearance preferences are applied as data attributes on html and body. */
+
+:root {
+  --portal-density-scale: 1;
+  --portal-page-padding: 0.7rem;
+  --portal-page-gap: 0.7rem;
+  --portal-control-height: 36px;
+  --portal-row-height: 42px;
+  --portal-motion-fast: 120ms;
+  --portal-motion-normal: 180ms;
+  --portal-motion-slow: 260ms;
+}
+
+:root[data-portal-density="compact"],
+body[data-portal-density="compact"] {
+  --portal-density-scale: 0.88;
+  --portal-page-padding: 0.48rem;
+  --portal-page-gap: 0.5rem;
+  --portal-control-height: 32px;
+  --portal-row-height: 35px;
+}
+
+:root[data-portal-density="comfortable"],
+body[data-portal-density="comfortable"] {
+  --portal-density-scale: 1;
+  --portal-page-padding: 0.7rem;
+  --portal-page-gap: 0.7rem;
+  --portal-control-height: 36px;
+  --portal-row-height: 42px;
+}
+
+:root[data-portal-density="compact"] .tenant-shell__content,
+body[data-portal-density="compact"] .tenant-shell__content {
+  padding: var(--portal-page-padding);
+}
+
+:root[data-portal-density="compact"] :where(
+  .section-card,
+  .dashboard-card,
+  .admin-panel,
+  .qms-panel,
+  .qms-dashboard-panel,
+  .training-panel,
+  .planning-panel,
+  .production-panel
+),
+body[data-portal-density="compact"] :where(
+  .section-card,
+  .dashboard-card,
+  .admin-panel,
+  .qms-panel,
+  .qms-dashboard-panel,
+  .training-panel,
+  .planning-panel,
+  .production-panel
+) {
+  --space-4: 12px;
+  --space-5: 18px;
+}
+
+:root[data-portal-density="compact"] :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  button,
+  .btn
+),
+body[data-portal-density="compact"] :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  button,
+  .btn
+) {
+  min-height: min(var(--portal-control-height), 100%);
+}
+
+:root[data-portal-density="compact"] :where(.data-table, .admin-table, .qms-table) :where(th, td),
+body[data-portal-density="compact"] :where(.data-table, .admin-table, .qms-table) :where(th, td) {
+  padding-block: 0.42rem;
+}
+
+:root[data-portal-motion="reduced"] *,
+:root[data-portal-motion="reduced"] *::before,
+:root[data-portal-motion="reduced"] *::after,
+body[data-portal-motion="reduced"] *,
+body[data-portal-motion="reduced"] *::before,
+body[data-portal-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+}
+
+:root[data-portal-motion="full"],
+body[data-portal-motion="full"] {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-portal-motion="full"]) *,
+  :root:not([data-portal-motion="full"]) *::before,
+  :root:not([data-portal-motion="full"]) *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
