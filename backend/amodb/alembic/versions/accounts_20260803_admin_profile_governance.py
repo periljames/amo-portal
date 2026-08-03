@@ -128,6 +128,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("amo_id", sa.String(length=36), nullable=False),
         sa.Column("user_id", sa.String(length=36), nullable=False),
+        sa.Column("auth_session_id", sa.String(length=64), nullable=False),
         sa.Column("grant_id", sa.String(length=36), nullable=True),
         sa.Column("activated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
@@ -150,6 +151,12 @@ def upgrade() -> None:
         "ix_admin_profile_sessions_amo_user",
         "admin_profile_sessions",
         ["amo_id", "user_id", "expires_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_admin_profile_sessions_auth_session",
+        "admin_profile_sessions",
+        ["amo_id", "user_id", "auth_session_id", "expires_at"],
         unique=False,
     )
     op.create_index(
@@ -227,6 +234,10 @@ def downgrade() -> None:
 
     op.drop_index(
         "ix_admin_profile_sessions_grant",
+        table_name="admin_profile_sessions",
+    )
+    op.drop_index(
+        "ix_admin_profile_sessions_auth_session",
         table_name="admin_profile_sessions",
     )
     op.drop_index(
