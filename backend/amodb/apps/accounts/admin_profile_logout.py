@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import Depends
 from sqlalchemy import text
@@ -36,29 +37,36 @@ def revoke_admin_profile_on_logout(
                 ),
                 {"now": now, "user_id": str(current_user.id)},
             )
+    except SQLAlchemyError:
+        # Token revocation is still authoritative when the optional governance
+        # schema is unavailable during development or disaster recovery.
+        return
+
+    amo_id = getattr(current_user, "amo_id", None)
+    if not amo_id:
+        return
+    try:
+        with db.begin_nested():
             db.execute(
                 text(
                     """
                     INSERT INTO admin_access_events (
                         id, amo_id, actor_user_id, subject_user_id, grant_id,
                         session_id, event_type, detail, created_at
-                    )
-                    SELECT
-                        CAST(:event_id AS VARCHAR), CAST(:amo_id AS VARCHAR),
-                        CAST(:user_id AS VARCHAR), CAST(:user_id AS VARCHAR),
-                        NULL, NULL, 'ADMIN_PROFILE_REVOKED_ON_LOGOUT',
+                    ) VALUES (
+                        :event_id, :amo_id, :user_id, :user_id, NULL,
+                        NULL, 'ADMIN_PROFILE_REVOKED_ON_LOGOUT',
                         'Authentication session ended', :now
-                    WHERE :amo_id IS NOT NULL
+                    )
                     """
                 ),
                 {
-                    "event_id": __import__("uuid").uuid4().hex,
-                    "amo_id": str(current_user.amo_id) if getattr(current_user, "amo_id", None) else None,
+                    "event_id": str(uuid4()),
+                    "amo_id": str(amo_id),
                     "user_id": str(current_user.id),
                     "now": now,
                 },
             )
     except SQLAlchemyError:
-        # Token revocation is still authoritative when the optional governance
-        # schema is unavailable during development or disaster recovery.
+        # Security revocation must not depend on optional audit-event storage.
         return
