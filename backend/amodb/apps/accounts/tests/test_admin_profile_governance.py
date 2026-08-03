@@ -26,6 +26,7 @@ from amodb.apps.accounts.admin_profile_router import (
 )
 from amodb.apps.accounts.models import AccountRole
 from amodb.apps.accounts.router_admin import router as protected_admin_router
+from amodb.apps.accounts.router_amo_assets import router as amo_assets_router
 from amodb.apps.accounts.router_public import router as public_router
 from amodb.security import require_admin, require_roles
 
@@ -130,6 +131,23 @@ def test_all_registered_tenant_admin_routes_have_profile_dependency() -> None:
         for route in normal_routes
         if require_active_admin_profile not in dependency_calls(route)
     ] == []
+
+
+def test_separately_mounted_amo_asset_mutations_require_profile() -> None:
+    routes = [route for route in amo_assets_router.routes if isinstance(route, APIRoute)]
+    mutations = [
+        route for route in routes
+        if bool((route.methods or set()) & {"POST", "PUT", "PATCH", "DELETE"})
+    ]
+    reads = [route for route in routes if (route.methods or set()) == {"GET"}]
+
+    assert {route.path for route in mutations} >= {
+        "/accounts/amo-assets/logo",
+        "/accounts/amo-assets/template",
+    }
+    assert all(require_active_admin_profile in dependency_calls(route) for route in mutations)
+    assert any(route.path == "/accounts/amo-assets/me" for route in reads)
+    assert all(require_active_admin_profile not in dependency_calls(route) for route in reads)
 
 
 def test_approval_route_locks_grant_before_endpoint_execution() -> None:
