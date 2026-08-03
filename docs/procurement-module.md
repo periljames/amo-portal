@@ -62,7 +62,7 @@ Root: `/api/maintenance/{amo_code}/procurement`
 alembic -c backend/amodb/alembic.ini upgrade heads
 ```
 
-Migrations: `procurement_20260803_full_domain`, `procurement_20260803_document_records`
+Migrations: `procurement_20260803_full_domain`, `procure_20260803_docs`
 
 ## Acceptance checklist
 
