@@ -5,17 +5,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
+from amodb.database import get_db
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
-from amodb.database import get_db
-from amodb.apps.accounts import models as account_models
-from amodb.apps.procurement import service as procurement_service
 
 from . import models, schemas, services
 
 router = APIRouter(
     prefix="",
-    tags=["inventory", "purchasing"],
+    tags=["inventory"],
     dependencies=[Depends(require_module("finance_inventory"))],
 )
 
@@ -24,13 +23,7 @@ INVENTORY_WRITE_ROLES = [
     account_models.AccountRole.STORES,
     account_models.AccountRole.STORES_MANAGER,
     account_models.AccountRole.STOREKEEPER,
-    account_models.AccountRole.PROCUREMENT_OFFICER,
     account_models.AccountRole.QUALITY_INSPECTOR,
-]
-
-PURCHASING_ROLES = [
-    account_models.AccountRole.AMO_ADMIN,
-    account_models.AccountRole.PROCUREMENT_OFFICER,
 ]
 
 
@@ -208,92 +201,3 @@ def list_ledger(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     return services.list_ledger(db, amo_id=_amo_id(current_user), skip=skip, limit=limit)
-
-
-@router.post(
-    "/purchasing/purchase-orders",
-    response_model=schemas.PurchaseOrderRead,
-    status_code=status.HTTP_201_CREATED,
-    deprecated=True,
-)
-def create_purchase_order(
-    payload: schemas.PurchaseOrderCreate,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(require_roles(*PURCHASING_ROLES)),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-):
-    if not payload.idempotency_key and idempotency_key:
-        payload.idempotency_key = idempotency_key
-    po = services.create_purchase_order(
-        db,
-        amo_id=_amo_id(current_user),
-        payload=payload,
-        actor_user_id=current_user.id,
-    )
-    db.commit()
-    db.refresh(po)
-    return po
-
-
-@router.post(
-    "/purchasing/purchase-orders/{purchase_order_id}/approve",
-    response_model=schemas.PurchaseOrderRead,
-    deprecated=True,
-)
-def approve_purchase_order(
-    purchase_order_id: int,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(require_roles(*PURCHASING_ROLES)),
-):
-    amo_id = _amo_id(current_user)
-    # The legacy endpoint remains for integrations, but it can no longer bypass
-    # QMS supplier approval and scope controls.
-    procurement_service.assert_legacy_purchase_order_eligible(
-        db,
-        amo_id=amo_id,
-        purchase_order_id=purchase_order_id,
-    )
-    po = services.approve_purchase_order(
-        db,
-        amo_id=amo_id,
-        purchase_order_id=purchase_order_id,
-        actor_user_id=current_user.id,
-    )
-    db.commit()
-    db.refresh(po)
-    return po
-
-
-@router.post(
-    "/purchasing/goods-receipts",
-    response_model=schemas.GoodsReceiptRead,
-    status_code=status.HTTP_201_CREATED,
-    deprecated=True,
-)
-def create_goods_receipt(
-    payload: schemas.GoodsReceiptCreate,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(require_roles(*INVENTORY_WRITE_ROLES)),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-):
-    if not payload.idempotency_key and idempotency_key:
-        payload.idempotency_key = idempotency_key
-    for line in payload.lines:
-        if line.condition is None:
-            line.condition = models.InventoryConditionEnum.QUARANTINE
-    amo_id = _amo_id(current_user)
-    if payload.purchase_order_id is not None:
-        procurement_service.assert_legacy_purchase_order_eligible(
-            db,
-            amo_id=amo_id,
-            purchase_order_id=payload.purchase_order_id,
-        )
-    receipt = services.create_goods_receipt(
-        db,
-        amo_id=amo_id,
-        payload=payload,
-        actor_user_id=current_user.id,
-    )
-    db.commit()
-    db.refresh(receipt)
-    return receipt
