@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 import psycopg2
 from sqlalchemy.orm import configure_mappers
@@ -70,7 +76,12 @@ def validate_application_and_database() -> None:
     if any("/reliability/v2" in path for path in paths):
         raise RuntimeError("Parallel Reliability v2 route detected")
 
-    parsed = urlparse(os.environ["DATABASE_URL"].replace("postgresql+psycopg2://", "postgresql://"))
+    parsed = urlparse(
+        os.environ["DATABASE_URL"].replace(
+            "postgresql+psycopg2://",
+            "postgresql://",
+        )
+    )
     connection = psycopg2.connect(
         host=parsed.hostname,
         port=parsed.port,
@@ -79,10 +90,14 @@ def validate_application_and_database() -> None:
         password=parsed.password,
     )
     cursor = connection.cursor()
-    cursor.execute("SELECT count(*) FROM auth_capability_definitions WHERE module='reliability'")
+    cursor.execute(
+        "SELECT count(*) FROM auth_capability_definitions WHERE module='reliability'"
+    )
     if cursor.fetchone()[0] != 21:
         raise RuntimeError("Reliability capability seed count is not 21")
-    cursor.execute("SELECT count(*) FROM auth_role_definitions WHERE code LIKE 'RELIABILITY_%'")
+    cursor.execute(
+        "SELECT count(*) FROM auth_role_definitions WHERE code LIKE 'RELIABILITY_%'"
+    )
     if cursor.fetchone()[0] != 4:
         raise RuntimeError("Reliability controlled role count is not four")
     cursor.execute(
@@ -136,7 +151,9 @@ def validate_staged_paths() -> None:
     ]
     if unapproved or wrong_temp_status or artifacts:
         raise RuntimeError(
-            f"Unapproved={unapproved}; temporary-not-deleted={wrong_temp_status}; artifacts={artifacts}"
+            f"Unapproved={unapproved}; "
+            f"temporary-not-deleted={wrong_temp_status}; "
+            f"artifacts={artifacts}"
         )
     if not paths:
         raise RuntimeError("No permanent Reliability changes are staged")
