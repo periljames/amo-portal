@@ -1,0 +1,194 @@
+/* Portal-wide control and overlay contract.
+ * Loaded last so page modules cannot leave white controls on dark surfaces or
+ * dark text on light dialogs. Sizing stays owned by each component; only colour,
+ * readability and safe overflow are normalised here.
+ */
+
+body :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea,
+  [contenteditable="true"]
+) {
+  background: var(--portal-control-bg) !important;
+  border-color: var(--input-border) !important;
+  color: var(--portal-control-text) !important;
+  caret-color: var(--portal-control-text);
+  -webkit-text-fill-color: var(--portal-control-text);
+  box-shadow: none;
+}
+
+body :where(input, textarea)::placeholder {
+  color: var(--portal-control-placeholder) !important;
+  opacity: 1;
+}
+
+body :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea,
+  [contenteditable="true"]
+):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--input-border)) !important;
+}
+
+body :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea,
+  [contenteditable="true"]
+):focus,
+body :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea,
+  [contenteditable="true"]
+):focus-visible {
+  background: var(--portal-control-bg-focus) !important;
+  border-color: var(--accent-primary) !important;
+  color: var(--portal-control-text) !important;
+  outline: 2px solid var(--portal-focus) !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 24%, transparent) !important;
+}
+
+body :where(input, select, textarea, [contenteditable="true"]):disabled,
+body :where(input, select, textarea)[aria-disabled="true"] {
+  background: var(--portal-control-bg-disabled) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+  -webkit-text-fill-color: var(--text-secondary) !important;
+  cursor: not-allowed;
+  opacity: 0.82;
+}
+
+body :where(input, textarea):-webkit-autofill,
+body :where(input, textarea):-webkit-autofill:hover,
+body :where(input, textarea):-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--portal-control-text) !important;
+  caret-color: var(--portal-control-text);
+  box-shadow: 0 0 0 1000px var(--portal-control-bg-focus) inset !important;
+  transition: background-color 9999s ease-out 0s;
+}
+
+body select,
+body select option,
+body select optgroup {
+  background: var(--portal-surface-raised) !important;
+  color: var(--text-primary) !important;
+}
+
+body input[type="file"]::file-selector-button {
+  margin-inline-end: 0.65rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.45rem;
+  background: var(--portal-surface-muted);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+body :where(label, legend, .field-label, .form-label) {
+  color: var(--text-primary);
+}
+
+body :where(.form-hint, .field-hint, .help-text, .input-hint, .muted, .text-muted) {
+  color: var(--text-secondary) !important;
+}
+
+body :where(.form-error, .field-error, [data-field-error="true"]) {
+  color: var(--alert-error-text) !important;
+}
+
+/* Native and application dialogs. */
+body :where(
+  dialog,
+  [role="dialog"],
+  [role="alertdialog"],
+  .modal,
+  .modal-content,
+  .modal-card,
+  .dialog,
+  .dialog-panel,
+  .drawer,
+  .drawer-panel,
+  .popover,
+  .popover-content,
+  .dropdown-menu,
+  .context-menu,
+  .menu-surface,
+  .confirm-dialog,
+  .prompt-dialog
+) {
+  border-color: var(--border-subtle) !important;
+  background-color: var(--portal-surface-raised) !important;
+  color: var(--text-primary) !important;
+}
+
+body :where(
+  dialog,
+  [role="dialog"],
+  [role="alertdialog"],
+  .modal,
+  .dialog,
+  .drawer,
+  .popover,
+  .dropdown-menu,
+  .context-menu
+) :where(h1, h2, h3, h4, h5, h6, label, legend, strong, th) {
+  color: var(--text-primary) !important;
+}
+
+body :where(
+  dialog,
+  [role="dialog"],
+  [role="alertdialog"],
+  .modal,
+  .dialog,
+  .drawer,
+  .popover,
+  .dropdown-menu,
+  .context-menu
+) :where(p, small, .subtitle, .description, .hint) {
+  color: var(--text-secondary) !important;
+}
+
+body :where(dialog, .modal-content, .modal-card, .dialog-panel, .confirm-dialog, .prompt-dialog) {
+  max-width: min(48rem, calc(100vw - 1.5rem));
+  max-height: min(90dvh, 60rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: var(--portal-shadow) !important;
+}
+
+body dialog::backdrop,
+body :where(.modal-backdrop, .dialog-backdrop, .drawer-backdrop, .overlay-backdrop, .scrim) {
+  background: var(--portal-overlay) !important;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+body :where(button, [role="button"]) {
+  font-family: inherit;
+}
+
+body :where(button, [role="button"]):disabled,
+body :where(button, [role="button"])[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+body :where(.btn, .button, button):focus-visible,
+body :where(a, [role="link"]):focus-visible {
+  outline: 2px solid var(--portal-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  body :where(dialog, .modal-content, .modal-card, .dialog-panel, .confirm-dialog, .prompt-dialog) {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    margin: 0.5rem;
+  }
+}
