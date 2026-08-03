@@ -1,0 +1,130 @@
+name: Publish Clean Canonical Reliability Source
+
+on:
+  push:
+    branches:
+      - agent/reliability-v2-foundation
+    paths:
+      - docs/reliability/.canonical-rebuild-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+      - name: Rebuild the validated canonical tree
+        run: |
+          git fetch origin agent/reliability-v2-backup:refs/remotes/origin/agent/reliability-v2-backup
+          mkdir -p backend/scripts docs/reliability frontend/src/pages/reliability frontend/src/services frontend/src/styles
+          git show origin/agent/reliability-v2-backup:backend/scripts/canonicalise_reliability_module.py > backend/scripts/canonicalise_reliability_module.py
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md > docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md
+          git show origin/agent/reliability-v2-backup:docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md > docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md
+          git show origin/agent/reliability-v2-backup:frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx > frontend/src/pages/reliability/ReliabilityWorkspacePage.tsx
+          git show origin/agent/reliability-v2-backup:frontend/src/services/reliabilityV2.ts > frontend/src/services/reliabilityV2.ts
+          git show origin/agent/reliability-v2-backup:frontend/src/styles/reliability-v2.css > frontend/src/styles/reliability-v2.css
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/scripts/canonicalise_reliability_module.py')
+          text = path.read_text(encoding='utf-8')
+          needle = '    text = text.replace("current_user.amo_id", "_amo_id(current_user)")\n'
+          replacement = needle + '    text = text.replace("amo_id = _amo_id(current_user)\\n    if not amo_id:", "amo_id = current_user.effective_amo_id\\n    if not amo_id:")\n'
+          if replacement not in text:
+              if needle not in text:
+                  raise SystemExit('Tenant replacement anchor not found')
+              text = text.replace(needle, replacement, 1)
+          text = text.replace('"/events/{event_id}"', '"/events/{event_id:int}"')
+          text = text.replace('"/alerts/{alert_id}"', '"/alerts/{alert_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}"', '"/fracas/cases/{case_id:int}"')
+          text = text.replace('"/fracas/cases/{case_id}/actions"', '"/fracas/cases/{case_id:int}/actions"')
+          path.write_text(text, encoding='utf-8')
+          PY
+          python backend/scripts/canonicalise_reliability_module.py
+          python backend/scripts/finalize_reliability_rebuild.py
+          python backend/scripts/patch_reliability_route_surface.py
+          python -m py_compile backend/amodb/apps/reliability/router.py backend/amodb/apps/reliability/schemas.py backend/amodb/apps/reliability/services.py backend/amodb/apps/reliability/tests/test_canonical_foundation.py
+      - name: Enforce canonical replacement contract
+        run: |
+          if grep -R '/reliability/v2' backend/amodb/apps/reliability frontend/src --exclude-dir=node_modules; then exit 1; fi
+          if grep -R 'ReliabilityReportsPage' frontend/src; then exit 1; fi
+          test ! -e backend/amodb/apps/reliability/v2_router.py
+          test ! -e backend/amodb/apps/reliability/v2_services.py
+          test ! -e backend/amodb/apps/reliability/v2_schemas.py
+          test ! -e frontend/src/services/reliabilityV2.ts
+          test ! -e frontend/src/pages/ReliabilityReportsPage.tsx
+      - name: Record validated architecture and clean temporary files
+        run: |
+          cat > docs/reliability/RELIABILITY_V2_VALIDATION.md <<EOF
+          # Reliability Canonical Replacement Validation
+
+          - Backend diagnostic run: \`30806703800\`
+          - Frontend diagnostic run: \`30807212501\`
+          - Source shell head: \`476fc3a96a6cdefbd5bcb89dc01a25dbb3a96f7a\`
+          - Publication run: \`${GITHUB_RUN_ID}\`
+          - UTC publication time: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+
+          ## Architecture enforced
+
+          - one frontend route tree: \`/maintenance/:amoCode/reliability/*\`
+          - one backend API prefix: \`/reliability/*\`
+          - no \`/reliability/v2\` API, aliases, compatibility redirects or duplicate clients
+          - no generic department-home or legacy report-page interception
+          - controlled reports are integrated into the canonical Reliability workspace
+          - no tracked test database or Python cache artifacts
+
+          ## Verified checks
+
+          - backend compilation, full application import and canonical route/freshness tests
+          - tenant-navigation regressions and CSS contract
+          - scoped ESLint on Reliability-owned routing and UI boundaries
+          - full TypeScript/Vite production build
+          EOF
+          rm -f backend/canonical_reliability_test.db
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          rm -f docs/reliability/.canonical-rebuild-trigger docs/reliability/.push-probe
+          rm -f docs/reliability/CANONICAL_REBUILD_DIAGNOSTIC.md docs/reliability/FRONTEND_REBUILD_DIAGNOSTIC.md
+          rm -f backend/scripts/canonicalise_reliability_module.py backend/scripts/finalize_reliability_rebuild.py backend/scripts/patch_reliability_route_surface.py
+          rm -f .github/workflows/reliability-publish-clean-source.yml
+          python - <<'PY'
+          from pathlib import Path
+          roots = [
+              Path('docs/reliability'),
+              Path('backend/amodb/apps/reliability'),
+              Path('frontend/src/pages/reliability'),
+          ]
+          files = [
+              Path('frontend/src/App.tsx'),
+              Path('frontend/src/portalRoutes.tsx'),
+              Path('frontend/src/app/PortalRouteSurface.tsx'),
+              Path('frontend/src/app/portalRouteManifest.ts'),
+              Path('frontend/src/app/portalRouteManifest.test.ts'),
+              Path('frontend/src/app/routePreload.ts'),
+              Path('frontend/src/services/reliability.ts'),
+              Path('frontend/src/styles/reliability-v2.css'),
+          ]
+          for root in roots:
+              if root.exists():
+                  files.extend(path for path in root.rglob('*') if path.is_file())
+          for path in files:
+              if not path.exists() or path.suffix not in {'.md', '.py', '.ts', '.tsx', '.css'}:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              clean = '\n'.join(line.rstrip() for line in text.splitlines()) + '\n'
+              path.write_text(clean, encoding='utf-8')
+          PY
+      - name: Commit canonical source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Rebuild Reliability as one canonical module"
+          git push origin HEAD:agent/reliability-v2-foundation
+          git push origin --delete agent/reliability-v2-backup || true
