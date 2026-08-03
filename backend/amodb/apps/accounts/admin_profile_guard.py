@@ -16,6 +16,34 @@ from . import models
 PROFILE_ROUTE_MARKER = "/accounts/admin/admin-profile/"
 
 
+def _normalise_role(user: models.User) -> str:
+    value = getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))
+    return str(value or "").upper()
+
+
+def _is_current_implicit_admin(user: models.User) -> bool:
+    if getattr(user, "is_superuser", False):
+        return False
+    return bool(
+        getattr(user, "is_amo_admin", False)
+        or _normalise_role(user) == "AMO_ADMIN"
+    )
+
+
+def _auth_session_id(user: models.User) -> str:
+    value = str(
+        getattr(user, "auth_session_id", None)
+        or getattr(user, "_auth_session_id", None)
+        or ""
+    ).strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication session identity is unavailable. Sign in again.",
+        )
+    return value
+
+
 def _mark_request_as_admin_profile(user: models.User) -> None:
     """Expose elevation to legacy dependencies without persisting role changes.
 
@@ -59,6 +87,8 @@ def require_active_admin_profile(
         )
 
     now = datetime.now(timezone.utc)
+    auth_session_id = _auth_session_id(current_user)
+    implicit_admin = _is_current_implicit_admin(current_user)
     try:
         session = db.execute(
             text(
@@ -68,12 +98,17 @@ def require_active_admin_profile(
                 LEFT JOIN admin_access_grants g ON g.id = s.grant_id
                 WHERE s.amo_id = :amo_id
                   AND s.user_id = :user_id
+                  AND s.auth_session_id = :auth_session_id
                   AND s.revoked_at IS NULL
                   AND s.expires_at > :now
                   AND (
-                    s.grant_id IS NULL
+                    (
+                      :implicit_admin = TRUE
+                      AND s.grant_id IS NULL
+                    )
                     OR (
-                      g.amo_id = s.amo_id
+                      s.grant_id IS NOT NULL
+                      AND g.amo_id = s.amo_id
                       AND g.user_id = s.user_id
                       AND g.status = 'ACTIVE'
                       AND (g.valid_from IS NULL OR g.valid_from <= :now)
@@ -87,6 +122,8 @@ def require_active_admin_profile(
             {
                 "amo_id": str(amo_id),
                 "user_id": str(current_user.id),
+                "auth_session_id": auth_session_id,
+                "implicit_admin": implicit_admin,
                 "now": now,
             },
         ).first()
