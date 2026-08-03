@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { isAuthenticated } from "../services/auth";
 import PortalRoutes from "../portalRoutes";
@@ -19,6 +19,7 @@ const DEPARTMENT_HOMES = new Set([
   "stores",
   "workshops",
 ]);
+const SIMPLE_DEPARTMENT_VIEWS = new Set(["operations", "settings"]);
 
 function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean).map((value) => {
@@ -63,42 +64,66 @@ export const AppRouter: React.FC = () => {
   const module = parts[2] || "";
   const view = parts[3] || "";
 
-  if (parts.length === 3 && DEPARTMENT_HOMES.has(module)) {
+  if (
+    DEPARTMENT_HOMES.has(module)
+    && (parts.length === 3 || (parts.length === 4 && SIMPLE_DEPARTMENT_VIEWS.has(view)))
+  ) {
     return (
-      <AuthenticatedSurface amoCode={amoCode} label={`${module} home`}>
-        <DepartmentHomePage />
-      </AuthenticatedSurface>
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/:department"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label={`${module} home`}>
+              <DepartmentHomePage />
+            </AuthenticatedSurface>
+          }
+        />
+        <Route
+          path="/maintenance/:amoCode/:department/:section"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label={`${module} workspace`}>
+              <DepartmentHomePage />
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
     );
   }
 
   if (module === "reliability" && view === "reports" && parts.length === 4) {
     return (
-      <AuthenticatedSurface amoCode={amoCode} label="reliability reports">
-        <ReliabilityReportsPage />
-      </AuthenticatedSurface>
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/reliability/reports"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="reliability reports">
+              <ReliabilityReportsPage />
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
     );
   }
 
   if (module === "ehm" && parts.length === 4) {
-    if (view === "dashboard") {
+    const surfaces: Record<string, React.ReactElement> = {
+      dashboard: <EhmDashboardPage />,
+      trends: <EhmTrendsPage />,
+      uploads: <EhmUploadsPage />,
+    };
+    const surface = surfaces[view];
+    if (surface) {
       return (
-        <AuthenticatedSurface amoCode={amoCode} label="EHM dashboard">
-          <EhmDashboardPage />
-        </AuthenticatedSurface>
-      );
-    }
-    if (view === "trends") {
-      return (
-        <AuthenticatedSurface amoCode={amoCode} label="EHM trends">
-          <EhmTrendsPage />
-        </AuthenticatedSurface>
-      );
-    }
-    if (view === "uploads") {
-      return (
-        <AuthenticatedSurface amoCode={amoCode} label="EHM uploads">
-          <EhmUploadsPage />
-        </AuthenticatedSurface>
+        <Routes location={location}>
+          <Route
+            path={`/maintenance/:amoCode/ehm/${view}`}
+            element={
+              <AuthenticatedSurface amoCode={amoCode} label={`EHM ${view}`}>
+                {surface}
+              </AuthenticatedSurface>
+            }
+          />
+        </Routes>
       );
     }
   }
