@@ -1,19 +1,17 @@
 # backend/amodb/apps/accounts/__init__.py
 """
-Accounts app
+Accounts app.
 
-Responsible for:
-- Multi-tenant AMO / Department definitions
-- User accounts, roles, and regulatory licence details
-- Staff authorisations (who can sign what, for which aircraft/checks)
-- Account security events (login, lockout, reset)
-- Public auth endpoints (login, password reset, first superuser)
-- Admin endpoints (manage AMOs, departments, users, authorisations)
-
-Other apps (fleet, work, crs, etc.) should depend on these models
-for anything related to "who is allowed to do what".
+Responsible for tenant, department, user, role, authorisation and governed
+administrator-profile records. Importing the package registers the dedicated
+administrator-profile router on the existing accounts administration router so
+there is one mounted accounts surface in the FastAPI application.
 """
 
 from . import models, schemas, services  # noqa: F401
+from .admin_profile_router import router as admin_profile_router
+from . import router_admin as _router_admin
 
-__all__ = ["models", "schemas", "services"]
+_router_admin.router.include_router(admin_profile_router)
+
+__all__ = ["models", "schemas", "services", "admin_profile_router"]
