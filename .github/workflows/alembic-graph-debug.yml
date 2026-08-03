@@ -21,6 +21,7 @@ jobs:
         run: |
           python - <<'PY' > /tmp/alembic-graph-probe.txt
           import ast
+          from collections import defaultdict, deque
           from pathlib import Path
 
           versions = Path('backend/amodb/alembic/versions')
@@ -54,6 +55,11 @@ jobs:
               else:
                   parents[revision] = tuple(parent)
 
+          children = defaultdict(list)
+          for child, values in parents.items():
+              for parent in values:
+                  children[parent].append(child)
+
           referenced = {parent for values in parents.values() for parent in values}
           heads = sorted(set(revisions) - referenced)
           unresolved = sorted(parent for parent in referenced if parent not in revisions)
@@ -64,6 +70,38 @@ jobs:
           print('UNRESOLVED')
           for parent in unresolved:
               print(f'  {parent}')
+
+          target = 'procurement_20260803_full_domain'
+          print('DIRECT_CHILDREN_OF_PROCUREMENT_FULL_DOMAIN')
+          for child in sorted(children.get(target, [])):
+              print(f'  {child} :: {revisions.get(child)} :: parents={parents.get(child)}')
+
+          print('DESCENDANTS_OF_PROCUREMENT_FULL_DOMAIN')
+          queue = deque([(target, 0)])
+          seen = {target}
+          while queue:
+              parent, depth = queue.popleft()
+              for child in sorted(children.get(parent, [])):
+                  if child in seen:
+                      continue
+                  seen.add(child)
+                  print(f'  {"  " * depth}{child} :: {revisions.get(child)} :: parents={parents.get(child)}')
+                  queue.append((child, depth + 1))
+
+          print('ANCESTRY_FROM_HEADS')
+          for head in heads:
+              print(f'  HEAD {head}')
+              queue = deque([(head, 0)])
+              seen = set()
+              while queue:
+                  revision, depth = queue.popleft()
+                  if revision in seen or depth > 18:
+                      continue
+                  seen.add(revision)
+                  print(f'    {"  " * depth}{revision} :: {revisions.get(revision, "missing")} :: parents={parents.get(revision, ())}')
+                  for parent in parents.get(revision, ()):
+                      queue.append((parent, depth + 1))
+
           print('PROCUREMENT_CHAIN')
           for revision, filename in sorted(revisions.items()):
               if 'procure' in revision.lower() or 'procure' in filename.lower():
@@ -77,5 +115,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/alembic-graph-probe.txt
-          git commit -m "Record Alembic source graph probe"
+          git commit -m "Record detailed Alembic source graph probe"
           git push origin HEAD:agent/procurement-ux-document-control-review
