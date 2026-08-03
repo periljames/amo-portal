@@ -155,7 +155,7 @@ export function getUserCapabilities(
   if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "AUDITOR") caps.add("quality");
   if (role === "SAFETY_MANAGER") caps.add("safety");
   if (role === "PROCUREMENT_OFFICER") caps.add("procurement");
-  if (["STORES", "STORES_MANAGER", "STOREKEEPER"].includes(role)) caps.add("stores");
+  if ((["STORES", "STORES_MANAGER", "STOREKEEPER"] as AccountRole[]).includes(role)) caps.add("stores");
   if (role === "VIEW_ONLY") caps.add("viewer");
   if (hasHrTitle(user, assignedDepartment) || role === "FINANCE_MANAGER" || role === "ACCOUNTS_OFFICER") caps.add("hr");
 
