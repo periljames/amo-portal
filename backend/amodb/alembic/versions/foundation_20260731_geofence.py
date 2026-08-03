@@ -15,7 +15,10 @@ from alembic import op
 revision: str = "foundation_20260731_geofence"
 down_revision: Union[str, Sequence[str], None] = "saas_20260731_route_latency_hist"
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+# The geofence columns extend the shared-foundations table created on the
+# rostering/foundations branch. Declaring the dependency makes clean upgrades
+# deterministic while the table guard keeps legacy stamped databases safe.
+depends_on: Union[str, Sequence[str], None] = "phase0_20260604"
 
 
 def _has_table(name: str) -> bool:
@@ -29,6 +32,9 @@ def _columns(name: str) -> set[str]:
 
 
 def upgrade() -> None:
+    if not _has_table("base_stations"):
+        return
+
     columns = _columns("base_stations")
     additions = [
         ("latitude", sa.Float(), True, None),

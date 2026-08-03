@@ -1,4 +1,10 @@
-import { authHeaders, endSession, getCachedUser } from "./auth";
+import {
+  authHeaders,
+  extendSessionIfNeeded,
+  getCachedUser,
+  handleAuthFailure,
+  markSessionActivity,
+} from "./auth";
 import { getApiBaseUrl } from "./config";
 
 export type PlatformList<T> = { items: T[]; total?: number; limit?: number; offset?: number };
@@ -123,6 +129,28 @@ export type SupportTicket = {
     created_at: string;
   }>;
 };
+export type PlatformApiKey = {
+  id: string;
+  name: string;
+  key_prefix: string;
+  status: string;
+  scopes_json?: string[] | null;
+  created_at?: string;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  raw_key?: string;
+};
+export type PlatformWebhook = {
+  id: string;
+  name: string;
+  event_type: string;
+  target_url: string;
+  status: string;
+  tenant_id?: string | null;
+  is_global?: boolean;
+  last_delivery_at?: string | null;
+  failure_count?: number;
+};
 
 function platformDevFallbackBase(): string | null {
   if (typeof window === "undefined") return null;
@@ -174,6 +202,10 @@ async function rawRequest(path: string, init: RequestInit, baseOverride?: string
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  markSessionActivity(`platform-control:start:${path}`);
+  const extension = extendSessionIfNeeded(`platform-control:${path}`);
+  if (extension) await extension;
+
   let res = await rawRequest(path, init);
   let contentType = res.headers.get("content-type") || "";
   let text = await res.text().catch(() => "");
@@ -187,7 +219,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (res.status === 401) {
-    endSession("manual");
+    handleAuthFailure("platform-control-unauthorized");
     throw new Error("Session expired. Please sign in again.");
   }
 
@@ -213,6 +245,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (res.status === 204 || res.status === 205) return null as T;
   if (!isJson) throw new Error(describeNonJsonResponse(path, contentType, text));
+  markSessionActivity(`platform-control:success:${path}`);
   return parsed as T;
 }
 
@@ -274,11 +307,11 @@ export const platformApi = {
   runThroughputProbe: (reason = "Manual throughput probe") => request<PlatformCommandJob>("/platform/metrics/run-throughput-probe", { method: "POST", body: JSON.stringify({ reason }) }),
 
   integrationsSummary: () => request<Record<string, unknown>>("/platform/integrations/summary"),
-  apiKeys: () => request<PlatformList<Record<string, unknown>>>("/platform/integrations/api-keys"),
-  createApiKey: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/integrations/api-keys", { method: "POST", body: JSON.stringify(payload) }),
+  apiKeys: () => request<PlatformList<PlatformApiKey>>("/platform/integrations/api-keys"),
+  createApiKey: (payload: Record<string, unknown>) => request<PlatformApiKey>("/platform/integrations/api-keys", { method: "POST", body: JSON.stringify(payload) }),
   revokeApiKey: (id: string, reason: string) => request<Record<string, unknown>>(`/platform/integrations/api-keys/${encodeURIComponent(id)}/revoke`, { method: "POST", body: JSON.stringify({ reason }) }),
-  webhooks: () => request<PlatformList<Record<string, unknown>>>("/platform/integrations/webhooks"),
-  createWebhook: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/integrations/webhooks", { method: "POST", body: JSON.stringify(payload) }),
+  webhooks: () => request<PlatformList<PlatformWebhook>>("/platform/integrations/webhooks"),
+  createWebhook: (payload: Record<string, unknown>) => request<PlatformWebhook>("/platform/integrations/webhooks", { method: "POST", body: JSON.stringify(payload) }),
   providers: () => request<PlatformList<Record<string, unknown>>>("/platform/integrations/providers"),
 
   infrastructureSummary: () => request<Record<string, unknown>>("/platform/infrastructure/summary"),
