@@ -77,25 +77,33 @@ QUICK_ACTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("EHM uploads", "Import engine health data", "/ehm/uploads"),
     ],
     "safety": [
-        ("Safety home", "Review safety tasks and current alerts", "/safety"),
-        ("Quality risk", "Open the governed risk register", "/quality/risk/risk-register"),
-        ("Change control", "Review operational changes", "/quality/change-control/register"),
+        ("Safety operations", "Review assigned safety operations", "/safety/operations"),
+        ("Safety configuration", "Review safety workspace configuration", "/safety/settings"),
     ],
     "stores": [
-        ("Stores home", "Review assigned stores work", "/stores"),
-        ("Parts and tools", "Review maintenance material demand", "/maintenance/parts-tools"),
-        ("Production materials", "Review production material demand", "/production/materials"),
+        ("Stores operations", "Review assigned procurement and stores work", "/stores/operations"),
+        ("Stores configuration", "Review procurement and stores configuration", "/stores/settings"),
     ],
     "workshops": [
-        ("Workshop home", "Review assigned workshop work", "/workshops"),
-        ("Work orders", "Open workshop maintenance work", "/maintenance/work-orders"),
-        ("Inspections", "Review inspection requirements", "/maintenance/inspections"),
+        ("Workshop operations", "Review assigned workshop work", "/workshops/operations"),
+        ("Workshop configuration", "Review workshop configuration", "/workshops/settings"),
     ],
 }
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _is_overdue(value: datetime | None, now: datetime) -> bool:
+    comparable = _as_utc(value)
+    return comparable is not None and comparable < now
 
 
 def _role(user: models.User) -> str:
@@ -277,7 +285,7 @@ def get_department_home(
             "route": _safe_task_route(task, amo_code, department_code),
         }
         for task in assigned
-        if task.due_at and task.due_at < now
+        if _is_overdue(task.due_at, now)
     ][:6]
 
     response.headers["Cache-Control"] = "private, max-age=20, stale-while-revalidate=120"
