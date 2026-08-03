@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -12,6 +13,29 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     if count != 1:
         raise RuntimeError(f"Expected one {label} in {path}, found {count}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def remove_tracked_runtime_artifacts() -> None:
+    completed = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    artifacts = [
+        path
+        for path in completed.stdout.splitlines()
+        if "/__pycache__/" in f"/{path}"
+        or path.endswith(".pyc")
+        or path.endswith("reliability_v2_test.db")
+    ]
+    if artifacts:
+        subprocess.run(
+            ["git", "rm", "-f", "--ignore-unmatch", *artifacts],
+            cwd=ROOT,
+            check=True,
+        )
 
 
 def main() -> None:
@@ -52,6 +76,7 @@ def main() -> None:
             "Reliability diagnostic metadata isolation stage",
         )
 
+    remove_tracked_runtime_artifacts()
     print("Reliability completion blockers corrected.")
 
 
