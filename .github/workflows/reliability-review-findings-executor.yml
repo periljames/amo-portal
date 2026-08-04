@@ -1,0 +1,117 @@
+name: Reliability Review Findings Executor
+
+on:
+  pull_request:
+    branches:
+      - agent/reliability-review-publisher-base
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-review-findings-executor
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/reliability-permanent-hotfix-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reliability_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d reliability_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      ENVIRONMENT: test
+      TESTING: 'true'
+      ALLOW_SQLITE_FOR_TESTS: '1'
+      RELIABILITY_SCHEDULER_ENABLED: 'false'
+      SECRET_KEY: reliability-review-fix-secret
+      JWT_SECRET_KEY: reliability-review-fix-jwt
+      PYTHONPATH: backend
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
+      WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/reliability-permanent-hotfix-v2
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Load base-only correction script
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/reliability-review-publisher-base
+          git show origin/agent/reliability-review-publisher-base:backend/scripts/apply_reliability_review_findings.py > /tmp/apply_reliability_review_findings.py
+          python /tmp/apply_reliability_review_findings.py
+          git diff --check
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Compile, import and test backend
+        run: |
+          python -m compileall -q backend/amodb/apps/reliability backend/amodb/alembic/versions/rel_20260804_calculation_run_revisions.py
+          python - <<'PY'
+          import amodb.main  # noqa: F401
+          from sqlalchemy.orm import configure_mappers
+          configure_mappers()
+          print('application import and mapper configuration passed')
+          PY
+          pytest -q backend/amodb/apps/reliability/tests
+
+      - name: Upgrade clean PostgreSQL and run append-only regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/heads.txt
+          test "$(grep -c '(head)' /tmp/heads.txt)" -eq 1
+          grep -q 'rel_20260804_calc_revisions' /tmp/heads.txt
+          python -m alembic -c backend/amodb/alembic.ini upgrade heads
+          python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validate tenant shell, lint and production build
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit --fund=false
+          npm run test:tenant-shell
+          npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
+          npm run build
+
+      - name: Publish permanent review corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f docs/reliability/.review-findings-kick
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git commit -m 'Address Reliability append-only and delay-range review findings'
+          git push origin HEAD:agent/reliability-permanent-hotfix-v2
