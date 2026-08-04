@@ -46,10 +46,14 @@ jobs:
           --health-retries=10
     env:
       APP_ENV: test
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
       SECRET_KEY: reliability-ci-secret-key-not-for-production
       JWT_SECRET_KEY: reliability-ci-jwt-secret-not-for-production
       PYTHONPATH: backend
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
+      WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
     steps:
       - uses: actions/checkout@v6
         with:
