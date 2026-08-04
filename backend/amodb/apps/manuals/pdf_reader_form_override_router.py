@@ -29,6 +29,7 @@ from .pdf_reader_router import (
     process_completed_pdf,
     read_bounded_pdf_upload,
 )
+from .pdf_static_overlay_router import static_overlay_capabilities
 
 
 router = APIRouter(prefix="/manuals", tags=["Controlled PDF Reader Form Overrides"])
@@ -185,11 +186,23 @@ def pdf_reader_capabilities_override(
         inspection = _inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
-    return _safe_form_capabilities(
+    execution_allowed = can_execute_profile(current_user, execution) if execution is not None else True
+    payload = _safe_form_capabilities(
         execution,
         inspection,
-        execution_allowed=can_execute_profile(current_user, execution) if execution is not None else True,
+        execution_allowed=execution_allowed,
     )
+    overlay = static_overlay_capabilities(
+        current_user,
+        execution,
+        has_javascript=inspection.has_javascript,
+        is_dynamic_xfa=inspection.is_dynamic_xfa,
+        encrypted=inspection.encrypted,
+    )
+    payload.update(overlay)
+    if overlay["can_overlay_fill"] and not inspection.has_acroform:
+        payload["unsupported_reason"] = None
+    return payload
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/flatten.pdf")
