@@ -1,0 +1,205 @@
+.pdf-static-typewriter-controls {
+  position: sticky;
+  z-index: 34;
+  top: calc(var(--portal-sticky-offset, 0px) + 46px);
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 96%, transparent);
+  color: var(--text-primary);
+  backdrop-filter: blur(14px);
+}
+
+.pdf-static-typewriter-controls.is-active {
+  background: color-mix(in srgb, #2563eb 10%, var(--surface-elevated));
+  border-bottom-color: color-mix(in srgb, #2563eb 48%, var(--border-subtle));
+}
+
+.pdf-static-typewriter-controls button {
+  min-height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.73rem;
+  font-weight: 720;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pdf-static-typewriter-controls button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface-elevated));
+}
+
+.pdf-static-typewriter-controls button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.pdf-static-typewriter-controls .pdf-static-typewriter-primary {
+  border-color: color-mix(in srgb, #2563eb 62%, var(--border-subtle));
+  background: color-mix(in srgb, #2563eb 14%, var(--surface-elevated));
+}
+
+.pdf-static-typewriter-controls > span {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.pdf-static-typewriter-controls > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.pdf-static-typewriter-controls > strong {
+  grid-column: 1 / -1;
+  color: var(--alert-error-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pdf-static-typewriter-layer {
+  position: absolute;
+  z-index: 18;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pdf-static-typewriter-layer.is-editing {
+  pointer-events: auto;
+  cursor: crosshair;
+  background: rgba(37, 99, 235, 0.015);
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.22);
+}
+
+.pdf-static-typewriter-field {
+  position: absolute;
+  z-index: 2;
+  min-width: 28px;
+  min-height: 18px;
+  pointer-events: none;
+  color: #0f172a;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: clamp(10px, 0.82vw, 14px);
+  line-height: 1.15;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pdf-static-typewriter-field.has-value:not(:has(textarea)) {
+  padding: 2px 3px;
+  background: rgba(255, 255, 255, 0.16);
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.pdf-static-typewriter-layer.is-editing .pdf-static-typewriter-field {
+  pointer-events: auto;
+  border: 1px solid rgba(37, 99, 235, 0.72);
+  border-radius: 3px;
+  background: rgba(239, 246, 255, 0.78);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+  cursor: text;
+}
+
+.pdf-static-typewriter-field textarea {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  padding: 3px 4px;
+  border: 0;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  font: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.15;
+  overflow: auto;
+  cursor: text;
+}
+
+.pdf-static-typewriter-field textarea:focus {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #2563eb;
+}
+
+.pdf-static-typewriter-drag,
+.pdf-static-typewriter-remove {
+  position: absolute;
+  z-index: 4;
+  width: 20px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(37, 99, 235, 0.55);
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: grab;
+}
+
+.pdf-static-typewriter-drag {
+  top: -19px;
+  left: -1px;
+  border-radius: 4px 4px 0 0;
+  touch-action: none;
+}
+
+.pdf-static-typewriter-drag:active {
+  cursor: grabbing;
+}
+
+.pdf-static-typewriter-remove {
+  top: -19px;
+  right: -1px;
+  border-radius: 4px 4px 0 0;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.pdf-static-typewriter-layer.is-schema-only .pdf-static-typewriter-field {
+  border-style: dashed;
+  border-color: rgba(22, 163, 74, 0.72);
+  background: rgba(240, 253, 244, 0.76);
+}
+
+@media (max-width: 920px) {
+  .pdf-static-typewriter-controls {
+    grid-template-columns: 1fr auto;
+  }
+
+  .pdf-static-typewriter-controls > span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 620px) {
+  .pdf-static-typewriter-controls {
+    position: relative;
+    top: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-static-typewriter-controls > div {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
