@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link2, List, X } from "lucide-react";
 
 import {
@@ -76,6 +76,13 @@ function humanize(value: unknown, fallback = "Pending review"): string {
   return text ? text.replaceAll("_", " ") : fallback;
 }
 
+function searchResultPage(button: Element): number | null {
+  const label = button.querySelector("small")?.textContent || "";
+  const match = label.match(/\bpage\s+(\d+)\b/i);
+  const page = Number(match?.[1] || 0);
+  return Number.isInteger(page) && page > 0 ? page : null;
+}
+
 export default function PublicationPdfLayoutViewer({
   fileUrl,
   title,
@@ -92,11 +99,40 @@ export default function PublicationPdfLayoutViewer({
   onOutlineReady,
 }: PublicationPdfLayoutViewerProps) {
   const identity = useMemo(() => sourceIdentity(fileUrl), [fileUrl]);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
   const [automaticReferences, setAutomaticReferences] = useState<DocumentationReference[]>([]);
   const [indexState, setIndexState] = useState<DocumentationIndexState | null>(null);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(activeReferenceId || null);
   const [referenceListOpen, setReferenceListOpen] = useState(false);
+  const [readerNavigationRequest, setReaderNavigationRequest] = useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+
+  useEffect(() => {
+    if (!navigationRequest) return;
+    setReaderNavigationRequest(navigationRequest);
+  }, [navigationRequest?.page, navigationRequest?.token]);
+
+  useEffect(() => {
+    const layout = layoutRef.current;
+    const page = layout?.closest<HTMLElement>(".publication-reader-page");
+    if (!layout || !page) return;
+
+    const routeIndexedSearchToPdf = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest(".publication-search-results button");
+      if (!button || !page.contains(button)) return;
+      const destination = searchResultPage(button);
+      if (!destination) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setReaderNavigationRequest({ page: destination, token: Date.now() });
+    };
+
+    page.addEventListener("click", routeIndexedSearchToPdf, true);
+    return () => page.removeEventListener("click", routeIndexedSearchToPdf, true);
+  }, []);
 
   useEffect(() => {
     if (!identity || references.length) return;
@@ -144,7 +180,7 @@ export default function PublicationPdfLayoutViewer({
   const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
-    <div className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
+    <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
       <div className="publication-native-pdf">
         {indexing(indexState) ? <div className="pdf-engine-notice">Indexing linked documents…</div> : null}
         {currentReferences.length ? <div className="publication-page-links-control">
@@ -164,7 +200,7 @@ export default function PublicationPdfLayoutViewer({
           filename={`${title}.pdf`}
           identity={identity}
           uncontrolled={uncontrolled}
-          navigationRequest={navigationRequest}
+          navigationRequest={readerNavigationRequest}
           initialPage={initialPage}
           initialZoom={initialZoom}
           onPageChange={(pageNumber) => { setCurrentPage(pageNumber); onPageChange?.(pageNumber); }}
