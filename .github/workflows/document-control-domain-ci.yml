@@ -67,6 +67,7 @@ jobs:
           pytest -q
           amodb/apps/manuals/tests/test_pdf_reader_form_override.py
           amodb/apps/manuals/tests/test_pdf_reader_override_route_order.py
+          amodb/apps/manuals/tests/test_pdf_static_overlay.py
 
   frontend:
     runs-on: ubuntu-latest
