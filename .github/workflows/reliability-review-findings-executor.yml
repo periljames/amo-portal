@@ -114,13 +114,23 @@ jobs:
           npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
           npm run build
 
-      - name: Publish permanent review corrections
+      - name: Publish permanent source and schema corrections
         shell: bash
         run: |
           set -euo pipefail
           rm -f docs/reliability/.review-findings-kick
-          git add -A
+          git add \
+            backend/amodb/alembic/versions/rel_20260804_calculation_run_revisions.py \
+            backend/amodb/apps/reliability/advanced_models.py \
+            backend/amodb/apps/reliability/advanced_services.py \
+            backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py \
+            backend/amodb/apps/reliability/tests/test_review_regressions.py
+          git add -u -- docs/reliability/.review-findings-kick
           git diff --cached --check
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo 'Workflow file was accidentally staged.'
+            exit 1
+          fi
           git config user.name github-actions
           git config user.email actions@github.com
           git commit -m 'Address Reliability append-only and delay-range review findings'
