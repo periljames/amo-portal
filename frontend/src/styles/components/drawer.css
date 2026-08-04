@@ -103,6 +103,7 @@
  */
 @media (min-width: 981px) {
   .drawer-overlay--left:has(.planner-drawer-tabs) {
+    z-index: 120;
     align-items: center;
     justify-content: center;
     padding: calc(var(--tenant-topbar-height, 50px) + var(--s-3)) var(--s-4) var(--s-4);
