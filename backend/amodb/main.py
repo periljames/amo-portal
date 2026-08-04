@@ -27,6 +27,7 @@ from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.accounts.router_onboarding import router as accounts_onboarding_router
+from .apps.fleet.usage_guard_router import router as usage_guard_router
 from .apps.fleet.router import router as fleet_router
 from .apps.maintenance_program.api import router as maintenance_program_router
 from .apps.maintenance_program.revision_router import router as maintenance_program_revision_router
@@ -464,6 +465,7 @@ app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(accounts_onboarding_router)
+app.include_router(usage_guard_router)
 app.include_router(fleet_router)
 app.include_router(maintenance_program_router)
 app.include_router(maintenance_program_revision_router)
