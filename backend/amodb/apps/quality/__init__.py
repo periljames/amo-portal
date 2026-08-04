@@ -10,22 +10,13 @@ from .router import router, public_router  # noqa: F401
 from . import excellence_models as _excellence_models  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
-# They replace narrowly scoped routes on the same exported router objects, so
-# both the full portal and bounded Quality entrypoint receive the corrections.
 from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
 from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
 
 
 def _deduplicate_exact_routes(api_router: APIRouter) -> None:
-    """Remove duplicate decorators that register the same endpoint twice.
-
-    Quality's large compatibility router previously contained an accidental
-    duplicate evidence-pack decorator. FastAPI accepts that shape but publishes
-    duplicate OpenAPI operations and makes route-order behaviour harder to
-    reason about. Preserve legitimately different handlers while collapsing an
-    exact path/method/endpoint duplicate.
-    """
+    """Remove accidental duplicate decorators while preserving distinct handlers."""
 
     unique_routes = []
     seen: set[tuple[str, frozenset[str], int]] = set()
@@ -50,22 +41,41 @@ from . import dashboard_v2 as _dashboard_v2  # noqa: F401,E402
 from . import dashboard_route_order as _dashboard_route_order  # noqa: F401,E402
 
 # Continuous-assurance APIs live under the canonical Quality and legacy QMS
-# tenant prefixes. Register them before main.py imports the exported router
-# objects so the full portal and bounded Quality service expose identical paths.
+# tenant prefixes. The wiring router is intentionally included after the base
+# excellence router; route-order consolidation below gives its stricter,
+# tenant-validated handlers precedence where paths overlap.
 from . import canonical_router as _canonical_router  # noqa: F401,E402
 from . import excellence_router as _excellence_router  # noqa: F401,E402
+from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
 
 
-def _include_once(parent: APIRouter, child: APIRouter, prefix_marker: str) -> None:
-    if any(str(getattr(route_item, "path", "")).startswith(prefix_marker) for route_item in parent.routes):
+def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
+    if any(unique_path_fragment in str(getattr(route_item, "path", "")) for route_item in parent.routes):
         return
     parent.include_router(child)
 
 
-_include_once(_canonical_router.router, _excellence_router.router, "/api/maintenance/{amo_code}/quality/excellence")
-_include_once(_canonical_router.legacy_router, _excellence_router.router, "/api/maintenance/{amo_code}/qms/excellence")
+_include_once(
+    _canonical_router.router,
+    _excellence_router.router,
+    "/api/maintenance/{amo_code}/quality/excellence/overview",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _excellence_router.router,
+    "/api/maintenance/{amo_code}/qms/excellence/overview",
+)
+_include_once(
+    _canonical_router.router,
+    _assurance_wiring_router.router,
+    "/api/maintenance/{amo_code}/quality/excellence/source-catalog",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _assurance_wiring_router.router,
+    "/api/maintenance/{amo_code}/qms/excellence/source-catalog",
+)
 
-# The compatibility router ends with a generic module catch-all. Promote the
-# newly included static assurance endpoints ahead of it so Starlette resolves
-# them as APIs rather than unknown module paths.
+# Promote static assurance APIs ahead of the canonical catch-all and collapse
+# path/method overlaps in favour of the stricter wiring handlers.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
