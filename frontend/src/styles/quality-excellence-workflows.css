@@ -1,109 +1,13 @@
-/* Focused workflow additions for the QMS continuous-assurance control centre. */
-
-html.quality-excellence-active .tenant-shell__content .qms-ops-page,
-html.quality-excellence-active .tenant-shell__content .qms-shell,
-html.quality-excellence-active .tenant-shell__content .quality-dashboard-page {
-  display: none !important;
-}
-
-html.quality-excellence-active .quality-excellence-host,
-html.quality-excellence-active .quality-excellence-host .qe-cockpit {
-  display: grid !important;
-}
-
-.qe-controls-layout--single {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.qe-link-evidence,
-.qe-evidence-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3rem;
-  min-height: 30px !important;
-  padding: 0 0.48rem;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--surface-border));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent-primary) 7%, var(--surface-elevated));
-  color: var(--accent-primary);
-  font-size: 0.66rem !important;
-  font-weight: 760;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.qe-link-evidence:hover,
-.qe-evidence-add:hover {
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface-elevated));
-}
-
-.qe-selected-control {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--surface-border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent-primary) 6%, var(--surface));
-}
-
-.qe-selected-control > svg {
-  color: var(--accent-primary);
-}
-
-.qe-selected-control > span {
-  display: grid;
-  gap: 0.12rem;
-  min-width: 0;
-}
-
-.qe-selected-control small {
-  color: var(--accent-primary);
-  font-size: 0.64rem;
-  font-weight: 820;
-  letter-spacing: 0.04em;
-}
-
-.qe-selected-control strong {
-  overflow: hidden;
-  font-size: 0.77rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qe-evidence-add {
-  border-style: dashed;
-  background: transparent;
-}
-
-.qe-readonly-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.45rem;
-  margin-top: 0.75rem;
-  padding: 0.65rem;
-  border: 1px solid var(--surface-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--text-secondary) 5%, var(--surface));
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-
-.qe-readonly-note > svg {
-  flex: 0 0 auto;
-  margin-top: 0.08rem;
-}
-
-.qe-control-table__state {
-  min-width: 0;
-}
-
-@media (max-width: 900px) {
-  .qe-link-evidence {
-    width: 100%;
-  }
-}
+/*
+ * The Quality Control Centre now owns the QMS root route directly.
+ *
+ * Keep this compatibility stylesheet intentionally free of global hide rules.
+ * The previous overlay implementation used `html.quality-excellence-active` to
+ * suppress the canonical dashboard underneath a portal-mounted cockpit. That
+ * architecture has been removed; hiding `.qms-ops-page`, `.qms-shell`, or
+ * `.quality-dashboard-page` globally would now be unsafe.
+ *
+ * Current Control Centre workflow and responsive styles live in:
+ *   - quality-excellence-cockpit.css
+ *   - quality-excellence-wiring.css
+ */
