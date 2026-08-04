@@ -84,14 +84,17 @@ const AdminSetupWorkflowNavigator: React.FC = () => {
 
   const alignActiveStep = useCallback(() => {
     const active = document.querySelector<HTMLElement>(".setup-resend__step.is-active");
-    if (!active) return;
+    if (!active) {
+      setPortalTarget(null);
+      return;
+    }
     active.scrollIntoView({
       behavior: prefersReducedMotion() ? "auto" : "smooth",
       block: "center",
       inline: "nearest",
     });
     const body = active.querySelector<HTMLElement>(".setup-resend__step-body");
-    setPortalTarget(body?.querySelector(".setup-resend__step-navigation") ? null : body);
+    setPortalTarget((current) => current === body ? current : body);
   }, []);
 
   const correctReadinessPresentation = useCallback(() => {
