@@ -1,5 +1,6 @@
 import React from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { PlanningMigrationPilotPage } from "./PlanningMigrationPilotPage";
 import { PlanningUtilisationPage as PortalUtilisationControlPage } from "./PlanningUtilisationControlPage";
 import { PlanningWinAirIntegrationPage } from "./PlanningWinAirIntegrationPage";
 import "../../styles/winair-integration.css";
@@ -7,20 +8,17 @@ import "../../styles/winair-integration.css";
 export const PlanningUtilisationWorkspacePage: React.FC = () => {
   const { amoCode } = useParams();
   const [searchParams] = useSearchParams();
+  const view = searchParams.get("view");
 
-  if (searchParams.get("view") === "winair") {
-    return <PlanningWinAirIntegrationPage />;
-  }
+  if (view === "winair") return <PlanningWinAirIntegrationPage />;
+  if (view === "migration") return <PlanningMigrationPilotPage />;
 
   return (
     <>
-      <Link
-        className="btn btn-secondary"
-        style={{ position: "fixed", right: "1.25rem", bottom: "1.25rem", zIndex: 40 }}
-        to={`/maintenance/${amoCode}/planning/utilisation-monitoring?view=winair`}
-      >
-        WinAir exchange
-      </Link>
+      <div style={{ position: "fixed", right: "1.25rem", bottom: "1.25rem", zIndex: 40, display: "flex", gap: "0.5rem" }}>
+        <Link className="btn btn-secondary" to={`/maintenance/${amoCode}/planning/utilisation-monitoring?view=migration`}>Migration pilot</Link>
+        <Link className="btn btn-secondary" to={`/maintenance/${amoCode}/planning/utilisation-monitoring?view=winair`}>WinAir exchange</Link>
+      </div>
       <PortalUtilisationControlPage />
     </>
   );
