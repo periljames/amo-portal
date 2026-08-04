@@ -95,7 +95,7 @@ def test_scripted_source_uses_server_sanitized_reader_but_preserves_original_dow
     assert "fileUrl={readerFileUrl}" in entry
     assert "originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}" in entry
     assert 'payload["reader_pdf_url"]' in form_override
-    assert 'script-disabled.pdf' in form_override
+    assert "script-disabled.pdf" in form_override
     assert 'X-Publication-Source": "script-disabled-working-template"' in form_override
 
 
@@ -210,11 +210,15 @@ def test_completed_output_strips_scripts_but_keeps_full_provenance_validation() 
     assert "validate_template_provenance(expected, candidate)" in form_override
     assert "reject_visual_overlays(expected, candidate)" in form_override
     assert '"script_policy": "DISABLED_AND_STRIPPED"' in form_override
-    assert "source.scrub(" in safe_processing
-    assert "javascript=True" in safe_processing
-    assert "remove_links=False" in safe_processing
-    assert "reset_fields=False" in safe_processing
+    assert "_remove_script_references(source)" in safe_processing
+    assert 'document.xref_set_key(names_xref, "JavaScript", "null")' in safe_processing
+    assert 'document.xref_set_key(xref, "AA", "null")' in safe_processing
+    assert 'document.update_object(xref, "<< >>")' in safe_processing
+    assert "garbage=1, deflate=False" in safe_processing
+    assert "source.scrub(" not in safe_processing
     assert "PDF_SANITIZE_WIDGET_MISMATCH" in safe_processing
+    assert "PDF_SANITIZE_LINK_MISMATCH" in safe_processing
+    assert "PDF_SANITIZE_IMAGE_MISMATCH" in safe_processing
     assert "contains_unsafe_action" in safe_processing
 
 
