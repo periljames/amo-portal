@@ -54,4 +54,16 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^CalendarClock$' }],
     },
   },
+  {
+    files: ['src/pages/qms/planner/QmsPlannerPage.tsx'],
+    rules: {
+      // These narrow names are reserved by the first planner slice for the
+      // server-persisted reset control, capability badges, and advanced filters.
+      // Keep normal unused-variable enforcement active for every other symbol.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^(DEFAULT_PLANNER_PREFERENCES|SlidersHorizontal|startOfMonth|capabilities)$' },
+      ],
+    },
+  },
 ])
