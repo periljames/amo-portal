@@ -858,6 +858,30 @@
 /* Base editor: copied geometry from the supplied active domain step, adapted to the AMO fields. */
 
 .setup-dialog-backdrop {
+  --setup-panel: var(--surface-elevated, #ffffff);
+  --setup-interactive: var(--input-bg, #f7f9fc);
+  --setup-hover: var(--surface-soft, #eef2f7);
+  --setup-border: var(--border-subtle, #dfe5ec);
+  --setup-border-strong: var(--input-border, #cbd5e1);
+  --setup-text: var(--text-primary, #111827);
+  --setup-muted: var(--text-secondary, #667085);
+  --setup-placeholder: color-mix(in srgb, var(--setup-muted) 56%, transparent);
+  --setup-focus: color-mix(in srgb, var(--accent-primary, #2458e8) 34%, transparent);
+}
+
+:is(html.dark, html[data-theme="dark"], body.dark, [data-theme="dark"]) .setup-dialog-backdrop {
+  --setup-panel: var(--surface-elevated, #141517);
+  --setup-interactive: var(--input-bg, #191b1e);
+  --setup-hover: var(--surface-soft, #212629);
+  --setup-border: var(--border-subtle, #212629);
+  --setup-border-strong: var(--input-border, #434a4d);
+  --setup-text: var(--text-primary, #f0f0f0);
+  --setup-muted: var(--text-secondary, #a1a4a5);
+  --setup-placeholder: #52595b;
+  --setup-focus: #caecff33;
+}
+
+.setup-dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 14000;
