@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile
+from amodb.apps.doc_control.pdfium_service import PdfEngineError
 from amodb.apps.doc_control.workspace_service import is_control_user
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -26,7 +27,6 @@ from .pdf_reader_router import (
     _load_direct_context,
     _source_path,
 )
-from amodb.apps.doc_control.pdfium_service import PdfEngineError
 
 
 router = APIRouter(prefix="/manuals", tags=["Controlled Static PDF Forms"])
@@ -266,6 +266,7 @@ def _render_static_overlays(
     completed_only: bool,
 ) -> tuple[bytes, list[int]]:
     document = pymupdf.open(stream=source_content, filetype="pdf")
+    source_page_count = document.page_count
     completed_pages = sorted({overlay.page for overlay in overlays})
     try:
         for overlay in overlays:
@@ -291,7 +292,7 @@ def _render_static_overlays(
 
     verification = pymupdf.open(stream=content, filetype="pdf")
     try:
-        expected_pages = len(completed_pages) if completed_only else max(1, verification.page_count)
+        expected_pages = len(completed_pages) if completed_only else source_page_count
         if verification.page_count != expected_pages:
             raise HTTPException(status_code=500, detail="The generated static form PDF failed page-count verification")
     finally:
