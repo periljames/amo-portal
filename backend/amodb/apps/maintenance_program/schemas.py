@@ -90,13 +90,12 @@ class MaintenanceProgramItemSummary(BaseModel):
 class AircraftProgramItemCreate(BaseModel):
     """Create one aircraft-specific requirement.
 
-    Aircraft identity comes from the route. Next-due and remaining values are
-    never accepted from clients; they are calculated from the approved master
-    requirement and last-accomplishment baseline.
+    Aircraft identity comes from the route. Component assignment is reserved for
+    the controlled configuration workflow. Next-due and remaining values are
+    calculated by the server from the approved requirement and accomplishment.
     """
 
     program_item_id: int
-    aircraft_component_id: Optional[int] = None
     override_task_code: Optional[str] = None
     override_title: Optional[str] = None
     last_done_date: Optional[date] = None
