@@ -222,7 +222,7 @@ class RequisitionRead(BaseModel):
 
 
 class RequisitionTransition(BaseModel):
-    action: str = Field(..., pattern="^(SUBMIT|TECHNICAL_APPROVE|BUDGET_APPROVE|SEND_TO_SOURCING|APPROVE|REJECT|CANCEL|CLOSE)$")
+    action: str = Field(..., pattern="^(SUBMIT|TECHNICAL_APPROVE|BUDGET_APPROVE|APPROVE|REJECT|CANCEL|CLOSE)$")
     reason: Optional[str] = None
 
 

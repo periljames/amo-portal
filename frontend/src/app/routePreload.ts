@@ -1,12 +1,3 @@
-/**
- * Route-module preloading for the AMO Portal.
- *
- * Navigation should never wait for a user click before the browser starts
- * downloading a lazy route chunk. The sidebar calls preloadRoute on hover,
- * focus, and immediately before navigation. Idle preloading is intentionally
- * conservative so slow or metered connections are not flooded with requests.
- */
-
 type RouteLoader = () => Promise<unknown>;
 
 const loadPlanningProductionPages: RouteLoader = () => import("../pages/PlanningProductionPages");
@@ -14,6 +5,7 @@ const loadTechnicalRecordsPages: RouteLoader = () => import("../pages/TechnicalR
 const loadRosteringPages: RouteLoader = () => import("../pages/rostering/RosteringPages");
 const loadDocControlPages: RouteLoader = () => import("../pages/DocControlPages");
 const loadQmsCanonicalPage: RouteLoader = () => import("../pages/qms/QmsCanonicalPage");
+const loadProcurementModule: RouteLoader = () => import("../pages/procurement/ProcurementModule");
 const loadDashboardPage: RouteLoader = () => import("../pages/DashboardPage");
 const loadProductionWorkspacePage: RouteLoader = () => import("../pages/ProductionWorkspacePage");
 const loadMaintenanceDashboardPage: RouteLoader = () => import("../pages/maintenance/MaintenanceDashboardPage");
@@ -48,6 +40,7 @@ const routeLoaders: Array<{ test: RegExp; loaders: RouteLoader[] }> = [
   { test: /\/maintenance\/reports(?:\/|$)/, loaders: [loadMaintenanceReportsPage] },
   { test: /\/maintenance\/settings(?:\/|$)/, loaders: [loadMaintenanceSettingsPage] },
   { test: /\/maintenance\/[^/]+\/maintenance(?:\/dashboard)?(?:\/|$)/, loaders: [loadMaintenanceDashboardPage] },
+  { test: /\/maintenance\/[^/]+\/procurement(?:\/|$)/, loaders: [loadProcurementModule] },
   { test: /\/(?:document-control|doc-control)(?:\/|$)/, loaders: [loadDocControlPages] },
   { test: /\/qms(?:\/|$)/, loaders: [loadQmsCanonicalPage] },
   { test: /\/manuals(?:\/|$)/, loaders: [loadManualsDashboardPage] },
@@ -134,7 +127,7 @@ export function scheduleWorkspaceRoutePreload(paths: string[]): () => void {
         try {
           idleWindow.cancelIdleCallback?.(id);
         } catch {
-          // best effort only
+          return;
         }
       });
     }

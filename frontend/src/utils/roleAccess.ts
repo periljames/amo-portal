@@ -9,6 +9,7 @@ export type RoleCapability =
   | "records"
   | "quality"
   | "safety"
+  | "procurement"
   | "stores"
   | "hr"
   | "viewer";
@@ -21,6 +22,7 @@ export type DepartmentId =
   | "quality"
   | "reliability"
   | "safety"
+  | "procurement"
   | "stores"
   | "workshops"
   | "admin";
@@ -152,7 +154,8 @@ export function getUserCapabilities(
   if (role === "TECHNICIAN") caps.add("technician");
   if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "AUDITOR") caps.add("quality");
   if (role === "SAFETY_MANAGER") caps.add("safety");
-  if (["STORES", "STORES_MANAGER", "STOREKEEPER", "PROCUREMENT_OFFICER"].includes(role)) caps.add("stores");
+  if (role === "PROCUREMENT_OFFICER") caps.add("procurement");
+  if (["STORES", "STORES_MANAGER", "STOREKEEPER"].includes(role)) caps.add("stores");
   if (role === "VIEW_ONLY") caps.add("viewer");
   if (hasHrTitle(user, assignedDepartment) || role === "FINANCE_MANAGER" || role === "ACCOUNTS_OFFICER") caps.add("hr");
 
@@ -172,7 +175,7 @@ export function getRoleDrivenDepartments(
   if (caps.has("admin")) {
     return [
       "planning", "production", "maintenance", "document-control", "quality",
-      "reliability", "safety", "stores", "workshops", "admin",
+      "reliability", "safety", "procurement", "stores", "workshops", "admin",
     ];
   }
 
@@ -180,7 +183,7 @@ export function getRoleDrivenDepartments(
   const assigned = getDepartmentFromUser(user, contextDepartment);
   const supported: DepartmentId[] = [
     "planning", "production", "maintenance", "document-control", "quality",
-    "reliability", "safety", "stores", "workshops",
+    "reliability", "safety", "procurement", "stores", "workshops",
   ];
   if (supported.includes(assigned as DepartmentId)) departments.add(assigned as DepartmentId);
   if (caps.has("planner")) departments.add("planning");
@@ -192,6 +195,7 @@ export function getRoleDrivenDepartments(
   if (caps.has("records")) departments.add("production");
   if (caps.has("quality")) departments.add("quality");
   if (caps.has("safety")) departments.add("safety");
+  if (caps.has("procurement")) departments.add("procurement");
   if (caps.has("stores")) departments.add("stores");
   return Array.from(departments);
 }
@@ -318,6 +322,7 @@ export function getFirstAccessibleModuleRoute(
   contextDepartment?: string | null,
 ): string {
   if (!user) return `/maintenance/${amoCode}/login`;
+  if (user.role === "PROCUREMENT_OFFICER") return `/maintenance/${amoCode}/procurement`;
   const ordered: Array<[ModuleFeature, string]> = [
     ["planning.dashboard", `/maintenance/${amoCode}/planning/dashboard`],
     ["production.control-board", `/maintenance/${amoCode}/production/control-board`],
@@ -330,6 +335,7 @@ export function getFirstAccessibleModuleRoute(
   }
   const depts = getRoleDrivenDepartments(user, contextDepartment);
   if (depts.includes("quality")) return `/maintenance/${amoCode}/qms`;
+  if (depts.includes("procurement")) return `/maintenance/${amoCode}/procurement`;
   if (depts.includes("stores")) return `/maintenance/${amoCode}/stores`;
   if (depts.includes("safety")) return `/maintenance/${amoCode}/safety`;
   if (depts.includes("document-control")) return `/maintenance/${amoCode}/document-control`;
@@ -355,6 +361,7 @@ export function formatCapabilitiesForUi(user: PortalUser | null, contextDepartme
       case "records": return "Technical Records";
       case "quality": return "Quality";
       case "safety": return "Safety";
+      case "procurement": return "Procurement";
       case "stores": return "Stores";
       case "hr": return "Workforce & HR";
       default: return "Read only";

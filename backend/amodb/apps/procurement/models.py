@@ -457,7 +457,6 @@ class ProcurementPurchaseOrder(Base):
     supplier_id = Column(Integer, ForeignKey("procurement_suppliers.id", ondelete="RESTRICT"), nullable=False, index=True)
     quote_id = Column(Integer, ForeignKey("procurement_quotes.id", ondelete="SET NULL"), nullable=True)
     requisition_id = Column(Integer, ForeignKey("procurement_requisitions.id", ondelete="SET NULL"), nullable=True)
-    legacy_purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True)
     status = Column(
         SAEnum(PurchaseOrderStatus, name="procurement_po_status_enum", native_enum=False),
         nullable=False,
