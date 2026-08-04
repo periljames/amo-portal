@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  apply-review-fixes:
+  apply_review_fixes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     outputs:
@@ -103,8 +103,8 @@ jobs:
           echo 'published=true' >> "$GITHUB_OUTPUT"
 
   reliability-backend:
-    needs: apply-review-fixes
-    if: needs.apply-review-fixes.outputs.published != 'true'
+    needs: apply_review_fixes
+    if: needs.apply_review_fixes.outputs.published != 'true'
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -192,8 +192,8 @@ jobs:
         run: pytest -q backend/amodb/apps/reliability/tests
 
   reliability-frontend:
-    needs: apply-review-fixes
-    if: needs.apply-review-fixes.outputs.published != 'true'
+    needs: apply_review_fixes
+    if: needs.apply_review_fixes.outputs.published != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
