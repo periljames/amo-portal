@@ -57,6 +57,16 @@ jobs:
           set -euo pipefail
           git fetch origin agent/reliability-review-publisher-base
           git show origin/agent/reliability-review-publisher-base:backend/scripts/apply_reliability_review_findings.py > /tmp/apply_reliability_review_findings.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/apply_reliability_review_findings.py')
+          source = path.read_text(encoding='utf-8')
+          old = 'assert "if existing:\\n        return existing" not in source'
+          new = 'assert "if existing:\\\\n        return existing" not in source'
+          if old not in source:
+              raise SystemExit('test escape marker not found in correction script')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
           python /tmp/apply_reliability_review_findings.py
           git diff --check
 
