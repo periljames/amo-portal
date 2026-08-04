@@ -357,7 +357,8 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
                 item = _row(
                     job_id=job.id, sheet="People", row_number=row_number, entity_type="PERSON",
                     source_key=payload["person_id"], label=payload["full_name"], action="UPDATE", status="REVIEW",
-                    decision_required=True, decision_options=["KEEP_EXISTING_EMAIL", "SKIP"],
+                    decision_required=True,
+                    decision_options=["KEEP_EXISTING_EMAIL", "SKIP"] if (existing_profile or existing_user) else ["SKIP"],
                     payload=payload, issue_code="IDENTITY_CONFLICT",
                     issue_message="PersonID and email resolve to different existing personnel/account records.",
                 )
@@ -871,7 +872,11 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
             account_models.PersonnelProfile.amo_id == job.amo_id,
             func.lower(account_models.PersonnelProfile.email) == str(payload["email"]).lower(),
         ).first()
-    profile = profile_by_person or profile_by_email
+    existing_staff_user = db.query(account_models.User).filter(
+        account_models.User.amo_id == job.amo_id,
+        account_models.User.staff_code == person_id,
+    ).first()
+    profile = profile_by_person if decision == "KEEP_EXISTING_EMAIL" else profile_by_person or profile_by_email
     is_new = profile is None
     if profile is None:
         profile = account_models.PersonnelProfile(
@@ -883,7 +888,10 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         db.add(profile)
 
     imported_email = payload.get("email")
-    selected_email = profile.email if decision == "KEEP_EXISTING_EMAIL" else imported_email or profile.email
+    if decision == "KEEP_EXISTING_EMAIL":
+        selected_email = (profile_by_person.email if profile_by_person else None) or (existing_staff_user.email if existing_staff_user else None)
+    else:
+        selected_email = imported_email or profile.email
 
     profile.person_id = person_id
     profile.first_name = payload["first_name"]
@@ -906,12 +914,8 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
     db.flush()
 
     existing_profile_user = db.get(account_models.User, profile.user_id) if profile.user_id else None
-    existing_staff_user = db.query(account_models.User).filter(
-        account_models.User.amo_id == job.amo_id,
-        account_models.User.staff_code == person_id,
-    ).first()
     existing_email_user = None
-    if selected_email:
+    if selected_email and decision != "KEEP_EXISTING_EMAIL":
         existing_email_user = db.query(account_models.User).filter(
             account_models.User.amo_id == job.amo_id,
             func.lower(account_models.User.email) == str(selected_email).lower(),
