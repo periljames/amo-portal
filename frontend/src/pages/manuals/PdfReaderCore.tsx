@@ -39,12 +39,8 @@ function readOnlyFallback(error: unknown): PdfReaderCapabilities {
 
 /**
  * Resolve the immutable-source capability contract before PDF.js paints a page.
- *
- * PDF.js chooses a different canvas annotation mode when interactive forms are
- * enabled. Rendering first in read-only mode can bake widget appearances into
- * the canvas and leave the later annotation layer non-interactive. Waiting for
- * the capability response gives AcroForms one deterministic first render and
- * matches the behaviour users see in native PDFium viewers such as Chrome.
+ * Scripted sources receive a server-generated, script-disabled reader derivative;
+ * the exact controlled original remains the download source.
  */
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
@@ -94,6 +90,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       props.identity.manualId,
       props.identity.revisionId,
       resolvedCapabilities.source_sha256 || "unverified",
+      resolvedCapabilities.javascript_policy || "NONE",
       mode,
     ].join(":");
   }, [
@@ -109,9 +106,12 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     </section>;
   }
 
+  const readerFileUrl = resolvedCapabilities.reader_pdf_url || props.fileUrl;
   return <PdfReaderCoreV2
     {...props}
     key={readerModeKey}
+    fileUrl={readerFileUrl}
+    originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
     capabilities={resolvedCapabilities}
   />;
 }
