@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import io
 import json
 import re
@@ -338,6 +339,15 @@ async def create_static_form_pdf(
         allow_free_position=bool(capability["can_configure_overlay"]),
     )
     source_content = await run_in_threadpool(_source_path(revision).read_bytes)
+    actual_source_sha256 = hashlib.sha256(source_content).hexdigest()
+    if not hmac.compare_digest(actual_source_sha256, str(inspection.source_sha256 or "").lower()):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PDF_SOURCE_CHECKSUM_MISMATCH",
+                "message": "The approved PDF changed while the filled derivative was being prepared",
+            },
+        )
     content, completed_pages = await run_in_threadpool(
         _render_static_overlays,
         source_content,
