@@ -128,7 +128,10 @@ export async function getPdfReaderCapabilities(
   // earlier reader session. Draft admission resumes only after this request
   // returns the current immutable source checksum.
   registerAuthoritativePdfSource(tenant, manualId, revisionId, null);
-  const response = await authenticatedFetch(`${revisionPath(tenant, manualId, revisionId)}/pdf-capabilities`);
+  const response = await authenticatedFetch(
+    `${revisionPath(tenant, manualId, revisionId)}/pdf-capabilities`,
+    { cache: "no-store" },
+  );
   const capabilities = await response.json() as PdfReaderCapabilities;
   registerAuthoritativePdfSource(tenant, manualId, revisionId, capabilities.source_sha256);
   return capabilities;
