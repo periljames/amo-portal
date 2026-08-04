@@ -64,3 +64,8 @@ def _include_once(parent: APIRouter, child: APIRouter, prefix_marker: str) -> No
 
 _include_once(_canonical_router.router, _excellence_router.router, "/api/maintenance/{amo_code}/quality/excellence")
 _include_once(_canonical_router.legacy_router, _excellence_router.router, "/api/maintenance/{amo_code}/qms/excellence")
+
+# The compatibility router ends with a generic module catch-all. Promote the
+# newly included static assurance endpoints ahead of it so Starlette resolves
+# them as APIs rather than unknown module paths.
+from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
