@@ -25,7 +25,7 @@ from .winair_schemas import (
 
 
 router = APIRouter(
-    prefix="/integrations/winair",
+    prefix="/winair",
     tags=["winair_integration"],
     dependencies=[Depends(require_module("work"))],
 )
