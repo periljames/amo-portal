@@ -93,7 +93,9 @@ jobs:
           test ! -e docs/reliability/.review-fix-trigger
           test ! -e docs/reliability/.review-fix-trigger-v2
           test ! -e docs/reliability/.hotfix-trigger
-          if grep -R -n -E 'apply_reliability_review_fixes|review-fix-trigger|hotfix-trigger|Reliability Hotfix Scheduled|Reliability Review Finalizer' .github/workflows docs/reliability backend/scripts 2>/dev/null; then
+          if git grep -n -E 'apply_reliability_review_fixes|review-fix-trigger|hotfix-trigger|Reliability Hotfix Scheduled|Reliability Review Finalizer' -- \
+            .github/workflows docs/reliability backend/scripts \
+            ':(exclude).github/workflows/reliability-module-ci.yml'; then
             echo 'Temporary Reliability recovery reference remains.'
             exit 1
           fi
