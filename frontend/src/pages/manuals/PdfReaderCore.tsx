@@ -27,14 +27,20 @@ const READ_ONLY_FALLBACK: PdfReaderCapabilities = {
   can_submit: false,
 };
 
+function readOnlyFallback(error: unknown): PdfReaderCapabilities {
+  const detail = error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : "PDF form capabilities could not be verified";
+  return {
+    ...READ_ONLY_FALLBACK,
+    unsupported_reason: `${detail}. The document remains available in read-only mode.`,
+  };
+}
+
 /**
  * Resolve the immutable-source capability contract before PDF.js paints a page.
- *
- * PDF.js chooses a different canvas annotation mode when interactive forms are
- * enabled. Rendering first in read-only mode can bake widget appearances into
- * the canvas and leave the later annotation layer non-interactive. Waiting for
- * the capability response gives AcroForms one deterministic first render and
- * matches the behaviour users see in native PDFium viewers such as Chrome.
+ * Scripted sources receive a server-generated, script-disabled reader derivative;
+ * the exact controlled original remains the download source.
  */
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
@@ -42,18 +48,15 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const [resolvedCapabilities, setResolvedCapabilities] = useState<PdfReaderCapabilities | null>(
     suppliedCapabilities ?? null,
   );
-  const [capabilityError, setCapabilityError] = useState("");
 
   useEffect(() => {
     if (externallyManaged) {
       setResolvedCapabilities(suppliedCapabilities ?? null);
-      setCapabilityError("");
       return;
     }
 
     let active = true;
     setResolvedCapabilities(null);
-    setCapabilityError("");
     getPdfReaderCapabilities(
       props.identity.tenant,
       props.identity.manualId,
@@ -65,8 +68,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       })
       .catch((error) => {
         if (!active) return;
-        setResolvedCapabilities(READ_ONLY_FALLBACK);
-        setCapabilityError(error instanceof Error ? error.message : "PDF processing is unavailable");
+        setResolvedCapabilities(readOnlyFallback(error));
       });
 
     return () => {
@@ -88,6 +90,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       props.identity.manualId,
       props.identity.revisionId,
       resolvedCapabilities.source_sha256 || "unverified",
+      resolvedCapabilities.javascript_policy || "NONE",
       mode,
     ].join(":");
   }, [
@@ -103,14 +106,14 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     </section>;
   }
 
-  return <>
-    {capabilityError ? <div className="pdfv2-notice" role="alert">{capabilityError}</div> : null}
-    <PdfReaderCoreV2
-      {...props}
-      key={readerModeKey}
-      capabilities={resolvedCapabilities}
-    />
-  </>;
+  const readerFileUrl = resolvedCapabilities.reader_pdf_url || props.fileUrl;
+  return <PdfReaderCoreV2
+    {...props}
+    key={readerModeKey}
+    fileUrl={readerFileUrl}
+    originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
+    capabilities={resolvedCapabilities}
+  />;
 }
 
 export type {

@@ -6,6 +6,8 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 READER_ENTRY = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 READER_CORE = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx"
+READER_CONFIG = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderConfig.ts"
+READER_SERVICE = REPOSITORY_ROOT / "frontend/src/services/pdfReader.ts"
 READER_ENGINE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngine.ts"
 READER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngineV2.css"
 READER_OPERATIONAL_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderOperationalFixes.css"
@@ -13,6 +15,9 @@ READER_LAYOUT = REPOSITORY_ROOT / "frontend/src/pages/manuals/publicationReaderZ
 LAYOUT_VIEWER = REPOSITORY_ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
 FAST_READER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 FORM_OVERRIDE = REPOSITORY_ROOT / "backend/amodb/apps/manuals/pdf_reader_form_override_router.py"
+CAPABILITY_SERVICE = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdf_capability_service.py"
+SAFE_PROCESSING = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdf_safe_processing_service.py"
+FULL_PDF_SERVICE = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdfium_service.py"
 ROUTER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/router.py"
 
 
@@ -67,6 +72,40 @@ def test_acroform_capabilities_are_resolved_before_pdfjs_first_render() -> None:
     assert "key={readerModeKey}" in entry
     assert "capabilities={resolvedCapabilities}" in entry
     assert entry.index("if (!resolvedCapabilities)") < entry.index("<PdfReaderCoreV2")
+
+
+def test_capability_failure_keeps_reader_available_and_shows_exact_reason() -> None:
+    entry = _source(READER_ENTRY)
+
+    assert "function readOnlyFallback" in entry
+    assert "error instanceof Error && error.message.trim()" in entry
+    assert "The document remains available in read-only mode" in entry
+    assert "setResolvedCapabilities(readOnlyFallback(error))" in entry
+
+
+def test_scripted_source_uses_server_sanitized_reader_but_preserves_original_download() -> None:
+    entry = _source(READER_ENTRY)
+    service = _source(READER_SERVICE)
+    form_override = _source(FORM_OVERRIDE)
+
+    assert "reader_pdf_url?: string | null" in service
+    assert "source_has_javascript?: boolean" in service
+    assert "javascript_policy?" in service
+    assert "const readerFileUrl = resolvedCapabilities.reader_pdf_url || props.fileUrl" in entry
+    assert "fileUrl={readerFileUrl}" in entry
+    assert "originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}" in entry
+    assert 'payload["reader_pdf_url"]' in form_override
+    assert "script-disabled.pdf" in form_override
+    assert 'X-Publication-Source": "script-disabled-working-template"' in form_override
+
+
+def test_jpx_images_use_secure_pdfjs_decoder_fallback() -> None:
+    config = _source(READER_CONFIG)
+
+    assert "useWasm: false" in config
+    assert "JavaScript OpenJPEG fallback" in config
+    assert "isEvalSupported: false" in config
+    assert "enableScripting: false" in config
 
 
 def test_acroform_widgets_enable_automatically_only_for_safe_documents() -> None:
@@ -147,6 +186,42 @@ def test_download_menu_exposes_three_distinct_outputs() -> None:
     assert "editedPages.length ? editedPages : formPages" in source
 
 
+def test_capability_route_does_not_run_full_page_provenance_scan() -> None:
+    form_override = _source(FORM_OVERRIDE)
+    capability_service = _source(CAPABILITY_SERVICE)
+    full_service = _source(FULL_PDF_SERVICE)
+
+    assert "inspect_pdf_capabilities_bytes" in form_override
+    assert "inspection = _capability_inspection(revision)" in form_override
+    assert '"template_fingerprint": None' in capability_service
+    assert "_security_profile(content)" in capability_service
+    assert "page.get_drawings()" not in capability_service
+    assert "_page_text_spans" not in capability_service
+    assert "page.get_drawings()" in full_service
+
+
+def test_completed_output_strips_scripts_but_keeps_full_provenance_validation() -> None:
+    form_override = _source(FORM_OVERRIDE)
+    safe_processing = _source(SAFE_PROCESSING)
+
+    assert "sanitize_pdf_javascript_bytes" in form_override
+    assert "inspect_script_disabled_pdf_bytes" in form_override
+    assert "flatten_script_disabled_pdf_bytes" in form_override
+    assert "validate_template_provenance(expected, candidate)" in form_override
+    assert "reject_visual_overlays(expected, candidate)" in form_override
+    assert '"script_policy": "DISABLED_AND_STRIPPED"' in form_override
+    assert "_remove_script_references(source)" in safe_processing
+    assert 'document.xref_set_key(names_xref, "JavaScript", "null")' in safe_processing
+    assert 'document.xref_set_key(xref, "AA", "null")' in safe_processing
+    assert 'document.update_object(xref, "<< >>")' in safe_processing
+    assert "garbage=1, deflate=False" in safe_processing
+    assert "source.scrub(" not in safe_processing
+    assert "PDF_SANITIZE_WIDGET_MISMATCH" in safe_processing
+    assert "PDF_SANITIZE_LINK_MISMATCH" in safe_processing
+    assert "PDF_SANITIZE_IMAGE_MISMATCH" in safe_processing
+    assert "contains_unsafe_action" in safe_processing
+
+
 def test_backend_streaming_and_safe_form_routes_support_the_reader() -> None:
     fast_reader = _source(FAST_READER)
     form_override = _source(FORM_OVERRIDE)
@@ -158,5 +233,6 @@ def test_backend_streaming_and_safe_form_routes_support_the_reader() -> None:
     assert "safe_acroform" in form_override
     assert '"can_fill": safe_acroform' in form_override
     assert "changed_pages or requested_form_pages" in form_override
+    assert '@router.post("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/submit-record")' in form_override
     assert router.index("router.include_router(_pdf_reader_form_override_router)") < router.index("router.include_router(_pdf_reader_router)")
     assert router.index("router.include_router(_pdf_reader_router)") < router.index("router.include_router(_fast_reader_router)")
