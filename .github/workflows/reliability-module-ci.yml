@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/reliability-module-ci.yml'
       - 'backend/amodb/alembic/env.py'
+      - 'backend/amodb/alembic/versions/qms_vernum_128.py'
+      - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
       - 'backend/amodb/apps/reliability/**'
       - 'backend/amodb/main.py'
@@ -64,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD > /tmp/reliability-files.txt
-          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
+          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
@@ -95,6 +97,23 @@ jobs:
           grep -q 'rel_20260803_complete_scope' /tmp/alembic-heads.txt
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
+      - name: Verify Alembic revision capacity
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              width = connection.execute(text("""
+                  SELECT character_maximum_length
+                  FROM information_schema.columns
+                  WHERE table_name = 'alembic_version'
+                    AND column_name = 'version_num'
+              """)).scalar_one()
+          assert width is not None and width >= 128, width
+          print(f'alembic_version.version_num capacity: {width}')
+          PY
       - name: Run Reliability tests
         run: pytest -q backend/amodb/apps/reliability/tests
 
