@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/reliability-hotfix-command.yml'
+      - '.github/reliability-hotfix-trigger'
   issue_comment:
     types: [created]
 
