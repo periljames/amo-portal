@@ -315,7 +315,7 @@ def list_personnel_licences(
     return [PersonnelLicenceRead.model_validate(item) for item in rows]
 
 
-@router.get("/role-groups", response_model=list[TrainingRoleGroupRead])
+@router.get("/catalog/role-groups", response_model=list[TrainingRoleGroupRead])
 def list_role_groups(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -324,7 +324,7 @@ def list_role_groups(
     return [TrainingRoleGroupRead.model_validate(item) for item in rows]
 
 
-@router.get("/role-rules", response_model=list[TrainingCourseRoleRuleRead])
+@router.get("/catalog/role-rules", response_model=list[TrainingCourseRoleRuleRead])
 def list_role_rules(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -333,7 +333,7 @@ def list_role_rules(
     return [TrainingCourseRoleRuleRead(id=rule.id, course_id=rule.course_id, course_code=course.course_id, course_name=course.course_name, role_group_id=rule.role_group_id, role_group_code=group.code, is_required=rule.is_required, requirement_type=rule.requirement_type, notes=rule.notes, is_active=rule.is_active) for rule, group, course in rows]
 
 
-@router.get("/people/{user_id}/roles", response_model=list[TrainingPersonRoleRead])
+@router.get("/users/{user_id}/roles", response_model=list[TrainingPersonRoleRead])
 def list_person_roles(
     user_id: str,
     db: Session = Depends(get_db),

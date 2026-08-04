@@ -4,7 +4,7 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -376,6 +376,8 @@ def import_training_records_rows(
     rows: list[dict[str, Any]],
     dry_run: bool,
     actor_user_id: Optional[str] = None,
+    manage_transaction: bool = True,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> schemas.TrainingRecordImportSummary:
     issues: list[schemas.TrainingRecordImportRowIssue] = []
     preview_rows: list[schemas.TrainingRecordImportRowPreview] = []
@@ -536,7 +538,13 @@ def import_training_records_rows(
     lifecycle_status_by_id: Dict[str, str] = {}
     now = datetime.now(timezone.utc)
 
-    for parsed, user, course in matched_pairs:
+    for processed_index, (parsed, user, course) in enumerate(matched_pairs, start=1):
+        if progress_callback:
+            progress_callback(
+                processed_index,
+                len(matched_pairs),
+                f"{parsed.person_name or parsed.person_id} · {parsed.course_id}",
+            )
         target_valid_until = parsed.next_due_date or (
             add_months(parsed.completion_date, int(course.frequency_months)) if course.frequency_months and not _is_one_off_course(course) else None
         )
@@ -641,7 +649,8 @@ def import_training_records_rows(
         for record in existing_by_key.values():
             if record.id in lifecycle_status_by_id:
                 db.add(record)
-        db.commit()
+        if manage_transaction:
+            db.commit()
 
     for preview in preview_rows:
         if preview.existing_record_id and preview.existing_record_id in lifecycle_status_by_id:

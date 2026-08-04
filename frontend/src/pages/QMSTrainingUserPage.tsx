@@ -2,6 +2,7 @@ import { Download, Eye, FileImage, FilePlus2, FileText, Pencil, Plus, Trash2, X,
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
+import PersonnelLicencePanel from "../components/training/PersonnelLicencePanel";
 import type { AdminUserRead } from "../services/adminUsers";
 import { getCachedUser, getContext, type PortalUser } from "../services/auth";
 import {
@@ -1219,6 +1220,15 @@ const QMSTrainingUserPage: React.FC = () => {
                   <strong>{user.is_active ? "Active" : "Inactive"}</strong>
                 </div>
               </div>
+              <PersonnelLicencePanel
+                userId={user.id}
+                fallback={{
+                  authority: user.regulatory_authority,
+                  licenceNumber: user.licence_number,
+                  country: user.licence_state_or_country,
+                  expiresOn: user.licence_expires_on,
+                }}
+              />
             </div>
 
             <div className="training-profile-toolbar training-profile-toolbar--surface">

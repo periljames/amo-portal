@@ -5,10 +5,12 @@ from datetime import date
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, load_only, noload
 
 from ..accounts import models as accounts_models
 from . import models as training_models
+from . import workbook_models as training_workbook_models
 from . import record_lifecycle as training_record_lifecycle
 from . import schemas as training_schemas
 
@@ -302,6 +304,42 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
             )
             .all()
         ]
+
+    # Role groups and matrix rules imported from the governed Training Tracker
+    # extend the canonical ALL/DEPARTMENT/JOB_ROLE/USER requirement model.  This
+    # preserves exact workbook applicability (including multi-role personnel)
+    # without using brittle position-name heuristics in the frontend.
+    role_group_ids = [
+        group_id
+        for (group_id,) in db.query(training_workbook_models.TrainingRoleGroup.id)
+        .filter(
+            training_workbook_models.TrainingRoleGroup.amo_id == user.amo_id,
+            training_workbook_models.TrainingRoleGroup.is_active.is_(True),
+            training_workbook_models.TrainingRoleGroup.code == "ALL",
+        )
+        .all()
+    ]
+    assignment_query = db.query(training_workbook_models.TrainingPersonRole.role_group_id).filter(
+        training_workbook_models.TrainingPersonRole.amo_id == user.amo_id,
+        training_workbook_models.TrainingPersonRole.is_active.is_(True),
+    )
+    person_terms = [training_workbook_models.TrainingPersonRole.user_id == user.id]
+    if getattr(user, "staff_code", None):
+        person_terms.append(training_workbook_models.TrainingPersonRole.person_id == str(user.staff_code).strip().upper())
+    assignment_query = assignment_query.filter(or_(*person_terms))
+    role_group_ids.extend(group_id for (group_id,) in assignment_query.all())
+    if role_group_ids:
+        required_course_ids.extend(
+            course_id
+            for (course_id,) in db.query(training_workbook_models.TrainingCourseRoleRule.course_id)
+            .filter(
+                training_workbook_models.TrainingCourseRoleRule.amo_id == user.amo_id,
+                training_workbook_models.TrainingCourseRoleRule.role_group_id.in_(sorted(set(role_group_ids))),
+                training_workbook_models.TrainingCourseRoleRule.is_active.is_(True),
+                training_workbook_models.TrainingCourseRoleRule.is_required.is_(True),
+            )
+            .all()
+        )
 
     return sorted(set(required_course_ids))
 

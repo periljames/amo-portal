@@ -3,6 +3,7 @@ import { AlertTriangle, CalendarClock, CheckSquare, ClipboardSignature, Download
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
+import TrainingWorkbookImportDialog from "../components/training/TrainingWorkbookImportDialog";
 import { useToast } from "../components/feedback/ToastProvider";
 import { saveDownloadedFile } from "../utils/downloads";
 import { getCachedUser } from "../services/auth";
@@ -17,8 +18,6 @@ import {
   downloadTrainingCertificateArtifact,
   getBulkTrainingStatusForUsers,
   getTrainingReportSettings,
-  importTrainingCoursesWorkbook,
-  importTrainingRecordsWorkbook,
   issueTrainingCertificate,
   listTrainingCertificates,
   listTrainingCourses,
@@ -29,7 +28,6 @@ import {
   listTrainingRequirements,
   type TrainingReportSettings,
   type TrainingReportSettingsUpdate,
-  type TransferProgress,
   updateTrainingCourse,
   updateTrainingEventParticipant,
   updateTrainingReportSettings,
@@ -515,13 +513,7 @@ const TrainingCompetencePage: React.FC = () => {
     effective_from: null,
     effective_to: null,
   });
-  const [importOpen, setImportOpen] = useState(false);
-  const [importMode, setImportMode] = useState<"courses" | "trainings">("courses");
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importDryRun, setImportDryRun] = useState(true);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<TransferProgress | null>(null);
-  const [importSummary, setImportSummary] = useState<any | null>(null);
+  const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
   const PEOPLE_PAGE_SIZE = 50;
   const [peoplePage, setPeoplePage] = useState(0);
   const [hasMorePeople, setHasMorePeople] = useState(false);
@@ -1316,35 +1308,6 @@ const TrainingCompetencePage: React.FC = () => {
     }
   };
 
-  const runImport = async () => {
-    if (!importFile) {
-      pushToast({ title: "No file selected", message: `Choose a ${importMode === "courses" ? "COURSES" : "TRAINING"} workbook first.`, variant: "error" });
-      return;
-    }
-    setImporting(true);
-    setImportProgress(null);
-    setImportSummary(null);
-    try {
-      const summary = importMode === "courses"
-        ? await importTrainingCoursesWorkbook(importFile, { dryRun: importDryRun, sheetName: "Courses", onProgress: setImportProgress })
-        : await importTrainingRecordsWorkbook(importFile, { dryRun: importDryRun, sheetName: "Training", onProgress: setImportProgress });
-      setImportSummary(summary);
-      const createdCount = Number((summary as any).created_courses ?? (summary as any).created_records ?? 0);
-      const updatedCount = Number((summary as any).updated_courses ?? (summary as any).updated_records ?? 0);
-      const skippedCount = Number((summary as any).skipped_rows ?? 0);
-      pushToast({
-        title: importDryRun ? "Dry-run completed" : "Import completed",
-        message: `${createdCount} created, ${updatedCount} updated, ${skippedCount} skipped.`,
-        variant: "info",
-      });
-      if (!importDryRun) await load();
-    } catch (error: any) {
-      pushToast({ title: "Import failed", message: error?.message || "Could not import the workbook.", variant: "error" });
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const exportCourses = () => {
     const rows = courses.slice().sort((a, b) => a.course_id.localeCompare(b.course_id)).map((course) => ({
       course_id: course.course_id,
@@ -1408,8 +1371,7 @@ const TrainingCompetencePage: React.FC = () => {
           {canManageCourses ? (
             <>
               <button type="button" className="secondary-chip-btn" onClick={openCreateCourse}><Users size={14} /> New course</button>
-              <button type="button" className="secondary-chip-btn" onClick={() => { setImportMode("courses"); setImportOpen(true); }}><Upload size={14} /> Import courses</button>
-              <button type="button" className="secondary-chip-btn" onClick={() => { setImportMode("trainings"); setImportOpen(true); }}><Upload size={14} /> Import trainings</button>
+              <button type="button" className="primary-chip-btn" onClick={() => setWorkbookImportOpen(true)}><Upload size={14} /> Import workbook</button>
             </>
           ) : null}
           <button type="button" className="secondary-chip-btn" onClick={exportCourses}><FileSpreadsheet size={14} /> Courses</button>
@@ -2319,19 +2281,13 @@ const TrainingCompetencePage: React.FC = () => {
         </div>
       </Drawer>
 
-      <Drawer title={importMode === "courses" ? "Import courses workbook" : "Import trainings workbook"} isOpen={importOpen} onClose={() => setImportOpen(false)}>
-        <div style={{ padding: 16, display: "grid", gap: 10 }}>
-          <input type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
-          <label className="tc-toggle"><input type="checkbox" checked={importDryRun} onChange={(e) => setImportDryRun(e.target.checked)} /><span>Dry run only</span></label>
-          {importProgress ? <p className="tc-muted">Transferred {Math.round(importProgress.loadedBytes / 1024)} KB · {importProgress.percent ? `${Math.round(importProgress.percent)}%` : ""}</p> : null}
-          <p className="tc-muted">{importMode === "courses" ? "Use the Courses sheet to create or update the course catalogue." : "Use the Training sheet to create or update individual training history records."}</p>
-          {importSummary ? <pre className="tc-import-summary">{JSON.stringify(importSummary, null, 2)}</pre> : null}
-          <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
-            <button type="button" className="secondary-chip-btn" onClick={() => setImportOpen(false)}>Close</button>
-            <button type="button" className="secondary-chip-btn" onClick={runImport} disabled={importing}>{importing ? "Importing…" : "Run import"}</button>
-          </div>
-        </div>
-      </Drawer>
+      <TrainingWorkbookImportDialog
+        isOpen={workbookImportOpen}
+        onClose={() => setWorkbookImportOpen(false)}
+        onCompleted={async () => {
+          await load();
+        }}
+      />
     </QMSLayout>
   );
 };
