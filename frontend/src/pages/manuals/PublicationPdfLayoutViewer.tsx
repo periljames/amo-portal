@@ -127,6 +127,7 @@ export default function PublicationPdfLayoutViewer({
 
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       setReaderNavigationRequest({ page: destination, token: Date.now() });
     };
 
