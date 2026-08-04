@@ -81,12 +81,48 @@ class MaintenanceProgramItemSummary(BaseModel):
     ata_chapter: Optional[str] = None
     title: str
     check_group: Optional[str] = None
+    is_mandatory: bool = True
 
     class Config:
         from_attributes = True
 
 
-class AircraftProgramItemBase(BaseModel):
+class AircraftProgramItemCreate(BaseModel):
+    """Create one aircraft-specific requirement.
+
+    Aircraft identity comes from the route. Next-due and remaining values are
+    never accepted from clients; they are calculated from the approved master
+    requirement and last-accomplishment baseline.
+    """
+
+    program_item_id: int
+    aircraft_component_id: Optional[int] = None
+    override_task_code: Optional[str] = None
+    override_title: Optional[str] = None
+    last_done_date: Optional[date] = None
+    last_done_hours: Optional[float] = None
+    last_done_cycles: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class AircraftProgramItemUpdate(BaseModel):
+    """Mutable accomplishment and display fields for one aircraft requirement.
+
+    Aircraft identity, programme identity, component linkage, and derived due
+    values are deliberately excluded from the generic PATCH contract.
+    """
+
+    override_task_code: Optional[str] = None
+    override_title: Optional[str] = None
+    last_done_date: Optional[date] = None
+    last_done_hours: Optional[float] = None
+    last_done_cycles: Optional[float] = None
+    status: Optional[AircraftProgramStatusEnum] = None
+    notes: Optional[str] = None
+
+
+class AircraftProgramItemRead(BaseModel):
+    id: int
     aircraft_serial_number: str
     program_item_id: int
     aircraft_component_id: Optional[int] = None
@@ -102,40 +138,7 @@ class AircraftProgramItemBase(BaseModel):
     remaining_hours: Optional[float] = None
     remaining_cycles: Optional[float] = None
     status: AircraftProgramStatusEnum = AircraftProgramStatusEnum.PLANNED
-    is_mandatory: bool = True
     notes: Optional[str] = None
-
-
-class AircraftProgramItemCreate(AircraftProgramItemBase):
-    pass
-
-
-class AircraftProgramItemUpdate(BaseModel):
-    """Mutable accomplishment and display fields for one aircraft requirement.
-
-    Aircraft identity, programme identity, and component linkage are deliberately
-    excluded. Moving a requirement between aircraft or components requires a
-    controlled configuration workflow rather than a generic PATCH request.
-    """
-
-    override_task_code: Optional[str] = None
-    override_title: Optional[str] = None
-    last_done_date: Optional[date] = None
-    last_done_hours: Optional[float] = None
-    last_done_cycles: Optional[float] = None
-    next_due_date: Optional[date] = None
-    next_due_hours: Optional[float] = None
-    next_due_cycles: Optional[float] = None
-    remaining_days: Optional[float] = None
-    remaining_hours: Optional[float] = None
-    remaining_cycles: Optional[float] = None
-    status: Optional[AircraftProgramStatusEnum] = None
-    is_mandatory: Optional[bool] = None
-    notes: Optional[str] = None
-
-
-class AircraftProgramItemRead(AircraftProgramItemBase):
-    id: int
     created_at: datetime
     updated_at: datetime
     created_by_user_id: Optional[str] = None
