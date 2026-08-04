@@ -1,1 +1,1 @@
-Validate PR #422 after the Training workbook importer, personnel review, licence register, matrix rules, and frontend build changes.
+Validate PR #422 after final personnel identity-owner hardening, full review pagination, licence registration, matrix rules, Alembic graph, frontend build and CSS checks.
