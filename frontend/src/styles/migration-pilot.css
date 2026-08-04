@@ -1,0 +1,132 @@
+.migration-page {
+  --migration-gap: clamp(0.75rem, 1.2vw, 1.25rem);
+}
+
+.migration-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--migration-gap);
+  margin-bottom: var(--migration-gap);
+}
+
+.migration-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.migration-batch-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.migration-batch-list > button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.7rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.migration-batch-list > button.is-selected,
+.migration-batch-list > button:hover {
+  border-color: var(--accent-color, #4677ff);
+  background: color-mix(in srgb, var(--accent-color, #4677ff) 9%, transparent);
+}
+
+.migration-batch-list button > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.migration-batch-list small {
+  color: var(--text-muted, #6b7280);
+}
+
+.migration-json {
+  min-height: 18rem;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.migration-page .planning-panel + .planning-panel {
+  margin-top: var(--migration-gap);
+}
+
+.migration-checkpoints {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.migration-checkpoints > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.7rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.migration-checkpoints > button:hover {
+  border-color: var(--accent-color, #4677ff);
+}
+
+.migration-checkpoints button > span:last-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.migration-checkpoints small {
+  color: var(--text-muted, #6b7280);
+}
+
+.migration-gate-actions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+}
+
+.migration-diff {
+  max-width: 28rem;
+  max-height: 10rem;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 1050px) {
+  .migration-layout,
+  .migration-checkpoints {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .migration-create-row {
+    grid-template-columns: 1fr;
+  }
+
+  .migration-batch-list > button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
