@@ -15,6 +15,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.apps.work.schemas import WorkOrderRead
 
+from . import projection
 from . import service as services
 from .models import AircraftProgramStatusEnum, ProgramItemStatusEnum
 from .schemas import (
@@ -220,7 +221,7 @@ def get_fleet_due_list(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> FleetPlanningOverview:
-    return services.get_fleet_planning_overview(
+    return projection.get_fleet_planning_overview(
         db,
         amo_id=current_user.effective_amo_id,
         horizon_days=horizon_days,
@@ -240,16 +241,15 @@ def recompute_due_for_aircraft(
     current_user: account_models.User = Depends(require_roles(*PROGRAM_WRITE_ROLES)),
 ) -> AircraftProgramItemDueList:
     try:
-        services.recompute_due_for_aircraft(
+        projection.recompute_due_for_aircraft(
             db,
             amo_id=current_user.effective_amo_id,
             aircraft_serial_number=aircraft_sn,
-            persist=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     db.commit()
-    return services.get_due_list_for_aircraft(
+    return projection.get_due_list_for_aircraft(
         db,
         amo_id=current_user.effective_amo_id,
         aircraft_serial_number=aircraft_sn,
@@ -266,7 +266,7 @@ def get_due_list_for_aircraft(
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> AircraftProgramItemDueList:
     try:
-        return services.get_due_list_for_aircraft(
+        return projection.get_due_list_for_aircraft(
             db,
             amo_id=current_user.effective_amo_id,
             aircraft_serial_number=aircraft_sn,
