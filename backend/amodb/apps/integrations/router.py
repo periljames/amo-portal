@@ -10,6 +10,7 @@ from amodb.security import require_roles
 from amodb.apps.accounts.models import AccountRole, User
 
 from . import schemas, services
+from .winair_router import router as winair_router
 
 
 router = APIRouter(
@@ -23,7 +24,7 @@ def list_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
 ):
-    return services.list_integration_configs(db, amo_id=current_user.amo_id)
+    return services.list_integration_configs(db, amo_id=current_user.effective_amo_id)
 
 
 @router.post(
@@ -39,7 +40,7 @@ def create_config(
 ):
     config = services.create_integration_config(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
         created_by_user_id=current_user.id,
         idempotency_key=idempotency_key,
@@ -63,7 +64,7 @@ def update_config(
     try:
         config = services.update_integration_config(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=current_user.effective_amo_id,
             config_id=config_id,
             data=payload,
             updated_by_user_id=current_user.id,
@@ -85,7 +86,7 @@ def list_outbox(
 ):
     return services.list_outbound_events(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         integration_id=integration_id,
         limit=limit,
     )
@@ -122,3 +123,6 @@ async def ingest_event(
     if not event.signature_valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
     return event
+
+
+router.include_router(winair_router)
