@@ -9,6 +9,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: training-review-fixes-pr-422
+  cancel-in-progress: true
+
 jobs:
   apply-test-and-commit:
     if: github.actor != 'github-actions[bot]'
@@ -92,7 +96,17 @@ jobs:
         working-directory: frontend
         run: npm run check:css
 
+      - name: Report validation failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment 422 --body "Training review patch validation failed on workflow run ${GITHUB_RUN_ID}. The product branch was not modified."
+
       - name: Remove one-shot workflow and commit fixes
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           rm -f .github/workflows/apply-training-review-fixes.yml
@@ -102,3 +116,4 @@ jobs:
           git add -A
           git commit -m 'Address Training workbook reconciliation review'
           git push origin HEAD
+          gh pr comment 422 --body "Applied the six reviewed Training fixes. Focused backend tests, frontend production build, and CSS contract checks passed in workflow run ${GITHUB_RUN_ID}."
