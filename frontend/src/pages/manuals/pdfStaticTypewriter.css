@@ -141,7 +141,8 @@
 }
 
 .pdf-static-typewriter-drag,
-.pdf-static-typewriter-remove {
+.pdf-static-typewriter-remove,
+.pdf-static-typewriter-resize {
   position: absolute;
   z-index: 4;
   width: 20px;
@@ -152,13 +153,13 @@
   border: 1px solid rgba(37, 99, 235, 0.55);
   background: #eff6ff;
   color: #1d4ed8;
-  cursor: grab;
 }
 
 .pdf-static-typewriter-drag {
   top: -19px;
   left: -1px;
   border-radius: 4px 4px 0 0;
+  cursor: grab;
   touch-action: none;
 }
 
@@ -172,6 +173,14 @@
   border-radius: 4px 4px 0 0;
   color: #b91c1c;
   cursor: pointer;
+}
+
+.pdf-static-typewriter-resize {
+  right: -1px;
+  bottom: -1px;
+  border-radius: 4px 0 3px 0;
+  cursor: nwse-resize;
+  touch-action: none;
 }
 
 .pdf-static-typewriter-layer.is-schema-only .pdf-static-typewriter-field {
