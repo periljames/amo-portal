@@ -4,23 +4,40 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from .pdfium_service import (
-    MAX_PDF_BYTES,
-    MAX_PDF_PAGES,
-    PdfEngineError,
-    PdfInspection,
-    _contains_unsafe_action,
-)
+from . import pdfium_service as base
+from .pdfium_service import MAX_PDF_BYTES, MAX_PDF_PAGES, PdfEngineError, PdfInspection
 
 
 CAPABILITY_TIMEOUT_SECONDS = int(os.getenv("PDF_CAPABILITY_TIMEOUT_SECONDS", "25"))
 CAPABILITY_WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
+_JS_KEY_PATTERN = re.compile(r"/(?:JavaScript|JS)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
+_EMPTY_JS_PATTERN = re.compile(r"/JS\s*(?:\(\s*\)|<\s*>)", re.IGNORECASE)
+_ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
+_ACTION_OBJECT_PATTERN = re.compile(r"/Type\s*/Action\b", re.IGNORECASE)
+_SAFE_ACTION_SUBTYPES = {"goto", "uri", "javascript", "js"}
+_DANGEROUS_NON_SCRIPT_SUBTYPES = {
+    "launch",
+    "submitform",
+    "importdata",
+    "gotor",
+    "gotoe",
+    "named",
+    "rendition",
+    "richmediaexecute",
+    "setocgstate",
+    "sound",
+    "movie",
+    "hide",
+    "resetform",
+    "trans",
+}
 
 
 def _validate_input(content: bytes) -> None:
@@ -42,8 +59,21 @@ def _safe_work_root() -> Path:
     return root
 
 
+def _object_action_profile(source: str) -> tuple[bool, bool]:
+    normalized = base._decode_pdf_name_escapes(source or "")
+    executable = _EMPTY_JS_PATTERN.sub("", normalized)
+    has_javascript = bool(_JS_KEY_PATTERN.search(executable))
+    subtypes = {match.group(1).casefold() for match in _ACTION_SUBTYPE_PATTERN.finditer(executable)}
+    unsafe_non_script = bool(subtypes & _DANGEROUS_NON_SCRIPT_SUBTYPES)
+    if _ACTION_OBJECT_PATTERN.search(executable):
+        unsafe_non_script = unsafe_non_script or bool(
+            not subtypes or any(subtype not in _SAFE_ACTION_SUBTYPES for subtype in subtypes)
+        )
+    return has_javascript or bool(subtypes & {"javascript", "js"}), unsafe_non_script
+
+
 def _security_profile(content: bytes) -> tuple[bool, bool]:
-    """Inspect encryption and executable actions without building page fingerprints."""
+    """Identify removable JavaScript and reject unrelated executable actions."""
 
     import pymupdf
 
@@ -57,13 +87,19 @@ def _security_profile(content: bytes) -> tuple[bool, bool]:
         if encrypted:
             return False, True
 
-        catalog = document.xref_object(-1, compressed=False)
-        if _contains_unsafe_action(catalog or ""):
-            return True, False
-        for xref in range(1, document.xref_length()):
-            if _contains_unsafe_action(document.xref_object(xref, compressed=False) or ""):
-                return True, False
-        return False, False
+        has_javascript = False
+        sources = [document.xref_object(-1, compressed=False)]
+        sources.extend(document.xref_object(xref, compressed=False) for xref in range(1, document.xref_length()))
+        for source in sources:
+            scripted, unsafe_non_script = _object_action_profile(source or "")
+            has_javascript = has_javascript or scripted
+            if unsafe_non_script:
+                raise PdfEngineError(
+                    "PDF_UNSAFE_ACTION",
+                    "The PDF contains an executable non-form action that is not permitted in controlled documents",
+                    status_code=409,
+                )
+        return has_javascript, False
     except PdfEngineError:
         raise
     except Exception as exc:
@@ -87,7 +123,7 @@ def _inspect_worker(source_path: Path) -> dict[str, Any]:
 
     content = source_path.read_bytes()
     _validate_input(content)
-    has_actions, encrypted = _security_profile(content)
+    has_javascript, encrypted = _security_profile(content)
 
     try:
         document = pdfium.PdfDocument(source_path)
@@ -112,8 +148,6 @@ def _inspect_worker(source_path: Path) -> dict[str, Any]:
         unsupported_reason = None
         if encrypted:
             unsupported_reason = "Encrypted PDFs require an approved password workflow"
-        elif has_actions:
-            unsupported_reason = "PDF JavaScript and automatic actions are disabled"
         elif dynamic_xfa:
             unsupported_reason = "Dynamic XFA forms cannot be flattened safely"
         return {
@@ -123,10 +157,10 @@ def _inspect_worker(source_path: Path) -> dict[str, Any]:
             "page_count": page_count,
             "form_type": form_type,
             "has_acroform": form_type == acro_form,
-            "has_javascript": has_actions,
+            "has_javascript": has_javascript,
             "is_dynamic_xfa": dynamic_xfa,
             "encrypted": encrypted,
-            "can_flatten": not encrypted and not has_actions and not dynamic_xfa,
+            "can_flatten": not encrypted and not dynamic_xfa,
             "unsupported_reason": unsupported_reason,
             "template_fingerprint": None,
         }
