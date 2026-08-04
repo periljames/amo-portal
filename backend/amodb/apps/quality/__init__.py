@@ -44,11 +44,13 @@ from . import dashboard_route_order as _dashboard_route_order  # noqa: F401,E402
 
 # Continuous-assurance APIs live under the canonical Quality and legacy QMS
 # tenant prefixes. Later extension routers intentionally override selected base
-# paths with stricter tenant validation and schema-aware aggregation.
+# paths with stricter tenant validation, schema-aware aggregation and lifecycle
+# transition enforcement.
 from . import canonical_router as _canonical_router  # noqa: F401,E402
 from . import excellence_router as _excellence_router  # noqa: F401,E402
 from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
 from . import assurance_metrics_router as _assurance_metrics_router  # noqa: F401,E402
+from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -87,6 +89,12 @@ _include_once(
     _assurance_metrics_router.router,
     "/api/maintenance/{amo_code}/qms/excellence/overview/full",
 )
+
+# These endpoints intentionally overlap the base wiring contract. They are
+# registered last so the route-order pass below retains the strict lifecycle
+# handlers for create and approval operations.
+_canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
+_canonical_router.legacy_router.include_router(_assurance_lifecycle_guard_router.router)
 
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
