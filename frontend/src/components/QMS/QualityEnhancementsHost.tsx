@@ -2,7 +2,12 @@ import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
+
+import PortalTextScaleManager from "./PortalTextScaleManager";
+import QualityContextTabs from "./QualityContextTabs";
+import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/quality-checklist-pdf-form-editor.css";
+import "../../styles/qms-usability-enhancements.css";
 
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
@@ -39,9 +44,6 @@ const CarInviteResponsiveStyleLoader: React.FC = () => {
       void import("../../styles/car-invite-responsive.css");
     };
 
-    // The route component imports the legacy CAR stylesheet. Wait until its
-    // workspace is mounted before loading the focused overrides, guaranteeing
-    // that source order cannot restore the cramped 50%-zoom layout.
     if (document.querySelector(".auth-layout--car-invite")) {
       loadOverrides();
     } else {
@@ -110,17 +112,23 @@ const QualityEnhancementsHost: React.FC = () => {
   if (/^\/car-invite\/?$/i.test(location.pathname)) {
     return <CarInviteResponsiveStyleLoader />;
   }
-  if (!route) return null;
 
-  if (route.activeTab === "checklist") {
-    return (
-      <Suspense fallback={null}>
-        <QualityChecklistPdfFormEditorHost />
-      </Suspense>
-    );
-  }
+  const auditEnhancement = route?.activeTab === "checklist" ? (
+    <Suspense fallback={null}>
+      <QualityChecklistPdfFormEditorHost />
+    </Suspense>
+  ) : route ? (
+    <WorkflowIntegrityGuard route={route} />
+  ) : null;
 
-  return <WorkflowIntegrityGuard route={route} />;
+  return (
+    <>
+      <PortalTextScaleManager />
+      <QualityContextTabs />
+      <QualityDataFreshnessCoordinator />
+      {auditEnhancement}
+    </>
+  );
 };
 
 export default QualityEnhancementsHost;
