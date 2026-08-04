@@ -1,0 +1,37 @@
+.admin-page.admin-amo-assets.setup-centre {
+  --setup-surface: var(--surface-elevated, rgba(255, 255, 255, 0.96));
+  --setup-surface-subtle: var(--surface-soft, #f1f5f9);
+  --setup-surface-hover: var(--surface-muted, var(--surface-soft, #e8eef5));
+  --setup-border: var(--border-subtle, rgba(148, 163, 184, 0.35));
+  --setup-border-strong: var(--input-border, rgba(148, 163, 184, 0.58));
+  --setup-text: var(--text-primary, #0f172a);
+  --setup-muted: var(--text-secondary, #475569);
+  --setup-accent: var(--accent-primary, #2563eb);
+  --setup-danger: var(--danger-strong, #b42318);
+  --setup-success: var(--success-strong, #16834a);
+}
+
+:is(html.dark, html[data-theme="dark"], body.dark, [data-theme="dark"]) .admin-page.admin-amo-assets.setup-centre {
+  --setup-surface: var(--surface-elevated, #151a22);
+  --setup-surface-subtle: var(--surface-soft, #1b222c);
+  --setup-surface-hover: var(--surface-muted, #242d39);
+  --setup-border: var(--border-subtle, rgba(203, 213, 225, 0.2));
+  --setup-border-strong: var(--input-border, rgba(203, 213, 225, 0.34));
+  --setup-text: var(--text-primary, #f1f5f9);
+  --setup-muted: var(--text-secondary, #b6c2d1);
+  --setup-accent: var(--accent-primary, #7aa2ff);
+}
+
+:is(html.dark, html[data-theme="dark"], body.dark, [data-theme="dark"])
+  .admin-page.admin-amo-assets.setup-centre > .admin-inline-alert--danger {
+  color: #fff7f7;
+  background: #6f1717;
+  border-color: #a83a3a;
+}
+
+:is(html.dark, html[data-theme="dark"], body.dark, [data-theme="dark"])
+  .admin-page.admin-amo-assets.setup-centre > .admin-inline-alert--success {
+  color: #f2fff7;
+  background: #0e5232;
+  border-color: #238c59;
+}
