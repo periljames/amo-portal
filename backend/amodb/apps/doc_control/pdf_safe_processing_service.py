@@ -99,8 +99,18 @@ def _count_widgets(document: Any) -> int:
     return sum(len(list(page.widgets() or [])) for page in document)
 
 
+def _javascript_object_xrefs(document: Any) -> set[int]:
+    scripted: set[int] = set()
+    for xref in range(1, document.xref_length()):
+        source = document.xref_object(xref, compressed=False) or ""
+        executable = _INERT_JS_PATTERN.sub("", source)
+        if _JS_KEY_PATTERN.search(executable) or _JAVASCRIPT_SUBTYPE_PATTERN.search(executable):
+            scripted.add(xref)
+    return scripted
+
+
 def _remove_script_references(document: Any) -> None:
-    """Remove JavaScript name trees and additional-action references after scrub."""
+    """Remove only executable PDF actions; keep pages, links, fields and images intact."""
 
     catalog = int(document.pdf_catalog())
     names_kind, names_value = document.xref_get_key(catalog, "Names")
@@ -110,15 +120,21 @@ def _remove_script_references(document: Any) -> None:
             names_xref = int(match.group(1))
             if document.xref_get_key(names_xref, "JavaScript")[0] != "null":
                 document.xref_set_key(names_xref, "JavaScript", "null")
-    if document.xref_get_key(catalog, "AA")[0] != "null":
-        document.xref_set_key(catalog, "AA", "null")
+    for key in ("AA", "OpenAction"):
+        if document.xref_get_key(catalog, key)[0] != "null":
+            document.xref_set_key(catalog, key, "null")
 
+    scripted_xrefs = _javascript_object_xrefs(document)
     for xref in range(1, document.xref_length()):
         if document.xref_get_key(xref, "AA")[0] != "null":
             document.xref_set_key(xref, "AA", "null")
-        source = document.xref_object(xref, compressed=False) or ""
-        if _JAVASCRIPT_SUBTYPE_PATTERN.search(source):
-            document.update_object(xref, "<< >>")
+        action_kind, action_value = document.xref_get_key(xref, "A")
+        if action_kind == "xref":
+            match = _PDF_REF_PATTERN.search(str(action_value or ""))
+            if match and int(match.group(1)) in scripted_xrefs:
+                document.xref_set_key(xref, "A", "null")
+    for xref in scripted_xrefs:
+        document.update_object(xref, "<< >>")
 
 
 def _sanitize_in_process(content: bytes) -> bytes:
@@ -140,23 +156,12 @@ def _sanitize_in_process(content: bytes) -> bytes:
         page_count = source.page_count
         widget_count = _count_widgets(source)
         link_count = sum(len(page.get_links()) for page in source)
-        source.scrub(
-            attached_files=False,
-            clean_pages=False,
-            embedded_files=False,
-            hidden_text=False,
-            javascript=True,
-            metadata=False,
-            redactions=False,
-            redact_images=0,
-            remove_links=False,
-            reset_fields=False,
-            reset_responses=False,
-            thumbnails=False,
-            xml_metadata=False,
-        )
+        image_count = sum(len(page.get_images(full=True)) for page in source)
         _remove_script_references(source)
-        sanitized = source.tobytes(garbage=4, deflate=True, clean=False)
+        # Garbage level 1 removes newly orphaned action objects without rebuilding
+        # or recompressing every page stream. Large manuals therefore sanitize in
+        # roughly the same order of time as opening the file, not full re-rendering.
+        sanitized = source.tobytes(garbage=1, deflate=False, clean=False)
     finally:
         source.close()
 
@@ -171,6 +176,8 @@ def _sanitize_in_process(content: bytes) -> bytes:
             raise PdfEngineError("PDF_SANITIZE_WIDGET_MISMATCH", "PDF script removal changed the AcroForm field count", status_code=500)
         if sum(len(page.get_links()) for page in verified) != link_count:
             raise PdfEngineError("PDF_SANITIZE_LINK_MISMATCH", "PDF script removal changed document links", status_code=500)
+        if sum(len(page.get_images(full=True)) for page in verified) != image_count:
+            raise PdfEngineError("PDF_SANITIZE_IMAGE_MISMATCH", "PDF script removal changed embedded images", status_code=500)
         sources = [verified.xref_object(-1, compressed=False)]
         sources.extend(verified.xref_object(xref, compressed=False) for xref in range(1, verified.xref_length()))
         if any(contains_unsafe_action(value or "") for value in sources):
