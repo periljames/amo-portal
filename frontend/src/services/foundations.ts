@@ -3,7 +3,9 @@ import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
 import {
   baseStationIdentityConflictError,
+  changedBaseStationIdentityCandidate,
   findBaseStationIdentityConflict,
+  type BaseStationIdentityCandidate,
 } from "./foundationBaseIdentity";
 import type {
   AirportCatalogSearchRead,
@@ -53,39 +55,50 @@ async function availableBaseIdentityScope(): Promise<BaseStationRead[] | null> {
   }
 }
 
-function updateCandidate(
+function changedUpdateCandidate(
   bases: readonly BaseStationRead[],
   baseStationId: string,
   payload: BaseStationUpdate,
-): Pick<BaseStationCreate, "code" | "aliases"> | null {
+): BaseStationIdentityCandidate | null {
   const current = bases.find((base) => base.id === baseStationId);
-  const code = payload.code ?? current?.code;
-  if (!code) return null;
-  return {
-    code,
-    aliases: payload.aliases ?? current?.aliases.map((alias) => alias.alias) ?? [],
-  };
+  return current ? changedBaseStationIdentityCandidate(current, payload) : null;
 }
 
 function assertIdentityAvailable(
   bases: readonly BaseStationRead[],
-  candidate: Pick<BaseStationCreate, "code" | "aliases">,
+  candidate: BaseStationIdentityCandidate,
   excludeBaseStationId?: string | null,
 ): void {
   const conflict = findBaseStationIdentityConflict(bases, candidate, excludeBaseStationId);
   if (conflict) throw baseStationIdentityConflictError(conflict);
 }
 
-async function explainServerConflict(
+async function explainCreateServerConflict(
   error: unknown,
-  candidate: Pick<BaseStationCreate, "code" | "aliases">,
-  excludeBaseStationId?: string | null,
+  candidate: BaseStationIdentityCandidate,
 ): Promise<never> {
   if (errorStatus(error) !== 409) throw error;
   const refreshed = await availableBaseIdentityScope();
   if (refreshed) {
-    const conflict = findBaseStationIdentityConflict(refreshed, candidate, excludeBaseStationId);
+    const conflict = findBaseStationIdentityConflict(refreshed, candidate);
     if (conflict) throw baseStationIdentityConflictError(conflict);
+  }
+  throw error;
+}
+
+async function explainUpdateServerConflict(
+  error: unknown,
+  baseStationId: string,
+  payload: BaseStationUpdate,
+): Promise<never> {
+  if (errorStatus(error) !== 409) throw error;
+  const refreshed = await availableBaseIdentityScope();
+  if (refreshed) {
+    const candidate = changedUpdateCandidate(refreshed, baseStationId, payload);
+    if (candidate) {
+      const conflict = findBaseStationIdentityConflict(refreshed, candidate, baseStationId);
+      if (conflict) throw baseStationIdentityConflictError(conflict);
+    }
   }
   throw error;
 }
@@ -115,7 +128,7 @@ export function listBaseStations(params?: { include_inactive?: boolean }): Promi
 }
 
 export function createBaseStation(payload: BaseStationCreate): Promise<BaseStationRead> {
-  const candidate = { code: payload.code, aliases: payload.aliases || [] };
+  const candidate: BaseStationIdentityCandidate = { code: payload.code, aliases: payload.aliases || [] };
   const key = baseWriteKey("create", null, payload);
   return singleFlightBaseWrite(key, async () => {
     const bases = await availableBaseIdentityScope();
@@ -123,7 +136,7 @@ export function createBaseStation(payload: BaseStationCreate): Promise<BaseStati
     try {
       return await apiPost<BaseStationRead>("/foundations/base-stations", payload, { headers: authHeaders() });
     } catch (error) {
-      return await explainServerConflict(error, candidate);
+      return await explainCreateServerConflict(error, candidate);
     }
   });
 }
@@ -132,13 +145,12 @@ export function updateBaseStation(baseStationId: string, payload: BaseStationUpd
   const key = baseWriteKey("update", baseStationId, payload);
   return singleFlightBaseWrite(key, async () => {
     const bases = await availableBaseIdentityScope();
-    const candidate = bases ? updateCandidate(bases, baseStationId, payload) : null;
+    const candidate = bases ? changedUpdateCandidate(bases, baseStationId, payload) : null;
     if (bases && candidate) assertIdentityAvailable(bases, candidate, baseStationId);
     try {
       return await apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
     } catch (error) {
-      if (!candidate) throw error;
-      return await explainServerConflict(error, candidate, baseStationId);
+      return await explainUpdateServerConflict(error, baseStationId, payload);
     }
   });
 }
