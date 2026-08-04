@@ -1,0 +1,45 @@
+name: Training workbook review check
+
+on:
+  push:
+    branches:
+      - agent/training-workbook-control-centre
+
+permissions:
+  contents: write
+
+jobs:
+  review-fixes:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply fixes
+        run: python .github/scripts/resolve_training_workbook_review.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Check CSS
+        working-directory: frontend
+        run: npm run check:css
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend docs
+          git commit -m "Resolve Training workbook import review findings"
+          git push origin HEAD
