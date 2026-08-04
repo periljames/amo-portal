@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import re
 from dataclasses import dataclass
@@ -22,8 +23,11 @@ class ParsedCourseRow:
     is_mandatory: bool
     scope: Optional[str]
     reference: Optional[str]
+    is_active: bool
 
 
+# Canonical in-memory contract. Import files may use the original workbook
+# labels, the legacy CourseType label, or the portal CSV export labels.
 EXPECTED_HEADERS = [
     "CourseID",
     "CourseName",
@@ -34,14 +38,31 @@ EXPECTED_HEADERS = [
     "Scope",
     "Reference",
 ]
+OPTIONAL_HEADERS = ["Active"]
+
+_HEADER_ALIASES = {
+    "courseid": "CourseID",
+    "coursecode": "CourseID",
+    "coursename": "CourseName",
+    "frequencymonths": "FrequencyMonths",
+    "status": "Status",
+    "coursetype": "Status",
+    "category": "Category",
+    "mandatory": "Mandatory",
+    "scope": "Scope",
+    "reference": "Reference",
+    "regulatoryreference": "Reference",
+    "active": "Active",
+    "isactive": "Active",
+}
 
 ALLOWED_STATUSES = {
     "initial": "Initial",
     "recurrent": "Recurrent",
     "one_off": "One_Off",
+    "one-off": "One_Off",
+    "one off": "One_Off",
 }
-
-
 
 
 def _normalize_whitespace(value: str) -> str:
@@ -94,12 +115,12 @@ def _derive_requirement_rule(
 
     norm = _normalized_scope_text(raw)
 
-    department = (
+    departments = (
         db.query(accounts_models.Department)
         .filter(accounts_models.Department.amo_id == amo_id, accounts_models.Department.is_active.is_(True))
         .all()
     )
-    for item in department:
+    for item in departments:
         if norm == _normalized_scope_text(item.code) or norm == _normalized_scope_text(item.name):
             return models.TrainingRequirementScope.DEPARTMENT, item.code.upper(), None, None
 
@@ -126,6 +147,8 @@ def _find_existing_requirement(
     query = query.filter(models.TrainingRequirement.job_role == job_role if job_role is not None else models.TrainingRequirement.job_role.is_(None))
     query = query.filter(models.TrainingRequirement.user_id == user_id if user_id is not None else models.TrainingRequirement.user_id.is_(None))
     return query.first()
+
+
 def _clean(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -137,7 +160,6 @@ def _normalize_course_name(value: Any) -> Optional[str]:
     raw = _clean(value)
     if raw is None:
         return None
-    # Intentionally normalize all whitespace (including embedded newlines) to single spaces.
     return re.sub(r"\s+", " ", raw).strip()
 
 
@@ -167,37 +189,101 @@ def _parse_mandatory(value: Any) -> bool:
     raise ValueError("Mandatory must be Yes/No (or blank)")
 
 
+def _parse_active(value: Any) -> bool:
+    raw = (_clean(value) or "").lower()
+    if raw in {"", "yes", "y", "true", "1", "active"}:
+        return True
+    if raw in {"no", "n", "false", "0", "inactive"}:
+        return False
+    raise ValueError("Active must be Yes/No, Active/Inactive, or blank")
+
+
 def _parse_status(value: Any) -> str:
     raw = _clean(value)
     if not raw:
-        raise ValueError("Status is required")
+        raise ValueError("Status/CourseType is required")
     canonical = ALLOWED_STATUSES.get(raw.lower())
     if canonical is None:
-        raise ValueError("Status must be one of: Initial, Recurrent, One_Off")
+        raise ValueError("Status/CourseType must be one of: Initial, Recurrent, One_Off")
     return canonical
 
 
-def parse_courses_sheet(file_bytes: bytes, *, filename: str, sheet_name: str = "Courses") -> list[dict[str, Any]]:
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if ext not in {"xlsx", "xlsm", "xltx", "xltm"}:
-        raise ValueError("Only Excel .xlsx/.xlsm files are supported for courses import.")
+def _header_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _canonicalize_headers(raw_headers: list[Any]) -> list[str]:
+    headers = list(raw_headers)
+    while headers and not str(headers[-1] or "").strip():
+        headers.pop()
+
+    canonical: list[str] = []
+    unknown: list[str] = []
+    for raw in headers:
+        raw_text = str(raw or "").strip()
+        mapped = _HEADER_ALIASES.get(_header_key(raw_text))
+        if not mapped:
+            unknown.append(raw_text or "<blank>")
+            continue
+        canonical.append(mapped)
+
+    if unknown:
+        raise ValueError(
+            "Unsupported course import header(s): "
+            f"{unknown}. Supported fields are {EXPECTED_HEADERS + OPTIONAL_HEADERS}; "
+            "'CourseType' is accepted as an alias for 'Status', and portal CSV export labels are accepted."
+        )
+
+    duplicates = sorted({header for header in canonical if canonical.count(header) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate course import field(s) after header normalization: {duplicates}")
+
+    missing = [header for header in EXPECTED_HEADERS if header not in canonical]
+    if missing:
+        raise ValueError(
+            f"Missing required course import field(s): {missing}. "
+            f"Supported fields are {EXPECTED_HEADERS + OPTIONAL_HEADERS}."
+        )
+    return canonical
+
+
+def _rows_from_excel(file_bytes: bytes, *, sheet_name: str) -> list[tuple[Any, ...]]:
     try:
         import openpyxl  # type: ignore
     except ImportError as exc:
         raise RuntimeError("openpyxl is required for courses import. Install openpyxl.") from exc
 
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"Sheet '{sheet_name}' not found.")
     ws = wb[sheet_name]
-    rows = list(ws.iter_rows(values_only=True))
+    return list(ws.iter_rows(values_only=True))
+
+
+def _rows_from_csv(file_bytes: bytes) -> list[tuple[Any, ...]]:
+    try:
+        text = file_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Courses CSV must be UTF-8 encoded.") from exc
+    return [tuple(row) for row in csv.reader(io.StringIO(text))]
+
+
+def parse_courses_sheet(file_bytes: bytes, *, filename: str, sheet_name: str = "Courses") -> list[dict[str, Any]]:
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if ext in {"xlsx", "xlsm", "xltx", "xltm"}:
+        rows = _rows_from_excel(file_bytes, sheet_name=sheet_name)
+    elif ext == "csv":
+        rows = _rows_from_csv(file_bytes)
+    else:
+        raise ValueError("Courses import supports Excel .xlsx/.xlsm files and UTF-8 .csv files.")
+
     if not rows:
         return []
-    headers = [str(c).strip() if c is not None else "" for c in rows[0]]
-    if headers != EXPECTED_HEADERS:
-        raise ValueError(
-            f"Unexpected headers in '{sheet_name}'. Expected exact order {EXPECTED_HEADERS}, got {headers}"
-        )
+
+    raw_headers = list(rows[0])
+    while raw_headers and not str(raw_headers[-1] or "").strip():
+        raw_headers.pop()
+    headers = _canonicalize_headers(raw_headers)
 
     parsed: list[dict[str, Any]] = []
     for idx, values in enumerate(rows[1:], start=2):
@@ -225,6 +311,7 @@ def _build_parsed_course(raw: dict[str, Any]) -> ParsedCourseRow:
         is_mandatory=_parse_mandatory(raw.get("Mandatory")),
         scope=_clean(raw.get("Scope")),
         reference=_clean(raw.get("Reference")),
+        is_active=_parse_active(raw.get("Active")),
     )
 
 
@@ -287,6 +374,7 @@ def import_courses_rows(
                 regulatory_reference=parsed.reference,
                 is_mandatory=parsed.is_mandatory,
                 mandatory_for_all=_normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"},
+                is_active=parsed.is_active,
                 created_by_user_id=actor_user_id,
                 updated_by_user_id=actor_user_id,
             )
@@ -303,6 +391,7 @@ def import_courses_rows(
                 existing.regulatory_reference = parsed.reference
                 existing.is_mandatory = parsed.is_mandatory
                 existing.mandatory_for_all = _normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"}
+                existing.is_active = parsed.is_active
                 existing.updated_by_user_id = actor_user_id
                 db.add(existing)
 
