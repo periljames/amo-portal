@@ -80,6 +80,7 @@ jobs:
           assurance = script.get_revision("quality_260804_assurance_hub")
           assurance_rls = script.get_revision("quality_260804_assurance_rls")
           assurance_wiring = script.get_revision("quality_260804_assurance_wiring")
+          trigger_fix = script.get_revision("quality_260804_trigger_fix")
 
           assert integrity is not None
           assert integrity.down_revision == "workforce_20260721_complete"
@@ -91,9 +92,11 @@ jobs:
           assert assurance_rls.down_revision == "quality_260804_assurance_hub"
           assert assurance_wiring is not None
           assert assurance_wiring.down_revision == "quality_260804_assurance_rls"
+          assert trigger_fix is not None
+          assert trigger_fix.down_revision == "quality_260804_assurance_wiring"
           assert all(
               len(revision.revision) <= 32
-              for revision in (preferences, assurance, assurance_rls, assurance_wiring)
+              for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix)
           )
           PY
       - name: Compile Quality backend
@@ -107,6 +110,7 @@ jobs:
           amodb/alembic/versions/quality_260804_assurance_hub.py
           amodb/alembic/versions/quality_260804_assurance_rls.py
           amodb/alembic/versions/quality_260804_assurance_wiring.py
+          amodb/alembic/versions/quality_260804_trigger_fix.py
       - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
