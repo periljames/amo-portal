@@ -1,6 +1,5 @@
 export {
   PlanningDashboardPage,
-  PlanningUtilisationPage,
   PlanningForecastPage,
   PlanningTaskLibraryPage,
   PlanningAdSbPage,
@@ -11,6 +10,8 @@ export {
   PublicationReviewPage,
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
+
+export { PlanningUtilisationPage } from "./planning/PlanningUtilisationControlPage";
 
 export {
   PlanningAmpPage,
