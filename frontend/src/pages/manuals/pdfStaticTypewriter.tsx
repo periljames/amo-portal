@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent as ReactChangeEvent,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { Download, FilePenLine, GripHorizontal, LoaderCircle, Trash2, X } from "lucide-react";
 
 import { getCachedUser } from "../../services/auth";
@@ -98,8 +109,10 @@ export function usePdfStaticTypewriter({
   const [error, setError] = useState("");
   const dragRef = useRef<DragState | null>(null);
 
-  const schema = capabilities?.overlay_schema?.fields || [];
-  const schemaSignature = useMemo(() => JSON.stringify(schema), [schema]);
+  const schema = useMemo(
+    () => capabilities?.overlay_schema?.fields || [],
+    [capabilities?.overlay_schema?.fields],
+  );
   const canConfigure = Boolean(capabilities?.can_configure_overlay);
   const available = Boolean(
     identity
@@ -127,14 +140,22 @@ export function usePdfStaticTypewriter({
         return;
       }
       const stored = Array.isArray(parsed.items) ? parsed.items : [];
+      if (!defaults.length) {
+        setItems(stored);
+        return;
+      }
       const byId = new Map(stored.map((item) => [item.id, item]));
-      setItems(defaults.length
-        ? defaults.map((item) => ({ ...item, text: byId.get(item.id)?.text || item.text }))
-        : stored);
+      const defaultIds = new Set(defaults.map((item) => item.id));
+      const restoredDefaults = defaults.map((item) => ({
+        ...item,
+        text: byId.get(item.id)?.text || item.text,
+      }));
+      const freeFields = canConfigure ? stored.filter((item) => !defaultIds.has(item.id)) : [];
+      setItems([...restoredDefaults, ...freeFields]);
     } catch {
       setItems(defaults);
     }
-  }, [available, capabilities?.source_sha256, identity?.manualId, identity?.revisionId, identity?.tenant, schemaSignature]);
+  }, [available, canConfigure, capabilities?.source_sha256, identity, schema]);
 
   useEffect(() => {
     if (!identity || !capabilities?.source_sha256 || !available) return;
@@ -245,10 +266,11 @@ export function usePdfStaticTypewriter({
   }, [identity, items, title]);
 
   const clearPage = useCallback(() => {
+    const schemaIds = new Set(schema.map((field, index) => String(field.id || field.name || `schema-field-${index}`)));
     setItems((current) => current
-      .filter((item) => item.page !== currentPage || schema.some((field, index) => String(field.id || field.name || `schema-field-${index}`) === item.id))
+      .filter((item) => item.page !== currentPage || schemaIds.has(item.id))
       .map((item) => item.page === currentPage ? { ...item, text: "" } : item));
-  }, [currentPage, schemaSignature]);
+  }, [currentPage, schema]);
 
   const controls = available ? <div className={`pdf-static-typewriter-controls ${active ? "is-active" : ""}`}>
     <button type="button" className="pdf-static-typewriter-primary" onClick={() => { setActive((value) => !value); setError(""); }}>
@@ -281,7 +303,7 @@ export function usePdfStaticTypewriter({
       className={`pdf-static-typewriter-layer ${active ? "is-editing" : ""} ${canConfigure ? "can-configure" : "is-schema-only"}`}
       data-page={pageNumber}
       aria-hidden={!interactive}
-      onPointerDown={(event) => addAt(event, pageNumber)}
+      onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => addAt(event, pageNumber)}
     >
       {pageItems.map((item) => <div key={item.id} className={`pdf-static-typewriter-field ${item.text.trim() ? "has-value" : ""}`} style={overlayStyle(item)}>
         {active ? <>
@@ -289,8 +311,8 @@ export function usePdfStaticTypewriter({
             type="button"
             className="pdf-static-typewriter-drag"
             aria-label="Move typed field"
-            onPointerDown={(event) => beginDrag(event, item)}
-            onPointerMove={(event) => moveDrag(event, item)}
+            onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => beginDrag(event, item)}
+            onPointerMove={(event: ReactPointerEvent<HTMLButtonElement>) => moveDrag(event, item)}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
           ><GripHorizontal size={12} /></button> : null}
@@ -299,10 +321,10 @@ export function usePdfStaticTypewriter({
             value={item.text}
             aria-label={item.name || "PDF form field"}
             spellCheck
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(event) => updateItem(item.id, { text: event.target.value })}
+            onPointerDown={(event: ReactPointerEvent<HTMLTextAreaElement>) => event.stopPropagation()}
+            onChange={(event: ReactChangeEvent<HTMLTextAreaElement>) => updateItem(item.id, { text: event.target.value })}
           />
-          {canConfigure ? <button type="button" className="pdf-static-typewriter-remove" aria-label="Remove typed field" onClick={(event) => { event.stopPropagation(); removeItem(item.id); }}><X size={11} /></button> : null}
+          {canConfigure ? <button type="button" className="pdf-static-typewriter-remove" aria-label="Remove typed field" onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); removeItem(item.id); }}><X size={11} /></button> : null}
         </> : item.text.trim() ? <span>{item.text}</span> : null}
       </div>)}
     </div>;
