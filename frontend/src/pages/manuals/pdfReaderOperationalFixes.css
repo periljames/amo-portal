@@ -1,0 +1,64 @@
+.pdfv2-reader .annotationLayer {
+  z-index: 12;
+}
+
+.pdfv2-reader:not(.is-form-active) .annotationLayer .widgetAnnotation,
+.pdfv2-reader:not(.is-form-active) .annotationLayer .buttonWidgetAnnotation,
+.pdfv2-reader:not(.is-form-active) .annotationLayer input,
+.pdfv2-reader:not(.is-form-active) .annotationLayer textarea,
+.pdfv2-reader:not(.is-form-active) .annotationLayer select,
+.pdfv2-reader:not(.is-form-active) .annotationLayer button:not(.linkAnnotation *) {
+  pointer-events: none !important;
+  caret-color: transparent !important;
+  user-select: none !important;
+}
+
+.pdfv2-reader.is-form-active .annotationLayer .widgetAnnotation,
+.pdfv2-reader.is-form-active .annotationLayer .buttonWidgetAnnotation,
+.pdfv2-reader.is-form-active .annotationLayer input,
+.pdfv2-reader.is-form-active .annotationLayer textarea,
+.pdfv2-reader.is-form-active .annotationLayer select,
+.pdfv2-reader.is-form-active .annotationLayer button {
+  pointer-events: auto !important;
+  caret-color: auto !important;
+  user-select: text !important;
+}
+
+.pdfv2-reader .annotationLayer .linkAnnotation,
+.pdfv2-reader .annotationLayer .linkAnnotation a {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+.pdfv2-reader.is-form-active .annotationLayer :is(input, textarea, select) {
+  min-height: 1.25em;
+  border: 1px solid rgba(37, 99, 235, 0.5) !important;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.97) !important;
+  color: #0f172a !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+}
+
+.pdfv2-reader.is-form-active .annotationLayer :is(input, textarea, select):focus {
+  outline: 2px solid #2563eb !important;
+  outline-offset: 1px;
+}
+
+.pdfv2-page .react-pdf__Page__canvas {
+  contain: layout paint;
+}
+
+.pdfv2-page .react-pdf__Page__textContent,
+.pdfv2-page .react-pdf__Page__annotations {
+  contain: layout style;
+}
+
+.pdfv2-placeholder--queued {
+  content-visibility: auto;
+  contain-intrinsic-size: var(--pdfv2-page-width) var(--pdfv2-page-height);
+}
+
+.pdf-engine-search-mark.is-active {
+  outline: 2px solid #c2410c;
+  outline-offset: 1px;
+}
