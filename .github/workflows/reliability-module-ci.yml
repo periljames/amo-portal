@@ -128,7 +128,7 @@ jobs:
           set -o pipefail
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_quality_20260804_merge' /tmp/alembic-heads.txt
+          grep -q 'rel_20260804_calc_revisions' /tmp/alembic-heads.txt
 
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
@@ -149,9 +149,12 @@ jobs:
               """)).scalar_one()
               version = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
           assert width is not None and width >= 128, width
-          assert version == 'rel_quality_20260804_merge', version
+          assert version == 'rel_20260804_calc_revisions', version
           print(f'alembic_version={version}; capacity={width}')
           PY
+
+      - name: Run PostgreSQL append-only revision regression
+        run: python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
 
       - name: Run Reliability tests
         run: pytest -q backend/amodb/apps/reliability/tests
