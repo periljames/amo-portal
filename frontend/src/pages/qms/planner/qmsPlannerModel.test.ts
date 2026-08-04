@@ -80,10 +80,15 @@ describe("QMS planner model", () => {
     expect(moved.endDate).toBe("2026-07-29");
   });
 
-  it("requests exact timeline and month ranges", () => {
-    const week = requestRange("week", new Date(2026, 6, 20), 4);
+  it("requests exact month ranges and covers both calendar and business-day timelines", () => {
+    const ordinaryWeek = requestRange("week", new Date(2026, 6, 20), 4);
+    const fridayFiveDaySpan = requestRange("week", new Date(2026, 6, 17), 5);
+    const sevenDaySpan = requestRange("week", new Date(2026, 6, 20), 7);
     const month = requestRange("month", new Date(2026, 6, 20));
-    expect(week).toEqual({ start: "2026-07-20", end: "2026-07-23" });
+
+    expect(ordinaryWeek).toEqual({ start: "2026-07-20", end: "2026-07-23" });
+    expect(fridayFiveDaySpan).toEqual({ start: "2026-07-17", end: "2026-07-23" });
+    expect(sevenDaySpan).toEqual({ start: "2026-07-19", end: "2026-07-28" });
     expect(month.start).toBe("2026-06-28");
     expect(month.end).toBe("2026-08-01");
     expect(isoDateKey(new Date(2026, 6, 20))).toBe("2026-07-20");
