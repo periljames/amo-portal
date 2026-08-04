@@ -1,6 +1,6 @@
 """Store user-scoped portal appearance and accessibility preferences.
 
-Revision ID: accounts_20260804_portal_preferences
+Revision ID: accounts_260804_portal_prefs
 Revises: accounts_20260803_auth_session
 Create Date: 2026-08-04
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "accounts_20260804_portal_preferences"
+revision = "accounts_260804_portal_prefs"
 down_revision = "accounts_20260803_auth_session"
 branch_labels = None
 depends_on = None
