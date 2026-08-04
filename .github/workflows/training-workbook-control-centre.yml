@@ -1,0 +1,57 @@
+name: Training workbook control centre patch
+
+on:
+  push:
+    branches:
+      - agent/training-workbook-control-centre
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Add SQLAlchemy role-query import
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/amodb/apps/training/compliance.py')
+          text = path.read_text(encoding='utf-8')
+          if 'from sqlalchemy import or_' not in text:
+              anchor = 'from sqlalchemy.orm import Session, load_only, noload\n'
+              if anchor not in text:
+                  raise SystemExit('Could not locate compliance SQLAlchemy import')
+              text = text.replace(anchor, 'from sqlalchemy import or_\n' + anchor, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Apply governed Training integration
+        run: python .github/scripts/apply_training_workbook_control_centre.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Validate frontend production build
+        working-directory: frontend
+        run: npm run build
