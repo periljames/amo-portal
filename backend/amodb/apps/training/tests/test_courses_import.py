@@ -36,7 +36,7 @@ def _xlsx_bytes(sheet_name: str, headers: list[str], rows: list[list[object]]) -
     return buf.getvalue()
 
 
-def test_parse_courses_sheet_rejects_wrong_sheet_and_headers():
+def test_parse_courses_sheet_rejects_wrong_sheet_and_unknown_headers():
     good_headers = [
         "CourseID",
         "CourseName",
@@ -48,20 +48,16 @@ def test_parse_courses_sheet_rejects_wrong_sheet_and_headers():
         "Reference",
     ]
     payload = _xlsx_bytes("Wrong", good_headers, [])
-    try:
+    with pytest.raises(ValueError) as exc_info:
         parse_courses_sheet(payload, filename="COURSES.xlsx", sheet_name="Courses")
-        assert False, "expected wrong-sheet error"
-    except ValueError as exc:
-        assert "Sheet 'Courses' not found." in str(exc)
+    assert "Sheet 'Courses' not found." in str(exc_info.value)
 
     bad_headers = good_headers.copy()
-    bad_headers[0] = "CourseCode"
+    bad_headers[0] = "UnknownCourseField"
     payload = _xlsx_bytes("Courses", bad_headers, [])
-    try:
+    with pytest.raises(ValueError) as exc_info:
         parse_courses_sheet(payload, filename="COURSES.xlsx", sheet_name="Courses")
-        assert False, "expected header error"
-    except ValueError as exc:
-        assert "Expected exact order" in str(exc)
+    assert "Unsupported course import header" in str(exc_info.value)
 
 
 def test_courses_import_contract_and_normalization(db_session):
@@ -115,21 +111,23 @@ def test_courses_import_contract_and_normalization(db_session):
             TrainingCourse.__table__.c.scope,
             TrainingCourse.__table__.c.regulatory_reference,
             TrainingCourse.__table__.c.is_mandatory,
+            TrainingCourse.__table__.c.is_active,
         ).order_by(TrainingCourse.__table__.c.course_id.asc())
     ).all()
 
     assert [r.course_id for r in saved] == ["1510-INIT", "1510-REF", "PT6A-INIT"]
     assert saved[0].course_name == "Composite Structures Inspection - Familiarisation"
     assert saved[1].course_name == "Composite Structures Inspection - Familiarisation"
-    assert saved[2].course_name == "PT6A INIT"  # newline normalized to single-space
+    assert saved[2].course_name == "PT6A INIT"
     assert saved[0].frequency_months is None
     assert saved[1].frequency_months == 24
-    assert saved[0].is_mandatory is False  # blank
-    assert saved[1].is_mandatory is True   # Yes
-    assert saved[2].is_mandatory is False  # No
+    assert saved[0].is_mandatory is False
+    assert saved[1].is_mandatory is True
+    assert saved[2].is_mandatory is False
     assert saved[1].scope == "All Staff"
     assert saved[0].regulatory_reference == "MTM 2.5"
     assert saved[1].regulatory_reference == "MPM 1.3.7.3"
+    assert all(r.is_active is True for r in saved)
 
 
 def test_courses_import_rejects_duplicate_course_id_and_invalid_tokens(db_session):
@@ -185,8 +183,7 @@ def test_courses_import_rejects_duplicate_course_id_and_invalid_tokens(db_sessio
     reasons = [issue.reason for issue in result.issues]
     assert any("Duplicate CourseID inside import file." == r for r in reasons)
     assert any("FrequencyMonths must be an integer or blank" in r for r in reasons)
-    assert any("Status must be one of: Initial, Recurrent, One_Off" in r for r in reasons)
-    # Mandatory validator is reached for valid status rows; keep explicit single-row check too.
+    assert any("Status/CourseType must be one of: Initial, Recurrent, One_Off" in r for r in reasons)
 
     mandatory_issue = import_courses_rows(
         db_session,
