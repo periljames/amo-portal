@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import io
 import json
 from typing import Any
@@ -13,7 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile, require_execution_scope
-from amodb.apps.doc_control.pdfium_service import PdfEngineError, PdfFlattenResult, PdfInspection
+from amodb.apps.doc_control.pdf_capability_service import inspect_pdf_capabilities_bytes
+from amodb.apps.doc_control.pdfium_service import MAX_PDF_BYTES, PdfEngineError, PdfFlattenResult, PdfInspection
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -32,6 +34,46 @@ from .pdf_reader_router import (
 
 
 router = APIRouter(prefix="/manuals", tags=["Controlled PDF Reader Form Overrides"])
+
+
+def _capability_inspection(revision: models.ManualRevision) -> PdfInspection:
+    """Verify custody, then perform only the checks needed to initialize the reader.
+
+    Completed-record submission still uses the full provenance inspection. Opening a
+    reader must not build text, image, vector, and navigation fingerprints for every
+    page merely to determine whether standard AcroForm widgets may be rendered.
+    """
+
+    path = _source_path(revision)
+    content = path.read_bytes()
+    if len(content) > MAX_PDF_BYTES:
+        raise PdfEngineError(
+            "PDF_TOO_LARGE",
+            f"PDF input exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MB processing limit",
+            status_code=413,
+        )
+    recorded_sha256 = str(getattr(revision, "source_sha256", "") or "").strip().lower()
+    if not recorded_sha256:
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISSING",
+            "The immutable revision does not have a recorded source checksum",
+            status_code=409,
+        )
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if not hmac.compare_digest(actual_sha256, recorded_sha256):
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISMATCH",
+            "The stored PDF bytes do not match the approved immutable revision checksum",
+            status_code=409,
+        )
+    inspection = inspect_pdf_capabilities_bytes(content)
+    if not hmac.compare_digest(inspection.source_sha256.lower(), recorded_sha256):
+        raise PdfEngineError(
+            "PDF_SOURCE_CHECKSUM_MISMATCH",
+            "The PDF capability processor did not confirm the approved immutable revision checksum",
+            status_code=409,
+        )
+    return inspection
 
 
 def _safe_form_capabilities(
@@ -182,7 +224,7 @@ def pdf_reader_capabilities_override(
         current_user=current_user,
     )
     try:
-        inspection = _inspection(revision)
+        inspection = _capability_inspection(revision)
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
     return _safe_form_capabilities(
