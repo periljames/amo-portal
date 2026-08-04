@@ -105,7 +105,7 @@ test.describe("QMS calendar operational workspace", () => {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
     }));
-    expect(internalWidths.scrollWidth).toBeGreaterThanOrEqual(internalWidths.clientWidth);
+    expect(internalWidths.scrollWidth).toBeGreaterThan(internalWidths.clientWidth);
 
     const populatedDay = page.locator(".qms-calendar-day").filter({ has: page.locator(".qms-calendar-item") }).first();
     test.skip((await populatedDay.count()) === 0, "The configured tenant has no visible events in the current month.");
@@ -115,9 +115,39 @@ test.describe("QMS calendar operational workspace", () => {
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS("position", "fixed");
 
+    const viewportLock = await page.evaluate(async () => {
+      const drawerElement = document.querySelector<HTMLElement>(".qms-calendar-drawer");
+      const scrollport = document.querySelector<HTMLElement>(".tenant-shell__main");
+      if (!drawerElement || !scrollport) throw new Error("Calendar drawer or tenant scrollport was not found.");
+
+      const spacer = document.createElement("div");
+      spacer.dataset.qmsCalendarViewportTestSpacer = "true";
+      spacer.style.minHeight = "28rem";
+      spacer.style.width = "1px";
+      spacer.style.flex = "0 0 28rem";
+      scrollport.appendChild(spacer);
+
+      const beforeScroll = scrollport.scrollTop;
+      const beforeBottom = drawerElement.getBoundingClientRect().bottom;
+      scrollport.scrollTop = Math.min(scrollport.scrollHeight - scrollport.clientHeight, beforeScroll + 180);
+
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+      const afterScroll = scrollport.scrollTop;
+      const afterBottom = drawerElement.getBoundingClientRect().bottom;
+      spacer.remove();
+      scrollport.scrollTop = beforeScroll;
+
+      return { beforeScroll, afterScroll, beforeBottom, afterBottom };
+    });
+
+    expect(viewportLock.afterScroll).toBeGreaterThan(viewportLock.beforeScroll);
+    expect(Math.abs(viewportLock.afterBottom - viewportLock.beforeBottom)).toBeLessThanOrEqual(2);
+
     const bounds = await drawer.evaluate((element) => element.getBoundingClientRect().toJSON());
     expect(bounds.left).toBeGreaterThanOrEqual(0);
     expect(bounds.right).toBeLessThanOrEqual(390);
+    expect(bounds.bottom).toBeGreaterThanOrEqual(820);
     expect(bounds.bottom).toBeLessThanOrEqual(844);
     await expectNoDocumentOverflow(page);
   });
