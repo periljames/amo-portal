@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from amodb.database import Base
+from amodb.apps.accounts.portal_preferences_models import UserPortalPreference
 from amodb.apps.accounts.portal_preferences_router import (
     PortalPreferencesPatch,
     PortalPreferencesRead,
@@ -18,6 +20,11 @@ def test_portal_preference_routes_are_mounted_on_router() -> None:
     }
     assert ("/portal-preferences/", "GET") in route_methods
     assert ("/portal-preferences/", "PATCH") in route_methods
+
+
+def test_portal_preference_model_is_registered() -> None:
+    assert UserPortalPreference.__tablename__ == "user_portal_preferences"
+    assert "user_portal_preferences" in Base.metadata.tables
 
 
 def test_portal_preference_defaults_are_accessible() -> None:
