@@ -10,8 +10,12 @@ READER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngineV2.
 READER_OPERATIONAL_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderOperationalFixes.css"
 READER_LAYOUT = REPOSITORY_ROOT / "frontend/src/pages/manuals/publicationReaderZoom.css"
 LAYOUT_VIEWER = REPOSITORY_ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
+STATIC_TYPEWRITER = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfStaticTypewriter.tsx"
+STATIC_TYPEWRITER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfStaticTypewriter.css"
+PDF_READER_SERVICE = REPOSITORY_ROOT / "frontend/src/services/pdfReader.ts"
 FAST_READER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 FORM_OVERRIDE = REPOSITORY_ROOT / "backend/amodb/apps/manuals/pdf_reader_form_override_router.py"
+STATIC_OVERLAY_ROUTER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/pdf_static_overlay_router.py"
 ROUTER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/router.py"
 
 
@@ -71,6 +75,34 @@ def test_acroform_widgets_enable_automatically_only_for_safe_documents() -> None
     assert ".pdfv2-reader.is-form-active .annotationLayer .widgetAnnotation" in operational_stylesheet
     assert "pointer-events: auto !important" in operational_stylesheet
     assert ".pdfv2-reader:not(.is-form-active)" in operational_stylesheet
+
+
+def test_static_pdf_pages_have_a_controlled_typewriter_execution_path() -> None:
+    layout = _source(LAYOUT_VIEWER)
+    typewriter = _source(STATIC_TYPEWRITER)
+    styles = _source(STATIC_TYPEWRITER_STYLES)
+    service = _source(PDF_READER_SERVICE)
+    backend = _source(STATIC_OVERLAY_ROUTER)
+    override = _source(FORM_OVERRIDE)
+    router = _source(ROUTER)
+
+    assert "usePdfStaticTypewriter" in layout
+    assert "staticTypewriter.controls" in layout
+    assert "staticTypewriter.renderPageOverlay(pageNumber)" in layout
+    assert "Type on PDF" in typewriter
+    assert "Click any blank line or box to add text" in typewriter
+    assert "Filled pages" in typewriter
+    assert "Full filled PDF" in typewriter
+    assert "amo-pdf-static-overlay:v1" in typewriter
+    assert ".pdf-static-typewriter-layer.is-editing" in styles
+    assert "createPdfStaticOverlay" in service
+    assert "/static-overlay.pdf" in service
+    assert "static_overlay_capabilities" in backend
+    assert "allow_free_position=bool(capability[\"can_configure_overlay\"])" in backend
+    assert "_source_path(revision).read_bytes" in backend
+    assert "document.tobytes" in backend
+    assert "payload.update(overlay)" in override
+    assert router.index("router.include_router(_pdf_static_overlay_router)") < router.index("router.include_router(_pdf_reader_router)")
 
 
 def test_search_moves_the_document_and_the_exact_occurrence() -> None:
