@@ -1,6 +1,8 @@
 name: Reliability Hotfix Command
 
 on:
+  schedule:
+    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
@@ -22,6 +24,7 @@ concurrency:
 jobs:
   apply-and-validate:
     if: >-
+      github.event_name == 'schedule' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.number == 412 &&
        github.event.comment.body == '/apply-reliability-hotfix-412' &&
