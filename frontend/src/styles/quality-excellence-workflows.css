@@ -1,0 +1,13 @@
+/*
+ * The Quality Control Centre now owns the QMS root route directly.
+ *
+ * Keep this compatibility stylesheet intentionally free of global hide rules.
+ * The previous overlay implementation used `html.quality-excellence-active` to
+ * suppress the canonical dashboard underneath a portal-mounted cockpit. That
+ * architecture has been removed; hiding `.qms-ops-page`, `.qms-shell`, or
+ * `.quality-dashboard-page` globally would now be unsafe.
+ *
+ * Current Control Centre workflow and responsive styles live in:
+ *   - quality-excellence-cockpit.css
+ *   - quality-excellence-wiring.css
+ */

@@ -1,0 +1,413 @@
+/* Portal accessibility and QMS operational hierarchy ---------------------------------- */
+
+html[data-portal-text-scale="standard"] { font-size: 100%; }
+html[data-portal-text-scale="large"] { font-size: 112.5%; }
+html[data-portal-text-scale="extra-large"] { font-size: 125%; }
+
+html[data-portal-text-scale] {
+  --tenant-topbar-height: clamp(50px, 3.2rem, 66px);
+  --portal-page-padding: clamp(0.65rem, 1vw, 1rem);
+}
+
+/* The portal used many 9.6px-12px labels. Keep hierarchy, but never make operational
+   navigation and controls depend on tiny type. */
+.tenant-shell__context strong { font-size: 0.9rem; }
+.tenant-shell__context span { font-size: 0.72rem; }
+.tenant-shell__brand strong { font-size: 0.875rem; }
+.tenant-shell__brand small { font-size: 0.72rem; }
+.tenant-nav__group > h2 { font-size: 0.72rem; }
+.tenant-nav__link > span:last-child,
+.tenant-nav__branch--level-1 .tenant-nav__link > span:last-child,
+.tenant-nav__branch--level-2 .tenant-nav__link > span:last-child { font-size: 0.84rem; }
+.tenant-shell__search input,
+.tenant-shell__profile-name,
+.tenant-shell__profile-menu > button,
+.tenant-shell__appearance select { font-size: 0.84rem; }
+.tenant-shell__appearance label > span,
+.tenant-shell__accent-picker > span { font-size: 0.7rem; }
+.tenant-shell__nav-summary,
+.tenant-shell__profile-error { font-size: 0.72rem; }
+.tenant-shell__status-banner { font-size: 0.82rem; }
+
+.tenant-nav__row { min-height: 40px; }
+.tenant-nav__link,
+.tenant-nav__expand,
+.tenant-nav__favourite { min-height: 38px; }
+.tenant-shell__profile-menu > button { min-height: 42px; }
+.tenant-shell__search { min-height: 40px; }
+.tenant-shell__search input { height: 36px; }
+.tenant-shell__appearance select { min-height: 40px; height: auto; padding-block: 0.45rem; }
+
+:root[data-portal-density="compact"] .tenant-nav__row,
+body[data-portal-density="compact"] .tenant-nav__row { min-height: 36px; }
+:root[data-portal-density="compact"] .tenant-nav__link,
+:root[data-portal-density="compact"] .tenant-nav__expand,
+:root[data-portal-density="compact"] .tenant-nav__favourite,
+body[data-portal-density="compact"] .tenant-nav__link,
+body[data-portal-density="compact"] .tenant-nav__expand,
+body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
+
+/* Per-user text scale control ---------------------------------------------------------- */
+.tenant-shell__text-scale-host {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.tenant-shell__text-scale {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--surface-border);
+}
+
+.tenant-shell__text-scale-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.tenant-shell__text-scale-heading > svg {
+  flex: 0 0 auto;
+  color: var(--accent-primary);
+}
+
+.tenant-shell__text-scale-heading > span {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.tenant-shell__text-scale-heading strong { font-size: 0.86rem; }
+.tenant-shell__text-scale-heading small { color: var(--text-secondary); font-size: 0.72rem; }
+
+.tenant-shell__text-scale-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.tenant-shell__text-scale-options > button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 0.12rem;
+  min-width: 0;
+  min-height: 58px;
+  padding: 0.45rem 0.3rem;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.tenant-shell__text-scale-options > button:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--input-border));
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--surface-elevated));
+}
+
+.tenant-shell__text-scale-options > button.is-selected {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface-elevated));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+}
+
+.tenant-shell__text-scale-options > button > svg {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  color: var(--accent-primary);
+}
+
+.tenant-shell__text-scale-sample { font-weight: 850; line-height: 1; }
+.tenant-shell__text-scale-options > button:nth-child(1) .tenant-shell__text-scale-sample { font-size: 0.88rem; }
+.tenant-shell__text-scale-options > button:nth-child(2) .tenant-shell__text-scale-sample { font-size: 1rem; }
+.tenant-shell__text-scale-options > button:nth-child(3) .tenant-shell__text-scale-sample { font-size: 1.12rem; }
+.tenant-shell__text-scale-label { overflow: hidden; max-width: 100%; font-size: 0.7rem; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Sticky contextual QMS navigation ---------------------------------------------------- */
+.quality-context-bar-host {
+  position: sticky;
+  top: 0;
+  z-index: 38;
+  min-width: 0;
+  border-bottom: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface-elevated) 96%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.quality-context-bar {
+  display: grid;
+  grid-template-columns: minmax(170px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  min-height: 54px;
+  padding: 0.42rem var(--portal-page-padding, 0.7rem);
+  color: var(--text-primary);
+}
+
+.quality-context-bar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.52rem;
+  min-width: 0;
+}
+
+.quality-context-bar__mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface));
+  color: var(--accent-primary);
+}
+
+.quality-context-bar__identity > span:last-child {
+  display: grid;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.quality-context-bar__identity small {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.quality-context-bar__identity strong {
+  overflow: hidden;
+  max-width: 18rem;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quality-context-bar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.18rem;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.1rem;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+}
+
+.quality-context-bar__tabs > button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 0.62rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 680;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quality-context-bar__tabs > button:hover {
+  background: var(--tenant-nav-hover);
+  color: var(--text-primary);
+}
+
+.quality-context-bar__tabs > button.is-active {
+  background: color-mix(in srgb, var(--accent-primary) 11%, var(--surface-elevated));
+  color: var(--text-primary);
+}
+
+.quality-context-bar__tabs > button.is-active::after {
+  content: "";
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0;
+  left: 0.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+}
+
+.quality-context-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+
+.quality-context-bar__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 30px;
+  padding: 0 0.48rem;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 32%, var(--surface-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-success) 8%, var(--surface-elevated));
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 740;
+}
+
+.quality-context-bar__primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 38px;
+  padding: 0 0.68rem;
+  border: 1px solid var(--accent-primary);
+  border-radius: 7px;
+  background: var(--accent-primary);
+  color: var(--button-primary-text, white);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quality-context-bar__primary:hover { filter: brightness(1.04); }
+
+.quality-context-bar__more { position: relative; }
+.quality-context-bar__more > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.12rem;
+  min-width: 40px;
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+.quality-context-bar__more > summary::-webkit-details-marker { display: none; }
+.quality-context-bar__more > div {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 80;
+  display: grid;
+  width: min(17rem, calc(100vw - 1rem));
+  padding: 0.35rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  background: var(--menu-surface);
+  box-shadow: var(--portal-shadow);
+}
+.quality-context-bar__more button {
+  min-height: 40px;
+  padding: 0 0.65rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.quality-context-bar__more button:hover { background: var(--tenant-nav-hover); }
+
+/* Remove competing hierarchy only where the new context bar provides the same information. */
+html.quality-context-active .qms-ops-page > .page-header { display: none; }
+html.quality-context-active .qms-ops-module-strip { display: none; }
+html.quality-context-active:not(.quality-context-overview) .qms-ops-hero { display: none; }
+html.quality-context-active .audit-shell-header__title-block { display: none; }
+html.quality-context-active .audit-shell-header__nav { display: none; }
+html.quality-context-active .audit-shell-header {
+  margin: 0;
+  padding: 0.35rem 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html.quality-context-active .audit-shell-header__top-row { justify-content: flex-end; }
+
+/* QMS operational text should remain readable at Standard size. */
+.qms-ops-page,
+.qms-shell,
+.audit-shell-content { font-size: 0.9rem; }
+.qms-ops-mode,
+.qms-ops-pill,
+.qms-ops-muted,
+.qms-ops-module-strip__group-head span,
+.qms-ops-signal__copy small,
+.qms-calendar-command__range,
+.qms-calendar-event-badge { font-size: 0.78rem; }
+.qms-ops-hero__copy span,
+.qms-ops-hero__copy p,
+.qms-ops-filter-bar,
+.qms-ops-purpose-list,
+.qms-calendar-shell button,
+.qms-calendar-shell input,
+.qms-calendar-shell select { font-size: 0.86rem; }
+.qms-ops-table,
+.qms-ops-table th,
+.qms-ops-table td { font-size: 0.86rem; }
+
+.qms-ops-page {
+  gap: 0.7rem;
+  padding-bottom: 1.25rem;
+}
+
+.qms-ops-workspace-grid { gap: 0.75rem; }
+.qms-ops-workspace-head { min-height: 44px; }
+.qms-ops-action-tabs { position: sticky; top: 0; z-index: 4; background: var(--surface-elevated); }
+
+@media (max-width: 1100px) {
+  .quality-context-bar {
+    grid-template-columns: minmax(145px, auto) minmax(0, 1fr) auto;
+  }
+  .quality-context-bar__live { display: none; }
+  .quality-context-bar__identity strong { max-width: 13rem; }
+}
+
+@media (max-width: 760px) {
+  .quality-context-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "identity actions"
+      "tabs tabs";
+    gap: 0.32rem 0.55rem;
+    padding-block: 0.38rem 0.28rem;
+  }
+  .quality-context-bar__identity { grid-area: identity; }
+  .quality-context-bar__tabs { grid-area: tabs; margin-inline: calc(-1 * var(--portal-page-padding, 0.7rem)); padding-inline: var(--portal-page-padding, 0.7rem); }
+  .quality-context-bar__actions { grid-area: actions; }
+  .quality-context-bar__identity small { display: none; }
+  .quality-context-bar__primary span { display: none; }
+  .quality-context-bar__primary { min-width: 40px; justify-content: center; padding: 0; }
+}
+
+@media (max-width: 540px) {
+  .tenant-shell__text-scale-options { grid-template-columns: minmax(0, 1fr); }
+  .tenant-shell__text-scale-options > button {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    justify-items: start;
+    min-height: 46px;
+    padding-inline: 0.65rem;
+  }
+  .tenant-shell__text-scale-options > button > svg { position: static; }
+  .tenant-shell__text-scale-label { font-size: 0.78rem; }
+  .quality-context-bar__mark { width: 30px; height: 30px; }
+  .quality-context-bar__identity strong { max-width: 48vw; }
+  .quality-context-bar__tabs > button { min-height: 40px; font-size: 0.8rem; }
+  .quality-context-bar__tabs > button > svg { display: none; }
+}

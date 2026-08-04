@@ -1,0 +1,31 @@
+/*
+ * Lifecycle-aware affordances for the direct Quality Control Centre.
+ *
+ * Backend lifecycle checks remain authoritative. These selectors prevent an
+ * unapproved control from presenting operating-effectiveness testing as an
+ * available action, while keeping evidence linking and approval actions clear.
+ */
+.qew-control-table > article:not(:has(.qew-status--approved))
+  .qew-control-table__actions > button:nth-of-type(2) {
+  display: none;
+}
+
+.qew-control-table > article:not(:has(.qew-status--approved))
+  .qew-control-table__actions::before {
+  content: "Approve before testing";
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 2px solid var(--qew-border-strong);
+  color: var(--qew-muted);
+  font-size: 0.76em;
+  font-weight: 650;
+}
+
+@supports not selector(:has(*)) {
+  /* Older browsers keep the action visible; the API still enforces lifecycle. */
+  .qew-control-table__actions::before {
+    content: none;
+  }
+}

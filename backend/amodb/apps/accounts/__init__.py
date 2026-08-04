@@ -11,7 +11,7 @@ from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
 from . import models, schemas, services  # noqa: F401
-from . import admin_profile_router, department_home_router, router_amo_assets
+from . import admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
 from .admin_profile_access import active_admin_profile_session
 from .admin_profile_concurrency import (
     lock_admin_grant_for_approval,
@@ -91,8 +91,11 @@ for _route in _router_public.router.routes:
 
 # Mounted below the authenticated /auth surface. The endpoint independently
 # resolves the AMO and validates effective department access before returning any
-# composed data.
+# composed data. Portal preferences are also mounted here so every deployment
+# profile that already exposes the authenticated accounts router receives the
+# same per-user accessibility and appearance contract.
 _router_public.router.include_router(department_home_router.router)
+_router_public.router.include_router(portal_preferences_router.router)
 
 __all__ = [
     "models",
@@ -100,6 +103,7 @@ __all__ = [
     "services",
     "admin_profile_router",
     "department_home_router",
+    "portal_preferences_router",
     "router_amo_assets",
     "active_admin_profile_session",
     "bind_auth_session_to_token_refresh",

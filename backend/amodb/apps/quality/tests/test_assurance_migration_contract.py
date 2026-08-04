@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+MIGRATION = (
+    Path(__file__).resolve().parents[3]
+    / "alembic"
+    / "versions"
+    / "quality_260804_trigger_fix.py"
+)
+
+
+def test_trigger_fix_preserves_event_provenance_and_caller_context() -> None:
+    source = MIGRATION.read_text(encoding="utf-8")
+    assert "CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE current_row END" in source
+    assert "set_config('app.tenant_id', tenant_id, true)" in source
+    assert "set_config('app.tenant_id', COALESCE(previous_tenant_id, ''), true)" in source
+    assert "set_config('app.user_id', COALESCE(previous_user_id, ''), true)" in source
+    assert "SELECT 1 FROM users WHERE id::text = actor_id" in source
+
+
+def test_report_and_out_of_tolerance_sources_emit_assurance_events() -> None:
+    source = MIGRATION.read_text(encoding="utf-8")
+    assert "trg_qms_report_exports_assurance_event" in source
+    assert "quality_capture_assurance_event('REPORT')" in source
+    assert "trg_qms_out_of_tolerance_events_assurance_event" in source
+    assert "quality_capture_assurance_event('OUT_OF_TOLERANCE')" in source
