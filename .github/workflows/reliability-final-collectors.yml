@@ -1,0 +1,112 @@
+name: Reliability Final Collector Integration
+
+on:
+  push:
+    branches: [agent/reliability-final-collectors]
+    paths: [docs/reliability/.final-collectors-trigger]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-final-collectors
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TARGET_SHA: 4bdb3ab7de013cf6105d981fce4ed97b28980b60
+      TARGET_BRANCH: agent/reliability-v2-foundation
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      WRITE_DATABASE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: reliability-collector-integration
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      PYTHONPATH: backend
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/reliability-final-collectors
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply final authoritative collectors
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo integration > /tmp/reliability-collectors-stage
+          git reset --hard "$TARGET_SHA"
+          git checkout refs/remotes/origin/agent/reliability-v2-collectors-prep -- \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py \
+            backend/scripts/apply_reliability_internal_collectors.py
+          python backend/scripts/apply_reliability_internal_collectors.py
+          rm -f backend/scripts/apply_reliability_internal_collectors.py
+          python -m py_compile \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/advanced_services.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+          git diff --check
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Run focused collector contracts
+        run: |
+          set -euo pipefail
+          echo tests > /tmp/reliability-collectors-stage
+          pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+          pytest -q \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+
+      - name: Publish collector completion to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo publication > /tmp/reliability-collectors-stage
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+          git add backend/amodb/apps/reliability/internal_collectors.py
+          git add backend/amodb/apps/reliability/advanced_services.py
+          git add backend/amodb/apps/reliability/tests/test_internal_collectors.py
+          git add backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" -eq 4
+          git diff --cached --check
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git commit -m "Complete authoritative Reliability collectors"
+          git push origin HEAD:"$TARGET_BRANCH"
+
+      - name: Record failure without modifying PR branch
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          STAGE="$(cat /tmp/reliability-collectors-stage 2>/dev/null || echo unknown)"
+          git reset --hard "$GITHUB_SHA"
+          git clean -fd
+          mkdir -p docs/reliability
+          cat > docs/reliability/FINAL_COLLECTORS_FAILURE.md <<EOF
+          # Final Reliability Collector Integration Failure
+          - Run: \`${GITHUB_RUN_ID}\`
+          - Stage: \`${STAGE}\`
+          - Source: \`${GITHUB_SHA}\`
+          PR #404 was not modified by this failed run.
+          EOF
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/FINAL_COLLECTORS_FAILURE.md
+          git commit -m "Record final Reliability collector integration failure" || true
+          git push origin HEAD:agent/reliability-final-collectors || true
