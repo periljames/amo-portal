@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/training-workbook-control-centre
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,7 +16,6 @@ concurrency:
 
 jobs:
   apply-test-and-commit:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -77,6 +77,14 @@ jobs:
           python -m py_compile backend/amodb/apps/training/workbook_import.py backend/amodb/apps/training/tests/test_workbook_import_mapping.py
           pytest -q backend/amodb/apps/training/tests/test_workbook_import_mapping.py
 
+      - name: Validate Alembic revision graph
+        env:
+          PYTHONPATH: backend
+          DATABASE_URL: postgresql+psycopg2://validation:validation@127.0.0.1:5432/validation
+          APP_ENV: test
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini heads
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -116,4 +124,4 @@ jobs:
           git add -A
           git commit -m 'Address Training workbook reconciliation review'
           git push origin HEAD
-          gh pr comment 422 --body "Applied the six reviewed Training fixes. Focused backend tests, frontend production build, and CSS contract checks passed in workflow run ${GITHUB_RUN_ID}."
+          gh pr comment 422 --body "Applied the six reviewed Training fixes. Focused backend tests, Alembic graph validation, frontend production build, and CSS contract checks passed in workflow run ${GITHUB_RUN_ID}."
