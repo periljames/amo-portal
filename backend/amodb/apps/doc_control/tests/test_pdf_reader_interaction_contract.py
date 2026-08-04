@@ -6,6 +6,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 READER_ENTRY = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 READER_CORE = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx"
+READER_CONFIG = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderConfig.ts"
 READER_ENGINE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngine.ts"
 READER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngineV2.css"
 READER_OPERATIONAL_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderOperationalFixes.css"
@@ -13,6 +14,8 @@ READER_LAYOUT = REPOSITORY_ROOT / "frontend/src/pages/manuals/publicationReaderZ
 LAYOUT_VIEWER = REPOSITORY_ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
 FAST_READER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 FORM_OVERRIDE = REPOSITORY_ROOT / "backend/amodb/apps/manuals/pdf_reader_form_override_router.py"
+CAPABILITY_SERVICE = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdf_capability_service.py"
+FULL_PDF_SERVICE = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdfium_service.py"
 ROUTER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/router.py"
 
 
@@ -67,6 +70,23 @@ def test_acroform_capabilities_are_resolved_before_pdfjs_first_render() -> None:
     assert "key={readerModeKey}" in entry
     assert "capabilities={resolvedCapabilities}" in entry
     assert entry.index("if (!resolvedCapabilities)") < entry.index("<PdfReaderCoreV2")
+
+
+def test_capability_failure_keeps_reader_available_and_shows_exact_reason() -> None:
+    entry = _source(READER_ENTRY)
+
+    assert "function readOnlyFallback" in entry
+    assert "error instanceof Error && error.message.trim()" in entry
+    assert "The document remains available in read-only mode" in entry
+    assert "setResolvedCapabilities(readOnlyFallback(error))" in entry
+
+
+def test_jpx_images_use_secure_pdfjs_decoder_fallback() -> None:
+    config = _source(READER_CONFIG)
+
+    assert "useWasm: false" in config
+    assert "JavaScript OpenJPEG fallback" in config
+    assert "isEvalSupported: false" in config
 
 
 def test_acroform_widgets_enable_automatically_only_for_safe_documents() -> None:
@@ -145,6 +165,22 @@ def test_download_menu_exposes_three_distinct_outputs() -> None:
     assert source.count("Editable PDF") == 1
     assert source.count("Completed form pages") == 1
     assert "editedPages.length ? editedPages : formPages" in source
+
+
+def test_capability_route_does_not_run_full_page_provenance_scan() -> None:
+    form_override = _source(FORM_OVERRIDE)
+    capability_service = _source(CAPABILITY_SERVICE)
+    full_service = _source(FULL_PDF_SERVICE)
+
+    assert "inspect_pdf_capabilities_bytes" in form_override
+    assert "inspection = _capability_inspection(revision)" in form_override
+    assert "template_fingerprint\": None" in capability_service
+    assert "_security_profile(content)" in capability_service
+    assert "page.get_drawings()" not in capability_service
+    assert "_page_text_spans" not in capability_service
+    assert "page.get_drawings()" in full_service
+    assert "process_completed_pdf" in form_override
+    assert "source_inspection = await run_in_threadpool(_inspection, revision)" in form_override
 
 
 def test_backend_streaming_and_safe_form_routes_support_the_reader() -> None:
