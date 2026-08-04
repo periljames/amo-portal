@@ -6,7 +6,7 @@ function futureToken(): string {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
 }
 
-function controlRecord() {
+function controlRecord(approvalStatus: "PENDING_APPROVAL" | "APPROVED" = "PENDING_APPROVAL") {
   return {
     id: "control-1",
     control_code: "145.A.65-C01",
@@ -20,7 +20,7 @@ function controlRecord() {
     owner_user_id: "quality-user-a",
     criticality: "CRITICAL",
     status: "ACTIVE",
-    approval_status: "PENDING_APPROVAL",
+    approval_status: approvalStatus,
     version_no: 1,
     test_frequency_days: 365,
     evidence_expectation: "Programme, independent reports and closure evidence",
@@ -31,8 +31,8 @@ function controlRecord() {
     verified_evidence_count: 1,
     latest_test_result: null,
     latest_tested_at: null,
-    approved_by_user_id: null,
-    approved_at: null,
+    approved_by_user_id: approvalStatus === "APPROVED" ? "quality-user-a" : null,
+    approved_at: approvalStatus === "APPROVED" ? "2026-08-04T04:00:00Z" : null,
     created_at: "2026-08-04T04:00:00Z",
     updated_at: "2026-08-04T04:00:00Z",
   };
@@ -40,6 +40,7 @@ function controlRecord() {
 
 async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
   const token = futureToken();
+  let approvalStatus: "PENDING_APPROVAL" | "APPROVED" = "PENDING_APPROVAL";
   await page.addInitScript(({ storedToken, storedRole }) => {
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
@@ -191,7 +192,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
 
     if (path.endsWith("/quality/excellence/controls") && request.method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [controlRecord()], total: 1, as_of: "2026-08-04T04:00:00Z" }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [controlRecord(approvalStatus)], total: 1, as_of: "2026-08-04T04:00:00Z" }) });
       return;
     }
 
@@ -233,7 +234,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
         contentType: "application/json",
         body: JSON.stringify({
           nodes: [
-            { id: "control:control-1", kind: "control", label: "145.A.65-C01 · Independent quality audit programme", framework: "KCAR PART 145", process_area: "Quality assurance", criticality: "CRITICAL", status: "ACTIVE", approval_status: "PENDING_APPROVAL", version_no: 1 },
+            { id: "control:control-1", kind: "control", label: "145.A.65-C01 · Independent quality audit programme", framework: "KCAR PART 145", process_area: "Quality assurance", criticality: "CRITICAL", status: "ACTIVE", approval_status: approvalStatus, version_no: 1 },
             { id: "source:DOCUMENT:doc-1", kind: "evidence", type: "DOCUMENT", label: "MOE 3.2 Quality audit procedure", status: "VERIFIED", route: "/maintenance/tenant-a/quality/documents/library/doc-1", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null },
           ],
           edges: [{ id: "edge-1", from: "control:control-1", to: "source:DOCUMENT:doc-1", relationship: "IMPLEMENTS", status: "VERIFIED", valid_until: null, source_route: "/maintenance/tenant-a/quality/documents/library/doc-1", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null }],
@@ -268,7 +269,8 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
 
     if (path.includes("/quality/excellence/controls/") && path.endsWith("/approval") && request.method() === "POST") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...controlRecord(), approval_status: "APPROVED", approved_by_user_id: "quality-user-a", approved_at: "2026-08-04T04:00:00Z" }) });
+      approvalStatus = "APPROVED";
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(controlRecord(approvalStatus)) });
       return;
     }
 
@@ -335,6 +337,8 @@ test("Quality management can approve and test a control from the same register",
   await prepare(page, "QUALITY_MANAGER");
   await page.goto("/maintenance/tenant-a/quality?hub=controls", { waitUntil: "domcontentloaded" });
 
+  await expect(page.getByText("Approve before testing")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test" })).toHaveCount(0);
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(/Control approved/)).toBeVisible();
   await page.getByRole("button", { name: "Test" }).click();
