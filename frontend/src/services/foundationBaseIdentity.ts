@@ -1,5 +1,4 @@
 import type {
-  BaseStationCreate,
   BaseStationRead,
   BaseStationUpdate,
 } from "../types/foundations";
@@ -66,6 +65,12 @@ export function changedBaseStationIdentityCandidate(
     : null;
 }
 
+/**
+ * Mirror the authoritative database contract exactly:
+ * - a base code competes with other base codes;
+ * - an alias competes with other aliases;
+ * - ICAO/IATA values and cross-namespace code/alias matches are permitted.
+ */
 export function findBaseStationIdentityConflict(
   existingBases: readonly BaseStationRead[],
   candidate: BaseStationIdentityCandidate,
@@ -73,27 +78,34 @@ export function findBaseStationIdentityConflict(
 ): BaseStationIdentityConflict | null {
   const requestedCode = String(candidate.code || "").trim();
   const requestedAliases = uniqueValues(candidate.aliases);
-  const requested = [
-    ...(requestedCode ? [{ field: "code" as const, value: requestedCode }] : []),
-    ...requestedAliases.map((value) => ({ field: "aliases" as const, value })),
-  ];
 
   for (const base of existingBases) {
     if (excludeBaseStationId && base.id === excludeBaseStationId) continue;
-    const existing = [
-      { kind: "code" as const, value: base.code },
-      ...(base.aliases || []).map((alias) => ({ kind: "alias" as const, value: alias.alias })),
-    ];
 
-    for (const requestedIdentity of requested) {
-      const requestedKey = identityKey(requestedIdentity.value);
-      const match = existing.find((identity) => identityKey(identity.value) === requestedKey);
+    if (requestedCode && identityKey(base.code) === identityKey(requestedCode)) {
+      return {
+        field: "code",
+        requestedValue: requestedCode,
+        existingKind: "code",
+        existingValue: base.code,
+        existingBase: {
+          id: base.id,
+          code: base.code,
+          name: base.name,
+          is_active: base.is_active,
+        },
+      };
+    }
+
+    for (const requestedAlias of requestedAliases) {
+      const match = (base.aliases || [])
+        .find((alias) => identityKey(alias.alias) === identityKey(requestedAlias));
       if (!match) continue;
       return {
-        field: requestedIdentity.field,
-        requestedValue: requestedIdentity.value,
-        existingKind: match.kind,
-        existingValue: match.value,
+        field: "aliases",
+        requestedValue: requestedAlias,
+        existingKind: "alias",
+        existingValue: match.alias,
         existingBase: {
           id: base.id,
           code: base.code,
