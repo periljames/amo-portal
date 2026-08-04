@@ -18,7 +18,7 @@ jobs:
     if: >-
       github.event.issue.pull_request &&
       github.event.issue.number == 422 &&
-      trim(github.event.comment.body) == '/apply-pr422-training-fixes'
+      github.event.comment.body == '/apply-pr422-training-fixes'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
