@@ -1,0 +1,113 @@
+.forecast-readiness-page {
+  --forecast-gap: clamp(0.75rem, 1.2vw, 1.25rem);
+}
+
+.forecast-readiness-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--forecast-gap);
+  margin-bottom: var(--forecast-gap);
+}
+
+.forecast-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.8rem;
+}
+
+.forecast-form-grid label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.forecast-form-grid label > span {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.82rem;
+}
+
+.forecast-form-grid .is-wide {
+  grid-column: span 2;
+}
+
+.forecast-scenario-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.forecast-scenario-list > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.forecast-scenario-list > button.is-selected,
+.forecast-scenario-list > button:hover {
+  border-color: var(--accent-color, #4677ff);
+  background: color-mix(in srgb, var(--accent-color, #4677ff) 9%, transparent);
+}
+
+.forecast-scenario-list button > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.forecast-scenario-list small,
+.forecast-readiness-page td small {
+  display: block;
+  color: var(--text-muted, #6b7280);
+}
+
+.forecast-readiness-page .planning-panel + .planning-panel {
+  margin-top: var(--forecast-gap);
+}
+
+.readiness-history {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+}
+
+.readiness-history h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.readiness-history p {
+  margin: 0.35rem 0;
+}
+
+@media (max-width: 1100px) {
+  .forecast-readiness-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .forecast-form-grid,
+  .readiness-history {
+    grid-template-columns: 1fr;
+  }
+
+  .forecast-form-grid .is-wide {
+    grid-column: auto;
+  }
+
+  .forecast-scenario-list > button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

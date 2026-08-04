@@ -12,11 +12,9 @@ export {
 } from "./planning/PlanningPhaseOnePages";
 
 export { PlanningUtilisationWorkspacePage as PlanningUtilisationPage } from "./planning/PlanningUtilisationWorkspacePage";
+export { PlanningWorkPackagesWorkspacePage as PlanningWorkPackagesPage } from "./planning/PlanningWorkPackagesWorkspacePage";
 
-export {
-  PlanningAmpPage,
-  PlanningWorkPackagesPage,
-} from "./planning/PlanningPhaseTwoPages";
+export { PlanningAmpPage } from "./planning/PlanningPhaseTwoPages";
 
 export {
   ProductionDashboardPage,
