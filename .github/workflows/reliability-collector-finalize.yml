@@ -1,0 +1,87 @@
+name: Reliability Collector Finalizer
+
+on:
+  push:
+    branches: [agent/reliability-v2-foundation]
+    paths: [docs/reliability/.collector-finalize-trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-collector-finalizer
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      WRITE_DATABASE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: reliability-collector-finalizer
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      PYTHONPATH: backend
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply authoritative collectors
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout refs/remotes/origin/agent/reliability-v2-collectors-prep -- \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py \
+            backend/scripts/apply_reliability_internal_collectors.py
+          python backend/scripts/apply_reliability_internal_collectors.py
+          python -m py_compile \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/advanced_services.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+          git diff --check
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Validate collector contracts
+        run: |
+          set -euo pipefail
+          pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+          pytest -q \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+
+      - name: Remove temporary machinery and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f backend/scripts/apply_reliability_internal_collectors.py
+          rm -f .github/workflows/reliability-collector-finalize.yml
+          rm -f docs/reliability/.collector-finalize-trigger
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+
+          git add backend/amodb/apps/reliability/internal_collectors.py
+          git add backend/amodb/apps/reliability/advanced_services.py
+          git add backend/amodb/apps/reliability/tests/test_internal_collectors.py
+          git add backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py
+          git add -u .github/workflows docs/reliability backend/scripts
+          git diff --cached --check
+
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git commit -m "Complete authoritative Reliability collectors"
+          git push origin HEAD:agent/reliability-v2-foundation
