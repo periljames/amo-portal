@@ -21,7 +21,7 @@ def _run_alembic(*arguments: str) -> None:
     )
 
 
-def _reset_and_bootstrap(engine: sa.Engine) -> dict[str, str]:
+def _bootstrap(engine: sa.Engine) -> dict[str, str]:
     ids = {
         "amo_a": str(uuid4()),
         "amo_b": str(uuid4()),
@@ -43,7 +43,7 @@ def _reset_and_bootstrap(engine: sa.Engine) -> dict[str, str]:
                     doc_code VARCHAR(80),
                     title VARCHAR(255),
                     status VARCHAR(24),
-                    updated_by VARCHAR(36),
+                    updated_by VARCHAR(80),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     deleted_at TIMESTAMPTZ
@@ -85,8 +85,7 @@ def _rls_state(connection, table_name: str) -> tuple[bool, bool]:
             SELECT c.relrowsecurity, c.relforcerowsecurity
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = current_schema()
-              AND c.relname = :table_name
+            WHERE n.nspname = current_schema() AND c.relname = :table_name
             """
         ),
         {"table_name": table_name},
@@ -94,9 +93,15 @@ def _rls_state(connection, table_name: str) -> tuple[bool, bool]:
     return bool(row.relrowsecurity), bool(row.relforcerowsecurity)
 
 
+def _set_tenant(connection, amo_id: str, user_id: str | None = None) -> None:
+    connection.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})
+    if user_id is not None:
+        connection.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": user_id})
+
+
 def main() -> None:
     engine = create_engine(os.environ["DATABASE_URL"])
-    ids = _reset_and_bootstrap(engine)
+    ids = _bootstrap(engine)
     _run_alembic("stamp", BASE_REVISION)
     _run_alembic("upgrade", TARGET_REVISION)
 
@@ -111,39 +116,27 @@ def main() -> None:
     rls_tables = tables[1:]
 
     with engine.begin() as connection:
-        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == TARGET_REVISION
-
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == TARGET_REVISION
         existing = {
             str(row.table_name)
             for row in connection.execute(
-                text(
-                    """
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = current_schema()
-                    """
-                )
+                text("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")
             )
         }
         assert set(tables).issubset(existing)
-
         for table_name in rls_tables:
             assert _rls_state(connection, table_name) == (True, True)
-            policy_count = connection.execute(
+            assert connection.execute(
                 text(
                     """
-                    SELECT COUNT(*)
-                    FROM pg_policies
-                    WHERE schemaname = current_schema()
-                      AND tablename = :table_name
+                    SELECT COUNT(*) FROM pg_policies
+                    WHERE schemaname = current_schema() AND tablename = :table_name
                     """
                 ),
                 {"table_name": table_name},
-            ).scalar_one()
-            assert policy_count == 1
+            ).scalar_one() == 1
 
-        trigger_count = connection.execute(
+        assert connection.execute(
             text(
                 """
                 SELECT COUNT(*)
@@ -154,14 +147,7 @@ def main() -> None:
                   AND NOT t.tgisinternal
                 """
             )
-        ).scalar_one()
-        assert trigger_count == 1
-
-        function_count = connection.execute(
-            text("SELECT COUNT(*) FROM pg_proc WHERE proname = 'quality_capture_assurance_event'")
-        ).scalar_one()
-        assert function_count == 1
-
+        ).scalar_one() == 1
         function_definition = connection.execute(
             text(
                 """
@@ -173,7 +159,7 @@ def main() -> None:
             )
         ).scalar_one()
         assert "set_config('app.tenant_id', tenant_id, true)" in function_definition
-        assert "NOT EXISTS" in function_definition
+        assert "COALESCE(previous_tenant_id, '')" in function_definition
         assert "FROM users" in function_definition
 
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}"))
@@ -181,13 +167,10 @@ def main() -> None:
 
     control_id = str(uuid4())
     evidence_id = str(uuid4())
-    test_id = str(uuid4())
-    insight_id = str(uuid4())
 
     with engine.begin() as connection:
         connection.execute(text(f"SET LOCAL ROLE {APP_ROLE}"))
-        connection.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": ids["amo_a"]})
-        connection.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": ids["user_a"]})
+        _set_tenant(connection, ids["amo_a"], ids["user_a"])
         connection.execute(
             text(
                 """
@@ -239,7 +222,7 @@ def main() -> None:
                 """
             ),
             {
-                "id": test_id,
+                "id": str(uuid4()),
                 "amo_id": ids["amo_a"],
                 "control_id": control_id,
                 "user_id": ids["user_a"],
@@ -258,9 +241,8 @@ def main() -> None:
                 )
                 """
             ),
-            {"id": insight_id, "amo_id": ids["amo_a"]},
+            {"id": str(uuid4()), "amo_id": ids["amo_a"]},
         )
-
         connection.execute(
             text(
                 """
@@ -277,34 +259,31 @@ def main() -> None:
                 "user_id": ids["user_a"],
             },
         )
-
         assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_controls")).scalar_one() == 1
         assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_evidence_links")).scalar_one() == 1
         assert connection.execute(text("SELECT COUNT(*) FROM quality_control_tests")).scalar_one() == 1
         assert connection.execute(text("SELECT COUNT(*) FROM quality_intelligence_reviews")).scalar_one() == 1
         assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_events")).scalar_one() == 1
-
         event = connection.execute(
             text(
                 """
                 SELECT source_type, source_id, event_type, processing_status, actor_user_id
-                FROM quality_assurance_events
-                LIMIT 1
+                FROM quality_assurance_events LIMIT 1
                 """
             )
         ).mappings().one()
-        assert event["source_type"] == "DOCUMENT"
-        assert event["source_id"] == ids["document_a"]
-        assert event["event_type"] == "UPDATE"
-        assert event["processing_status"] == "PENDING"
-        assert event["actor_user_id"] == ids["user_a"]
-
+        assert dict(event) == {
+            "source_type": "DOCUMENT",
+            "source_id": ids["document_a"],
+            "event_type": "UPDATE",
+            "processing_status": "PENDING",
+            "actor_user_id": ids["user_a"],
+        }
         evidence = connection.execute(
             text(
                 """
                 SELECT source_snapshot, evidence_status, last_synced_at, invalidation_reason
-                FROM quality_assurance_evidence_links
-                WHERE id = :id
+                FROM quality_assurance_evidence_links WHERE id = :id
                 """
             ),
             {"id": evidence_id},
@@ -314,8 +293,8 @@ def main() -> None:
         assert evidence["last_synced_at"] is not None
         assert evidence["invalidation_reason"] is None
 
-    # The trigger must derive tenant context from the source row when a trusted
-    # import or scheduled job has not pre-populated app.tenant_id.
+    # Exercise a trusted import without request context. The trigger derives the
+    # tenant for its own writes, then restores the caller's empty context.
     with engine.begin() as connection:
         connection.execute(text(f"SET LOCAL ROLE {APP_ROLE}"))
         connection.execute(
@@ -330,13 +309,15 @@ def main() -> None:
             ),
             {"document_id": ids["document_a"], "amo_id": ids["amo_a"]},
         )
+        assert connection.execute(text("SELECT current_setting('app.tenant_id', true)")).scalar_one_or_none() in (None, "")
+
+    with engine.begin() as connection:
         event = connection.execute(
             text(
                 """
                 SELECT actor_user_id, source_snapshot
                 FROM quality_assurance_events
-                ORDER BY occurred_at DESC
-                LIMIT 1
+                ORDER BY occurred_at DESC LIMIT 1
                 """
             )
         ).mappings().one()
@@ -345,15 +326,11 @@ def main() -> None:
 
     with engine.begin() as connection:
         connection.execute(text(f"SET LOCAL ROLE {APP_ROLE}"))
-        connection.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": ids["amo_b"]})
-        assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_controls")).scalar_one() == 0
-        assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_evidence_links")).scalar_one() == 0
-        assert connection.execute(text("SELECT COUNT(*) FROM quality_control_tests")).scalar_one() == 0
-        assert connection.execute(text("SELECT COUNT(*) FROM quality_assurance_events")).scalar_one() == 0
-        assert connection.execute(text("SELECT COUNT(*) FROM quality_intelligence_reviews")).scalar_one() == 0
-
-        rejected = False
+        _set_tenant(connection, ids["amo_b"])
+        for table_name in rls_tables:
+            assert connection.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar_one() == 0
         savepoint = connection.begin_nested()
+        rejected = False
         try:
             connection.execute(
                 text(
