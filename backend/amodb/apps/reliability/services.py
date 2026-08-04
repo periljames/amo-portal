@@ -2315,6 +2315,15 @@ def build_reliability_workbench(
         current_status=models.EngineTrendStatusEnum.SHIFT,
         limit=limit,
     )
+    engine_shift_count = (
+        db.query(func.count(models.EngineTrendStatus.id))
+        .filter(
+            models.EngineTrendStatus.amo_id == amo_id,
+            models.EngineTrendStatus.current_status == models.EngineTrendStatusEnum.SHIFT,
+        )
+        .scalar()
+        or 0
+    )
 
     terminal_action_statuses = {
         models.FRACASActionStatusEnum.DONE,
@@ -2438,7 +2447,7 @@ def build_reliability_workbench(
                 models.FRACASCase.status != models.FRACASStatusEnum.CLOSED,
             ).count(),
             overdue_actions=overdue_actions_query.count(),
-            engine_shifts=len(engine_shifts),
+            engine_shifts=engine_shift_count,
             recent_events=db.query(models.ReliabilityEvent).filter(
                 models.ReliabilityEvent.amo_id == amo_id,
                 models.ReliabilityEvent.occurred_at >= now - timedelta(days=7),

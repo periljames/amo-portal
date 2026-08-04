@@ -389,7 +389,19 @@ class ReliabilityCalculationRun(Base):
             "period_start",
             "period_end",
             "formula_version",
+            "revision",
             name="uq_reliability_calculation_identity",
+        ),
+        Index(
+            "ix_reliability_calculation_identity_revision",
+            "amo_id",
+            "metric_definition_id",
+            "scope_type",
+            "scope_id",
+            "period_start",
+            "period_end",
+            "formula_version",
+            "revision",
         ),
         Index("ix_reliability_calculation_metric_period", "metric_definition_id", "period_end"),
         Index("ix_reliability_calculation_scope", "amo_id", "scope_type", "scope_id"),
@@ -412,6 +424,7 @@ class ReliabilityCalculationRun(Base):
     small_fleet = Column(Boolean, nullable=False, default=False)
     status = Column(String(32), nullable=False, default="VALID", index=True)
     formula_version = Column(String(40), nullable=False)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
     source_cutoff_at = Column(DateTime(timezone=True), nullable=False)
     source_lineage_json = Column(JSON_VALUE, nullable=False, default=dict)
     result_hash = Column(String(64), nullable=False, unique=True)

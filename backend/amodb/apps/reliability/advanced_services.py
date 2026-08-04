@@ -391,6 +391,26 @@ def _validate_ingestion_record(payload: Dict[str, Any]) -> Tuple[List[str], List
         payload.get("mel_reference") or payload.get("cdl_reference")
     ):
         warnings.append("Deferral occurrence has no MEL/CDL reference")
+    delay_value = payload.get("delay_minutes")
+    if delay_value not in (None, ""):
+        delay_error = "delay_minutes must be a nonnegative whole number"
+        if isinstance(delay_value, bool):
+            errors.append(delay_error)
+        else:
+            try:
+                parsed_delay = Decimal(str(delay_value))
+            except Exception:
+                errors.append(delay_error)
+            else:
+                if (
+                    not parsed_delay.is_finite()
+                    or parsed_delay < 0
+                    or parsed_delay > Decimal("2147483647")
+                    or parsed_delay != parsed_delay.to_integral_value()
+                ):
+                    errors.append(delay_error)
+                else:
+                    payload["delay_minutes"] = int(parsed_delay)
     return errors, warnings
 
 
@@ -1715,6 +1735,30 @@ def _exposure(
     return decimal_value(value)
 
 
+def _metric_event_contract(
+    *,
+    method: str,
+    configured_event_types: Sequence[str],
+) -> Tuple[List[str], Optional[List[str]], Optional[str]]:
+    """Resolve numerator and event-denominator semantics for governed metrics."""
+    numerator_types = [str(item) for item in configured_event_types]
+    if method == "PERCENT":
+        return numerator_types, [], "ALL_RELIABILITY_EVENTS"
+    if method == "NFF_RATE":
+        return ["NO_FAULT_FOUND"], ["UNSCHEDULED_REMOVAL"], "UNSCHEDULED_REMOVALS"
+    return numerator_types, None, None
+
+
+def _advance_metric_schedule(
+    metric: domain.ReliabilityMetricDefinition,
+    source_cutoff: datetime,
+) -> None:
+    metric.last_run_at = source_cutoff
+    metric.next_run_at = source_cutoff + timedelta(
+        minutes=max(int(metric.schedule_interval_minutes or 0), 60)
+    )
+
+
 def _rate_with_confidence(
     *,
     events: int,
@@ -1728,6 +1772,9 @@ def _rate_with_confidence(
         return None, None, None
     if method == "MTBUR":
         value = exposure / Decimal(events) if events else None
+        return quantize(value), None, None
+    if method in {"PERCENT", "NFF_RATE"}:
+        value = Decimal(events) / exposure * multiplier
         return quantize(value), None, None
     value = Decimal(events) / exposure * multiplier
     if events == 0:
@@ -1801,7 +1848,11 @@ def execute_metric(
     resolved_scope_type = scope_type or metric.scope_type
     resolved_scope_id = scope_id or "FLEET"
     start, end = _period_bounds(metric, period_start, period_end)
-    event_types = [str(item) for item in (metric.numerator_event_types or [])]
+    configured_event_types = [str(item) for item in (metric.numerator_event_types or [])]
+    event_types, denominator_event_types, denominator_source = _metric_event_contract(
+        method=metric.method,
+        configured_event_types=configured_event_types,
+    )
     query = _scope_event_query(
         db,
         amo_id=amo_id,
@@ -1812,15 +1863,27 @@ def execute_metric(
         scope_id=resolved_scope_id,
     )
     events = query.count()
-    exposure = _exposure(
-        db,
-        amo_id=amo_id,
-        period_start=start,
-        period_end=end,
-        denominator_type=metric.denominator_type,
-        scope_type=resolved_scope_type,
-        scope_id=resolved_scope_id,
-    )
+    if denominator_event_types is None:
+        exposure = _exposure(
+            db,
+            amo_id=amo_id,
+            period_start=start,
+            period_end=end,
+            denominator_type=metric.denominator_type,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
+    else:
+        denominator_query = _scope_event_query(
+            db,
+            amo_id=amo_id,
+            period_start=start,
+            period_end=end,
+            event_types=denominator_event_types,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
+        exposure = Decimal(denominator_query.count())
     value, lower, upper = _rate_with_confidence(
         events=events,
         exposure=exposure,
@@ -1844,7 +1907,9 @@ def execute_metric(
     lineage = {
         "event_types": event_types,
         "event_count": events,
-        "denominator_type": metric.denominator_type,
+        "denominator_type": denominator_source or metric.denominator_type,
+        "configured_denominator_type": metric.denominator_type,
+        "denominator_event_types": denominator_event_types,
         "exposure": str(exposure),
         "period_start": start.isoformat(),
         "period_end": end.isoformat(),
@@ -1853,17 +1918,21 @@ def execute_metric(
         "threshold_id": threshold.id if threshold else None,
         "source_cutoff_at": source_cutoff.isoformat(),
     }
-    result_hash = sha256_value(
-        {
-            "metric_id": metric.id,
-            "formula_version": metric.formula_version,
-            "lineage": lineage,
-            "value": str(value) if value is not None else None,
-            "confidence": [str(lower) if lower is not None else None, str(upper) if upper is not None else None],
-            "status": result_status,
-        }
-    )
-    existing = (
+    identity_payload = {
+        "amo_id": amo_id,
+        "metric_definition_id": metric.id,
+        "scope_type": resolved_scope_type,
+        "scope_id": resolved_scope_id,
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+        "formula_version": metric.formula_version,
+    }
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity_key, 0))"),
+            {"identity_key": canonical_json(identity_payload)},
+        )
+    previous = (
         db.query(domain.ReliabilityCalculationRun)
         .filter(
             domain.ReliabilityCalculationRun.amo_id == amo_id,
@@ -1874,10 +1943,29 @@ def execute_metric(
             domain.ReliabilityCalculationRun.period_end == end,
             domain.ReliabilityCalculationRun.formula_version == metric.formula_version,
         )
+        .order_by(
+            domain.ReliabilityCalculationRun.revision.desc(),
+            domain.ReliabilityCalculationRun.created_at.desc(),
+            domain.ReliabilityCalculationRun.id.desc(),
+        )
         .first()
     )
-    if existing:
-        return existing
+    revision = (int(previous.revision) + 1) if previous else 1
+    if previous:
+        lineage["previous_run_id"] = previous.id
+        lineage["previous_revision"] = int(previous.revision)
+    lineage["revision"] = revision
+    result_hash = sha256_value(
+        {
+            "metric_id": metric.id,
+            "formula_version": metric.formula_version,
+            "revision": revision,
+            "lineage": lineage,
+            "value": str(value) if value is not None else None,
+            "confidence": [str(lower) if lower is not None else None, str(upper) if upper is not None else None],
+            "status": result_status,
+        }
+    )
     run = domain.ReliabilityCalculationRun(
         amo_id=amo_id,
         metric_definition_id=metric.id,
@@ -1894,6 +1982,7 @@ def execute_metric(
         small_fleet=active_aircraft < 6,
         status=result_status,
         formula_version=metric.formula_version,
+        revision=revision,
         source_cutoff_at=source_cutoff,
         source_lineage_json=lineage,
         result_hash=result_hash,
@@ -1901,9 +1990,9 @@ def execute_metric(
         run_by_user_id=actor_user_id,
     )
     db.add(run)
+    audit_action = "CALCULATION_REFRESHED" if previous else "CALCULATION_EXECUTED"
     db.flush()
-    metric.last_run_at = source_cutoff
-    metric.next_run_at = source_cutoff + timedelta(minutes=max(metric.schedule_interval_minutes, 60))
+    _advance_metric_schedule(metric, source_cutoff)
     if alert_severity:
         alert_code = f"{metric.code}:{resolved_scope_type}:{resolved_scope_id}:{end.isoformat()}"
         open_alert = (
@@ -1934,8 +2023,16 @@ def execute_metric(
         amo_id=amo_id,
         entity_type="CALCULATION_RUN",
         entity_id=run.id,
-        action="CALCULATION_EXECUTED",
-        payload={"metric_id": metric.id, "status": result_status, "result_hash": result_hash, "scheduled": scheduled},
+        action=audit_action,
+        payload={
+            "metric_id": metric.id,
+            "status": result_status,
+            "result_hash": result_hash,
+            "revision": revision,
+            "previous_run_id": previous.id if previous else None,
+            "scheduled": scheduled,
+            "source_cutoff_at": source_cutoff.isoformat(),
+        },
         actor_user_id=actor_user_id,
     )
     db.commit()
