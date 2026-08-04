@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FC, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FC, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, FilePenLine, LoaderCircle, Minus, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { DocumentationRecord } from "../../services/documentation";
@@ -653,7 +653,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   return <section
     ref={hostRef}
     className={`pdfv2-reader ${compact ? "is-compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${safeForm ? "is-form-active" : ""}`}
-    onKeyDown={(event) => {
+    onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === "f") {
         event.preventDefault();
@@ -665,7 +665,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     <header className="pdfv2-toolbar">
       <div className="pdfv2-pages">
         <button type="button" aria-label="Previous page" onClick={() => jump(currentPage - 1)} disabled={currentPage <= 1}><ChevronLeft size={17} /></button>
-        <input value={pageInput} aria-label="Page number" inputMode="numeric" onChange={(event) => setPageInput(event.target.value.replace(/\D+/g, ""))} onBlur={() => jump(Number(pageInput || currentPage))} onKeyDown={(event) => { if (event.key === "Enter") jump(Number(pageInput || currentPage)); }} />
+        <input value={pageInput} aria-label="Page number" inputMode="numeric" onChange={(event: ChangeEvent<HTMLInputElement>) => setPageInput(event.target.value.replace(/\D+/g, ""))} onBlur={() => jump(Number(pageInput || currentPage))} onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") jump(Number(pageInput || currentPage)); }} />
         <span>/ {pageCount || "—"}</span>
         <button type="button" aria-label="Next page" onClick={() => jump(currentPage + 1)} disabled={!pageCount || currentPage >= pageCount}><ChevronRight size={17} /></button>
       </div>
@@ -701,9 +701,9 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
     {searchOpen ? <div className="pdfv2-search">
       <Search size={16} />
-      <input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void runSearch(); }} placeholder="Search this PDF" />
-      <label><input type="checkbox" checked={Boolean(searchOptions.caseSensitive)} onChange={(event) => setSearchOptions((value) => ({ ...value, caseSensitive: event.target.checked }))} /> Aa</label>
-      <label><input type="checkbox" checked={Boolean(searchOptions.wholeWord)} onChange={(event) => setSearchOptions((value) => ({ ...value, wholeWord: event.target.checked }))} /> Word</label>
+      <input ref={searchInput} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") void runSearch(); }} placeholder="Search this PDF" />
+      <label><input type="checkbox" checked={Boolean(searchOptions.caseSensitive)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchOptions((value) => ({ ...value, caseSensitive: event.target.checked }))} /> Aa</label>
+      <label><input type="checkbox" checked={Boolean(searchOptions.wholeWord)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchOptions((value) => ({ ...value, wholeWord: event.target.checked }))} /> Word</label>
       <button type="button" disabled={searchBusy || query.trim().length < 2} onClick={() => void runSearch()}>{searchBusy ? <LoaderCircle className="is-spinning" size={15} /> : "Find"}</button>
       <span>{searchResults.length ? `${searchIndex + 1}/${searchResults.length}` : ""}</span>
       <button type="button" aria-label="Previous search result" disabled={!searchResults.length} onClick={() => moveSearch(-1)}><ChevronLeft size={16} /></button>
@@ -720,8 +720,8 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
     <div
       className="pdfv2-viewport"
-      onInput={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
-      onChange={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+      onInput={(event: FormEvent<HTMLDivElement>) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+      onChange={(event: FormEvent<HTMLDivElement>) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
     >
       {loadError ? <div className="pdfv2-error"><AlertTriangle size={18} />{loadError}</div> : null}
       <PdfDocument
@@ -743,7 +743,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
             } as CSSProperties;
             return <div
               key={page}
-              ref={(element) => { if (element) pageRefs.current.set(page, element); else pageRefs.current.delete(page); }}
+              ref={(element: HTMLDivElement | null) => { if (element) pageRefs.current.set(page, element); else pageRefs.current.delete(page); }}
               className={`pdfv2-page ${page === currentPage ? "is-current" : ""}`}
               data-page-number={page}
               style={style}
