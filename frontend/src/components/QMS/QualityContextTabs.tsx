@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  type LucideIcon,
 } from "lucide-react";
 
 
@@ -19,9 +20,10 @@ type ContextTab = {
   id: string;
   label: string;
   path: string;
-  icon?: React.ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
+  icon?: LucideIcon;
   exact?: boolean;
   queryTab?: string;
+  activePrefixes?: string[];
 };
 
 type QualityRoute = {
@@ -90,33 +92,40 @@ function moduleTitle(segment: string | undefined): string {
   return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Management System";
 }
 
+function pathMatches(current: string, target: string): boolean {
+  const cleanTarget = target.split("?")[0].replace(/\/$/, "");
+  return current === cleanTarget || current.startsWith(`${cleanTarget}/`);
+}
+
 function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean {
   const target = tab.path.split("?")[0].replace(/\/$/, "");
   const current = pathname.replace(/\/$/, "");
   if (tab.queryTab) {
-    return current === target && (new URLSearchParams(search).get("tab") || "war-room") === tab.queryTab;
+    return pathMatches(current, target)
+      && (new URLSearchParams(search).get("tab") || "war-room") === tab.queryTab;
   }
+  if (tab.activePrefixes?.some((prefix) => pathMatches(current, prefix))) return true;
   if (tab.exact) return current === target;
-  return current === target || current.startsWith(`${target}/`);
+  return pathMatches(current, target);
 }
 
 function topLevelTabs(basePath: string): ContextTab[] {
   return [
     { id: "overview", label: "Overview", path: basePath, icon: Gauge, exact: true },
-    { id: "work", label: "My Work", path: `${basePath}/inbox/assigned-to-me`, icon: Inbox },
-    { id: "calendar", label: "Calendar", path: `${basePath}/calendar/month`, icon: CalendarDays },
-    { id: "audits", label: "Audits", path: `${basePath}/audits/dashboard`, icon: ClipboardCheck },
-    { id: "findings", label: "Findings", path: `${basePath}/findings/register`, icon: ShieldCheck },
-    { id: "cars", label: "CAR / CAPA", path: `${basePath}/cars/register`, icon: ListChecks },
-    { id: "reports", label: "Reports", path: `${basePath}/reports/executive-dashboard` },
+    { id: "work", label: "My Work", path: `${basePath}/inbox/assigned-to-me`, icon: Inbox, activePrefixes: [`${basePath}/inbox`] },
+    { id: "calendar", label: "Calendar", path: `${basePath}/calendar/month`, icon: CalendarDays, activePrefixes: [`${basePath}/calendar`] },
+    { id: "audits", label: "Audits", path: `${basePath}/audits/dashboard`, icon: ClipboardCheck, activePrefixes: [`${basePath}/audits`] },
+    { id: "findings", label: "Findings", path: `${basePath}/findings/register`, icon: ShieldCheck, activePrefixes: [`${basePath}/findings`] },
+    { id: "cars", label: "CAR / CAPA", path: `${basePath}/cars/register`, icon: ListChecks, activePrefixes: [`${basePath}/cars`] },
+    { id: "reports", label: "Reports", path: `${basePath}/reports/executive-dashboard`, activePrefixes: [`${basePath}/reports`] },
   ];
 }
 
 function auditSectionTabs(basePath: string): ContextTab[] {
   return [
     { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
-    { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, exact: true },
-    { id: "audit-schedule", label: "Schedule", path: `${basePath}/audits/plan?view=calendar`, exact: true },
+    { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
+    { id: "audit-schedule", label: "Schedule", path: `${basePath}/audits/plan?view=calendar`, activePrefixes: [`${basePath}/audits/plan`, `${basePath}/audits/schedule`, `${basePath}/audits/schedules`] },
     { id: "audit-register", label: "Active Audits", path: `${basePath}/audits/register`, exact: true },
     { id: "audit-checklists", label: "Checklists", path: `${basePath}/audits/checklists`, exact: true },
     { id: "audit-reports", label: "Reports", path: `${basePath}/audits/reports`, exact: true },
@@ -157,28 +166,32 @@ const QualityContextTabs: React.FC = () => {
   const [mountTarget, setMountTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    let host: HTMLDivElement | null = null;
-    const attach = () => {
+    let activeHost: HTMLDivElement | null = null;
+
+    const syncMount = () => {
       const main = document.querySelector<HTMLElement>(".tenant-shell__main");
-      if (!main) return false;
-      host = main.querySelector<HTMLDivElement>(":scope > .quality-context-bar-host");
+      if (!main) {
+        if (activeHost && !activeHost.isConnected) activeHost = null;
+        setMountTarget(null);
+        return;
+      }
+
+      let host = main.querySelector<HTMLDivElement>(":scope > .quality-context-bar-host");
       if (!host) {
         host = document.createElement("div");
         host.className = "quality-context-bar-host";
         main.prepend(host);
       }
-      setMountTarget(host);
-      return true;
+      activeHost = host;
+      setMountTarget((current) => current === host ? current : host);
     };
 
-    if (attach()) return () => host?.remove();
-    const observer = new MutationObserver(() => {
-      if (attach()) observer.disconnect();
-    });
+    syncMount();
+    const observer = new MutationObserver(syncMount);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
-      host?.remove();
+      activeHost?.remove();
     };
   }, []);
 
@@ -194,20 +207,21 @@ const QualityContextTabs: React.FC = () => {
   if (!route || !mountTarget) return null;
 
   const [moduleSegment, recordKey] = route.segments;
-  const isAuditRecord = moduleSegment === "audits" && Boolean(recordKey) && !STATIC_AUDIT_VIEWS.has(recordKey);
-  const isCarRecord = moduleSegment === "cars" && Boolean(recordKey) && !STATIC_CAR_VIEWS.has(recordKey);
+  const safeRecordKey = recordKey || "";
+  const isAuditRecord = moduleSegment === "audits" && Boolean(safeRecordKey) && !STATIC_AUDIT_VIEWS.has(safeRecordKey);
+  const isCarRecord = moduleSegment === "cars" && Boolean(safeRecordKey) && !STATIC_CAR_VIEWS.has(safeRecordKey);
   const tabs = isAuditRecord
-    ? auditRecordTabs(route.basePath, recordKey)
+    ? auditRecordTabs(route.basePath, safeRecordKey)
     : isCarRecord
-      ? carRecordTabs(route.basePath, recordKey)
+      ? carRecordTabs(route.basePath, safeRecordKey)
       : moduleSegment === "audits"
         ? auditSectionTabs(route.basePath)
         : topLevelTabs(route.basePath);
 
   const title = isAuditRecord
-    ? `Audit ${recordKey}`
+    ? `Audit ${safeRecordKey}`
     : isCarRecord
-      ? `CAR ${recordKey}`
+      ? `CAR ${safeRecordKey}`
       : moduleTitle(moduleSegment);
 
   const primaryAction = isAuditRecord
@@ -220,7 +234,6 @@ const QualityContextTabs: React.FC = () => {
           ? { label: "New CAR", path: `${route.basePath}/cars/new`, icon: Plus }
           : { label: "Schedule audit", path: `${route.basePath}/audits/plan?view=calendar&create=1`, icon: Plus };
 
-  const MoreIcon = MoreHorizontal;
   const PrimaryIcon = primaryAction.icon;
 
   return createPortal(
@@ -261,7 +274,7 @@ const QualityContextTabs: React.FC = () => {
           <span>{primaryAction.label}</span>
         </button>
         <details className="quality-context-bar__more">
-          <summary aria-label="More Quality pages"><MoreIcon size={17} /><ChevronDown size={13} /></summary>
+          <summary aria-label="More Quality pages"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
           <div>
             <button type="button" onClick={() => navigate(`${route.basePath}/risk/register`)}>Risk & opportunities</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/change-control/register`)}>Change control</button>
