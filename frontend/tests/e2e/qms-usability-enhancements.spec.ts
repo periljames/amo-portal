@@ -48,7 +48,7 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
     const request = route.request();
     const url = request.url();
 
-    if (url.includes("/auth/portal-preferences")) {
+    if (url.includes("/auth/portal-preferences/")) {
       if (request.method() === "PATCH") {
         const patch = request.postDataJSON() as { text_scale?: StoredScale };
         state.scale = patch.text_scale || state.scale;
@@ -131,7 +131,7 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not configured in QMS usability test" }) });
   };
 
-  await page.route("**/auth/portal-preferences", fulfil);
+  await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
