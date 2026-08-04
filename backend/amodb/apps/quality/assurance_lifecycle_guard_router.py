@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from amodb.database import get_write_db
@@ -8,10 +11,12 @@ from amodb.database import get_write_db
 from .assurance_wiring_router import (
     ApprovalDecision,
     ControlCreate,
+    ControlTestCreate,
     create_control,
     decide_control_approval,
+    record_control_test,
 )
-from .excellence_models import QualityAssuranceControl
+from .excellence_models import QualityAssuranceControl, QualityAssuranceEvidenceLink
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -80,3 +85,52 @@ def transition_control_approval(
         )
 
     return decide_control_approval(control_id=control_id, payload=payload, ctx=ctx, db=db)
+
+
+@router.post("/controls/{control_id}/tests", status_code=status.HTTP_201_CREATED)
+def record_approved_control_test(
+    control_id: str,
+    payload: ControlTestCreate,
+    ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
+    db: Session = Depends(get_write_db),
+):
+    """Test only an approved active control supported by current evidence."""
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    control = (
+        db.query(QualityAssuranceControl)
+        .filter(
+            QualityAssuranceControl.id == control_id,
+            QualityAssuranceControl.amo_id == ctx.amo_id,
+        )
+        .first()
+    )
+    if not control:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assurance control not found.")
+    if control.status != "ACTIVE" or control.approval_status != "APPROVED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Operating-effectiveness testing requires an APPROVED, ACTIVE control.",
+        )
+
+    current_verified_evidence = (
+        db.query(QualityAssuranceEvidenceLink.id)
+        .filter(
+            QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
+            QualityAssuranceEvidenceLink.control_id == control_id,
+            QualityAssuranceEvidenceLink.evidence_status == "VERIFIED",
+            or_(
+                QualityAssuranceEvidenceLink.valid_until.is_(None),
+                QualityAssuranceEvidenceLink.valid_until >= date.today(),
+            ),
+            QualityAssuranceEvidenceLink.invalidated_at.is_(None),
+        )
+        .first()
+    )
+    if not current_verified_evidence:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Verify at least one current authoritative evidence record before testing this control.",
+        )
+
+    return record_control_test(control_id=control_id, payload=payload, ctx=ctx, db=db)
