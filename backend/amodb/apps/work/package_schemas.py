@@ -16,7 +16,7 @@ class WorkPackageCreate(BaseModel):
     planned_start: Optional[datetime] = None
     planned_end: Optional[datetime] = None
     source_horizon_days: int = Field(default=90, ge=1, le=730)
-    program_item_ids: list[int] = []
+    program_item_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_dates(self):
@@ -32,6 +32,12 @@ class WorkPackageUpdate(BaseModel):
     due_date: Optional[date] = None
     planned_start: Optional[datetime] = None
     planned_end: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.planned_start and self.planned_end and self.planned_end < self.planned_start:
+            raise ValueError("planned_end must not be before planned_start")
+        return self
 
 
 class WorkPackageOrderRead(BaseModel):
@@ -66,7 +72,7 @@ class WorkPackageRead(BaseModel):
     readiness_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
-    orders: list[WorkPackageOrderRead] = []
+    orders: list[WorkPackageOrderRead] = Field(default_factory=list)
 
 
 class WorkPackageAttachOrder(BaseModel):
