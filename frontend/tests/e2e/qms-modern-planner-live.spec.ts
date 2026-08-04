@@ -44,17 +44,24 @@ test.describe("Quality Operations Planner", () => {
 
     await page.keyboard.press("/");
     await expect(page.locator(".qms-planner-command")).toBeVisible();
-    await expect(page.getByText("Quick schedule", { exact: true })).toBeVisible();
-    // The first Escape leaves the focused command input; the second closes the palette.
-    await page.keyboard.press("Escape");
+    await expect(page.getByText("Quick audit draft", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator(".qms-planner-command")).toBeHidden();
 
     await page.keyboard.press("c");
     await expect(page.locator(".qms-planner-create-modal")).toBeVisible();
-    await expect(page.getByText("Create a quality commitment")).toBeVisible();
-    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Create an audit schedule draft")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Close quick schedule" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "CAR follow-up" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Training" })).toBeDisabled();
+    await page.keyboard.press("Escape");
     await expect(page.locator(".qms-planner-create-modal")).toBeHidden();
+
+    await page.keyboard.press("?");
+    await expect(page.locator(".qms-planner-shortcuts")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Close keyboard shortcuts" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".qms-planner-shortcuts")).toBeHidden();
 
     await page.keyboard.press("m");
     await expect(page).toHaveURL(/\/quality\/calendar\/month/);
@@ -68,6 +75,29 @@ test.describe("Quality Operations Planner", () => {
     await expect(page).toHaveURL(/\/quality\/calendar\/list/);
     await expect(page.locator(".qms-planner-agenda")).toBeVisible();
     await expectNoDocumentOverflow(page);
+  });
+
+  test("retains quick audit input in the authoritative Audit Planner draft", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 950 });
+    await openPlanner(page, "week");
+
+    const draftKey = `qms-audit-schedule-draft:${AMO_CODE}:quality`;
+    await page.evaluate((key) => window.localStorage.removeItem(key), draftKey);
+    await page.keyboard.press("c");
+    const modal = page.locator(".qms-planner-create-modal");
+    await expect(modal).toBeVisible();
+    await modal.getByLabel("Audit title or reference").fill("Planner handoff verification");
+    await modal.getByLabel("Planned date").fill("2026-08-18");
+    await modal.getByLabel("Requested start time").fill("10:30");
+    await modal.getByRole("button", { name: "Continue to Audit Planner" }).click();
+
+    await expect(page).toHaveURL(/\/quality\/audits\/plan\?view=list&source=planner/);
+    const stored = await page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) || "null"), draftKey);
+    expect(stored?.form?.title).toBe("Planner handoff verification");
+    expect(stored?.form?.next_due_date).toBe("2026-08-18");
+    expect(stored?.form?.frequency).toBe("ONE_TIME");
+    expect(stored?.form?.criteria).toContain("10:30");
+    await page.evaluate((key) => window.localStorage.removeItem(key), draftKey);
   });
 
   test("supports source filtering, saved focus views, and UTC comparison", async ({ page }) => {
@@ -104,8 +134,10 @@ test.describe("Quality Operations Planner", () => {
       await page.keyboard.press("Shift+ArrowRight");
       await expect(page.locator(".qms-planner-modal")).toBeVisible();
       await expect(page.getByText("Controlled schedule change")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Close reschedule dialog" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Confirm move" })).toBeDisabled();
       await page.keyboard.press("Escape");
+      await expect(page.getByText("Controlled schedule change")).toBeHidden();
     }
     await expectNoDocumentOverflow(page);
   });
