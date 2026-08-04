@@ -40,6 +40,30 @@ _DANGEROUS_ACTION_SUBTYPES = {
     "resetform",
     "trans",
 }
+_INSPECTION_FIELDS = {
+    "engine",
+    "engine_version",
+    "source_sha256",
+    "page_count",
+    "form_type",
+    "has_acroform",
+    "has_javascript",
+    "is_dynamic_xfa",
+    "encrypted",
+    "can_flatten",
+    "unsupported_reason",
+    "template_fingerprint",
+}
+_FLATTEN_FIELDS = {
+    "engine",
+    "engine_version",
+    "source_sha256",
+    "output_sha256",
+    "page_count",
+    "form_type",
+    "flattened_pages",
+    "unchanged_pages",
+}
 
 
 def contains_unsafe_action(source: str) -> bool:
@@ -206,7 +230,7 @@ def sanitize_pdf_javascript_bytes(content: bytes) -> bytes:
 
 def inspect_script_disabled_pdf_bytes(content: bytes) -> PdfInspection:
     metadata, _ = _run_worker("inspect", content)
-    return PdfInspection(**metadata)
+    return PdfInspection(**{key: metadata[key] for key in _INSPECTION_FIELDS})
 
 
 def flatten_script_disabled_pdf_bytes(content: bytes) -> PdfFlattenResult:
@@ -215,7 +239,7 @@ def flatten_script_disabled_pdf_bytes(content: bytes) -> PdfFlattenResult:
         raise PdfEngineError("PDF_FLATTEN_OUTPUT_INVALID", "PDFium did not produce a valid flattened PDF")
     if hashlib.sha256(output).hexdigest() != str(metadata.get("output_sha256") or ""):
         raise PdfEngineError("PDF_FLATTEN_CHECKSUM_MISMATCH", "The flattened PDF checksum could not be verified", status_code=500)
-    return PdfFlattenResult(content=output, **metadata)
+    return PdfFlattenResult(content=output, **{key: metadata[key] for key in _FLATTEN_FIELDS})
 
 
 def _worker_process(action: str, source_path: Path, output_path: Path) -> dict[str, Any]:
@@ -224,11 +248,15 @@ def _worker_process(action: str, source_path: Path, output_path: Path) -> dict[s
     sanitized_path = source_path.with_name("sanitized.pdf")
     sanitized_path.write_bytes(sanitized)
     if action == "sanitize":
+        import pymupdf
+
+        with pymupdf.open(stream=sanitized, filetype="pdf") as verified:
+            page_count = verified.page_count
         output_path.write_bytes(sanitized)
         return {
             "source_sha256": hashlib.sha256(content).hexdigest(),
             "output_sha256": hashlib.sha256(sanitized).hexdigest(),
-            "page_count": 0,
+            "page_count": page_count,
         }
 
     base._contains_unsafe_action = contains_unsafe_action
