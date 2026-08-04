@@ -11,7 +11,7 @@ export {
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
 
-export { PlanningUtilisationPage } from "./planning/PlanningUtilisationControlPage";
+export { PlanningUtilisationWorkspacePage as PlanningUtilisationPage } from "./planning/PlanningUtilisationWorkspacePage";
 
 export {
   PlanningAmpPage,
