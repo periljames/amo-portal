@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Response
@@ -78,17 +78,17 @@ def _response_for_user(user: models.User, row: dict[str, object] | None = None) 
     return PortalPreferencesRead(
         user_id=str(user.id),
         amo_id=str(user.amo_id) if user.amo_id else None,
-        text_scale=values["text_scale"],
-        density=values["density"],
-        motion=values["motion"],
-        color_scheme=values["color_scheme"],
-        accent=values["accent"],
+        text_scale=cast(TextScale, str(values["text_scale"])),
+        density=cast(PortalDensity, str(values["density"])),
+        motion=cast(PortalMotion, str(values["motion"])),
+        color_scheme=cast(PortalColorScheme, str(values["color_scheme"])),
+        accent=cast(PortalAccent, str(values["accent"])),
         version=int(values.get("version") or 1),
-        updated_at=values.get("updated_at"),
+        updated_at=cast(datetime | None, values.get("updated_at")),
     )
 
 
-@router.get("", response_model=PortalPreferencesRead)
+@router.get("/", response_model=PortalPreferencesRead)
 def get_portal_preferences(
     response: Response,
     current_user: models.User = Depends(get_current_active_user),
@@ -98,7 +98,7 @@ def get_portal_preferences(
     return _response_for_user(current_user, _read_preferences(db, str(current_user.id)))
 
 
-@router.patch("", response_model=PortalPreferencesRead)
+@router.patch("/", response_model=PortalPreferencesRead)
 def update_portal_preferences(
     payload: PortalPreferencesPatch,
     response: Response,
