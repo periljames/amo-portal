@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+READER_ENTRY = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 READER_CORE = REPOSITORY_ROOT / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx"
 READER_ENGINE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngine.ts"
 READER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngineV2.css"
@@ -53,6 +54,19 @@ def test_fit_modes_measure_the_visible_viewport() -> None:
     assert 'fitMode === "WIDTH"' in source
     assert 'setFitMode("PAGE")' in source
     assert "ResizeObserver" in source
+
+
+def test_acroform_capabilities_are_resolved_before_pdfjs_first_render() -> None:
+    entry = _source(READER_ENTRY)
+
+    assert "getPdfReaderCapabilities" in entry
+    assert "const externallyManaged = suppliedCapabilities !== undefined" in entry
+    assert "if (!resolvedCapabilities)" in entry
+    assert "Checking PDF fields and permissions" in entry
+    assert '"acroform" : "read-only"' in entry
+    assert "key={readerModeKey}" in entry
+    assert "capabilities={resolvedCapabilities}" in entry
+    assert entry.index("if (!resolvedCapabilities)") < entry.index("<PdfReaderCoreV2")
 
 
 def test_acroform_widgets_enable_automatically_only_for_safe_documents() -> None:
