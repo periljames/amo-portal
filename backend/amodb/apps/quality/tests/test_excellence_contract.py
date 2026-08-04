@@ -19,6 +19,18 @@ def _route_methods(router):
     }
 
 
+def _route_index(router, path: str) -> int:
+    return next(index for index, route in enumerate(router.routes) if str(route.path) == path)
+
+
+def _catchall_index(router) -> int:
+    return next(
+        index
+        for index, route in enumerate(router.routes)
+        if str(route.path).endswith("/{module_path:path}")
+    )
+
+
 def test_excellence_routes_cover_readiness_controls_evidence_and_governance() -> None:
     methods = _route_methods(excellence_router)
     expected = {
@@ -42,6 +54,13 @@ def test_excellence_routes_are_mounted_on_canonical_and_legacy_tenant_routers() 
     assert "/api/maintenance/{amo_code}/quality/excellence/overview" in canonical_paths
     assert "/api/maintenance/{amo_code}/quality/excellence/controls" in canonical_paths
     assert "/api/maintenance/{amo_code}/qms/excellence/overview" in legacy_paths
+
+
+def test_excellence_routes_precede_the_generic_qms_catchall() -> None:
+    canonical_overview = "/api/maintenance/{amo_code}/quality/excellence/overview"
+    legacy_overview = "/api/maintenance/{amo_code}/qms/excellence/overview"
+    assert _route_index(canonical_router.router, canonical_overview) < _catchall_index(canonical_router.router)
+    assert _route_index(canonical_router.legacy_router, legacy_overview) < _catchall_index(canonical_router.legacy_router)
 
 
 def test_excellence_models_are_registered_in_shared_metadata() -> None:
