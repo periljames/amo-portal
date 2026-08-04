@@ -1,0 +1,78 @@
+name: Training workbook review round two
+
+on:
+  push:
+    branches:
+      - agent/training-workbook-control-centre
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  patch-test-and-clean:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Apply review fixes
+        run: python .github/scripts/address_training_workbook_review_round2.py
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run focused backend tests
+        env:
+          PYTHONPATH: backend
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+        run: pytest -q backend/amodb/apps/training/tests/test_workbook_import_mapping.py
+
+      - name: Validate Alembic revision graph
+        env:
+          DATABASE_URL: postgresql+psycopg2://validation:validation@127.0.0.1:5432/validation
+          APP_ENV: test
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini heads
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Check CSS contracts
+        working-directory: frontend
+        run: npm run check:css
+
+      - name: Remove one-shot files
+        run: |
+          rm -f .github/workflows/training-workbook-review-round2.yml
+          rm -f .github/scripts/address_training_workbook_review_round2.py
+
+      - name: Commit validated fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Address second Training workbook review"
+          git push origin HEAD
