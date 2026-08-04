@@ -18,7 +18,7 @@ async function signIn(page: Page): Promise<void> {
 async function openPlanner(page: Page, view = "week"): Promise<void> {
   await signIn(page);
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/quality/calendar/${view}`);
-  await expect(page.locator(".qms-modern-planner")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".qms-modern-planner-v2")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".qms-planner-canvas")).toBeVisible();
 }
 
@@ -27,20 +27,29 @@ async function expectNoDocumentOverflow(page: Page): Promise<void> {
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 2);
 }
 
-test.describe("Modern QMS business planner", () => {
+test.describe("Quality Operations Planner", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_QUALITY=1 to run against a connected AMO environment.");
   test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
-  test("renders planner rails, timeline, commands, and keyboard view switching", async ({ page }) => {
+  test("renders the planner rails, context centre, timeline, commands, and keyboard views", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "week");
 
     await expect(page.locator(".qms-planner-left-rail")).toBeVisible();
     await expect(page.locator(".qms-planner-timeline")).toBeVisible();
-    await expect(page.getByPlaceholder("Search planner or press / for commands")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Search planner or press/ })).toBeVisible();
+    await expect(page.locator(".qms-planner-inspector.is-overview")).toBeVisible();
+    await expect(page.getByText("Planner control centre")).toBeVisible();
+    await expect(page.getByText("People and resources")).toBeVisible();
 
     await page.keyboard.press("/");
     await expect(page.locator(".qms-planner-command")).toBeVisible();
+    await expect(page.getByText("Quick schedule", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.keyboard.press("c");
+    await expect(page.locator(".qms-planner-create-modal")).toBeVisible();
+    await expect(page.getByText("Create a quality commitment")).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.keyboard.press("m");
@@ -57,14 +66,31 @@ test.describe("Modern QMS business planner", () => {
     await expectNoDocumentOverflow(page);
   });
 
-  test("exposes controlled drag behavior and event inspector when mutable events exist", async ({ page }) => {
+  test("supports source filtering, saved focus views, and UTC comparison", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 950 });
+    await openPlanner(page, "week");
+
+    const auditsSource = page.locator(".qms-planner-source-list button").filter({ hasText: "Audits" });
+    await expect(auditsSource).toHaveAttribute("aria-pressed", /true|false/);
+    await auditsSource.click();
+    await auditsSource.click();
+
+    await page.getByText("Overdue", { exact: true }).first().click();
+    await expect(page.locator(".qms-planner-focus-list button.is-active")).toContainText("Overdue");
+
+    await page.getByText("Show UTC comparison", { exact: true }).click();
+    await expect(page.locator(".qms-planner-timeline__corner")).toContainText("UTC below");
+    await expectNoDocumentOverflow(page);
+  });
+
+  test("exposes controlled drag behavior and event details when mutable events exist", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "month");
 
     const firstEvent = page.locator(".qms-planner-event").first();
     test.skip((await firstEvent.count()) === 0, "The configured period has no QMS planner events.");
     await firstEvent.click();
-    await expect(page.locator(".qms-planner-inspector")).toBeVisible();
+    await expect(page.locator(".qms-planner-inspector.is-event")).toBeVisible();
     await expect(page.locator(".qms-planner-inspector__title strong")).not.toBeEmpty();
 
     const draggable = page.locator('.qms-planner-event[draggable="true"]').first();
@@ -80,7 +106,7 @@ test.describe("Modern QMS business planner", () => {
     await expectNoDocumentOverflow(page);
   });
 
-  test("keeps the planner usable on mobile with internal calendar scrolling and bottom-sheet details", async ({ page }) => {
+  test("keeps internal calendar scrolling and event details usable on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page, "month");
     await expectNoDocumentOverflow(page);
@@ -91,7 +117,7 @@ test.describe("Modern QMS business planner", () => {
     const firstEvent = page.locator(".qms-planner-event").first();
     if (await firstEvent.count()) {
       await firstEvent.click();
-      const inspector = page.locator(".qms-planner-inspector");
+      const inspector = page.locator(".qms-planner-inspector.is-event");
       await expect(inspector).toBeVisible();
       await expect(inspector).toHaveCSS("position", "fixed");
       const bounds = await inspector.evaluate((element) => element.getBoundingClientRect().toJSON());
