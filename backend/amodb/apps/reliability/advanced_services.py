@@ -391,6 +391,25 @@ def _validate_ingestion_record(payload: Dict[str, Any]) -> Tuple[List[str], List
         payload.get("mel_reference") or payload.get("cdl_reference")
     ):
         warnings.append("Deferral occurrence has no MEL/CDL reference")
+    delay_value = payload.get("delay_minutes")
+    if delay_value not in (None, ""):
+        delay_error = "delay_minutes must be a nonnegative whole number"
+        if isinstance(delay_value, bool):
+            errors.append(delay_error)
+        else:
+            try:
+                parsed_delay = Decimal(str(delay_value))
+            except Exception:
+                errors.append(delay_error)
+            else:
+                if (
+                    not parsed_delay.is_finite()
+                    or parsed_delay < 0
+                    or parsed_delay != parsed_delay.to_integral_value()
+                ):
+                    errors.append(delay_error)
+                else:
+                    payload["delay_minutes"] = int(parsed_delay)
     return errors, warnings
 
 
@@ -1715,6 +1734,30 @@ def _exposure(
     return decimal_value(value)
 
 
+def _metric_event_contract(
+    *,
+    method: str,
+    configured_event_types: Sequence[str],
+) -> Tuple[List[str], Optional[List[str]], Optional[str]]:
+    """Resolve numerator and event-denominator semantics for governed metrics."""
+    numerator_types = [str(item) for item in configured_event_types]
+    if method == "PERCENT":
+        return numerator_types, [], "ALL_RELIABILITY_EVENTS"
+    if method == "NFF_RATE":
+        return ["NO_FAULT_FOUND"], ["UNSCHEDULED_REMOVAL"], "UNSCHEDULED_REMOVALS"
+    return numerator_types, None, None
+
+
+def _advance_metric_schedule(
+    metric: domain.ReliabilityMetricDefinition,
+    source_cutoff: datetime,
+) -> None:
+    metric.last_run_at = source_cutoff
+    metric.next_run_at = source_cutoff + timedelta(
+        minutes=max(int(metric.schedule_interval_minutes or 0), 60)
+    )
+
+
 def _rate_with_confidence(
     *,
     events: int,
@@ -1728,6 +1771,9 @@ def _rate_with_confidence(
         return None, None, None
     if method == "MTBUR":
         value = exposure / Decimal(events) if events else None
+        return quantize(value), None, None
+    if method in {"PERCENT", "NFF_RATE"}:
+        value = Decimal(events) / exposure * multiplier
         return quantize(value), None, None
     value = Decimal(events) / exposure * multiplier
     if events == 0:
@@ -1801,7 +1847,11 @@ def execute_metric(
     resolved_scope_type = scope_type or metric.scope_type
     resolved_scope_id = scope_id or "FLEET"
     start, end = _period_bounds(metric, period_start, period_end)
-    event_types = [str(item) for item in (metric.numerator_event_types or [])]
+    configured_event_types = [str(item) for item in (metric.numerator_event_types or [])]
+    event_types, denominator_event_types, denominator_source = _metric_event_contract(
+        method=metric.method,
+        configured_event_types=configured_event_types,
+    )
     query = _scope_event_query(
         db,
         amo_id=amo_id,
@@ -1812,15 +1862,27 @@ def execute_metric(
         scope_id=resolved_scope_id,
     )
     events = query.count()
-    exposure = _exposure(
-        db,
-        amo_id=amo_id,
-        period_start=start,
-        period_end=end,
-        denominator_type=metric.denominator_type,
-        scope_type=resolved_scope_type,
-        scope_id=resolved_scope_id,
-    )
+    if denominator_event_types is None:
+        exposure = _exposure(
+            db,
+            amo_id=amo_id,
+            period_start=start,
+            period_end=end,
+            denominator_type=metric.denominator_type,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
+    else:
+        denominator_query = _scope_event_query(
+            db,
+            amo_id=amo_id,
+            period_start=start,
+            period_end=end,
+            event_types=denominator_event_types,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+        )
+        exposure = Decimal(denominator_query.count())
     value, lower, upper = _rate_with_confidence(
         events=events,
         exposure=exposure,
@@ -1844,7 +1906,9 @@ def execute_metric(
     lineage = {
         "event_types": event_types,
         "event_count": events,
-        "denominator_type": metric.denominator_type,
+        "denominator_type": denominator_source or metric.denominator_type,
+        "configured_denominator_type": metric.denominator_type,
+        "denominator_event_types": denominator_event_types,
         "exposure": str(exposure),
         "period_start": start.isoformat(),
         "period_end": end.isoformat(),
@@ -1877,33 +1941,49 @@ def execute_metric(
         .first()
     )
     if existing:
-        return existing
-    run = domain.ReliabilityCalculationRun(
-        amo_id=amo_id,
-        metric_definition_id=metric.id,
-        scope_type=resolved_scope_type,
-        scope_id=resolved_scope_id,
-        period_start=start,
-        period_end=end,
-        numerator=Decimal(events),
-        denominator=exposure,
-        value=value,
-        confidence_lower=lower,
-        confidence_upper=upper,
-        sample_size=events,
-        small_fleet=active_aircraft < 6,
-        status=result_status,
-        formula_version=metric.formula_version,
-        source_cutoff_at=source_cutoff,
-        source_lineage_json=lineage,
-        result_hash=result_hash,
-        scheduled=scheduled,
-        run_by_user_id=actor_user_id,
-    )
-    db.add(run)
+        run = existing
+        run.numerator = Decimal(events)
+        run.denominator = exposure
+        run.value = value
+        run.confidence_lower = lower
+        run.confidence_upper = upper
+        run.sample_size = events
+        run.small_fleet = active_aircraft < 6
+        run.status = result_status
+        run.source_cutoff_at = source_cutoff
+        run.source_lineage_json = lineage
+        run.result_hash = result_hash
+        run.scheduled = bool(run.scheduled or scheduled)
+        if actor_user_id is not None:
+            run.run_by_user_id = actor_user_id
+        audit_action = "CALCULATION_REFRESHED"
+    else:
+        run = domain.ReliabilityCalculationRun(
+            amo_id=amo_id,
+            metric_definition_id=metric.id,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            period_start=start,
+            period_end=end,
+            numerator=Decimal(events),
+            denominator=exposure,
+            value=value,
+            confidence_lower=lower,
+            confidence_upper=upper,
+            sample_size=events,
+            small_fleet=active_aircraft < 6,
+            status=result_status,
+            formula_version=metric.formula_version,
+            source_cutoff_at=source_cutoff,
+            source_lineage_json=lineage,
+            result_hash=result_hash,
+            scheduled=scheduled,
+            run_by_user_id=actor_user_id,
+        )
+        db.add(run)
+        audit_action = "CALCULATION_EXECUTED"
     db.flush()
-    metric.last_run_at = source_cutoff
-    metric.next_run_at = source_cutoff + timedelta(minutes=max(metric.schedule_interval_minutes, 60))
+    _advance_metric_schedule(metric, source_cutoff)
     if alert_severity:
         alert_code = f"{metric.code}:{resolved_scope_type}:{resolved_scope_id}:{end.isoformat()}"
         open_alert = (
@@ -1934,8 +2014,14 @@ def execute_metric(
         amo_id=amo_id,
         entity_type="CALCULATION_RUN",
         entity_id=run.id,
-        action="CALCULATION_EXECUTED",
-        payload={"metric_id": metric.id, "status": result_status, "result_hash": result_hash, "scheduled": scheduled},
+        action=audit_action,
+        payload={
+            "metric_id": metric.id,
+            "status": result_status,
+            "result_hash": result_hash,
+            "scheduled": scheduled,
+            "source_cutoff_at": source_cutoff.isoformat(),
+        },
         actor_user_id=actor_user_id,
     )
     db.commit()
