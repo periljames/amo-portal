@@ -109,28 +109,32 @@ const PortalTextScaleManager: React.FC = () => {
   }, [storageKey]);
 
   useEffect(() => {
-    let host: HTMLDivElement | null = null;
-    const attach = () => {
+    let activeHost: HTMLDivElement | null = null;
+
+    const syncMount = () => {
       const appearance = document.querySelector<HTMLElement>(".tenant-shell__appearance");
-      if (!appearance) return false;
-      host = appearance.querySelector<HTMLDivElement>(".tenant-shell__text-scale-host");
+      if (!appearance) {
+        if (activeHost && !activeHost.isConnected) activeHost = null;
+        setMountTarget(null);
+        return;
+      }
+
+      let host = appearance.querySelector<HTMLDivElement>(".tenant-shell__text-scale-host");
       if (!host) {
         host = document.createElement("div");
         host.className = "tenant-shell__text-scale-host";
         appearance.append(host);
       }
-      setMountTarget(host);
-      return true;
+      activeHost = host;
+      setMountTarget((current) => current === host ? current : host);
     };
 
-    if (attach()) return () => host?.remove();
-    const observer = new MutationObserver(() => {
-      if (attach()) observer.disconnect();
-    });
+    syncMount();
+    const observer = new MutationObserver(syncMount);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
-      host?.remove();
+      activeHost?.remove();
     };
   }, []);
 
