@@ -31,6 +31,7 @@ on:
       - "frontend/tests/e2e/qms-*.spec.ts"
       - "frontend/src/router.tsx"
       - "frontend/src/portalRoutes.tsx"
+      - "frontend/eslint.config.js"
       - "frontend/package.json"
       - "frontend/package-lock.json"
       - ".github/workflows/quality-module-ci.yml"
@@ -142,6 +143,7 @@ jobs:
           amodb/apps/quality/tests/test_evidence_pack_exports.py
           amodb/apps/quality/tests/test_excellence_contract.py
           amodb/apps/quality/tests/test_assurance_wiring_contract.py
+          amodb/apps/quality/tests/test_assurance_metrics_contract.py
 
   postgres-quality-schema:
     runs-on: ubuntu-latest
@@ -195,7 +197,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
@@ -219,6 +221,24 @@ jobs:
         run: npm run test:quality
       - name: Typecheck and production build
         run: npm run build
+      - name: Install Chromium for focused QMS browser tests
+        run: npx playwright install --with-deps chromium
+      - name: Run direct-root and usability browser regressions
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" || true' EXIT
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173 >/dev/null
+          npx playwright test \
+            tests/e2e/qms-excellence-cockpit.spec.ts \
+            tests/e2e/qms-usability-enhancements.spec.ts \
+            --workers=1
       - name: Lint Quality-owned frontend surfaces
         run: >-
           npm exec -- eslint
