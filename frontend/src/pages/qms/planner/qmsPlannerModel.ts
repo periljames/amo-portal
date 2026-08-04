@@ -109,8 +109,18 @@ export function requestRange(view: PlannerView, anchor: Date, span = 5): { start
   if (view === "agenda") {
     return { start: isoDateKey(addDays(anchor, -30)), end: isoDateKey(addDays(anchor, 180)) };
   }
-  const days = visiblePlannerDays(anchor, view === "day" ? 1 : span);
-  return { start: isoDateKey(days[0]), end: isoDateKey(days[days.length - 1]) };
+  if (view === "day") {
+    const day = visiblePlannerDays(anchor, 1, false)[0];
+    return { start: isoDateKey(day), end: isoDateKey(day) };
+  }
+
+  // Fetch the union of the calendar-day and business-day spans. This keeps the
+  // already-loaded dataset valid when a user toggles "Hide weekends" and prevents
+  // later business days from rendering empty after a Friday or weekend anchor.
+  const calendarDays = visiblePlannerDays(anchor, span, false);
+  const businessDays = visiblePlannerDays(anchor, span, true);
+  const candidates = [...calendarDays, ...businessDays].sort((left, right) => left.getTime() - right.getTime());
+  return { start: isoDateKey(candidates[0]), end: isoDateKey(candidates[candidates.length - 1]) };
 }
 
 function text(row: Record<string, unknown>, ...keys: string[]): string {
