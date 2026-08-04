@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from amodb.apps.accounts.portal_preferences_router import (
     PortalPreferencesPatch,
@@ -15,8 +16,8 @@ def test_portal_preference_routes_are_mounted_on_router() -> None:
         for route in router.routes
         for method in (getattr(route, "methods", None) or set())
     }
-    assert ("/portal-preferences", "GET") in route_methods
-    assert ("/portal-preferences", "PATCH") in route_methods
+    assert ("/portal-preferences/", "GET") in route_methods
+    assert ("/portal-preferences/", "PATCH") in route_methods
 
 
 def test_portal_preference_defaults_are_accessible() -> None:
@@ -29,7 +30,7 @@ def test_portal_preference_defaults_are_accessible() -> None:
 
 
 def test_portal_preference_patch_rejects_unknown_scale() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         PortalPreferencesPatch(text_scale="tiny")
 
 
