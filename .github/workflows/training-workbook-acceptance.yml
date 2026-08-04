@@ -1,0 +1,93 @@
+name: Training workbook acceptance
+
+on:
+  push:
+    branches:
+      - agent/training-workbook-control-centre
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  acceptance:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Remove obsolete decision labels
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/components/training/TrainingWorkbookImportDialog.tsx')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    USE_IMPORTED_EMAIL: "Use workbook email",\n', '')
+          text = text.replace('    RETRY_AFTER_PERSON_IMPORT: "Retry after accepted People rows are created",\n', '')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate backend and frontend
+        env:
+          PYTHONPATH: backend
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python -m pip install -r backend/requirements.txt > /tmp/pip.log 2>&1
+          pip_status=$?
+          pytest -q backend/amodb/apps/training/tests/test_workbook_import_mapping.py > /tmp/pytest.log 2>&1
+          pytest_status=$?
+          (cd backend && alembic -c amodb/alembic.ini heads) > /tmp/alembic.log 2>&1
+          alembic_status=$?
+          (cd frontend && npm ci) > /tmp/npm-ci.log 2>&1
+          npm_status=$?
+          (cd frontend && npm run build) > /tmp/build.log 2>&1
+          build_status=$?
+          (cd frontend && npm run check:css) > /tmp/css.log 2>&1
+          css_status=$?
+          set -e
+
+          if [ "$pip_status" -ne 0 ] || [ "$pytest_status" -ne 0 ] || [ "$alembic_status" -ne 0 ] || [ "$npm_status" -ne 0 ] || [ "$build_status" -ne 0 ] || [ "$css_status" -ne 0 ]; then
+            {
+              echo '## Training workbook acceptance failed'
+              echo
+              echo "- dependency install: $pip_status"
+              echo "- focused pytest: $pytest_status"
+              echo "- Alembic graph: $alembic_status"
+              echo "- npm ci: $npm_status"
+              echo "- frontend build: $build_status"
+              echo "- CSS contract: $css_status"
+              echo
+              echo '<details><summary>Failure logs</summary>'
+              echo
+              echo '```text'
+              tail -n 60 /tmp/pytest.log
+              tail -n 40 /tmp/alembic.log
+              tail -n 60 /tmp/build.log
+              tail -n 40 /tmp/css.log
+              echo '```'
+              echo '</details>'
+            } > /tmp/acceptance-comment.md
+            gh pr comment 422 --body-file /tmp/acceptance-comment.md
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/training/TrainingWorkbookImportDialog.tsx
+          if ! git diff --cached --quiet; then
+            git commit -m "Remove obsolete Training import decisions"
+            git push origin HEAD
+          fi
+          gh pr comment 422 --body $'## Training workbook acceptance passed\n\n- Focused backend workbook tests passed.\n- Alembic revision graph resolved successfully.\n- Frontend production build passed.\n- CSS contract checks passed.'
