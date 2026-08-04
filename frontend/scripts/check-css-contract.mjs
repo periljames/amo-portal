@@ -35,6 +35,7 @@ const requiredOrder = [
   "./foundations/appearance.css",
   "./qms-usability-enhancements.css",
   "./qms-calendar-workspace.css",
+  "./qms-calendar-viewport-safety.css",
 ];
 let previous = -1;
 for (const required of requiredOrder) {
@@ -45,8 +46,8 @@ for (const required of requiredOrder) {
 }
 
 const manifestImports = [...index.matchAll(/@import\s+["']([^"']+)["']/g)].map((match) => match[1]);
-if (manifestImports.at(-1) !== "./qms-calendar-workspace.css") {
-  fail(`styles/index.css must load ./qms-calendar-workspace.css last; found ${manifestImports.at(-1) || "no imports"}`);
+if (manifestImports.at(-1) !== "./qms-calendar-viewport-safety.css") {
+  fail(`styles/index.css must load ./qms-calendar-viewport-safety.css last; found ${manifestImports.at(-1) || "no imports"}`);
 }
 
 function cssFiles(directory) {
@@ -108,6 +109,19 @@ for (const requiredSelector of [
   "prefers-reduced-motion",
 ]) {
   if (!calendarContract.includes(requiredSelector)) fail(`qms-calendar-workspace.css is missing ${requiredSelector}`);
+}
+
+const calendarViewportSafety = read(path.join(styles, "qms-calendar-viewport-safety.css"));
+for (const requiredFragment of [
+  "@media (max-width: 760px)",
+  ".qms-calendar-shell",
+  "contain: none !important",
+  ".qms-calendar-drawer",
+  "overscroll-behavior: contain",
+]) {
+  if (!calendarViewportSafety.includes(requiredFragment)) {
+    fail(`qms-calendar-viewport-safety.css is missing ${requiredFragment}`);
+  }
 }
 
 if (failures.length) {
