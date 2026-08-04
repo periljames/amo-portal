@@ -45,12 +45,16 @@ test.describe("Quality Operations Planner", () => {
     await page.keyboard.press("/");
     await expect(page.locator(".qms-planner-command")).toBeVisible();
     await expect(page.getByText("Quick schedule", { exact: true })).toBeVisible();
+    // The first Escape leaves the focused command input; the second closes the palette.
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".qms-planner-command")).toBeHidden();
 
     await page.keyboard.press("c");
     await expect(page.locator(".qms-planner-create-modal")).toBeVisible();
     await expect(page.getByText("Create a quality commitment")).toBeVisible();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator(".qms-planner-create-modal")).toBeHidden();
 
     await page.keyboard.press("m");
     await expect(page).toHaveURL(/\/quality\/calendar\/month/);
