@@ -6,7 +6,6 @@ import { RefreshCcw, ShieldAlert } from "lucide-react";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
-import "../../styles/quality-checklist-pdf-form-editor.css";
 
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
