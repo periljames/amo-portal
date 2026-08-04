@@ -179,6 +179,7 @@ def main() -> None:
         assert connection.execute(text("SELECT COUNT(*) FROM quality_intelligence_reviews")).scalar_one() == 0
 
         rejected = False
+        savepoint = connection.begin_nested()
         try:
             connection.execute(
                 text(
@@ -196,6 +197,9 @@ def main() -> None:
             )
         except sa.exc.DatabaseError:
             rejected = True
+            savepoint.rollback()
+        else:
+            savepoint.rollback()
         assert rejected, "RLS unexpectedly allowed a cross-tenant assurance-control insert"
 
 
