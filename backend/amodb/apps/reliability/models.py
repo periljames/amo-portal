@@ -259,11 +259,31 @@ class ReliabilityRecommendation(Base):
 
 class ReliabilityEventTypeEnum(str, Enum):
     DEFECT = "DEFECT"
+    REPEAT_DEFECT = "REPEAT_DEFECT"
+    PILOT_REPORT = "PILOT_REPORT"
+    CABIN_REPORT = "CABIN_REPORT"
+    TECHNICAL_DELAY = "TECHNICAL_DELAY"
+    TECHNICAL_CANCELLATION = "TECHNICAL_CANCELLATION"
+    RETURN_TO_GATE = "RETURN_TO_GATE"
+    AIR_TURNBACK = "AIR_TURNBACK"
+    DIVERSION = "DIVERSION"
+    IN_FLIGHT_SHUTDOWN = "IN_FLIGHT_SHUTDOWN"
+    ABORTED_TAKEOFF = "ABORTED_TAKEOFF"
+    MEL_DEFERRAL = "MEL_DEFERRAL"
+    CDL_DEFERRAL = "CDL_DEFERRAL"
+    UNSCHEDULED_REMOVAL = "UNSCHEDULED_REMOVAL"
+    SCHEDULED_REMOVAL = "SCHEDULED_REMOVAL"
     REMOVAL = "REMOVAL"
     INSTALLATION = "INSTALLATION"
+    SHOP_FINDING = "SHOP_FINDING"
+    NO_FAULT_FOUND = "NO_FAULT_FOUND"
     OCTM = "OCTM"
     ECTM = "ECTM"
+    EHM_ALERT = "EHM_ALERT"
     FRACAS = "FRACAS"
+    MAINTENANCE_ERROR = "MAINTENANCE_ERROR"
+    SUPPLIER_ESCAPE = "SUPPLIER_ESCAPE"
+    SAFETY_EVENT = "SAFETY_EVENT"
     OTHER = "OTHER"
 
 
@@ -356,8 +376,17 @@ class ReliabilityEvent(Base):
     __tablename__ = "reliability_events"
 
     __table_args__ = (
+        UniqueConstraint(
+            "amo_id",
+            "source_system",
+            "source_record_id",
+            name="uq_reliability_event_source_record",
+        ),
         Index("ix_reliability_events_amo_type", "amo_id", "event_type"),
         Index("ix_reliability_events_aircraft_date", "aircraft_serial_number", "occurred_at"),
+        Index("ix_reliability_events_repeat_key", "amo_id", "repeat_key"),
+        Index("ix_reliability_events_component_identity", "amo_id", "part_number", "component_serial_number"),
+        CheckConstraint("delay_minutes IS NULL OR delay_minutes >= 0", name="ck_reliability_event_delay_nonnegative"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -402,7 +431,27 @@ class ReliabilityEvent(Base):
     )
     ata_chapter = Column(String(20), nullable=True, index=True)
     reference_code = Column(String(64), nullable=True, index=True)
-    source_system = Column(String(64), nullable=True)
+    source_system = Column(String(64), nullable=True, index=True)
+    source_record_id = Column(String(255), nullable=True, index=True)
+    source_payload_hash = Column(String(64), nullable=True, index=True)
+    validation_status = Column(String(24), nullable=False, default="VALID", server_default=text("'VALID'"), index=True)
+    validation_errors = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    provenance_json = Column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
+
+    operation_stage = Column(String(40), nullable=True, index=True)
+    flight_number = Column(String(24), nullable=True, index=True)
+    origin_station = Column(String(8), nullable=True)
+    destination_station = Column(String(8), nullable=True)
+    delay_minutes = Column(Integer, nullable=True)
+    mel_reference = Column(String(80), nullable=True, index=True)
+    cdl_reference = Column(String(80), nullable=True, index=True)
+    deferral_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    part_number = Column(String(80), nullable=True, index=True)
+    component_serial_number = Column(String(80), nullable=True, index=True)
+    confirmed_failure = Column(Boolean, nullable=True)
+    repeat_key = Column(String(255), nullable=True, index=True)
+
     description = Column(Text, nullable=True)
     occurred_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
 

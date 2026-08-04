@@ -185,7 +185,7 @@ const DashboardPage = lazyDefault(() => import("./pages/DashboardPage"));
 const EhmDashboardPage = lazyDefault(() => import("./pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazyDefault(() => import("./pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazyDefault(() => import("./pages/ehm/EhmUploadsPage"));
-const ReliabilityReportsPage = lazyDefault(() => import("./pages/ReliabilityReportsPage"));
+const ReliabilityWorkspacePage = lazyDefault(() => import("./pages/reliability/ReliabilityWorkspacePage"));
 const CRSNewPage = lazyDefault(() => import("./pages/CRSNewPage"));
 const AircraftImportPage = lazyDefault(() => import("./pages/AircraftImportPage"));
 const ComponentImportPage = lazyDefault(() => import("./pages/ComponentImportPage"));
@@ -1008,6 +1008,8 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/:department/training-competence" element={<RequireAuth><LegacyTrainingCompetenceRedirect /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
 
+      <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />
+
       {/* Department dashboard, e.g. /maintenance/safarilink/maintenance */}
       <Route
         path="/maintenance/:amoCode/:department"
@@ -1047,4 +1049,3 @@ export const AppRouter: React.FC = () => {
 };
 
 export default AppRouter;
-

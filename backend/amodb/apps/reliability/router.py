@@ -35,6 +35,13 @@ router = APIRouter(
 MAX_EHM_PAGE_SIZE = 500
 
 
+def _amo_id(current_user: account_models.User) -> str:
+    amo_id = current_user.effective_amo_id
+    if not amo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="A tenant context is required.")
+    return amo_id
+
+
 def _normalize_ehm_pagination(limit: int, offset: int) -> tuple[int, int]:
     if limit <= 0:
         limit = 100
@@ -90,6 +97,15 @@ EHM_ALLOWED_CONTENT_TYPES = {
 }
 
 
+@router.get("/workbench", response_model=schemas.ReliabilityWorkbenchSnapshot)
+def get_workbench(
+    limit: int = Query(default=8, ge=1, le=20),
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.build_reliability_workbench(db, amo_id=_amo_id(current_user), limit=limit)
+
+
 @router.post(
     "/templates/seed",
     response_model=List[schemas.ReliabilityProgramTemplateRead],
@@ -101,7 +117,7 @@ def seed_templates(
 ):
     created = services.seed_default_templates(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         created_by_user_id=current_user.id,
     )
     return created
@@ -119,7 +135,7 @@ def create_trend(
 ):
     trend = services.compute_defect_trend(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         window_start=payload.window_start,
         window_end=payload.window_end,
         aircraft_serial_number=payload.aircraft_serial_number,
@@ -140,7 +156,7 @@ def upsert_recurring(
 ):
     instance = services.upsert_recurring_finding(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
     )
     return instance
@@ -158,7 +174,7 @@ def create_recommendation(
 ):
     return services.create_recommendation(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -176,21 +192,45 @@ def create_event(
 ):
     return services.create_reliability_event(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         created_by_user_id=current_user.id,
     )
 
 
-@router.get(
-    "/events",
-    response_model=List[schemas.ReliabilityEventRead],
-)
+@router.get("/events", response_model=List[schemas.ReliabilityEventRead])
 def list_events(
+    event_type: Optional[reliability_models.ReliabilityEventTypeEnum] = None,
+    severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
+    aircraft_serial_number: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_reliability_events(db, amo_id=current_user.amo_id)
+    return services.list_reliability_events(
+        db,
+        amo_id=_amo_id(current_user),
+        event_type=event_type,
+        severity=severity,
+        aircraft_serial_number=aircraft_serial_number,
+        query_text=q,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/events/{event_id:int}", response_model=schemas.ReliabilityEventRead)
+def get_event(
+    event_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    event = services.get_reliability_event(db, amo_id=_amo_id(current_user), event_id=event_id)
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reliability event not found.")
+    return event
 
 
 @router.get(
@@ -206,7 +246,7 @@ def pull_reliability_feed(
 ):
     return services.build_reliability_pull(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         start_date=start_date,
         end_date=end_date,
         limit=limit,
@@ -221,7 +261,7 @@ def export_events(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    csv_payload = services.export_reliability_events_csv(db, amo_id=current_user.amo_id)
+    csv_payload = services.export_reliability_events_csv(db, amo_id=_amo_id(current_user))
     return Response(
         content=csv_payload,
         media_type="text/csv",
@@ -242,7 +282,7 @@ def ingest_e_logbook_events(
     try:
         created = services.create_reliability_events_bulk(
             db,
-            amo_id=current_user.effective_amo_id,
+            amo_id=_amo_id(current_user),
             created_by_user_id=current_user.id,
             events=payload.events,
         )
@@ -261,7 +301,7 @@ def create_kpi(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_kpi_snapshot(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_kpi_snapshot(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -272,7 +312,7 @@ def list_kpis(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_kpis(db, amo_id=current_user.amo_id)
+    return services.list_kpis(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -287,7 +327,7 @@ def create_alert(
 ):
     return services.create_alert(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -306,7 +346,7 @@ def acknowledge_alert(
     try:
         return services.acknowledge_alert(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             alert_id=alert_id,
             message=payload.message,
             acknowledged_by_user_id=current_user.id,
@@ -328,7 +368,7 @@ def resolve_alert(
     try:
         return services.resolve_alert(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             alert_id=alert_id,
             message=payload.message,
             resolved_by_user_id=current_user.id,
@@ -337,15 +377,35 @@ def resolve_alert(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.get(
-    "/alerts",
-    response_model=List[schemas.ReliabilityAlertRead],
-)
+@router.get("/alerts", response_model=List[schemas.ReliabilityAlertRead])
 def list_alerts(
+    alert_status: Optional[reliability_models.ReliabilityAlertStatusEnum] = Query(default=None, alias="status"),
+    severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_alerts(db, amo_id=current_user.amo_id)
+    return services.list_alerts(
+        db,
+        amo_id=_amo_id(current_user),
+        alert_status=alert_status,
+        severity=severity,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/alerts/{alert_id:int}", response_model=schemas.ReliabilityAlertRead)
+def get_alert(
+    alert_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    alert = services.get_reliability_alert(db, amo_id=_amo_id(current_user), alert_id=alert_id)
+    if not alert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reliability alert not found.")
+    return alert
 
 
 @router.post(
@@ -360,7 +420,7 @@ def create_notification_rule(
 ):
     return services.create_notification_rule(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -374,7 +434,7 @@ def list_notification_rules(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_notification_rules(db, amo_id=current_user.effective_amo_id)
+    return services.list_notification_rules(db, amo_id=_amo_id(current_user))
 
 
 @router.get(
@@ -385,7 +445,7 @@ def list_my_notifications(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_notifications(db, amo_id=current_user.effective_amo_id, user_id=current_user.id)
+    return services.list_notifications(db, amo_id=_amo_id(current_user), user_id=current_user.id)
 
 
 @router.post(
@@ -401,7 +461,7 @@ def mark_notification_read(
     try:
         return services.mark_notification_read(
             db,
-            amo_id=current_user.effective_amo_id,
+            amo_id=_amo_id(current_user),
             user_id=current_user.id,
             notification_id=notification_id,
             read=payload.read,
@@ -422,7 +482,7 @@ def evaluate_alerts(
     try:
         created_alerts, evaluated_rules = services.evaluate_alerts_for_kpi(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             kpi_id=payload.kpi_id,
             threshold_set_id=payload.threshold_set_id,
             created_by_user_id=current_user.id,
@@ -447,7 +507,7 @@ def create_fracas_case(
 ):
     return services.create_fracas_case(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -466,7 +526,7 @@ def approve_fracas_case(
     try:
         return services.approve_fracas_case(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             case_id=case_id,
             approved_by_user_id=current_user.id,
             approval_notes=payload.approval_notes,
@@ -490,7 +550,7 @@ def verify_fracas_case(
     try:
         return services.verify_fracas_case(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             case_id=case_id,
             verified_by_user_id=current_user.id,
             verification_notes=payload.verification_notes,
@@ -502,15 +562,47 @@ def verify_fracas_case(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.get(
-    "/fracas/cases",
-    response_model=List[schemas.FRACASCaseRead],
-)
+@router.get("/fracas/cases", response_model=List[schemas.FRACASCaseRead])
 def list_fracas_cases(
+    case_status: Optional[reliability_models.FRACASStatusEnum] = Query(default=None, alias="status"),
+    severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_fracas_cases(db, amo_id=current_user.amo_id)
+    return services.list_fracas_cases(
+        db,
+        amo_id=_amo_id(current_user),
+        case_status=case_status,
+        severity=severity,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/fracas/cases/{case_id:int}", response_model=schemas.FRACASCaseRead)
+def get_fracas_case(
+    case_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    case = services.get_fracas_case(db, amo_id=_amo_id(current_user), case_id=case_id)
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FRACAS case not found.")
+    return case
+
+
+@router.get("/fracas/cases/{case_id:int}/actions", response_model=List[schemas.FRACASActionRead])
+def get_fracas_case_actions(
+    case_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    case = services.get_fracas_case(db, amo_id=_amo_id(current_user), case_id=case_id)
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FRACAS case not found.")
+    return services.list_fracas_case_actions(db, amo_id=_amo_id(current_user), case_id=case_id)
 
 
 @router.post(
@@ -524,7 +616,7 @@ def create_fracas_action(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.create_fracas_action(db, amo_id=current_user.amo_id, data=payload)
+        return services.create_fracas_action(db, amo_id=_amo_id(current_user), data=payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -542,7 +634,7 @@ def verify_fracas_action(
     try:
         return services.verify_fracas_action(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             action_id=action_id,
             verified_by_user_id=current_user.id,
             effectiveness_notes=payload.effectiveness_notes,
@@ -551,22 +643,7 @@ def verify_fracas_action(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.get(
-    "/fracas/{fracas_case_id}/actions",
-    response_model=List[schemas.FRACASActionRead],
-)
-def list_fracas_actions(
-    fracas_case_id: int,
-    current_user: account_models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_write_db),
-):
-    try:
-        return services.list_fracas_actions(db, amo_id=current_user.amo_id, fracas_case_id=fracas_case_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@router.get("/fracas/{fracas_case_id}/evidence-pack")
+@router.get("/fracas/cases/{fracas_case_id}/evidence-pack")
 def export_fracas_evidence_pack(
     fracas_case_id: int,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -574,7 +651,7 @@ def export_fracas_evidence_pack(
 ):
     case = (
         db.query(reliability_models.FRACASCase)
-        .filter(reliability_models.FRACASCase.amo_id == current_user.amo_id, reliability_models.FRACASCase.id == fracas_case_id)
+        .filter(reliability_models.FRACASCase.amo_id == _amo_id(current_user), reliability_models.FRACASCase.id == fracas_case_id)
         .first()
     )
     if not case:
@@ -587,7 +664,7 @@ def export_fracas_evidence_pack(
         db,
         actor_user_id=current_user.id,
         correlation_id=generate_uuid7(),
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
     )
 
 
@@ -602,7 +679,7 @@ def create_engine_snapshot(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.create_engine_snapshot(db, amo_id=current_user.amo_id, data=payload)
+        return services.create_engine_snapshot(db, amo_id=_amo_id(current_user), data=payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -615,7 +692,7 @@ def list_engine_snapshots(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_engine_snapshots(db, amo_id=current_user.amo_id)
+    return services.list_engine_snapshots(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -631,22 +708,28 @@ def compute_engine_trend_status(
 ):
     return services.compute_engine_trend_status(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
         aircraft_serial_number=aircraft_serial_number,
         engine_position=engine_position,
         engine_serial_number=engine_serial_number,
     )
 
 
-@router.get(
-    "/engine-trends/fleet-status",
-    response_model=List[schemas.EngineTrendStatusRead],
-)
+@router.get("/engine-trends/fleet-status", response_model=List[schemas.EngineTrendStatusRead])
 def list_engine_trend_statuses(
+    current_status: Optional[reliability_models.EngineTrendStatusEnum] = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_engine_trend_statuses(db, amo_id=current_user.amo_id)
+    return services.list_engine_trend_statuses(
+        db,
+        amo_id=_amo_id(current_user),
+        current_status=current_status,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -665,7 +748,7 @@ def get_engine_trend_series(
 ):
     return services.get_engine_trend_series(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
         aircraft_serial_number=aircraft_serial_number,
         engine_position=engine_position,
         metric=metric,
@@ -688,7 +771,7 @@ def review_engine_trend_status(
     try:
         return services.review_engine_trend_status(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             status_id=status_id,
             reviewed_by_user_id=current_user.id,
             last_review_date=payload.last_review_date,
@@ -710,7 +793,7 @@ def ingest_engine_snapshots(
     try:
         created = services.create_engine_snapshots_bulk(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             snapshots=payload.snapshots,
         )
     except ValueError as exc:
@@ -728,7 +811,7 @@ def create_oil_uplift(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_oil_uplift(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_oil_uplift(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -739,7 +822,7 @@ def list_oil_uplifts(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_oil_uplifts(db, amo_id=current_user.amo_id)
+    return services.list_oil_uplifts(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -752,7 +835,7 @@ def create_oil_consumption_rate(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_oil_consumption_rate(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_oil_consumption_rate(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -763,7 +846,7 @@ def list_oil_consumption_rates(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_oil_consumption_rates(db, amo_id=current_user.amo_id)
+    return services.list_oil_consumption_rates(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -778,7 +861,7 @@ def create_component_instance(
 ):
     return services.create_component_instance(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         actor_user_id=current_user.id,
     )
@@ -792,7 +875,7 @@ def list_component_instances(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_component_instances(db, amo_id=current_user.amo_id)
+    return services.list_component_instances(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -813,7 +896,7 @@ def create_part_movement(
         removal_tracking_id = generate_uuid7()
         movement, _removal = services.record_part_movement_with_removal(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             data=payload,
             removal_tracking_id=removal_tracking_id,
             removal_reason=payload.reason_code,
@@ -825,7 +908,7 @@ def create_part_movement(
     else:
         movement = services.create_part_movement(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_amo_id(current_user),
             data=payload,
             actor_user_id=current_user.id,
             removal_tracking_id=removal_tracking_id,
@@ -843,7 +926,7 @@ def list_part_movements(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_part_movements(db, amo_id=current_user.amo_id)
+    return services.list_part_movements(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -858,7 +941,7 @@ def create_removal_event(
 ):
     removal = services.create_removal_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_amo_id(current_user),
         data=payload,
         actor_user_id=current_user.id,
     )
@@ -875,7 +958,7 @@ def list_removal_events(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_removal_events(db, amo_id=current_user.amo_id)
+    return services.list_removal_events(db, amo_id=_amo_id(current_user))
 
 
 @router.get(
@@ -899,7 +982,7 @@ def pull_reliability_events(
         end_dt = datetime.combine(end_date, time.max, tzinfo=timezone.utc)
 
     usage_query = db.query(fleet_models.AircraftUsage).filter(
-        fleet_models.AircraftUsage.amo_id == current_user.amo_id
+        fleet_models.AircraftUsage.amo_id == _amo_id(current_user)
     )
     if aircraft_serial_number:
         usage_query = usage_query.filter(
@@ -918,7 +1001,7 @@ def pull_reliability_events(
     )
 
     removal_query = db.query(reliability_models.RemovalEvent).filter(
-        reliability_models.RemovalEvent.amo_id == current_user.amo_id
+        reliability_models.RemovalEvent.amo_id == _amo_id(current_user)
     )
     if aircraft_serial_number:
         removal_query = removal_query.filter(
@@ -937,7 +1020,7 @@ def pull_reliability_events(
     )
 
     defect_query = db.query(fleet_models.DefectReport).filter(
-        fleet_models.DefectReport.amo_id == current_user.amo_id
+        fleet_models.DefectReport.amo_id == _amo_id(current_user)
     )
     if aircraft_serial_number:
         defect_query = defect_query.filter(
@@ -956,7 +1039,7 @@ def pull_reliability_events(
     )
 
     shop_visit_query = db.query(work_models.WorkOrder).filter(
-        work_models.WorkOrder.amo_id == current_user.amo_id,
+        work_models.WorkOrder.amo_id == _amo_id(current_user),
         work_models.WorkOrder.wo_type.in_(
             [work_models.WorkOrderTypeEnum.BASE, work_models.WorkOrderTypeEnum.PERIODIC]
         ),
@@ -1015,7 +1098,7 @@ def create_shop_visit(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_shop_visit(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_shop_visit(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -1026,7 +1109,7 @@ def list_shop_visits(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_shop_visits(db, amo_id=current_user.amo_id)
+    return services.list_shop_visits(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -1039,7 +1122,7 @@ def create_aircraft_utilization(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_aircraft_utilization(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_aircraft_utilization(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -1050,7 +1133,7 @@ def list_aircraft_utilization(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_aircraft_utilization(db, amo_id=current_user.amo_id)
+    return services.list_aircraft_utilization(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -1063,7 +1146,7 @@ def create_engine_utilization(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_engine_utilization(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_engine_utilization(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -1074,7 +1157,7 @@ def list_engine_utilization(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_engine_utilization(db, amo_id=current_user.amo_id)
+    return services.list_engine_utilization(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -1087,7 +1170,7 @@ def create_threshold_set(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_threshold_set(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_threshold_set(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -1098,7 +1181,7 @@ def list_threshold_sets(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_threshold_sets(db, amo_id=current_user.amo_id)
+    return services.list_threshold_sets(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -1112,7 +1195,7 @@ def create_alert_rule(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.create_alert_rule(db, amo_id=current_user.amo_id, data=payload)
+        return services.create_alert_rule(db, amo_id=_amo_id(current_user), data=payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1127,7 +1210,7 @@ def list_alert_rules(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.list_alert_rules(db, amo_id=current_user.amo_id, threshold_set_id=threshold_set_id)
+        return services.list_alert_rules(db, amo_id=_amo_id(current_user), threshold_set_id=threshold_set_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1142,7 +1225,7 @@ def create_control_chart_config(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_control_chart_config(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_control_chart_config(db, amo_id=_amo_id(current_user), data=payload)
 
 
 @router.get(
@@ -1153,7 +1236,7 @@ def list_control_chart_configs(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_control_chart_configs(db, amo_id=current_user.amo_id)
+    return services.list_control_chart_configs(db, amo_id=_amo_id(current_user))
 
 
 @router.post(
@@ -1168,7 +1251,7 @@ def create_report(
 ):
     return services.generate_reliability_report(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         created_by_user_id=current_user.id,
         window_start=payload.window_start,
         window_end=payload.window_end,
@@ -1183,7 +1266,7 @@ def list_reports(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_reports(db, amo_id=current_user.effective_amo_id)
+    return services.list_reports(db, amo_id=_amo_id(current_user))
 
 
 @router.get(
@@ -1196,7 +1279,7 @@ def get_report(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.get_report(db, amo_id=current_user.effective_amo_id, report_id=report_id)
+        return services.get_report(db, amo_id=_amo_id(current_user), report_id=report_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1211,7 +1294,7 @@ def download_report(
     db: Session = Depends(get_write_db),
 ):
     try:
-        report = services.get_report(db, amo_id=current_user.effective_amo_id, report_id=report_id)
+        report = services.get_report(db, amo_id=_amo_id(current_user), report_id=report_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if not report.file_ref:
@@ -1260,7 +1343,7 @@ def upload_ehm_log(
             detail="Unsupported content type for EHM log.",
         )
 
-    amo_id = current_user.effective_amo_id
+    amo_id = _amo_id(current_user)
     log_id = generate_uuid7()
 
     EHM_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -1395,7 +1478,7 @@ def list_ehm_logs(
 ):
     limit, offset = _normalize_ehm_pagination(limit, offset)
     query = db.query(reliability_models.EhmRawLog).filter(
-        reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id
+        reliability_models.EhmRawLog.amo_id == _amo_id(current_user)
     )
     if aircraft_serial_number:
         query = query.filter(reliability_models.EhmRawLog.aircraft_serial_number == aircraft_serial_number)
@@ -1423,7 +1506,7 @@ def get_ehm_log(
         db.query(reliability_models.EhmRawLog)
         .filter(
             reliability_models.EhmRawLog.id == log_id,
-            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+            reliability_models.EhmRawLog.amo_id == _amo_id(current_user),
         )
         .first()
     )
@@ -1444,7 +1527,7 @@ def get_ehm_raw_text(
         db.query(reliability_models.EhmRawLog)
         .filter(
             reliability_models.EhmRawLog.id == log_id,
-            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+            reliability_models.EhmRawLog.amo_id == _amo_id(current_user),
         )
         .first()
     )
@@ -1482,7 +1565,7 @@ def list_ehm_records(
         db.query(reliability_models.EhmRawLog)
         .filter(
             reliability_models.EhmRawLog.id == log_id,
-            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+            reliability_models.EhmRawLog.amo_id == _amo_id(current_user),
         )
         .first()
     )
@@ -1493,7 +1576,7 @@ def list_ehm_records(
 
     query = db.query(reliability_models.EhmParsedRecord).filter(
         reliability_models.EhmParsedRecord.raw_log_id == log_id,
-        reliability_models.EhmParsedRecord.amo_id == current_user.effective_amo_id,
+        reliability_models.EhmParsedRecord.amo_id == _amo_id(current_user),
     )
     if record_type:
         query = query.filter(reliability_models.EhmParsedRecord.record_type == record_type)
@@ -1520,10 +1603,16 @@ def get_ehm_snapshot(
     window_start, window_end = ehm_services.build_snapshot_window(at, from_, to)
     snapshot = ehm_services.build_snapshot(
         db,
-        amo_id=current_user.effective_amo_id,
+        amo_id=_amo_id(current_user),
         aircraft_serial_number=asset_id,
         engine_position=engine_position,
         window_start=window_start,
         window_end=window_end,
     )
     return snapshot
+
+
+# Canonical advanced Reliability routes
+from .advanced_router import router as advanced_reliability_router  # noqa: E402
+
+router.include_router(advanced_reliability_router)

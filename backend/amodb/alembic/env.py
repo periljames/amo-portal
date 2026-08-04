@@ -9,7 +9,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, pool, text  # kept for compatibility with typical alembic templates
+from sqlalchemy import MetaData, inspect, pool, text  # kept for compatibility with typical alembic templates
 
 # ---------------------------------------------------------------------------
 # PYTHONPATH SETUP
@@ -49,14 +49,93 @@ from amodb.apps.training import models as training_models  # noqa: F401, E402
 # ADD: Quality models so Alembic can create/update QMS tables
 from amodb.apps.quality import models as quality_models  # noqa: F401, E402
 from amodb.apps.reliability import models as reliability_models  # noqa: F401, E402
+from amodb.apps.reliability import advanced_models as reliability_advanced_models  # noqa: F401, E402
 from amodb.apps.inventory import models as inventory_models  # noqa: F401, E402
 from amodb.apps.finance import models as finance_models  # noqa: F401, E402
 import amodb.apps.realtime.models as realtime_models  # noqa: F401, E402
 from amodb.apps.doc_control import domain_models as document_control_domain_models  # noqa: F401, E402
 from amodb.apps.doc_control import knowledge_models as document_control_knowledge_models  # noqa: F401, E402
 
-# Target metadata for 'autogenerate'
-target_metadata = Base.metadata
+
+
+_RELIABILITY_TABLES = {
+    "reliability_events",
+    "reliability_sources",
+    "reliability_ingestion_batches",
+    "reliability_ingestion_records",
+    "reliability_data_quality_issues",
+    "reliability_operational_interruptions",
+    "reliability_fracas_lifecycles",
+    "reliability_fracas_evidence",
+    "reliability_fracas_stage_events",
+    "reliability_effectiveness_reviews",
+    "reliability_programmes",
+    "reliability_programme_versions",
+    "reliability_metric_definitions",
+    "reliability_threshold_versions",
+    "reliability_calculation_runs",
+    "reliability_review_meetings",
+    "reliability_meeting_decisions",
+    "reliability_change_proposals",
+    "reliability_handoffs",
+    "reliability_authority_submissions",
+    "reliability_audit_events",
+    "reliability_ai_reviews",
+}
+
+
+def _reliability_include_object(obj, name, type_, reflected, compare_to):
+    if os.getenv("RELIABILITY_AUTOGENERATE_ONLY", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+        return True
+    if type_ == "table":
+        return name in _RELIABILITY_TABLES
+    table = getattr(obj, "table", None)
+    if table is None:
+        table = getattr(compare_to, "table", None)
+    return table is not None and table.name in _RELIABILITY_TABLES
+
+def _build_reliability_metadata() -> MetaData:
+    """Return only Reliability tables and their direct FK dependency graph.
+
+    Global metadata currently contains optional module tables whose foreign-key
+    targets are not registered in every deployment. Reliability-only
+    autogeneration must not resolve or compare those unrelated tables.
+    """
+    required = set(_RELIABILITY_TABLES)
+    pending = list(required)
+    while pending:
+        table_name = pending.pop()
+        table = Base.metadata.tables.get(table_name)
+        if table is None:
+            raise RuntimeError(f"Reliability autogenerate table is not registered: {table_name}")
+        for foreign_key in table.foreign_keys:
+            target = str(foreign_key._colspec).rsplit(".", 1)[0]
+            if target not in required:
+                if target not in Base.metadata.tables:
+                    raise RuntimeError(
+                        f"Reliability table {table_name} references unregistered table {target}"
+                    )
+                required.add(target)
+                pending.append(target)
+
+    metadata = MetaData()
+    for table_name in sorted(required):
+        Base.metadata.tables[table_name].to_metadata(metadata)
+    return metadata
+
+
+_RELIABILITY_AUTOGENERATE_ENABLED = (
+    os.getenv("RELIABILITY_AUTOGENERATE_ONLY", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
+# Target metadata for 'autogenerate'. Application migrations use the full model;
+# the Reliability completion migration uses an isolated, dependency-complete graph.
+target_metadata = (
+    _build_reliability_metadata()
+    if _RELIABILITY_AUTOGENERATE_ENABLED
+    else Base.metadata
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +197,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         compare_type=True,
-        compare_server_default=True,
+        compare_server_default=not _RELIABILITY_AUTOGENERATE_ENABLED,
+        include_object=_reliability_include_object,
     )
 
     with context.begin_transaction():
@@ -344,8 +424,10 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
-            compare_server_default=True,
-            # You can add include_object / process_revision_directives here later if needed.
+            # PostgreSQL JSON has no equality operator; compare defaults only for
+            # ordinary application migrations, not the scoped Reliability graph.
+            compare_server_default=not _RELIABILITY_AUTOGENERATE_ENABLED,
+            include_object=_reliability_include_object,
         )
 
         with context.begin_transaction():

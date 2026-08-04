@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -102,6 +102,7 @@ def compute_defect_trend(
         func.coalesce(func.sum(AircraftUsage.block_hours), 0.0),
         func.coalesce(func.sum(AircraftUsage.cycles), 0.0),
     ).filter(
+        AircraftUsage.amo_id == amo_id,
         AircraftUsage.date >= window_start,
         AircraftUsage.date <= window_end,
     )
@@ -110,11 +111,13 @@ def compute_defect_trend(
     utilisation_hours, utilisation_cycles = utilisation_q.one()
 
     defects_q = db.query(func.count(TaskCard.id)).filter(
+        TaskCard.amo_id == amo_id,
         TaskCard.category == TaskCategoryEnum.DEFECT,
         TaskCard.created_at >= start_dt,
         TaskCard.created_at < end_dt_exclusive,
     )
     findings_q = db.query(func.count(QMSAuditFinding.id)).filter(
+        QMSAuditFinding.amo_id == amo_id,
         QMSAuditFinding.created_at >= start_dt,
         QMSAuditFinding.created_at < end_dt_exclusive,
     )
@@ -133,6 +136,7 @@ def compute_defect_trend(
         TaskCard.task_code.label("task_code"),
         func.count(TaskCard.id).label("defect_count"),
     ).filter(
+        TaskCard.amo_id == amo_id,
         TaskCard.category == TaskCategoryEnum.DEFECT,
         TaskCard.created_at >= start_dt,
         TaskCard.created_at < end_dt_exclusive,
@@ -281,12 +285,41 @@ def list_reliability_events(
     db: Session,
     *,
     amo_id: str,
+    event_type: Optional[models.ReliabilityEventTypeEnum] = None,
+    severity: Optional[models.ReliabilitySeverityEnum] = None,
+    aircraft_serial_number: Optional[str] = None,
+    query_text: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> Sequence[models.ReliabilityEvent]:
+    query = db.query(models.ReliabilityEvent).filter(models.ReliabilityEvent.amo_id == amo_id)
+    if event_type is not None:
+        query = query.filter(models.ReliabilityEvent.event_type == event_type)
+    if severity is not None:
+        query = query.filter(models.ReliabilityEvent.severity == severity)
+    if aircraft_serial_number:
+        query = query.filter(models.ReliabilityEvent.aircraft_serial_number == aircraft_serial_number)
+    if query_text:
+        pattern = f"%{query_text.strip()}%"
+        query = query.filter(or_(
+            models.ReliabilityEvent.description.ilike(pattern),
+            models.ReliabilityEvent.reference_code.ilike(pattern),
+            models.ReliabilityEvent.ata_chapter.ilike(pattern),
+            models.ReliabilityEvent.aircraft_serial_number.ilike(pattern),
+        ))
+    return (
+        query.order_by(models.ReliabilityEvent.occurred_at.desc(), models.ReliabilityEvent.id.desc())
+        .offset(max(offset, 0))
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+def get_reliability_event(db: Session, *, amo_id: str, event_id: int) -> Optional[models.ReliabilityEvent]:
     return (
         db.query(models.ReliabilityEvent)
-        .filter(models.ReliabilityEvent.amo_id == amo_id)
-        .order_by(models.ReliabilityEvent.occurred_at.desc())
-        .all()
+        .filter(models.ReliabilityEvent.amo_id == amo_id, models.ReliabilityEvent.id == event_id)
+        .first()
     )
 
 
@@ -447,12 +480,29 @@ def list_alerts(
     db: Session,
     *,
     amo_id: str,
+    alert_status: Optional[models.ReliabilityAlertStatusEnum] = None,
+    severity: Optional[models.ReliabilitySeverityEnum] = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> Sequence[models.ReliabilityAlert]:
+    query = db.query(models.ReliabilityAlert).filter(models.ReliabilityAlert.amo_id == amo_id)
+    if alert_status is not None:
+        query = query.filter(models.ReliabilityAlert.status == alert_status)
+    if severity is not None:
+        query = query.filter(models.ReliabilityAlert.severity == severity)
+    return (
+        query.order_by(models.ReliabilityAlert.triggered_at.desc(), models.ReliabilityAlert.id.desc())
+        .offset(max(offset, 0))
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+def get_reliability_alert(db: Session, *, amo_id: str, alert_id: int) -> Optional[models.ReliabilityAlert]:
     return (
         db.query(models.ReliabilityAlert)
-        .filter(models.ReliabilityAlert.amo_id == amo_id)
-        .order_by(models.ReliabilityAlert.triggered_at.desc())
-        .all()
+        .filter(models.ReliabilityAlert.amo_id == amo_id, models.ReliabilityAlert.id == alert_id)
+        .first()
     )
 
 
@@ -601,11 +651,38 @@ def list_fracas_cases(
     db: Session,
     *,
     amo_id: str,
+    case_status: Optional[models.FRACASStatusEnum] = None,
+    severity: Optional[models.ReliabilitySeverityEnum] = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> Sequence[models.FRACASCase]:
+    query = db.query(models.FRACASCase).filter(models.FRACASCase.amo_id == amo_id)
+    if case_status is not None:
+        query = query.filter(models.FRACASCase.status == case_status)
+    if severity is not None:
+        query = query.filter(models.FRACASCase.severity == severity)
+    return (
+        query.order_by(models.FRACASCase.updated_at.desc(), models.FRACASCase.id.desc())
+        .offset(max(offset, 0))
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+def get_fracas_case(db: Session, *, amo_id: str, case_id: int) -> Optional[models.FRACASCase]:
     return (
         db.query(models.FRACASCase)
-        .filter(models.FRACASCase.amo_id == amo_id)
-        .order_by(models.FRACASCase.opened_at.desc())
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == case_id)
+        .first()
+    )
+
+
+def list_fracas_case_actions(db: Session, *, amo_id: str, case_id: int) -> Sequence[models.FRACASAction]:
+    return (
+        db.query(models.FRACASAction)
+        .join(models.FRACASCase, models.FRACASAction.fracas_case_id == models.FRACASCase.id)
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == case_id)
+        .order_by(models.FRACASAction.created_at.asc(), models.FRACASAction.id.asc())
         .all()
     )
 
@@ -1081,11 +1158,21 @@ def list_engine_trend_statuses(
     db: Session,
     *,
     amo_id: str,
+    current_status: Optional[models.EngineTrendStatusEnum] = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> Sequence[models.EngineTrendStatus]:
+    query = db.query(models.EngineTrendStatus).filter(models.EngineTrendStatus.amo_id == amo_id)
+    if current_status is not None:
+        query = query.filter(models.EngineTrendStatus.current_status == current_status)
     return (
-        db.query(models.EngineTrendStatus)
-        .filter(models.EngineTrendStatus.amo_id == amo_id)
-        .order_by(models.EngineTrendStatus.aircraft_serial_number.asc())
+        query.order_by(
+            models.EngineTrendStatus.current_status.desc(),
+            models.EngineTrendStatus.aircraft_serial_number.asc(),
+            models.EngineTrendStatus.engine_position.asc(),
+        )
+        .offset(max(offset, 0))
+        .limit(min(max(limit, 1), 200))
         .all()
     )
 
@@ -2165,3 +2252,203 @@ def get_report(
         db.commit()
         db.refresh(report)
     return report
+
+
+# Canonical Reliability workbench service
+def _as_utc_datetime(value: date | datetime | None) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return datetime.combine(value, time.max, tzinfo=timezone.utc)
+
+
+def _reliability_freshness(
+    *,
+    source: str,
+    latest: date | datetime | None,
+    now: datetime,
+    issue_count: int = 0,
+    failed: bool = False,
+    pending: bool = False,
+    detail: Optional[str] = None,
+) -> schemas.ReliabilityDataFreshness:
+    latest_dt = _as_utc_datetime(latest)
+    if failed:
+        freshness_status = "FAILED"
+    elif pending:
+        freshness_status = "PENDING"
+    elif latest_dt is None:
+        freshness_status = "MISSING"
+    else:
+        freshness_status = "CURRENT" if max((now - latest_dt).days, 0) <= 7 else "STALE"
+    return schemas.ReliabilityDataFreshness(
+        source=source,
+        status=freshness_status,
+        latest_record_at=latest_dt,
+        age_days=max((now - latest_dt).days, 0) if latest_dt else None,
+        issue_count=issue_count,
+        detail=detail,
+    )
+
+
+def build_reliability_workbench(
+    db: Session,
+    *,
+    amo_id: str,
+    limit: int = 8,
+) -> schemas.ReliabilityWorkbenchSnapshot:
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    limit = min(max(limit, 1), 20)
+
+    open_alerts = list_alerts(db, amo_id=amo_id, limit=limit)
+    open_alerts = [item for item in open_alerts if item.status != models.ReliabilityAlertStatusEnum.CLOSED]
+    active_cases = list_fracas_cases(db, amo_id=amo_id, limit=limit)
+    active_cases = [item for item in active_cases if item.status != models.FRACASStatusEnum.CLOSED]
+    recent_events = list_reliability_events(db, amo_id=amo_id, limit=limit)
+    engine_shifts = list_engine_trend_statuses(
+        db,
+        amo_id=amo_id,
+        current_status=models.EngineTrendStatusEnum.SHIFT,
+        limit=limit,
+    )
+
+    terminal_action_statuses = {
+        models.FRACASActionStatusEnum.DONE,
+        models.FRACASActionStatusEnum.VERIFIED,
+        models.FRACASActionStatusEnum.CANCELLED,
+    }
+    overdue_actions_query = (
+        db.query(models.FRACASAction)
+        .join(models.FRACASCase, models.FRACASAction.fracas_case_id == models.FRACASCase.id)
+        .filter(
+            models.FRACASCase.amo_id == amo_id,
+            models.FRACASAction.due_date.isnot(None),
+            models.FRACASAction.due_date < today,
+            models.FRACASAction.status.notin_(terminal_action_statuses),
+        )
+    )
+
+    failed_ehm_count = db.query(models.EhmRawLog).filter(
+        models.EhmRawLog.amo_id == amo_id,
+        models.EhmRawLog.parse_status == models.EhmParseStatusEnum.FAILED,
+    ).count()
+    old_pending_ehm_count = db.query(models.EhmRawLog).filter(
+        models.EhmRawLog.amo_id == amo_id,
+        models.EhmRawLog.parse_status == models.EhmParseStatusEnum.PENDING,
+        models.EhmRawLog.created_at < now - timedelta(hours=24),
+    ).count()
+
+    priorities: List[schemas.ReliabilityPriorityItem] = []
+    for alert in open_alerts:
+        priorities.append(schemas.ReliabilityPriorityItem(
+            kind="ALERT",
+            severity=alert.severity,
+            title=alert.alert_code,
+            summary=alert.message,
+            occurred_at=alert.triggered_at,
+            relative_path=f"alerts/{alert.id}",
+            entity_id=str(alert.id),
+        ))
+    for action in overdue_actions_query.order_by(models.FRACASAction.due_date.asc()).limit(limit).all():
+        priorities.append(schemas.ReliabilityPriorityItem(
+            kind="OVERDUE_ACTION",
+            severity=models.ReliabilitySeverityEnum.HIGH,
+            title=f"FRACAS action overdue — case {action.fracas_case_id}",
+            summary=action.description,
+            due_date=action.due_date,
+            relative_path=f"cases/{action.fracas_case_id}",
+            entity_id=str(action.id),
+        ))
+    for engine in engine_shifts:
+        priorities.append(schemas.ReliabilityPriorityItem(
+            kind="ENGINE_SHIFT",
+            severity=models.ReliabilitySeverityEnum.HIGH,
+            title=f"{engine.aircraft_serial_number} {engine.engine_position} trend shift",
+            summary=f"Engine {engine.engine_serial_number or 'serial not recorded'} requires engineering review.",
+            due_date=engine.last_review_date,
+            relative_path=f"engines/{engine.id}",
+            entity_id=str(engine.id),
+        ))
+    if failed_ehm_count or old_pending_ehm_count:
+        priorities.append(schemas.ReliabilityPriorityItem(
+            kind="DATA_QUALITY",
+            severity=models.ReliabilitySeverityEnum.HIGH if failed_ehm_count else models.ReliabilitySeverityEnum.MEDIUM,
+            title="Reliability data feed requires attention",
+            summary=f"{failed_ehm_count} failed EHM files and {old_pending_ehm_count} pending longer than 24 hours.",
+            relative_path="data-quality",
+        ))
+
+    latest_event_row = db.query(models.ReliabilityEvent.occurred_at).filter(
+        models.ReliabilityEvent.amo_id == amo_id,
+    ).order_by(models.ReliabilityEvent.occurred_at.desc()).first()
+    latest_engine_row = db.query(models.EngineFlightSnapshot.flight_date).filter(
+        models.EngineFlightSnapshot.amo_id == amo_id,
+    ).order_by(models.EngineFlightSnapshot.flight_date.desc()).first()
+    latest_ehm_row = db.query(models.EhmRawLog.created_at).filter(
+        models.EhmRawLog.amo_id == amo_id,
+    ).order_by(models.EhmRawLog.created_at.desc()).first()
+
+    freshness = [
+        _reliability_freshness(source="Reliability occurrences", latest=latest_event_row[0] if latest_event_row else None, now=now),
+        _reliability_freshness(source="Engine trend snapshots", latest=latest_engine_row[0] if latest_engine_row else None, now=now),
+        _reliability_freshness(
+            source="EHM raw-log processing",
+            latest=latest_ehm_row[0] if latest_ehm_row else None,
+            now=now,
+            issue_count=failed_ehm_count + old_pending_ehm_count,
+            failed=failed_ehm_count > 0,
+            pending=failed_ehm_count == 0 and old_pending_ehm_count > 0,
+            detail=f"{failed_ehm_count} failed; {old_pending_ehm_count} pending over 24 hours.",
+        ),
+    ]
+    data_quality_issues = failed_ehm_count + old_pending_ehm_count + sum(item.status != "CURRENT" for item in freshness)
+
+    severity_rank = {
+        models.ReliabilitySeverityEnum.CRITICAL: 4,
+        models.ReliabilitySeverityEnum.HIGH: 3,
+        models.ReliabilitySeverityEnum.MEDIUM: 2,
+        models.ReliabilitySeverityEnum.LOW: 1,
+    }
+    priorities.sort(
+        key=lambda item: (
+            severity_rank.get(item.severity, 0),
+            item.occurred_at or _as_utc_datetime(item.due_date) or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
+
+    return schemas.ReliabilityWorkbenchSnapshot(
+        generated_at=now,
+        counts=schemas.ReliabilityWorkbenchCounts(
+            open_alerts=db.query(models.ReliabilityAlert).filter(
+                models.ReliabilityAlert.amo_id == amo_id,
+                models.ReliabilityAlert.status != models.ReliabilityAlertStatusEnum.CLOSED,
+            ).count(),
+            critical_alerts=db.query(models.ReliabilityAlert).filter(
+                models.ReliabilityAlert.amo_id == amo_id,
+                models.ReliabilityAlert.status != models.ReliabilityAlertStatusEnum.CLOSED,
+                models.ReliabilityAlert.severity == models.ReliabilitySeverityEnum.CRITICAL,
+            ).count(),
+            active_cases=db.query(models.FRACASCase).filter(
+                models.FRACASCase.amo_id == amo_id,
+                models.FRACASCase.status != models.FRACASStatusEnum.CLOSED,
+            ).count(),
+            overdue_actions=overdue_actions_query.count(),
+            engine_shifts=len(engine_shifts),
+            recent_events=db.query(models.ReliabilityEvent).filter(
+                models.ReliabilityEvent.amo_id == amo_id,
+                models.ReliabilityEvent.occurred_at >= now - timedelta(days=7),
+            ).count(),
+            data_quality_issues=data_quality_issues,
+        ),
+        priorities=priorities[:limit],
+        recent_events=recent_events,
+        active_cases=active_cases,
+        open_alerts=open_alerts,
+        engine_shifts=engine_shifts,
+        data_freshness=freshness,
+    )

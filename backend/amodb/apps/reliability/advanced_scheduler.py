@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import logging
+import os
+import threading
+from contextlib import contextmanager
+from typing import Iterator
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from amodb.database import WriteSessionLocal, close_session_safely
+
+from . import advanced_models as domain
+from . import advanced_services as services
+
+
+logger = logging.getLogger(__name__)
+_LOCK_KEY = 618_245_913
+_stop_event = threading.Event()
+_thread: threading.Thread | None = None
+_state_lock = threading.Lock()
+
+
+def _enabled() -> bool:
+    value = (os.getenv("RELIABILITY_SCHEDULER_ENABLED") or "true").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _interval_seconds() -> int:
+    try:
+        return max(int(os.getenv("RELIABILITY_SCHEDULER_INTERVAL_SEC", "3600")), 60)
+    except ValueError:
+        return 3600
+
+
+@contextmanager
+def _advisory_lock(db: Session) -> Iterator[bool]:
+    if db.bind is None or db.bind.dialect.name != "postgresql":
+        yield True
+        return
+    acquired = bool(db.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": _LOCK_KEY}).scalar())
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _LOCK_KEY})
+            except Exception:
+                logger.debug("Reliability scheduler advisory unlock failed", exc_info=True)
+
+
+def run_reliability_cycle() -> dict[str, int]:
+    db = WriteSessionLocal()
+    harvested = 0
+    calculations = 0
+    tenants = 0
+    try:
+        with _advisory_lock(db) as acquired:
+            if not acquired:
+                return {"tenants": 0, "harvested_batches": 0, "calculation_runs": 0}
+            amo_ids = {
+                str(row[0])
+                for row in db.query(domain.ReliabilitySource.amo_id)
+                .filter(domain.ReliabilitySource.status == "ACTIVE")
+                .distinct()
+                .all()
+            }
+            amo_ids.update(
+                str(row[0])
+                for row in db.query(domain.ReliabilityMetricDefinition.amo_id)
+                .filter(domain.ReliabilityMetricDefinition.active.is_(True))
+                .distinct()
+                .all()
+            )
+            tenants = len(amo_ids)
+            for amo_id in sorted(amo_ids):
+                try:
+                    harvested += len(
+                        services.harvest_internal_sources(
+                            db,
+                            amo_id=amo_id,
+                            actor_user_id=None,
+                        )
+                    )
+                    calculations += len(
+                        services.run_due_metrics(
+                            db,
+                            amo_id=amo_id,
+                            actor_user_id=None,
+                        )
+                    )
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    logger.exception("Reliability scheduled cycle failed for tenant %s", amo_id)
+    finally:
+        close_session_safely(db)
+    return {
+        "tenants": tenants,
+        "harvested_batches": harvested,
+        "calculation_runs": calculations,
+    }
+
+
+def _worker() -> None:
+    while not _stop_event.is_set():
+        try:
+            result = run_reliability_cycle()
+            logger.info("Reliability scheduler cycle completed: %s", result)
+        except Exception:
+            logger.exception("Reliability scheduler cycle failed")
+        _stop_event.wait(_interval_seconds())
+
+
+def start_reliability_scheduler() -> None:
+    global _thread
+    if not _enabled():
+        logger.info("Reliability scheduler is disabled by configuration")
+        return
+    with _state_lock:
+        if _thread and _thread.is_alive():
+            return
+        _stop_event.clear()
+        _thread = threading.Thread(
+            target=_worker,
+            name="reliability-scheduler",
+            daemon=True,
+        )
+        _thread.start()
+
+
+def stop_reliability_scheduler() -> None:
+    global _thread
+    with _state_lock:
+        thread = _thread
+        _stop_event.set()
+        _thread = None
+    if thread and thread.is_alive():
+        thread.join(timeout=5)

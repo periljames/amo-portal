@@ -33,6 +33,7 @@ from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router, public_router as training_public_router
 from .apps.quality import router as quality_router, public_router as quality_public_router  
 from .apps.reliability.router import router as reliability_router
+from .apps.reliability import advanced_scheduler as reliability_scheduler
 from .apps.inventory.router import router as inventory_router
 from .apps.finance.router import router as finance_router
 from .apps.audit.router import router as audit_router
@@ -268,6 +269,7 @@ def _schema_preflight() -> None:
     app.state.is_shutting_down = False
     _enforce_schema_head_sync_if_configured()
     realtime_gateway.connect()
+    reliability_scheduler.start_reliability_scheduler()
 
 
 def _run_shutdown_step(name: str, fn: Callable[[], None], timeout_seconds: float) -> None:
@@ -296,6 +298,7 @@ def _flush_usage_metrics_on_shutdown() -> None:
     app.state.is_shutting_down = True
     timeout_seconds = float(os.getenv("AMODB_SHUTDOWN_STEP_TIMEOUT_SEC", "3") or "3")
 
+    _run_shutdown_step("reliability-scheduler", reliability_scheduler.stop_reliability_scheduler, timeout_seconds)
     _run_shutdown_step("realtime-disconnect", realtime_gateway.disconnect, timeout_seconds)
 
     if os.getenv("API_USAGE_FLUSH_ON_SHUTDOWN", "false").lower() in {"1", "true", "yes", "on"}:
