@@ -33,6 +33,12 @@ function canonicalRefreshButton(): HTMLButtonElement | null {
   return candidates.find((button) => /^refresh$/i.test(button.textContent?.trim() || "") || /refresh/i.test(button.getAttribute("aria-label") || "")) || null;
 }
 
+function createScheduleButton(): HTMLButtonElement | null {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>(
+    ".qms-page-grid button, .audit-shell-content button",
+  )).find((button) => /^create schedule$/i.test(button.textContent?.trim() || "")) || null;
+}
+
 const QualityDataFreshnessCoordinator: React.FC = () => {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -46,6 +52,31 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       pendingTimers.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    if (!qualityActive) return;
+    const params = new URLSearchParams(location.search);
+    const createIntent = params.get("create") === "1";
+    const plannerRoute = /\/quality\/audits\/(?:plan|schedule)\/?$/i.test(location.pathname);
+    if (!createIntent || !plannerRoute) return;
+
+    let attempts = 0;
+    const interval = window.setInterval(() => {
+      attempts += 1;
+      const button = createScheduleButton();
+      if (button && !button.disabled) {
+        button.click();
+        params.delete("create");
+        const suffix = params.toString();
+        window.history.replaceState(window.history.state, "", `${location.pathname}${suffix ? `?${suffix}` : ""}`);
+        window.clearInterval(interval);
+      } else if (attempts >= 30) {
+        window.clearInterval(interval);
+      }
+    }, 150);
+
+    return () => window.clearInterval(interval);
+  }, [location.pathname, location.search, qualityActive]);
 
   useEffect(() => {
     if (!qualityActive) return;
