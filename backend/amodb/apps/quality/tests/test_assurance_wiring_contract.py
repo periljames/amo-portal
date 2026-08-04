@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.assurance_lifecycle_guard_router import _ALLOWED_APPROVAL_TRANSITIONS
 from amodb.apps.quality.assurance_wiring_router import (
     SOURCE_REGISTRY,
     _readiness,
@@ -55,13 +56,14 @@ def test_wiring_router_exposes_lifecycle_source_event_and_review_contracts() -> 
     assert expected.issubset(methods)
 
 
-def test_latest_wiring_handlers_override_legacy_excellence_handlers_once() -> None:
+def test_latest_wiring_and_lifecycle_handlers_override_base_excellence_once() -> None:
     canonical_prefix = "/api/maintenance/{amo_code}/quality"
     legacy_prefix = "/api/maintenance/{amo_code}/qms"
     cases = (
         ("/excellence/controls", "GET", "list_controls"),
-        ("/excellence/controls", "POST", "create_control"),
+        ("/excellence/controls", "POST", "create_draft_control"),
         ("/excellence/controls/{control_id}", "PATCH", "update_control"),
+        ("/excellence/controls/{control_id}/approval", "POST", "transition_control_approval"),
         ("/excellence/controls/{control_id}/evidence", "POST", "link_validated_evidence"),
         ("/excellence/evidence-graph", "GET", "evidence_graph"),
     )
@@ -75,6 +77,18 @@ def test_latest_wiring_handlers_override_legacy_excellence_handlers_once() -> No
             assert len(matches) == 1
             assert matches[0].endpoint.__name__ == endpoint_name
             assert router.routes.index(matches[0]) < _catchall_index(router)
+
+
+def test_control_approval_transitions_cannot_skip_governed_states() -> None:
+    assert _ALLOWED_APPROVAL_TRANSITIONS == {
+        "DRAFT": {"PENDING_APPROVAL"},
+        "REJECTED": {"PENDING_APPROVAL", "RETIRED"},
+        "PENDING_APPROVAL": {"APPROVED", "REJECTED"},
+        "APPROVED": {"RETIRED"},
+        "RETIRED": set(),
+    }
+    assert "APPROVED" not in _ALLOWED_APPROVAL_TRANSITIONS["DRAFT"]
+    assert "DRAFT" not in _ALLOWED_APPROVAL_TRANSITIONS["APPROVED"]
 
 
 def test_assurance_source_registry_covers_enterprise_qms_records() -> None:
