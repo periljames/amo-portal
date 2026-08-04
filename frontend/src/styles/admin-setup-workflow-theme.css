@@ -11,6 +11,27 @@
   --setup-success: var(--success-strong, #16834a);
 }
 
+.admin-page.admin-amo-assets.setup-centre > .admin-inline-alert strong {
+  font-size: 0.95rem;
+}
+
+.admin-page.admin-amo-assets.setup-centre > .admin-inline-alert .admin-inline-alert__body {
+  font-size: 0.875rem;
+}
+
+.setup-centre .setup-centre__checklist article strong {
+  font-size: 0.88rem;
+}
+
+.setup-centre .setup-centre__checklist article p {
+  font-size: 0.78rem;
+}
+
+.setup-dialog--wide label > span,
+.setup-dialog--wide legend {
+  font-size: 0.8rem;
+}
+
 :is(html.dark, html[data-theme="dark"], body.dark, [data-theme="dark"]) .admin-page.admin-amo-assets.setup-centre {
   --setup-surface: var(--surface-elevated, #151a22);
   --setup-surface-subtle: var(--surface-soft, #1b222c);
