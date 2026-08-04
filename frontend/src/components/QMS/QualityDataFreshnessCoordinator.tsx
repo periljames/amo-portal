@@ -68,7 +68,10 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     };
 
     const scheduleRefresh = (delay: number, force = true) => {
-      const timer = window.setTimeout(() => refresh(force), delay);
+      const timer = window.setTimeout(() => {
+        pendingTimers.current = pendingTimers.current.filter((candidate) => candidate !== timer);
+        refresh(force);
+      }, delay);
       pendingTimers.current.push(timer);
     };
 
@@ -94,8 +97,8 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
 
     window.addEventListener("focus", onFocus);
     window.addEventListener("online", onOnline);
-    window.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("amo:qms:refresh", onExplicitRefresh as EventListener);
+    document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("click", onClick, true);
 
     return () => {
@@ -103,8 +106,8 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("online", onOnline);
-      window.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("amo:qms:refresh", onExplicitRefresh as EventListener);
+      document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("click", onClick, true);
     };
   }, [location.pathname, location.search, qualityActive, queryClient]);
