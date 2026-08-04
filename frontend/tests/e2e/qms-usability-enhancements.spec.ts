@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 
 type StoredScale = "standard" | "large" | "extra-large";
@@ -44,7 +44,7 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
     }));
   }, { storedToken: token });
 
-  const fulfil = async (route: Parameters<Page["route"]>[1] extends (route: infer R) => unknown ? R : never) => {
+  const fulfil = async (route: Route) => {
     const request = route.request();
     const url = request.url();
 
@@ -131,7 +131,10 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not configured in QMS usability test" }) });
   };
 
-  await page.route("**/*", fulfil);
+  await page.route("**/auth/portal-preferences", fulfil);
+  await page.route("**/accounts/admin/admin-profile/**", fulfil);
+  await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
+  await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
 test("QMS context navigation and user text scale persist without duplicate headers", async ({ page }) => {
