@@ -54,6 +54,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Reset worktree to exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          echo "Exact base: $(git rev-parse HEAD)"
+
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -78,6 +86,10 @@ jobs:
           python backend/scripts/apply_reliability_review_fixes.py
           echo 'f7f1340e8b34af391398218009dd59494aa4784388529ec028c0f83589dbd799  backend/amodb/apps/reliability/advanced_services.py' | sha256sum -c -
           echo '32da4772bc0739387aea724416d976c9872c5948fe9d669f9c571cbdb8c6cead  backend/amodb/apps/reliability/services.py' | sha256sum -c -
+          python -m py_compile \
+            backend/amodb/apps/reliability/advanced_services.py \
+            backend/amodb/apps/reliability/services.py \
+            backend/amodb/apps/reliability/tests/test_review_regressions.py
 
       - name: Remove temporary Reliability recovery machinery
         shell: bash
@@ -99,8 +111,43 @@ jobs:
           find backend -type f -name '*.pyc' -delete
           grep -q '^  contents: read$' .github/workflows/reliability-module-ci.yml
           if grep -R -n -E 'apply_reliability_review_fixes|review-fix-trigger|hotfix-trigger|permanent-hotfix-kick|Reliability Hotfix Scheduled|Reliability Review Finalizer|Reliability Permanent Hotfix Publisher' .github/workflows docs/reliability backend/scripts 2>/dev/null; then
+            echo 'Temporary Reliability recovery reference remains.'
             exit 1
           fi
+
+      - name: Converge current Quality and Reliability migration heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e backend/amodb/alembic/versions/rel_quality_20260804_merge_converge_quality_reliability_heads.py
+          cat > backend/amodb/alembic/versions/rel_quality_20260804_merge_converge_quality_reliability_heads.py <<'PY'
+          """Converge the current Quality and Reliability migration heads.
+
+          Revision ID: rel_quality_20260804_merge
+          Revises: quality_260804_trigger_fix, rel_20260803_complete_scope
+          Create Date: 2026-08-04
+          """
+          from typing import Sequence, Union
+
+
+          revision: str = "rel_quality_20260804_merge"
+          down_revision: Union[str, Sequence[str], None] = (
+              "quality_260804_trigger_fix",
+              "rel_20260803_complete_scope",
+          )
+          branch_labels: Union[str, Sequence[str], None] = None
+          depends_on: Union[str, Sequence[str], None] = None
+
+
+          def upgrade() -> None:
+              """Merge both schema branches without changing database objects."""
+              pass
+
+
+          def downgrade() -> None:
+              """Split back to the Quality and Reliability heads without schema changes."""
+              pass
+          PY
           git diff --check
 
       - name: Compile application and configure mappers
@@ -119,7 +166,7 @@ jobs:
           set -euo pipefail
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_20260803_complete_scope' /tmp/alembic-heads.txt
+          grep -q 'rel_quality_20260804_merge' /tmp/alembic-heads.txt
           python -m alembic -c backend/amodb/alembic.ini upgrade heads
           python - <<'PY'
           import os
@@ -132,8 +179,10 @@ jobs:
                   WHERE table_name = 'alembic_version'
                     AND column_name = 'version_num'
               """)).scalar_one()
+              version = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
           assert width is not None and width >= 128, width
-          print(f'alembic_version.version_num capacity: {width}')
+          assert version == 'rel_quality_20260804_merge', version
+          print(f'alembic_version={version}; capacity={width}')
           PY
 
       - name: Run all Reliability tests
@@ -153,18 +202,25 @@ jobs:
           npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
           npm run build
 
-      - name: Publish validated final tree
+      - name: Publish one clean commit on exact current main
         id: publish
         shell: bash
         run: |
           set -euo pipefail
           git add -A
           git diff --cached --check
+          echo 'Permanent hotfix diff:'
+          git diff --cached --stat
+          git diff --cached --name-status
           git config user.name github-actions
           git config user.email actions@github.com
-          git commit -m 'Hotfix Reliability ingestion, metrics, scheduling and counts'
-          git push origin HEAD:agent/reliability-permanent-hotfix
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          BASE_SHA=$(git rev-parse origin/main)
+          TREE_SHA=$(git write-tree)
+          COMMIT_SHA=$(printf '%s\n' 'Hotfix Reliability ingestion, metrics, scheduling and counts' | git commit-tree "$TREE_SHA" -p "$BASE_SHA")
+          git reset --hard "$COMMIT_SHA"
+          git push --force origin HEAD:agent/reliability-permanent-hotfix
+          echo "sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Record exact-head validation
         env:
