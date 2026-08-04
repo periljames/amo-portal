@@ -1,0 +1,30 @@
+/* QMS calendar viewport safety ---------------------------------------------------------
+ *
+ * The canonical calendar applies layout/paint containment to reduce repaint work on
+ * large desktop boards. CSS layout containment also creates a containing block for
+ * fixed descendants. Remove that containment only at the mobile bottom-sheet
+ * breakpoint so the selected-date drawer remains anchored to the visual viewport.
+ */
+
+@media (max-width: 760px) {
+  html.quality-context-active .qms-ops-page--calendar .qms-calendar-shell {
+    contain: none !important;
+  }
+
+  /* Clear the same performance containment from any known calendar ancestors.
+     :has() keeps this narrowly scoped to the active QMS calendar route. */
+  @supports selector(:has(*)) {
+    html.quality-context-active :is(
+      .qms-page-grid,
+      .qms-ops-workspace,
+      .audit-shell-body
+    ):has(.qms-ops-page--calendar) {
+      contain: none !important;
+    }
+  }
+
+  html.quality-context-active .qms-ops-page--calendar .qms-calendar-drawer {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
