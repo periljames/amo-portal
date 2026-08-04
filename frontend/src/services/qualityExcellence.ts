@@ -82,6 +82,20 @@ export type AssuranceControlCreate = {
   next_test_due?: string | null;
 };
 
+export type AssuranceEvidence = {
+  id: string;
+  control_id: string;
+  source_type: string;
+  source_id: string;
+  relationship: string;
+  label: string | null;
+  evidence_status: EvidenceStatus;
+  valid_until: string | null;
+  notes: string | null;
+  verified_at: string | null;
+  created_at: string | null;
+};
+
 export type EvidenceGraph = {
   nodes: Array<{
     id: string;
@@ -127,6 +141,9 @@ export type QualityInsight = {
   created_at: string | null;
 };
 
+type ControlListResponse = { items: AssuranceControl[]; total: number; as_of: string };
+type InsightListResponse = { items: QualityInsight[]; total: number; as_of: string };
+
 export function getQualityExcellenceOverview(amoCode: string): Promise<ExcellenceOverview> {
   return apiRequest<ExcellenceOverview>(qualityPath(amoCode, "/excellence/overview"), {
     cacheTtlMs: 10_000,
@@ -134,8 +151,8 @@ export function getQualityExcellenceOverview(amoCode: string): Promise<Excellenc
   });
 }
 
-export function getAssuranceControls(amoCode: string): Promise<{ items: AssuranceControl[]; total: number; as_of: string }> {
-  return apiRequest(qualityPath(amoCode, "/excellence/controls"), {
+export function getAssuranceControls(amoCode: string): Promise<ControlListResponse> {
+  return apiRequest<ControlListResponse>(qualityPath(amoCode, "/excellence/controls"), {
     cacheTtlMs: 15_000,
     timeoutMs: 20_000,
   });
@@ -145,7 +162,7 @@ export function createAssuranceControl(
   amoCode: string,
   payload: AssuranceControlCreate,
 ): Promise<AssuranceControl> {
-  return apiRequest(qualityPath(amoCode, "/excellence/controls"), {
+  return apiRequest<AssuranceControl>(qualityPath(amoCode, "/excellence/controls"), {
     method: "POST",
     body: JSON.stringify(payload),
     timeoutMs: 20_000,
@@ -157,7 +174,7 @@ export function updateAssuranceControl(
   controlId: string,
   payload: Partial<AssuranceControlCreate>,
 ): Promise<AssuranceControl> {
-  return apiRequest(qualityPath(amoCode, `/excellence/controls/${encodeURIComponent(controlId)}`), {
+  return apiRequest<AssuranceControl>(qualityPath(amoCode, `/excellence/controls/${encodeURIComponent(controlId)}`), {
     method: "PATCH",
     body: JSON.stringify(payload),
     timeoutMs: 20_000,
@@ -176,8 +193,8 @@ export function linkAssuranceEvidence(
     valid_until?: string | null;
     notes?: string | null;
   },
-): Promise<Record<string, unknown>> {
-  return apiRequest(qualityPath(amoCode, `/excellence/controls/${encodeURIComponent(controlId)}/evidence`), {
+): Promise<AssuranceEvidence> {
+  return apiRequest<AssuranceEvidence>(qualityPath(amoCode, `/excellence/controls/${encodeURIComponent(controlId)}/evidence`), {
     method: "POST",
     body: JSON.stringify(payload),
     timeoutMs: 20_000,
@@ -185,14 +202,14 @@ export function linkAssuranceEvidence(
 }
 
 export function getAssuranceEvidenceGraph(amoCode: string): Promise<EvidenceGraph> {
-  return apiRequest(qualityPath(amoCode, "/excellence/evidence-graph"), {
+  return apiRequest<EvidenceGraph>(qualityPath(amoCode, "/excellence/evidence-graph"), {
     cacheTtlMs: 15_000,
     timeoutMs: 20_000,
   });
 }
 
-export function getQualityInsights(amoCode: string): Promise<{ items: QualityInsight[]; total: number; as_of: string }> {
-  return apiRequest(qualityPath(amoCode, "/excellence/insights"), {
+export function getQualityInsights(amoCode: string): Promise<InsightListResponse> {
+  return apiRequest<InsightListResponse>(qualityPath(amoCode, "/excellence/insights"), {
     cacheTtlMs: 10_000,
     timeoutMs: 20_000,
   });
@@ -203,10 +220,10 @@ export function rebuildQualityInsights(amoCode: string): Promise<{
   skipped_existing: number;
   items: QualityInsight[];
 }> {
-  return apiRequest(qualityPath(amoCode, "/excellence/insights/rebuild"), {
-    method: "POST",
-    timeoutMs: 30_000,
-  });
+  return apiRequest<{ generated: number; skipped_existing: number; items: QualityInsight[] }>(
+    qualityPath(amoCode, "/excellence/insights/rebuild"),
+    { method: "POST", timeoutMs: 30_000 },
+  );
 }
 
 export function decideQualityInsight(
@@ -215,7 +232,7 @@ export function decideQualityInsight(
   status: InsightStatus,
   note?: string,
 ): Promise<QualityInsight> {
-  return apiRequest(qualityPath(amoCode, `/excellence/insights/${encodeURIComponent(insightId)}`), {
+  return apiRequest<QualityInsight>(qualityPath(amoCode, `/excellence/insights/${encodeURIComponent(insightId)}`), {
     method: "PATCH",
     body: JSON.stringify({ status, note: note || null }),
     timeoutMs: 20_000,
