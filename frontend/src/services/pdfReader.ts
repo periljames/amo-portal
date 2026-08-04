@@ -3,6 +3,40 @@ import { getApiBaseUrl } from "./config";
 import type { DocumentationExecutionProfile, DocumentationRecord } from "./documentation";
 import { registerAuthoritativePdfSource } from "./pdfWorkingCopyAuthority";
 
+export type PdfStaticOverlaySchemaField = {
+  id?: string;
+  name?: string;
+  label?: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size?: number;
+  multiline?: boolean;
+  align?: "left" | "center" | "right";
+  default_value?: string;
+};
+
+export type PdfStaticOverlaySchema = {
+  fields?: PdfStaticOverlaySchemaField[];
+  instructions?: string;
+};
+
+export type PdfStaticOverlayItem = {
+  id: string;
+  name?: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  font_size?: number;
+  multiline?: boolean;
+  align?: "left" | "center" | "right";
+};
+
 export type PdfReaderCapabilities = {
   execution?: DocumentationExecutionProfile | null;
   renderer: "PDF.js" | string;
@@ -23,6 +57,11 @@ export type PdfReaderCapabilities = {
   can_submit: boolean;
   automatic_form_execution?: boolean;
   form_download_mode?: "CHANGED_FORM_PAGES" | string | null;
+  can_overlay_fill?: boolean;
+  can_configure_overlay?: boolean;
+  overlay_schema?: PdfStaticOverlaySchema | null;
+  overlay_download_mode?: "COMPLETED_PAGES" | string | null;
+  overlay_reason?: string | null;
 };
 
 export type FlattenedPdfResult = {
@@ -122,6 +161,30 @@ export async function flattenPdfWorkingCopy(
     outputSha256: response.headers.get("X-PDF-Output-SHA256"),
     pageCount: Number(response.headers.get("X-PDF-Page-Count") || 0) || null,
     flattenedPages: Number(response.headers.get("X-PDF-Flattened-Pages") || 0) || null,
+    selectedPages: selectedPageHeader(response.headers.get("X-PDF-Selected-Pages")),
+  };
+}
+
+export async function createPdfStaticOverlay(
+  tenant: string,
+  manualId: string,
+  revisionId: string,
+  items: PdfStaticOverlayItem[],
+  completedOnly = true,
+): Promise<FlattenedPdfResult> {
+  const body = new FormData();
+  body.append("overlay_json", JSON.stringify({ items, completed_only: completedOnly }));
+  const response = await authenticatedFetch(`${revisionPath(tenant, manualId, revisionId)}/static-overlay.pdf`, {
+    method: "POST",
+    body,
+  });
+  const blob = await response.blob();
+  return {
+    blob,
+    filename: contentDispositionFilename(response, completedOnly ? "FILLED_PAGES.pdf" : "FILLED_COPY.pdf"),
+    sourceSha256: response.headers.get("X-PDF-Template-SHA256"),
+    outputSha256: response.headers.get("X-PDF-Output-SHA256"),
+    pageCount: Number(response.headers.get("X-PDF-Page-Count") || 0) || null,
     selectedPages: selectedPageHeader(response.headers.get("X-PDF-Selected-Pages")),
   };
 }
