@@ -335,9 +335,25 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
             email_profile = by_profile_email.get(payload["email"] or "") if payload["email"] else None
             existing_user = by_staff.get(payload["person_id"])
             email_user = by_user_email.get(payload["email"] or "") if payload["email"] else None
-            conflict = existing_profile and email_profile and existing_profile.id != email_profile.id
-            user_conflict = existing_user and email_user and existing_user.id != email_user.id
-            if conflict or user_conflict:
+            profile_email_conflict = bool(
+                email_profile
+                and upper(email_profile.person_id) != payload["person_id"]
+            )
+            user_email_conflict = bool(
+                email_user
+                and upper(email_user.staff_code) != payload["person_id"]
+            )
+            split_profile_conflict = bool(
+                existing_profile
+                and email_profile
+                and existing_profile.id != email_profile.id
+            )
+            split_user_conflict = bool(
+                existing_user
+                and email_user
+                and existing_user.id != email_user.id
+            )
+            if profile_email_conflict or user_email_conflict or split_profile_conflict or split_user_conflict:
                 item = _row(
                     job_id=job.id, sheet="People", row_number=row_number, entity_type="PERSON",
                     source_key=payload["person_id"], label=payload["full_name"], action="UPDATE", status="REVIEW",
@@ -867,7 +883,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         db.add(profile)
 
     imported_email = payload.get("email")
-    selected_email = profile.email if decision == "KEEP_EXISTING_EMAIL" and profile.email else imported_email or profile.email
+    selected_email = profile.email if decision == "KEEP_EXISTING_EMAIL" else imported_email or profile.email
 
     profile.person_id = person_id
     profile.first_name = payload["first_name"]
