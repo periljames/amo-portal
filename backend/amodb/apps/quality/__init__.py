@@ -6,6 +6,9 @@ from fastapi import APIRouter
 # Primary Quality API exports.
 from .router import router, public_router  # noqa: F401
 
+# Register extension metadata before application startup or test metadata creation.
+from . import excellence_models as _excellence_models  # noqa: F401,E402
+
 # Focused extensions are loaded only after the compatibility router is complete.
 # They replace narrowly scoped routes on the same exported router objects, so
 # both the full portal and bounded Quality entrypoint receive the corrections.
@@ -45,3 +48,19 @@ _deduplicate_exact_routes(public_router)
 # ahead of the generic /{module_path:path} fallback on both canonical aliases.
 from . import dashboard_v2 as _dashboard_v2  # noqa: F401,E402
 from . import dashboard_route_order as _dashboard_route_order  # noqa: F401,E402
+
+# Continuous-assurance APIs live under the canonical Quality and legacy QMS
+# tenant prefixes. Register them before main.py imports the exported router
+# objects so the full portal and bounded Quality service expose identical paths.
+from . import canonical_router as _canonical_router  # noqa: F401,E402
+from . import excellence_router as _excellence_router  # noqa: F401,E402
+
+
+def _include_once(parent: APIRouter, child: APIRouter, prefix_marker: str) -> None:
+    if any(str(getattr(route_item, "path", "")).startswith(prefix_marker) for route_item in parent.routes):
+        return
+    parent.include_router(child)
+
+
+_include_once(_canonical_router.router, _excellence_router.router, "/api/maintenance/{amo_code}/quality/excellence")
+_include_once(_canonical_router.legacy_router, _excellence_router.router, "/api/maintenance/{amo_code}/qms/excellence")
