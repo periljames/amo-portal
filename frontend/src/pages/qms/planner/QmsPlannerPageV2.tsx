@@ -552,6 +552,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   const [quickCreate, setQuickCreate] = useState<QuickCreateDraft | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const loadRequestRef = useRef(0);
 
   useEffect(() => saveUiPreferences(storageKey, preferences), [preferences, storageKey]);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timer); }, [toast]);
@@ -573,6 +574,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   }, [amoCode, anchorKey, navigate, preferences.daySpan, searchParams]);
 
   const loadPlanner = useCallback(async (force = false) => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setError(null);
     const range = requestRange(view, anchor, view === "week" ? preferences.daySpan : 1);
@@ -582,15 +584,18 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         apiRequest<CalendarResponse>(`${qmsPath(amoCode, "/integrations/calendar")}?${params.toString()}`, { timeoutMs: 15000 }),
         apiRequest<PlannerCapabilities>(qmsPath(amoCode, "/integrations/calendar/planner-capabilities"), { timeoutMs: 8000 }).catch(() => ({ can_reschedule: false, can_create_audit: false, can_manage_training: false })),
       ]);
+      if (requestId !== loadRequestRef.current) return;
       setCapabilities(access);
       setEvents((calendar.items || []).map((row) => normalisePlannerEvent(row, access.can_reschedule)).filter((event): event is PlannerEvent => Boolean(event)));
       setWarning(calendar.has_more ? "This period contains more commitments than were returned. Use Agenda or narrow the range." : calendar.warning || null);
       setSourceErrors(calendar.source_errors || []);
       if (force) setToast({ tone: "success", message: "Planner refreshed." });
     } catch (loadError) {
-      setError(friendlyError(loadError, "Unable to load the Quality Operations Planner."));
+      if (requestId === loadRequestRef.current) {
+        setError(friendlyError(loadError, "Unable to load the Quality Operations Planner."));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
   }, [amoCode, anchor, preferences.daySpan, view]);
 
@@ -613,6 +618,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
       const key = event.key.toLowerCase();
       if (event.key === "?") { event.preventDefault(); setShortcutsOpen(true); return; }
       if (event.key === "/" || ((event.ctrlKey || event.metaKey) && key === "k")) { event.preventDefault(); setCommandOpen(true); return; }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (key === "c") { event.preventDefault(); setQuickCreate({ kind: "audit", title: "", date: selectedDate || anchorKey, time: "09:00" }); return; }
       if (key === "t") { event.preventDefault(); setDateParam(todayKey); return; }
       if (key === "m") { event.preventDefault(); switchView("month"); return; }
