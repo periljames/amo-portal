@@ -144,10 +144,14 @@ def _set_job_progress(
         job.processed_rows += processed_delta
     job.updated_at = utcnow()
     db.add(job)
-    db.commit()
-    db.refresh(job)
-    if job.cancel_requested:
-        raise RuntimeError("IMPORT_CANCELLED")
+    should_publish = job.processed_rows % 10 == 0 or job.processed_rows >= job.total_rows
+    if should_publish:
+        db.commit()
+        db.refresh(job)
+        if job.cancel_requested:
+            raise RuntimeError("IMPORT_CANCELLED")
+    else:
+        db.flush()
 
 
 def _row(
@@ -337,7 +341,7 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
                 item = _row(
                     job_id=job.id, sheet="People", row_number=row_number, entity_type="PERSON",
                     source_key=payload["person_id"], label=payload["full_name"], action="UPDATE", status="REVIEW",
-                    decision_required=True, decision_options=["KEEP_EXISTING_EMAIL", "USE_IMPORTED_EMAIL", "SKIP"],
+                    decision_required=True, decision_options=["KEEP_EXISTING_EMAIL", "SKIP"],
                     payload=payload, issue_code="IDENTITY_CONFLICT",
                     issue_message="PersonID and email resolve to different existing personnel/account records.",
                 )
@@ -358,6 +362,24 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
                     action = "UPDATE" if change_list else "UNCHANGED"
                     item = _row(job_id=job.id, sheet="People", row_number=row_number, entity_type="PERSON", source_key=payload["person_id"], label=payload["full_name"], action=action, payload=payload, changes=change_list)
                     _counter(sheet, action)
+                elif user and not profile:
+                    item = _row(
+                        job_id=job.id,
+                        sheet="People",
+                        row_number=row_number,
+                        entity_type="PERSON",
+                        source_key=payload["person_id"],
+                        label=payload["full_name"],
+                        action="UPDATE",
+                        status="REVIEW",
+                        decision_required=True,
+                        decision_options=["LINK_EXISTING_ACCOUNT", "SKIP"],
+                        payload=payload,
+                        changes=change_list,
+                        issue_code="PROFILE_NOT_LINKED",
+                        issue_message="A portal account exists for this staff code or email. Review and link the personnel profile, or skip the row.",
+                    )
+                    _counter(sheet, "UPDATE", review=True)
                 else:
                     action = "UPDATE" if profile else "CREATE"
                     options = ["PROFILE_ONLY", "SKIP"] if not payload["email"] else ["CREATE_ACCOUNT", "PROFILE_ONLY", "SKIP"]
@@ -366,7 +388,7 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
                         source_key=payload["person_id"], label=payload["full_name"], action=action, status="REVIEW",
                         decision_required=True, decision_options=options, payload=payload, changes=change_list,
                         issue_code="NEW_PERSON" if not profile else "ACCOUNT_NOT_LINKED",
-                        issue_message="Review whether this person should receive portal access or remain a personnel-only record.",
+                        issue_message="Review whether this person should enter approval/onboarding or remain a non-login personnel identity.",
                     )
                     _counter(sheet, action, review=True)
             db.add(item)
@@ -621,7 +643,10 @@ def process_workbook_preview(job_id: str) -> None:
             config = WORKBOOK_SHEETS.get(name, {"classification": "UNMAPPED", "destination": "Review and classify", "operational": False})
             rows = _sheet_rows(workbook[name])
             rows_by_sheet[name] = rows
-            operational_rows = len(rows) if config["operational"] else 0
+            if name == "People":
+                operational_rows = sum(1 for row in rows if upper(row.get("PersonID")) != "TOTAL")
+            else:
+                operational_rows = len(rows) if config["operational"] else 0
             total_rows += operational_rows
             sheet = TrainingWorkbookImportSheet(
                 job_id=job.id,
@@ -632,7 +657,7 @@ def process_workbook_preview(job_id: str) -> None:
                 is_operational=config["operational"],
                 display_order=index,
                 status="PENDING" if config["operational"] else "MAPPED",
-                total_rows=len(rows),
+                total_rows=operational_rows if config["operational"] else len(rows),
                 message=None if config["operational"] else "This worksheet is represented by a live portal view or configuration and is not copied as duplicate operational data.",
             )
             db.add(sheet)
@@ -817,19 +842,32 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
     decision = (row.decision or "").upper()
     if decision == "SKIP":
         return None, "SKIP"
-    profile = db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id, account_models.PersonnelProfile.person_id == person_id).first()
-    if profile is None and payload.get("email"):
-        profile = db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id, func.lower(account_models.PersonnelProfile.email) == str(payload["email"]).lower()).first()
+    if decision == "USE_IMPORTED_EMAIL":
+        raise ValueError("Imported email conflicts must be reconciled outside the import; choose KEEP_EXISTING_EMAIL or SKIP.")
+
+    profile_by_person = db.query(account_models.PersonnelProfile).filter(
+        account_models.PersonnelProfile.amo_id == job.amo_id,
+        account_models.PersonnelProfile.person_id == person_id,
+    ).first()
+    profile_by_email = None
+    if payload.get("email"):
+        profile_by_email = db.query(account_models.PersonnelProfile).filter(
+            account_models.PersonnelProfile.amo_id == job.amo_id,
+            func.lower(account_models.PersonnelProfile.email) == str(payload["email"]).lower(),
+        ).first()
+    profile = profile_by_person or profile_by_email
     is_new = profile is None
     if profile is None:
-        profile = account_models.PersonnelProfile(amo_id=job.amo_id, person_id=person_id, first_name=payload["first_name"], last_name=payload["last_name"])
+        profile = account_models.PersonnelProfile(
+            amo_id=job.amo_id,
+            person_id=person_id,
+            first_name=payload["first_name"],
+            last_name=payload["last_name"],
+        )
         db.add(profile)
 
     imported_email = payload.get("email")
-    if decision == "KEEP_EXISTING_EMAIL" and profile.email:
-        selected_email = profile.email
-    else:
-        selected_email = imported_email or profile.email
+    selected_email = profile.email if decision == "KEEP_EXISTING_EMAIL" and profile.email else imported_email or profile.email
 
     profile.person_id = person_id
     profile.first_name = payload["first_name"]
@@ -851,29 +889,27 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
     profile.birth_place = payload.get("birth_place")
     db.flush()
 
-    user = db.get(account_models.User, profile.user_id) if profile.user_id else None
-    if user is None:
-        user = db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id, account_models.User.staff_code == person_id).first()
-    if user is None and selected_email:
-        user = db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id, func.lower(account_models.User.email) == str(selected_email).lower()).first()
+    existing_profile_user = db.get(account_models.User, profile.user_id) if profile.user_id else None
+    existing_staff_user = db.query(account_models.User).filter(
+        account_models.User.amo_id == job.amo_id,
+        account_models.User.staff_code == person_id,
+    ).first()
+    existing_email_user = None
+    if selected_email:
+        existing_email_user = db.query(account_models.User).filter(
+            account_models.User.amo_id == job.amo_id,
+            func.lower(account_models.User.email) == str(selected_email).lower(),
+        ).first()
 
-    create_account = decision == "CREATE_ACCOUNT"
-    personnel_only = decision == "PROFILE_ONLY" or (is_new and not create_account)
-    if user is None and (create_account or personnel_only):
-        if create_account and not selected_email:
-            raise ValueError("A portal-access candidate requires a valid email address")
-        identity_email = selected_email or f"{person_id.lower()}@personnel.invalid"
-        approval_note = (
-            "Imported from Training Tracker; pending administrator approval and onboarding."
-            if create_account
-            else "Personnel-only identity imported for training and licence records; portal access disabled."
-        )
+    if decision == "PROFILE_ONLY":
+        if existing_profile_user or existing_staff_user or existing_email_user:
+            raise ValueError("A portal account now exists for this person. Re-run preview and choose LINK_EXISTING_ACCOUNT or another reviewed action.")
         user = account_models.User(
             id=generate_user_id(),
             amo_id=job.amo_id,
             department_id=_department_id(db, job.amo_id, payload.get("department")),
             staff_code=person_id,
-            email=identity_email,
+            email=f"{person_id.lower()}@personnel.invalid",
             first_name=payload["first_name"],
             last_name=payload["last_name"],
             full_name=payload.get("full_name") or f"{payload['first_name']} {payload['last_name']}",
@@ -888,24 +924,56 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
             must_change_password=True,
             approved_by_user_id=None,
             approved_at=None,
-            approval_notes=approval_note,
+            approval_notes="Personnel-only identity imported for licence and training history; portal access disabled.",
         )
         db.add(user)
         db.flush()
         profile.user_id = user.id
-    elif user is not None:
-        user.department_id = _department_id(db, job.amo_id, payload.get("department")) or user.department_id
-        user.first_name = payload["first_name"]
-        user.last_name = payload["last_name"]
-        user.full_name = payload.get("full_name") or user.full_name
-        user.position_title = payload.get("position_title")
-        user.phone = payload.get("phone_number")
-        user.secondary_phone = payload.get("secondary_phone")
-        if str(payload.get("status") or "Active").lower() != "active":
-            user.is_active = False
-        if selected_email:
-            user.email = selected_email
-        profile.user_id = user.id
+    else:
+        user = existing_profile_user or existing_staff_user or existing_email_user
+        if user is None and decision == "CREATE_ACCOUNT":
+            if not selected_email:
+                raise ValueError("A portal-access candidate requires a valid email address")
+            user = account_models.User(
+                id=generate_user_id(),
+                amo_id=job.amo_id,
+                department_id=_department_id(db, job.amo_id, payload.get("department")),
+                staff_code=person_id,
+                email=selected_email,
+                first_name=payload["first_name"],
+                last_name=payload["last_name"],
+                full_name=payload.get("full_name") or f"{payload['first_name']} {payload['last_name']}",
+                role=_role_from_position(payload.get("position_title")),
+                position_title=payload.get("position_title"),
+                phone=payload.get("phone_number"),
+                secondary_phone=payload.get("secondary_phone"),
+                hashed_password=get_password_hash(secrets.token_urlsafe(48)),
+                is_active=False,
+                is_amo_admin=False,
+                is_auditor=False,
+                must_change_password=True,
+                approved_by_user_id=None,
+                approved_at=None,
+                approval_notes="Imported from Training Tracker; pending administrator approval and onboarding.",
+            )
+            db.add(user)
+            db.flush()
+        elif user is None and decision == "LINK_EXISTING_ACCOUNT":
+            raise ValueError("The account selected for linking no longer exists. Re-run the workbook preview.")
+        elif user is not None:
+            user.department_id = _department_id(db, job.amo_id, payload.get("department")) or user.department_id
+            user.first_name = payload["first_name"]
+            user.last_name = payload["last_name"]
+            user.full_name = payload.get("full_name") or user.full_name
+            user.position_title = payload.get("position_title")
+            user.phone = payload.get("phone_number")
+            user.secondary_phone = payload.get("secondary_phone")
+            if str(payload.get("status") or "Active").lower() != "active":
+                user.is_active = False
+            if selected_email and decision != "KEEP_EXISTING_EMAIL":
+                user.email = selected_email
+        if user is not None:
+            profile.user_id = user.id
 
     if user and payload.get("kamel_no"):
         user.regulatory_authority = account_models.RegulatoryAuthority.KCAA
@@ -1090,22 +1158,35 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                 rule.source_job_id = job.id
                 work_db.flush()
                 item.committed_entity_id = rule.id
-                # ALL rules also populate the canonical requirement table for existing consumers.
-                if group.code == "ALL" and rule.is_required:
+                # Keep the canonical ALL requirement in exact sync for existing
+                # consumers, including deactivation when a later matrix makes
+                # the course optional.
+                if group.code == "ALL":
                     canonical = work_db.query(training_models.TrainingRequirement).filter(
                         training_models.TrainingRequirement.amo_id == job.amo_id,
                         training_models.TrainingRequirement.course_id == course.id,
                         training_models.TrainingRequirement.scope == training_models.TrainingRequirementScope.ALL,
                     ).first()
-                    if canonical is None:
+                    any_required = work_db.query(TrainingCourseRoleRule.id).filter(
+                        TrainingCourseRoleRule.amo_id == job.amo_id,
+                        TrainingCourseRoleRule.course_id == course.id,
+                        TrainingCourseRoleRule.role_group_id == group.id,
+                        TrainingCourseRoleRule.is_active.is_(True),
+                        TrainingCourseRoleRule.is_required.is_(True),
+                    ).first() is not None
+                    if canonical is None and any_required:
                         canonical = training_models.TrainingRequirement(
-                            amo_id=job.amo_id, course_id=course.id, scope=training_models.TrainingRequirementScope.ALL,
-                            is_mandatory=True, is_active=True, created_by_user_id=job.actor_user_id,
+                            amo_id=job.amo_id,
+                            course_id=course.id,
+                            scope=training_models.TrainingRequirementScope.ALL,
+                            is_mandatory=True,
+                            is_active=True,
+                            created_by_user_id=job.actor_user_id,
                         )
                         work_db.add(canonical)
-                    else:
-                        canonical.is_mandatory = True
-                        canonical.is_active = True
+                    elif canonical is not None:
+                        canonical.is_mandatory = any_required
+                        canonical.is_active = any_required
                 total_processed += 1
 
             training_payloads = []

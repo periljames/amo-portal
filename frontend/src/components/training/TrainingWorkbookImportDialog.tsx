@@ -45,6 +45,7 @@ function humanize(value: string | null | undefined): string {
 function decisionLabel(value: string): string {
   const labels: Record<string, string> = {
     CREATE_ACCOUNT: "Create inactive account for approval and onboarding",
+    LINK_EXISTING_ACCOUNT: "Link the existing portal account to this personnel profile",
     PROFILE_ONLY: "Accept personnel record without portal access",
     SKIP: "Do not import this row",
     KEEP_EXISTING_EMAIL: "Keep existing email and update other fields",
@@ -84,6 +85,21 @@ function statusTone(status: string): string {
   if (["COMPLETED", "COMMITTED", "READY"].includes(status)) return "success";
   if (["SKIPPED", "CANCELLED"].includes(status)) return "muted";
   return "info";
+}
+
+async function loadAllImportRows(
+  jobId: string,
+  options: { reviewOnly?: boolean; status?: string },
+): Promise<TrainingWorkbookImportRow[]> {
+  const limit = 250;
+  const items: TrainingWorkbookImportRow[] = [];
+  let offset = 0;
+  while (true) {
+    const page = await listTrainingWorkbookImportRows(jobId, { ...options, limit, offset });
+    items.push(...page.items);
+    offset += page.items.length;
+    if (offset >= page.total || page.items.length === 0) return items;
+  }
 }
 
 const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onCompleted }) => {
@@ -149,8 +165,13 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
         const next = await getTrainingWorkbookImport(job.id);
         if (stopped) return;
         setJob(next);
-        const offset = Math.max(0, (next.processed_rows || 0) - 8);
-        const page = await listTrainingWorkbookImportRows(next.id, { limit: 8, offset });
+        const activeSheet = next.sheets.find((sheet) => sheet.sheet_name === next.current_sheet);
+        const offset = Math.max(0, (activeSheet?.processed_rows || 0) - 8);
+        const page = await listTrainingWorkbookImportRows(next.id, {
+          sheet: next.current_sheet || undefined,
+          limit: 8,
+          offset,
+        });
         if (!stopped) setRecentRows(page.items);
       } catch (pollError) {
         if (!stopped) setError(pollError instanceof Error ? pollError.message : "Could not refresh import progress.");
@@ -169,16 +190,16 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
     let active = true;
     const loadRows = async () => {
       try {
-        const [reviewPage, issuePage] = await Promise.all([
-          listTrainingWorkbookImportRows(job.id, { reviewOnly: true, limit: 250 }),
-          listTrainingWorkbookImportRows(job.id, { status: "FAILED", limit: 250 }),
+        const [allReviewRows, allIssueRows] = await Promise.all([
+          loadAllImportRows(job.id, { reviewOnly: true }),
+          loadAllImportRows(job.id, { status: "FAILED" }),
         ]);
         if (!active) return;
-        setReviewRows(reviewPage.items);
-        setIssueRows(issuePage.items);
+        setReviewRows(allReviewRows);
+        setIssueRows(allIssueRows);
         setDecisions((current) => {
           const next = { ...current };
-          reviewPage.items.forEach((row) => {
+          allReviewRows.forEach((row) => {
             if (row.decision) next[row.id] = row.decision;
           });
           return next;
@@ -372,7 +393,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
             {isReviewReady && reviewRows.length > 0 ? (
               <section className="training-import-section training-import-review">
                 <div className="training-import-section__header">
-                  <div><h4>Personnel and conflict review</h4><p>New people are never silently activated. Create an inactive account for approval, keep a non-login personnel identity, or skip the row.</p></div>
+                  <div><h4>Personnel and conflict review</h4><p>New people are never silently activated. Create an inactive account for approval, link an existing account when identified, keep a non-login personnel identity, or skip the row.</p></div>
                   <UserPlus size={20} />
                 </div>
                 <div className="training-import-filterbar">

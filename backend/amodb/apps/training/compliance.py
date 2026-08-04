@@ -310,7 +310,11 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
     # rolling deployment cannot interrupt existing compliance reads before the
     # Alembic migration reaches every application instance.
     inspector = inspect(db.get_bind())
-    if inspector.has_table("training_role_groups") and inspector.has_table("training_course_role_rules"):
+    if (
+        inspector.has_table("training_role_groups")
+        and inspector.has_table("training_person_roles")
+        and inspector.has_table("training_course_role_rules")
+    ):
         role_group_ids = [
             group_id
             for (group_id,) in db.query(training_workbook_models.TrainingRoleGroup.id)

@@ -34,6 +34,6 @@ The workbook is a migration and reconciliation source. It is not retained as the
 - Repeated file hashes are identified before commit.
 - Training history uses the existing renewal and record-lifecycle controls.
 - New People rows never silently create accounts.
-- A personnel-only profile is supported when a person must exist in training records but should not receive portal access.
+- A personnel-only choice creates an inactive non-login identity linked to the personnel profile so licences and training history remain queryable without granting portal access.
 - Matrix rules are evaluated by the backend compliance engine, not inferred by the frontend.
 - Derived workbook sheets are represented by live portal capabilities rather than duplicated stored calculations.

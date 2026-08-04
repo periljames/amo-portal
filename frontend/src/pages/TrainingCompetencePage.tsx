@@ -7,7 +7,7 @@ import TrainingWorkbookImportDialog from "../components/training/TrainingWorkboo
 import { useToast } from "../components/feedback/ToastProvider";
 import { saveDownloadedFile } from "../utils/downloads";
 import { getCachedUser } from "../services/auth";
-import { listAdminUserSummaries, type AdminUserSummaryRead } from "../services/adminUsers";
+import { invalidateAdminUserCache, listAdminUserSummaries, type AdminUserSummaryRead } from "../services/adminUsers";
 import {
   autoGroupTrainingEvents,
   createTrainingCourse,
@@ -18,6 +18,7 @@ import {
   downloadTrainingCertificateArtifact,
   getBulkTrainingStatusForUsers,
   getTrainingReportSettings,
+  invalidateTrainingServiceCache,
   issueTrainingCertificate,
   listTrainingCertificates,
   listTrainingCourses,
@@ -2285,6 +2286,13 @@ const TrainingCompetencePage: React.FC = () => {
         isOpen={workbookImportOpen}
         onClose={() => setWorkbookImportOpen(false)}
         onCompleted={async () => {
+          invalidateAdminUserCache();
+          invalidateTrainingServiceCache();
+          try {
+            window.sessionStorage.removeItem(trainingDashboardSnapshotKey(amoCode));
+          } catch {
+            // Ignore storage failures; the fresh API load remains authoritative.
+          }
           await load();
         }}
       />
