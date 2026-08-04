@@ -1,4 +1,5 @@
 from datetime import date
+import inspect
 
 import pytest
 from fastapi import HTTPException
@@ -50,7 +51,7 @@ def test_reschedule_requires_reason_and_expected_date_is_optional() -> None:
         )
 
 
-def test_only_authoritative_schedule_sources_are_mutable() -> None:
+def test_only_authoritative_active_schedule_sources_are_mutable() -> None:
     assert set(_MUTABLE_CALENDAR_SOURCES) == {
         "audit_schedule",
         "audit",
@@ -59,6 +60,28 @@ def test_only_authoritative_schedule_sources_are_mutable() -> None:
     }
     assert "training_record" not in _MUTABLE_CALENDAR_SOURCES
     assert all(source["permission"] == "qms.calendar.manage" for source in _MUTABLE_CALENDAR_SOURCES.values())
+
+    predicates = {key: str(value["active_predicate"]) for key, value in _MUTABLE_CALENDAR_SOURCES.items()}
+    assert "is_active IS TRUE" in predicates["audit_schedule"]
+    assert "deleted_at IS NULL" in predicates["audit_schedule"]
+    assert "deleted_at IS NULL" in predicates["audit"]
+    assert "CLOSED" in predicates["audit"] and "CANCELLED" in predicates["audit"]
+    assert "closed_at IS NULL" in predicates["car"]
+    assert "CLOSED" in predicates["car"] and "CANCELLED" in predicates["car"]
+    assert "CANCELLED" in predicates["training_event"]
+
+
+def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None:
+    source = inspect.getsource(qms_planner_reschedule)
+    assert source.count("active_predicate") >= 3
+    assert "This schedule is no longer active" in source
+    assert "left the active calendar" in source
+    assert "result.rowcount != 1" in source
+    assert "_log_qms_activity(" in source
+    assert "calendar_schedule_rescheduled" in source
+    assert source.index("_log_qms_activity(") < source.index("db.commit()")
+    assert '"reason": payload.reason.strip()' in source
+    assert '"trace_id": trace_id' in source
 
 
 def test_canonical_router_reexports_dashboard_private_helpers() -> None:
