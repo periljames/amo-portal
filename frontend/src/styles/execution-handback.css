@@ -1,0 +1,148 @@
+.execution-control-page,
+.records-handback-page {
+  --execution-gap: clamp(0.75rem, 1.2vw, 1.25rem);
+}
+
+.execution-layout,
+.handback-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--execution-gap);
+  margin-bottom: var(--execution-gap);
+}
+
+.execution-control-page .planning-panel + .planning-panel,
+.records-handback-page .planning-panel + .planning-panel {
+  margin-top: var(--execution-gap);
+}
+
+.execution-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.execution-form-grid label,
+.execution-layout article > label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.execution-form-grid label > span,
+.execution-layout article > label > span,
+.execution-session-summary span,
+.handback-summary span {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.82rem;
+}
+
+.execution-session-summary,
+.handback-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0.8rem 0;
+  padding: 0.75rem;
+  border-radius: 0.7rem;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.execution-session-summary > div,
+.handback-summary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.execution-session-summary code,
+.handback-summary code {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
+.execution-issue-form,
+.handback-finding-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.6fr) minmax(140px, 0.5fr) minmax(180px, 1fr) minmax(220px, 1.4fr) auto;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.execution-issue-form textarea,
+.handback-finding-form textarea {
+  min-height: 2.55rem;
+  resize: vertical;
+}
+
+.execution-control-page td small,
+.records-handback-page td small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.execution-control-page td code,
+.records-handback-page td code {
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+}
+
+.handback-blockers {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+
+.handback-blockers > div {
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid var(--danger-color, #c43d3d);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--danger-color, #c43d3d) 9%, transparent);
+}
+
+.handback-manifest-preview {
+  max-height: 19rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 1180px) {
+  .execution-issue-form,
+  .handback-finding-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .execution-issue-form textarea,
+  .handback-finding-form textarea {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .execution-layout,
+  .handback-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .execution-form-grid,
+  .execution-session-summary,
+  .handback-summary,
+  .execution-issue-form,
+  .handback-finding-form {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-issue-form textarea,
+  .handback-finding-form textarea {
+    grid-column: auto;
+  }
+}
