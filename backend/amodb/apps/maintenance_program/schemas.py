@@ -111,9 +111,13 @@ class AircraftProgramItemCreate(AircraftProgramItemBase):
 
 
 class AircraftProgramItemUpdate(BaseModel):
-    aircraft_serial_number: Optional[str] = None
-    program_item_id: Optional[int] = None
-    aircraft_component_id: Optional[int] = None
+    """Mutable accomplishment and display fields for one aircraft requirement.
+
+    Aircraft identity, programme identity, and component linkage are deliberately
+    excluded. Moving a requirement between aircraft or components requires a
+    controlled configuration workflow rather than a generic PATCH request.
+    """
+
     override_task_code: Optional[str] = None
     override_title: Optional[str] = None
     last_done_date: Optional[date] = None
