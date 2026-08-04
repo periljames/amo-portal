@@ -20,7 +20,6 @@ concurrency:
 
 jobs:
   apply-validate-push:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -63,6 +62,7 @@ jobs:
           git apply /tmp/training-six-fixes.diff
           rm -f .github/workflows/apply-training-review-fixes.yml
           rm -f .github/triggers/apply-training-review-fixes.txt
+          rm -f .github/triggers/direct-training-review-fix.txt
           git diff --check
 
       - name: Verify reviewed file set
