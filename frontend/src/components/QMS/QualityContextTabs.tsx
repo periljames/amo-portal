@@ -163,9 +163,16 @@ const QualityContextTabs: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const route = useMemo(() => parseQualityRoute(location.pathname), [location.pathname]);
+  const qualityActive = Boolean(route);
   const [mountTarget, setMountTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (!qualityActive) {
+      document.querySelector(":scope > .quality-context-bar-host")?.remove();
+      setMountTarget(null);
+      return;
+    }
+
     let activeHost: HTMLDivElement | null = null;
 
     const syncMount = () => {
@@ -193,16 +200,16 @@ const QualityContextTabs: React.FC = () => {
       observer.disconnect();
       activeHost?.remove();
     };
-  }, []);
+  }, [qualityActive]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("quality-context-active", Boolean(route));
+    document.documentElement.classList.toggle("quality-context-active", qualityActive);
     const overview = Boolean(route && route.segments.length === 0);
     document.documentElement.classList.toggle("quality-context-overview", overview);
     return () => {
       document.documentElement.classList.remove("quality-context-active", "quality-context-overview");
     };
-  }, [route]);
+  }, [qualityActive, route]);
 
   if (!route || !mountTarget) return null;
 
