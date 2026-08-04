@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, text
+from sqlalchemy import case, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,11 @@ RiskLevel = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 
 class AssuranceControlCreate(BaseModel):
-    control_code: str = Field(min_length=2, max_length=64)
+    control_code: str = Field(
+        min_length=2,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/ -]*$",
+    )
     title: str = Field(min_length=3, max_length=255)
     description: str | None = None
     framework: str = Field(default="INTERNAL_QMS", min_length=2, max_length=120)
@@ -64,9 +68,9 @@ class AssuranceControlPatch(BaseModel):
 
 
 class AssuranceEvidenceCreate(BaseModel):
-    source_type: str = Field(min_length=2, max_length=48)
+    source_type: str = Field(min_length=2, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
     source_id: str = Field(min_length=1, max_length=160)
-    relationship: str = Field(default="EVIDENCES", min_length=2, max_length=48)
+    relationship: str = Field(default="EVIDENCES", min_length=2, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
     label: str | None = Field(default=None, max_length=255)
     evidence_status: EvidenceStatus = "LINKED"
     valid_until: date | None = None
@@ -79,7 +83,7 @@ class IntelligenceDecision(BaseModel):
 
 
 class IntelligenceManualCreate(BaseModel):
-    insight_type: str = Field(min_length=2, max_length=64)
+    insight_type: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(min_length=3, max_length=255)
     rationale: str = Field(min_length=3)
     recommendation: str | None = None
@@ -458,38 +462,46 @@ def list_assurance_controls(
         query = query.filter(QualityAssuranceControl.framework == framework)
     if process_area:
         query = query.filter(QualityAssuranceControl.process_area == process_area)
-    rows = query.order_by(QualityAssuranceControl.criticality.desc(), QualityAssuranceControl.control_code.asc()).limit(limit).all()
-    counts = {
-        control_id: {"total": total, "verified": verified}
-        for control_id, total, verified in (
-            db.query(
-                QualityAssuranceEvidenceLink.control_id,
-                func.count(QualityAssuranceEvidenceLink.id),
-                func.sum(
-                    func.case(
-                        (QualityAssuranceEvidenceLink.evidence_status == "VERIFIED", 1),
-                        else_=0,
-                    )
-                ),
-            )
-            .filter(
-                QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
-                QualityAssuranceEvidenceLink.control_id.in_([row.id for row in rows] or ["__none__"]),
-            )
-            .group_by(QualityAssuranceEvidenceLink.control_id)
-            .all()
+    total = query.count()
+    criticality_order = case(
+        (QualityAssuranceControl.criticality == "CRITICAL", 0),
+        (QualityAssuranceControl.criticality == "HIGH", 1),
+        (QualityAssuranceControl.criticality == "MEDIUM", 2),
+        else_=3,
+    )
+    rows = query.order_by(criticality_order, QualityAssuranceControl.control_code.asc()).limit(limit).all()
+    evidence_rows = (
+        db.query(
+            QualityAssuranceEvidenceLink.control_id,
+            func.count(QualityAssuranceEvidenceLink.id),
+            func.sum(
+                case(
+                    (QualityAssuranceEvidenceLink.evidence_status == "VERIFIED", 1),
+                    else_=0,
+                )
+            ),
         )
+        .filter(
+            QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
+            QualityAssuranceEvidenceLink.control_id.in_([row.id for row in rows] or ["__none__"]),
+        )
+        .group_by(QualityAssuranceEvidenceLink.control_id)
+        .all()
+    )
+    counts = {
+        control_id: {"total": int(total_count or 0), "verified": int(verified_count or 0)}
+        for control_id, total_count, verified_count in evidence_rows
     }
     return {
         "items": [
             _control_dict(
                 row,
-                evidence_count=int(counts.get(row.id, {}).get("total") or 0),
-                verified_count=int(counts.get(row.id, {}).get("verified") or 0),
+                evidence_count=counts.get(row.id, {}).get("total", 0),
+                verified_count=counts.get(row.id, {}).get("verified", 0),
             )
             for row in rows
         ],
-        "total": query.count(),
+        "total": total,
         "as_of": _now().isoformat(),
     }
 
@@ -547,7 +559,7 @@ def update_assurance_control(
     )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assurance control not found.")
-    changes = payload.model_dump(exclude_unset=True)
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     for field, value in changes.items():
         setattr(row, field, value.strip() if isinstance(value, str) else value)
     row.updated_by_user_id = ctx.user_id
@@ -689,8 +701,9 @@ def list_intelligence_reviews(
     query = db.query(QualityIntelligenceReview).filter(QualityIntelligenceReview.amo_id == ctx.amo_id)
     if status_filter:
         query = query.filter(QualityIntelligenceReview.status == status_filter)
+    total = query.count()
     rows = query.order_by(QualityIntelligenceReview.created_at.desc()).limit(limit).all()
-    return {"items": [_insight_dict(row) for row in rows], "total": query.count(), "as_of": _now().isoformat()}
+    return {"items": [_insight_dict(row) for row in rows], "total": total, "as_of": _now().isoformat()}
 
 
 @router.post("/insights", status_code=status.HTTP_201_CREATED)
@@ -812,7 +825,12 @@ def rebuild_rule_engine_insights(
         )
         db.add(row)
         generated.append(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        generated = []
+        skipped += 1
     return {
         "generated": len(generated),
         "skipped_existing": skipped,
