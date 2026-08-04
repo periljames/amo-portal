@@ -1,0 +1,31 @@
+name: Training identity owner hardening
+
+on:
+  push:
+    branches:
+      - agent/training-workbook-control-centre
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply identity owner fix
+        run: python .github/scripts/fix_training_identity_owner.py
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/amodb/apps/training/workbook_import.py
+          git commit -m "Prevent Training import identity ownership collisions"
+          git push origin HEAD
