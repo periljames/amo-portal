@@ -76,6 +76,7 @@ def upgrade() -> None:
         sa.Column("added_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("added_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("work_package_id", "work_order_id", name="uq_work_package_order"),
+        sa.UniqueConstraint("amo_id", "work_order_id", name="uq_work_package_order_amo_order"),
     )
     op.create_index("ix_work_package_orders_package", "work_package_orders", ["work_package_id", "sequence_no"])
     op.create_index("ix_work_package_orders_order", "work_package_orders", ["work_order_id"])
