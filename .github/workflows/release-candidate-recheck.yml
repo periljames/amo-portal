@@ -310,8 +310,6 @@ jobs:
             sleep 1
           done
 
-          # This validates preview-server readiness. Chromium performs the
-          # actual HTTP-cache prime inside measure-rostering-load.mjs.
           mapfile -t built_assets < <(
             find dist -maxdepth 2 -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' \) \
               -printf '/%P\n' | sort -u

@@ -177,3 +177,86 @@ export type ProcurementQualityHold = {
   qms_car_id?: string | null;
   placed_at: string;
 };
+
+export type ProcurementDocumentEntityType =
+  | "REQUISITION"
+  | "RFQ"
+  | "QUOTE"
+  | "PURCHASE_ORDER"
+  | "RECEIPT"
+  | "SUPPLIER"
+  | "QUALITY_HOLD";
+
+export type ProcurementDocumentSource =
+  | "PHYSICAL_FORM"
+  | "EXTERNAL_SOFTWARE"
+  | "EMAIL"
+  | "SUPPLIER_PORTAL"
+  | "PORTAL_EXPORT"
+  | "DMS_CONTROLLED"
+  | "OTHER";
+
+export type ProcurementDocumentVerificationStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "VERIFIED"
+  | "REJECTED";
+
+export type ProcurementDocument = {
+  id: number;
+  entity_type: ProcurementDocumentEntityType;
+  entity_id: string;
+  document_type: string;
+  title: string;
+  document_number?: string | null;
+  revision?: string | null;
+  document_date?: string | null;
+  source: ProcurementDocumentSource;
+  original_filename?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  physical_reference?: string | null;
+  physical_location?: string | null;
+  external_system?: string | null;
+  external_reference?: string | null;
+  external_url?: string | null;
+  dms_document_id?: string | null;
+  dms_revision_id?: string | null;
+  notes?: string | null;
+  is_quality_evidence: boolean;
+  qms_reference?: string | null;
+  verification_status: ProcurementDocumentVerificationStatus;
+  verification_notes?: string | null;
+  verified_by_user_id?: string | null;
+  verified_at?: string | null;
+  status: "ACTIVE" | "VOID";
+  uploaded_by_user_id?: string | null;
+  uploaded_at: string;
+  voided_by_user_id?: string | null;
+  voided_at?: string | null;
+  void_reason?: string | null;
+  download_url?: string | null;
+};
+
+export type ProcurementDocumentUpload = {
+  entityType: ProcurementDocumentEntityType;
+  entityId: string;
+  documentType: string;
+  title: string;
+  source: ProcurementDocumentSource;
+  documentNumber?: string;
+  revision?: string;
+  documentDate?: string;
+  physicalReference?: string;
+  physicalLocation?: string;
+  externalSystem?: string;
+  externalReference?: string;
+  externalUrl?: string;
+  dmsDocumentId?: string;
+  dmsRevisionId?: string;
+  notes?: string;
+  isQualityEvidence?: boolean;
+  qmsReference?: string;
+  file?: File | null;
+};

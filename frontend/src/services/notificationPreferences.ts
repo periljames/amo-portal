@@ -3,6 +3,8 @@ const PREFS_STORAGE_KEY = "amodb_notification_preferences";
 let sharedAudioCtx: AudioContext | null = null;
 let unlockBound = false;
 
+export type NotificationCue = "info" | "success" | "warning" | "error";
+
 export type NotificationPreferences = {
   audioEnabled: boolean;
   desktopEnabled: boolean;
@@ -47,45 +49,72 @@ export function setNotificationPreferences(next: Partial<NotificationPreferences
   return merged;
 }
 
-export function playNotificationChirp(): void {
-  if (typeof window === "undefined") return;
-  const prefs = getNotificationPreferences();
-  if (!prefs.audioEnabled) return;
-  const AudioCtx = (window as Window & { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
-    || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioCtx) return;
-  if (!unlockBound) {
-    const unlock = () => {
-      if (!sharedAudioCtx) {
-        sharedAudioCtx = new AudioCtx();
-      }
-      if (sharedAudioCtx.state === "suspended") {
-        void sharedAudioCtx.resume().catch(() => undefined);
-      }
-    };
-    window.addEventListener("pointerdown", unlock, { passive: true });
-    window.addEventListener("keydown", unlock, { passive: true });
-    unlockBound = true;
-  }
-  if (!sharedAudioCtx) {
-    return;
-  }
-  if (sharedAudioCtx.state === "suspended") {
-    void sharedAudioCtx.resume().catch(() => undefined);
-    return;
-  }
-  const ctx = sharedAudioCtx;
-  const osc = ctx.createOscillator();
+function audioConstructor(): typeof AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const audioWindow = window as Window & {
+    AudioContext?: typeof AudioContext;
+    webkitAudioContext?: typeof AudioContext;
+  };
+  return audioWindow.AudioContext || audioWindow.webkitAudioContext || null;
+}
+
+function bindAudioUnlock(AudioCtx: typeof AudioContext): void {
+  if (unlockBound || typeof window === "undefined") return;
+  const unlock = () => {
+    if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
+    if (sharedAudioCtx.state === "suspended") void sharedAudioCtx.resume().catch(() => undefined);
+  };
+  window.addEventListener("pointerdown", unlock, { passive: true });
+  window.addEventListener("keydown", unlock, { passive: true });
+  unlockBound = true;
+}
+
+function playTone(ctx: AudioContext, frequency: number, start: number, duration: number, volume: number): void {
+  const oscillator = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(1320, ctx.currentTime);
-  gain.gain.setValueAtTime(0.001, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
-  osc.connect(gain);
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(frequency, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(gain);
   gain.connect(ctx.destination);
-  osc.start();
-  osc.stop(ctx.currentTime + 0.18);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+
+export function playNotificationCue(cue: NotificationCue = "info"): void {
+  if (typeof window === "undefined" || !getNotificationPreferences().audioEnabled) return;
+  const AudioCtx = audioConstructor();
+  if (!AudioCtx) return;
+  bindAudioUnlock(AudioCtx);
+  if (!sharedAudioCtx || sharedAudioCtx.state !== "running") {
+    if (sharedAudioCtx?.state === "suspended") void sharedAudioCtx.resume().catch(() => undefined);
+    return;
+  }
+
+  const ctx = sharedAudioCtx;
+  const start = ctx.currentTime + 0.015;
+  if (cue === "success") {
+    playTone(ctx, 660, start, 0.12, 0.055);
+    playTone(ctx, 880, start + 0.105, 0.17, 0.065);
+    return;
+  }
+  if (cue === "warning") {
+    playTone(ctx, 740, start, 0.14, 0.06);
+    playTone(ctx, 740, start + 0.19, 0.14, 0.06);
+    return;
+  }
+  if (cue === "error") {
+    playTone(ctx, 520, start, 0.15, 0.065);
+    playTone(ctx, 330, start + 0.12, 0.22, 0.075);
+    return;
+  }
+  playTone(ctx, 980, start, 0.15, 0.05);
+}
+
+export function playNotificationChirp(): void {
+  playNotificationCue("info");
 }
 
 export async function pushDesktopNotification(title: string, body: string): Promise<void> {
@@ -98,9 +127,7 @@ export async function pushDesktopNotification(title: string, body: string): Prom
   }
   if (Notification.permission !== "denied") {
     const permission = await Notification.requestPermission();
-    if (permission === "granted") {
-      new Notification(title, { body });
-    }
+    if (permission === "granted") new Notification(title, { body });
   }
 }
 

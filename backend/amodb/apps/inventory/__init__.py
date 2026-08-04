@@ -1,14 +1,9 @@
-"""
-Inventory module.
+"""Inventory and supply-chain router registration."""
 
-Handles stock ledger, purchasing flows, and traceability for parts. The canonical
-Procurement department router is mounted here so the application entrypoint keeps
-one inventory/supply-chain registration point while Procurement remains its own
-domain package.
-"""
-
-from .router import router  # noqa: F401
-from . import models  # noqa: F401
+from .router import router
+from . import models
 from amodb.apps.procurement.router import router as procurement_router
+from amodb.apps.procurement.document_router import router as procurement_document_router
 
 router.include_router(procurement_router)
+router.include_router(procurement_document_router)

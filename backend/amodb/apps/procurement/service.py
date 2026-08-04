@@ -600,10 +600,6 @@ def transition_requisition(
             raise HTTPException(status_code=409, detail="Technical approval is required before budget approval.")
         requisition.budget_reviewed_by_user_id = actor_user_id
         requisition.status = models.RequisitionStatus.SOURCING
-    elif action == "SEND_TO_SOURCING":
-        if requisition.status != models.RequisitionStatus.BUDGET_REVIEW:
-            raise HTTPException(status_code=409, detail="Requisition is not ready for sourcing.")
-        requisition.status = models.RequisitionStatus.SOURCING
     elif action == "APPROVE":
         if requisition.status != models.RequisitionStatus.SOURCING:
             raise HTTPException(status_code=409, detail="Requisition must complete sourcing before approval.")
@@ -1482,46 +1478,6 @@ def create_invoice_match(
         detail={"status": match.status.value, "variance": str(variance)},
     )
     return match
-
-
-def assert_legacy_purchase_order_eligible(
-    db: Session,
-    *,
-    amo_id: str,
-    purchase_order_id: int,
-) -> models.ProcurementSupplier:
-    legacy_po = (
-        db.query(inventory_models.PurchaseOrder)
-        .filter(
-            inventory_models.PurchaseOrder.amo_id == amo_id,
-            inventory_models.PurchaseOrder.id == purchase_order_id,
-        )
-        .first()
-    )
-    if not legacy_po:
-        raise HTTPException(status_code=404, detail="Legacy purchase order was not found.")
-    if not legacy_po.vendor_id:
-        raise HTTPException(status_code=409, detail="Legacy purchase order has no linked supplier/vendor.")
-    supplier = (
-        db.query(models.ProcurementSupplier)
-        .filter(
-            models.ProcurementSupplier.amo_id == amo_id,
-            models.ProcurementSupplier.vendor_id == legacy_po.vendor_id,
-        )
-        .first()
-    )
-    if not supplier:
-        raise HTTPException(
-            status_code=409,
-            detail="Vendor must be onboarded and approved in Procurement before this legacy purchase order can proceed.",
-        )
-    categories = {"PART" if line.part_id else "SERVICE" for line in legacy_po.lines}
-    return assert_supplier_eligible(
-        db,
-        amo_id=amo_id,
-        supplier_id=supplier.id,
-        categories=categories or {"GENERAL"},
-    )
 
 
 def dashboard(db: Session, *, amo_id: str) -> schemas.DashboardResponse:
