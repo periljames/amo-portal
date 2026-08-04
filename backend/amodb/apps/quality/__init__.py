@@ -79,20 +79,16 @@ _include_once(
     _assurance_wiring_router.router,
     "/api/maintenance/{amo_code}/qms/excellence/source-catalog",
 )
-_include_once(
-    _canonical_router.router,
-    _assurance_metrics_router.router,
-    "/api/maintenance/{amo_code}/quality/excellence/overview/full",
-)
-_include_once(
-    _canonical_router.legacy_router,
-    _assurance_metrics_router.router,
-    "/api/maintenance/{amo_code}/qms/excellence/overview/full",
-)
 
-# These endpoints intentionally overlap the base wiring contract. They are
-# registered last so the route-order pass below retains the strict lifecycle
-# handlers for create and approval operations.
+# Metrics intentionally override the wiring router's broad aggregation paths.
+# Register them directly so the later route-order pass can retain the latest
+# exact path/method handler rather than treating the overlap as duplication.
+_canonical_router.router.include_router(_assurance_metrics_router.router)
+_canonical_router.legacy_router.include_router(_assurance_metrics_router.router)
+
+# Lifecycle endpoints intentionally overlap the base wiring contract. They are
+# registered last so create, approval and test operations retain strict state
+# transition and evidence gates.
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
 _canonical_router.legacy_router.include_router(_assurance_lifecycle_guard_router.router)
 
