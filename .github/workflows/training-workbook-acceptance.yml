@@ -42,6 +42,9 @@ jobs:
         env:
           PYTHONPATH: backend
           GH_TOKEN: ${{ github.token }}
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
         run: |
           set +e
           python -m pip install -r backend/requirements.txt > /tmp/pip.log 2>&1
@@ -73,7 +76,7 @@ jobs:
               echo
               echo '```text'
               tail -n 60 /tmp/pytest.log
-              tail -n 40 /tmp/alembic.log
+              tail -n 60 /tmp/alembic.log
               tail -n 60 /tmp/build.log
               tail -n 40 /tmp/css.log
               echo '```'
