@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from amodb.apps.training.workbook_import import WORKBOOK_SHEETS, _course_payload, _person_payload
+from amodb.apps.training.workbook_import import WORKBOOK_SHEETS, _course_payload, _default_frequency_months, _person_payload, _workbook_params
 
 
 def test_training_tracker_operational_and_derived_sheets_are_explicitly_mapped():
@@ -78,3 +78,26 @@ def test_courses_sheet_accepts_tracker_course_type_and_recurrent_frequency():
     assert payload["status"] == "Recurrent"
     assert payload["frequency_months"] == 24
     assert payload["is_mandatory"] is True
+
+
+
+def test_params_default_frequency_applies_to_recurrent_courses_without_override():
+    params = _workbook_params([
+        {"row_number": 2, "Setting": "Default Frequency (months)", "Value": 24},
+    ])
+    default_months = _default_frequency_months(params)
+    payload = _course_payload(
+        {
+            "CourseID": "SMS-REF",
+            "CourseName": "Safety Management Systems (Refresher)",
+            "FrequencyMonths": None,
+            "CourseType": "Recurrent",
+            "Category": "SMS",
+            "Mandatory": "Yes",
+            "Scope": "ALL",
+            "Reference": "KCAR",
+        },
+        default_frequency_months=default_months,
+    )
+    assert default_months == 24
+    assert payload["frequency_months"] == 24

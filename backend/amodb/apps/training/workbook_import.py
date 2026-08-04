@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import secrets
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -247,7 +248,7 @@ def _person_payload(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _course_payload(raw: dict[str, Any]) -> dict[str, Any]:
+def _course_payload(raw: dict[str, Any], *, default_frequency_months: Optional[int] = None) -> dict[str, Any]:
     course_id = upper(raw.get("CourseID"))
     name = clean(raw.get("CourseName"))
     if not course_id or not name:
@@ -258,7 +259,7 @@ def _course_payload(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Course type must be Initial, Recurrent or One_Off")
     frequency = raw.get("FrequencyMonths")
     if frequency in (None, ""):
-        months = None
+        months = default_frequency_months if canonical == "Recurrent" else None
     else:
         months = int(float(frequency))
         if months < 0:
@@ -274,6 +275,27 @@ def _course_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "regulatory_reference": clean(raw.get("Reference")),
         "is_active": bool_value(raw.get("Active"), True),
     }
+
+
+
+def _workbook_params(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for row in rows:
+        setting = clean(row.get("Setting"))
+        if not setting:
+            continue
+        values[setting] = row.get("Value")
+    return values
+
+
+def _default_frequency_months(params: dict[str, Any]) -> Optional[int]:
+    raw = params.get("Default Frequency (months)")
+    if raw in (None, ""):
+        return None
+    value = int(float(raw))
+    if value <= 0:
+        raise ValueError("Default Frequency (months) must be a positive integer")
+    return value
 
 
 def _role_from_position(position: Optional[str]) -> account_models.AccountRole:
@@ -354,14 +376,14 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
         _set_job_progress(db, job, stage="VALIDATING", sheet="People", label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Personnel row'}", processed_delta=1)
 
 
-def _preview_courses(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]]) -> None:
+def _preview_courses(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]], *, default_frequency_months: Optional[int] = None) -> None:
     existing = {upper(item.course_id): item for item in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all()}
     seen: set[str] = set()
     mapping = {"course_name": "course_name", "frequency_months": "frequency_months", "status": "status", "category_raw": "category_raw", "is_mandatory": "is_mandatory", "scope": "scope", "regulatory_reference": "regulatory_reference", "is_active": "is_active"}
     for raw in rows:
         row_number = int(raw["row_number"])
         try:
-            payload = _course_payload(raw)
+            payload = _course_payload(raw, default_frequency_months=default_frequency_months)
             if payload["course_id"] in seen:
                 raise ValueError("Duplicate CourseID inside workbook")
             seen.add(payload["course_id"])
@@ -376,14 +398,29 @@ def _preview_courses(db: Session, job: TrainingWorkbookImportJob, sheet: Trainin
         _set_job_progress(db, job, stage="VALIDATING", sheet="Courses", label=f"{clean(raw.get('CourseID')) or 'Course row'}", processed_delta=1)
 
 
-def _preview_training(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]]) -> None:
-    users = db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id, account_models.User.is_system_account.is_(False)).all()
-    courses = db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all()
+def _preview_training(
+    db: Session,
+    job: TrainingWorkbookImportJob,
+    sheet: TrainingWorkbookImportSheet,
+    rows: list[dict[str, Any]],
+    *,
+    workbook_people: set[str],
+    workbook_courses: set[str],
+) -> None:
+    users = db.query(account_models.User).filter(
+        account_models.User.amo_id == job.amo_id,
+        account_models.User.is_system_account.is_(False),
+    ).all()
+    courses = db.query(training_models.TrainingCourse).filter(
+        training_models.TrainingCourse.amo_id == job.amo_id,
+    ).all()
     by_staff, by_user_id, by_name = records_import._index_users(users)
     by_code, by_course_name = records_import._index_courses(courses)
     existing = {
         (str(item.user_id), str(item.course_id), item.completion_date): item
-        for item in db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == job.amo_id).all()
+        for item in db.query(training_models.TrainingRecord)
+        .filter(training_models.TrainingRecord.amo_id == job.amo_id)
+        .all()
     }
     seen: set[tuple[str, str, date]] = set()
     for raw in rows:
@@ -398,27 +435,106 @@ def _preview_training(db: Session, job: TrainingWorkbookImportJob, sheet: Traini
             user = records_import._match_user(parsed, by_staff=by_staff, by_id=by_user_id, by_name=by_name)
             course = records_import._match_course(parsed, by_code=by_code, by_name=by_course_name)
             payload = {
-                "RecordID": parsed.legacy_record_id, "PersonID": parsed.person_id, "PersonName": parsed.person_name,
-                "CourseID": parsed.course_id, "CourseName": parsed.course_name,
-                "LastTrainingDate": parsed.completion_date, "NextDueDate": parsed.next_due_date,
-                "DaysToDue": parsed.days_to_due, "Status": parsed.source_status,
+                "RecordID": parsed.legacy_record_id,
+                "PersonID": parsed.person_id,
+                "PersonName": parsed.person_name,
+                "CourseID": parsed.course_id,
+                "CourseName": parsed.course_name,
+                "LastTrainingDate": parsed.completion_date,
+                "NextDueDate": parsed.next_due_date,
+                "DaysToDue": parsed.days_to_due,
+                "Status": parsed.source_status,
             }
-            if user is None:
-                item = _row(job_id=job.id, sheet="Training", row_number=row_number, entity_type="TRAINING_RECORD", source_key=source_key, label=f"{parsed.person_name or parsed.person_id} · {parsed.course_name}", action="SKIP", status="REVIEW", decision_required=True, decision_options=["RETRY_AFTER_PERSON_IMPORT", "SKIP"], payload=payload, issue_code="UNMATCHED_PERSON", issue_message="The training row has no accepted portal user. Review the People row first.")
-                _counter(sheet, "SKIP", review=True)
-            elif course is None:
-                item = _row(job_id=job.id, sheet="Training", row_number=row_number, entity_type="TRAINING_RECORD", source_key=source_key, label=f"{parsed.person_name or parsed.person_id} · {parsed.course_name}", action="SKIP", status="FAILED", payload=payload, issue_code="UNMATCHED_COURSE", issue_message="CourseID does not exist in the course catalogue or Courses sheet.")
+            person_resolves_from_workbook = user is None and parsed.person_id in workbook_people
+            course_resolves_from_workbook = course is None and parsed.course_id in workbook_courses
+            if user is None and not person_resolves_from_workbook:
+                item = _row(
+                    job_id=job.id,
+                    sheet="Training",
+                    row_number=row_number,
+                    entity_type="TRAINING_RECORD",
+                    source_key=source_key,
+                    label=f"{parsed.person_name or parsed.person_id} · {parsed.course_name}",
+                    action="SKIP",
+                    status="FAILED",
+                    payload=payload,
+                    issue_code="UNMATCHED_PERSON",
+                    issue_message="PersonID is not present in the People sheet or the AMO personnel register.",
+                )
                 _counter(sheet, "SKIP", failed=True)
+            elif course is None and not course_resolves_from_workbook:
+                item = _row(
+                    job_id=job.id,
+                    sheet="Training",
+                    row_number=row_number,
+                    entity_type="TRAINING_RECORD",
+                    source_key=source_key,
+                    label=f"{parsed.person_name or parsed.person_id} · {parsed.course_name}",
+                    action="SKIP",
+                    status="FAILED",
+                    payload=payload,
+                    issue_code="UNMATCHED_COURSE",
+                    issue_message="CourseID is not present in the Courses sheet or the AMO course catalogue.",
+                )
+                _counter(sheet, "SKIP", failed=True)
+            elif person_resolves_from_workbook or course_resolves_from_workbook:
+                dependencies = []
+                if person_resolves_from_workbook:
+                    dependencies.append("People")
+                if course_resolves_from_workbook:
+                    dependencies.append("Courses")
+                item = _row(
+                    job_id=job.id,
+                    sheet="Training",
+                    row_number=row_number,
+                    entity_type="TRAINING_RECORD",
+                    source_key=source_key,
+                    label=f"{parsed.person_name or parsed.person_id} · {parsed.course_name}",
+                    action="CREATE",
+                    status="PENDING_DEPENDENCY",
+                    payload=payload,
+                    issue_code="WORKBOOK_DEPENDENCY",
+                    issue_message=f"Will resolve after accepted {' and '.join(dependencies)} rows are committed.",
+                )
+                _counter(sheet, "CREATE")
             else:
                 current = existing.get((str(user.id), str(course.id), parsed.completion_date))
                 action = "CREATE" if current is None else "UPDATE"
-                item = _row(job_id=job.id, sheet="Training", row_number=row_number, entity_type="TRAINING_RECORD", source_key=source_key, label=f"{getattr(user, 'full_name', parsed.person_id)} · {course.course_name}", action=action, payload=payload)
+                item = _row(
+                    job_id=job.id,
+                    sheet="Training",
+                    row_number=row_number,
+                    entity_type="TRAINING_RECORD",
+                    source_key=source_key,
+                    label=f"{getattr(user, 'full_name', parsed.person_id)} · {course.course_name}",
+                    action=action,
+                    payload=payload,
+                )
                 _counter(sheet, action)
             db.add(item)
         except Exception as exc:
-            db.add(_row(job_id=job.id, sheet="Training", row_number=row_number, entity_type="TRAINING_RECORD", source_key=None, label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Training row'} · {clean(raw.get('CourseName')) or clean(raw.get('CourseID')) or ''}", action="SKIP", status="FAILED", payload=raw, issue_code="INVALID_TRAINING_RECORD", issue_message=str(exc)))
+            db.add(_row(
+                job_id=job.id,
+                sheet="Training",
+                row_number=row_number,
+                entity_type="TRAINING_RECORD",
+                source_key=None,
+                label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Training row'} · {clean(raw.get('CourseName')) or clean(raw.get('CourseID')) or ''}",
+                action="SKIP",
+                status="FAILED",
+                payload=raw,
+                issue_code="INVALID_TRAINING_RECORD",
+                issue_message=str(exc),
+            ))
             _counter(sheet, "SKIP", failed=True)
-        _set_job_progress(db, job, stage="MATCHING", sheet="Training", label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Training row'} · {clean(raw.get('CourseID')) or ''}", processed_delta=1)
+        _set_job_progress(
+            db,
+            job,
+            stage="MATCHING",
+            sheet="Training",
+            label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Training row'} · {clean(raw.get('CourseID')) or ''}",
+            processed_delta=1,
+        )
 
 
 def _preview_role_groups(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]]) -> None:
@@ -529,11 +645,24 @@ def process_workbook_preview(job_id: str) -> None:
         }
         db.commit()
 
+        params = _workbook_params(rows_by_sheet.get("Params", []))
+        default_frequency_months = _default_frequency_months(params)
+        job.summary_json = {
+            **(job.summary_json or {}),
+            "policy_defaults": {
+                "default_frequency_months": default_frequency_months,
+            },
+        }
+        db.add(job)
+        db.commit()
+
         course_rows = rows_by_sheet.get("Courses", [])
         people_rows = [item for item in rows_by_sheet.get("People", []) if upper(item.get("PersonID")) != "TOTAL"]
-        known_courses = {upper(item.get("CourseID")) for item in course_rows if upper(item.get("CourseID"))}
+        workbook_courses = {upper(item.get("CourseID")) for item in course_rows if upper(item.get("CourseID"))}
+        workbook_people = {upper(item.get("PersonID")) for item in people_rows if upper(item.get("PersonID"))}
+        known_courses = set(workbook_courses)
         known_courses.update(upper(item.course_id) for item in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all())
-        known_people = {upper(item.get("PersonID")) for item in people_rows if upper(item.get("PersonID"))}
+        known_people = set(workbook_people)
         known_people.update(upper(item.person_id) for item in db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all())
         role_rows = rows_by_sheet.get("tblRoleGroups", [])
         known_groups = {upper(item.get("RoleGroup")) for item in role_rows if upper(item.get("RoleGroup"))}
@@ -541,7 +670,7 @@ def process_workbook_preview(job_id: str) -> None:
 
         processors: list[tuple[str, Callable[[], None]]] = []
         if "Courses" in sheets:
-            processors.append(("Courses", lambda: _preview_courses(db, job, sheets["Courses"], course_rows)))
+            processors.append(("Courses", lambda: _preview_courses(db, job, sheets["Courses"], course_rows, default_frequency_months=default_frequency_months)))
         if "People" in sheets:
             sheets["People"].total_rows = len(people_rows)
             processors.append(("People", lambda: _preview_people(db, job, sheets["People"], people_rows)))
@@ -552,7 +681,7 @@ def process_workbook_preview(job_id: str) -> None:
         if "tblCourseMatrix" in sheets:
             processors.append(("tblCourseMatrix", lambda: _preview_matrix(db, job, sheets["tblCourseMatrix"], rows_by_sheet.get("tblCourseMatrix", []), known_courses, known_groups)))
         if "Training" in sheets:
-            processors.append(("Training", lambda: _preview_training(db, job, sheets["Training"], rows_by_sheet.get("Training", []))))
+            processors.append(("Training", lambda: _preview_training(db, job, sheets["Training"], rows_by_sheet.get("Training", []), workbook_people=workbook_people, workbook_courses=workbook_courses)))
 
         for name, processor in processors:
             sheets[name].status = "PROCESSING"
@@ -729,21 +858,37 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         user = db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id, func.lower(account_models.User.email) == str(selected_email).lower()).first()
 
     create_account = decision == "CREATE_ACCOUNT"
-    profile_only = decision == "PROFILE_ONLY" or (is_new and not create_account)
-    if user is None and create_account:
-        if not selected_email:
-            raise ValueError("Cannot create a portal account without an email address")
-        default_password = (os.getenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD") or "").strip()
-        if not default_password:
-            raise ValueError("PERSONNEL_IMPORT_DEFAULT_PASSWORD is not configured; choose PROFILE_ONLY or configure onboarding credentials")
+    personnel_only = decision == "PROFILE_ONLY" or (is_new and not create_account)
+    if user is None and (create_account or personnel_only):
+        if create_account and not selected_email:
+            raise ValueError("A portal-access candidate requires a valid email address")
+        identity_email = selected_email or f"{person_id.lower()}@personnel.invalid"
+        approval_note = (
+            "Imported from Training Tracker; pending administrator approval and onboarding."
+            if create_account
+            else "Personnel-only identity imported for training and licence records; portal access disabled."
+        )
         user = account_models.User(
-            id=generate_user_id(), amo_id=job.amo_id, department_id=_department_id(db, job.amo_id, payload.get("department")),
-            staff_code=person_id, email=selected_email, first_name=payload["first_name"], last_name=payload["last_name"],
+            id=generate_user_id(),
+            amo_id=job.amo_id,
+            department_id=_department_id(db, job.amo_id, payload.get("department")),
+            staff_code=person_id,
+            email=identity_email,
+            first_name=payload["first_name"],
+            last_name=payload["last_name"],
             full_name=payload.get("full_name") or f"{payload['first_name']} {payload['last_name']}",
-            role=_role_from_position(payload.get("position_title")), position_title=payload.get("position_title"),
-            phone=payload.get("phone_number"), secondary_phone=payload.get("secondary_phone"),
-            hashed_password=get_password_hash(default_password), is_active=str(payload.get("status") or "Active").lower() == "active",
-            is_amo_admin=False, is_auditor=False, must_change_password=True,
+            role=_role_from_position(payload.get("position_title")),
+            position_title=payload.get("position_title"),
+            phone=payload.get("phone_number"),
+            secondary_phone=payload.get("secondary_phone"),
+            hashed_password=get_password_hash(secrets.token_urlsafe(48)),
+            is_active=False,
+            is_amo_admin=False,
+            is_auditor=False,
+            must_change_password=True,
+            approved_by_user_id=None,
+            approved_at=None,
+            approval_notes=approval_note,
         )
         db.add(user)
         db.flush()
@@ -756,7 +901,8 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         user.position_title = payload.get("position_title")
         user.phone = payload.get("phone_number")
         user.secondary_phone = payload.get("secondary_phone")
-        user.is_active = str(payload.get("status") or "Active").lower() == "active"
+        if str(payload.get("status") or "Active").lower() != "active":
+            user.is_active = False
         if selected_email:
             user.email = selected_email
         profile.user_id = user.id

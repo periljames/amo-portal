@@ -44,7 +44,7 @@ function humanize(value: string | null | undefined): string {
 
 function decisionLabel(value: string): string {
   const labels: Record<string, string> = {
-    CREATE_ACCOUNT: "Create personnel profile and portal account",
+    CREATE_ACCOUNT: "Create inactive account for approval and onboarding",
     PROFILE_ONLY: "Accept personnel record without portal access",
     SKIP: "Do not import this row",
     KEEP_EXISTING_EMAIL: "Keep existing email and update other fields",
@@ -372,7 +372,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
             {isReviewReady && reviewRows.length > 0 ? (
               <section className="training-import-section training-import-review">
                 <div className="training-import-section__header">
-                  <div><h4>Personnel and conflict review</h4><p>New people are never silently given portal access. Accept each as a user, personnel-only record, or skip it.</p></div>
+                  <div><h4>Personnel and conflict review</h4><p>New people are never silently activated. Create an inactive account for approval, keep a non-login personnel identity, or skip the row.</p></div>
                   <UserPlus size={20} />
                 </div>
                 <div className="training-import-filterbar">

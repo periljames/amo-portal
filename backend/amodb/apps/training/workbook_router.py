@@ -14,6 +14,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from . import compliance as training_compliance
+from . import models as training_models
 from .workbook_import import commit_workbook_import, process_workbook_preview, utcnow
 from .workbook_models import (
     PersonnelLicence,
@@ -329,7 +330,17 @@ def list_role_rules(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> list[TrainingCourseRoleRuleRead]:
-    rows = db.query(TrainingCourseRoleRule, TrainingRoleGroup, __import__("amodb.apps.training.models", fromlist=["TrainingCourse"]).TrainingCourse).join(TrainingRoleGroup, TrainingCourseRoleRule.role_group_id == TrainingRoleGroup.id).join(__import__("amodb.apps.training.models", fromlist=["TrainingCourse"]).TrainingCourse, TrainingCourseRoleRule.course_id == __import__("amodb.apps.training.models", fromlist=["TrainingCourse"]).TrainingCourse.id).filter(TrainingCourseRoleRule.amo_id == current_user.amo_id, TrainingCourseRoleRule.is_active.is_(True)).all()
+    rows = (
+        db.query(TrainingCourseRoleRule, TrainingRoleGroup, training_models.TrainingCourse)
+        .join(TrainingRoleGroup, TrainingCourseRoleRule.role_group_id == TrainingRoleGroup.id)
+        .join(training_models.TrainingCourse, TrainingCourseRoleRule.course_id == training_models.TrainingCourse.id)
+        .filter(
+            TrainingCourseRoleRule.amo_id == current_user.amo_id,
+            TrainingCourseRoleRule.is_active.is_(True),
+        )
+        .order_by(TrainingRoleGroup.code.asc(), training_models.TrainingCourse.course_id.asc())
+        .all()
+    )
     return [TrainingCourseRoleRuleRead(id=rule.id, course_id=rule.course_id, course_code=course.course_id, course_name=course.course_name, role_group_id=rule.role_group_id, role_group_code=group.code, is_required=rule.is_required, requirement_type=rule.requirement_type, notes=rule.notes, is_active=rule.is_active) for rule, group, course in rows]
 
 
