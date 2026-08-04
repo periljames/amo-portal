@@ -1,7 +1,13 @@
 import type {
   BaseStationCreate,
   BaseStationRead,
+  BaseStationUpdate,
 } from "../types/foundations";
+
+export type BaseStationIdentityCandidate = {
+  code?: string | null;
+  aliases?: readonly string[] | null;
+};
 
 export type BaseStationIdentityConflict = {
   field: "code" | "aliases";
@@ -28,9 +34,41 @@ function uniqueValues(values: readonly string[] | null | undefined): string[] {
   return result;
 }
 
+/**
+ * Return only identities introduced by an update.
+ *
+ * Codes and aliases have separate database constraints, so historic tenants can
+ * legally contain a code on one base that matches an alias on another. Those
+ * overlaps must remain editable. We therefore grandfather unchanged identity
+ * values and preflight only a changed code or aliases newly added by the user.
+ */
+export function changedBaseStationIdentityCandidate(
+  current: BaseStationRead,
+  payload: BaseStationUpdate,
+): BaseStationIdentityCandidate | null {
+  const candidate: BaseStationIdentityCandidate = {};
+
+  if (payload.code !== undefined && identityKey(payload.code) !== identityKey(current.code)) {
+    candidate.code = payload.code;
+  }
+
+  if (payload.aliases !== undefined) {
+    const currentAliases = new Set(
+      (current.aliases || []).map((alias) => identityKey(alias.alias)).filter(Boolean),
+    );
+    const introducedAliases = uniqueValues(payload.aliases)
+      .filter((alias) => !currentAliases.has(identityKey(alias)));
+    if (introducedAliases.length) candidate.aliases = introducedAliases;
+  }
+
+  return candidate.code !== undefined || (candidate.aliases?.length || 0) > 0
+    ? candidate
+    : null;
+}
+
 export function findBaseStationIdentityConflict(
   existingBases: readonly BaseStationRead[],
-  candidate: Pick<BaseStationCreate, "code" | "aliases">,
+  candidate: BaseStationIdentityCandidate,
   excludeBaseStationId?: string | null,
 ): BaseStationIdentityConflict | null {
   const requestedCode = String(candidate.code || "").trim();
