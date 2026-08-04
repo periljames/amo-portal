@@ -204,11 +204,11 @@ export default function PublicationPdfLayoutViewer({
           navigationRequest={readerNavigationRequest}
           initialPage={initialPage}
           initialZoom={initialZoom}
-          onPageChange={(pageNumber) => { setCurrentPage(pageNumber); onPageChange?.(pageNumber); }}
+          onPageChange={(pageNumber: number) => { setCurrentPage(pageNumber); onPageChange?.(pageNumber); }}
           onZoomChange={onZoomChange}
           onAcroFormDetected={onAcroFormDetected}
           onOutlineReady={onOutlineReady}
-          renderPageOverlay={(pageNumber) => <>{(referencesByPage.get(pageNumber) || []).map((reference) => {
+          renderPageOverlay={(pageNumber: number) => <>{(referencesByPage.get(pageNumber) || []).map((reference) => {
             const style = hotspotStyle(reference);
             if (!style || !reference.target) return null;
             return <button
