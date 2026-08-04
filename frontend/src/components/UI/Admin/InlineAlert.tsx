@@ -18,8 +18,15 @@ const InlineAlert: React.FC<InlineAlertProps> = ({
   className,
   actions,
 }) => {
+  const urgent = tone === "danger" || tone === "warning";
   return (
-    <div className={clsx("admin-inline-alert", `admin-inline-alert--${tone}`, className)}>
+    <div
+      className={clsx("admin-inline-alert", `admin-inline-alert--${tone}`, className)}
+      role={urgent ? "alert" : "status"}
+      aria-live={urgent ? "assertive" : "polite"}
+      aria-atomic="true"
+      data-tone={tone}
+    >
       <div className="admin-inline-alert__content">
         {title ? <strong>{title}</strong> : null}
         {children ? <div className="admin-inline-alert__body">{children}</div> : null}
