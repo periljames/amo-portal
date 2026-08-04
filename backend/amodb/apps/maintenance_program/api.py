@@ -293,14 +293,36 @@ def create_work_order_from_program_items(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(require_roles(*PROGRAM_WRITE_ROLES)),
 ) -> WorkOrderRead:
-    if not payload.program_item_ids:
+    selected_program_ids = set(payload.program_item_ids)
+    if not selected_program_ids:
         raise HTTPException(status_code=400, detail="No program_item_ids supplied")
+
+    try:
+        aircraft_items = services.list_aircraft_program_items_for_aircraft(
+            db,
+            amo_id=current_user.effective_amo_id,
+            aircraft_serial_number=aircraft_sn,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    available_program_ids = {item.program_item_id for item in aircraft_items}
+    missing_program_ids = sorted(selected_program_ids - available_program_ids)
+    if missing_program_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Selected maintenance requirements are not assigned to this aircraft.",
+                "program_item_ids": missing_program_ids,
+            },
+        )
+
     try:
         wo = services.create_work_order_from_program_items(
             db,
             amo_id=current_user.effective_amo_id,
             aircraft_serial_number=aircraft_sn,
-            program_item_ids=payload.program_item_ids,
+            program_item_ids=sorted(selected_program_ids),
             check_type=payload.check_type,
             wo_number=payload.wo_number,
             description=payload.description,
@@ -309,7 +331,7 @@ def create_work_order_from_program_items(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    run_count = max(1, len(payload.program_item_ids))
+    run_count = len(selected_program_ids)
     account_services.record_usage(
         db,
         amo_id=current_user.effective_amo_id,
