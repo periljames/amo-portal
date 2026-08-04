@@ -405,6 +405,7 @@ def _validate_ingestion_record(payload: Dict[str, Any]) -> Tuple[List[str], List
                 if (
                     not parsed_delay.is_finite()
                     or parsed_delay < 0
+                    or parsed_delay > Decimal("2147483647")
                     or parsed_delay != parsed_delay.to_integral_value()
                 ):
                     errors.append(delay_error)
@@ -1917,17 +1918,21 @@ def execute_metric(
         "threshold_id": threshold.id if threshold else None,
         "source_cutoff_at": source_cutoff.isoformat(),
     }
-    result_hash = sha256_value(
-        {
-            "metric_id": metric.id,
-            "formula_version": metric.formula_version,
-            "lineage": lineage,
-            "value": str(value) if value is not None else None,
-            "confidence": [str(lower) if lower is not None else None, str(upper) if upper is not None else None],
-            "status": result_status,
-        }
-    )
-    existing = (
+    identity_payload = {
+        "amo_id": amo_id,
+        "metric_definition_id": metric.id,
+        "scope_type": resolved_scope_type,
+        "scope_id": resolved_scope_id,
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+        "formula_version": metric.formula_version,
+    }
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity_key, 0))"),
+            {"identity_key": canonical_json(identity_payload)},
+        )
+    previous = (
         db.query(domain.ReliabilityCalculationRun)
         .filter(
             domain.ReliabilityCalculationRun.amo_id == amo_id,
@@ -1938,50 +1943,54 @@ def execute_metric(
             domain.ReliabilityCalculationRun.period_end == end,
             domain.ReliabilityCalculationRun.formula_version == metric.formula_version,
         )
+        .order_by(
+            domain.ReliabilityCalculationRun.revision.desc(),
+            domain.ReliabilityCalculationRun.created_at.desc(),
+            domain.ReliabilityCalculationRun.id.desc(),
+        )
         .first()
     )
-    if existing:
-        run = existing
-        run.numerator = Decimal(events)
-        run.denominator = exposure
-        run.value = value
-        run.confidence_lower = lower
-        run.confidence_upper = upper
-        run.sample_size = events
-        run.small_fleet = active_aircraft < 6
-        run.status = result_status
-        run.source_cutoff_at = source_cutoff
-        run.source_lineage_json = lineage
-        run.result_hash = result_hash
-        run.scheduled = bool(run.scheduled or scheduled)
-        if actor_user_id is not None:
-            run.run_by_user_id = actor_user_id
-        audit_action = "CALCULATION_REFRESHED"
-    else:
-        run = domain.ReliabilityCalculationRun(
-            amo_id=amo_id,
-            metric_definition_id=metric.id,
-            scope_type=resolved_scope_type,
-            scope_id=resolved_scope_id,
-            period_start=start,
-            period_end=end,
-            numerator=Decimal(events),
-            denominator=exposure,
-            value=value,
-            confidence_lower=lower,
-            confidence_upper=upper,
-            sample_size=events,
-            small_fleet=active_aircraft < 6,
-            status=result_status,
-            formula_version=metric.formula_version,
-            source_cutoff_at=source_cutoff,
-            source_lineage_json=lineage,
-            result_hash=result_hash,
-            scheduled=scheduled,
-            run_by_user_id=actor_user_id,
-        )
-        db.add(run)
-        audit_action = "CALCULATION_EXECUTED"
+    revision = (int(previous.revision) + 1) if previous else 1
+    if previous:
+        lineage["previous_run_id"] = previous.id
+        lineage["previous_revision"] = int(previous.revision)
+    lineage["revision"] = revision
+    result_hash = sha256_value(
+        {
+            "metric_id": metric.id,
+            "formula_version": metric.formula_version,
+            "revision": revision,
+            "lineage": lineage,
+            "value": str(value) if value is not None else None,
+            "confidence": [str(lower) if lower is not None else None, str(upper) if upper is not None else None],
+            "status": result_status,
+        }
+    )
+    run = domain.ReliabilityCalculationRun(
+        amo_id=amo_id,
+        metric_definition_id=metric.id,
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        period_start=start,
+        period_end=end,
+        numerator=Decimal(events),
+        denominator=exposure,
+        value=value,
+        confidence_lower=lower,
+        confidence_upper=upper,
+        sample_size=events,
+        small_fleet=active_aircraft < 6,
+        status=result_status,
+        formula_version=metric.formula_version,
+        revision=revision,
+        source_cutoff_at=source_cutoff,
+        source_lineage_json=lineage,
+        result_hash=result_hash,
+        scheduled=scheduled,
+        run_by_user_id=actor_user_id,
+    )
+    db.add(run)
+    audit_action = "CALCULATION_REFRESHED" if previous else "CALCULATION_EXECUTED"
     db.flush()
     _advance_metric_schedule(metric, source_cutoff)
     if alert_severity:
@@ -2019,6 +2028,8 @@ def execute_metric(
             "metric_id": metric.id,
             "status": result_status,
             "result_hash": result_hash,
+            "revision": revision,
+            "previous_run_id": previous.id if previous else None,
             "scheduled": scheduled,
             "source_cutoff_at": source_cutoff.isoformat(),
         },

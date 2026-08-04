@@ -67,11 +67,36 @@ def test_subdaily_schedule_advances_after_each_execution():
     assert metric.next_run_at == datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
 
 
-def test_existing_period_result_is_refreshed_instead_of_returned_early():
+def test_existing_period_result_creates_an_immutable_revision():
     source = getsource(advanced_services.execute_metric)
-    assert "run.source_cutoff_at = source_cutoff" in source
-    assert 'audit_action = "CALCULATION_REFRESHED"' in source
-    assert "if existing:\n        return existing" not in source
+    assert "pg_advisory_xact_lock" in source
+    assert "ReliabilityCalculationRun.revision.desc()" in source
+    assert "revision=revision" in source
+    assert 'audit_action = "CALCULATION_REFRESHED" if previous else "CALCULATION_EXECUTED"' in source
+    assert "run = existing" not in source
+    assert "run.source_cutoff_at = source_cutoff" not in source
+
+
+def test_delay_integer_boundaries_are_validated_before_insertion():
+    accepted = {
+        "event_type": "TECHNICAL_DELAY",
+        "occurred_at": "2026-08-04T00:00:00Z",
+        "flight_number": "KQ100",
+        "delay_minutes": "2147483647",
+    }
+    errors, _ = advanced_services._validate_ingestion_record(accepted)
+    assert not errors
+    assert accepted["delay_minutes"] == 2147483647
+
+    rejected = {
+        "event_type": "TECHNICAL_DELAY",
+        "occurred_at": "2026-08-04T00:00:00Z",
+        "flight_number": "KQ101",
+        "delay_minutes": "2147483648",
+    }
+    errors, _ = advanced_services._validate_ingestion_record(rejected)
+    assert "delay_minutes must be a nonnegative whole number" in errors
+    assert rejected["delay_minutes"] == "2147483648"
 
 
 def test_workbench_total_engine_shift_count_is_not_page_limited():
