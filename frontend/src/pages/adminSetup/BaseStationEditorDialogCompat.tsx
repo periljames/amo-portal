@@ -1,10 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 import BaseStationEditorDialogV2, {
   type BaseDraft,
   type BaseEditorState,
 } from "./BaseStationEditorDialogV2";
+import { getCachedUser } from "../../services/auth";
+import {
+  getAdminContext,
+  setAdminContext,
+  type AdminContext,
+} from "../../services/adminUsers";
 import { listBaseStations, updateBaseStation } from "../../services/foundations";
 import type { BaseStationCreate, BaseStationRead } from "../../types/foundations";
 
@@ -84,18 +90,48 @@ const BaseStationEditorDialogCompat: React.FC<Props> = ({
   onSave,
   onLocationChanged,
 }) => {
+  const isSuperuser = Boolean(getCachedUser()?.is_superuser);
   const [bases, setBases] = useState<BaseStationRead[]>([]);
   const [selectedExisting, setSelectedExisting] = useState<BaseStationRead | null>(null);
   const [updatingExisting, setUpdatingExisting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const tenantContextRef = useRef<AdminContext | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void listBaseStations({ include_inactive: true })
-      .then((items) => { if (!cancelled) setBases(items); })
-      .catch(() => { if (!cancelled) setBases([]); });
+
+    const loadScopedBases = async () => {
+      setError(null);
+      try {
+        if (isSuperuser) {
+          const context = await getAdminContext();
+          if (cancelled) return;
+          if (!context.active_amo_id) {
+            throw new Error("Select an AMO support context before editing its operating bases.");
+          }
+          tenantContextRef.current = context;
+          await setAdminContext({
+            active_amo_id: context.active_amo_id,
+            data_mode: context.data_mode,
+          });
+        } else {
+          tenantContextRef.current = null;
+        }
+
+        const items = await listBaseStations({ include_inactive: true });
+        if (!cancelled) setBases(items);
+      } catch (cause) {
+        if (cancelled) return;
+        setBases([]);
+        setError(cause instanceof Error && cause.message.trim()
+          ? cause.message
+          : "The selected AMO's base records could not be loaded.");
+      }
+    };
+
+    void loadScopedBases();
     return () => { cancelled = true; };
-  }, [editor.id]);
+  }, [editor.id, isSuperuser]);
 
   useEffect(() => {
     setSelectedExisting(null);
@@ -122,6 +158,16 @@ const BaseStationEditorDialogCompat: React.FC<Props> = ({
     setUpdatingExisting(true);
     setError(null);
     try {
+      if (isSuperuser) {
+        const context = tenantContextRef.current;
+        if (!context?.active_amo_id) {
+          throw new Error("The AMO context used to open this base is no longer available. Close the dialog and reopen it from the intended tenant.");
+        }
+        await setAdminContext({
+          active_amo_id: context.active_amo_id,
+          data_mode: context.data_mode,
+        });
+      }
       await updateBaseStation(selectedExisting.id, payloadFromDraft(editor.draft));
       await onLocationChanged();
       onClose();
