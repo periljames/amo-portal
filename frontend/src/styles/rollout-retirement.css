@@ -1,0 +1,188 @@
+.rollout-page {
+  --rollout-gap: clamp(0.75rem, 1.2vw, 1.25rem);
+}
+
+.rollout-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rollout-gap);
+  margin-bottom: var(--rollout-gap);
+}
+
+.rollout-page .planning-panel + .planning-panel {
+  margin-top: var(--rollout-gap);
+}
+
+.rollout-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.rollout-form-grid label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.rollout-form-grid label > span,
+.rollout-wave-summary span {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.82rem;
+}
+
+.rollout-form-grid .is-wide {
+  grid-column: span 2;
+}
+
+.rollout-form-grid textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.rollout-select {
+  margin: 0.8rem 0;
+}
+
+.rollout-aircraft-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  max-height: 16rem;
+  overflow: auto;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.65rem;
+}
+
+.rollout-aircraft-picker label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.rollout-aircraft-picker label:hover {
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.rollout-aircraft-picker label > span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.rollout-aircraft-picker small,
+.rollout-page td small,
+.rollout-checklist-grid small {
+  display: block;
+  color: var(--text-muted, #6b7280);
+}
+
+.rollout-wave-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0.8rem 0;
+  padding: 0.75rem;
+  border-radius: 0.65rem;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.rollout-wave-summary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.rollout-blockers {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.rollout-blockers > div {
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid var(--danger-color, #c43d3d);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--danger-color, #c43d3d) 9%, transparent);
+}
+
+.rollout-checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.rollout-checklist-grid > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.6rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rollout-checklist-grid > button:hover {
+  border-color: var(--accent-color, #4677ff);
+}
+
+.rollout-checklist-grid button > span:last-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.spreadsheet-state-guide {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.spreadsheet-state-guide > div {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.6rem;
+}
+
+.spreadsheet-state-guide strong {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.rollout-page td code {
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+}
+
+@media (max-width: 1050px) {
+  .rollout-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .rollout-form-grid,
+  .rollout-aircraft-picker,
+  .rollout-wave-summary,
+  .rollout-checklist-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rollout-form-grid .is-wide {
+    grid-column: auto;
+  }
+}
