@@ -10,9 +10,6 @@ import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
-const QualityExcellenceCockpit = lazy(
-  () => import("./QualityExcellenceCockpit"),
-);
 
 type AuditRoute = {
   amoCode: string;
@@ -114,7 +111,6 @@ const QualityEnhancementsHost: React.FC = () => {
     return <CarInviteResponsiveStyleLoader />;
   }
 
-  const excellenceActive = /^\/maintenance\/[^/]+\/quality\/?$/i.test(location.pathname);
   const auditEnhancement = route?.activeTab === "checklist" ? (
     <Suspense fallback={null}>
       <QualityChecklistPdfFormEditorHost />
@@ -128,11 +124,6 @@ const QualityEnhancementsHost: React.FC = () => {
       <PortalTextScaleManager />
       <QualityContextTabs />
       <QualityDataFreshnessCoordinator />
-      {excellenceActive ? (
-        <Suspense fallback={null}>
-          <QualityExcellenceCockpit />
-        </Suspense>
-      ) : null}
       {auditEnhancement}
     </>
   );
