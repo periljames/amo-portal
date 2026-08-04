@@ -14,6 +14,10 @@
   backdrop-filter: blur(14px);
 }
 
+.publication-linked-layout.has-static-typewriter .pdfv2-search {
+  top: calc(var(--portal-sticky-offset, 0px) + 90px);
+}
+
 .pdf-static-typewriter-controls.is-active {
   background: color-mix(in srgb, #2563eb 10%, var(--surface-elevated));
   border-bottom-color: color-mix(in srgb, #2563eb 48%, var(--border-subtle));
@@ -205,6 +209,10 @@
     position: relative;
     top: auto;
     grid-template-columns: 1fr;
+  }
+
+  .publication-linked-layout.has-static-typewriter .pdfv2-search {
+    top: calc(var(--portal-sticky-offset, 0px) + 46px);
   }
 
   .pdf-static-typewriter-controls > div {
