@@ -1,1 +1,0 @@
-Apply and validate the six latest Codex review findings for PR #422.
