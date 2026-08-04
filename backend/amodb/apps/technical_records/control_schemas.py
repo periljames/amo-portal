@@ -13,6 +13,8 @@ class CanonicalUtilisationCreate(BaseModel):
     station: Optional[str] = Field(default=None, max_length=16)
     hours: float = Field(ge=0, description="Cumulative airframe hours after this entry")
     cycles: float = Field(ge=0, description="Cumulative airframe cycles after this entry")
+    block_hours: Optional[float] = Field(default=None, ge=0)
+    entry_cycles: Optional[float] = Field(default=None, ge=0)
     source: str = "Manual"
     remarks: Optional[str] = None
     note: Optional[str] = None
