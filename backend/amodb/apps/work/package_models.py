@@ -86,6 +86,7 @@ class WorkPackageOrder(Base):
     __tablename__ = "work_package_orders"
     __table_args__ = (
         UniqueConstraint("work_package_id", "work_order_id", name="uq_work_package_order"),
+        UniqueConstraint("amo_id", "work_order_id", name="uq_work_package_order_amo_order"),
         Index("ix_work_package_orders_package", "work_package_id", "sequence_no"),
         Index("ix_work_package_orders_order", "work_order_id"),
     )
