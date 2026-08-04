@@ -6,8 +6,10 @@ from fastapi import APIRouter
 # Primary Quality API exports.
 from .router import router, public_router  # noqa: F401
 
-# Register extension metadata before application startup or test metadata creation.
+# Register extension metadata and assurance permission alignment before route
+# dependencies are evaluated during application startup.
 from . import excellence_models as _excellence_models  # noqa: F401,E402
+from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
 from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
