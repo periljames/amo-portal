@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -30,6 +33,12 @@ PACKAGE_EDITOR_ROLES = (
     AccountRole.PLANNING_ENGINEER,
     AccountRole.PRODUCTION_ENGINEER,
 )
+
+
+def _refresh_package_links(db: Session, package) -> None:
+    db.flush()
+    db.expire(package, ["order_links"])
+    package_services.calculate_readiness(db, package=package)
 
 
 @router.get("", response_model=list[WorkPackageRead])
@@ -78,13 +87,21 @@ def create_work_package(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*PACKAGE_EDITOR_ROLES)),
 ):
+    effective_payload = payload
+    if not payload.package_ref:
+        effective_payload = payload.model_copy(
+            update={
+                "package_ref": f"WP-{datetime.now(UTC):%Y%m%d}-{uuid4().hex[:8].upper()}"
+            }
+        )
     try:
         package = package_services.create_package(
             db,
             amo_id=current_user.effective_amo_id,
-            payload=payload,
+            payload=effective_payload,
             actor=current_user,
         )
+        _refresh_package_links(db, package)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit()
@@ -135,7 +152,7 @@ def attach_work_order(
         payload=payload,
         actor=current_user,
     )
-    package_services.calculate_readiness(db, package=package)
+    _refresh_package_links(db, package)
     db.commit()
     db.refresh(package)
     return package_services.package_read(package)
@@ -152,6 +169,7 @@ def get_work_package_readiness(
         amo_id=current_user.effective_amo_id,
         package_id=package_id,
     )
+    db.expire(package, ["order_links"])
     readiness = package_services.calculate_readiness(db, package=package)
     db.commit()
     return readiness
@@ -169,6 +187,7 @@ def update_work_package_status(
         amo_id=current_user.effective_amo_id,
         package_id=package_id,
     )
+    db.expire(package, ["order_links"])
     package_services.change_status(
         db,
         package=package,
