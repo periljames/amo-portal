@@ -63,6 +63,17 @@ test.describe("Quality Operations Planner", () => {
     await page.keyboard.press("Escape");
     await expect(page.locator(".qms-planner-shortcuts")).toBeHidden();
 
+    const weekUrl = page.url();
+    await page.keyboard.press("Control+c");
+    await expect(page.locator(".qms-planner-create-modal")).toBeHidden();
+    expect(page.url()).toBe(weekUrl);
+    await page.keyboard.press("Control+a");
+    await expect(page).not.toHaveURL(/\/quality\/calendar\/list/);
+    await page.keyboard.press("Control+k");
+    await expect(page.locator(".qms-planner-command")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".qms-planner-command")).toBeHidden();
+
     await page.keyboard.press("m");
     await expect(page).toHaveURL(/\/quality\/calendar\/month/);
     await expect(page.locator(".qms-planner-month")).toBeVisible();
