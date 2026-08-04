@@ -18,9 +18,11 @@ from .pdfium_service import PdfEngineError, PdfFlattenResult, PdfInspection
 SAFE_PROCESS_TIMEOUT_SECONDS = int(os.getenv("PDF_SAFE_PROCESS_TIMEOUT_SECONDS", "90"))
 SAFE_WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
 _JS_KEY_PATTERN = re.compile(r"/(?:JavaScript|JS)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
-_EMPTY_JS_PATTERN = re.compile(r"/JS\s*(?:\(\s*\)|<\s*>)", re.IGNORECASE)
+_INERT_JS_PATTERN = re.compile(r"/(?:JavaScript|JS)\s*(?:null|\(\s*\)|<\s*>)", re.IGNORECASE)
 _ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
+_JAVASCRIPT_SUBTYPE_PATTERN = re.compile(r"/S\s*/(?:JavaScript|JS)\b", re.IGNORECASE)
 _ACTION_OBJECT_PATTERN = re.compile(r"/Type\s*/Action\b", re.IGNORECASE)
+_PDF_REF_PATTERN = re.compile(r"(\d+)\s+\d+\s+R")
 _SAFE_ACTION_SUBTYPES = {"goto", "uri"}
 _DANGEROUS_ACTION_SUBTYPES = {
     "javascript",
@@ -70,10 +72,13 @@ def contains_unsafe_action(source: str) -> bool:
     """Detect executable actions without confusing font glyph names with `/A` actions."""
 
     normalized = base._decode_pdf_name_escapes(source or "")
-    executable = _EMPTY_JS_PATTERN.sub("", normalized)
+    inert_javascript = bool(_INERT_JS_PATTERN.search(normalized))
+    executable = _INERT_JS_PATTERN.sub("", normalized)
     if _JS_KEY_PATTERN.search(executable):
         return True
     subtypes = {match.group(1).casefold() for match in _ACTION_SUBTYPE_PATTERN.finditer(executable)}
+    if inert_javascript and _JAVASCRIPT_SUBTYPE_PATTERN.search(executable):
+        subtypes -= {"javascript", "js"}
     if subtypes & _DANGEROUS_ACTION_SUBTYPES:
         return True
     if _ACTION_OBJECT_PATTERN.search(executable):
@@ -94,6 +99,28 @@ def _count_widgets(document: Any) -> int:
     return sum(len(list(page.widgets() or [])) for page in document)
 
 
+def _remove_script_references(document: Any) -> None:
+    """Remove JavaScript name trees and additional-action references after scrub."""
+
+    catalog = int(document.pdf_catalog())
+    names_kind, names_value = document.xref_get_key(catalog, "Names")
+    if names_kind == "xref":
+        match = _PDF_REF_PATTERN.search(str(names_value or ""))
+        if match:
+            names_xref = int(match.group(1))
+            if document.xref_get_key(names_xref, "JavaScript")[0] != "null":
+                document.xref_set_key(names_xref, "JavaScript", "null")
+    if document.xref_get_key(catalog, "AA")[0] != "null":
+        document.xref_set_key(catalog, "AA", "null")
+
+    for xref in range(1, document.xref_length()):
+        if document.xref_get_key(xref, "AA")[0] != "null":
+            document.xref_set_key(xref, "AA", "null")
+        source = document.xref_object(xref, compressed=False) or ""
+        if _JAVASCRIPT_SUBTYPE_PATTERN.search(source):
+            document.update_object(xref, "<< >>")
+
+
 def _sanitize_in_process(content: bytes) -> bytes:
     import pymupdf
 
@@ -112,6 +139,7 @@ def _sanitize_in_process(content: bytes) -> bytes:
             )
         page_count = source.page_count
         widget_count = _count_widgets(source)
+        link_count = sum(len(page.get_links()) for page in source)
         source.scrub(
             attached_files=False,
             clean_pages=False,
@@ -127,6 +155,7 @@ def _sanitize_in_process(content: bytes) -> bytes:
             thumbnails=False,
             xml_metadata=False,
         )
+        _remove_script_references(source)
         sanitized = source.tobytes(garbage=4, deflate=True, clean=False)
     finally:
         source.close()
@@ -140,6 +169,8 @@ def _sanitize_in_process(content: bytes) -> bytes:
             raise PdfEngineError("PDF_SANITIZE_PAGE_MISMATCH", "PDF script removal changed the page count", status_code=500)
         if _count_widgets(verified) != widget_count:
             raise PdfEngineError("PDF_SANITIZE_WIDGET_MISMATCH", "PDF script removal changed the AcroForm field count", status_code=500)
+        if sum(len(page.get_links()) for page in verified) != link_count:
+            raise PdfEngineError("PDF_SANITIZE_LINK_MISMATCH", "PDF script removal changed document links", status_code=500)
         sources = [verified.xref_object(-1, compressed=False)]
         sources.extend(verified.xref_object(xref, compressed=False) for xref in range(1, verified.xref_length()))
         if any(contains_unsafe_action(value or "") for value in sources):
