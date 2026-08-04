@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, text
 
 
 BASE_REVISION = "accounts_20260803_auth_session"
-TARGET_REVISION = "quality_260804_assurance_wiring"
+TARGET_REVISION = "quality_260804_trigger_fix"
 APP_ROLE = "amo_quality_probe_app"
 
 
@@ -162,6 +162,20 @@ def main() -> None:
         ).scalar_one()
         assert function_count == 1
 
+        function_definition = connection.execute(
+            text(
+                """
+                SELECT pg_get_functiondef(p.oid)
+                FROM pg_proc p
+                WHERE p.proname = 'quality_capture_assurance_event'
+                LIMIT 1
+                """
+            )
+        ).scalar_one()
+        assert "set_config('app.tenant_id', tenant_id, true)" in function_definition
+        assert "NOT EXISTS" in function_definition
+        assert "FROM users" in function_definition
+
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}"))
         connection.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}"))
 
@@ -273,7 +287,7 @@ def main() -> None:
         event = connection.execute(
             text(
                 """
-                SELECT source_type, source_id, event_type, processing_status
+                SELECT source_type, source_id, event_type, processing_status, actor_user_id
                 FROM quality_assurance_events
                 LIMIT 1
                 """
@@ -283,6 +297,7 @@ def main() -> None:
         assert event["source_id"] == ids["document_a"]
         assert event["event_type"] == "UPDATE"
         assert event["processing_status"] == "PENDING"
+        assert event["actor_user_id"] == ids["user_a"]
 
         evidence = connection.execute(
             text(
@@ -298,6 +313,35 @@ def main() -> None:
         assert evidence["evidence_status"] == "VERIFIED"
         assert evidence["last_synced_at"] is not None
         assert evidence["invalidation_reason"] is None
+
+    # The trigger must derive tenant context from the source row when a trusted
+    # import or scheduled job has not pre-populated app.tenant_id.
+    with engine.begin() as connection:
+        connection.execute(text(f"SET LOCAL ROLE {APP_ROLE}"))
+        connection.execute(
+            text(
+                """
+                UPDATE qms_documents
+                SET title = 'Quality Procedures Manual — Imported Revision',
+                    updated_by = 'non-user-import-principal',
+                    updated_at = NOW()
+                WHERE id = :document_id AND amo_id = :amo_id
+                """
+            ),
+            {"document_id": ids["document_a"], "amo_id": ids["amo_a"]},
+        )
+        event = connection.execute(
+            text(
+                """
+                SELECT actor_user_id, source_snapshot
+                FROM quality_assurance_events
+                ORDER BY occurred_at DESC
+                LIMIT 1
+                """
+            )
+        ).mappings().one()
+        assert event["actor_user_id"] is None
+        assert event["source_snapshot"]["title"] == "Quality Procedures Manual — Imported Revision"
 
     with engine.begin() as connection:
         connection.execute(text(f"SET LOCAL ROLE {APP_ROLE}"))
