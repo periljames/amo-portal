@@ -1,5 +1,38 @@
 // src/app/routeGuards.ts
-import { getCachedUser } from "../services/auth";
+import { getCachedUser, type PortalUser } from "../services/auth";
+
+const QMS_INSPECTOR_PERMISSIONS = new Set([
+  "qms.dashboard.view",
+  "qms.inbox.view",
+  "qms.calendar.view",
+  "qms.audit.view",
+  "qms.audit.execute",
+  "qms.finding.view",
+  "qms.finding.create",
+  "qms.car.view",
+  "qms.document.view",
+  "qms.evidence.view",
+  "qms.evidence.download",
+]);
+
+const QMS_VIEW_ONLY_PERMISSIONS = new Set([
+  "qms.dashboard.view",
+  "qms.inbox.view",
+  "qms.calendar.view",
+  "qms.audit.view",
+  "qms.finding.view",
+  "qms.car.view",
+  "qms.risk.view",
+  "qms.change.view",
+  "qms.document.view",
+  "qms.supplier.view",
+  "qms.equipment.view",
+  "qms.external.view",
+  "qms.review.view",
+  "qms.report.view",
+  "qms.evidence.view",
+  "qms.training.view",
+]);
 
 export function isPlatformSuperuser(): boolean {
   const user = getCachedUser();
@@ -11,34 +44,29 @@ export function hasTenantIdentity(): boolean {
   return !!user && !user.is_superuser && !!user.amo_id;
 }
 
-export function hasQmsRolePermission(permission: string): boolean {
-  const user = getCachedUser();
+export function userHasQmsRolePermission(
+  user: PortalUser | null | undefined,
+  permission: string,
+): boolean {
   if (!user) return false;
 
-  // Platform superuser is global. It must use /platform/control and must not be
-  // treated as an AMO tenant QMS user.
-  if (user.is_superuser) return false;
-  if (!user.amo_id) return false;
+  // Platform superusers must use /platform/control and are never treated as an
+  // AMO tenant QMS user.
+  if (user.is_superuser || !user.amo_id) return false;
 
-  if (user.is_amo_admin) return permission.startsWith("qms.");
+  if (user.is_amo_admin || user.role === "AMO_ADMIN") {
+    return permission.startsWith("qms.");
+  }
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR") {
-    return [
-      "qms.dashboard.view",
-      "qms.inbox.view",
-      "qms.calendar.view",
-      "qms.audit.view",
-      "qms.audit.execute",
-      "qms.finding.view",
-      "qms.finding.create",
-      "qms.car.view",
-      "qms.document.view",
-      "qms.evidence.view",
-      "qms.evidence.download",
-    ].includes(permission);
+    return QMS_INSPECTOR_PERMISSIONS.has(permission);
   }
   if (user.role === "VIEW_ONLY") {
-    return permission.endsWith(".view");
+    return QMS_VIEW_ONLY_PERMISSIONS.has(permission);
   }
   return false;
+}
+
+export function hasQmsRolePermission(permission: string): boolean {
+  return userHasQmsRolePermission(getCachedUser(), permission);
 }

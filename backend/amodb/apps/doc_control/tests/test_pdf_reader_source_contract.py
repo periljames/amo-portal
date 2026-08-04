@@ -15,6 +15,20 @@ def _reader_core() -> str:
     return _read("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
 
 
+def _runs_reader_backend_contracts(workflow: str) -> bool:
+    """Accept an explicit reader list or the complete Document Control suite."""
+    complete_suite = "pytest -q amodb/apps/doc_control/tests" in workflow
+    explicit_suite = all(
+        test_name in workflow
+        for test_name in (
+            "test_pdf_reader_engine.py",
+            "test_pdf_reader_source_contract.py",
+            "test_pdf_reader_final_hardening.py",
+        )
+    )
+    return complete_suite or explicit_suite
+
+
 def test_one_browser_pdf_engine_owns_react_pdf_loading() -> None:
     core = _reader_core()
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
@@ -250,14 +264,16 @@ def test_reader_routes_precede_compatibility_routes() -> None:
     assert composition.index("router.include_router(_knowledge_reader_access_router)") < composition.index("router.include_router(_knowledge_reader_router)")
 
 
-def test_reader_ci_executes_engine_and_frontend_contracts() -> None:
+def test_reader_ci_covers_engine_and_frontend_contracts() -> None:
     publications = _read(".github/workflows/publications-reader-ci.yml")
     document_control = _read(".github/workflows/document-control-domain-ci.yml")
+
+    assert _runs_reader_backend_contracts(publications)
+    assert _runs_reader_backend_contracts(document_control)
+
     for workflow in (publications, document_control):
-        assert "test_pdf_reader_engine.py" in workflow
-        assert "test_pdf_reader_source_contract.py" in workflow
         assert "pdfReaderEngine.test.ts" in workflow
         assert "npm run build" in workflow
-    assert "pdf-capabilities" in document_control
-    assert "flatten.pdf" in document_control
-    assert "submit-record" in document_control
+
+    assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in publications
+    assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in document_control

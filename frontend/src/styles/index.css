@@ -1,0 +1,40 @@
+/*
+ * AMO Portal stylesheet manifest.
+ *
+ * Import order is deliberate:
+ * 1. historical global rules and resets;
+ * 2. canonical semantic tokens and base behaviour;
+ * 3. shared component and module styles;
+ * 4. theme adapters;
+ * 5. final accessibility, form, overlay and layout safety contracts.
+ *
+ * Application entry points import this file only. Large page-specific styles
+ * remain imported by their lazy page component so they are code-split and easy
+ * to trace. A page stylesheet must not redefine semantic theme tokens.
+ */
+
+@import "./global.css";
+@import "./tokens.css";
+@import "./base.css";
+
+@import "./qms.css";
+@import "./components/app-shell.css";
+@import "./components/page-header.css";
+@import "./components/section-card.css";
+@import "./components/data-table.css";
+@import "./components/empty-state.css";
+@import "./components/inline-error.css";
+@import "./components/toast.css";
+@import "./components/drawer.css";
+@import "./components/dashboard-cockpit.css";
+@import "./components/action-panel.css";
+@import "./components/planning-production.css";
+@import "./components/liquid-glass.css";
+@import "./components/tenant-shell.css";
+@import "./rostering.css";
+
+@import "./theme-contract.css";
+@import "./theme-module-repairs.css";
+@import "./foundations/forms-and-overlays.css";
+@import "./foundations/layout-safety.css";
+@import "./foundations/appearance.css";

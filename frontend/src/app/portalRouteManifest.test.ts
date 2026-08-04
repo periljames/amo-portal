@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+
+import type { PortalUser } from "../services/auth";
+import {
+  buildPortalNavigation,
+  flattenPortalNavigation,
+  type PortalNavItem,
+} from "./portalRouteManifest";
+
+function user(overrides: Partial<PortalUser> = {}): PortalUser {
+  return {
+    id: "user-1",
+    amo_id: "amo-1",
+    department_id: "department-1",
+    staff_code: "ST-001",
+    email: "user@example.com",
+    first_name: "Quality",
+    last_name: "User",
+    full_name: "Quality User",
+    role: "QUALITY_MANAGER",
+    position_title: "Quality Manager",
+    phone: null,
+    regulatory_authority: null,
+    licence_number: null,
+    licence_state_or_country: null,
+    licence_expires_on: null,
+    is_active: true,
+    is_superuser: false,
+    is_amo_admin: false,
+    must_change_password: false,
+    last_login_at: null,
+    last_login_ip: null,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function depth(item: PortalNavItem): number {
+  if (!item.children?.length) return 1;
+  return 1 + Math.max(...item.children.map(depth));
+}
+
+describe("portal route manifest", () => {
+  it("shows only the assigned department to a normal tenant user", () => {
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: user(),
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+
+    expect(items.some((item) => item.id === "department-quality")).toBe(true);
+    expect(items.some((item) => item.id === "department-planning")).toBe(false);
+    expect(items.some((item) => item.adminOnly)).toBe(false);
+    expect(items.every((item) => item.path.startsWith("/maintenance/safarilink"))).toBe(true);
+  });
+
+  it("filters Quality navigation from the supplied user without browser storage", () => {
+    const inspectorItems = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: user({ role: "QUALITY_INSPECTOR", is_amo_admin: false }),
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+    const viewOnlyItems = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: user({ role: "VIEW_ONLY", is_amo_admin: false }),
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+
+    expect(inspectorItems.some((item) => item.id === "qms-audits")).toBe(true);
+    expect(inspectorItems.some((item) => item.id === "qms-settings")).toBe(false);
+    expect(viewOnlyItems.some((item) => item.id === "qms-findings")).toBe(true);
+    expect(viewOnlyItems.some((item) => item.id === "qms-settings")).toBe(false);
+  });
+
+  it("does not expose administration until the backend-confirmed mode is active", () => {
+    const admin = user({
+      role: "AMO_ADMIN",
+      is_amo_admin: true,
+      position_title: "AMO Administrator",
+    });
+    const normalMode = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: admin,
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+    const elevatedMode = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: admin,
+      contextDepartment: "quality",
+      adminModeActive: true,
+    }));
+
+    expect(normalMode.some((item) => item.adminOnly)).toBe(false);
+    expect(elevatedMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
+    expect(elevatedMode.some((item) => item.id === "department-planning")).toBe(true);
+    expect(elevatedMode.some((item) => item.id === "department-quality")).toBe(true);
+  });
+
+  it("honours an active approved grant for a non-admin user", () => {
+    const grantee = user({
+      role: "TECHNICIAN",
+      is_amo_admin: false,
+      position_title: "Technician",
+    });
+    const normalMode = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: grantee,
+      contextDepartment: "maintenance",
+      adminModeActive: false,
+    }));
+    const elevatedMode = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink",
+      user: grantee,
+      contextDepartment: "maintenance",
+      adminModeActive: true,
+    }));
+
+    expect(normalMode.some((item) => item.adminOnly)).toBe(false);
+    expect(normalMode.some((item) => item.id === "department-quality")).toBe(false);
+    expect(elevatedMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
+    expect(elevatedMode.some((item) => item.id === "department-quality")).toBe(true);
+  });
+
+  it("never produces navigation deeper than three selectable levels", () => {
+    const groups = buildPortalNavigation({
+      amoCode: "safarilink",
+      user: user({ role: "AMO_ADMIN", is_amo_admin: true }),
+      contextDepartment: "quality",
+      adminModeActive: true,
+    });
+    const maximum = Math.max(...groups.flatMap((group) => group.items.map(depth)));
+    expect(maximum).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps every generated route inside the current tenant URL namespace", () => {
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: user({ role: "AMO_ADMIN", is_amo_admin: true }),
+      contextDepartment: "quality",
+      adminModeActive: true,
+    }));
+
+    expect(items.length).toBeGreaterThan(20);
+    expect(items.every((item) => item.path.startsWith("/maintenance/tenant-a"))).toBe(true);
+    expect(items.some((item) => item.path.includes("tenant-b"))).toBe(false);
+  });
+
+  it("publishes explicit routes for Reliability and EHM destinations", () => {
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: user({ role: "AMO_ADMIN", is_amo_admin: true }),
+      contextDepartment: "reliability",
+      adminModeActive: true,
+    }));
+    const paths = new Map(items.map((item) => [item.id, item.path]));
+
+    expect(paths.get("reliability-reports")).toBe("/maintenance/tenant-a/reliability/reports");
+    expect(paths.get("ehm-dashboard")).toBe("/maintenance/tenant-a/ehm/dashboard");
+    expect(paths.get("ehm-trends")).toBe("/maintenance/tenant-a/ehm/trends");
+    expect(paths.get("ehm-uploads")).toBe("/maintenance/tenant-a/ehm/uploads");
+  });
+
+  it("provides real home, operations and configuration routes for simple departments", () => {
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: user({ role: "AMO_ADMIN", is_amo_admin: true }),
+      contextDepartment: "safety",
+      adminModeActive: true,
+    }));
+    const paths = new Set(items.map((item) => item.path));
+
+    for (const department of ["safety", "stores", "workshops"]) {
+      expect(paths.has(`/maintenance/tenant-a/${department}`)).toBe(true);
+      expect(paths.has(`/maintenance/tenant-a/${department}/operations`)).toBe(true);
+      expect(paths.has(`/maintenance/tenant-a/${department}/settings`)).toBe(true);
+    }
+  });
+});

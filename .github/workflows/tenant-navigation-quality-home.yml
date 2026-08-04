@@ -1,0 +1,203 @@
+name: Tenant Navigation and Department Homes CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/security.py"
+      - "backend/amodb/alembic/versions/accounts_20260803_admin_profile_governance.py"
+      - "backend/amodb/alembic/versions/accounts_20260803_auth_session.py"
+      - "backend/amodb/apps/accounts/admin_profile_access.py"
+      - "backend/amodb/apps/accounts/admin_profile_concurrency.py"
+      - "backend/amodb/apps/accounts/admin_profile_guard.py"
+      - "backend/amodb/apps/accounts/admin_profile_logout.py"
+      - "backend/amodb/apps/accounts/admin_profile_router.py"
+      - "backend/amodb/apps/accounts/auth_session_context.py"
+      - "backend/amodb/apps/accounts/department_home_router.py"
+      - "backend/amodb/apps/accounts/router_admin.py"
+      - "backend/amodb/apps/accounts/router_public.py"
+      - "backend/amodb/apps/accounts/router_user_directory.py"
+      - "backend/amodb/apps/accounts/__init__.py"
+      - "backend/amodb/apps/accounts/tests/test_admin_profile_governance.py"
+      - "backend/amodb/apps/accounts/tests/test_department_home_security.py"
+      - "backend/amodb/apps/accounts/tests/test_user_directory_pagination.py"
+      - "backend/amodb/apps/quality/tenant_security.py"
+      - "backend/amodb/apps/quality/tests/test_tenant_route_isolation.py"
+      - "frontend/scripts/check-css-contract.mjs"
+      - "frontend/tests/e2e/tenant-shell-theme.spec.ts"
+      - "frontend/playwright.tenant.config.ts"
+      - "frontend/src/App.tsx"
+      - "frontend/src/main.tsx"
+      - "frontend/src/router.tsx"
+      - "frontend/src/portalRoutes.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/app/TenantRouteBoundary.tsx"
+      - "frontend/src/app/portalRouteManifest.ts"
+      - "frontend/src/app/portalRouteManifest.test.ts"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/components/Layout/DepartmentLayout.tsx"
+      - "frontend/src/components/Layout/DepartmentLayoutImpl.tsx"
+      - "frontend/src/hooks/usePortalAppearance.ts"
+      - "frontend/src/pages/DepartmentHomePage.tsx"
+      - "frontend/src/pages/qms/QmsOverviewPage.tsx"
+      - "frontend/src/pages/qms/qmsOverviewModel.ts"
+      - "frontend/src/pages/qms/qmsOverviewModel.test.ts"
+      - "frontend/src/services/adminProfileMode.ts"
+      - "frontend/src/services/adminProfileMode.test.ts"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/departmentHome.ts"
+      - "frontend/src/services/departmentHome.test.ts"
+      - "frontend/src/services/qmsDashboard.ts"
+      - "frontend/src/services/qmsDashboard.test.ts"
+      - "frontend/src/styles/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/tenant-navigation-quality-home.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-navigation-department-homes-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "tenant frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Validate CSS architecture and tenant navigation
+        run: npm run test:tenant-shell
+      - name: Run Quality home regressions
+        run: npm run test:qms-overview
+      - name: Lint changed tenant, home and Quality boundaries
+        run: >-
+          npm exec -- eslint
+          scripts/check-css-contract.mjs
+          tests/e2e/tenant-shell-theme.spec.ts
+          playwright.tenant.config.ts
+          src/App.tsx
+          src/main.tsx
+          src/router.tsx
+          src/app/PortalRouteSurface.tsx
+          src/app/TenantRouteBoundary.tsx
+          src/app/portalRouteManifest.ts
+          src/app/portalRouteManifest.test.ts
+          src/app/routeGuards.ts
+          src/components/Layout/DepartmentLayout.tsx
+          src/components/Layout/DepartmentLayoutImpl.tsx
+          src/hooks/usePortalAppearance.ts
+          src/pages/DepartmentHomePage.tsx
+          src/pages/qms/QmsOverviewPage.tsx
+          src/pages/qms/qmsOverviewModel.ts
+          src/pages/qms/qmsOverviewModel.test.ts
+          src/services/adminProfileMode.ts
+          src/services/adminProfileMode.test.ts
+          src/services/apiClient.ts
+          src/services/departmentHome.ts
+          src/services/departmentHome.test.ts
+          src/services/qmsDashboard.ts
+          src/services/qmsDashboard.test.ts
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Install Chromium for focused render smoke tests
+        run: npx playwright install --with-deps chromium
+      - name: Verify light and dark tenant layouts at desktop and mobile sizes
+        run: npm run test:tenant-render
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "tenant backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile tenant governance, homes and isolation modules
+        run: >-
+          python -m compileall -q
+          amodb/security.py
+          amodb/alembic/versions/accounts_20260803_admin_profile_governance.py
+          amodb/alembic/versions/accounts_20260803_auth_session.py
+          amodb/apps/accounts/admin_profile_access.py
+          amodb/apps/accounts/admin_profile_concurrency.py
+          amodb/apps/accounts/admin_profile_guard.py
+          amodb/apps/accounts/admin_profile_logout.py
+          amodb/apps/accounts/admin_profile_router.py
+          amodb/apps/accounts/auth_session_context.py
+          amodb/apps/accounts/department_home_router.py
+          amodb/apps/accounts/router_admin.py
+          amodb/apps/accounts/router_public.py
+          amodb/apps/accounts/router_user_directory.py
+          amodb/apps/accounts/__init__.py
+          amodb/apps/quality/tenant_security.py
+      - name: Import the application with the test database
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: tenant-navigation-test-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: python -c "import amodb.main; print('Application imported with canonical tenant routes')"
+      - name: Run tenant governance, home and route isolation regressions
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: tenant-navigation-test-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: >-
+          pytest -q
+          amodb/apps/accounts/tests/test_admin_profile_governance.py
+          amodb/apps/accounts/tests/test_department_home_security.py
+          amodb/apps/accounts/tests/test_user_directory_pagination.py
+          amodb/apps/quality/tests/test_tenant_route_isolation.py
+      - name: Verify the Alembic graph remains loadable
+        env:
+          DATABASE_URL: ""
+          DATABASE_WRITE_URL: ""
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          print("Alembic heads:", heads)
+          assert heads
+          assert len(heads) == len(set(heads)), heads
+          PY

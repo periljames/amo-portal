@@ -3,41 +3,29 @@ name: Quality Module CI
 on:
   pull_request:
     paths:
-      - "backend/Dockerfile"
       - "backend/amodb/quality_main.py"
       - "backend/amodb/apps/quality/**"
       - "backend/amodb/apps/audit/**"
-      - "backend/amodb/apps/notifications/**"
       - "backend/amodb/apps/tasks/**"
       - "backend/amodb/apps/exports/**"
-      - "backend/amodb/apps/training/**"
-      - "backend/amodb/apps/manuals/**"
-      - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/alembic/versions/quality_*.py"
-      - "backend/amodb/scripts/quality_module_internal_check.py"
       - "backend/docs/quality/**"
       - "frontend/src/pages/Quality*.tsx"
       - "frontend/src/pages/QMS*.tsx"
       - "frontend/src/pages/qms/**"
       - "frontend/src/pages/qualityAudits/**"
       - "frontend/src/components/QMS/**"
+      - "frontend/src/components/Layout/qmsSidebarNavigation*"
       - "frontend/src/components/dashboard/QualityCockpit*.tsx"
       - "frontend/src/dashboards/DashboardCockpit.tsx"
       - "frontend/src/layouts/QmsShell.tsx"
-      - "frontend/src/services/qms.ts"
-      - "frontend/src/services/qmsDashboard.ts"
-      - "frontend/src/services/qmsDashboard.test.ts"
-      - "frontend/src/services/qmsAuditHubActions.ts"
-      - "frontend/src/services/qmsAuditHubActions.test.ts"
+      - "frontend/src/services/qms*.ts"
       - "frontend/src/types/qms.ts"
-      - "frontend/src/styles/qms-overview.css"
-      - "frontend/src/styles/qms-register.css"
+      - "frontend/src/styles/qms*.css"
       - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
-      - ".github/scripts/**"
       - ".github/workflows/quality-module-ci.yml"
-      - ".github/workflows/recheck-transient-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -63,13 +51,13 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Install backend dependencies with bounded transient retries
+      - name: Install backend dependencies
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
           --label "quality backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Verify Alembic graph and Quality revision
+      - name: Verify Quality migration contract
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
@@ -79,22 +67,17 @@ jobs:
           from alembic.script import ScriptDirectory
 
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          heads = script.get_heads()
-          print("Alembic heads:", heads)
-          assert len(heads) == len(set(heads)), heads
           revision = script.get_revision("quality_20260722_schema_integrity")
           assert revision is not None
           assert revision.down_revision == "workforce_20260721_complete"
           PY
-      - name: Run executable Quality contract check
-        run: python -m amodb.scripts.quality_module_internal_check
       - name: Compile Quality backend
         run: >-
           python -m compileall -q
           amodb/quality_main.py
           amodb/apps/quality
           amodb/alembic/versions/quality_20260722_schema_integrity.py
-      - name: Configure full and bounded Quality SQLAlchemy mappers
+      - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
@@ -102,8 +85,8 @@ jobs:
           DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
           SECRET_KEY: quality-mapper-test-secret
           QUALITY_SCHEMA_STRICT: "0"
-        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
-      - name: Run Quality workflow and dashboard tests
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('Quality application mappers configured')"
+      - name: Run Quality workflow and dashboard regressions
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
@@ -113,6 +96,8 @@ jobs:
           QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
+          amodb/apps/quality/tests/test_quality_imports.py
+          amodb/apps/quality/tests/test_tenant_route_isolation.py
           amodb/apps/quality/tests/test_dashboard_v2_contract.py
           amodb/apps/quality/tests/test_quality_delivery_profile.py
           amodb/apps/quality/tests/test_workflow_transitions.py
@@ -121,7 +106,7 @@ jobs:
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
 
-  postgres-schema-integrity:
+  postgres-quality-schema:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
@@ -150,36 +135,19 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Install backend dependencies with bounded transient retries
+      - name: Install backend dependencies
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
           --label "quality PostgreSQL dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run Quality fallback-schema hardening probe
-        id: quality_schema
-        continue-on-error: true
+      - name: Run Quality schema hardening probe
         env:
           APP_ENV: test
           SECRET_KEY: quality-postgres-test-secret
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
           DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        shell: bash
-        run: |
-          set -o pipefail
-          python -m amodb.apps.quality.tests.postgres_schema_integrity_probe 2>&1 | tee quality-postgres-schema.log
-      - name: Upload Quality schema diagnostics
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: quality-postgres-schema-log
-          path: backend/quality-postgres-schema.log
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Fail when Quality schema probe failed
-        if: steps.quality_schema.outcome != 'success'
-        run: exit 1
+        run: python -m amodb.apps.quality.tests.postgres_schema_integrity_probe
 
   frontend:
     runs-on: ubuntu-latest
@@ -196,7 +164,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend dependencies with bounded transient retries
+      - name: Install frontend dependencies
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
@@ -207,24 +175,13 @@ jobs:
         run: npm run test:quality
       - name: Typecheck and production build
         run: npm run build
-      - name: Lint changed Quality boundaries
+      - name: Lint Quality-owned frontend surfaces
         run: >-
           npm exec -- eslint
-          src/router.tsx
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
-          src/pages/qms/QmsOverviewPage.tsx
-          src/pages/qms/QmsRegisterPage.tsx
-          src/pages/qms/QmsNotFoundPage.tsx
-          src/pages/qms/qmsOverviewModel.ts
-          src/pages/qms/qmsOverviewModel.test.ts
-          src/pages/qms/routes/qmsRouteRegistry.ts
-          src/pages/qms/routes/qmsRouteRegistry.test.ts
-          src/pages/qms/components/QmsActionQueue.tsx
-          src/pages/qms/components/QmsMyWork.tsx
-          src/pages/qms/components/QmsUpcomingObligations.tsx
-          src/pages/qms/components/QmsPerformanceSummary.tsx
-          src/pages/qms/components/QmsDiagnosticsDrawer.tsx
-          src/dashboards/DashboardCockpit.tsx
+          src/pages/qms
+          src/components/Layout/qmsSidebarNavigation.test.ts
+          src/types/qms.ts

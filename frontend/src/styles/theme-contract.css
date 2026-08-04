@@ -1,9 +1,9 @@
 /*
  * Portal-wide semantic theme contract.
  *
- * This file is intentionally imported after module styles. Legacy modules still
- * contain literal light surfaces; these rules normalise shared structural
- * surfaces and controls without changing status/severity colours.
+ * This file is intentionally imported after module styles. Earlier modules may
+ * still contain literal light surfaces; these rules normalise shared structural
+ * surfaces and controls without changing status or severity colours.
  */
 
 :root {
@@ -106,7 +106,7 @@ body :where(.data-table, .aum-table, .admin-table, .qms-table) tbody tr:hover {
   background: var(--portal-row-hover);
 }
 
-/* Repair the legacy create-user view shown in the dark-theme screenshot. */
+/* Repair the create-user view that previously retained light surfaces in dark mode. */
 body:not([data-color-scheme="light"]) .admin-user-create-page :is(.admin-page-header, .admin-panel) {
   background: var(--portal-surface-raised) !important;
   border-color: var(--border-subtle) !important;
@@ -160,13 +160,11 @@ body:not([data-color-scheme="light"]) .admin-user-create-page :is(.admin-btn, .a
   color: var(--text-primary) !important;
 }
 
-/* Light mode remains explicitly token-driven rather than falling through to literals. */
 body[data-color-scheme="light"] .admin-user-create-page :is(.admin-page-header, .admin-panel) {
   background: var(--portal-surface-raised) !important;
   color: var(--text-primary) !important;
 }
 
-/* Common overlays and menus should never inherit the opposite scheme. */
 body :where(.drawer, .modal, .popover, .dropdown-menu, .context-menu, .menu-surface) {
   background-color: var(--portal-surface-raised);
   border-color: var(--border-subtle);
@@ -177,7 +175,6 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   background: var(--portal-overlay);
 }
 
-/* Compact offline/sync control used globally. */
 .portal-offline-indicator {
   position: fixed;
   right: 14px;
@@ -219,12 +216,12 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   height: 17px;
   padding: 0 4px;
   border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: var(--accent-warning);
+  background: var(--accent-danger);
   color: #fff;
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   font-weight: 800;
+  line-height: 17px;
+  text-align: center;
 }
 
 .portal-offline-recovery {
@@ -232,152 +229,35 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   right: 14px;
   bottom: 58px;
   z-index: 10019;
-  width: min(390px, calc(100vw - 28px));
-  max-height: min(560px, calc(100vh - 90px));
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  gap: 0.45rem;
+  width: min(22rem, calc(100vw - 28px));
+  padding: 0.7rem;
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--portal-surface-raised);
   color: var(--text-primary);
   box-shadow: var(--portal-shadow);
 }
 
-.portal-offline-recovery__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 14px 12px;
-  border-bottom: 1px solid var(--panel-divider);
-}
-
-.portal-offline-recovery__header > div {
-  display: grid;
-  gap: 3px;
-}
-
-.portal-offline-recovery__header strong {
-  font-size: 0.9rem;
-}
-
-.portal-offline-recovery__header span,
-.portal-offline-recovery__item-copy span {
+.portal-offline-recovery p {
+  margin: 0;
   color: var(--text-secondary);
-  font-size: 0.76rem;
-  line-height: 1.35;
+  font-size: 0.7rem;
+  line-height: 1.4;
 }
 
-.portal-offline-recovery__close {
-  flex: 0 0 auto;
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
+.portal-offline-recovery button {
+  min-height: 32px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--portal-surface-muted);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.portal-offline-recovery__error {
-  margin: 10px 14px 0;
-  padding: 9px 10px;
-  border: 1px solid var(--alert-error-border);
-  border-radius: 9px;
-  background: var(--alert-error-bg);
-  color: var(--alert-error-text);
-  font-size: 0.76rem;
-}
-
-.portal-offline-recovery__list {
-  overflow-y: auto;
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-}
-
-.portal-offline-recovery__item {
-  display: grid;
-  gap: 10px;
-  padding: 11px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--portal-surface-muted);
-}
-
-.portal-offline-recovery__item-copy {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.portal-offline-recovery__item-copy strong {
-  text-transform: capitalize;
-  font-size: 0.8rem;
-}
-
-.portal-offline-recovery__item-copy code {
-  overflow-wrap: anywhere;
-  color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.68rem;
-}
-
-.portal-offline-recovery__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
-}
-
-.portal-offline-recovery__actions button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--portal-control-bg);
   color: var(--text-primary);
-  font-size: 0.72rem;
+  font: inherit;
   font-weight: 700;
   cursor: pointer;
 }
 
-.portal-offline-recovery__actions button:hover:not(:disabled),
-.portal-offline-recovery__close:hover {
-  background: var(--portal-surface-hover);
-}
-
-.portal-offline-recovery__actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.portal-offline-recovery__actions .portal-offline-recovery__discard {
-  color: var(--accent-danger);
-}
-
 @keyframes portal-sync-spin {
   to { transform: rotate(360deg); }
-}
-
-@media (max-width: 520px) {
-  .portal-offline-recovery {
-    right: 10px;
-    bottom: 56px;
-    width: calc(100vw - 20px);
-  }
-
-  .portal-offline-indicator {
-    right: 10px;
-    bottom: 10px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .portal-offline-indicator[data-state="syncing"] svg { animation: none; }
 }

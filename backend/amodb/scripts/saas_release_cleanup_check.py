@@ -52,6 +52,45 @@ def _assert_before(text: str, needles: tuple[str, ...], boundary: str) -> None:
         assert text.index(needle) < boundary_index, f"{needle} must run before {boundary}"
 
 
+def _assert_change_aware_merge_gate(workflow: str) -> None:
+    """Validate project selection and real behavior without fixing YAML layout."""
+    required_surfaces = (
+        "backend",
+        "frontend",
+        "schema",
+        "accounts",
+        "quality",
+        "workforce",
+        "rostering",
+        "platform",
+        "tenant_shell",
+        "offline",
+    )
+    assert "name: Main Merge Readiness" in workflow
+    assert "Detect affected project surfaces" in workflow
+    assert "git diff --name-only" in workflow
+    for surface in required_surfaces:
+        assert f"{surface}: ${{{{ steps.paths.outputs.{surface} }}}}" in workflow
+    for job in (
+        "schema-postgres:",
+        "backend-regressions:",
+        "frontend-regressions:",
+        "merge-readiness:",
+    ):
+        assert job in workflow
+    for behavior in (
+        "alembic -c amodb/alembic.ini upgrade heads",
+        "pytest -q amodb/apps/accounts/tests",
+        "npm run test:quality",
+        "npm run test:tenant-shell",
+        "npm run test:platform",
+        "src/services/offlineHttp.test.ts",
+        "success|skipped",
+    ):
+        assert behavior in workflow
+    assert "continue-on-error: true" not in workflow
+
+
 def main() -> int:
     checks: dict[str, dict[str, Any]] = {}
 
@@ -70,17 +109,34 @@ def main() -> int:
     tenant_route = "/maintenance/{amoCode}/admin/email-settings"
     assert tenant_route in admin_links_text
     assert "module._setup_links = setup_links" in admin_links_text
-    frontend_router = _read(FRONTEND_ROOT / "src/router.tsx")
-    delegated_frontend_router = _read(FRONTEND_ROOT / "src/router.legacy.tsx")
-    assert 'from "./router.legacy"' in frontend_router
+
+    canonical_router_path = FRONTEND_ROOT / "src/router.tsx"
+    portal_routes_path = FRONTEND_ROOT / "src/portalRoutes.tsx"
+    route_surface_path = FRONTEND_ROOT / "src/app/PortalRouteSurface.tsx"
+    canonical_router = _read(canonical_router_path)
+    portal_routes = _read(portal_routes_path)
+    route_surface = _read(route_surface_path)
+
+    assert 'from "./app/PortalRouteSurface"' in canonical_router
+    assert 'from "../portalRoutes"' in route_surface
+    assert not (FRONTEND_ROOT / "src/router.legacy.tsx").exists()
+    assert not (FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.legacy.tsx").exists()
+
     registered_route = tenant_route.replace("{amoCode}", ":amoCode")
-    assert registered_route in delegated_frontend_router, registered_route
+    assert registered_route in portal_routes, registered_route
     checks["tenant-admin-link-is-registered"] = {
         "passed": True,
         "backend": tenant_route,
         "frontend": registered_route,
-        "owner": "frontend/src/router.legacy.tsx",
-        "delegated_by": "frontend/src/router.tsx",
+        "owner": "frontend/src/portalRoutes.tsx",
+        "canonical_router": "frontend/src/router.tsx",
+    }
+    checks["duplicate-route-files-removed"] = {
+        "passed": True,
+        "removed": [
+            "frontend/src/router.legacy.tsx",
+            "frontend/src/components/Layout/DepartmentLayout.legacy.tsx",
+        ],
     }
 
     fiscal_path = BACKEND_ROOT / "amodb/apps/platform/saas_fiscalization_policy.py"
@@ -143,10 +199,10 @@ def main() -> int:
     )
     workflow_rows: list[dict[str, Any]] = []
     for path in workflow_paths:
-        text = _read(path)
-        assert ".github/scripts/retry_transient.py" in text, path
-        assert not re.search(r"(?m)^\s*- run: pip install -r requirements\.txt\s*$", text), path
-        assert not re.search(r"(?m)^\s*- run: npm ci\s*$", text), path
+        workflow_text = _read(path)
+        assert ".github/scripts/retry_transient.py" in workflow_text, path
+        assert not re.search(r"(?m)^\s*- run: pip install -r requirements\.txt\s*$", workflow_text), path
+        assert not re.search(r"(?m)^\s*- run: npm ci\s*$", workflow_text), path
         workflow_rows.append({"path": str(path.relative_to(ROOT)), "passed": True})
     checks["workflow-transient-install-guards"] = {
         "passed": True,
@@ -154,16 +210,8 @@ def main() -> int:
     }
 
     merge_workflow = _read(ROOT / ".github/workflows/main-merge-readiness.yml")
-    for token in (
-        "name: Main Merge Readiness",
-        "alembic -c amodb/alembic.ini upgrade heads",
-        "amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests",
-        "npm run test:quality",
-        "npm run test:platform",
-        "src/services/offlineHttp.test.ts",
-    ):
-        assert token in merge_workflow, token
-    checks["integrated-main-merge-gate"] = {"passed": True}
+    _assert_change_aware_merge_gate(merge_workflow)
+    checks["change-aware-main-merge-gate"] = {"passed": True}
 
     recheck_workflow = _read(ROOT / ".github/workflows/recheck-transient-ci.yml")
     for token in (

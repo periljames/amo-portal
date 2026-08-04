@@ -1,0 +1,456 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import HTTPException
+from fastapi.routing import APIRoute
+from jose import jwt
+
+from amodb.apps.accounts import admin_profile_router as profile_router
+from amodb.apps.accounts import department_home_router as home_router
+from amodb.apps.accounts.admin_profile_concurrency import (
+    lock_admin_grant_for_approval,
+    serialized_approval_count,
+)
+from amodb.apps.accounts.admin_profile_guard import (
+    _is_current_implicit_admin,
+    require_active_admin_profile,
+)
+from amodb.apps.accounts.admin_profile_logout import revoke_admin_profile_on_logout
+from amodb.apps.accounts.admin_profile_router import (
+    REQUIRED_SCHEMA_TABLES,
+    REQUIRED_SESSION_COLUMNS,
+    _active_session,
+    _as_utc,
+    _assert_tenant_member,
+    _ensure_schema,
+    _is_implicit_admin,
+    _is_management_approver,
+)
+from amodb.apps.accounts.auth_session_context import bind_auth_session_to_token_refresh
+from amodb.apps.accounts.models import AccountRole
+from amodb.apps.accounts.router_admin import router as protected_admin_router
+from amodb.apps.accounts.router_amo_assets import router as amo_assets_router
+from amodb.apps.accounts.router_public import router as public_router
+from amodb.security import (
+    JWT_ALGORITHM,
+    SECRET_KEY,
+    bind_current_auth_session_id,
+    create_access_token,
+    require_admin,
+    require_roles,
+    reset_current_auth_session_id,
+)
+
+
+def actor(**overrides):
+    values = {
+        "id": "user-1",
+        "amo_id": "amo-a",
+        "effective_amo_id": "amo-a",
+        "auth_session_id": "auth-session-a",
+        "is_superuser": False,
+        "is_amo_admin": False,
+        "role": "QUALITY_MANAGER",
+        "position_title": "Quality Manager",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def request(path: str):
+    return SimpleNamespace(url=SimpleNamespace(path=path))
+
+
+def dependency_calls(route: APIRoute) -> set[object]:
+    return {dependency.call for dependency in route.dependant.dependencies}
+
+
+def test_admin_profile_rejects_cross_tenant_actor() -> None:
+    with pytest.raises(HTTPException) as exc:
+        _assert_tenant_member(actor(amo_id="amo-a", effective_amo_id="amo-a"), SimpleNamespace(id="amo-b"))
+    assert exc.value.status_code == 403
+    assert "not a member" in str(exc.value.detail).lower()
+
+
+def test_platform_superuser_cannot_become_tenant_admin_profile() -> None:
+    with pytest.raises(HTTPException) as exc:
+        _assert_tenant_member(actor(is_superuser=True), SimpleNamespace(id="amo-a"))
+    assert exc.value.status_code == 403
+    assert "support-session" in str(exc.value.detail).lower()
+
+
+def test_existing_admin_and_governance_approver_rules() -> None:
+    assert _is_implicit_admin(actor(role="AMO_ADMIN", is_amo_admin=True)) is True
+    assert _is_implicit_admin(actor(role="QUALITY_MANAGER", is_amo_admin=False)) is False
+    assert _is_current_implicit_admin(actor(role="AMO_ADMIN", is_amo_admin=True)) is True
+    assert _is_current_implicit_admin(actor(role="TECHNICIAN", is_amo_admin=False)) is False
+    assert _is_management_approver(actor(role="QUALITY_MANAGER")) is True
+    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="Accountable Manager")) is True
+    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="HR Manager")) is True
+    assert _is_management_approver(actor(role="TECHNICIAN", position_title="Technician")) is False
+
+
+def test_naive_and_aware_grant_datetimes_are_normalised_to_utc() -> None:
+    naive = datetime(2026, 8, 3, 10, 0, 0)
+    aware = datetime(2026, 8, 3, 10, 0, 0, tzinfo=timezone.utc)
+    assert _as_utc(naive).tzinfo == timezone.utc
+    assert _as_utc(aware) == aware
+
+
+def test_accounts_package_preserves_router_modules_for_monkeypatching() -> None:
+    assert hasattr(profile_router, "inspect")
+    assert hasattr(profile_router, "router")
+    assert hasattr(home_router, "_admin_profile_active")
+    assert hasattr(home_router, "router")
+
+
+def test_admin_profile_schema_check_accepts_migrated_tables_without_runtime_ddl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    inspector = SimpleNamespace(
+        get_table_names=lambda: sorted(REQUIRED_SCHEMA_TABLES),
+        get_columns=lambda _table: [{"name": name} for name in REQUIRED_SESSION_COLUMNS],
+    )
+    monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
+
+    _ensure_schema(db)
+
+    db.get_bind.assert_called_once_with()
+    db.execute.assert_not_called()
+
+
+def test_admin_profile_schema_check_fails_closed_when_migration_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    inspector = SimpleNamespace(
+        get_table_names=lambda: ["users", "amos"],
+        get_columns=lambda _table: [],
+    )
+    monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
+
+    with pytest.raises(HTTPException) as exc:
+        _ensure_schema(db)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "ADMIN_PROFILE_SCHEMA_NOT_MIGRATED"
+    assert sorted(exc.value.detail["missing_tables"]) == sorted(REQUIRED_SCHEMA_TABLES)
+    assert exc.value.detail["missing_session_columns"] == sorted(REQUIRED_SESSION_COLUMNS)
+    db.execute.assert_not_called()
+
+
+def test_admin_profile_schema_check_requires_auth_session_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    inspector = SimpleNamespace(
+        get_table_names=lambda: sorted(REQUIRED_SCHEMA_TABLES),
+        get_columns=lambda _table: [{"name": "id"}, {"name": "user_id"}],
+    )
+    monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
+
+    with pytest.raises(HTTPException) as exc:
+        _ensure_schema(db)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail["missing_tables"] == []
+    assert exc.value.detail["missing_session_columns"] == ["auth_session_id"]
+
+
+def test_all_registered_tenant_admin_routes_have_profile_dependency() -> None:
+    normal_routes = [
+        route
+        for route in protected_admin_router.routes
+        if isinstance(route, APIRoute) and "/admin-profile/" not in route.path
+    ]
+    assert normal_routes
+    assert [
+        route.path
+        for route in normal_routes
+        if require_active_admin_profile not in dependency_calls(route)
+    ] == []
+
+
+def test_separately_mounted_amo_asset_mutations_require_profile() -> None:
+    routes = [route for route in amo_assets_router.routes if isinstance(route, APIRoute)]
+    mutations = [
+        route for route in routes
+        if bool((route.methods or set()) & {"POST", "PUT", "PATCH", "DELETE"})
+    ]
+    reads = [route for route in routes if (route.methods or set()) == {"GET"}]
+
+    assert {route.path for route in mutations} >= {
+        "/accounts/amo-assets/logo",
+        "/accounts/amo-assets/template",
+    }
+    assert all(require_active_admin_profile in dependency_calls(route) for route in mutations)
+    assert any(route.path == "/accounts/amo-assets/me" for route in reads)
+    assert all(require_active_admin_profile not in dependency_calls(route) for route in reads)
+
+
+def test_approval_route_locks_grant_before_endpoint_execution() -> None:
+    routes = [
+        route
+        for route in protected_admin_router.routes
+        if isinstance(route, APIRoute)
+        and route.path.endswith("/approve")
+        and "/admin-profile/" in route.path
+        and "POST" in (route.methods or set())
+    ]
+    assert len(routes) == 1
+    calls = dependency_calls(routes[0])
+    assert lock_admin_grant_for_approval in calls
+    assert require_active_admin_profile in calls
+
+
+def test_profile_governance_routes_are_the_only_tenant_admin_guard_exemption() -> None:
+    db = MagicMock()
+    current = actor(role="AMO_ADMIN", is_amo_admin=True)
+    assert require_active_admin_profile(
+        request("/accounts/admin/admin-profile/safarilink/state"),
+        current,
+        db,
+    ) is current
+    db.execute.assert_not_called()
+
+
+def test_normal_tenant_admin_api_requires_active_backend_session() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        require_active_admin_profile(
+            request("/accounts/admin/users"),
+            actor(role="AMO_ADMIN", is_amo_admin=True),
+            db,
+        )
+    assert exc.value.status_code == 403
+    assert "activate admin profile" in str(exc.value.detail).lower()
+
+
+def test_active_backend_session_unlocks_tenant_admin_api() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = ("session-1",)
+    current = actor(role=AccountRole.AMO_ADMIN, is_amo_admin=True)
+    elevated = require_active_admin_profile(
+        request("/accounts/admin/users"),
+        current,
+        db,
+    )
+    assert elevated is current
+    assert elevated.is_amo_admin is True
+    assert elevated.role == AccountRole.AMO_ADMIN
+    sql = str(db.execute.call_args.args[0]).upper()
+    params = db.execute.call_args.args[1]
+    assert "S.AUTH_SESSION_ID = :AUTH_SESSION_ID" in sql
+    assert ":IMPLICIT_ADMIN = TRUE" in sql
+    assert params["auth_session_id"] == "auth-session-a"
+    assert params["implicit_admin"] is True
+
+
+def test_downgraded_admin_cannot_use_grantless_session() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+    current = actor(
+        role=AccountRole.TECHNICIAN,
+        is_amo_admin=False,
+        position_title="Technician",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        require_active_admin_profile(
+            request("/accounts/admin/users"),
+            current,
+            db,
+        )
+
+    assert exc.value.status_code == 403
+    params = db.execute.call_args.args[1]
+    assert params["implicit_admin"] is False
+    assert params["auth_session_id"] == "auth-session-a"
+
+
+def test_concurrent_login_must_match_activating_auth_session() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = None
+    current = actor(
+        role=AccountRole.AMO_ADMIN,
+        is_amo_admin=True,
+        auth_session_id="browser-b",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        require_active_admin_profile(
+            request("/accounts/admin/users"),
+            current,
+            db,
+        )
+
+    assert exc.value.status_code == 403
+    assert db.execute.call_args.args[1]["auth_session_id"] == "browser-b"
+
+
+def test_missing_auth_session_identity_fails_closed() -> None:
+    db = MagicMock()
+    current = actor(role=AccountRole.AMO_ADMIN, is_amo_admin=True, auth_session_id=None)
+
+    with pytest.raises(HTTPException) as exc:
+        require_active_admin_profile(
+            request("/accounts/admin/users"),
+            current,
+            db,
+        )
+
+    assert exc.value.status_code == 401
+    db.execute.assert_not_called()
+
+
+def test_approved_grantee_satisfies_legacy_admin_dependencies() -> None:
+    db = MagicMock()
+    db.execute.return_value.first.return_value = ("session-1",)
+    current = actor(
+        role=AccountRole.TECHNICIAN,
+        is_amo_admin=False,
+        position_title="Technician",
+    )
+
+    elevated = require_active_admin_profile(
+        request("/accounts/admin/users"),
+        current,
+        db,
+    )
+
+    assert elevated is current
+    assert elevated.is_amo_admin is True
+    assert elevated.role == AccountRole.AMO_ADMIN
+    assert getattr(elevated, "_admin_profile_elevated", False) is True
+    assert require_admin(elevated) is elevated
+    assert require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)(elevated) is elevated
+
+
+def test_profile_session_lookup_requires_current_auth_session_and_role() -> None:
+    db = MagicMock()
+    db.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert _active_session(
+        db,
+        amo_id="amo-a",
+        user_id="user-1",
+        auth_session_id="browser-a",
+        implicit_admin=False,
+        now=datetime.now(timezone.utc),
+    ) is None
+
+    sql = str(db.execute.call_args.args[0]).upper()
+    params = db.execute.call_args.args[1]
+    assert "S.AUTH_SESSION_ID = :AUTH_SESSION_ID" in sql
+    assert "S.GRANT_ID IS NULL" in sql
+    assert ":IMPLICIT_ADMIN = TRUE" in sql
+    assert params["auth_session_id"] == "browser-a"
+    assert params["implicit_admin"] is False
+
+
+def test_platform_superuser_stays_on_separate_control_plane() -> None:
+    db = MagicMock()
+    current = actor(is_superuser=True, amo_id=None, effective_amo_id=None, role="SUPERUSER")
+    assert require_active_admin_profile(
+        request("/accounts/admin/platform/metrics"),
+        current,
+        db,
+    ) is current
+    db.execute.assert_not_called()
+
+
+def test_new_logins_receive_distinct_server_auth_session_ids() -> None:
+    first = create_access_token(data={"sub": "user-1"})
+    second = create_access_token(data={"sub": "user-1"})
+    first_payload = jwt.decode(first, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    second_payload = jwt.decode(second, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+
+    assert first_payload["auth_session_id"]
+    assert second_payload["auth_session_id"]
+    assert first_payload["auth_session_id"] != second_payload["auth_session_id"]
+
+
+def test_token_refresh_context_preserves_server_auth_session_id() -> None:
+    context = bind_current_auth_session_id("browser-a")
+    try:
+        refreshed = create_access_token(data={"sub": "user-1"})
+    finally:
+        reset_current_auth_session_id(context)
+
+    payload = jwt.decode(refreshed, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    assert payload["auth_session_id"] == "browser-a"
+
+
+def test_extend_session_route_binds_refresh_to_current_auth_session() -> None:
+    routes = [
+        route
+        for route in public_router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/auth/extend-session"
+        and "POST" in (route.methods or set())
+    ]
+    assert len(routes) == 1
+    assert bind_auth_session_to_token_refresh in dependency_calls(routes[0])
+
+
+def test_postgres_approval_dependency_locks_before_insert() -> None:
+    db = MagicMock()
+    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    lock_admin_grant_for_approval("grant-1", db)
+
+    assert db.execute.call_count == 1
+    assert "FOR UPDATE" in str(db.execute.call_args.args[0]).upper()
+
+
+def test_sqlite_approval_dependency_skips_unsupported_row_lock() -> None:
+    db = MagicMock()
+    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+    lock_admin_grant_for_approval("grant-1", db)
+
+    db.execute.assert_not_called()
+
+
+def test_serialized_count_only_counts_after_prelock() -> None:
+    db = MagicMock()
+    db.execute.return_value.scalar.return_value = 2
+
+    assert serialized_approval_count(db, "grant-1") == 2
+    assert db.execute.call_count == 1
+    sql = str(db.execute.call_args.args[0]).upper()
+    assert "COUNT(DISTINCT APPROVER_USER_ID)" in sql
+    assert "FOR UPDATE" not in sql
+
+
+def test_logout_route_revokes_admin_profile_session() -> None:
+    routes = [
+        route
+        for route in public_router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/auth/logout"
+        and "POST" in (route.methods or set())
+    ]
+    assert len(routes) == 1
+    assert revoke_admin_profile_on_logout in dependency_calls(routes[0])
+
+
+def test_logout_revocation_updates_live_profile_sessions() -> None:
+    db = MagicMock()
+    current = actor(role="TECHNICIAN", is_amo_admin=False)
+
+    revoke_admin_profile_on_logout(current, db)
+
+    assert db.begin_nested.call_count == 2
+    assert db.execute.call_count == 2
+    update_sql = str(db.execute.call_args_list[0].args[0]).upper()
+    event_sql = str(db.execute.call_args_list[1].args[0]).upper()
+    assert "UPDATE ADMIN_PROFILE_SESSIONS" in update_sql
+    assert "REVOKED_AT" in update_sql
+    assert "ADMIN_PROFILE_REVOKED_ON_LOGOUT" in event_sql

@@ -1,0 +1,148 @@
+/* Shared collision and overflow safeguards.
+ * Component styles remain responsible for visual design; this layer prevents
+ * fixed-width descendants, tables, charts and dialogs from breaking the shell.
+ */
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
+:where(
+  main,
+  section,
+  article,
+  aside,
+  header,
+  footer,
+  nav,
+  form,
+  fieldset,
+  .page,
+  .page-content,
+  .page-shell,
+  .dashboard,
+  .dashboard-grid,
+  .content,
+  .content-area,
+  .workspace,
+  .panel,
+  .card,
+  .table-wrap,
+  .chart-wrap
+) {
+  min-width: 0;
+}
+
+.tenant-shell__content,
+.tenant-shell__content > *,
+.app-shell__main,
+.app-shell__main > *,
+.app-shell-v2__main,
+.app-shell-v2__main > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tenant-shell__content > * { width: 100%; }
+
+:where(img, video, canvas, svg):not([data-allow-overflow="true"]) {
+  max-width: 100%;
+}
+
+:where(.table-wrap, .data-table-wrap, .responsive-table, [data-table-scroll="true"]) {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+:where(table) { border-collapse: collapse; }
+
+:where(td, th, p, li, dd, dt, label, .description, .subtitle, .copy) {
+  overflow-wrap: anywhere;
+}
+
+:where(.toolbar, .page-actions, .header-actions, .form-actions, .dialog-actions) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+:where(.dashboard-grid, .card-grid, .metric-grid, .form-grid) > * { min-width: 0; }
+
+:where(.recharts-responsive-container, .echarts-for-react, .chart-container) {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+:where(.sticky, [data-sticky="true"]) { max-width: 100%; }
+
+:where(.portal-offline-indicator, .floating-action, .floating-control) {
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100dvh - 1rem);
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+  margin-right: env(safe-area-inset-right, 0px);
+}
+
+:where(.popover, .dropdown-menu, .context-menu, .menu-surface) {
+  max-width: min(30rem, calc(100vw - 1rem));
+  max-height: min(80dvh, 42rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 900px) {
+  :where(.dashboard-grid, .card-grid, .metric-grid, .form-grid) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  }
+
+  :where(.page-header, .admin-page-header, .qms-page-header) { max-width: 100%; }
+}
+
+@media (max-width: 560px) {
+  :where(.toolbar, .page-actions, .header-actions, .form-actions, .dialog-actions) > :where(button, a, .btn) {
+    max-width: 100%;
+  }
+
+  :where(.page-header__actions, .admin-page-header__actions, .qms-page-header__actions) {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media print {
+  body {
+    overflow: visible;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .tenant-shell,
+  .tenant-shell__workspace,
+  .tenant-shell__main {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .tenant-shell__sidebar,
+  .tenant-shell__topbar,
+  .portal-offline-indicator,
+  .portal-offline-recovery {
+    display: none !important;
+  }
+}

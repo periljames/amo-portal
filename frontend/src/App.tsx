@@ -3,13 +3,13 @@ import React, { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { AppRouter } from "./router";
-
+import TenantRouteBoundary from "./app/TenantRouteBoundary";
 import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
-
 import { ToastProvider } from "./components/feedback/ToastProvider";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import { onSessionEvent } from "./services/auth";
+import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
 import { clearApiResponseCache } from "./services/apiClient";
 import { preloadRoute } from "./app/routePreload";
@@ -27,17 +27,18 @@ const App: React.FC = () => {
 
   void scheme;
 
-
   useEffect(() => {
     return onSessionEvent((detail) => {
       if (detail.type === "authenticated") {
         void queryClient.cancelQueries();
+        clearAllCachedAdminProfileStates();
         clearApiResponseCache();
         resetLoading();
       }
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
         void queryClient.cancelQueries();
         queryClient.clear();
+        clearAllCachedAdminProfileStates();
         clearApiResponseCache();
         resetLoading();
       }
@@ -75,7 +76,9 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       <GlobalLoadingBar />
-      <AppRouter />
+      <TenantRouteBoundary>
+        <AppRouter />
+      </TenantRouteBoundary>
     </ToastProvider>
   );
 };

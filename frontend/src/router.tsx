@@ -8,7 +8,7 @@ import {
   type OnboardingStatus,
 } from "./services/auth";
 import { classifyQmsPath, type QmsPathClassification } from "./pages/qms/routes/qmsRouteRegistry";
-import { AppRouter as LegacyAppRouter } from "./router.legacy";
+import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
@@ -286,7 +286,7 @@ export const AppRouter: React.FC = () => {
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
-  return <LegacyAppRouter />;
+  return <PortalRouteSurface />;
 };
 
 export default AppRouter;

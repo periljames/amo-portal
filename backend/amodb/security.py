@@ -15,23 +15,25 @@ This module is intentionally focused and aligned with the new accounts app:
 
 from __future__ import annotations
 
+import hashlib
 import os
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable, Union, Set
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
 import bcrypt
 
-from .database import get_db, get_read_db
+from .database import get_db
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AccountRole
 
@@ -66,6 +68,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # Current actor id for request-scoped access in routers.
 CURRENT_ACTOR_ID: ContextVar[Optional[str]] = ContextVar(
     "current_actor_id",
+    default=None,
+)
+
+# Authentication-session identity copied into refreshed JWTs. This differs from
+# the user id: concurrent browsers for the same account receive independent
+# values, so an elevated Admin Profile cannot leak between those sessions.
+CURRENT_AUTH_SESSION_ID: ContextVar[Optional[str]] = ContextVar(
+    "current_auth_session_id",
     default=None,
 )
 
@@ -129,6 +139,41 @@ def get_password_hash(password: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalise_auth_session_id(value: object) -> Optional[str]:
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 64:
+        return None
+    return candidate
+
+
+def _auth_session_id_from_token(token: str, payload: dict) -> str:
+    """Resolve a stable server-session id from a JWT.
+
+    New tokens carry an explicit UUID. A deterministic token hash keeps older
+    tokens isolated from one another during a rolling deployment without ever
+    treating the account id itself as the authentication session.
+    """
+    explicit = _normalise_auth_session_id(payload.get("auth_session_id"))
+    if explicit:
+        return explicit
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def bind_current_auth_session_id(value: str) -> Token:
+    normalised = _normalise_auth_session_id(value)
+    if not normalised:
+        raise ValueError("A valid authentication-session id is required.")
+    return CURRENT_AUTH_SESSION_ID.set(normalised)
+
+
+def reset_current_auth_session_id(token: Token) -> None:
+    CURRENT_AUTH_SESSION_ID.reset(token)
+
+
+def get_current_auth_session_id() -> Optional[str]:
+    return CURRENT_AUTH_SESSION_ID.get()
+
+
 def create_access_token(
     *,
     data: dict,
@@ -139,8 +184,19 @@ def create_access_token(
 
     The `data` dict should already include the subject, e.g.:
         {"sub": user.id, "amo_id": user.amo_id}
+
+    A fresh authentication-session id is created for a new login. The explicit
+    refresh dependency binds the current id into CURRENT_AUTH_SESSION_ID so a
+    token refresh stays within the same browser/device session.
     """
     to_encode = data.copy()
+
+    auth_session_id = (
+        _normalise_auth_session_id(to_encode.get("auth_session_id"))
+        or _normalise_auth_session_id(CURRENT_AUTH_SESSION_ID.get())
+        or str(uuid4())
+    )
+    to_encode["auth_session_id"] = auth_session_id
 
     expire = datetime.utcnow() + (
         expires_delta
@@ -200,18 +256,20 @@ def _credentials_exception() -> HTTPException:
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_db),
 ) -> account_models.User:
-    """
-    Decode the JWT access token and return the corresponding User.
+    """Decode the JWT and load identity from the strongly consistent writer.
 
-    The token is expected to contain a `sub` claim with the user_id.
+    Authentication, token revocation, tenant membership and role decisions must
+    never trust a potentially lagging read replica. Read sessions remain suitable
+    only after this writer-side identity has authorized the requested operation.
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
         user_id: Optional[Union[str, int]] = payload.get("sub")
         if user_id is None:
             raise _credentials_exception()
+        auth_session_id = _auth_session_id_from_token(token, payload)
     except JWTError:
         raise _credentials_exception()
 
@@ -238,14 +296,16 @@ def get_current_user(
         if issued_at_dt is None or issued_at_dt + timedelta(seconds=2) <= revoked_dt:
             raise _credentials_exception()
 
+    setattr(user, "auth_session_id", auth_session_id)
+    setattr(user, "_auth_session_id", auth_session_id)
     return user
 
 
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_db),
 ) -> account_models.User:
-    """Ensure the current user is active and attach request tenant context.
+    """Ensure the writer-side user is active and attach tenant context.
 
     Superusers remain platform actors, but their selected support AMO is exposed
     through ``active_amo_id``/``effective_amo_id`` so admin/support screens can
@@ -334,19 +394,14 @@ def get_current_actor_id() -> Optional[str]:
     return CURRENT_ACTOR_ID.get()
 
 
-
 def require_capability(
     capability_code: str,
 ) -> Callable[[account_models.User, Session], account_models.User]:
-    """Fail-closed capability gate (hard cutover mode).
-
-    - No legacy AMO_ADMIN fallback path.
-    - Capability datastore/query failures return 503 (authorization service unavailable).
-    """
+    """Fail-closed capability gate against the writer-side authorization state."""
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
-        db: Session = Depends(get_read_db),
+        db: Session = Depends(get_db),
     ) -> account_models.User:
         if getattr(current_user, "is_superuser", False):
             return current_user
@@ -399,27 +454,9 @@ def require_roles(
     """
     Dependency factory to enforce that the current user has one of the given roles.
 
-    Usage (with Enum):
-        @router.post(...)
-        def endpoint(
-            current_user: User = Depends(
-                require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)
-            )
-        ):
-            ...
-
-    Usage (with strings, useful in routers to avoid importing AccountRole):
-        @router.post(...)
-        def endpoint(
-            current_user: User = Depends(
-                require_roles("SUPERUSER", "AMO_ADMIN", "PLANNING_ENGINEER")
-            )
-        ):
-            ...
-
     Behaviour:
     - SUPERUSER always passes, even if not explicitly listed in `allowed_roles`.
-    - Otherwise, the user's `role` must be in the allowed set.
+    - Otherwise, the user's writer-side role must be in the allowed set.
     """
     normalised_roles: Set[AccountRole] = set()
     for r in allowed_roles:

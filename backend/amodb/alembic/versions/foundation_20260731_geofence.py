@@ -2,6 +2,7 @@
 
 Revision ID: foundation_20260731_geofence
 Revises: saas_20260731_route_latency_hist
+Depends on: phase0_20260604
 Create Date: 2026-07-31
 """
 
@@ -15,7 +16,9 @@ from alembic import op
 revision: str = "foundation_20260731_geofence"
 down_revision: Union[str, Sequence[str], None] = "saas_20260731_route_latency_hist"
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+# The geofence branch alters base_stations, which is created on the independent
+# shared-foundations branch. Alembic must order that branch before this revision.
+depends_on: Union[str, Sequence[str], None] = "phase0_20260604"
 
 
 def _has_table(name: str) -> bool:
@@ -29,6 +32,11 @@ def _columns(name: str) -> set[str]:
 
 
 def upgrade() -> None:
+    if not _has_table("base_stations"):
+        raise RuntimeError(
+            "foundation_20260731_geofence requires phase0_20260604 to create base_stations"
+        )
+
     columns = _columns("base_stations")
     additions = [
         ("latitude", sa.Float(), True, None),
@@ -106,6 +114,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     if _has_table("base_location_observations"):
         op.drop_table("base_location_observations")
+    if not _has_table("base_stations"):
+        return
     columns = _columns("base_stations")
     for name in [
         "suspicious_location_review_enabled",

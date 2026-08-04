@@ -21,6 +21,14 @@ from amodb.apps.manuals import pdf_reader_router as reader_router
 ROOT = Path(__file__).resolve().parents[5]
 
 
+def _runs_final_hardening_contract(workflow: str) -> bool:
+    """A full Document Control test directory includes this hardening module."""
+    return (
+        "pytest -q amodb/apps/doc_control/tests" in workflow
+        or "test_pdf_reader_final_hardening.py" in workflow
+    )
+
+
 def _plain_pdf(*, label: str = "Immutable controlled source", font: str = "Helvetica") -> bytes:
     output = BytesIO()
     document = canvas.Canvas(output)
@@ -343,7 +351,7 @@ def test_semantic_punctuation_and_operators_are_fingerprinted(tmp_path: Path, mo
     assert mismatch.value.status_code == 409
 
 
-def test_dedicated_reader_workflows_trigger_for_authority_service_changes() -> None:
+def test_reader_workflows_cover_authority_service_changes() -> None:
     authority_path = "frontend/src/services/pdfWorkingCopyAuthority.ts"
     workflows = (
         ROOT / ".github/workflows/publications-reader-ci.yml",
@@ -352,7 +360,7 @@ def test_dedicated_reader_workflows_trigger_for_authority_service_changes() -> N
     for workflow in workflows:
         content = workflow.read_text(encoding="utf-8")
         assert authority_path in content, workflow
-        assert "test_pdf_reader_final_hardening.py" in content, workflow
+        assert _runs_final_hardening_contract(content), workflow
 
 
 @pytest.mark.parametrize(
@@ -388,7 +396,6 @@ def test_controlled_widgets_and_navigation_reject_structural_relocation(
         engine.validate_template_provenance(source, candidate)
     assert mismatch.value.code == "PDF_TEMPLATE_MISMATCH"
     assert mismatch.value.status_code == 409
-
 
 
 def _fit_destination_array(document: object, page_index: int, mode: str) -> str:
