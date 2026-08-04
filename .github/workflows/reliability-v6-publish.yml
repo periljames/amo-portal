@@ -1,0 +1,352 @@
+name: Reliability V6 Final Publisher
+
+on:
+  push:
+    branches:
+      - agent/reliability-v6-publisher
+    paths:
+      - docs/reliability/.v6-publish-trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-v6-final-publisher
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_reliability_v6
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_reliability_v6"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BASE_SHA: 246638e66a8583fac95a284aea35c03d5d47ef5b
+      OLD_BASE_SHA: 309a8eac0aecfdbb19a1ecd71c83cdbaababb074
+      TARGET_BRANCH: agent/reliability-v2-foundation
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_v6
+      WRITE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_reliability_v6
+      SECRET_KEY: reliability-v6-publisher
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      PGPASSWORD: postgres
+
+    steps:
+      - name: Check out publisher branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/reliability-v6-publisher
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct the clean current-base tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo reconstruct > /tmp/reliability-v6-stage
+          git fetch origin \
+            feat/global-tenant-navigation-quality-home \
+            agent/reliability-v2-canonical-source \
+            agent/reliability-v2-collectors-prep \
+            agent/reliability-v2-clean \
+            agent/reliability-finalizer-source \
+            --force
+          test "$(git rev-parse origin/feat/global-tenant-navigation-quality-home)" = "$BASE_SHA"
+          git reset --hard "$BASE_SHA"
+
+          git checkout origin/agent/reliability-v2-canonical-source -- \
+            .gitignore \
+            backend/amodb/apps/reliability \
+            docs/reliability/RELIABILITY_MODULE_V2_TARGET_DESIGN.md \
+            docs/reliability/RELIABILITY_V2_IMPLEMENTATION_TRACKER.md \
+            docs/reliability/RELIABILITY_V2_VALIDATION.md \
+            docs/reliability/RELIABILITY_COMPLETE_SCOPE_VALIDATION.md \
+            frontend/src/pages/reliability \
+            frontend/src/services/reliability.ts \
+            frontend/src/styles/reliability-v2.css
+
+          git rm -f --ignore-unmatch frontend/src/pages/ReliabilityReportsPage.tsx
+
+          git diff --binary \
+            "$OLD_BASE_SHA" \
+            origin/agent/reliability-v2-canonical-source \
+            -- \
+            backend/amodb/alembic/env.py \
+            backend/amodb/main.py \
+            frontend/src/app/PortalRouteSurface.tsx \
+            frontend/src/app/portalRouteManifest.test.ts \
+            frontend/src/app/routePreload.ts \
+            frontend/src/portalRoutes.tsx \
+            > /tmp/reliability-v6-shared.patch
+          git apply --3way /tmp/reliability-v6-shared.patch
+          test -z "$(git diff --name-only --diff-filter=U)"
+
+          git checkout origin/agent/reliability-v2-clean -- \
+            backend/scripts/prepare_reliability_clean_tree.py \
+            backend/scripts/validate_reliability_clean.py \
+            .github/workflows/reliability.yml
+          python backend/scripts/prepare_reliability_clean_tree.py
+
+          git checkout origin/agent/reliability-v2-collectors-prep -- \
+            backend/amodb/apps/reliability/internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_internal_collectors.py \
+            backend/amodb/apps/reliability/tests/test_merge_readiness_contracts.py \
+            backend/scripts/apply_reliability_internal_collectors.py
+          python backend/scripts/apply_reliability_internal_collectors.py
+          rm -f backend/scripts/apply_reliability_internal_collectors.py
+
+          python -m py_compile \
+            backend/amodb/apps/reliability/*.py \
+            backend/amodb/apps/reliability/tests/*.py \
+            backend/amodb/alembic/env.py \
+            backend/amodb/main.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          set -euo pipefail
+          echo backend-dependencies > /tmp/reliability-v6-stage
+          pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Prepare current PostgreSQL baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo postgres-baseline > /tmp/reliability-v6-stage
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_v6 -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE IF NOT EXISTS alembic_version (
+            version_num varchar(255) NOT NULL PRIMARY KEY
+          );
+          ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255);
+          SQL
+          cd backend
+          alembic -c amodb/alembic.ini upgrade heads
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_v6 -v ON_ERROR_STOP=1 <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO reliability_events (amo_id, event_type, occurred_at, created_at, description)
+          VALUES ('legacy-reliability-v6-probe', 'DEFECT', now(), now(), 'Existing Reliability row before the advanced migration.');
+          SET session_replication_role = origin;
+          SQL
+
+      - name: Generate the current-head Reliability migration
+        working-directory: backend
+        env:
+          RELIABILITY_AUTOGENERATE_ONLY: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo migration-generation > /tmp/reliability-v6-stage
+          rm -f amodb/alembic/versions/rel_20260803_complete_scope*.py
+          rm -f amodb/alembic/versions/rel_20260803_merge_heads*.py
+
+          mapfile -t HEADS < <(alembic -c amodb/alembic.ini heads | awk '{print $1}')
+          if [ "${#HEADS[@]}" -gt 1 ]; then
+            alembic -c amodb/alembic.ini merge \
+              --rev-id rel_20260803_merge_heads \
+              -m "merge current heads before complete Reliability scope" \
+              "${HEADS[@]}"
+            alembic -c amodb/alembic.ini upgrade head
+          fi
+
+          git checkout origin/agent/reliability-finalizer-source -- scripts/finalize_reliability_migration.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/finalize_reliability_migration.py')
+          text = path.read_text(encoding='utf-8')
+          for role_id in (
+              'rel-role-viewer',
+              'rel-role-engineer',
+              'rel-role-manager',
+              'rel-role-authority',
+          ):
+              old = f"u.amo_id || ':' || u.id || ':{role_id}'"
+              new = f"u.amo_id || '|' || u.id || '|{role_id}'"
+              if old not in text:
+                  raise RuntimeError(f'Missing role seed anchor: {role_id}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          alembic -c amodb/alembic.ini revision \
+            --autogenerate \
+            --rev-id rel_20260803_complete_scope \
+            -m "complete Reliability full stack scope"
+          python scripts/finalize_reliability_migration.py
+          rm -f scripts/finalize_reliability_migration.py
+          python -m py_compile amodb/alembic/versions/rel_20260803_*.py
+
+      - name: Prove migration and backend contracts
+        working-directory: backend
+        env:
+          RELIABILITY_AUTOGENERATE_ONLY: "true"
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo backend-validation > /tmp/reliability-v6-stage
+          alembic -c amodb/alembic.ini upgrade head
+          test "$(alembic -c amodb/alembic.ini heads | wc -l | tr -d ' ')" -eq 1
+          alembic -c amodb/alembic.ini check
+
+          psql -h 127.0.0.1 -U postgres -d amo_reliability_v6 -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE probe record;
+          BEGIN
+            SELECT validation_status, validation_errors, provenance_json INTO probe
+            FROM reliability_events
+            WHERE amo_id = 'legacy-reliability-v6-probe';
+            IF probe.validation_status <> 'VALID' THEN
+              RAISE EXCEPTION 'Reliability validation status was not backfilled';
+            END IF;
+            IF probe.validation_errors IS NULL OR probe.provenance_json IS NULL THEN
+              RAISE EXCEPTION 'Reliability provenance defaults were not backfilled';
+            END IF;
+          END $$;
+          SQL
+
+          alembic -c amodb/alembic.ini downgrade -1
+          alembic -c amodb/alembic.ini upgrade head
+          alembic -c amodb/alembic.ini check
+          python scripts/validate_reliability_clean.py
+          pytest -q amodb/apps/reliability/tests
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prove tenant shell and production frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo frontend-validation > /tmp/reliability-v6-stage
+          npm ci --no-audit --no-fund
+          npm run test:tenant-shell
+          npx eslint \
+            src/services/reliability.ts \
+            src/pages/reliability/ReliabilityWorkspacePage.tsx \
+            src/pages/reliability/ReliabilityAdvancedViews.tsx \
+            src/pages/reliability/ReliabilityReportsView.tsx \
+            src/app/PortalRouteSurface.tsx \
+            src/app/portalRouteManifest.ts \
+            src/app/portalRouteManifest.test.ts \
+            src/app/routePreload.ts
+          npm run build
+
+      - name: Record exact-head validation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo validation-record > /tmp/reliability-v6-stage
+          cat > docs/reliability/RELIABILITY_CLEAN_REBUILD_VALIDATION.md <<EOF
+          # Reliability Clean Rebuild Validation
+
+          - Run: \`${GITHUB_RUN_ID}\`
+          - Shared-shell baseline: \`${BASE_SHA}\`
+          - Canonical implementation source: \`origin/agent/reliability-v2-canonical-source\`
+          - Authoritative collector source: \`7063d46c384b38c0a46544e02a7fb2f6180f4637\`
+          - UTC: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+
+          ## Passed
+
+          - clean reconstruction from the exact current shared-shell head;
+          - one canonical frontend workspace, client and backend API, with no `/reliability/v2` surface;
+          - current-head Alembic merge, generated advanced Reliability migration and one final head;
+          - populated-row upgrade, validation/provenance backfill, downgrade and re-upgrade;
+          - mapper configuration, capability/role seeds and append-only evidence guards;
+          - tenant isolation, bounded queries, source freshness, scheduler lifecycle and controlled FRACAS evidence tests;
+          - authoritative internal collectors for technical logs, maintenance tasks, technical records, EHM, Reliability CARs and Procurement quality events;
+          - explicit external contracts for flight operations, standalone MEL/CDL, component-shop and SMS feeds;
+          - complete Reliability backend regression suite;
+          - tenant-shell regressions, scoped ESLint and full TypeScript/Vite production build;
+          - strict Reliability-owned path allowlist with no virtual environment, bytecode, database, node-module or temporary workflow artifacts.
+          EOF
+
+      - name: Enforce clean scope and publish PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo final-publication > /tmp/reliability-v6-stage
+          cp backend/scripts/validate_reliability_clean.py /tmp/validate_reliability_clean.py
+          rm -f backend/scripts/prepare_reliability_clean_tree.py
+          rm -f backend/scripts/validate_reliability_clean.py
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+
+          git add .gitignore .github/workflows/reliability.yml
+          git add backend/amodb/alembic/env.py backend/amodb/alembic/versions/rel_20260803_*.py
+          git add backend/amodb/apps/reliability backend/amodb/main.py
+          git add docs/reliability/RELIABILITY_*.md
+          git add frontend/src/app/PortalRouteSurface.tsx
+          git add frontend/src/app/portalRouteManifest.ts
+          git add frontend/src/app/portalRouteManifest.test.ts
+          git add frontend/src/app/routePreload.ts
+          git add frontend/src/pages/reliability
+          git add frontend/src/services/reliability.ts
+          git add frontend/src/styles/reliability-v2.css
+          git add frontend/src/portalRoutes.tsx
+          git add -u frontend/src/pages/ReliabilityReportsPage.tsx || true
+
+          PYTHONPATH=backend RELIABILITY_CLEAN_VALIDATION_MODE=paths \
+            python /tmp/validate_reliability_clean.py
+          git diff --cached --check
+
+          if git diff --cached --name-only | grep -E '(^|/)(\.venv|__pycache__|node_modules)(/|$)|\.pyc$|\.db$|clean-publish|diagnostic|prepare_reliability_clean|validate_reliability_clean'; then
+            echo 'Forbidden publication artifact detected.' >&2
+            exit 1
+          fi
+
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git commit -m "Complete Reliability module on current tenant shell"
+          git push --force origin HEAD:"$TARGET_BRANCH"
+
+      - name: Publish failure stage without touching PR head
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          FAILED_STAGE="$(cat /tmp/reliability-v6-stage 2>/dev/null || echo unknown)"
+          git reset --hard "$GITHUB_SHA"
+          git clean -fd
+          mkdir -p docs/reliability
+          cat > docs/reliability/V6_PUBLISH_FAILURE.md <<EOF
+          # Reliability V6 Publisher Failure
+
+          - Run: \`${GITHUB_RUN_ID}\`
+          - Stage: \`${FAILED_STAGE}\`
+          - Source: \`${GITHUB_SHA}\`
+          - UTC: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+
+          PR #404 was not modified by this failed run.
+          EOF
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add docs/reliability/V6_PUBLISH_FAILURE.md
+          git commit -m "Record Reliability V6 publisher failure" || true
+          git push origin HEAD:agent/reliability-v6-publisher || true
