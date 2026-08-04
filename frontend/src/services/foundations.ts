@@ -1,6 +1,10 @@
 // src/services/foundations.ts
 import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
+import {
+  baseStationIdentityConflictError,
+  findBaseStationIdentityConflict,
+} from "./foundationBaseIdentity";
 import type {
   AirportCatalogSearchRead,
   AvailabilityCreate,
@@ -18,6 +22,8 @@ import type {
   UserBaseAssignmentRead,
 } from "../types/foundations";
 
+const inFlightBaseWrites = new Map<string, Promise<BaseStationRead>>();
+
 function toQuery(params: Record<string, string | number | boolean | null | undefined>): string {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -26,6 +32,72 @@ function toQuery(params: Record<string, string | number | boolean | null | undef
   });
   const value = qs.toString();
   return value ? `?${value}` : "";
+}
+
+function errorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
+}
+
+function baseWriteKey(action: "create" | "update", id: string | null, payload: BaseStationCreate | BaseStationUpdate): string {
+  return `${action}:${id || "new"}:${JSON.stringify(payload)}`;
+}
+
+async function availableBaseIdentityScope(): Promise<BaseStationRead[] | null> {
+  try {
+    return await listBaseStations({ include_inactive: true });
+  } catch {
+    // Identity preflight improves feedback but must not replace server authority.
+    return null;
+  }
+}
+
+function updateCandidate(
+  bases: readonly BaseStationRead[],
+  baseStationId: string,
+  payload: BaseStationUpdate,
+): Pick<BaseStationCreate, "code" | "aliases"> | null {
+  const current = bases.find((base) => base.id === baseStationId);
+  const code = payload.code ?? current?.code;
+  if (!code) return null;
+  return {
+    code,
+    aliases: payload.aliases ?? current?.aliases.map((alias) => alias.alias) ?? [],
+  };
+}
+
+function assertIdentityAvailable(
+  bases: readonly BaseStationRead[],
+  candidate: Pick<BaseStationCreate, "code" | "aliases">,
+  excludeBaseStationId?: string | null,
+): void {
+  const conflict = findBaseStationIdentityConflict(bases, candidate, excludeBaseStationId);
+  if (conflict) throw baseStationIdentityConflictError(conflict);
+}
+
+async function explainServerConflict(
+  error: unknown,
+  candidate: Pick<BaseStationCreate, "code" | "aliases">,
+  excludeBaseStationId?: string | null,
+): Promise<never> {
+  if (errorStatus(error) !== 409) throw error;
+  const refreshed = await availableBaseIdentityScope();
+  if (refreshed) {
+    const conflict = findBaseStationIdentityConflict(refreshed, candidate, excludeBaseStationId);
+    if (conflict) throw baseStationIdentityConflictError(conflict);
+  }
+  throw error;
+}
+
+function singleFlightBaseWrite(key: string, write: () => Promise<BaseStationRead>): Promise<BaseStationRead> {
+  const existing = inFlightBaseWrites.get(key);
+  if (existing) return existing;
+  const pending = write().finally(() => {
+    if (inFlightBaseWrites.get(key) === pending) inFlightBaseWrites.delete(key);
+  });
+  inFlightBaseWrites.set(key, pending);
+  return pending;
 }
 
 export function getFoundationContracts(): Promise<FoundationContracts> {
@@ -43,11 +115,32 @@ export function listBaseStations(params?: { include_inactive?: boolean }): Promi
 }
 
 export function createBaseStation(payload: BaseStationCreate): Promise<BaseStationRead> {
-  return apiPost<BaseStationRead>("/foundations/base-stations", payload, { headers: authHeaders() });
+  const candidate = { code: payload.code, aliases: payload.aliases || [] };
+  const key = baseWriteKey("create", null, payload);
+  return singleFlightBaseWrite(key, async () => {
+    const bases = await availableBaseIdentityScope();
+    if (bases) assertIdentityAvailable(bases, candidate);
+    try {
+      return await apiPost<BaseStationRead>("/foundations/base-stations", payload, { headers: authHeaders() });
+    } catch (error) {
+      return await explainServerConflict(error, candidate);
+    }
+  });
 }
 
 export function updateBaseStation(baseStationId: string, payload: BaseStationUpdate): Promise<BaseStationRead> {
-  return apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
+  const key = baseWriteKey("update", baseStationId, payload);
+  return singleFlightBaseWrite(key, async () => {
+    const bases = await availableBaseIdentityScope();
+    const candidate = bases ? updateCandidate(bases, baseStationId, payload) : null;
+    if (bases && candidate) assertIdentityAvailable(bases, candidate, baseStationId);
+    try {
+      return await apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
+    } catch (error) {
+      if (!candidate) throw error;
+      return await explainServerConflict(error, candidate, baseStationId);
+    }
+  });
 }
 
 export function searchAirportCatalog(params: {
