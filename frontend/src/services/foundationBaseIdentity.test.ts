@@ -49,30 +49,36 @@ describe("base station identity conflicts", () => {
     expect(baseStationIdentityConflictMessage(conflict!)).toContain("NBO-HQ · Nairobi Main Base");
   });
 
-  it("detects an alias that collides with another base code", () => {
+  it("detects aliases case-insensitively", () => {
+    const conflict = findBaseStationIdentityConflict(
+      [base()],
+      { code: "NBO-HGR", aliases: [" hq "] },
+    );
+
+    expect(conflict).toMatchObject({
+      field: "aliases",
+      requestedValue: "hq",
+      existingKind: "alias",
+      existingValue: "HQ",
+    });
+  });
+
+  it("permits an alias that matches another base code", () => {
     const conflict = findBaseStationIdentityConflict(
       [base()],
       { code: "NBO-HGR", aliases: ["nbo-hq"] },
     );
 
-    expect(conflict).toMatchObject({
-      field: "aliases",
-      requestedValue: "nbo-hq",
-      existingKind: "code",
-    });
+    expect(conflict).toBeNull();
   });
 
-  it("detects a code that collides with an existing alias", () => {
+  it("permits a code that matches an existing alias", () => {
     const conflict = findBaseStationIdentityConflict(
       [base()],
       { code: "hq", aliases: [] },
     );
 
-    expect(conflict).toMatchObject({
-      field: "code",
-      existingKind: "alias",
-      existingValue: "HQ",
-    });
+    expect(conflict).toBeNull();
   });
 
   it("points users to inactive records instead of creating duplicates", () => {
