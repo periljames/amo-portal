@@ -1,10 +1,12 @@
 name: Reliability Permanent Hotfix Publisher
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/reliability-permanent-hotfix
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - '.github/workflows/reliability-permanent-hotfix-publisher.yml'
       - 'docs/reliability/.permanent-hotfix-kick'
 
 permissions:
@@ -12,11 +14,12 @@ permissions:
   statuses: write
 
 concurrency:
-  group: reliability-permanent-hotfix-publisher
+  group: reliability-permanent-hotfix-publisher-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   publish-verified-hotfix:
+    if: github.event.pull_request.head.ref == 'agent/reliability-permanent-hotfix'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     services:
