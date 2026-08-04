@@ -7,7 +7,6 @@ import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/quality-checklist-pdf-form-editor.css";
-import "../../styles/qms-usability-enhancements.css";
 
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
