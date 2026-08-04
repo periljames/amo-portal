@@ -1,3 +1,5 @@
+import "./pdfReaderOperationalFixes.css";
+
 export { default } from "./PdfReaderCoreV2";
 export type {
   PdfReaderCoreProps,
