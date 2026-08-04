@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 
 const setupEntry = readFileSync(new URL("../AdminSetupCentrePage.tsx", import.meta.url), "utf8");
 const setupCss = readFileSync(new URL("../../styles/admin-setup-workflow.css", import.meta.url), "utf8");
+const setupThemeCss = readFileSync(new URL("../../styles/admin-setup-workflow-theme.css", import.meta.url), "utf8");
 const inlineAlert = readFileSync(new URL("../../components/UI/Admin/InlineAlert.tsx", import.meta.url), "utf8");
 
 describe("AMO Setup Centre focused workflow presentation", () => {
-  it("loads the dedicated workflow layer after the legacy location styles", () => {
+  it("loads workflow and theme overrides after the legacy location styles", () => {
     expect(setupEntry).toContain('import "../styles/admin-setup-location.css"');
     expect(setupEntry).toContain('import "../styles/admin-setup-workflow.css"');
+    expect(setupEntry).toContain('import "../styles/admin-setup-workflow-theme.css"');
     expect(setupEntry.indexOf("admin-setup-workflow.css"))
       .toBeGreaterThan(setupEntry.indexOf("admin-setup-location.css"));
+    expect(setupEntry.indexOf("admin-setup-workflow-theme.css"))
+      .toBeGreaterThan(setupEntry.indexOf("admin-setup-workflow.css"));
   });
 
   it("uses a compact desktop canvas and responsive two-column editor", () => {
@@ -30,6 +34,21 @@ describe("AMO Setup Centre focused workflow presentation", () => {
     expect(inlineAlert).toContain('role={urgent ? "alert" : "status"}');
     expect(inlineAlert).toContain('aria-live={urgent ? "assertive" : "polite"}');
     expect(inlineAlert).toContain('aria-atomic="true"');
+  });
+
+  it("binds the redesign to portal light and dark theme tokens", () => {
+    for (const token of [
+      "--surface-elevated",
+      "--surface-soft",
+      "--border-subtle",
+      "--text-primary",
+      "--text-secondary",
+      "--accent-primary",
+    ]) {
+      expect(setupThemeCss).toContain(token);
+    }
+    expect(setupThemeCss).toContain('html[data-theme="dark"]');
+    expect(setupThemeCss).toContain("body.dark");
   });
 
   it("keeps example text visibly subordinate to entered values", () => {
