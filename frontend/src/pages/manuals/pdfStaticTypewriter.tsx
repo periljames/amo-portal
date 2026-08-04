@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Download, FilePenLine, GripHorizontal, LoaderCircle, Trash2, X } from "lucide-react";
+import { Download, FilePenLine, GripHorizontal, LoaderCircle, Maximize2, Trash2, X } from "lucide-react";
 
 import { getCachedUser } from "../../services/auth";
 import {
@@ -38,6 +38,17 @@ type DragState = {
   startY: number;
   originX: number;
   originY: number;
+  layerWidth: number;
+  layerHeight: number;
+};
+
+type ResizeState = {
+  id: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  originWidth: number;
+  originHeight: number;
   layerWidth: number;
   layerHeight: number;
 };
@@ -108,6 +119,7 @@ export function usePdfStaticTypewriter({
   const [busy, setBusy] = useState<"" | "PAGES" | "FULL">("");
   const [error, setError] = useState("");
   const dragRef = useRef<DragState | null>(null);
+  const resizeRef = useRef<ResizeState | null>(null);
 
   const schema = useMemo(
     () => capabilities?.overlay_schema?.fields || [],
@@ -186,8 +198,8 @@ export function usePdfStaticTypewriter({
     const rect = event.currentTarget.getBoundingClientRect();
     const x = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 0.95);
     const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 0.96);
-    const width = Math.min(0.3, Math.max(0.08, 0.98 - x));
-    const height = Math.min(0.085, Math.max(0.035, 0.99 - y));
+    const width = Math.min(0.45, Math.max(0.1, 0.985 - x));
+    const height = Math.min(0.12, Math.max(0.04, 0.99 - y));
     const id = newIdentifier();
     setItems((current) => [...current, {
       id,
@@ -240,6 +252,47 @@ export function usePdfStaticTypewriter({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }, []);
 
+  const beginResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>, item: PdfStaticOverlayItem) => {
+    if (!canConfigure) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const layer = event.currentTarget.closest<HTMLElement>(".pdf-static-typewriter-layer");
+    if (!layer) return;
+    const rect = layer.getBoundingClientRect();
+    resizeRef.current = {
+      id: item.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originWidth: item.width,
+      originHeight: item.height,
+      layerWidth: Math.max(1, rect.width),
+      layerHeight: Math.max(1, rect.height),
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [canConfigure]);
+
+  const moveResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>, item: PdfStaticOverlayItem) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.id !== item.id || resize.pointerId !== event.pointerId) return;
+    const width = clamp(
+      resize.originWidth + (event.clientX - resize.startX) / resize.layerWidth,
+      0.04,
+      1 - item.x,
+    );
+    const height = clamp(
+      resize.originHeight + (event.clientY - resize.startY) / resize.layerHeight,
+      0.025,
+      1 - item.y,
+    );
+    updateItem(item.id, { width, height });
+  }, [updateItem]);
+
+  const endResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (resizeRef.current?.pointerId === event.pointerId) resizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
   const download = useCallback(async (completedOnly: boolean) => {
     if (!identity) return;
     const populated = items.filter((item) => item.text.trim());
@@ -278,7 +331,7 @@ export function usePdfStaticTypewriter({
     </button>
     <span>{active
       ? canConfigure
-        ? "Click any blank line or box to add text. Drag the handle to reposition it."
+        ? "Click a blank line or box to add text. Drag the top handle to move it and the corner handle to resize it."
         : "Complete the highlighted fields directly on the controlled page."
       : items.some((item) => item.text.trim())
         ? `${items.filter((item) => item.text.trim()).length} filled field(s) saved locally`
@@ -324,11 +377,22 @@ export function usePdfStaticTypewriter({
             onPointerDown={(event: ReactPointerEvent<HTMLTextAreaElement>) => event.stopPropagation()}
             onChange={(event: ReactChangeEvent<HTMLTextAreaElement>) => updateItem(item.id, { text: event.target.value })}
           />
-          {canConfigure ? <button type="button" className="pdf-static-typewriter-remove" aria-label="Remove typed field" onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); removeItem(item.id); }}><X size={11} /></button> : null}
+          {canConfigure ? <>
+            <button
+              type="button"
+              className="pdf-static-typewriter-resize"
+              aria-label="Resize typed field"
+              onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) => beginResize(event, item)}
+              onPointerMove={(event: ReactPointerEvent<HTMLButtonElement>) => moveResize(event, item)}
+              onPointerUp={endResize}
+              onPointerCancel={endResize}
+            ><Maximize2 size={11} /></button>
+            <button type="button" className="pdf-static-typewriter-remove" aria-label="Remove typed field" onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); removeItem(item.id); }}><X size={11} /></button>
+          </> : null}
         </> : item.text.trim() ? <span>{item.text}</span> : null}
       </div>)}
     </div>;
-  }, [active, addAt, available, beginDrag, canConfigure, endDrag, items, moveDrag, removeItem, updateItem]);
+  }, [active, addAt, available, beginDrag, beginResize, canConfigure, endDrag, endResize, items, moveDrag, moveResize, removeItem, updateItem]);
 
   return { available, controls, renderPageOverlay };
 }
