@@ -2,10 +2,8 @@ export {
   PlanningDashboardPage,
   PlanningUtilisationPage,
   PlanningForecastPage,
-  PlanningAmpPage,
   PlanningTaskLibraryPage,
   PlanningAdSbPage,
-  PlanningWorkPackagesPage,
   PlanningWorkOrdersPage,
   PlanningDefermentsPage,
   PlanningNonRoutinePage,
@@ -13,6 +11,11 @@ export {
   PublicationReviewPage,
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
+
+export {
+  PlanningAmpPage,
+  PlanningWorkPackagesPage,
+} from "./planning/PlanningPhaseTwoPages";
 
 export {
   ProductionDashboardPage,
