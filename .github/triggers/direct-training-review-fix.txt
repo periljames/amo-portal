@@ -1,0 +1,1 @@
+Trigger the validated Training workbook repair workflow through a direct Git ref update.
