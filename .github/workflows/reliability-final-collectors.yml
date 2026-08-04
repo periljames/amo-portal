@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      TARGET_SHA: 4bdb3ab7de013cf6105d981fce4ed97b28980b60
+      TARGET_SHA: 888d45c8d62faf34930ce0a4d0cf417ac340faf7
       TARGET_BRANCH: agent/reliability-v2-foundation
       DATABASE_URL: sqlite+pysqlite:///:memory:
       WRITE_DATABASE_URL: sqlite+pysqlite:///:memory:
