@@ -61,6 +61,15 @@ describe("base identity and location workflow", () => {
     expect(compatSource).toContain("listBaseStations({ include_inactive: true })");
   });
 
+  it("restores the captured superuser tenant before the existing-base PUT", () => {
+    expect(compatSource).toContain("tenantContextRef.current = context");
+    expect(compatSource).toContain("await setAdminContext({");
+    const syncIndex = compatSource.lastIndexOf("await setAdminContext({");
+    const updateIndex = compatSource.indexOf("await updateBaseStation(selectedExisting.id");
+    expect(syncIndex).toBeGreaterThan(-1);
+    expect(updateIndex).toBeGreaterThan(syncIndex);
+  });
+
   it("routes the existing setup page through the location-first editor", () => {
     expect(routedEditor).toContain('from "./BaseStationEditorDialogCompat"');
     expect(routedEditor).not.toContain("const code = draft.code.trim()");
@@ -71,6 +80,11 @@ describe("base identity and location workflow", () => {
     expect(navigatorSource).toContain("summary.match");
     expect(navigatorSource).toContain('params.set("section", "bases")');
     expect(navigatorSource).toContain('params.set("section", "departments")');
+  });
+
+  it("keeps the navigation portal mounted while observing its host", () => {
+    expect(navigatorSource).toContain("setPortalTarget((current) => current === body ? current : body)");
+    expect(navigatorSource).not.toContain('body?.querySelector(".setup-resend__step-navigation") ? null : body');
   });
 
   it("moves each opened stage into view and provides skip and continue controls", () => {
@@ -87,6 +101,13 @@ describe("base identity and location workflow", () => {
     expect(mapSource).toContain("gmpDraggable: true");
     expect(mapSource).toContain('addListener("dragend"');
     expect(mapSource).toContain('addListener("click"');
+  });
+
+  it("shows a marker only after the draft has a real position", () => {
+    expect(mapSource).toContain("...(configuredPosition ? { map, position: configuredPosition } : {})");
+    expect(mapSource).toContain("marker.map = map");
+    expect(mapSource).toContain("markerRef.current.map = null");
+    expect(mapSource).not.toContain("position: initialPosition,");
   });
 
   it("keeps placeholders subordinate and notifications above the modal", () => {
