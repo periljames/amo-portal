@@ -5,10 +5,13 @@ on:
     paths:
       - "backend/amodb/quality_main.py"
       - "backend/amodb/apps/quality/**"
+      - "backend/amodb/apps/accounts/portal_preferences_*"
+      - "backend/amodb/apps/accounts/tests/test_portal_preferences_contract.py"
       - "backend/amodb/apps/audit/**"
       - "backend/amodb/apps/tasks/**"
       - "backend/amodb/apps/exports/**"
       - "backend/amodb/alembic/versions/quality_*.py"
+      - "backend/amodb/alembic/versions/accounts_20260804_portal_preferences.py"
       - "backend/docs/quality/**"
       - "frontend/src/pages/Quality*.tsx"
       - "frontend/src/pages/QMS*.tsx"
@@ -20,9 +23,14 @@ on:
       - "frontend/src/dashboards/DashboardCockpit.tsx"
       - "frontend/src/layouts/QmsShell.tsx"
       - "frontend/src/services/qms*.ts"
+      - "frontend/src/services/qualityExcellence.ts"
+      - "frontend/src/services/portalPreferences.ts"
       - "frontend/src/types/qms.ts"
       - "frontend/src/styles/qms*.css"
+      - "frontend/src/styles/quality-excellence*.css"
+      - "frontend/tests/e2e/qms-*.spec.ts"
       - "frontend/src/router.tsx"
+      - "frontend/src/portalRoutes.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
       - ".github/workflows/quality-module-ci.yml"
@@ -67,16 +75,31 @@ jobs:
           from alembic.script import ScriptDirectory
 
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          revision = script.get_revision("quality_20260722_schema_integrity")
-          assert revision is not None
-          assert revision.down_revision == "workforce_20260721_complete"
+          integrity = script.get_revision("quality_20260722_schema_integrity")
+          preferences = script.get_revision("accounts_260804_portal_prefs")
+          assurance = script.get_revision("quality_260804_assurance_hub")
+          assurance_rls = script.get_revision("quality_260804_assurance_rls")
+
+          assert integrity is not None
+          assert integrity.down_revision == "workforce_20260721_complete"
+          assert preferences is not None
+          assert preferences.down_revision == "accounts_20260803_auth_session"
+          assert assurance is not None
+          assert assurance.down_revision == "accounts_260804_portal_prefs"
+          assert assurance_rls is not None
+          assert assurance_rls.down_revision == "quality_260804_assurance_hub"
+          assert all(len(revision.revision) <= 32 for revision in (preferences, assurance, assurance_rls))
           PY
       - name: Compile Quality backend
         run: >-
           python -m compileall -q
           amodb/quality_main.py
           amodb/apps/quality
-          amodb/alembic/versions/quality_20260722_schema_integrity.py
+          amodb/apps/accounts/portal_preferences_models.py
+          amodb/apps/accounts/portal_preferences_router.py
+          amodb/alembic/versions/accounts_20260804_portal_preferences.py
+          amodb/alembic/versions/quality_260804_assurance_hub.py
+          amodb/alembic/versions/quality_260804_assurance_rls.py
       - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
@@ -96,6 +119,7 @@ jobs:
           QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
+          amodb/apps/accounts/tests/test_portal_preferences_contract.py
           amodb/apps/quality/tests/test_quality_imports.py
           amodb/apps/quality/tests/test_tenant_route_isolation.py
           amodb/apps/quality/tests/test_dashboard_v2_contract.py
@@ -105,6 +129,7 @@ jobs:
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
+          amodb/apps/quality/tests/test_excellence_contract.py
 
   postgres-quality-schema:
     runs-on: ubuntu-latest
@@ -182,6 +207,9 @@ jobs:
           src/services/qmsAuditHubActions.test.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
+          src/services/qualityExcellence.ts
+          src/services/portalPreferences.ts
           src/pages/qms
+          src/components/QMS
           src/components/Layout/qmsSidebarNavigation.test.ts
           src/types/qms.ts
