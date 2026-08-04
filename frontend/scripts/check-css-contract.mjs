@@ -33,6 +33,8 @@ const requiredOrder = [
   "./foundations/forms-and-overlays.css",
   "./foundations/layout-safety.css",
   "./foundations/appearance.css",
+  "./qms-usability-enhancements.css",
+  "./qms-calendar-workspace.css",
 ];
 let previous = -1;
 for (const required of requiredOrder) {
@@ -40,6 +42,11 @@ for (const required of requiredOrder) {
   if (offset < 0) fail(`styles/index.css is missing ${required}`);
   if (offset >= 0 && offset <= previous) fail(`styles/index.css loads ${required} out of contract order`);
   if (offset >= 0) previous = offset;
+}
+
+const manifestImports = [...index.matchAll(/@import\s+["']([^"']+)["']/g)].map((match) => match[1]);
+if (manifestImports.at(-1) !== "./qms-calendar-workspace.css") {
+  fail(`styles/index.css must load ./qms-calendar-workspace.css last; found ${manifestImports.at(-1) || "no imports"}`);
 }
 
 function cssFiles(directory) {
@@ -90,6 +97,17 @@ for (const file of graph.keys()) visit(file);
 const contract = read(path.join(styles, "foundations", "forms-and-overlays.css"));
 for (const requiredSelector of ['[role="dialog"]', "textarea", "select option", ":-webkit-autofill"]) {
   if (!contract.includes(requiredSelector)) fail(`forms-and-overlays.css is missing ${requiredSelector}`);
+}
+
+const calendarContract = read(path.join(styles, "qms-calendar-workspace.css"));
+for (const requiredSelector of [
+  "html.quality-context-active .qms-ops-page--calendar",
+  ".qms-calendar-board",
+  ".qms-calendar-drawer",
+  ":focus-visible",
+  "prefers-reduced-motion",
+]) {
+  if (!calendarContract.includes(requiredSelector)) fail(`qms-calendar-workspace.css is missing ${requiredSelector}`);
 }
 
 if (failures.length) {
