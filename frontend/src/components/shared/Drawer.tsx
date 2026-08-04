@@ -7,9 +7,18 @@ type DrawerProps = {
   children: React.ReactNode;
   side?: "left" | "right";
   panelClassName?: string;
+  closeDisabled?: boolean;
 };
 
-const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side = "right", panelClassName }) => {
+const Drawer: React.FC<DrawerProps> = ({
+  title,
+  isOpen,
+  onClose,
+  children,
+  side = "right",
+  panelClassName,
+  closeDisabled = false,
+}) => {
   const lastActiveRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -21,7 +30,7 @@ const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side 
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || closeDisabled) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
@@ -29,10 +38,10 @@ const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side 
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [closeDisabled, isOpen, onClose]);
 
   const handleBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
+    if (!closeDisabled && event.target === event.currentTarget) {
       onClose();
     }
   };
@@ -42,11 +51,12 @@ const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side 
       className={`drawer-overlay drawer-overlay--${side}${isOpen ? " drawer-overlay--open" : ""}`}
       onMouseDown={handleBackdropClick}
       aria-hidden={!isOpen}
+      aria-busy={closeDisabled || undefined}
     >
       <aside className={`drawer-panel${panelClassName ? ` ${panelClassName}` : ""}`} role="dialog" aria-modal="true">
         <div className="drawer__header">
           <h3 className="drawer__title">{title}</h3>
-          <button type="button" className="drawer__close" onClick={onClose}>
+          <button type="button" className="drawer__close" onClick={onClose} disabled={closeDisabled} aria-label={`Close ${title}`}>
             ×
           </button>
         </div>
