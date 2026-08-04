@@ -1,0 +1,113 @@
+.personnel-licences {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--border-subtle, #d0d5dd);
+}
+
+.personnel-licences__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text-primary, #17212b);
+}
+
+.personnel-licences__header > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.personnel-licences__header span {
+  color: var(--text-secondary, #667085);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.personnel-licences__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.65rem;
+}
+
+.personnel-licence {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-subtle, #d0d5dd);
+  border-radius: 11px;
+  background: var(--surface, #fff);
+}
+
+.personnel-licence.is-primary {
+  border-left: 3px solid var(--accent-primary, #8b6f00);
+}
+
+.personnel-licence__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.personnel-licence__top span {
+  color: var(--accent-primary, #8b6f00);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.personnel-licence__top small {
+  color: #067647;
+  font-weight: 750;
+}
+
+.personnel-licence > strong {
+  overflow-wrap: anywhere;
+  color: var(--text-primary, #17212b);
+  font-size: 1rem;
+}
+
+.personnel-licence dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.75rem;
+  margin: 0;
+}
+
+.personnel-licence dl > div {
+  min-width: 0;
+}
+
+.personnel-licence dt {
+  color: var(--text-secondary, #667085);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.personnel-licence dd {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.1rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary, #17212b);
+  font-size: 0.78rem;
+}
+
+.personnel-licences__state {
+  margin: 0;
+  color: var(--text-secondary, #667085);
+  font-size: 0.8rem;
+}
+
+.personnel-licences__state--warning {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #b54708;
+}
