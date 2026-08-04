@@ -89,7 +89,7 @@ function moduleTitle(segment: string | undefined): string {
     settings: "QMS Settings",
     aerodoc: "AeroDoc",
   };
-  return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Management System";
+  return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Control Centre";
 }
 
 function pathMatches(current: string, target: string): boolean {
@@ -111,7 +111,7 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
 
 function topLevelTabs(basePath: string): ContextTab[] {
   return [
-    { id: "overview", label: "Overview", path: basePath, icon: Gauge, exact: true },
+    { id: "overview", label: "Control Centre", path: basePath, icon: Gauge, exact: true },
     { id: "work", label: "My Work", path: `${basePath}/inbox/assigned-to-me`, icon: Inbox, activePrefixes: [`${basePath}/inbox`] },
     { id: "calendar", label: "Calendar", path: `${basePath}/calendar/month`, icon: CalendarDays, activePrefixes: [`${basePath}/calendar`] },
     { id: "audits", label: "Audits", path: `${basePath}/audits/dashboard`, icon: ClipboardCheck, activePrefixes: [`${basePath}/audits`] },
@@ -174,7 +174,6 @@ const QualityContextTabs: React.FC = () => {
     }
 
     let activeHost: HTMLDivElement | null = null;
-
     const syncMount = () => {
       const main = document.querySelector<HTMLElement>(".tenant-shell__main");
       if (!main) {
@@ -182,7 +181,6 @@ const QualityContextTabs: React.FC = () => {
         setMountTarget(null);
         return;
       }
-
       let host = main.querySelector<HTMLDivElement>(":scope > .quality-context-bar-host");
       if (!host) {
         host = document.createElement("div");
@@ -247,10 +245,7 @@ const QualityContextTabs: React.FC = () => {
     <section className="quality-context-bar" aria-label="Quality workspace navigation">
       <div className="quality-context-bar__identity">
         <span className="quality-context-bar__mark"><ShieldCheck size={17} aria-hidden="true" /></span>
-        <span>
-          <small>Quality workspace</small>
-          <strong>{title}</strong>
-        </span>
+        <span><small>Quality workspace</small><strong>{title}</strong></span>
       </div>
 
       <nav className="quality-context-bar__tabs" aria-label={`${title} related pages`}>
@@ -258,28 +253,16 @@ const QualityContextTabs: React.FC = () => {
           const Icon = tab.icon;
           const active = tabIsActive(tab, location.pathname, location.search);
           return (
-            <button
-              key={tab.id}
-              type="button"
-              className={active ? "is-active" : ""}
-              aria-current={active ? "page" : undefined}
-              onClick={() => navigate(tab.path)}
-            >
-              {Icon ? <Icon size={15} aria-hidden="true" /> : null}
-              <span>{tab.label}</span>
+            <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
+              {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
             </button>
           );
         })}
       </nav>
 
       <div className="quality-context-bar__actions">
-        <span className="quality-context-bar__live" title="QMS pages refresh automatically while active">
-          <RefreshCw size={13} aria-hidden="true" /> Live
-        </span>
-        <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}>
-          <PrimaryIcon size={15} aria-hidden="true" />
-          <span>{primaryAction.label}</span>
-        </button>
+        <span className="quality-context-bar__live" title="QMS pages refresh automatically while active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
+        <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}><PrimaryIcon size={15} aria-hidden="true" /><span>{primaryAction.label}</span></button>
         <details className="quality-context-bar__more">
           <summary aria-label="More Quality pages"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
           <div>
