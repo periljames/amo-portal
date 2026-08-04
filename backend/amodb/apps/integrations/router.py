@@ -10,6 +10,7 @@ from amodb.security import require_roles
 from amodb.apps.accounts.models import AccountRole, User
 
 from . import schemas, services
+from .migration_router import router as migration_router
 from .winair_router import router as winair_router
 
 
@@ -126,3 +127,4 @@ async def ingest_event(
 
 
 router.include_router(winair_router)
+router.include_router(migration_router)
