@@ -6,11 +6,13 @@ import {
   type DocumentationIndexState,
   type DocumentationReference,
 } from "../../services/documentation";
+import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
 import LinkedDocumentationPanel from "./LinkedDocumentationPanel";
 import PdfReaderCore, {
   type PdfReaderNavigationRequest,
   type PdfReaderOutlineItem,
 } from "./PdfReaderCore";
+import { usePdfStaticTypewriter } from "./pdfStaticTypewriter";
 import "./publicationReaderZoom.css";
 
 export type PdfOutlineItem = PdfReaderOutlineItem;
@@ -102,15 +104,30 @@ export default function PublicationPdfLayoutViewer({
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [automaticReferences, setAutomaticReferences] = useState<DocumentationReference[]>([]);
   const [indexState, setIndexState] = useState<DocumentationIndexState | null>(null);
+  const [capabilities, setCapabilities] = useState<PdfReaderCapabilities | null>(null);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(activeReferenceId || null);
   const [referenceListOpen, setReferenceListOpen] = useState(false);
   const [readerNavigationRequest, setReaderNavigationRequest] = useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+  const staticTypewriter = usePdfStaticTypewriter({ identity, capabilities, currentPage, title });
 
   useEffect(() => {
     if (!navigationRequest) return;
     setReaderNavigationRequest(navigationRequest);
   }, [navigationRequest?.page, navigationRequest?.token]);
+
+  useEffect(() => {
+    if (!identity) {
+      setCapabilities(null);
+      return;
+    }
+    let active = true;
+    setCapabilities(null);
+    getPdfReaderCapabilities(identity.tenant, identity.manualId, identity.revisionId)
+      .then((value) => { if (active) setCapabilities(value); })
+      .catch(() => { if (active) setCapabilities(null); });
+    return () => { active = false; };
+  }, [identity]);
 
   useEffect(() => {
     const layout = layoutRef.current;
@@ -181,9 +198,10 @@ export default function PublicationPdfLayoutViewer({
   const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
-    <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
+    <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""} ${staticTypewriter.available ? "has-static-typewriter" : ""}`}>
       <div className="publication-native-pdf">
         {indexing(indexState) ? <div className="pdf-engine-notice">Indexing linked documents…</div> : null}
+        {staticTypewriter.controls}
         {currentReferences.length ? <div className="publication-page-links-control">
           <button type="button" className="publication-page-links-button" onClick={() => setReferenceListOpen((value) => !value)}><Link2 size={14} /> {currentReferences.length} linked</button>
           {referenceListOpen ? <div className="publication-page-links-popover">
@@ -202,24 +220,28 @@ export default function PublicationPdfLayoutViewer({
           identity={identity}
           uncontrolled={uncontrolled}
           navigationRequest={readerNavigationRequest}
+          capabilities={capabilities}
           initialPage={initialPage}
           initialZoom={initialZoom}
           onPageChange={(pageNumber: number) => { setCurrentPage(pageNumber); onPageChange?.(pageNumber); }}
           onZoomChange={onZoomChange}
           onAcroFormDetected={onAcroFormDetected}
           onOutlineReady={onOutlineReady}
-          renderPageOverlay={(pageNumber: number) => <>{(referencesByPage.get(pageNumber) || []).map((reference) => {
-            const style = hotspotStyle(reference);
-            if (!style || !reference.target) return null;
-            return <button
-              type="button"
-              key={reference.id}
-              className={`publication-reference-hotspot ${(activeReferenceId || selectedReferenceId) === reference.id ? "active" : ""}`}
-              style={style}
-              aria-label={`${reference.raw_token}: open ${reference.target.code}`}
-              onClick={() => openReference(reference)}
-            />;
-          })}</>}
+          renderPageOverlay={(pageNumber: number) => <>
+            {(referencesByPage.get(pageNumber) || []).map((reference) => {
+              const style = hotspotStyle(reference);
+              if (!style || !reference.target) return null;
+              return <button
+                type="button"
+                key={reference.id}
+                className={`publication-reference-hotspot ${(activeReferenceId || selectedReferenceId) === reference.id ? "active" : ""}`}
+                style={style}
+                aria-label={`${reference.raw_token}: open ${reference.target.code}`}
+                onClick={() => openReference(reference)}
+              />;
+            })}
+            {staticTypewriter.renderPageOverlay(pageNumber)}
+          </>}
         />
       </div>
       {selectedReference ? <LinkedDocumentationPanel tenant={identity.tenant} referenceId={selectedReference.id} onClose={() => setSelectedReferenceId(null)} /> : null}
