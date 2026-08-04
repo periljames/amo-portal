@@ -6,7 +6,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Circle,
@@ -39,6 +38,7 @@ import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import InlineError from "../../../components/shared/InlineError";
 import Button from "../../../components/UI/Button";
 import { apiRequest, qmsPath } from "../../../services/apiClient";
+import { plannerClockAt } from "./qmsPlannerClock";
 import {
   DEFAULT_PLANNER_PREFERENCES,
   PLANNER_CATEGORIES,
@@ -51,7 +51,6 @@ import {
   normalisePlannerEvent,
   parseIsoDateKey,
   requestRange,
-  startOfMonth,
   visiblePlannerDays,
   type PlannerCategory,
   type PlannerEvent,
@@ -93,6 +92,7 @@ type PlannerUiPreferences = {
 
 type PendingMove = { event: PlannerEvent; targetDate: string };
 type QuickCreateDraft = { kind: CreateKind; title: string; date: string; time: string };
+type QuickCreateOption = { kind: CreateKind; label: string; enabled: boolean; unavailableReason?: string };
 
 const DEFAULT_UI: PlannerUiPreferences = {
   ...DEFAULT_PLANNER_PREFERENCES,
@@ -106,6 +106,13 @@ const DEFAULT_UI: PlannerUiPreferences = {
 const HOUR_HEIGHT = 64;
 const TENANT_TIMEZONE = "Africa/Nairobi";
 const TENANT_TIMEZONE_LABEL = "EAT · UTC+3";
+const QUICK_CREATE_OPTIONS: QuickCreateOption[] = [
+  { kind: "audit", label: "Audit", enabled: true },
+  { kind: "car", label: "CAR follow-up", enabled: false, unavailableReason: "CAR creation does not yet accept a planner draft." },
+  { kind: "training", label: "Training", enabled: false, unavailableReason: "Training scheduling does not yet accept a planner draft." },
+  { kind: "review", label: "Management review", enabled: false, unavailableReason: "Management review creation does not yet accept a planner draft." },
+  { kind: "other", label: "Other", enabled: false, unavailableReason: "This source does not yet expose an authoritative planner handoff." },
+];
 
 function friendlyError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -196,7 +203,7 @@ function eventBelongsToUser(event: PlannerEvent, userId?: string): boolean {
 function MiniMonth({ anchor, selectedDate, onSelect }: { anchor: Date; selectedDate: string; onSelect: (date: Date) => void }): React.ReactElement {
   const days = monthGridDays(anchor);
   const month = anchor.getMonth();
-  const today = isoDateKey(new Date());
+  const today = plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey;
   return (
     <section className="qms-planner-mini" aria-label="Mini month calendar">
       <header><strong>{anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong></header>
@@ -295,7 +302,7 @@ function MonthView({
 }): React.ReactElement {
   const days = monthGridDays(anchor);
   const month = anchor.getMonth();
-  const today = isoDateKey(new Date());
+  const today = plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey;
   return (
     <div className="qms-planner-month" aria-label="Quality month planner">
       {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => <div key={label} className="qms-planner-month__dow">{label}</div>)}
@@ -368,11 +375,11 @@ function TimelineView({
   onDropEvent: (eventId: string, targetDate: string) => void;
   onKeyboardMove: (event: PlannerEvent, days: number) => void;
 }): React.ReactElement {
-  const now = new Date();
-  const today = isoDateKey(now);
+  const now = plannerClockAt(new Date(), TENANT_TIMEZONE);
+  const today = now.dateKey;
   const hours = Array.from({ length: Math.max(1, hourEnd - hourStart + 1) }, (_, index) => hourStart + index);
   const height = Math.max(1, hourEnd - hourStart) * HOUR_HEIGHT;
-  const nowMinutes = (now.getHours() - hourStart) * 60 + now.getMinutes();
+  const nowMinutes = (now.hour - hourStart) * 60 + now.minute;
   const nowTop = Math.max(0, Math.min(height, (nowMinutes / 60) * HOUR_HEIGHT));
 
   const createFromPointer = (event: React.MouseEvent<HTMLDivElement>, date: string) => {
@@ -458,7 +465,7 @@ function TimelineView({
             }}
           >
             {hours.map((hour) => <React.Fragment key={hour}><span className="qms-planner-timeline__hour-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT}px` }} /><span className="qms-planner-timeline__half-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT + HOUR_HEIGHT / 2}px` }} /></React.Fragment>)}
-            {key === today && now.getHours() >= hourStart && now.getHours() <= hourEnd ? <span className="qms-planner-timeline__now" style={{ top: `${nowTop}px` }}><i>{formatTime(`${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`, timeFormat)}</i></span> : null}
+            {key === today && now.hour >= hourStart && now.hour <= hourEnd ? <span className="qms-planner-timeline__now" style={{ top: `${nowTop}px` }}><i>{formatTime(`${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}`, timeFormat)}</i></span> : null}
             {timed.map((row, index) => {
               const [startHour, startMinute] = String(row.startTime).split(":").map(Number);
               const [endHour, endMinute] = String(row.endTime || "").split(":").map(Number);
@@ -520,9 +527,9 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const view = viewFromPath(location.pathname);
-  const todayKey = useMemo(() => isoDateKey(new Date()), []);
+  const todayKey = useMemo(() => plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey, []);
   const anchorKey = parseIsoDateKey(searchParams.get("date")) ? String(searchParams.get("date")) : todayKey;
-  const anchor = useMemo(() => parseIsoDateKey(anchorKey) || new Date(), [anchorKey]);
+  const anchor = useMemo(() => parseIsoDateKey(anchorKey) || parseIsoDateKey(todayKey) || new Date(), [anchorKey, todayKey]);
   const storageKey = `amoportal:qms-planner-v2:${amoCode}`;
   const [preferences, setPreferences] = useState<PlannerUiPreferences>(() => loadUiPreferences(storageKey));
   const [events, setEvents] = useState<PlannerEvent[]>([]);
@@ -592,10 +599,17 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select, [contenteditable='true']")) {
-        if (event.key === "Escape") target.blur();
+      const editable = Boolean(target?.matches("input, textarea, select, [contenteditable='true']"));
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (shortcutsOpen) { setShortcutsOpen(false); return; }
+        if (commandOpen) { setCommandOpen(false); return; }
+        if (pendingMove) { if (!moveBusy) setPendingMove(null); return; }
+        if (quickCreate) { setQuickCreate(null); return; }
+        if (editable) target?.blur();
         return;
       }
+      if (shortcutsOpen || commandOpen || pendingMove || quickCreate || editable) return;
       const key = event.key.toLowerCase();
       if (event.key === "?") { event.preventDefault(); setShortcutsOpen(true); return; }
       if (event.key === "/" || ((event.ctrlKey || event.metaKey) && key === "k")) { event.preventDefault(); setCommandOpen(true); return; }
@@ -613,15 +627,15 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         setPreferences((current) => ({ ...current, daySpan: span }));
         if (view !== "week") switchView("week");
       }
-      if (event.key === "Escape") { setCommandOpen(false); setShortcutsOpen(false); setPendingMove(null); setQuickCreate(null); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [anchorKey, selectedDate, setDateParam, switchView, todayKey, view]);
+  }, [anchorKey, commandOpen, moveBusy, pendingMove, quickCreate, selectedDate, setDateParam, shortcutsOpen, switchView, todayKey, view]);
 
   const enabledCategories = useMemo(() => new Set(PLANNER_CATEGORIES.map((item) => item.key).filter((key) => !preferences.hiddenCategories.includes(key))), [preferences.hiddenCategories]);
   const owners = useMemo(() => [...new Set(events.map((event) => event.ownerLabel).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [events]);
-  const weekEnd = isoDateKey(addDays(new Date(), 7));
+  const todayDate = useMemo(() => parseIsoDateKey(todayKey) || new Date(), [todayKey]);
+  const weekEnd = isoDateKey(addDays(todayDate, 7));
   const filteredEvents = useMemo(() => events.filter((event) => {
     if (!enabledCategories.has(event.category) || !eventMatchesSearch(event, query)) return false;
     if (ownerFilter !== "all" && event.ownerLabel !== ownerFilter) return false;
@@ -682,22 +696,48 @@ export default function QmsPlannerPageV2(): React.ReactElement {
     }
   };
 
-  const openQuickCreate = (date = selectedDate || anchorKey, time = "09:00", kind: CreateKind = "audit") => setQuickCreate({ kind, title: "", date, time });
+  const openQuickCreate = (date = selectedDate || anchorKey, time = "09:00", kind: CreateKind = "audit") => {
+    const option = QUICK_CREATE_OPTIONS.find((item) => item.kind === kind);
+    if (option && !option.enabled) {
+      setToast({ tone: "info", message: option.unavailableReason || "This planner handoff is not yet available." });
+      return;
+    }
+    setCommandOpen(false);
+    setShortcutsOpen(false);
+    setQuickCreate({ kind, title: "", date, time });
+  };
 
   const continueQuickCreate = () => {
-    if (!quickCreate) return;
-    const params = new URLSearchParams({ create: "1", source: "planner", date: quickCreate.date, time: quickCreate.time, title: quickCreate.title.trim() });
-    const base = `/maintenance/${amoCode}`;
-    const path = quickCreate.kind === "audit"
-      ? `${base}/quality/audits/plan`
-      : quickCreate.kind === "car"
-        ? `${base}/quality/cars/new`
-        : quickCreate.kind === "training"
-          ? `${base}/training/competence/dashboard`
-          : quickCreate.kind === "review"
-            ? `${base}/quality/management-review/meetings`
-            : `${base}/quality/inbox/assigned-to-me`;
-    navigate(`${path}?${params.toString()}`);
+    if (!quickCreate || quickCreate.kind !== "audit") return;
+    const draftKey = `qms-audit-schedule-draft:${amoCode}:quality`;
+    try {
+      const existingRaw = window.localStorage.getItem(draftKey);
+      if (existingRaw) {
+        const existing = JSON.parse(existingRaw) as { form?: { title?: string; next_due_date?: string } };
+        if (existing.form?.title || existing.form?.next_due_date) {
+          setToast({ tone: "danger", message: "Audit Planner already contains a saved draft. Complete or clear that draft before sending another planner handoff." });
+          return;
+        }
+      }
+      const requestedTime = quickCreate.time ? `Planner requested start time: ${quickCreate.time} ${TENANT_TIMEZONE_LABEL}.` : "";
+      window.localStorage.setItem(draftKey, JSON.stringify({
+        form: {
+          title: quickCreate.title.trim(),
+          next_due_date: quickCreate.date,
+          frequency: "ONE_TIME",
+          duration_days: "1",
+          criteria: requestedTime,
+        },
+        editingScheduleId: null,
+        savedAt: Date.now(),
+      }));
+    } catch {
+      setToast({ tone: "danger", message: "The audit draft could not be stored in this browser. No planner input was discarded." });
+      return;
+    }
+    const params = new URLSearchParams({ view: "list", source: "planner" });
+    setQuickCreate(null);
+    navigate(`/maintenance/${amoCode}/quality/audits/plan?${params.toString()}`);
   };
 
   const toggleCategory = (category: PlannerCategory) => setPreferences((current) => ({
@@ -819,8 +859,8 @@ export default function QmsPlannerPageV2(): React.ReactElement {
               <>
                 <section className="qms-planner-welcome"><div className="qms-planner-welcome__icon"><CalendarClock size={22} /></div><div><strong>Plan, act, and follow through</strong><p>Use one workspace for audits, CAR/CAPA, training, management reviews, and other quality commitments.</p></div></section>
                 <section className="qms-planner-panel-section"><h3>Attention now</h3><div className="qms-planner-attention-grid"><button type="button" onClick={() => setFocus("overdue")}><strong>{overdueCount}</strong><span>Overdue</span></button><button type="button" onClick={() => setFocus("today")}><strong>{todayCount}</strong><span>Today</span></button><button type="button" onClick={() => setFocus("week")}><strong>{upcomingCount}</strong><span>Next 7 days</span></button><button type="button" onClick={() => setFocus("unassigned")}><strong>{unassignedCount}</strong><span>Unassigned</span></button></div></section>
-                <section className="qms-planner-panel-section"><h3>Quick actions</h3><div className="qms-planner-action-list"><button type="button" onClick={() => openQuickCreate(selectedDate, "09:00", "audit")}><Circle size={15} /><span>Schedule an audit</span><ChevronRight size={14} /></button><button type="button" onClick={() => openQuickCreate(selectedDate, "09:00", "car")}><Circle size={15} /><span>Plan a CAR follow-up</span><ChevronRight size={14} /></button><button type="button" onClick={() => openQuickCreate(selectedDate, "09:00", "training")}><Circle size={15} /><span>Plan training</span><ChevronRight size={14} /></button><button type="button" onClick={() => openQuickCreate(selectedDate, "09:00", "review")}><Circle size={15} /><span>Schedule management review</span><ChevronRight size={14} /></button></div></section>
-                <section className="qms-planner-panel-section"><h3>Useful shortcuts</h3><div className="qms-planner-shortcut-summary"><span>Command menu <kbd>⌘ K</kbd></span><span>Quick schedule <kbd>C</kbd></span><span>Toggle sidebar <kbd>B</kbd></span><span>All shortcuts <button type="button" onClick={() => setShortcutsOpen(true)}>?</button></span></div></section>
+                <section className="qms-planner-panel-section"><h3>Quick actions</h3><div className="qms-planner-action-list"><button type="button" onClick={() => openQuickCreate(selectedDate, "09:00", "audit")}><Circle size={15} /><span>Schedule an audit</span><ChevronRight size={14} /></button><button type="button" disabled title="CAR creation does not yet accept a planner draft."><Circle size={15} /><span>Plan a CAR follow-up</span><ChevronRight size={14} /></button><button type="button" disabled title="Training scheduling does not yet accept a planner draft."><Circle size={15} /><span>Plan training</span><ChevronRight size={14} /></button><button type="button" disabled title="Management review creation does not yet accept a planner draft."><Circle size={15} /><span>Schedule management review</span><ChevronRight size={14} /></button></div></section>
+                <section className="qms-planner-panel-section"><h3>Useful shortcuts</h3><div className="qms-planner-shortcut-summary"><span>Command menu <kbd>⌘ K</kbd></span><span>Quick audit draft <kbd>C</kbd></span><span>Toggle sidebar <kbd>B</kbd></span><span>All shortcuts <button type="button" onClick={() => setShortcutsOpen(true)}>?</button></span></div></section>
                 <section className="qms-planner-panel-section"><h3>Source health</h3><p className={sourceErrors?.length ? "is-danger" : "is-success"}>{sourceErrors?.length ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}{sourceErrors?.length ? `${sourceErrors.length} source failures need attention.` : "All returned planner sources are healthy."}</p></section>
               </>
             )}
@@ -830,12 +870,12 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         {quickCreate ? (
           <div className="qms-planner-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setQuickCreate(null); }}>
             <section className="qms-planner-modal qms-planner-create-modal" role="dialog" aria-modal="true" aria-labelledby="qms-create-title">
-              <header><div><span>Quick schedule</span><strong id="qms-create-title">Create a quality commitment</strong></div><button type="button" onClick={() => setQuickCreate(null)}><X size={18} /></button></header>
-              <div className="qms-planner-create-types">{([['audit', 'Audit'], ['car', 'CAR follow-up'], ['training', 'Training'], ['review', 'Management review'], ['other', 'Other']] as Array<[CreateKind, string]>).map(([kind, label]) => <button key={kind} type="button" className={quickCreate.kind === kind ? "is-active" : ""} onClick={() => setQuickCreate((current) => current ? { ...current, kind } : current)}>{label}</button>)}</div>
-              <label className="qms-planner-modal__field"><span>Title or reference</span><input autoFocus value={quickCreate.title} onChange={(event) => setQuickCreate((current) => current ? { ...current, title: event.target.value } : current)} placeholder="e.g. Procurement internal audit" /></label>
-              <div className="qms-planner-create-date-row"><label className="qms-planner-modal__field"><span>Date</span><input type="date" value={quickCreate.date} onChange={(event) => setQuickCreate((current) => current ? { ...current, date: event.target.value } : current)} /></label><label className="qms-planner-modal__field"><span>Start time</span><input type="time" value={quickCreate.time} onChange={(event) => setQuickCreate((current) => current ? { ...current, time: event.target.value } : current)} /></label></div>
-              <div className="qms-planner-create-note"><ShieldCheck size={16} /><span>The planner opens the authoritative module form. It does not bypass approval, numbering, assignment, or audit-trail controls.</span></div>
-              <footer><Button variant="secondary" onClick={() => setQuickCreate(null)}>Cancel</Button><Button onClick={continueQuickCreate} disabled={!quickCreate.date}>Continue to form</Button></footer>
+              <header><div><span>Quick schedule</span><strong id="qms-create-title">Create an audit schedule draft</strong></div><button type="button" aria-label="Close quick schedule" onClick={() => setQuickCreate(null)}><X size={18} /></button></header>
+              <div className="qms-planner-create-types">{QUICK_CREATE_OPTIONS.map((option) => <button key={option.kind} type="button" className={quickCreate.kind === option.kind ? "is-active" : ""} disabled={!option.enabled} title={option.enabled ? undefined : option.unavailableReason} onClick={() => option.enabled && setQuickCreate((current) => current ? { ...current, kind: option.kind } : current)}>{option.label}</button>)}</div>
+              <label className="qms-planner-modal__field"><span>Audit title or reference</span><input autoFocus value={quickCreate.title} onChange={(event) => setQuickCreate((current) => current ? { ...current, title: event.target.value } : current)} placeholder="e.g. Procurement internal audit" /></label>
+              <div className="qms-planner-create-date-row"><label className="qms-planner-modal__field"><span>Planned date</span><input type="date" value={quickCreate.date} onChange={(event) => setQuickCreate((current) => current ? { ...current, date: event.target.value } : current)} /></label><label className="qms-planner-modal__field"><span>Requested start time</span><input type="time" value={quickCreate.time} onChange={(event) => setQuickCreate((current) => current ? { ...current, time: event.target.value } : current)} /></label></div>
+              <div className="qms-planner-create-note"><ShieldCheck size={16} /><span>The title, date, and requested time are retained in the authoritative Audit Planner draft. Other source types stay disabled until their modules expose an equivalent handoff contract.</span></div>
+              <footer><Button variant="secondary" onClick={() => setQuickCreate(null)}>Cancel</Button><Button onClick={continueQuickCreate} disabled={!quickCreate.date || !quickCreate.title.trim()}>Continue to Audit Planner</Button></footer>
             </section>
           </div>
         ) : null}
@@ -843,7 +883,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         {pendingMove ? (
           <div className="qms-planner-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !moveBusy) setPendingMove(null); }}>
             <section className="qms-planner-modal" role="dialog" aria-modal="true" aria-labelledby="qms-reschedule-title">
-              <header><div><span>Controlled schedule change</span><strong id="qms-reschedule-title">Reschedule {eventReference(pendingMove.event)}</strong></div><button type="button" onClick={() => setPendingMove(null)} disabled={moveBusy}><X size={18} /></button></header>
+              <header><div><span>Controlled schedule change</span><strong id="qms-reschedule-title">Reschedule {eventReference(pendingMove.event)}</strong></div><button type="button" aria-label="Close reschedule dialog" onClick={() => setPendingMove(null)} disabled={moveBusy}><X size={18} /></button></header>
               <div className="qms-planner-move-summary"><span><small>From</small><strong>{pendingMove.event.date}</strong></span><ChevronRight size={18} /><span><small>To</small><strong>{pendingMove.targetDate}</strong></span></div>
               {pendingMove.targetDate === pendingMove.event.date ? <label className="qms-planner-modal__field"><span>New date</span><input type="date" value={pendingMove.targetDate} onChange={(event) => setPendingMove((current) => current ? { ...current, targetDate: event.target.value } : current)} /></label> : null}
               {sameOwnerConflicts.length ? <div className="qms-planner-conflict"><AlertTriangle size={16} /><span>{sameOwnerConflicts.length} item{sameOwnerConflicts.length === 1 ? "" : "s"} already use the same owner on the target date.</span></div> : null}
@@ -859,7 +899,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
             <section className="qms-planner-command" role="dialog" aria-modal="true" aria-label="Planner command menu">
               <header><Search size={18} /><input ref={searchRef} autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search events or run a planner command" /><kbd>Esc</kbd></header>
               <div className="qms-planner-command__list">
-                <button type="button" onClick={() => { setCommandOpen(false); openQuickCreate(); }}><Plus size={16} /><span><strong>Quick schedule</strong><small>Create an audit, follow-up, training, or review</small></span><kbd>C</kbd></button>
+                <button type="button" onClick={() => { setCommandOpen(false); openQuickCreate(); }}><Plus size={16} /><span><strong>Quick audit draft</strong><small>Prefill the authoritative Audit Planner</small></span><kbd>C</kbd></button>
                 <button type="button" onClick={() => { setCommandOpen(false); setDateParam(todayKey); }}><CalendarDays size={16} /><span><strong>Go to today</strong><small>Return to the current date</small></span><kbd>T</kbd></button>
                 <button type="button" onClick={() => { setCommandOpen(false); setFocus("overdue"); }}><AlertTriangle size={16} /><span><strong>Show overdue</strong><small>Focus the planner on overdue commitments</small></span></button>
                 <button type="button" onClick={() => { setCommandOpen(false); setPreferences((current) => ({ ...current, leftRailOpen: !current.leftRailOpen })); }}><PanelLeftOpen size={16} /><span><strong>Toggle sidebar</strong><small>Show or hide planner controls</small></span><kbd>B</kbd></button>
@@ -873,8 +913,8 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         {shortcutsOpen ? (
           <div className="qms-planner-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShortcutsOpen(false); }}>
             <section className="qms-planner-shortcuts" role="dialog" aria-modal="true" aria-label="Planner keyboard shortcuts">
-              <header><div><span>Power-user controls</span><strong>Keyboard shortcuts</strong></div><button type="button" onClick={() => setShortcutsOpen(false)}><X size={18} /></button></header>
-              <div>{[["C", "Quick schedule"], ["T", "Go to today"], ["M", "Month view"], ["W", "Multi-day view"], ["D", "Day view"], ["A", "Agenda view"], ["1–9", "Choose visible day span"], ["B", "Toggle sidebar"], ["]", "Toggle context panel"], ["/ or ⌘K", "Command menu"], ["Shift + arrows", "Propose moving the selected commitment"], ["?", "Shortcut help"]].map(([key, label]) => <span key={key}><kbd>{key}</kbd><strong>{label}</strong></span>)}</div>
+              <header><div><span>Power-user controls</span><strong>Keyboard shortcuts</strong></div><button type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutsOpen(false)}><X size={18} /></button></header>
+              <div>{[["C", "Quick audit draft"], ["T", "Go to today"], ["M", "Month view"], ["W", "Multi-day view"], ["D", "Day view"], ["A", "Agenda view"], ["1–9", "Choose visible day span"], ["B", "Toggle sidebar"], ["]", "Toggle context panel"], ["/ or ⌘K", "Command menu"], ["Shift + arrows", "Propose moving the selected commitment"], ["?", "Shortcut help"]].map(([key, label]) => <span key={key}><kbd>{key}</kbd><strong>{label}</strong></span>)}</div>
             </section>
           </div>
         ) : null}
