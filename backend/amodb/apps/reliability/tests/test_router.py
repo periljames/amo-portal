@@ -146,7 +146,7 @@ def test_compute_trend_basic(db_session):
     payload = DefectTrendCreate(window_start=date(2024, 1, 1), window_end=date(2024, 1, 31))
     trend = reliability_services.compute_defect_trend(
         db_session,
-        amo_id="amo-1",
+        amo_id=str(amo.id),
         window_start=payload.window_start,
         window_end=payload.window_end,
         aircraft_serial_number=payload.aircraft_serial_number,

@@ -1,0 +1,94 @@
+name: Reliability Review Finalizer V2
+
+on:
+  push:
+    branches: [agent/reliability-v2-foundation]
+    paths: [docs/reliability/.review-fix-trigger-v2]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-review-finalizer-v2
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      APP_ENV: test
+      ENVIRONMENT: test
+      TESTING: "true"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      SECRET_KEY: reliability-review-finalizer
+      JWT_SECRET_KEY: reliability-review-finalizer-jwt
+      PYTHONPATH: backend
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      WRITE_DATABASE_URL: sqlite+pysqlite:///:memory:
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/reliability-v2-foundation
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Correct patcher boundary matching
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/scripts/apply_reliability_review_fixes.py')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace(
+              'start = text.index(f"def {name}(\\n")',
+              'start = text.index(f"def {name}(")',
+          )
+          source = source.replace(
+              'end = text.index(f"\\ndef {next_name}(\\n", start)',
+              'end = text.index(f"\\ndef {next_name}(", start)',
+          )
+          path.write_text(source, encoding='utf-8')
+          PY
+
+      - name: Apply and validate review corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python backend/scripts/apply_reliability_review_fixes.py
+          python -m py_compile \
+            backend/amodb/apps/reliability/advanced_services.py \
+            backend/amodb/apps/reliability/services.py \
+            backend/amodb/apps/reliability/tests/test_review_regressions.py
+          pytest -q backend/amodb/apps/reliability/tests
+          git diff --check
+
+      - name: Restore permanent CI and publish clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 55b4263623b5dc7ee3baef91fd8f39cc2c44aa2b:.github/workflows/reliability-module-ci.yml > .github/workflows/reliability-module-ci.yml
+          rm -f .github/workflows/reliability-review-finalize-v2.yml
+          rm -f backend/scripts/apply_reliability_review_fixes.py
+          rm -f docs/reliability/.review-fix-trigger
+          rm -f docs/reliability/.review-fix-trigger-v2
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git commit -m "Fix Reliability ingestion, metrics, scheduling and counts"
+          git push origin HEAD:agent/reliability-v2-foundation

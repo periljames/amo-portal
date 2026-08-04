@@ -5,7 +5,6 @@ import { isAuthenticated } from "../services/auth";
 import PortalRoutes from "../portalRoutes";
 
 const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
-const ReliabilityReportsPage = lazy(() => import("../pages/ReliabilityReportsPage"));
 const EhmDashboardPage = lazy(() => import("../pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazy(() => import("../pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazy(() => import("../pages/ehm/EhmUploadsPage"));
@@ -14,7 +13,6 @@ const DEPARTMENT_HOMES = new Set([
   "planning",
   "production",
   "maintenance",
-  "reliability",
   "safety",
   "stores",
   "workshops",
@@ -90,20 +88,6 @@ export const AppRouter: React.FC = () => {
     );
   }
 
-  if (module === "reliability" && view === "reports" && parts.length === 4) {
-    return (
-      <Routes location={location}>
-        <Route
-          path="/maintenance/:amoCode/reliability/reports"
-          element={
-            <AuthenticatedSurface amoCode={amoCode} label="reliability reports">
-              <ReliabilityReportsPage />
-            </AuthenticatedSurface>
-          }
-        />
-      </Routes>
-    );
-  }
 
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {

@@ -1,14 +1,14 @@
 """Add actionable QMS notification links.
 
 Revision ID: quality_20260705_notification_action_links
-Revises: qual_20260704_schedfix
+Revises: qms_vernum_128
 Create Date: 2026-07-05
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "quality_20260705_notification_action_links"
-down_revision = "qual_20260704_schedfix"
+down_revision = "qms_vernum_128"
 branch_labels = None
 depends_on = None
 
