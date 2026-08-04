@@ -7,16 +7,16 @@ import "../../styles/winair-integration.css";
 export const PlanningUtilisationWorkspacePage: React.FC = () => {
   const { amoCode } = useParams();
   const [searchParams] = useSearchParams();
-  const view = searchParams.get("view");
 
-  if (view === "winair") {
+  if (searchParams.get("view") === "winair") {
     return <PlanningWinAirIntegrationPage />;
   }
 
   return (
     <>
       <Link
-        className="winair-workspace-launch btn btn-secondary"
+        className="btn btn-secondary"
+        style={{ position: "fixed", right: "1.25rem", bottom: "1.25rem", zIndex: 40 }}
         to={`/maintenance/${amoCode}/planning/utilisation-monitoring?view=winair`}
       >
         WinAir exchange
