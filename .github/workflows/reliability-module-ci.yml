@@ -72,7 +72,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD > /tmp/reliability-files.txt
+          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          git fetch origin "${{ github.event.pull_request.base.ref }}"
+          BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
+          git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
           ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability PR:'
