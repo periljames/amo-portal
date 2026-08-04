@@ -5,7 +5,9 @@ on:
     paths:
       - "backend/amodb/apps/manuals/**"
       - "backend/amodb/apps/doc_control/pdfium_service.py"
-      - "backend/amodb/apps/doc_control/tests/test_pdf_reader_*.py"
+      - "backend/amodb/apps/doc_control/pdf_capability_service.py"
+      - "backend/amodb/apps/doc_control/pdf_safe_processing_service.py"
+      - "backend/amodb/apps/doc_control/tests/test_pdf_*.py"
       - "backend/docs/document_control/PDF_READER_ENGINE_HARDENING_*.md"
       - "frontend/src/pages/manuals/**"
       - "frontend/src/pages/DocControl*"
@@ -76,7 +78,12 @@ jobs:
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Compile Publications and PDF engine backend
         working-directory: backend
-        run: python -m compileall -q amodb/apps/manuals amodb/apps/doc_control/pdfium_service.py
+        run: >-
+          python -m compileall -q
+          amodb/apps/manuals
+          amodb/apps/doc_control/pdfium_service.py
+          amodb/apps/doc_control/pdf_capability_service.py
+          amodb/apps/doc_control/pdf_safe_processing_service.py
       - name: Run controlled PDF engine and source contracts
         working-directory: backend
         run: >-
@@ -84,6 +91,8 @@ jobs:
           amodb/apps/doc_control/tests/test_pdf_reader_engine.py
           amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
           amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py
+          amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py
+          amodb/apps/doc_control/tests/test_pdf_capability_service.py
           amodb/apps/manuals/tests/test_pdf_reader_form_override.py
           amodb/apps/manuals/tests/test_pdf_reader_override_route_order.py
       - uses: actions/setup-node@v6
