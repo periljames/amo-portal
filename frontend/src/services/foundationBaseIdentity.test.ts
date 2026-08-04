@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   baseStationIdentityConflictMessage,
+  changedBaseStationIdentityCandidate,
   findBaseStationIdentityConflict,
 } from "./foundationBaseIdentity";
 import type { BaseStationRead } from "../types/foundations";
@@ -101,5 +102,75 @@ describe("base station identity conflicts", () => {
     );
 
     expect(conflict).toBeNull();
+  });
+
+  it("allows unrelated updates when historic code-to-alias overlaps exist", () => {
+    const current = base({ id: "base-a", code: "HQ", aliases: [] });
+    const historicOther = base({
+      id: "base-b",
+      code: "NBO-LINE",
+      aliases: [{
+        id: "alias-overlap",
+        amo_id: "amo-1",
+        base_station_id: "base-b",
+        alias: "HQ",
+        created_at: "2026-08-04T00:00:00Z",
+      }],
+    });
+
+    const candidate = changedBaseStationIdentityCandidate(current, { is_active: false });
+
+    expect(candidate).toBeNull();
+    expect(findBaseStationIdentityConflict([current, historicOther], candidate || {}, current.id)).toBeNull();
+  });
+
+  it("grandfathers unchanged identities while checking aliases newly introduced", () => {
+    const current = base({
+      id: "base-a",
+      code: "HQ",
+      aliases: [{
+        id: "alias-existing",
+        amo_id: "amo-1",
+        base_station_id: "base-a",
+        alias: "Nairobi",
+        created_at: "2026-08-04T00:00:00Z",
+      }],
+    });
+
+    const candidate = changedBaseStationIdentityCandidate(current, {
+      aliases: ["Nairobi", "Hangar 2"],
+    });
+
+    expect(candidate).toEqual({ aliases: ["Hangar 2"] });
+  });
+
+  it("does not preflight alias removal as a new identity", () => {
+    const current = base({
+      aliases: [
+        {
+          id: "alias-hq",
+          amo_id: "amo-1",
+          base_station_id: "base-nbo",
+          alias: "HQ",
+          created_at: "2026-08-04T00:00:00Z",
+        },
+        {
+          id: "alias-nairobi",
+          amo_id: "amo-1",
+          base_station_id: "base-nbo",
+          alias: "Nairobi",
+          created_at: "2026-08-04T00:00:00Z",
+        },
+      ],
+    });
+
+    expect(changedBaseStationIdentityCandidate(current, { aliases: ["HQ"] })).toBeNull();
+  });
+
+  it("checks a genuinely changed code", () => {
+    const current = base();
+
+    expect(changedBaseStationIdentityCandidate(current, { code: "NBO-HGR" }))
+      .toEqual({ code: "NBO-HGR" });
   });
 });
