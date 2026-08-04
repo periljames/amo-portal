@@ -1,8 +1,13 @@
 name: Apply PR 422 Training review fixes
 
 on:
-  issue_comment:
-    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-pr422-training-review-fixes.yml
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,10 +20,7 @@ concurrency:
 
 jobs:
   apply-validate-push:
-    if: >-
-      github.event.issue.pull_request &&
-      github.event.issue.number == 422 &&
-      github.event.comment.body == '/apply-pr422-training-fixes'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
