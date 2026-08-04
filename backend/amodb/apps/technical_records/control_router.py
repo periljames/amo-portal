@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts.models import AccountRole, User
@@ -69,12 +69,52 @@ def create_utilisation(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(*UTILISATION_ENTRY_ROLES)),
 ):
+    previous = control_services._usage_before(
+        db,
+        amo_id=current_user.effective_amo_id,
+        aircraft_serial_number=tail_id,
+        entry_date=payload.entry_date,
+        techlog_no=payload.techlog_no,
+    )
+    effective_payload = payload
+    if previous is None:
+        effective_payload = payload.model_copy(
+            update={
+                "block_hours": payload.block_hours if payload.block_hours is not None else 0.0,
+                "entry_cycles": payload.entry_cycles if payload.entry_cycles is not None else 0.0,
+            }
+        )
+    else:
+        expected_hours = payload.hours - float(previous.ttaf_after or 0)
+        expected_cycles = payload.cycles - float(previous.tca_after or 0)
+        if expected_hours < -control_services.HOURS_TOLERANCE or expected_cycles < -control_services.CYCLES_TOLERANCE:
+            raise HTTPException(
+                status_code=400,
+                detail="Cumulative hours and cycles cannot be below the preceding accepted entry.",
+            )
+        if payload.block_hours is not None and abs(payload.block_hours - expected_hours) > control_services.HOURS_TOLERANCE:
+            raise HTTPException(
+                status_code=400,
+                detail="Block hours do not reconcile with the preceding cumulative airframe hours.",
+            )
+        if payload.entry_cycles is not None and abs(payload.entry_cycles - expected_cycles) > control_services.CYCLES_TOLERANCE:
+            raise HTTPException(
+                status_code=400,
+                detail="Entry cycles do not reconcile with the preceding cumulative cycle total.",
+            )
+        effective_payload = payload.model_copy(
+            update={
+                "block_hours": payload.block_hours if payload.block_hours is not None else expected_hours,
+                "entry_cycles": payload.entry_cycles if payload.entry_cycles is not None else expected_cycles,
+            }
+        )
+
     row = control_services.create_canonical_utilisation(
         db,
         amo_id=current_user.effective_amo_id,
         actor_user_id=current_user.id,
         aircraft_serial_number=tail_id,
-        payload=payload,
+        payload=effective_payload,
     )
     db.commit()
     db.refresh(row)
