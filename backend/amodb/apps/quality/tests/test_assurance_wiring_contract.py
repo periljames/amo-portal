@@ -64,6 +64,7 @@ def test_latest_wiring_and_lifecycle_handlers_override_base_excellence_once() ->
         ("/excellence/controls", "POST", "create_draft_control"),
         ("/excellence/controls/{control_id}", "PATCH", "update_control"),
         ("/excellence/controls/{control_id}/approval", "POST", "transition_control_approval"),
+        ("/excellence/controls/{control_id}/tests", "POST", "record_approved_control_test"),
         ("/excellence/controls/{control_id}/evidence", "POST", "link_validated_evidence"),
         ("/excellence/evidence-graph", "GET", "evidence_graph"),
     )
