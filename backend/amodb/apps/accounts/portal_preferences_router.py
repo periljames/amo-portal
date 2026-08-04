@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Literal, cast
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import models
+from .portal_preferences_models import UserPortalPreference
 
 
 router = APIRouter(prefix="/portal-preferences", tags=["auth"])
@@ -58,23 +57,22 @@ def _disable_http_cache(response: Response) -> None:
     response.headers["Pragma"] = "no-cache"
 
 
-def _read_preferences(db: Session, user_id: str) -> dict[str, object] | None:
-    row = db.execute(
-        text(
-            """
-            SELECT user_id, amo_id, text_scale, density, motion, color_scheme,
-                   accent, version, updated_at
-            FROM user_portal_preferences
-            WHERE user_id = :user_id
-            """
-        ),
-        {"user_id": user_id},
-    ).mappings().first()
-    return dict(row) if row else None
+def _read_preferences(db: Session, user_id: str) -> UserPortalPreference | None:
+    return (
+        db.query(UserPortalPreference)
+        .filter(UserPortalPreference.user_id == user_id)
+        .one_or_none()
+    )
 
 
-def _response_for_user(user: models.User, row: dict[str, object] | None = None) -> PortalPreferencesRead:
-    values = {**_DEFAULTS, **(row or {})}
+def _response_for_user(
+    user: models.User,
+    preference: UserPortalPreference | None = None,
+) -> PortalPreferencesRead:
+    values = {
+        key: getattr(preference, key, default) if preference is not None else default
+        for key, default in _DEFAULTS.items()
+    }
     return PortalPreferencesRead(
         user_id=str(user.id),
         amo_id=str(user.amo_id) if user.amo_id else None,
@@ -83,8 +81,8 @@ def _response_for_user(user: models.User, row: dict[str, object] | None = None) 
         motion=cast(PortalMotion, str(values["motion"])),
         color_scheme=cast(PortalColorScheme, str(values["color_scheme"])),
         accent=cast(PortalAccent, str(values["accent"])),
-        version=int(values.get("version") or 1),
-        updated_at=cast(datetime | None, values.get("updated_at")),
+        version=int(preference.version if preference is not None else 1),
+        updated_at=preference.updated_at if preference is not None else None,
     )
 
 
@@ -95,7 +93,10 @@ def get_portal_preferences(
     db: Session = Depends(get_db),
 ) -> PortalPreferencesRead:
     _disable_http_cache(response)
-    return _response_for_user(current_user, _read_preferences(db, str(current_user.id)))
+    return _response_for_user(
+        current_user,
+        _read_preferences(db, str(current_user.id)),
+    )
 
 
 @router.patch("/", response_model=PortalPreferencesRead)
@@ -107,55 +108,24 @@ def update_portal_preferences(
 ) -> PortalPreferencesRead:
     _disable_http_cache(response)
     user_id = str(current_user.id)
-    existing = _read_preferences(db, user_id)
-    merged = {**_DEFAULTS, **(existing or {}), **payload.model_dump(exclude_none=True)}
+    preference = _read_preferences(db, user_id)
+    patch = payload.model_dump(exclude_none=True)
     now = datetime.now(timezone.utc)
 
-    if existing:
-        db.execute(
-            text(
-                """
-                UPDATE user_portal_preferences
-                SET amo_id = :amo_id,
-                    text_scale = :text_scale,
-                    density = :density,
-                    motion = :motion,
-                    color_scheme = :color_scheme,
-                    accent = :accent,
-                    version = version + 1,
-                    updated_at = :updated_at
-                WHERE user_id = :user_id
-                """
-            ),
-            {
-                "user_id": user_id,
-                "amo_id": str(current_user.amo_id) if current_user.amo_id else None,
-                "updated_at": now,
-                **{key: merged[key] for key in _DEFAULTS},
-            },
+    if preference is None:
+        preference = UserPortalPreference(
+            user_id=user_id,
+            amo_id=str(current_user.amo_id) if current_user.amo_id else None,
+            **patch,
         )
+        db.add(preference)
     else:
-        db.execute(
-            text(
-                """
-                INSERT INTO user_portal_preferences (
-                    id, user_id, amo_id, text_scale, density, motion,
-                    color_scheme, accent, version, created_at, updated_at
-                ) VALUES (
-                    :id, :user_id, :amo_id, :text_scale, :density, :motion,
-                    :color_scheme, :accent, 1, :created_at, :updated_at
-                )
-                """
-            ),
-            {
-                "id": str(uuid4()),
-                "user_id": user_id,
-                "amo_id": str(current_user.amo_id) if current_user.amo_id else None,
-                "created_at": now,
-                "updated_at": now,
-                **{key: merged[key] for key in _DEFAULTS},
-            },
-        )
+        preference.amo_id = str(current_user.amo_id) if current_user.amo_id else None
+        for key, value in patch.items():
+            setattr(preference, key, value)
+        preference.version = int(preference.version or 0) + 1
+        preference.updated_at = now
 
     db.commit()
-    return _response_for_user(current_user, _read_preferences(db, user_id))
+    db.refresh(preference)
+    return _response_for_user(current_user, preference)
