@@ -28,7 +28,10 @@ from .apps.accounts.router_modules_admin import router as accounts_modules_route
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.accounts.router_onboarding import router as accounts_onboarding_router
 from .apps.fleet.router import router as fleet_router
+from .apps.maintenance_program.api import router as maintenance_program_router
+from .apps.maintenance_program.revision_router import router as maintenance_program_revision_router
 from .apps.work.router import router as work_router
+from .apps.work.package_router import router as work_package_router
 from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router, public_router as training_public_router
 from .apps.quality import router as quality_router, public_router as quality_public_router  
@@ -51,6 +54,7 @@ from .apps.manuals.router import router as manuals_router
 from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.aerodoc_router import router as aerodoc_router
 from .apps.doc_control.router import router as doc_control_router
+from .apps.technical_records.control_router import router as technical_records_control_router
 from .apps.technical_records.router import router as technical_records_router
 from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
 from .apps.platform.router import router as platform_router
@@ -461,7 +465,10 @@ app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(accounts_onboarding_router)
 app.include_router(fleet_router)
+app.include_router(maintenance_program_router)
+app.include_router(maintenance_program_revision_router)
 app.include_router(work_router)
+app.include_router(work_package_router)
 app.include_router(crs_router)
 app.include_router(training_router)
 app.include_router(training_public_router)
@@ -482,8 +489,8 @@ app.include_router(realtime_router)
 app.include_router(manuals_router)
 app.include_router(manuals_branding_router)
 app.include_router(doc_control_router)
+app.include_router(technical_records_control_router)
 app.include_router(technical_records_router)
 app.include_router(canonical_quality_router)
 app.include_router(legacy_qms_router)
 app.include_router(aerodoc_router)
-
