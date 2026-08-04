@@ -36,6 +36,9 @@ def upgrade() -> None:
                 tenant_id text;
                 record_id text;
                 actor_id text;
+                request_actor_id text;
+                previous_tenant_id text;
+                previous_user_id text;
                 invalid_reason text;
                 changed jsonb;
             BEGIN
@@ -43,12 +46,15 @@ def upgrade() -> None:
                 previous_row := CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END;
                 tenant_id := COALESCE(current_row ->> 'amo_id', previous_row ->> 'amo_id');
                 record_id := COALESCE(current_row ->> 'id', previous_row ->> 'id');
+                previous_tenant_id := current_setting('app.tenant_id', true);
+                previous_user_id := current_setting('app.user_id', true);
+                request_actor_id := NULLIF(previous_user_id, '');
                 actor_id := COALESCE(
                     current_row ->> 'updated_by_user_id',
                     current_row ->> 'updated_by',
                     current_row ->> 'created_by_user_id',
                     current_row ->> 'created_by',
-                    NULLIF(current_setting('app.user_id', true), '')
+                    request_actor_id
                 );
 
                 IF tenant_id IS NULL OR record_id IS NULL THEN
@@ -58,9 +64,14 @@ def upgrade() -> None:
                 -- Triggered writes may originate from imports, scheduled jobs or
                 -- specialist routers. Derive the transaction-local RLS tenant
                 -- from the authoritative row instead of requiring every caller
-                -- to remember to initialise the assurance context first.
+                -- to initialise assurance context first.
                 PERFORM set_config('app.tenant_id', tenant_id, true);
 
+                IF actor_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM users WHERE id::text = actor_id
+                ) THEN
+                    actor_id := request_actor_id;
+                END IF;
                 IF actor_id IS NOT NULL AND NOT EXISTS (
                     SELECT 1 FROM users WHERE id::text = actor_id
                 ) THEN
@@ -124,6 +135,11 @@ def upgrade() -> None:
                 WHERE amo_id::text = tenant_id
                   AND source_type = TG_ARGV[0]
                   AND source_id = record_id;
+
+                -- Do not leak the source row's tenant or actor into later
+                -- statements executed by the caller in the same transaction.
+                PERFORM set_config('app.tenant_id', COALESCE(previous_tenant_id, ''), true);
+                PERFORM set_config('app.user_id', COALESCE(previous_user_id, ''), true);
 
                 RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
             END;
