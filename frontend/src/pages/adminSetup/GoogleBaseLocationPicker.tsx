@@ -33,8 +33,8 @@ type AdvancedMarkerInstance = {
 };
 
 type AdvancedMarkerConstructor = new (options: {
-  map: GoogleMapInstance;
-  position: LatLngLiteral;
+  map?: GoogleMapInstance | null;
+  position?: LatLngLiteral;
   title: string;
   gmpDraggable: boolean;
 }) => AdvancedMarkerInstance;
@@ -203,8 +203,7 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
           fullscreenControl: true,
         });
         const marker = new AdvancedMarkerElement({
-          map,
-          position: initialPosition,
+          ...(configuredPosition ? { map, position: configuredPosition } : {}),
           title: `${labelRef.current || "Base location"}. Drag to correct the approved point.`,
           gmpDraggable: true,
         });
@@ -213,6 +212,7 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
           const literal = toLatLng(nextPosition);
           if (!literal) return;
           marker.position = literal;
+          marker.map = map;
           map.setCenter(literal);
           onChangeRef.current({
             latitude: Number(literal.lat.toFixed(7)),
@@ -275,8 +275,13 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
   }, [apiKey, mapId]);
 
   useEffect(() => {
-    if (!position || !mapRef.current || !markerRef.current) return;
+    if (!mapRef.current || !markerRef.current) return;
+    if (!position) {
+      markerRef.current.map = null;
+      return;
+    }
     markerRef.current.position = position;
+    markerRef.current.map = mapRef.current;
     mapRef.current.setCenter(position);
     mapRef.current.setZoom(17);
   }, [position]);
@@ -297,7 +302,7 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
       </div>
 
       <div className="setup-google-map__canvas-wrap">
-        {apiKey ? <div ref={mapHostRef} className="setup-google-map__canvas" aria-label="Draggable Google map for the approved base location" /> : null}
+        {apiKey ? <div ref={mapHostRef} className="setup-google-map__canvas" aria-label="Google map for selecting the approved base location" /> : null}
         {!apiKey && fallbackUrl ? (
           <iframe
             className="setup-google-map__fallback"
@@ -324,7 +329,11 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
       </div>
 
       <div className="setup-google-map__footer">
-        <span><Move size={15} /> Drag the pin or click the map to correct the exact facility point.</span>
+        <span>
+          {position
+            ? <><Move size={15} /> Drag the pin or click the map to correct the exact facility point.</>
+            : <><MapPin size={15} /> Search or click the map to place the facility pin.</>}
+        </span>
         <output>
           {position ? `${position.lat.toFixed(7)}, ${position.lng.toFixed(7)}` : "No coordinates selected"}
         </output>
