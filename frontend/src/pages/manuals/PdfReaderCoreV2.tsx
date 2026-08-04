@@ -24,8 +24,12 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "./pdfReaderEngineV2.css";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
 const PdfDocument = Document as unknown as FC<any>;
 const PdfPage = Page as unknown as FC<any>;
+const RENDER_RADIUS = 3;
+const NAVIGATION_SETTLE_MS = 900;
+const PAGE_TOP_OFFSET = 92;
 
 type PdfDocumentHandle = {
   numPages: number;
@@ -85,10 +89,16 @@ const uniquePages = (values: Iterable<number>) => [...new Set(values)]
   .filter((value) => Number.isInteger(value) && value > 0)
   .sort((a, b) => a - b);
 
-const nearbyPages = (page: number, count: number, radius = 2) => new Set(
+const nearbyPages = (page: number, count: number, radius = RENDER_RADIUS) => new Set(
   Array.from({ length: radius * 2 + 1 }, (_, index) => page - radius + index)
     .filter((value) => value >= 1 && value <= count),
 );
+
+function samePages(left: Set<number>, right: Set<number>): boolean {
+  if (left.size !== right.size) return false;
+  for (const page of left) if (!right.has(page)) return false;
+  return true;
+}
 
 async function outlineItems(pdf: PdfDocumentHandle): Promise<PdfReaderOutlineItem[]> {
   const source = await pdf.getOutline?.().catch(() => null);
@@ -108,7 +118,7 @@ async function outlineItems(pdf: PdfDocumentHandle): Promise<PdfReaderOutlineIte
     }
   };
   await visit(source, 1, "outline");
-  return rows;
+  return rows.sort((left, right) => left.page - right.page || left.level - right.level);
 }
 
 function detectedFormPages(fields: Record<string, Array<Record<string, unknown>>> | null, pageCount: number): number[] {
@@ -157,6 +167,9 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   const persistDraftRef = useRef<() => Promise<void>>(async () => undefined);
   const editedRef = useRef(new Set<number>());
   const dirtyRef = useRef(false);
+  const currentPageRef = useRef(Math.max(1, initialPage));
+  const navigationTargetRef = useRef<number | null>(null);
+  const navigationTimerRef = useRef<number | null>(null);
   const searchInput = useRef<HTMLInputElement | null>(null);
   const searchController = useRef<AbortController | null>(null);
 
@@ -190,7 +203,14 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   const source = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
   const readerFile = useMemo(() => draft ? { data: new Uint8Array(draft.bytes.slice(0)) } : source, [draft, source]);
   const outputName = safePdfFilename(filename || "", `${title}.pdf`);
-  const safeForm = Boolean(capabilities.can_fill && fieldCount > 0 && !capabilities.has_javascript && !capabilities.is_dynamic_xfa && !capabilities.encrypted);
+  const formDetected = Boolean(capabilities.has_acroform || fieldCount > 0);
+  const safeForm = Boolean(
+    capabilities.can_fill
+    && formDetected
+    && !capabilities.has_javascript
+    && !capabilities.is_dynamic_xfa
+    && !capabilities.encrypted,
+  );
   const availableWidth = Math.max(260, Math.min(1600, hostSize.width - (compact ? 16 : 36)));
   const ratio = pageRatios[currentPage] || 1.414;
   const pageWidth = Math.round(
@@ -200,6 +220,11 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
         ? availableWidth * (zoom / 100)
         : availableWidth,
   );
+
+  const setRenderWindow = useCallback((page: number, count: number) => {
+    const next = nearbyPages(page, count);
+    setRendered((current) => samePages(current, next) ? current : next);
+  }, []);
 
   const setDirtyState = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -220,6 +245,13 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     }
   }, []);
 
+  const clearNavigationTimer = useCallback(() => {
+    if (navigationTimerRef.current !== null) {
+      window.clearTimeout(navigationTimerRef.current);
+      navigationTimerRef.current = null;
+    }
+  }, []);
+
   const invalidateDraftLifecycle = useCallback(() => {
     lifecycleGenerationRef.current += 1;
     autosaveQueuedRef.current = false;
@@ -229,19 +261,27 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   useEffect(() => {
     if (suppliedCapabilities) {
       setCapabilities(suppliedCapabilities);
+      setCapabilityError("");
       return;
     }
     let active = true;
     getPdfReaderCapabilities(identity.tenant, identity.manualId, identity.revisionId)
-      .then((value) => active && setCapabilities(value))
+      .then((value) => {
+        if (!active) return;
+        setCapabilities(value);
+        setCapabilityError("");
+      })
       .catch((error) => {
-        if (active) {
-          setCapabilities(READ_ONLY);
-          setCapabilityError(error instanceof Error ? error.message : "PDF processing is unavailable");
-        }
+        if (!active) return;
+        setCapabilities(READ_ONLY);
+        setCapabilityError(error instanceof Error ? error.message : "PDF processing is unavailable");
       });
     return () => { active = false; };
   }, [identity.manualId, identity.revisionId, identity.tenant, suppliedCapabilities]);
+
+  useEffect(() => {
+    onAcroFormDetected?.(formDetected);
+  }, [formDetected, onAcroFormDetected]);
 
   useEffect(() => {
     lifecycleGenerationRef.current += 1;
@@ -255,15 +295,14 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     let active = true;
     readPdfWorkingCopy(identity)
       .then((value) => {
-        if (active && value) {
-          setDraft(value);
-          setEdited(value.editedPages || []);
-          setDirtyState(true);
-        }
+        if (!active || !value) return;
+        setDraft(value);
+        setEdited(value.editedPages || []);
+        setDirtyState(true);
       })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [capabilities.source_sha256, identity, setDirtyState, setEdited]);
+  }, [capabilities.source_sha256, identity.manualId, identity.revisionId, identity.tenant, identity.userId, setDirtyState, setEdited]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -337,9 +376,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
           autosaveQueuedRef.current = true;
         }
       } catch {
-        if (isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)) {
-          setDraftState("ERROR");
-        }
+        if (isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)) setDraftState("ERROR");
       } finally {
         autosaveInFlightRef.current = null;
         const shouldFollowUp = autosaveQueuedRef.current
@@ -360,7 +397,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
   const markEdited = useCallback((page: number) => {
     editGenerationRef.current += 1;
-    setEdited(new Set([...editedRef.current, page]));
+    setEdited(new Set([...editedRef.current, Math.max(1, page)]));
     setDirtyState(true);
     setDraftState("");
     clearAutosaveTimer();
@@ -384,30 +421,49 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
   useEffect(() => () => {
     invalidateDraftLifecycle();
+    clearNavigationTimer();
     searchController.current?.abort();
-  }, [invalidateDraftLifecycle]);
+  }, [clearNavigationTimer, invalidateDraftLifecycle]);
 
-  const jump = useCallback((requested: number, behavior: ScrollBehavior = "smooth") => {
-    if (!pageCount) return;
-    const page = clampPdfValue(requested, 1, pageCount);
-    setRendered(nearbyPages(page, pageCount));
-    setCurrentPage(page);
+  const publishPage = useCallback((page: number) => {
+    currentPageRef.current = page;
+    setCurrentPage((current) => current === page ? current : page);
     setPageInput(String(page));
     onPageChange?.(page);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+  }, [onPageChange]);
+
+  const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {
+    if (!pageCount) return;
+    const page = clampPdfValue(requested, 1, pageCount);
+    navigationTargetRef.current = page;
+    clearNavigationTimer();
+    setRenderWindow(page, pageCount);
+    publishPage(page);
+
+    const scroll = (attempt = 0) => {
       const host = hostRef.current;
       const element = pageRefs.current.get(page);
-      if (!host || !element) return;
+      if (!host || !element) {
+        if (attempt < 8) window.requestAnimationFrame(() => scroll(attempt + 1));
+        return;
+      }
       const root = resolvePdfReaderScrollRoot(host);
-      const top = element.getBoundingClientRect().top - (root?.getBoundingClientRect().top || 0) - 92;
+      const rootTop = root?.getBoundingClientRect().top || 0;
+      const top = element.getBoundingClientRect().top - rootTop - PAGE_TOP_OFFSET;
       if (root) root.scrollTo({ top: Math.max(0, root.scrollTop + top), behavior });
       else window.scrollBy({ top, behavior });
-    }));
-  }, [onPageChange, pageCount]);
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scroll()));
+
+    navigationTimerRef.current = window.setTimeout(() => {
+      navigationTargetRef.current = null;
+      navigationTimerRef.current = null;
+    }, NAVIGATION_SETTLE_MS);
+  }, [clearNavigationTimer, pageCount, publishPage, setRenderWindow]);
 
   useEffect(() => {
     if (navigationRequest?.page && pageCount) jump(navigationRequest.page);
-  }, [jump, navigationRequest, pageCount]);
+  }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
 
   useEffect(() => {
     if (!pageCount || typeof IntersectionObserver === "undefined" || !hostRef.current) return;
@@ -416,30 +472,35 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       const visible = entries.filter((entry) => entry.isIntersecting);
       if (!visible.length) return;
       const page = Number((visible.sort(
-        (a, b) => Math.abs(a.boundingClientRect.top - 120) - Math.abs(b.boundingClientRect.top - 120),
+        (left, right) => Math.abs(left.boundingClientRect.top - 120) - Math.abs(right.boundingClientRect.top - 120),
       )[0].target as HTMLElement).dataset.pageNumber || 1);
-      setRendered(nearbyPages(page, pageCount));
-      if (page !== currentPage) {
-        setCurrentPage(page);
-        setPageInput(String(page));
-        onPageChange?.(page);
+
+      const target = navigationTargetRef.current;
+      if (target !== null && page !== target) return;
+      if (target === page) {
+        navigationTargetRef.current = null;
+        clearNavigationTimer();
       }
-    }, { root, rootMargin: "600px 0px", threshold: [0.01, 0.25] });
+
+      setRenderWindow(page, pageCount);
+      if (page !== currentPageRef.current) publishPage(page);
+    }, { root, rootMargin: "1200px 0px", threshold: [0.01, 0.2, 0.6] });
+
     pageRefs.current.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [currentPage, onPageChange, pageCount, pageWidth]);
+  }, [clearNavigationTimer, pageCount, pageWidth, publishPage, setRenderWindow]);
 
   const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
     pdfRef.current = pdf;
     const count = Math.max(1, Number(pdf.numPages || 1));
     const restored = clampPdfValue(initialPage, 1, count);
     setPageCount(count);
-    setCurrentPage(restored);
-    setPageInput(String(restored));
-    setRendered(nearbyPages(restored, count));
+    setPageRatios({});
+    setRenderWindow(restored, count);
+    publishPage(restored);
     setLoadError("");
-    onPageChange?.(restored);
-    if (pdf.annotationStorage) pdf.annotationStorage.onSetModified = () => markEdited(currentPage);
+    if (pdf.annotationStorage) pdf.annotationStorage.onSetModified = () => markEdited(currentPageRef.current);
+
     Promise.all([
       pdf.getFieldObjects?.().catch(() => null) || null,
       pdf.hasJSActions?.().catch(() => false) || false,
@@ -449,11 +510,13 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       const pages = detectedFormPages(fields, count);
       setFieldCount(countFields);
       setFormPages(pages);
-      onAcroFormDetected?.(countFields > 0);
+      onAcroFormDetected?.(Boolean(capabilities.has_acroform || countFields > 0));
       onOutlineReady?.(outline);
-      if (scripts && countFields) setActionError("Scripted PDF actions are disabled; fields are read-only.");
+      if (scripts && (capabilities.has_acroform || countFields)) {
+        setActionError("Scripted PDF actions are disabled; form fields remain read-only.");
+      }
     }).catch(() => undefined);
-  }, [currentPage, initialPage, markEdited, onAcroFormDetected, onOutlineReady, onPageChange]);
+  }, [capabilities.has_acroform, initialPage, markEdited, onAcroFormDetected, onOutlineReady, publishPage, setRenderWindow]);
 
   const workingFile = useCallback(async () => new File(
     [copyPdfBytes(await serialize())],
@@ -524,6 +587,27 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     setDraftState("");
   };
 
+  const revealSearchResult = useCallback((result?: PdfSearchResult, attempt = 0) => {
+    if (!result) return;
+    const page = pageRefs.current.get(result.page);
+    if (!page) return;
+    const marks = [...page.querySelectorAll<HTMLElement>(".pdf-engine-search-mark")];
+    marks.forEach((mark) => mark.classList.remove("is-active"));
+    const target = marks[Math.max(0, result.ordinal - 1)] || marks[0];
+    if (!target) {
+      if (attempt < 12) window.requestAnimationFrame(() => revealSearchResult(result, attempt + 1));
+      return;
+    }
+    target.classList.add("is-active");
+    const host = hostRef.current;
+    const root = host ? resolvePdfReaderScrollRoot(host) : null;
+    const rootRect = root?.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (root && rootRect && (targetRect.top < rootRect.top + PAGE_TOP_OFFSET || targetRect.bottom > rootRect.bottom - 28)) {
+      root.scrollBy({ top: targetRect.top - rootRect.top - PAGE_TOP_OFFSET - 24, behavior: "smooth" });
+    }
+  }, []);
+
   const runSearch = async () => {
     if (!pdfRef.current || query.trim().length < 2) return;
     searchController.current?.abort();
@@ -535,7 +619,10 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       if (controller.signal.aborted) return;
       setSearchResults(rows);
       setSearchIndex(rows.length ? 0 : -1);
-      if (rows[0]) jump(rows[0].page);
+      if (rows[0]) {
+        jump(rows[0].page);
+        window.requestAnimationFrame(() => revealSearchResult(rows[0]));
+      }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         setActionError(error instanceof Error ? error.message : "PDF search failed");
@@ -549,42 +636,64 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   const moveSearch = (step: number) => {
     if (!searchResults.length) return;
     const index = (searchIndex + step + searchResults.length) % searchResults.length;
+    const result = searchResults[index];
     setSearchIndex(index);
-    jump(searchResults[index].page);
+    jump(result.page);
+    window.requestAnimationFrame(() => revealSearchResult(result));
   };
 
   const pages = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
   const activeResult = searchResults[searchIndex];
 
-  return <section ref={hostRef} className={`pdfv2-reader ${compact ? "is-compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${safeForm ? "is-form-active" : ""}`}>
+  useEffect(() => {
+    if (!activeResult || !rendered.has(activeResult.page)) return;
+    window.requestAnimationFrame(() => revealSearchResult(activeResult));
+  }, [activeResult, pageWidth, query, rendered, revealSearchResult]);
+
+  return <section
+    ref={hostRef}
+    className={`pdfv2-reader ${compact ? "is-compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${safeForm ? "is-form-active" : ""}`}
+    onKeyDown={(event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        window.requestAnimationFrame(() => searchInput.current?.focus());
+      }
+    }}
+  >
     <header className="pdfv2-toolbar">
       <div className="pdfv2-pages">
-        <button onClick={() => jump(currentPage - 1)} disabled={currentPage <= 1}><ChevronLeft size={17} /></button>
-        <input value={pageInput} inputMode="numeric" onChange={(event) => setPageInput(event.target.value.replace(/\D+/g, ""))} onBlur={() => jump(Number(pageInput || currentPage))} onKeyDown={(event) => { if (event.key === "Enter") jump(Number(pageInput || currentPage)); }} />
+        <button type="button" aria-label="Previous page" onClick={() => jump(currentPage - 1)} disabled={currentPage <= 1}><ChevronLeft size={17} /></button>
+        <input value={pageInput} aria-label="Page number" inputMode="numeric" onChange={(event) => setPageInput(event.target.value.replace(/\D+/g, ""))} onBlur={() => jump(Number(pageInput || currentPage))} onKeyDown={(event) => { if (event.key === "Enter") jump(Number(pageInput || currentPage)); }} />
         <span>/ {pageCount || "—"}</span>
-        <button onClick={() => jump(currentPage + 1)} disabled={!pageCount || currentPage >= pageCount}><ChevronRight size={17} /></button>
+        <button type="button" aria-label="Next page" onClick={() => jump(currentPage + 1)} disabled={!pageCount || currentPage >= pageCount}><ChevronRight size={17} /></button>
       </div>
       <div className="pdfv2-zoom">
-        <button onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value - 10, 50, 250)); }}><Minus size={17} /></button>
-        <button onClick={() => { setFitMode("CUSTOM"); setZoom(100); }}>{fitMode === "WIDTH" ? "Fit width" : fitMode === "PAGE" ? "Fit page" : `${zoom}%`}</button>
-        <button onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value + 10, 50, 250)); }}><Plus size={17} /></button>
+        <button type="button" aria-label="Zoom out" onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value - 10, 50, 250)); }}><Minus size={17} /></button>
+        <button type="button" onClick={() => {
+          if (fitMode === "WIDTH") setFitMode("PAGE");
+          else if (fitMode === "PAGE") { setFitMode("CUSTOM"); setZoom(100); }
+          else setFitMode("WIDTH");
+        }}>{fitMode === "WIDTH" ? "Fit width" : fitMode === "PAGE" ? "Fit page" : `${zoom}%`}</button>
+        <button type="button" aria-label="Zoom in" onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value + 10, 50, 250)); }}><Plus size={17} /></button>
       </div>
       <div className="pdfv2-actions">
-        <button className={searchOpen ? "active" : ""} onClick={() => { setSearchOpen((value) => !value); requestAnimationFrame(() => searchInput.current?.focus()); }}><Search size={16} /><span>Search</span></button>
+        <button type="button" className={searchOpen ? "active" : ""} onClick={() => { setSearchOpen((value) => !value); window.requestAnimationFrame(() => searchInput.current?.focus()); }}><Search size={16} /><span>Search</span></button>
         {safeForm ? <span className="pdfv2-form-state"><FilePenLine size={15} /> Form active{editedPages.length ? ` · ${editedPages.length} changed` : ""}</span> : null}
         <details className="pdfv2-menu">
           <summary><Download size={16} /><span>Download</span></summary>
           <div>
-            <button disabled={Boolean(busy) || !capabilities.can_download_original} onClick={() => void downloadOriginal()}>Original PDF</button>
-            <button disabled={Boolean(busy) || !capabilities.can_download_working || !pdfRef.current?.saveDocument} onClick={() => void downloadWorking()}>Editable PDF</button>
-            <button disabled={Boolean(busy) || !capabilities.can_flatten || !safeForm || !pdfRef.current?.saveDocument} onClick={() => void downloadCompleted()}>Completed form pages{editedPages.length ? ` (${editedPages.length})` : ""}</button>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_download_original} onClick={() => void downloadOriginal()}>Original PDF</button>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_download_working || !pdfRef.current?.saveDocument} onClick={() => void downloadWorking()}>Editable PDF</button>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_flatten || !safeForm || !pdfRef.current?.saveDocument} onClick={() => void downloadCompleted()}>Completed form pages{editedPages.length ? ` (${editedPages.length})` : ""}</button>
           </div>
         </details>
         <details className="pdfv2-menu">
-          <summary><MoreHorizontal size={18} /></summary>
+          <summary aria-label="More PDF actions"><MoreHorizontal size={18} /></summary>
           <div>
-            {capabilities.can_submit ? <button disabled={Boolean(busy)} onClick={() => void submit()}>Submit retained record</button> : null}
-            {draft || dirty ? <button onClick={() => void discard()}><Trash2 size={14} /> Discard working copy</button> : null}
+            {capabilities.can_submit ? <button type="button" disabled={Boolean(busy)} onClick={() => void submit()}>Submit retained record</button> : null}
+            {draft || dirty ? <button type="button" onClick={() => void discard()}><Trash2 size={14} /> Discard working copy</button> : null}
           </div>
         </details>
       </div>
@@ -594,22 +703,37 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       <Search size={16} />
       <input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void runSearch(); }} placeholder="Search this PDF" />
       <label><input type="checkbox" checked={Boolean(searchOptions.caseSensitive)} onChange={(event) => setSearchOptions((value) => ({ ...value, caseSensitive: event.target.checked }))} /> Aa</label>
-      <button disabled={searchBusy || query.trim().length < 2} onClick={() => void runSearch()}>{searchBusy ? <LoaderCircle className="is-spinning" size={15} /> : "Find"}</button>
+      <label><input type="checkbox" checked={Boolean(searchOptions.wholeWord)} onChange={(event) => setSearchOptions((value) => ({ ...value, wholeWord: event.target.checked }))} /> Word</label>
+      <button type="button" disabled={searchBusy || query.trim().length < 2} onClick={() => void runSearch()}>{searchBusy ? <LoaderCircle className="is-spinning" size={15} /> : "Find"}</button>
       <span>{searchResults.length ? `${searchIndex + 1}/${searchResults.length}` : ""}</span>
-      <button disabled={!searchResults.length} onClick={() => moveSearch(-1)}><ChevronLeft size={16} /></button>
-      <button disabled={!searchResults.length} onClick={() => moveSearch(1)}><ChevronRight size={16} /></button>
-      <button onClick={() => { searchController.current?.abort(); setSearchBusy(false); setSearchOpen(false); }}><X size={16} /></button>
+      <button type="button" aria-label="Previous search result" disabled={!searchResults.length} onClick={() => moveSearch(-1)}><ChevronLeft size={16} /></button>
+      <button type="button" aria-label="Next search result" disabled={!searchResults.length} onClick={() => moveSearch(1)}><ChevronRight size={16} /></button>
+      <button type="button" aria-label="Close PDF search" onClick={() => { searchController.current?.abort(); setSearchBusy(false); setSearchOpen(false); }}><X size={16} /></button>
     </div> : null}
 
     {capabilityError ? <div className="pdfv2-notice"><AlertTriangle size={16} />{capabilityError}</div> : null}
     {capabilities.unsupported_reason && !safeForm ? <div className="pdfv2-notice"><AlertTriangle size={16} />{capabilities.unsupported_reason}</div> : null}
-    {safeForm ? <div className="pdfv2-notice pdfv2-notice--form"><FilePenLine size={16} />Fields are active. Completed-page download excludes unchanged manual pages.<small>{draftState === "SAVING" ? "Saving…" : draftState === "SAVED" ? "Saved" : draftState === "ERROR" ? "Save failed" : ""}</small></div> : null}
+    {formDetected && !safeForm && !capabilities.unsupported_reason ? <div className="pdfv2-notice"><AlertTriangle size={16} />This PDF contains form fields, but controlled form execution is unavailable for this document or user.</div> : null}
+    {safeForm ? <div className="pdfv2-notice pdfv2-notice--form"><FilePenLine size={16} />Fields are active. Entries stay in a local working copy until you download or submit.<small>{draftState === "SAVING" ? "Saving…" : draftState === "SAVED" ? "Saved" : draftState === "ERROR" ? "Save failed" : ""}</small></div> : null}
     {actionError ? <div className="pdfv2-error"><AlertTriangle size={17} />{actionError}</div> : null}
     {record ? <div className="pdfv2-success"><CheckCircle2 size={17} />Record {record.record_number} created.<a href={record.download_url}>Open</a></div> : null}
 
-    <div className="pdfv2-viewport" onInput={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPage))} onChange={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPage))}>
+    <div
+      className="pdfv2-viewport"
+      onInput={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+      onChange={(event) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+    >
       {loadError ? <div className="pdfv2-error"><AlertTriangle size={18} />{loadError}</div> : null}
-      <PdfDocument file={readerFile} options={PDF_DOCUMENT_OPTIONS} onLoadSuccess={loadDocument} onLoadError={(error: unknown) => setLoadError(error instanceof Error ? error.message : "The PDF could not be opened")} loading={<div className="pdfv2-loading"><LoaderCircle className="is-spinning" size={20} />Opening document…</div>}>
+      <PdfDocument
+        file={readerFile}
+        options={PDF_DOCUMENT_OPTIONS}
+        onLoadSuccess={loadDocument}
+        onLoadError={(error: unknown) => setLoadError(error instanceof Error ? error.message : "The PDF could not be opened")}
+        onItemClick={({ pageNumber }: { pageNumber?: number | null }) => {
+          if (pageNumber) jump(pageNumber);
+        }}
+        loading={<div className="pdfv2-loading"><LoaderCircle className="is-spinning" size={20} />Opening document…</div>}
+      >
         <div className="pdfv2-pages-list">
           {pages.map((page) => {
             const pageRatio = pageRatios[page] || 1.414;
@@ -617,7 +741,13 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
               "--pdfv2-page-width": `${pageWidth}px`,
               "--pdfv2-page-height": `${Math.round(pageWidth * pageRatio)}px`,
             } as CSSProperties;
-            return <div key={page} ref={(element) => { if (element) pageRefs.current.set(page, element); else pageRefs.current.delete(page); }} className={`pdfv2-page ${page === currentPage ? "is-current" : ""}`} data-page-number={page} style={style}>
+            return <div
+              key={page}
+              ref={(element) => { if (element) pageRefs.current.set(page, element); else pageRefs.current.delete(page); }}
+              className={`pdfv2-page ${page === currentPage ? "is-current" : ""}`}
+              data-page-number={page}
+              style={style}
+            >
               {uncontrolled ? <span className="pdfv2-watermark">UNCONTROLLED DRAFT</span> : null}
               {rendered.has(page) ? <PdfPage
                 pageNumber={page}
@@ -626,8 +756,10 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
                 renderTextLayer
                 renderAnnotationLayer
                 renderForms={safeForm}
+                externalLinkTarget="_blank"
+                externalLinkRel="noopener noreferrer"
                 devicePixelRatio={pdfDevicePixelRatio()}
-                customTextRenderer={({ str }: { str: string }) => highlightPdfText(str, query, searchOptions, activeResult?.page === page)}
+                customTextRenderer={({ str }: { str: string }) => highlightPdfText(str, query, searchOptions, false)}
                 loading={<div className="pdfv2-placeholder">Rendering page {page}…</div>}
                 error={<div className="pdfv2-placeholder">Page {page} could not be rendered.</div>}
                 onGetAnnotationsSuccess={(annotations: any[]) => {
@@ -640,7 +772,11 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
                 onLoadSuccess={(loaded: any) => {
                   const width = Number(loaded?.originalWidth || loaded?.view?.[2] || 1);
                   const height = Number(loaded?.originalHeight || loaded?.view?.[3] || width * 1.414);
-                  setPageRatios((values) => ({ ...values, [page]: height / width }));
+                  const nextRatio = height / width;
+                  setPageRatios((values) => Math.abs((values[page] || 0) - nextRatio) < 0.0001 ? values : ({ ...values, [page]: nextRatio }));
+                }}
+                onRenderTextLayerSuccess={() => {
+                  if (activeResult?.page === page) window.requestAnimationFrame(() => revealSearchResult(activeResult));
                 }}
               /> : <div className="pdfv2-placeholder pdfv2-placeholder--queued">Page {page}</div>}
               {renderPageOverlay?.(page)}
