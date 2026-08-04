@@ -4,6 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts.models import AccountRole, User
+from amodb.apps.audit import schemas as audit_schemas
+from amodb.apps.audit import services as audit_services
+from amodb.apps.maintenance_program import projection
 
 from ...database import get_db
 from ...entitlements import require_module
@@ -40,6 +43,33 @@ CORRECTION_REVIEW_ROLES = (
     AccountRole.QUALITY_MANAGER,
     AccountRole.PLANNING_ENGINEER,
 )
+
+
+def _audit_correction_decision(
+    db: Session,
+    *,
+    correction: AircraftUsageCorrection,
+    actor_user_id: str | None,
+    decision: str,
+) -> None:
+    audit_services.create_audit_event(
+        db,
+        amo_id=correction.amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AircraftUsageCorrection",
+            entity_id=str(correction.id),
+            action="decision",
+            actor_user_id=actor_user_id,
+            before_json={"status": "PENDING"},
+            after_json={
+                "decision": decision,
+                "status": correction.status,
+                "usage_id": correction.usage_id,
+                "aircraft_serial_number": correction.aircraft_serial_number,
+                "review_notes": correction.review_notes,
+            },
+        ),
+    )
 
 
 @router.get(
@@ -116,6 +146,11 @@ def create_utilisation(
         aircraft_serial_number=tail_id,
         payload=effective_payload,
     )
+    projection.recompute_due_for_aircraft(
+        db,
+        amo_id=current_user.effective_amo_id,
+        aircraft_serial_number=tail_id,
+    )
     db.commit()
     db.refresh(row)
     return control_services.utilisation_read(row)
@@ -182,6 +217,18 @@ def decide_usage_correction(
         correction_id=correction_id,
         actor_user_id=current_user.id,
         payload=payload,
+    )
+    if row.status == "APPLIED":
+        projection.recompute_due_for_aircraft(
+            db,
+            amo_id=current_user.effective_amo_id,
+            aircraft_serial_number=row.aircraft_serial_number,
+        )
+    _audit_correction_decision(
+        db,
+        correction=row,
+        actor_user_id=current_user.id,
+        decision=payload.decision,
     )
     db.commit()
     db.refresh(row)
