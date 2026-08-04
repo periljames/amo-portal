@@ -20,6 +20,7 @@ from .package_schemas import (
     WorkPackageStatusUpdate,
     WorkPackageUpdate,
 )
+from .readiness_router import router as readiness_router
 
 router = APIRouter(
     prefix="/work-packages",
@@ -197,3 +198,6 @@ def update_work_package_status(
     db.commit()
     db.refresh(package)
     return package_services.package_read(package)
+
+
+router.include_router(readiness_router)
