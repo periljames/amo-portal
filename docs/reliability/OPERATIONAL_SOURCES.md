@@ -49,3 +49,20 @@ The tenant Reliability workspace exposes **Operational sources** with:
 - SMS relevance assessment;
 - explicit QMS finding linkage; and
 - workbook upload, mapping, row reconciliation, import approval and ingestion.
+
+## Interaction and derivation rules
+
+The operational interface follows source workflows rather than exposing database fields directly:
+
+- Active aircraft are selected from the tenant fleet register instead of typing serial numbers repeatedly.
+- For a technical delay, the user records scheduled and actual departure. Delay minutes are derived by the API and shown by the interface; they are not a second editable fact.
+- The API rejects an actual departure before the scheduled departure and rejects any supplied delay or dispatch impact that conflicts with the derived values.
+- Technical cancellations require the scheduled departure and cannot contain an actual departure.
+- Operational impact is derived from the selected occurrence type, while severity remains an accountable classification.
+- MEL/CDL expiry is entered from the approved item basis. The interface does not invent a generic expiry interval.
+- Repeat-inspection intervals may be entered in practical units and are normalised to minutes before storage.
+- NFF classification fixes confirmed failure to `false`; a shop release reference is recorded only during the release action.
+- SMS records are presented first as a relevance-assessment queue. A canonical Reliability event is created only for an affirmative assessment with a reason.
+- QMS linking uses searchable controlled findings and displays the source evidence before linking; users do not paste opaque finding IDs.
+- Workbook mapping uses guided source-column selection instead of requiring users to write JSON.
+- Approval, extension, assessment, release, rejection and closure actions use controlled forms rather than browser prompt dialogs.
