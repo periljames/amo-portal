@@ -1,295 +1,228 @@
-# QMS Modern Business Planner — Architecture and Build Plan
+# QMS Modern Business Planner — Delivered Architecture
 
-## 1. Product objective
+## 1. Merge scope
 
-Replace the passive QMS calendar grid with a fast operational planner that lets Quality teams see, filter, inspect, and safely reschedule controlled commitments without turning the portal into a generic consumer calendar.
+This pull request replaces the passive Quality calendar route with a dedicated operational planner while preserving the established non-calendar QMS implementation.
 
-The planner is intended to coordinate:
+The delivered slice covers:
 
 - audit schedules and active audits;
-- CAR/CAPA due dates;
-- planned training sessions and competence expiries;
-- management reviews and regulatory commitments;
-- future document reviews, supplier approvals, calibration dates, risk treatments, and change-control milestones.
-
-The interface should feel lightweight and intentional, while every mutation remains tenant-scoped, permission-controlled, conflict-aware, and recoverable.
-
-## 2. Research basis
-
-The design direction is based on established calendar interaction patterns rather than copying a visual theme:
-
-- Notion Calendar exposes keyboard shortcut help with `?`, supporting a power-user workflow: https://www.notion.com/help/notion-calendar-keyboard-shortcuts
-- Notion Calendar lets dated database items appear as all-day events and supports drag-and-drop into specific times while updating the underlying record: https://www.notion.com/help/guides/getting-started-with-notion-calendar
-- FullCalendar's documented event-drop and event-resize contracts retain the old event and expose a `revert` mechanism when persistence fails: https://fullcalendar.io/docs/eventDrop and https://fullcalendar.io/docs/eventResize
-- FullCalendar also documents overlap, constraint, and programmatic drop-approval controls: https://fullcalendar.io/docs/event-dragging-resizing
-- dnd-kit's accessibility guidance requires feature parity and provides keyboard-driven drag support: https://docs.dndkit.com/guides/accessibility and https://docs.dndkit.com/api-documentation/sensors/keyboard
-
-The first implementation uses native browser drag/drop plus an explicit Shift+Arrow keyboard equivalent. A later hardening phase may adopt dnd-kit after touch, screen-reader, and bundle-impact evaluation.
-
-## 3. Delivered architecture in this branch
-
-### 3.1 Stable route composition
-
-`frontend/src/pages/qms/QmsCanonicalPage.tsx` is now a route dispatcher:
-
-- `/quality/calendar/*` and `/qms/calendar/*` render the dedicated modern planner;
-- every other QMS path continues to render `QmsCanonicalLegacyPage` without behavioral changes.
-
-This limits regression risk and allows the calendar product to evolve independently from large legacy QMS register pages.
-
-### 3.2 Planner frontend
-
-Primary files:
-
-- `frontend/src/pages/qms/planner/QmsPlannerPage.tsx`
-- `frontend/src/pages/qms/planner/qmsPlannerModel.ts`
-- `frontend/src/styles/qms-modern-planner.css`
-
-Implemented views:
-
-1. **Month:** dense commitment overview with draggable event cards.
-2. **Multi-day:** configurable 1–9 day timeline with all-day and timed lanes.
-3. **Day:** focused execution timeline.
-4. **Agenda:** accessible date-grouped list.
-
-Implemented interaction model:
-
-- collapsible left navigation rail;
-- mini month navigator;
-- independent source toggles rather than a single exclusive filter;
-- overdue focus filter;
-- search and command palette;
-- right-side event inspector;
+- open CAR/CAPA due dates;
+- current training-expiry projections;
+- planned training events;
+- month, configurable multi-day, day, and agenda views;
+- authoritative audit-schedule creation handoff;
+- controlled rescheduling of approved mutable sources;
+- tenant and permission enforcement;
+- immutable schedule-change activity logging;
 - desktop, tablet, and mobile layouts;
-- per-tenant local preferences for density, day span, weekend visibility, and rail state;
-- keyboard shortcuts: `C`, `T`, `M`, `W`, `D`, `A`, `1–9`, `/`, `Ctrl/Cmd+K`, `?`, and Shift+Arrow movement;
-- native drag/drop on mutable authoritative sources;
-- controlled rescheduling modal with a reason and acknowledgement;
-- optimistic UI followed by automatic rollback on backend rejection.
+- keyboard, focus, and dialog accessibility controls.
 
-### 3.3 Canonical event model
+CAR, training, management-review, and generic quick-create choices remain visibly disabled until their destination modules expose equivalent authoritative draft contracts. No entered value is silently discarded.
 
-`PlannerEvent` normalizes heterogeneous calendar sources into one frontend contract:
+## 2. Frontend architecture
 
-```ts
-{
-  id,
-  module,
-  entityType,
-  entityId,
-  eventType,
-  title,
-  date,
-  endDate,
-  startTime,
-  endTime,
-  link,
-  dueState,
-  status,
-  priority,
-  ownerLabel,
-  location,
-  category,
-  tone,
-  canReschedule,
-  source,
-}
-```
+### Route boundary
 
-The raw backend row remains available in `source`, but visual components consume only the normalized fields.
+`frontend/src/pages/qms/QmsCanonicalPage.tsx` dispatches:
 
-### 3.4 Backend planner API
+- `/quality/calendar/*` and `/qms/calendar/*` to `QmsPlannerLivePage`;
+- every other QMS route to `QmsCanonicalLegacyPage`.
+
+This keeps existing registers and workflows stable while allowing the planner to evolve independently.
+
+### Planner implementation
 
 Primary files:
 
+- `frontend/src/pages/qms/planner/QmsPlannerLivePage.tsx`
+- `frontend/src/pages/qms/planner/QmsPlannerPageV2.tsx`
+- `frontend/src/pages/qms/planner/qmsPlannerClock.ts`
+- `frontend/src/pages/qms/planner/qmsPlannerModel.ts`
+- `frontend/src/styles/qms-modern-planner-v2.css`
+
+`QmsPlannerLivePage` supplies the lifecycle controls around the main planner:
+
+- one bounded 30-second clock refresh;
+- Africa/Nairobi date rollover handling without a browser reload;
+- current-time marker refresh;
+- Today-dependent count refresh;
+- initial focus placement inside planner dialogs;
+- Tab and Shift+Tab containment in the topmost dialog;
+- focus restoration to the actual opener after Escape, backdrop click, Cancel, or close-button dismissal.
+
+`QmsPlannerPageV2` supplies the operational workspace:
+
+- persistent source and mini-calendar rail;
+- central month or timeline canvas;
+- context and selected-event inspector;
+- source toggles, saved focus views, owner filtering, density, weekend, time-format, and UTC controls;
+- command palette and documented keyboard shortcuts;
+- native drag/drop plus Shift+Arrow keyboard parity;
+- controlled reschedule confirmation with reason and acknowledgement;
+- optimistic movement with automatic rollback;
+- stale-request protection through a monotonically increasing request ID.
+
+### Canonical event model
+
+The frontend normalizes heterogeneous source records into `PlannerEvent`. Generated training-expiry projections are always read-only. Only `audit_schedule`, `audit`, `car`, and `training_event` records may become movable, and only when the backend capability response grants calendar management.
+
+## 3. Authoritative audit creation handoff
+
+The planner stores the entered audit title, date, frequency, duration, and requested EAT start-time context in the existing tenant/domain-scoped audit draft key.
+
+The route then opens:
+
+`/maintenance/:amoCode/quality/audits/plan?view=list&source=planner`
+
+The established audit planner remains the only schedule-creation implementation:
+
+- `QualityAuditPlanScheduleBasePage.tsx` preserves the existing full page and form;
+- `QualityAuditPlanSchedulePage.tsx` is a compatibility boundary that opens the existing **Create schedule** drawer once for a planner handoff;
+- `planner_handoff=opened` prevents the drawer from reopening on later query-state changes;
+- the actual drawer consumes the stored title, next due date, one-time frequency, duration, and requested-time criteria.
+
+No parallel or reduced audit form was introduced.
+
+## 4. Backend architecture
+
+Primary files:
+
+- `backend/amodb/apps/quality/planner_calendar_router.py`
 - `backend/amodb/apps/quality/planner_router.py`
 - `backend/amodb/apps/quality/canonical_router.py`
 - `backend/amodb/apps/quality/canonical_router_legacy.py`
 
-New endpoints:
+`canonical_router.py` composes exact planner routes ahead of generic QMS catch-alls for:
 
-#### `GET /integrations/calendar/planner-capabilities`
+- direct core-router consumers;
+- `/api/maintenance/{amo_code}/quality`;
+- `/api/maintenance/{amo_code}/qms`.
 
-Returns the current user's planner mutation capabilities. The frontend must never infer permission from role names.
+The hardened calendar projection replaces the older exact path/method route instead of leaving duplicate OpenAPI operations.
 
-#### `PATCH /integrations/calendar/reschedule`
+### `GET /integrations/calendar`
 
-Accepts:
+Controls and behavior:
 
-```json
-{
-  "event_id": "audits:audit:<uuid>:audit_planned",
-  "expected_old_date": "2026-07-20",
-  "new_date": "2026-07-24",
-  "reason": "Lead auditor availability changed after operational reassignment."
-}
-```
+- requires `qms.calendar.view`;
+- applies request-local tenant and user context;
+- validates source and date range;
+- filters every source by `amo_id`;
+- excludes inactive, deleted, closed, and cancelled records as applicable;
+- selects only the latest active training record per user/course before applying the requested expiry range;
+- excludes renewed and superseded training records when those lifecycle columns exist;
+- uses Africa/Nairobi for Today/Overdue projection state;
+- returns stable sorted pagination and explicit `has_more`/`next_offset` metadata;
+- reports individual source failures instead of silently presenting a complete-looking result.
+
+### `GET /integrations/calendar/planner-capabilities`
+
+Returns server-authoritative mutation capabilities. The frontend does not infer write authority from role labels.
+
+### `PATCH /integrations/calendar/reschedule`
 
 Controls:
 
-- tenant-scoped source lookup;
-- explicit `qms.calendar.manage` permission;
-- allowlist of mutable source types;
-- stale-write protection using `expected_old_date`;
-- row locking on PostgreSQL;
-- preservation of multi-day duration;
-- reason validation;
-- structured trace logging;
-- read-only treatment of generated expiry records.
+- requires `qms.calendar.view` and enforces `qms.calendar.manage` for the selected source;
+- parses an allowlisted event identifier;
+- filters by tenant and record ID;
+- locks the source row on PostgreSQL;
+- applies the same source-specific active predicate to both locked read and update;
+- rejects generated/read-only sources;
+- rejects stale expected dates and unchanged dates;
+- preserves multi-day duration;
+- requires a meaningful reason;
+- verifies one row was conditionally updated;
+- records actor, source, old/new dates, reason, trace ID, IP address, and user agent in `qms_activity_logs` before commit;
+- commits the source mutation and append-only activity entry in one transaction.
 
-Mutable source mapping:
+## 5. Accessibility and keyboard contract
 
-| Entity type | Source table | Start field | End field |
-|---|---|---|---|
-| `audit_schedule` | `qms_audit_schedules` | `next_due_date` | — |
-| `audit` | `qms_audits` | `planned_start` | `planned_end` |
-| `car` | `quality_cars` | `due_date` | — |
-| `training_event` | `training_events` | `starts_on` | `ends_on` |
+- Event cards remain semantic buttons.
+- Every pointer move has a Shift+Arrow equivalent.
+- Escape closes exactly the topmost active planner dialog on the first press, including while an editable field has focus.
+- Planner shortcuts are blocked while a dialog is active, preventing modal stacking.
+- Ctrl/Cmd/Alt combinations remain available to the browser except intentional Ctrl/Cmd+K.
+- Icon-only close controls have context-specific accessible names.
+- Focus is placed within a newly opened modal, trapped while it is active, and restored to its opener when closed.
+- Visible focus treatment, text labels, reduced-motion behavior, and agenda fallback remain available.
 
-Training expiry records are projections and remain non-draggable.
+## 6. Verification coverage
 
-## 4. Usability rules
+### Backend
 
-### 4.1 Default workflow
+`backend/amodb/apps/quality/tests/test_planner_router.py` covers:
 
-- Open the planner in multi-day view for operational work.
-- Use month view for density and milestone awareness.
-- Use agenda view for overdue review, mobile work, and users who prefer lists.
-- Selecting an event opens the inspector without changing route context.
-- Opening the source record is always one direct action from the inspector.
-
-### 4.2 Drag/drop safety
-
-A drag is a proposal, not an immediate uncontrolled write.
-
-Required flow:
-
-1. User drags or keyboard-moves a mutable event.
-2. Planner shows old date, proposed date, and visible owner conflicts.
-3. User enters a meaningful reason.
-4. User acknowledges affected ownership and workflow dependencies.
-5. UI updates optimistically.
-6. API validates tenant, permission, current source date, and source type.
-7. Failed persistence restores the previous position.
-
-### 4.3 Accessibility
-
-- Every mouse drag has a Shift+Arrow keyboard equivalent.
-- Event cards are buttons and remain operable with Enter/Space.
-- Focus rings are visible in light and dark themes.
-- Colour is supplemented with text labels, category names, and status.
-- Reduced-motion preferences disable nonessential transitions.
-- Agenda remains the semantic fallback for screen readers and narrow devices.
-
-## 5. Testing contract
+- event identifier and reason validation;
+- strict mutable-source allowlist;
+- source lifecycle predicates;
+- immutable activity logging before commit;
+- latest-active training projection contract;
+- date-range rejection;
+- stable pagination;
+- private helper compatibility exports;
+- exact route uniqueness and placement before catch-alls on all router families.
 
 ### Frontend unit tests
 
-`frontend/src/pages/qms/planner/qmsPlannerModel.test.ts`
+- `qmsPlannerClock.test.ts` covers browser-timezone independence and EAT rollover.
+- `qmsPlannerModel.test.ts` covers month boundaries, business-day request coverage, source normalization, read-only projections, and duration-preserving movement.
 
-Covers:
+### Deterministic browser tests
 
-- month-grid boundaries;
-- configurable business-day spans;
-- category normalization;
-- mutable versus projected/read-only records;
-- multi-day duration preservation;
-- API request ranges.
+- `qms-modern-planner-live.spec.ts` covers rendering, keyboard commands, modifier-key protection, controlled movement, audit draft retention, and mobile layout.
+- `qms-planner-lifecycle.spec.ts` covers dialog focus entry, focus trapping/restoration, modal non-stacking, and live EAT midnight rollover.
+- `qms-planner-audit-handoff.spec.ts` proves the planner opens the real audit schedule drawer with title, date, frequency, and requested-time criteria retained.
 
-### Live Playwright tests
+The optional live-tenant suite remains gated by `E2E_LIVE_QUALITY=1` and must use non-production test data.
 
-`frontend/tests/e2e/qms-modern-planner-live.spec.ts`
+## 7. Merge gate
 
-Covers:
-
-- planner shell and rails;
-- command palette;
-- keyboard view switching;
-- inspector behavior;
-- controlled move confirmation;
-- mobile internal scrolling;
-- mobile fixed bottom-sheet details;
-- document-level overflow protection.
-
-### Backend tests
-
-`backend/amodb/apps/quality/tests/test_planner_router.py`
-
-Covers:
-
-- event identifier validation;
-- reason validation;
-- strict mutable-source allowlist;
-- permission contract metadata.
-
-## 6. Required verification commands
-
-```bash
-cd frontend
-npm run build
-npm run check:css
-npx vitest run src/pages/qms/planner/qmsPlannerModel.test.ts
-E2E_LIVE_QUALITY=1 npm run test:e2e -- tests/e2e/qms-modern-planner-live.spec.ts
-```
+The focused planner workflow defines the required checks:
 
 ```bash
 cd backend
-pytest amodb/apps/quality/tests/test_planner_router.py -q
+python -m compileall -q \
+  amodb/apps/quality/canonical_router.py \
+  amodb/apps/quality/canonical_router_legacy.py \
+  amodb/apps/quality/planner_calendar_router.py \
+  amodb/apps/quality/planner_router.py \
+  amodb/apps/quality/tests/test_planner_router.py
+pytest -q amodb/apps/quality/tests/test_planner_router.py
 ```
 
-The live Playwright suite requires the existing AMO test credentials and must not run schedule mutations against production data.
+```bash
+cd frontend
+npm ci
+npm run test:qms-planner
+npm run check:css
+npm exec -- eslint \
+  src/pages/qms/QmsCanonicalPage.tsx \
+  src/pages/qms/planner \
+  src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx \
+  tests/e2e/qms-modern-planner-live.spec.ts \
+  tests/e2e/qms-planner-lifecycle.spec.ts \
+  tests/e2e/qms-planner-audit-handoff.spec.ts
+npm run build
+npx playwright install --with-deps chromium
+npx playwright test \
+  tests/e2e/qms-modern-planner-live.spec.ts \
+  tests/e2e/qms-planner-lifecycle.spec.ts \
+  tests/e2e/qms-planner-audit-handoff.spec.ts \
+  --workers=1
+```
 
-## 7. Next hardening phases
+## 8. Deliberately deferred enhancements
 
-### Phase 2 — Timed manipulation and resource planning
+The following are separate product extensions and are not represented as completed in this pull request:
 
-- pointer/touch time-slot drag with 15/30-minute snapping;
-- event-duration resize handles;
+- authoritative quick-create contracts for CAR/CAPA, training, management review, and generic commitments;
+- timed drag snapping and persisted duration resizing;
+- server-side conflict dry-runs across people, departments, locations, and dependencies;
 - auditor, department, base, and aircraft resource lanes;
-- external unscheduled-work backlog dragged into the timeline;
-- collision service covering owner, location, and dependent workflow conflicts;
-- mobile long-press activation to avoid scroll-versus-drag conflicts;
-- screen-reader announcements for pick-up, movement, invalid targets, and drop.
+- tenant-configured timezone returned by the API instead of the current EAT product default;
+- additional Reviews/Other source integrations;
+- server-persisted saved views and natural-language scheduling.
 
-### Phase 3 — Compliance ledger and notification orchestration
-
-The first implementation emits structured server logs. Before schedule changes become broadly enabled, add an immutable database ledger containing:
-
-- tenant ID;
-- source table/type and entity ID;
-- old and new start/end values;
-- actor and delegated/support context;
-- reason;
-- request/trace ID;
-- timestamp;
-- client view and timezone;
-- notification outcome;
-- optional approval reference.
-
-Also add source-specific notifications and dependency impact checks.
-
-### Phase 4 — Smart planning
-
-- server-persisted saved views per user;
-- natural-language quick add with deterministic parsing and confirmation;
-- recurring-series rescheduling choices;
-- workload heatmaps;
-- suggested auditor assignment based on competence and availability;
-- planner change digest;
-- two-timezone comparison mode;
-- iCalendar/Outlook/Google interoperability where tenant policy permits.
-
-## 8. Definition of done for production activation
-
-The planner is production-ready only when:
-
-- build, CSS contract, unit, backend, and live tests pass;
-- mutation permission is defined and assigned in capability tables;
-- immutable schedule-change ledger is deployed;
-- notifications and conflict checks are verified for every mutable source;
-- rollback works for network, validation, stale-write, and server errors;
-- mobile drag behavior is tested on touch hardware;
-- keyboard and screen-reader flows have parity with pointer interactions;
-- no calendar source is silently truncated;
-- tenant timezone is returned by the API and used for Today/Overdue calculations;
-- performance remains acceptable with realistic tenant event volumes.
+These items must be delivered through their own scoped changes with source-specific contracts and regression coverage.
