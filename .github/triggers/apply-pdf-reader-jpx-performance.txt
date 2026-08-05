@@ -1,1 +1,1 @@
-Run the direct recursive PDF.js runtime copier and validate every decoder, CMap and standard-font asset.
+Rerun the validated PDF.js runtime build and focused contracts with the complete backend dependency environment.
