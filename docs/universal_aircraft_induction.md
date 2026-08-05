@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The portal builds an aircraft type once, applies an approved tenant programme overlay once per operator, and then inducts each tail from its actual configuration, counters, status, and records.
+The portal builds an aircraft type once, applies an approved tenant programme overlay once per operator, and inducts every tail from its actual configuration, counters, status, and records.
 
-The architecture replaces the former aircraft/component importer and the Phase 4 migration-batch workflow. There is one onboarding API, one cockpit, one reconciliation lifecycle, and one activation manifest.
+This architecture replaces the former aircraft/component importer and the Phase 4 migration-batch workflow. There is one onboarding API, one cockpit, one reconciliation lifecycle, and one activation manifest.
 
 ## Canonical model
 
@@ -34,35 +34,35 @@ Aircraft Induction
   -> Aircraft activation and immutable baseline binding
 ```
 
-## What is global and reusable
+## Global reusable content
 
-The type library can contain global or tenant-private templates. A published revision is immutable and includes:
+A published type-template revision is immutable and can include:
 
-- aircraft family, type, variant, and type-certificate identity;
-- source MPD, MRB, CMR, ALI, ICA, AD, SB, STC, and authority references;
+- family, type, variant, and type-certificate identity;
+- MPD, MRB, CMR, ALI, ICA, AD, SB, STC, and authority references;
 - configuration hierarchy and positions;
 - allowable part numbers and quantities;
 - counter rules;
 - maintenance requirements, thresholds, intervals, and governing logic;
 - structured effectivity.
 
-A new revision supersedes the previous published revision. Existing aircraft remain bound to the revision that was approved for them until a controlled re-baseline is performed.
+A new revision supersedes the previous published revision. Existing aircraft remain bound to their approved revision until a controlled re-baseline is performed.
 
 ## Tenant programme overlay
 
-A tenant programme revision must reference the current published aircraft-type revision. It stores only operator differences:
+A tenant programme revision references the current published aircraft-type revision and stores only operator differences:
 
-- ADD: approved operator or authority requirement;
-- MODIFY: approved change to an inherited requirement;
-- EXCLUDE: approved exclusion with justification;
-- optional overlay effectivity;
-- authority approval reference and approval date.
+- `ADD`: operator or authority requirement;
+- `MODIFY`: approved change to inherited content;
+- `EXCLUDE`: approved exclusion with justification;
+- overlay effectivity;
+- authority approval reference and date.
 
-Approved tenant revisions are immutable. A new approval supersedes the prior revision.
+Approved tenant revisions are immutable.
 
 ## Explainable effectivity
 
-Effectivity is represented as structured JSON, not executable formulas or arbitrary code.
+Effectivity is structured JSON rather than executable formulas.
 
 ```json
 {
@@ -75,40 +75,23 @@ Effectivity is represented as structured JSON, not executable formulas or arbitr
 }
 ```
 
-Every result includes explanations such as:
+Results include human-readable explanations of every matched and unmatched criterion.
 
-```text
-aircraft.variant_code matched: actual='DHC8-315', operator=eq, expected='DHC8-315'
-aircraft.msn matched: actual=487, operator=between, expected=[300, 620]
-NOT: modifications did not match: actual=['MOD-8-1001'], operator=contains, expected='MOD-8-3021'
-```
+Logical operators: `all`, `any`, `not`.
 
-Supported logical operators: `all`, `any`, `not`.
+Comparisons: `eq`, `neq`, `in`, `not_in`, `between`, `exists`, `contains`, `contains_any`, `contains_all`, `prefix`, `gt`, `gte`, `lt`, `lte`.
 
-Supported comparisons: `eq`, `neq`, `in`, `not_in`, `between`, `exists`, `contains`, `contains_any`, `contains_all`, `prefix`, `gt`, `gte`, `lt`, `lte`.
-
-## Source mappings are not aircraft templates
+## Source mappings are separate
 
 `ImportMappingProfile` answers: **How is this source layout interpreted?**
 
-`AircraftTypeTemplateRevision` answers: **What engineering content and configuration apply to the aircraft type?**
+`AircraftTypeTemplateRevision` answers: **What engineering structure and requirements apply?**
 
-They are separate domains.
-
-Mapping profiles are versioned and identified by:
-
-- source system and version;
-- canonical dataset;
-- deterministic schema fingerprint;
-- normalized header signature;
-- source-to-canonical mapping;
-- transformations, defaults, and validation.
-
-The same WinAir, AMOS, TRAX, Ramco, or spreadsheet export mapping can be reused across tenants and aircraft types without duplicating engineering templates.
+The same WinAir, AMOS, TRAX, Ramco, CSV, or workbook mapping can therefore be reused across tenants and aircraft types without duplicating engineering content.
 
 ## Supported induction datasets
 
-One job may contain multiple files and sheets with different schemas:
+One induction may contain multiple files and sheets with different schemas:
 
 - `AIRCRAFT_MASTER`
 - `CONFIGURATION`
@@ -124,20 +107,15 @@ One job may contain multiple files and sheets with different schemas:
 - `MAINTENANCE_HISTORY`
 - `DOCUMENT_INDEX`
 
-CSV, XLSX, and XLSM are parsed directly. XLSB must be exported to XLSX or handled by a source-system adapter because safe binary-workbook parsing is not part of the web application runtime.
+CSV, XLSX, XLSM, and XLSB are parsed read-only. XLSB support is provided through the dedicated binary-workbook adapter so current DHC8 source workbooks can be staged without conversion.
 
-## Induction lifecycle
+## Lifecycle
 
 ```text
-DRAFT
-  -> STAGED
-  -> VALIDATED
-  -> EFFECTIVITY_RESOLVED
-  -> APPROVED
-  -> ACTIVE
+DRAFT -> STAGED -> VALIDATED -> EFFECTIVITY_RESOLVED -> APPROVED -> ACTIVE
 ```
 
-Activation creates or binds:
+Activation creates:
 
 - aircraft master;
 - actual installed configuration;
@@ -149,49 +127,47 @@ Activation creates or binds:
 - active aircraft template binding;
 - activation manifest and audit event.
 
-Existing aircraft cannot be silently re-inducted. A separate controlled re-baseline workflow must be used.
+Existing aircraft cannot be silently re-inducted.
 
 ## Removed architecture
 
 The registered application no longer exposes:
 
-- `/aircraft/import/*`
+- `/aircraft/import/*`;
 - component-specific import APIs;
 - OCR importer APIs;
 - importer preview/session/snapshot APIs;
-- Phase 4 `/integrations/migration/*` APIs;
+- `/integrations/migration/*` APIs;
 - migration-batch rollout linkage.
 
-The database migration converts reusable old column mappings to `ImportMappingProfile`, drops retired importer tables, renames rollout lineage to `induction_id`, and drops migration-batch tables.
+The migrations convert reusable old mappings to `ImportMappingProfile`, drop retired importer tables, rename rollout lineage to `induction_id`, and remove migration-batch tables.
 
 ## Rollout gate
 
-An aircraft cannot enter dual run unless it has:
+Dual run requires:
 
-- an active universal induction;
-- an active aircraft template binding;
-- a canonical utilization ledger;
-- an active approved AMP baseline;
+- active universal induction;
+- active aircraft type/programme/applicability binding;
+- canonical utilization ledger;
+- active approved AMP baseline;
 - no open Technical Records exceptions.
 
 ## Initial content packs
 
-The first controlled type-library content should be built for:
+Build and validate:
 
-1. Cessna 208 / 208B / 208B EX family;
-2. DHC8-100 / 200 / 300 family.
+1. Cessna 208 / 208B / 208B EX;
+2. DHC8-100 / 200 / 300.
 
-Existing aircraft workbooks are source and validation evidence. They are not the permanent template structure.
+Existing workbooks remain source and validation evidence, not permanent template structures.
 
 ## Verification before merge
 
-Run:
-
-1. Alembic upgrade through `j0k1l2m3n4o5` on a disposable PostgreSQL copy.
-2. SQLAlchemy mapper initialization and metadata inspection.
-3. Backend unit and API integration tests.
-4. TypeScript typecheck and Vite production build.
-5. C208 and DHC8 type-revision authoring tests.
-6. Multi-file 5Y-SLS induction dry run and rollback rehearsal.
-7. Cross-tenant visibility tests for global versus tenant-private templates and mappings.
-8. Rollout transition tests using `induction_id`.
+1. Upgrade Alembic through `j0k1l2m3n4o5` on disposable PostgreSQL.
+2. Initialize all SQLAlchemy mappers and inspect metadata.
+3. Run backend unit and API integration tests.
+4. Run TypeScript typecheck and Vite production build.
+5. Author C208 and DHC8 type revisions.
+6. Run a multi-file 5Y-SLS and 5Y-SLK induction rehearsal.
+7. Test global versus tenant-private visibility.
+8. Test rollout transitions using `induction_id`.
