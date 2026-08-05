@@ -7,11 +7,13 @@ import TenantRouteBoundary from "./app/TenantRouteBoundary";
 import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
 import { ToastProvider } from "./components/feedback/ToastProvider";
+import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import { onSessionEvent } from "./services/auth";
 import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
 import { clearApiResponseCache } from "./services/apiClient";
+import { installPortalFetchErrorBridge } from "./services/portalFetchErrorBridge";
 import { preloadRoute } from "./app/routePreload";
 
 import "./styles/auth.css";
@@ -26,6 +28,8 @@ const App: React.FC = () => {
   }, [theme]);
 
   void scheme;
+
+  useEffect(() => installPortalFetchErrorBridge(), []);
 
   useEffect(() => {
     return onSessionEvent((detail) => {
@@ -76,9 +80,11 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       <GlobalLoadingBar />
-      <TenantRouteBoundary>
-        <AppRouter />
-      </TenantRouteBoundary>
+      <PortalErrorBoundary>
+        <TenantRouteBoundary>
+          <AppRouter />
+        </TenantRouteBoundary>
+      </PortalErrorBoundary>
     </ToastProvider>
   );
 };
