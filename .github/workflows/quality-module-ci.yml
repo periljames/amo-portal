@@ -68,8 +68,12 @@ jobs:
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Verify Quality migration contract
         env:
-          DATABASE_URL: ""
-          DATABASE_WRITE_URL: ""
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+          SECRET_KEY: quality-migration-contract-secret
+          QUALITY_SCHEMA_STRICT: "0"
         run: |
           python - <<'PY'
           from alembic.config import Config
