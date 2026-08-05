@@ -2,9 +2,8 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type { ServerOptions } from 'node:https'
-import { defineConfig, loadEnv, normalizePath, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type ResolvedConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 import { DEV_API_PROXY_PATTERN, shouldServePlatformSpa } from './src/services/devProxyRouting'
 
@@ -17,12 +16,38 @@ const pdfJsPackage = JSON.parse(fs.readFileSync(pdfJsPackagePath, 'utf8')) as { 
 const pdfJsAssetVersion = String(pdfJsPackage.version || 'unknown')
 const pdfJsAssetDirectories = ['wasm', 'cmaps', 'standard_fonts'] as const
 
-const pdfJsStaticAssetsPlugin = () => viteStaticCopy({
-  targets: pdfJsAssetDirectories.map((directory) => ({
-    src: normalizePath(path.join(pdfJsDistRoot, directory, '*')),
-    dest: `pdfjs/${pdfJsAssetVersion}/${directory}`,
-  })),
-})
+/**
+ * Copy the complete PDF.js runtime directories after Rollup has emitted the
+ * application. A direct recursive copy is deliberate: glob-based copy plugins
+ * have previously omitted the binary OpenJPEG/QCMS directory while still
+ * reporting success for CMaps and fonts, leaving JPX pages blank at runtime.
+ */
+const pdfJsRuntimeAssetsPlugin = (): Plugin => {
+  let resolvedConfig: ResolvedConfig | null = null
+  return {
+    name: 'pdfjs-runtime-assets',
+    configResolved(config) {
+      resolvedConfig = config
+    },
+    writeBundle() {
+      if (!resolvedConfig) {
+        throw new Error('Vite configuration was not resolved before copying PDF.js assets')
+      }
+      const outputRoot = path.resolve(resolvedConfig.root, resolvedConfig.build.outDir)
+      const versionRoot = path.join(outputRoot, 'pdfjs', pdfJsAssetVersion)
+      for (const directory of pdfJsAssetDirectories) {
+        const source = path.join(pdfJsDistRoot, directory)
+        const target = path.join(versionRoot, directory)
+        if (!fs.existsSync(source)) {
+          throw new Error(`Installed PDF.js runtime directory is missing: ${source}`)
+        }
+        fs.rmSync(target, { recursive: true, force: true })
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.cpSync(source, target, { recursive: true, dereference: true })
+      }
+    },
+  }
+}
 
 const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
   const configured = env.VITE_ALLOWED_HOSTS
@@ -100,7 +125,7 @@ export default defineConfig(({ mode }) => {
     define: {
       __PDFJS_ASSET_VERSION__: JSON.stringify(pdfJsAssetVersion),
     },
-    plugins: [platformSpaNavigationPlugin(), pdfJsStaticAssetsPlugin(), react()],
+    plugins: [platformSpaNavigationPlugin(), pdfJsRuntimeAssetsPlugin(), react()],
     server: {
       https,
       allowedHosts,
