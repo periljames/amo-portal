@@ -1,7 +1,7 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
-import QmsPlannerPageV2 from "./planner/QmsPlannerPageV2";
+import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
 
 /**
  * Keep the canonical QMS route stable while allowing the calendar to evolve as a
@@ -13,5 +13,5 @@ export default function QmsCanonicalPage(): React.ReactElement {
   const isPlannerRoute = /\/quality\/calendar(?:\/|$)/i.test(location.pathname)
     || /\/qms\/calendar(?:\/|$)/i.test(location.pathname);
 
-  return isPlannerRoute ? <QmsPlannerPageV2 /> : <QmsCanonicalLegacyPage />;
+  return isPlannerRoute ? <QmsPlannerLivePage /> : <QmsCanonicalLegacyPage />;
 }
