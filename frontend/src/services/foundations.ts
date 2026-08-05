@@ -1,6 +1,7 @@
 // src/services/foundations.ts
 import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
-import { authHeaders } from "./auth";
+import { authHeaders, getCachedUser } from "./auth";
+import { readAdminPageTenantScope } from "./adminPageTenantScope";
 import {
   baseStationIdentityConflictError,
   changedBaseStationIdentityCandidate,
@@ -24,6 +25,11 @@ import type {
   UserBaseAssignmentRead,
 } from "../types/foundations";
 
+export type BaseStationRequestScope = {
+  amo_id?: string | null;
+};
+
+const AMO_CONTEXT_HEADER = "X-AMO-Context-Id";
 const inFlightBaseWrites = new Map<string, Promise<BaseStationRead>>();
 
 function toQuery(params: Record<string, string | number | boolean | null | undefined>): string {
@@ -36,22 +42,139 @@ function toQuery(params: Record<string, string | number | boolean | null | undef
   return value ? `?${value}` : "";
 }
 
+function normalisedScopeAmoId(scope?: BaseStationRequestScope): string {
+  return String(scope?.amo_id || "").trim();
+}
+
+function pageScopeError(message: string, code: string): Error {
+  const error = new Error(message) as Error & { status?: number; code?: string };
+  error.name = "BaseStationPageScopeError";
+  error.status = 409;
+  error.code = code;
+  return error;
+}
+
+/**
+ * Resolve the AMO selected by this browser tab after the setup page's successful
+ * /accounts/admin/context request. The server-side support context and other tabs
+ * are deliberately not consulted when constructing a base request.
+ */
+export function captureBaseStationRequestScope(
+  scope?: BaseStationRequestScope,
+): BaseStationRequestScope {
+  const explicitAmoId = normalisedScopeAmoId(scope);
+  if (explicitAmoId) return { amo_id: explicitAmoId };
+
+  const user = getCachedUser();
+  if (!user?.is_superuser) return {};
+
+  const selectedAmoId = String(readAdminPageTenantScope(user.id) || "").trim();
+  if (!selectedAmoId) {
+    throw pageScopeError(
+      "Select an AMO on the setup page before accessing its operating bases.",
+      "BASE_STATION_PAGE_SCOPE_UNAVAILABLE",
+    );
+  }
+  return { amo_id: selectedAmoId };
+}
+
+/** Fail if a retained dialog scope no longer matches this tab's page selector. */
+export function validateBaseStationRequestScope(
+  scope: BaseStationRequestScope,
+): BaseStationRequestScope {
+  const expectedAmoId = normalisedScopeAmoId(scope);
+  const user = getCachedUser();
+  if (!user?.is_superuser) {
+    return expectedAmoId ? { amo_id: expectedAmoId } : {};
+  }
+
+  const selectedAmoId = String(readAdminPageTenantScope(user.id) || "").trim();
+  if (!expectedAmoId || !selectedAmoId || selectedAmoId !== expectedAmoId) {
+    throw pageScopeError(
+      "The setup page changed to another AMO after this base action began. Close the editor, confirm the intended AMO, and retry.",
+      "BASE_STATION_PAGE_SCOPE_CHANGED",
+    );
+  }
+  return { amo_id: expectedAmoId };
+}
+
+function resolvedRequestScope(scope?: BaseStationRequestScope): BaseStationRequestScope {
+  return validateBaseStationRequestScope(captureBaseStationRequestScope(scope));
+}
+
+function scopedAuthHeaders(scope?: BaseStationRequestScope): Headers {
+  const headers = new Headers(authHeaders());
+  const amoId = normalisedScopeAmoId(scope);
+  if (amoId) headers.set(AMO_CONTEXT_HEADER, amoId);
+  return headers;
+}
+
 function errorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
   const status = (error as { status?: unknown }).status;
   return typeof status === "number" ? status : null;
 }
 
-function baseWriteKey(action: "create" | "update", id: string | null, payload: BaseStationCreate | BaseStationUpdate): string {
-  return `${action}:${id || "new"}:${JSON.stringify(payload)}`;
+function baseWriteKey(
+  action: "create" | "update",
+  id: string | null,
+  payload: BaseStationCreate | BaseStationUpdate,
+  scope?: BaseStationRequestScope,
+): string {
+  return `${normalisedScopeAmoId(scope) || "account-amo"}:${action}:${id || "new"}:${JSON.stringify(payload)}`;
 }
 
-async function availableBaseIdentityScope(): Promise<BaseStationRead[] | null> {
+function identityScopeUnavailableError(cause: unknown): Error {
+  const suffix = cause instanceof Error && cause.message.trim() ? ` ${cause.message}` : "";
+  const error = new Error(
+    `The live operating-base register could not be verified. No base change was sent.${suffix}`,
+  ) as Error & { status?: number; code?: string; cause?: unknown };
+  error.name = "BaseStationIdentityScopeUnavailableError";
+  error.status = 503;
+  error.code = "BASE_STATION_IDENTITY_SCOPE_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+}
+
+function tenantMismatchError(message: string): Error {
+  const error = new Error(message) as Error & { status?: number; code?: string };
+  error.name = "BaseStationTenantMismatchError";
+  error.status = 409;
+  error.code = "BASE_STATION_TENANT_MISMATCH";
+  return error;
+}
+
+function assertRegisterTenant(
+  items: BaseStationRead[],
+  scope?: BaseStationRequestScope,
+): BaseStationRead[] {
+  const expectedAmoId = normalisedScopeAmoId(scope);
+  if (expectedAmoId && items.some((item) => item.amo_id !== expectedAmoId)) {
+    throw tenantMismatchError(
+      "The server returned an operating-base register from a different AMO. The response was rejected and the setup page must be refreshed.",
+    );
+  }
+  return items;
+}
+
+function assertResponseTenant(item: BaseStationRead, scope?: BaseStationRequestScope): BaseStationRead {
+  const expectedAmoId = normalisedScopeAmoId(scope);
+  if (expectedAmoId && item.amo_id !== expectedAmoId) {
+    throw tenantMismatchError(
+      "The server returned a base from a different AMO. The response was rejected and the setup page must be refreshed.",
+    );
+  }
+  return item;
+}
+
+async function requiredBaseIdentityScope(scope: BaseStationRequestScope): Promise<BaseStationRead[]> {
   try {
-    return await listBaseStations({ include_inactive: true });
-  } catch {
-    // Identity preflight improves feedback but must not replace server authority.
-    return null;
+    return await listBaseStations({
+      include_inactive: true,
+      amo_id: scope.amo_id,
+    });
+  } catch (cause) {
+    throw identityScopeUnavailableError(cause);
   }
 }
 
@@ -76,13 +199,12 @@ function assertIdentityAvailable(
 async function explainCreateServerConflict(
   error: unknown,
   candidate: BaseStationIdentityCandidate,
+  scope: BaseStationRequestScope,
 ): Promise<never> {
   if (errorStatus(error) !== 409) throw error;
-  const refreshed = await availableBaseIdentityScope();
-  if (refreshed) {
-    const conflict = findBaseStationIdentityConflict(refreshed, candidate);
-    if (conflict) throw baseStationIdentityConflictError(conflict);
-  }
+  const refreshed = await requiredBaseIdentityScope(scope);
+  const conflict = findBaseStationIdentityConflict(refreshed, candidate);
+  if (conflict) throw baseStationIdentityConflictError(conflict);
   throw error;
 }
 
@@ -90,15 +212,14 @@ async function explainUpdateServerConflict(
   error: unknown,
   baseStationId: string,
   payload: BaseStationUpdate,
+  scope: BaseStationRequestScope,
 ): Promise<never> {
   if (errorStatus(error) !== 409) throw error;
-  const refreshed = await availableBaseIdentityScope();
-  if (refreshed) {
-    const candidate = changedUpdateCandidate(refreshed, baseStationId, payload);
-    if (candidate) {
-      const conflict = findBaseStationIdentityConflict(refreshed, candidate, baseStationId);
-      if (conflict) throw baseStationIdentityConflictError(conflict);
-    }
+  const refreshed = await requiredBaseIdentityScope(scope);
+  const candidate = changedUpdateCandidate(refreshed, baseStationId, payload);
+  if (candidate) {
+    const conflict = findBaseStationIdentityConflict(refreshed, candidate, baseStationId);
+    if (conflict) throw baseStationIdentityConflictError(conflict);
   }
   throw error;
 }
@@ -121,36 +242,67 @@ export function getPersonnelIdentityHealth(): Promise<PersonnelIdentityHealth> {
   return apiGet<PersonnelIdentityHealth>("/foundations/personnel/identity-health", { headers: authHeaders() });
 }
 
-export function listBaseStations(params?: { include_inactive?: boolean }): Promise<BaseStationRead[]> {
-  return apiGet<BaseStationRead[]>(`/foundations/base-stations${toQuery({ include_inactive: params?.include_inactive })}`, {
-    headers: authHeaders(),
-  });
+export async function listBaseStations(params?: {
+  include_inactive?: boolean;
+  amo_id?: string | null;
+}): Promise<BaseStationRead[]> {
+  const requestScope = resolvedRequestScope({ amo_id: params?.amo_id });
+  const items = await apiGet<BaseStationRead[]>(
+    `/foundations/base-stations${toQuery({ include_inactive: params?.include_inactive })}`,
+    {
+      headers: scopedAuthHeaders(requestScope),
+      offline: {
+        cache: false,
+        allowStaleFallback: false,
+      },
+    },
+  );
+  return assertRegisterTenant(items, requestScope);
 }
 
-export function createBaseStation(payload: BaseStationCreate): Promise<BaseStationRead> {
+export function createBaseStation(
+  payload: BaseStationCreate,
+  scope?: BaseStationRequestScope,
+): Promise<BaseStationRead> {
+  const requestScope = resolvedRequestScope(scope);
   const candidate: BaseStationIdentityCandidate = { code: payload.code, aliases: payload.aliases || [] };
-  const key = baseWriteKey("create", null, payload);
+  const key = baseWriteKey("create", null, payload, requestScope);
   return singleFlightBaseWrite(key, async () => {
-    const bases = await availableBaseIdentityScope();
-    if (bases) assertIdentityAvailable(bases, candidate);
+    const bases = await requiredBaseIdentityScope(requestScope);
+    assertIdentityAvailable(bases, candidate);
     try {
-      return await apiPost<BaseStationRead>("/foundations/base-stations", payload, { headers: authHeaders() });
+      const created = await apiPost<BaseStationRead>("/foundations/base-stations", payload, {
+        headers: scopedAuthHeaders(requestScope),
+      });
+      return assertResponseTenant(created, requestScope);
     } catch (error) {
-      return await explainCreateServerConflict(error, candidate);
+      return await explainCreateServerConflict(error, candidate, requestScope);
     }
   });
 }
 
-export function updateBaseStation(baseStationId: string, payload: BaseStationUpdate): Promise<BaseStationRead> {
-  const key = baseWriteKey("update", baseStationId, payload);
+export function updateBaseStation(
+  baseStationId: string,
+  payload: BaseStationUpdate,
+  scope?: BaseStationRequestScope,
+): Promise<BaseStationRead> {
+  const requestScope = resolvedRequestScope(scope);
+  const key = baseWriteKey("update", baseStationId, payload, requestScope);
   return singleFlightBaseWrite(key, async () => {
-    const bases = await availableBaseIdentityScope();
-    const candidate = bases ? changedUpdateCandidate(bases, baseStationId, payload) : null;
-    if (bases && candidate) assertIdentityAvailable(bases, candidate, baseStationId);
+    const bases = await requiredBaseIdentityScope(requestScope);
+    const current = bases.find((base) => base.id === baseStationId);
+    if (!current) throw new Error("The selected base no longer exists in the requested AMO register.");
+    const candidate = changedBaseStationIdentityCandidate(current, payload);
+    if (candidate) assertIdentityAvailable(bases, candidate, baseStationId);
     try {
-      return await apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
+      const updated = await apiPut<BaseStationRead>(
+        `/foundations/base-stations/${encodeURIComponent(baseStationId)}`,
+        payload,
+        { headers: scopedAuthHeaders(requestScope) },
+      );
+      return assertResponseTenant(updated, requestScope);
     } catch (error) {
-      return await explainUpdateServerConflict(error, baseStationId, payload);
+      return await explainUpdateServerConflict(error, baseStationId, payload, requestScope);
     }
   });
 }

@@ -5,6 +5,10 @@
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
+import {
+  beginAdminPageTenantScope,
+  completeAdminPageTenantScope,
+} from "./adminPageTenantScope";
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
@@ -48,7 +52,7 @@ async function request<T>(
       ...fetchInit,
       timeoutMs: method === "GET" ? 12_000 : 45_000,
       offline: {
-        cache: method === "GET",
+        cache: offline?.cache ?? method === "GET",
         cacheTtlMs: offline?.cacheTtlMs ?? 5 * 60_000,
         allowStaleFallback: offline?.allowStaleFallback ?? true,
         queueMutation: offline?.queueMutation === true,
@@ -113,6 +117,10 @@ async function request<T>(
 }
 
 export async function apiPost<T>(path: string, body?: unknown, init: AppRequestInit = {}): Promise<T> {
+  const contextAttempt = path === "/accounts/admin/context"
+    ? beginAdminPageTenantScope(body)
+    : null;
+
   let bodyInit: BodyInit | undefined;
   if (body === undefined || body === null) bodyInit = undefined;
   else if (typeof body === "string" || body instanceof FormData) bodyInit = body;
@@ -122,7 +130,9 @@ export async function apiPost<T>(path: string, body?: unknown, init: AppRequestI
   if (bodyInit !== undefined && !(bodyInit instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return request<T>("POST", path, bodyInit, { ...init, headers });
+  const result = await request<T>("POST", path, bodyInit, { ...init, headers });
+  if (contextAttempt) completeAdminPageTenantScope(contextAttempt, result);
+  return result;
 }
 
 export async function apiPut<T>(path: string, body?: unknown, init: AppRequestInit = {}): Promise<T> {
