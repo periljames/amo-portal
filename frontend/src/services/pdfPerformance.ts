@@ -46,6 +46,12 @@ function browserHints(): {
  * high-throughput connection on a capable device receives 50 MiB bursts.
  * Constrained clients retain a progressive path without governing everyone
  * else by the slowest possible network profile.
+ *
+ * The page observer is also the authority for the toolbar page number and the
+ * active Contents row. Its root margin must therefore remain zero. Nearby-page
+ * preloading is provided by renderRadius/hotPageLimit after the truly visible
+ * page is selected; treating pages thousands of pixels outside the viewport as
+ * visible causes the wrong render window to be retained during jumps.
  */
 export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   const { connection, deviceMemory, hardwareConcurrency } = browserHints();
@@ -67,7 +73,7 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
       rangeChunkSize: 512 * KIB,
       renderRadius: 2,
       hotPageLimit: 5,
-      prefetchMarginPx: 900,
+      prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.1,
     };
   }
@@ -78,7 +84,7 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
       rangeChunkSize: 4 * MIB,
       renderRadius: 4,
       hotPageLimit: 10,
-      prefetchMarginPx: 3000,
+      prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.25,
     };
   }
@@ -89,7 +95,7 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
       rangeChunkSize: 50 * MIB,
       renderRadius: 8,
       hotPageLimit: 24,
-      prefetchMarginPx: 12000,
+      prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.6,
     };
   }
@@ -99,7 +105,7 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     rangeChunkSize: 20 * MIB,
     renderRadius: 6,
     hotPageLimit: 18,
-    prefetchMarginPx: 7000,
+    prefetchMarginPx: 0,
     maxDevicePixelRatio: 1.45,
   };
 }

@@ -12,6 +12,14 @@ export type PdfSearchResult = {
   snippet: string;
 };
 
+export type PdfViewportEntry = {
+  page: number;
+  top: number;
+  bottom: number;
+  isIntersecting: boolean;
+  intersectionRatio?: number;
+};
+
 export type PdfReaderShortcut =
   | "SEARCH"
   | "ZOOM_IN"
@@ -70,6 +78,46 @@ export function resolvePdfReaderScrollRoot(readerRoot: HTMLElement): HTMLElement
     ?? readerRoot.querySelector<HTMLElement>(":scope > .pdf-engine-viewport");
   if (viewport && ["auto", "scroll"].includes(window.getComputedStyle(viewport).overflowY)) return viewport;
   return readerRoot.closest<HTMLElement>(".app-shell__scroll");
+}
+
+/**
+ * Select the physical PDF page at the reader's visual reading line. Entries
+ * outside the real viewport are ignored even if an observer reports them as
+ * intersecting because of an oversized root margin. The function accepts all
+ * currently observed entries, rather than only the subset changed in the most
+ * recent callback, so page authority cannot jump to a stale off-screen page.
+ */
+export function selectPdfViewportPage(
+  entries: Iterable<PdfViewportEntry>,
+  viewportTop: number,
+  viewportBottom: number,
+  anchorOffset = 92,
+): number | null {
+  if (!(viewportBottom > viewportTop)) return null;
+  const anchor = Math.min(viewportBottom - 1, viewportTop + Math.max(0, anchorOffset));
+  const visible = [...entries].filter((entry) => (
+    entry.isIntersecting
+    && Number.isInteger(entry.page)
+    && entry.page > 0
+    && entry.bottom > viewportTop
+    && entry.top < viewportBottom
+  ));
+  if (!visible.length) return null;
+
+  const containingAnchor = visible.filter((entry) => entry.top <= anchor && entry.bottom > anchor);
+  const candidates = containingAnchor.length ? containingAnchor : visible;
+  candidates.sort((left, right) => {
+    const leftDistance = left.top <= anchor && left.bottom > anchor
+      ? 0
+      : Math.min(Math.abs(left.top - anchor), Math.abs(left.bottom - anchor));
+    const rightDistance = right.top <= anchor && right.bottom > anchor
+      ? 0
+      : Math.min(Math.abs(right.top - anchor), Math.abs(right.bottom - anchor));
+    if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    const ratioDifference = Number(right.intersectionRatio || 0) - Number(left.intersectionRatio || 0);
+    return ratioDifference || left.page - right.page;
+  });
+  return candidates[0]?.page || null;
 }
 
 export function isPdfTextEntryTarget(target: EventTarget | null): boolean {
