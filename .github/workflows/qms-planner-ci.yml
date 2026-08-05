@@ -9,6 +9,7 @@ on:
       - ".github/workflows/qms-planner-ci.yml"
       - "backend/amodb/apps/quality/canonical_router.py"
       - "backend/amodb/apps/quality/canonical_router_legacy.py"
+      - "backend/amodb/apps/quality/planner_calendar_router.py"
       - "backend/amodb/apps/quality/planner_router.py"
       - "backend/amodb/apps/quality/tests/test_planner_router.py"
       - "frontend/package.json"
@@ -56,6 +57,7 @@ jobs:
           python -m compileall -q
           amodb/apps/quality/canonical_router.py
           amodb/apps/quality/canonical_router_legacy.py
+          amodb/apps/quality/planner_calendar_router.py
           amodb/apps/quality/planner_router.py
           amodb/apps/quality/tests/test_planner_router.py
       - name: Configure application mappers
