@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Building2,
   ChevronLeft,
@@ -74,12 +74,8 @@ const DepartmentManager: React.FC<Props> = ({ departments, loading, onChanged })
   }, [departments, query]);
 
   const pageCount = Math.max(1, Math.ceil(filteredDepartments.length / pageSize));
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, pageCount));
-  }, [pageCount]);
-
-  const pageStartIndex = (page - 1) * pageSize;
+  const currentPage = Math.min(page, pageCount);
+  const pageStartIndex = (currentPage - 1) * pageSize;
   const visibleDepartments = filteredDepartments.slice(pageStartIndex, pageStartIndex + pageSize);
   const visibleStart = filteredDepartments.length ? pageStartIndex + 1 : 0;
   const visibleEnd = Math.min(pageStartIndex + pageSize, filteredDepartments.length);
@@ -299,11 +295,11 @@ const DepartmentManager: React.FC<Props> = ({ departments, loading, onChanged })
                     </select>
                   </label>
                   <div className="setup-department-manager__pager">
-                    <button type="button" aria-label="Previous department page" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+                    <button type="button" aria-label="Previous department page" disabled={currentPage <= 1} onClick={() => setPage(Math.max(1, currentPage - 1))}>
                       <ChevronLeft size={15} />
                     </button>
-                    <span>Page {page} of {pageCount}</span>
-                    <button type="button" aria-label="Next department page" disabled={page >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>
+                    <span>Page {currentPage} of {pageCount}</span>
+                    <button type="button" aria-label="Next department page" disabled={currentPage >= pageCount} onClick={() => setPage(Math.min(pageCount, currentPage + 1))}>
                       <ChevronRight size={15} />
                     </button>
                   </div>
