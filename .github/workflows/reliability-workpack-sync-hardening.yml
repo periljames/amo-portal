@@ -38,6 +38,8 @@ jobs:
       - name: Validate app import and Reliability tests
         working-directory: backend
         env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: '1'
           DATABASE_URL: sqlite:///./reliability_workpack_test.db
         run: |
           python -c "from amodb.main import app; assert app"
