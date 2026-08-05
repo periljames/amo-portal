@@ -1,1 +1,1 @@
-Retry the packaged PDF.js decoder, adaptive throughput, hot-page window and TOC key repair after validating the complete runtime asset tree.
+Run the direct recursive PDF.js runtime copier and validate every decoder, CMap and standard-font asset.
