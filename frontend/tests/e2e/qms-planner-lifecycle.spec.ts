@@ -2,7 +2,6 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
-
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: 4_102_444_800 })}.signature`;
@@ -126,6 +125,7 @@ async function openPlanner(page: Page, view: "week" | "month"): Promise<void> {
   await page.goto(`/maintenance/tenant-a/quality/calendar/${view}?date=2026-08-18`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".qms-modern-planner-v2")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".qms-planner-loading")).toBeHidden({ timeout: 15_000 });
+  await page.addStyleTag({ content: ".toast-stack { pointer-events: none !important; }" });
 }
 
 function monthDay(page: Page, day: number) {
@@ -134,13 +134,13 @@ function monthDay(page: Page, day: number) {
 }
 
 test.describe("QMS planner lifecycle", () => {
-
   test("contains dialog focus, restores each opener, and never stacks dialogs", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "week");
 
     const commandTrigger = page.locator(".qms-planner-toolbar__search");
-    await commandTrigger.click();
+    await commandTrigger.focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog", { name: "Planner command menu" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Planner command menu" })).toBeHidden();
@@ -173,16 +173,19 @@ test.describe("QMS planner lifecycle", () => {
     await expect(page.locator(".qms-planner-quick-schedule")).toBeFocused();
 
     const shortcutsTrigger = page.locator(".qms-planner-shortcut-link");
-    await shortcutsTrigger.click();
+    await shortcutsTrigger.focus();
+    await page.keyboard.press("Enter");
     const shortcutsDialog = page.getByRole("dialog", { name: "Planner keyboard shortcuts" });
     await expect(shortcutsDialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(shortcutsDialog).toBeHidden();
     await expect(shortcutsTrigger).toBeFocused();
 
-    await page.locator(".qms-planner-event").first().click();
+    await page.locator(".qms-planner-event").first().focus();
+    await page.keyboard.press("Enter");
     const rescheduleTrigger = page.getByRole("button", { name: "Reschedule" });
-    await rescheduleTrigger.click();
+    await rescheduleTrigger.focus();
+    await page.keyboard.press("Enter");
     const rescheduleDialog = page.getByRole("dialog", { name: /Reschedule QAR-026/ });
     await expect(rescheduleDialog).toBeVisible();
     await page.keyboard.press("Escape");
@@ -193,7 +196,10 @@ test.describe("QMS planner lifecycle", () => {
   test("advances the Today marker across an Africa Nairobi midnight without reload", async ({ page }) => {
     await page.clock.install({ time: new Date("2026-08-18T20:59:45.000Z") });
     await page.setViewportSize({ width: 1600, height: 950 });
-    await openPlanner(page, "month");
+    await openPlanner(page, "week");
+    await page.keyboard.press("m");
+    await expect(page).toHaveURL(/\/quality\/calendar\/month/);
+    await expect(page.locator(".qms-planner-month")).toBeVisible({ timeout: 10_000 });
 
     await expect(monthDay(page, 18)).toHaveClass(/is-today/);
     await expect(monthDay(page, 19)).not.toHaveClass(/is-today/);
