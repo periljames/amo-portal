@@ -131,7 +131,7 @@ def _build_parsed_row(raw: dict[str, Any]) -> ParsedRow:
         last_name=last_name,
         full_name=_to_clean_str(raw.get("PersonName")),
         national_id=_to_clean_str(raw.get("nid")),
-        amel_no=_to_clean_str(raw.get("AMEL NO:")),
+        amel_no=_to_clean_str(raw.get("KAMEL NO:")) or _to_clean_str(raw.get("AMEL NO:")),
         internal_certification_stamp_no=_to_clean_str(raw.get("Internal Certification Stamp No:")),
         initial_authorization_date=_parse_date(raw.get("initial_auth")),
         department=_to_clean_str(raw.get("Department")),

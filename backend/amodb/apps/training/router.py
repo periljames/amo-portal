@@ -6696,3 +6696,9 @@ def verify_certificate_public_endpoint(
 ):
     return verify_certificate_public(certificate_number, db, request, response_format)
 
+
+
+# TRAINING_WORKBOOK_CONTROL_CENTRE
+from .workbook_router import router as training_workbook_import_router
+
+router.include_router(training_workbook_import_router)
