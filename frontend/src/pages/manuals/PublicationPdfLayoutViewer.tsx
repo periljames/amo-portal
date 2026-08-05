@@ -111,8 +111,10 @@ function alignActiveNavigationRow(layout: HTMLElement, currentPage: number): boo
   if (!row) return false;
 
   rows.forEach((candidate) => {
-    candidate.classList.toggle("active", candidate === row);
-    candidate.toggleAttribute("aria-current", candidate === row);
+    const active = candidate === row;
+    candidate.classList.toggle("active", active);
+    if (active) candidate.setAttribute("aria-current", "page");
+    else candidate.removeAttribute("aria-current");
   });
   readerPage?.setAttribute("data-pdf-current-page", String(currentPage));
 
