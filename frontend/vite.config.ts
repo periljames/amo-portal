@@ -15,12 +15,25 @@ const pdfJsDistRoot = path.dirname(pdfJsPackagePath)
 const pdfJsPackage = JSON.parse(fs.readFileSync(pdfJsPackagePath, 'utf8')) as { version?: string }
 const pdfJsAssetVersion = String(pdfJsPackage.version || 'unknown')
 const pdfJsAssetDirectories = ['wasm', 'cmaps', 'standard_fonts'] as const
+const pdfJsAssetDirectorySet = new Set<string>(pdfJsAssetDirectories)
+
+const pdfJsAssetContentType = (filename: string): string => {
+  const extension = path.extname(filename).toLowerCase()
+  if (extension === '.wasm') return 'application/wasm'
+  if (extension === '.js' || extension === '.mjs') return 'text/javascript; charset=utf-8'
+  if (extension === '.json') return 'application/json; charset=utf-8'
+  return 'application/octet-stream'
+}
 
 /**
- * Copy the complete PDF.js runtime directories after Rollup has emitted the
- * application. A direct recursive copy is deliberate: glob-based copy plugins
- * have previously omitted the binary OpenJPEG/QCMS directory while still
- * reporting success for CMaps and fonts, leaving JPX pages blank at runtime.
+ * Publish the exact PDF.js decoder, CMap and standard-font resources in both
+ * Vite development and production. The versioned same-origin URL is consumed
+ * by PDF.js `wasmUrl`, `cMapUrl` and `standardFontDataUrl`.
+ *
+ * Development needs an explicit middleware because writeBundle only runs for a
+ * production build. Without it, PDF.js resolves the JPX fallback against a null
+ * asset base and requests `nullopenjpeg_nowasm_fallback.js`, leaving scanned and
+ * JPEG 2000 pages blank even though the npm package contains the decoder.
  */
 const pdfJsRuntimeAssetsPlugin = (): Plugin => {
   let resolvedConfig: ResolvedConfig | null = null
@@ -28,6 +41,69 @@ const pdfJsRuntimeAssetsPlugin = (): Plugin => {
     name: 'pdfjs-runtime-assets',
     configResolved(config) {
       resolvedConfig = config
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        let pathname = ''
+        try {
+          pathname = new URL(req.url || '/', 'http://vite.local').pathname
+        } catch {
+          next()
+          return
+        }
+
+        const base = server.config.base.endsWith('/') ? server.config.base : `${server.config.base}/`
+        const prefix = `${base}pdfjs/${encodeURIComponent(pdfJsAssetVersion)}/`
+        if (!pathname.startsWith(prefix)) {
+          next()
+          return
+        }
+
+        let relativePath = ''
+        try {
+          relativePath = decodeURIComponent(pathname.slice(prefix.length))
+        } catch {
+          res.statusCode = 400
+          res.end('Invalid PDF.js asset path')
+          return
+        }
+
+        const segments = relativePath.split('/').filter(Boolean)
+        if (segments.length < 2 || !pdfJsAssetDirectorySet.has(segments[0]) || segments.some((segment) => segment === '.' || segment === '..')) {
+          res.statusCode = 404
+          res.end('PDF.js asset not found')
+          return
+        }
+
+        const assetPath = path.resolve(pdfJsDistRoot, ...segments)
+        const allowedRoot = `${path.resolve(pdfJsDistRoot)}${path.sep}`
+        if (!assetPath.startsWith(allowedRoot)) {
+          res.statusCode = 403
+          res.end('PDF.js asset path rejected')
+          return
+        }
+
+        let stats: fs.Stats
+        try {
+          stats = fs.statSync(assetPath)
+        } catch {
+          res.statusCode = 404
+          res.end('PDF.js asset not found')
+          return
+        }
+        if (!stats.isFile()) {
+          res.statusCode = 404
+          res.end('PDF.js asset not found')
+          return
+        }
+
+        res.statusCode = 200
+        res.setHeader('Content-Type', pdfJsAssetContentType(assetPath))
+        res.setHeader('Content-Length', String(stats.size))
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        fs.createReadStream(assetPath).on('error', next).pipe(res)
+      })
     },
     writeBundle() {
       if (!resolvedConfig) {
