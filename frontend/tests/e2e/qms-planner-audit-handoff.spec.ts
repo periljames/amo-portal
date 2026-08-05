@@ -175,7 +175,7 @@ test.describe("QMS planner authoritative audit handoff", () => {
     await expect(openDrawer).toBeVisible({ timeout: 15_000 });
     await expect(openDrawer.getByLabel("Audit title")).toHaveValue("Planner handoff verification");
     await expect(openDrawer.getByLabel("Next due date")).toHaveValue("2026-08-21");
-    await expect(openDrawer.getByText(/Planner requested start time: 10:30 EAT/)).toBeVisible();
+    await expect(openDrawer.getByLabel("Criteria")).toHaveValue(/Planner requested start time: 10:30 EAT/);
 
     const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), draftKey);
     expect(stored?.form?.title).toBe("Planner handoff verification");
