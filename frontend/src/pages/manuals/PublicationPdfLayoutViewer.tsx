@@ -83,6 +83,27 @@ function searchResultPage(button: Element): number | null {
   return Number.isInteger(page) && page > 0 ? page : null;
 }
 
+function alignActiveNavigationRow(layout: HTMLElement): boolean {
+  const readerPage = layout.closest<HTMLElement>(".publication-reader-page");
+  const container = readerPage?.querySelector<HTMLElement>(".publication-toc__list");
+  const row = container?.querySelector<HTMLElement>(".publication-toc__row.active");
+  if (!container || !row) return false;
+
+  const containerRect = container.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const margin = 18;
+  const above = rowRect.top < containerRect.top + margin;
+  const below = rowRect.bottom > containerRect.bottom - margin;
+  if (!above && !below) return true;
+
+  const centeredTop = container.scrollTop
+    + rowRect.top
+    - containerRect.top
+    - Math.max(0, (container.clientHeight - rowRect.height) / 2);
+  container.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
+  return true;
+}
+
 export default function PublicationPdfLayoutViewer({
   fileUrl,
   title,
@@ -134,6 +155,31 @@ export default function PublicationPdfLayoutViewer({
     page.addEventListener("click", routeIndexedSearchToPdf, true);
     return () => page.removeEventListener("click", routeIndexedSearchToPdf, true);
   }, []);
+
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout) return;
+    let cancelled = false;
+    let frame = 0;
+    let timer = 0;
+
+    const synchronize = (attempt: number) => {
+      if (cancelled) return;
+      frame = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        if (alignActiveNavigationRow(layout)) return;
+        if (attempt >= 14) return;
+        timer = window.setTimeout(() => synchronize(attempt + 1), attempt < 4 ? 16 : 48);
+      });
+    };
+
+    synchronize(0);
+    return () => {
+      cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [currentPage, readerNavigationRequest?.token]);
 
   useEffect(() => {
     if (!identity || references.length) return;
@@ -204,7 +250,10 @@ export default function PublicationPdfLayoutViewer({
           navigationRequest={readerNavigationRequest}
           initialPage={initialPage}
           initialZoom={initialZoom}
-          onPageChange={(pageNumber: number) => { setCurrentPage(pageNumber); onPageChange?.(pageNumber); }}
+          onPageChange={(pageNumber: number) => {
+            setCurrentPage(pageNumber);
+            onPageChange?.(pageNumber);
+          }}
           onZoomChange={onZoomChange}
           onAcroFormDetected={onAcroFormDetected}
           onOutlineReady={onOutlineReady}

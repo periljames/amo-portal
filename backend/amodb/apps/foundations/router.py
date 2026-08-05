@@ -14,6 +14,7 @@ from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..audit import services as audit_services
 from . import airport_catalog, department_schemas, models, schemas, services
+from .tenant_scope import get_bound_foundation_amo_id, get_bound_foundation_write_amo_id
 
 router = APIRouter(prefix="/foundations", tags=["foundations"])
 
@@ -272,12 +273,13 @@ def search_airport_catalog(
 @router.get("/base-stations", response_model=List[schemas.BaseStationRead])
 def list_base_stations(
     include_inactive: bool = Query(default=False),
+    amo_id: str = Depends(get_bound_foundation_amo_id),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     rows = services.list_base_stations(
         db,
-        amo_id=_effective_amo_id(current_user),
+        amo_id=amo_id,
         include_inactive=include_inactive,
     )
     return [_base_read_for_user(row, current_user) for row in rows]
@@ -286,12 +288,13 @@ def list_base_stations(
 @router.post("/base-stations", response_model=schemas.BaseStationRead, status_code=status.HTTP_201_CREATED)
 def create_base_station(
     payload: schemas.BaseStationCreate,
+    amo_id: str = Depends(get_bound_foundation_write_amo_id),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_foundation_manager(current_user)
     try:
-        item = services.create_base_station(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
+        item = services.create_base_station(db, amo_id=amo_id, actor_user_id=current_user.id, payload=payload)
         db.commit()
         db.refresh(item)
         return item
@@ -307,11 +310,11 @@ def create_base_station(
 def update_base_station(
     base_station_id: str,
     payload: schemas.BaseStationUpdate,
+    amo_id: str = Depends(get_bound_foundation_write_amo_id),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_foundation_manager(current_user)
-    amo_id = _effective_amo_id(current_user)
     item = services.get_base_station(db, amo_id=amo_id, base_station_id=base_station_id)
     if not item:
         raise HTTPException(status_code=404, detail="Base station not found")

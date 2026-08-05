@@ -90,6 +90,7 @@ type PdfNavigationRequest = { page: number; token: number };
 
 type NavigationItem = {
   key: string;
+  renderKey: string;
   title: string;
   level: number;
   page?: number | null;
@@ -375,10 +376,17 @@ export default function PublicationsReaderPage() {
 
   const navigationItems = useMemo<NavigationItem[]>(() => {
     if (viewMode === "layout" && nativeOutline.length) {
-      return nativeOutline.map((item) => ({ key: item.id, title: item.title, level: item.level, page: item.page }));
+      return nativeOutline.map((item) => ({
+        key: item.id,
+        renderKey: `outline:${item.id}`,
+        title: item.title,
+        level: item.level,
+        page: item.page,
+      }));
     }
-    return sections.map((section) => ({
+    return sections.map((section, index) => ({
       key: section.anchor_slug,
+      renderKey: `section:${section.id}:${index}`,
       title: section.heading,
       level: section.level || 1,
       page: section.page_start,
@@ -387,9 +395,12 @@ export default function PublicationsReaderPage() {
   }, [nativeOutline, sections, viewMode]);
 
   const activeNavigationKey = viewMode === "layout" && nativeOutline.length ? activeOutlineKey : activeSection;
+  const activeNavigationRenderKey = navigationItems.find((item) => item.key === activeNavigationKey)?.renderKey
+    || navigationItems.find((item) => safeAnchor(item.key) === safeAnchor(activeNavigationKey))?.renderKey
+    || "";
 
-  const expandAncestors = useCallback((key: string) => {
-    const index = navigationItems.findIndex((item) => item.key === key);
+  const expandAncestors = useCallback((renderKey: string) => {
+    const index = navigationItems.findIndex((item) => item.renderKey === renderKey);
     if (index < 0) return;
     const level = navigationItems[index].level || 1;
     const ancestors: string[] = [];
@@ -397,7 +408,7 @@ export default function PublicationsReaderPage() {
     for (let cursor = index - 1; cursor >= 0 && expected > 0; cursor -= 1) {
       const item = navigationItems[cursor];
       if ((item.level || 1) === expected) {
-        ancestors.push(item.key);
+        ancestors.push(item.renderKey);
         expected -= 1;
       }
     }
@@ -410,9 +421,9 @@ export default function PublicationsReaderPage() {
   }, [navigationItems]);
 
   useEffect(() => {
-    if (!activeNavigationKey) return;
-    expandAncestors(activeNavigationKey);
-    const row = navRowRefs.current[activeNavigationKey];
+    if (!activeNavigationRenderKey) return;
+    expandAncestors(activeNavigationRenderKey);
+    const row = navRowRefs.current[activeNavigationRenderKey];
     const container = tocListRef.current;
     if (!row || !container) return;
     const rowTop = row.offsetTop;
@@ -421,7 +432,7 @@ export default function PublicationsReaderPage() {
     const visibleBottom = visibleTop + container.clientHeight;
     if (rowTop < visibleTop + 12) container.scrollTo({ top: Math.max(0, rowTop - 20), behavior: "smooth" });
     else if (rowBottom > visibleBottom - 12) container.scrollTo({ top: rowBottom - container.clientHeight + 24, behavior: "smooth" });
-  }, [activeNavigationKey, expandAncestors]);
+  }, [activeNavigationRenderKey, expandAncestors]);
 
   const schedulePositionSave = useCallback((next: { page?: number; zoom?: number; anchor?: string; sectionId?: string }) => {
     if (!tenant || !manualId || !revId) return;
@@ -568,7 +579,7 @@ export default function PublicationsReaderPage() {
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
       const candidate = navigationItems[cursor];
       if ((candidate.level || 1) < level) {
-        if (collapsed.has(candidate.key)) return true;
+        if (collapsed.has(candidate.renderKey)) return true;
         if ((candidate.level || 1) === 1) break;
       }
     }
@@ -576,7 +587,7 @@ export default function PublicationsReaderPage() {
   };
 
   const collapseAll = () => {
-    setCollapsed(new Set(navigationItems.filter((item, index) => navigationItems[index + 1] && navigationItems[index + 1].level > item.level).map((item) => item.key)));
+    setCollapsed(new Set(navigationItems.filter((item, index) => navigationItems[index + 1] && navigationItems[index + 1].level > item.level).map((item) => item.renderKey)));
   };
 
   const setTheme = (theme: ReaderTheme) => {
@@ -613,15 +624,15 @@ export default function PublicationsReaderPage() {
             {navigationItems.map((item, index) => {
               if (hiddenByCollapsedParent(index)) return null;
               const hasChildren = navigationItems[index + 1] && navigationItems[index + 1].level > item.level;
-              const isCollapsed = collapsed.has(item.key);
+              const isCollapsed = collapsed.has(item.renderKey);
               const isActive = activeNavigationKey === item.key || safeAnchor(activeNavigationKey) === safeAnchor(item.key);
               return (
                 <div
-                  key={item.key}
-                  ref={(element) => { navRowRefs.current[item.key] = element; }}
+                  key={item.renderKey}
+                  ref={(element) => { navRowRefs.current[item.renderKey] = element; }}
                   className={`publication-toc__row level-${Math.max(1, Math.min(5, item.level || 1))} ${isActive ? "active" : ""}`}
                 >
-                  {hasChildren ? <button type="button" className="publication-toc__toggle" onClick={() => toggleCollapsed(item.key)} aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${item.title}`}>{isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</button> : <span className="publication-toc__spacer" />}
+                  {hasChildren ? <button type="button" className="publication-toc__toggle" onClick={() => toggleCollapsed(item.renderKey)} aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${item.title}`}>{isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</button> : <span className="publication-toc__spacer" />}
                   <button type="button" className="publication-toc__link" onClick={() => openNavigationItem(item)}><span>{item.title}</span>{item.page ? <small>p. {item.page}</small> : null}</button>
                 </div>
               );

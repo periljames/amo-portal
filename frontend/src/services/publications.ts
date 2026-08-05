@@ -2,6 +2,7 @@ import { authHeaders, getCachedUser } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
+import { getPdfReaderPerformanceProfile } from "./pdfPerformance";
 
 export type PublicationUploadPreview = {
   filename: string;
@@ -266,15 +267,31 @@ export function publicationPdfSource(path: string): {
   disableRange: boolean;
   disableStream: boolean;
 } {
+  const performance = getPdfReaderPerformanceProfile();
+  if (/^(?:blob:|data:)/i.test(path)) {
+    return {
+      url: path,
+      httpHeaders: {},
+      withCredentials: false,
+      rangeChunkSize: performance.rangeChunkSize,
+      disableAutoFetch: false,
+      disableRange: false,
+      disableStream: false,
+    };
+  }
+
   const headers = new Headers(authHeaders());
   const userId = getCachedUser()?.id;
   const separator = path.includes("?") ? "&" : "?";
   const partitionedPath = userId ? `${path}${separator}reader_user=${encodeURIComponent(userId)}` : path;
+  const url = /^https?:\/\//i.test(partitionedPath)
+    ? partitionedPath
+    : `${getApiBaseUrl()}${partitionedPath}`;
   return {
-    url: `${getApiBaseUrl()}${partitionedPath}`,
+    url,
     httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
-    rangeChunkSize: 512 * 1024,
+    rangeChunkSize: performance.rangeChunkSize,
     disableAutoFetch: false,
     disableRange: false,
     disableStream: false,
