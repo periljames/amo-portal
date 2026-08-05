@@ -87,7 +87,10 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       lastRefreshAt.current = now;
 
       if (includeAllActive) {
-        void queryClient.invalidateQueries({ refetchType: "active" });
+        // Explicit user/system refreshes must bypass stale-time heuristics and
+        // immediately execute every mounted query, including legacy keys that do
+        // not contain a predictable QMS marker.
+        void queryClient.refetchQueries({ type: "active" });
       } else {
         void queryClient.invalidateQueries({
           predicate: (query) => isQualityQueryKey(query.queryKey),
