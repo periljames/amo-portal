@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertTriangle, RefreshCcw } from "lucide-react";
 import { reportPortalError } from "../../services/portalError";
+import "./portalErrorBoundary.css";
 
 type PortalErrorBoundaryState = {
   error: Error | null;
