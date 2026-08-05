@@ -14,6 +14,7 @@ import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
 import { clearApiResponseCache } from "./services/apiClient";
 import { installPortalFetchErrorBridge } from "./services/portalFetchErrorBridge";
+import { installPortalInlineErrorMirror } from "./services/portalInlineErrorMirror";
 import { installPortalUploadGuard } from "./services/portalUploadGuard";
 import { preloadRoute } from "./app/routePreload";
 
@@ -32,9 +33,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const removeFetchBridge = installPortalFetchErrorBridge();
+    const removeInlineMirror = installPortalInlineErrorMirror();
     const removeUploadGuard = installPortalUploadGuard();
     return () => {
       removeUploadGuard();
+      removeInlineMirror();
       removeFetchBridge();
     };
   }, []);
