@@ -1,0 +1,85 @@
+name: Verified Aircraft Architecture U2 Apply
+
+on:
+  push:
+    branches:
+      - agent/aircraft-induction-architecture
+    paths:
+      - ".github/workflows/aircraft-architecture-u2-verified-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verified-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/aircraft-induction-architecture
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r backend/requirements.txt
+      - name: Extract staged U2 source
+        run: |
+          python - <<'PY'
+          import base64
+          import io
+          import re
+          import tarfile
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/aircraft-architecture-u2-apply.yml').read_text(encoding='utf-8')
+          match = re.search(r'U2_ARCHIVE:\s*"([A-Za-z0-9+/=]+)"', workflow)
+          if not match:
+              raise SystemExit('Staged U2 archive not found')
+          archive = base64.b64decode(match.group(1), validate=True)
+          with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as bundle:
+              for member in bundle.getmembers():
+                  if member.name.startswith('/') or '..' in member.name.split('/'):
+                      raise SystemExit(f'Unsafe archive path: {member.name}')
+              bundle.extractall('.')
+          PY
+      - name: Restore exact reviewed model blob
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "/repos/${GITHUB_REPOSITORY}/git/blobs/9d0b0248876cb690f499c0d843a73b1ada707bbe" --jq .content \
+            | tr -d '\n' \
+            | base64 --decode \
+            > backend/amodb/apps/aircraft_architecture/effectivity/models.py
+      - name: Verify every reviewed U2 source hash
+        run: |
+          cat > /tmp/u2.sha256 <<'EOF'
+          a4af28c7ebc9fd32b1f6f97ea9b16a7f1c836c82b3121068be34177068263361  backend/amodb/apps/aircraft_architecture/effectivity/__init__.py
+          ee5836d37174853818f1d976fa8062570b67e15024b87ed3d38c99fa82d08286  backend/amodb/apps/aircraft_architecture/effectivity/evaluator.py
+          cae9f1add0932d4f93add0615762cd8dfc525363b00bee06b5d2ff39cfc855b5  backend/amodb/apps/aircraft_architecture/effectivity/models.py
+          84e495e73b7d2a181c9bad6fbf7a980651a4e323371f65aface7e5726084966f  backend/amodb/apps/aircraft_architecture/effectivity/schemas.py
+          1a602323fa2e81a509bb704d868d910ca382ef733c518ffd7b537481f39b8371  backend/amodb/apps/aircraft_architecture/effectivity/services.py
+          58cb5cdac1c5a8b056ebffcc2be5cdb45d236e9c716288b0ded341bbbacaec4d  backend/amodb/apps/aircraft_architecture/effectivity/router.py
+          414bd15672a699969c184085dfcae441e8c5d0904544ff47b06903a7cf492f83  backend/amodb/apps/aircraft_architecture/effectivity/tests/test_evaluator.py
+          eb105c92933f54a61d9eab2373089f9dda1d30d2ce02e4bad2ffec45e05e9211  backend/amodb/apps/aircraft_architecture/effectivity/tests/test_version_contract.py
+          c6a6547cb417ca28ea3f682899cbc9959d3085872ed560b377734f774b19bafb  backend/amodb/alembic/versions/aircraft_arch_20260805_u2_effectivity.py
+          299a230cc9c04c2ed7103afd8945d4eacfcef87398c10ad411527b67f96cff62  backend/amodb/apps/aircraft_architecture/router.py
+          EOF
+          sha256sum --check /tmp/u2.sha256
+      - name: Compile and run focused U2 tests
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m compileall -q backend/amodb/apps/aircraft_architecture/effectivity
+          python -m py_compile backend/amodb/alembic/versions/aircraft_arch_20260805_u2_effectivity.py
+          pytest -q backend/amodb/apps/aircraft_architecture/effectivity/tests
+      - name: Commit verified U2 source
+        run: |
+          git config user.name "amo-portal-architecture-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/amodb/apps/aircraft_architecture backend/amodb/alembic/versions/aircraft_arch_20260805_u2_effectivity.py
+          git commit -m "Phase U2: add explainable effectivity engine"
+          git push origin HEAD:agent/aircraft-induction-architecture
