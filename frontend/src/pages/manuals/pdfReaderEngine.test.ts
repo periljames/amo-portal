@@ -10,6 +10,7 @@ import {
   pdfReaderShortcut,
   searchPdfDocument,
   resolvePdfReaderScrollRoot,
+  resolvePortalScrollRoot,
   selectPdfViewportPage,
 } from "./pdfReaderEngine";
 import {
@@ -162,18 +163,40 @@ describe("controlled PDF reader engine", () => {
     expect(isPdfDraftLifecycleCurrent(3, 4)).toBe(false);
   });
 
-  it("selects the compact reader's direct scrolling viewport", () => {
+  it("uses the current tenant shell as the full-page PDF scroll root", () => {
+    const tenantMain = {} as HTMLElement;
+    const reader = {
+      querySelector: vi.fn(() => null),
+      closest: vi.fn((selector: string) => selector.includes(".tenant-shell__main") ? tenantMain : null),
+      parentElement: null,
+    } as unknown as HTMLElement;
+    vi.stubGlobal("window", {
+      getComputedStyle: (element: HTMLElement) => ({ overflowY: element === tenantMain ? "auto" : "visible" }),
+    });
+
+    expect(resolvePortalScrollRoot(reader)).toBe(tenantMain);
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(tenantMain);
+    expect(reader.closest).toHaveBeenCalledWith(".tenant-shell__main, .app-shell__scroll");
+    vi.unstubAllGlobals();
+  });
+
+  it("selects the compact reader's direct scrolling viewport before the portal shell", () => {
     const shell = {} as HTMLElement;
     const compactViewport = {} as HTMLElement;
-    let overflowY = "auto";
+    let viewportOverflow = "auto";
     const reader = {
       querySelector: vi.fn((selector: string) => selector.includes("pdfv2") ? compactViewport : null),
       closest: vi.fn(() => shell),
+      parentElement: null,
     } as unknown as HTMLElement;
-    vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY }) });
+    vi.stubGlobal("window", {
+      getComputedStyle: (element: HTMLElement) => ({
+        overflowY: element === compactViewport ? viewportOverflow : "auto",
+      }),
+    });
 
     expect(resolvePdfReaderScrollRoot(reader)).toBe(compactViewport);
-    overflowY = "visible";
+    viewportOverflow = "visible";
     expect(resolvePdfReaderScrollRoot(reader)).toBe(shell);
     expect(reader.querySelector).toHaveBeenCalledWith(":scope > .pdfv2-viewport");
     vi.unstubAllGlobals();
@@ -184,6 +207,7 @@ describe("controlled PDF reader engine", () => {
     const reader = {
       querySelector: vi.fn((selector: string) => selector.includes("pdf-engine") ? legacyViewport : null),
       closest: vi.fn(() => null),
+      parentElement: null,
     } as unknown as HTMLElement;
     vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY: "auto" }) });
 
