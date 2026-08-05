@@ -81,15 +81,19 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   useEffect(() => {
     if (!qualityActive) return;
 
-    const refresh = (force = false) => {
+    const refresh = (force = false, includeAllActive = false) => {
       const now = Date.now();
       if (!force && now - lastRefreshAt.current < FOCUS_REFRESH_THRESHOLD_MS) return;
       lastRefreshAt.current = now;
 
-      void queryClient.invalidateQueries({
-        predicate: (query) => isQualityQueryKey(query.queryKey),
-        refetchType: "active",
-      });
+      if (includeAllActive) {
+        void queryClient.invalidateQueries({ refetchType: "active" });
+      } else {
+        void queryClient.invalidateQueries({
+          predicate: (query) => isQualityQueryKey(query.queryKey),
+          refetchType: "active",
+        });
+      }
 
       window.requestAnimationFrame(() => {
         const button = canonicalRefreshButton();
@@ -111,7 +115,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") refresh(false);
     };
-    const onExplicitRefresh = () => refresh(true);
+    const onExplicitRefresh = () => refresh(true, true);
     const onClick = (event: MouseEvent) => {
       const element = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
       if (!element) return;
