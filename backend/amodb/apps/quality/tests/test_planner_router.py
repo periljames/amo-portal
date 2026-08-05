@@ -120,6 +120,10 @@ def test_calendar_page_is_stable_and_reports_next_offset() -> None:
     assert has_more is True
     assert next_offset == 2
 
+    source = inspect.getsource(qms_planner_calendar)
+    assert "source_limit = bounded_offset + bounded_limit + 1" in source
+    assert "min(max(bounded_limit + bounded_offset" not in source
+
 
 def test_calendar_rejects_invalid_range_before_query(monkeypatch) -> None:
     class Context:
