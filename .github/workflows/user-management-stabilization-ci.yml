@@ -75,7 +75,19 @@ jobs:
 
       - name: Run account and workforce tests
         working-directory: backend
-        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -vv --maxfail=20 amodb/apps/accounts/tests amodb/apps/workforce/tests 2>&1 | tee ../user-management-pytest.log
+
+      - name: Upload backend test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-management-pytest
+          path: user-management-pytest.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - uses: actions/setup-node@v6
         with:
