@@ -134,5 +134,6 @@ jobs:
           test ! -e scripts/pr422_pass3.py
           test ! -e scripts/pr422_pass4.py
           test ! -e .github/workflows/pr422-final-hardening.yml
-          test "$(find . -type f \( -name '*.pyc' -o -name '*.orig' -o -name '*.rej' \) -print -quit)" = ""
+          bad_artifacts="$(git diff --name-only --diff-filter=ACMR origin/main...HEAD | grep -E '(^|/)(__pycache__/|.*\.(pyc|orig|rej)$)' || true)"
+          test -z "$bad_artifacts" || { printf 'Generated artifacts in PR:\n%s\n' "$bad_artifacts"; exit 1; }
           git diff --check origin/main...HEAD
