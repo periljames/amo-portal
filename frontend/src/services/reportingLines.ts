@@ -123,6 +123,34 @@ export interface GuidedAssignmentInput {
   delegation_limitations?: string | null;
 }
 
+export interface ReportingAssignmentUpdateInput {
+  reporting_manager_user_id?: string | null;
+  assignment_type?: string;
+  effective_to?: string | null;
+  fte_percent?: string;
+  matrix_reporting?: boolean;
+  matrix_reason?: string | null;
+  display_title?: string;
+  delegation_limitations?: string | null;
+  notes?: string | null;
+}
+
+export interface ReportingAssignmentTransferInput {
+  target_position_id: string;
+  effective_from: string;
+  reporting_manager_user_id?: string | null;
+  assignment_type: string;
+  fte_percent: string;
+  matrix_reporting: boolean;
+  matrix_reason?: string | null;
+  display_title?: string | null;
+  appointment_reference?: string | null;
+  authority_acceptance_reference?: string | null;
+  authority_accepted_on?: string | null;
+  delegation_limitations?: string | null;
+  reason: string;
+}
+
 export interface MyTitleProfile {
   assignment_id: string | null;
   position_id: string | null;
@@ -170,6 +198,37 @@ export const createGuidedAssignment = (
   payload: GuidedAssignmentInput,
 ) => apiPost<ReportingWorkspace>(
   `${mutationBase(actorMode)}/assignments`,
+  payload,
+  options(),
+);
+
+export const updateReportingAssignment = (
+  actorMode: ReportingWorkspace["actor_mode"],
+  assignmentId: string,
+  payload: ReportingAssignmentUpdateInput,
+) => apiPatch<ReportingWorkspace>(
+  `${mutationBase(actorMode)}/assignments/${encodeURIComponent(assignmentId)}`,
+  payload,
+  options(),
+);
+
+export const endReportingAssignment = (
+  actorMode: ReportingWorkspace["actor_mode"],
+  assignmentId: string,
+  endOn: string,
+  reason: string,
+) => apiPost<ReportingWorkspace>(
+  `${mutationBase(actorMode)}/assignments/${encodeURIComponent(assignmentId)}/end`,
+  { end_on: endOn, reason: reason.trim() },
+  options(),
+);
+
+export const transferReportingAssignment = (
+  actorMode: ReportingWorkspace["actor_mode"],
+  assignmentId: string,
+  payload: ReportingAssignmentTransferInput,
+) => apiPost<ReportingWorkspace>(
+  `${mutationBase(actorMode)}/assignments/${encodeURIComponent(assignmentId)}/transfer`,
   payload,
   options(),
 );
