@@ -104,7 +104,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const [resolvedCapabilities, setResolvedCapabilities] = useState<PdfReaderCapabilities>(
     initialCachedCapabilities ? cachedReadOnly(initialCachedCapabilities) : READ_ONLY_FALLBACK,
   );
-  const [cachedPdfBytes, setCachedPdfBytes] = useState<ArrayBuffer | null>(null);
+  const [cachedPdfUrl, setCachedPdfUrl] = useState<string | null>(null);
   const [sourceCachePending, setSourceCachePending] = useState(Boolean(initialCachedCapabilities?.source_sha256));
 
   useEffect(() => {
@@ -133,7 +133,10 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         );
         if (sourceChanged) {
           clearCachedPdfCapabilities(props.identity);
-          setCachedPdfBytes(null);
+          setCachedPdfUrl((current) => {
+            if (current) URL.revokeObjectURL(current);
+            return null;
+          });
           setSourceCachePending(false);
           void deleteCachedPdfSource(
             props.identity,
@@ -174,8 +177,12 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     let active = true;
     readCachedPdfSource(props.identity, fingerprint, readerFileUrl)
       .then((bytes) => {
-        if (!active) return;
-        if (bytes) setCachedPdfBytes(bytes);
+        if (!active || !bytes) return;
+        const localUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+        setCachedPdfUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return localUrl;
+        });
       })
       .finally(() => {
         if (!active) return;
@@ -185,24 +192,24 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     return () => { active = false; };
   }, [identityKey, props.identity, readerFileUrl]);
 
+  useEffect(() => () => {
+    if (cachedPdfUrl) URL.revokeObjectURL(cachedPdfUrl);
+  }, [cachedPdfUrl]);
+
   useEffect(() => {
     const fingerprint = resolvedCapabilities.source_sha256;
-    if (!fingerprint || cachedPdfBytes || sourceCachePending) return;
-    const expectedBytes = readerFileUrl === props.fileUrl ? props.sourceSizeBytes : undefined;
+    if (!fingerprint || cachedPdfUrl || sourceCachePending) return;
     return scheduleIdle(() => {
       void warmPdfSourceCache(
         props.identity,
         fingerprint,
         readerFileUrl,
-        expectedBytes,
       );
     });
   }, [
-    cachedPdfBytes,
+    cachedPdfUrl,
     identityKey,
-    props.fileUrl,
     props.identity,
-    props.sourceSizeBytes,
     readerFileUrl,
     resolvedCapabilities.source_sha256,
     sourceCachePending,
@@ -217,10 +224,9 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   return <PdfReaderCoreV2
     {...props}
     key={identityKey}
-    fileUrl={readerFileUrl}
+    fileUrl={cachedPdfUrl || readerFileUrl}
     originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
     capabilities={resolvedCapabilities}
-    fileData={cachedPdfBytes}
   />;
 }
 
