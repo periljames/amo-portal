@@ -1,28 +1,6 @@
 name: User Management Stabilization CI
 
 on:
-  push:
-    paths:
-      - "backend/amodb/apps/accounts/**"
-      - "backend/amodb/apps/workforce/**"
-      - "backend/amodb/apps/realtime/**"
-      - "backend/amodb/alembic/versions/accounts_20260805_corporate_structure.py"
-      - "backend/amodb/alembic/versions/accounts_20260805_reporting_lines.py"
-      - "frontend/src/pages/AdminDashboardPage.tsx"
-      - "frontend/src/pages/admin-users/**"
-      - "frontend/src/services/adminUserDirectory.ts"
-      - "frontend/src/services/corporateStructure.ts"
-      - "frontend/src/services/reportingLines.ts"
-      - "frontend/src/components/realtime/RealtimeProvider.tsx"
-      - "frontend/src/app/PortalRouteSurface.tsx"
-      - "frontend/src/app/portalRouteManifest.ts"
-      - "frontend/src/styles/admin-user-management-v2.css"
-      - "frontend/src/styles/admin-corporate-structure.css"
-      - "frontend/src/styles/admin-user-governance.css"
-      - "frontend/src/styles/workforce-portals.css"
-      - "frontend/src/styles/reporting-line-builder.css"
-      - ".github/scripts/retry_transient.py"
-      - ".github/workflows/user-management-stabilization-ci.yml"
   pull_request:
     paths:
       - "backend/amodb/apps/accounts/**"
