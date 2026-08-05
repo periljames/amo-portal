@@ -17,7 +17,7 @@ concurrency:
 jobs:
   apply-test-commit:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
       - uses: actions/setup-node@v6
         with:
@@ -96,9 +98,22 @@ jobs:
           print("OpenJPEG WASM, JavaScript fallback and QCMS assets are present in the production build.")
           PY
 
+      - name: Install backend dependencies
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 4
+          --label "PDF reader backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
       - name: Run focused source contracts
+        env:
+          PYTHONPATH: backend
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: '1'
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: pdf-reader-runtime-contract-secret
         run: |
-          python -m pip install --disable-pip-version-check pytest==8.3.3
           pytest -q \
             backend/amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py \
             backend/amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
