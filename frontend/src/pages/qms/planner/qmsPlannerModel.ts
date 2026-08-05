@@ -43,12 +43,13 @@ export const DEFAULT_PLANNER_PREFERENCES: PlannerPreferences = {
   hideWeekends: false,
 };
 
+// Only sources backed by the authoritative integrated calendar are exposed as
+// active filters. Review and other categories remain valid normalization targets
+// for future source integrations, but are not presented as available today.
 export const PLANNER_CATEGORIES: Array<{ key: PlannerCategory; label: string }> = [
   { key: "audits", label: "Audits" },
   { key: "cars", label: "CAR / CAPA" },
   { key: "training", label: "Training" },
-  { key: "reviews", label: "Reviews" },
-  { key: "other", label: "Other" },
 ];
 
 export function isoDateKey(value: Date): string {
