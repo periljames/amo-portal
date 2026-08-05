@@ -358,7 +358,10 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
       item("admin-amos", "AMO Management", "amos", "home"),
       item("admin-assets", "AMO Assets", "amo-assets", "documents"),
     ] },
-    { id: "admin-access", label: "People & Access", items: [item("admin-users", "User Management", "users", "users")] },
+    { id: "admin-access", label: "People & Access", items: [
+      item("admin-users", "User Management", "users", "users"),
+      item("admin-corporate-structure", "Corporate Structure", "organization", "users"),
+    ] },
     { id: "admin-configuration", label: "Portal Configuration", items: [
       item("admin-settings", "Usage & Limits", "settings", "settings"),
       item("admin-email", "Email Server", "email-settings", "mail"),
@@ -387,6 +390,7 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
     label: "Workspace",
     items: [
       { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, assigned), exact: true },
+      { id: "my-profile", label: "My Organization Profile", icon: "users", path: "/my-profile" },
       { id: "my-training", label: "My Training", icon: "training", path: `${base}/training` },
       { id: "my-roster", label: "My Roster", icon: "calendar", path: `${base}/rostering/my-roster` },
     ],
