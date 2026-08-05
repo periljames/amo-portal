@@ -338,7 +338,7 @@ def test_overtime_decision_executes_with_joined_relationships_on_postgresql() ->
                     first_name="Overtime",
                     last_name="Supervisor",
                     full_name="Overtime Supervisor",
-                    role=account_models.AccountRole.MANAGER,
+                    role=account_models.AccountRole.AMO_ADMIN,
                     hashed_password="not-a-real-password-hash",
                 ),
             ]
