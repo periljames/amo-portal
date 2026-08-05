@@ -69,7 +69,7 @@ jobs:
       - name: Run focused backend tests
         env:
           PYTHONPATH: backend
-          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_URL: 'sqlite+pysqlite:///:memory:'
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: '1'
         run: |
@@ -79,7 +79,7 @@ jobs:
       - name: Validate Alembic revision graph
         env:
           PYTHONPATH: backend
-          DATABASE_URL: postgresql+psycopg2://validation:validation@127.0.0.1:5432/validation
+          DATABASE_URL: 'postgresql+psycopg2://validation:validation@127.0.0.1:5432/validation'
           APP_ENV: test
         working-directory: backend
         run: alembic -c amodb/alembic.ini heads
