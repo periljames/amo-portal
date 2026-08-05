@@ -1,6 +1,6 @@
 name: Main Merge Readiness
 
-on:
+"on":
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
