@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
+import { getPdfReaderPerformanceProfile, type PdfReaderPerformanceProfile } from "../../services/pdfPerformance";
 import "./pdfReaderOperationalFixes.css";
 import PdfReaderCoreV2, {
   type PdfReaderCoreProps,
@@ -72,17 +73,19 @@ function readOnlyFallback(
   };
 }
 
-function scheduleIdle(task: () => void): () => void {
+function scheduleSourceWarm(
+  profile: PdfReaderPerformanceProfile,
+  task: () => void,
+): () => void {
   if (typeof window === "undefined") return () => undefined;
-  const browser = window as typeof window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-    cancelIdleCallback?: (handle: number) => void;
-  };
-  if (browser.requestIdleCallback) {
-    const handle = browser.requestIdleCallback(task, { timeout: 2500 });
-    return () => browser.cancelIdleCallback?.(handle);
-  }
-  const handle = window.setTimeout(task, 1800);
+  const twentyMib = 20 * 1024 * 1024;
+  const fourMib = 4 * 1024 * 1024;
+  const delay = profile.rangeChunkSize >= twentyMib
+    ? 80
+    : profile.rangeChunkSize >= fourMib
+      ? 450
+      : 1600;
+  const handle = window.setTimeout(task, delay);
   return () => window.clearTimeout(handle);
 }
 
@@ -94,6 +97,7 @@ function scheduleIdle(task: () => void): () => void {
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
   const externallyManaged = suppliedCapabilities !== undefined;
+  const performanceProfile = useMemo(() => getPdfReaderPerformanceProfile(), []);
   const readerIdentity = useMemo(() => ({
     tenant: props.identity.tenant,
     manualId: props.identity.manualId,
@@ -213,7 +217,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   useEffect(() => {
     const fingerprint = resolvedCapabilities.source_sha256;
     if (!fingerprint || cachedPdfUrl || sourceCachePending) return;
-    return scheduleIdle(() => {
+    return scheduleSourceWarm(performanceProfile, () => {
       void warmPdfSourceCache(
         readerIdentity,
         fingerprint,
@@ -222,6 +226,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     });
   }, [
     cachedPdfUrl,
+    performanceProfile,
     readerFileUrl,
     readerIdentity,
     resolvedCapabilities.source_sha256,
