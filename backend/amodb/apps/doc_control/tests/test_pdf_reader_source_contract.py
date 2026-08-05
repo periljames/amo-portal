@@ -281,13 +281,17 @@ def test_reader_ci_covers_engine_and_frontend_contracts() -> None:
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in publications
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in document_control
 
-def test_reader_network_profile_bursts_on_capable_clients() -> None:
+
+def test_reader_network_profile_uses_20_mib_default_and_50_mib_stable_bursts() -> None:
     performance = _read("frontend/src/services/pdfPerformance.ts")
     publications = _read("frontend/src/services/publications.ts")
     core = _reader_core()
 
-    assert "rangeChunkSize: 4 * MIB" in performance
-    assert "rangeChunkSize: 128 * KIB" in performance
+    assert "rangeChunkSize: 50 * MIB" in performance
+    assert "rangeChunkSize: 20 * MIB" in performance
+    assert "rangeChunkSize: 512 * KIB" in performance
+    assert "downlink >= 25" in performance
+    assert "rtt <= 80" in performance
     assert 'mode: "burst"' in performance
     assert "performance.rangeChunkSize" in publications
     assert "disableAutoFetch: false" in publications
