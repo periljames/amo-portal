@@ -1,0 +1,77 @@
+name: Apply PDF reader JPX and performance repair
+
+on:
+  push:
+    branches:
+      - agent/pdf-reader-jpx-assets-performance
+    paths:
+      - .github/triggers/apply-pdf-reader-jpx-performance.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pdf-reader-jpx-performance
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/pdf-reader-jpx-assets-performance
+          fetch-depth: 0
+          token: ${{ github.token }}
+          show-progress: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply deterministic reader patch
+        run: python .github/scripts/apply_pdf_reader_runtime_fix.py
+
+      - name: Install supported PDF.js asset copier
+        working-directory: frontend
+        run: npm install --save-dev vite-plugin-static-copy@4.1.1 --no-audit --fund=false
+
+      - name: Build frontend and verify shipped decoder resources
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build
+          pdfjs_version="$(node -p "require('./node_modules/pdfjs-dist/package.json').version")"
+          test -f "dist/pdfjs/${pdfjs_version}/wasm/openjpeg.wasm"
+          test -f "dist/pdfjs/${pdfjs_version}/wasm/openjpeg_nowasm_fallback.js"
+          test -d "dist/pdfjs/${pdfjs_version}/cmaps"
+          test -d "dist/pdfjs/${pdfjs_version}/standard_fonts"
+          test "$(find "dist/pdfjs/${pdfjs_version}/cmaps" -type f | wc -l)" -gt 20
+          test "$(find "dist/pdfjs/${pdfjs_version}/standard_fonts" -type f | wc -l)" -gt 5
+
+      - name: Run focused source contracts
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.3.3
+          pytest -q \
+            backend/amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py \
+            backend/amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
+          git diff --check
+
+      - name: Commit validated product changes
+        run: |
+          set -euo pipefail
+          rm -f .github/scripts/apply_pdf_reader_runtime_fix.py
+          rm -f .github/triggers/apply-pdf-reader-jpx-performance.txt
+          rm -f .github/workflows/apply-pdf-reader-jpx-performance.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Ship PDF.js decoders and accelerate publication rendering'
+          git push origin HEAD:agent/pdf-reader-jpx-assets-performance
