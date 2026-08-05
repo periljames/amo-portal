@@ -10,6 +10,7 @@ import {
   pdfReaderShortcut,
   searchPdfDocument,
   resolvePdfReaderScrollRoot,
+  selectPdfViewportPage,
 } from "./pdfReaderEngine";
 import {
   pdfWorkingCopyKey,
@@ -94,6 +95,26 @@ describe("controlled PDF reader engine", () => {
       expect(profile.hotPageLimit).toBeGreaterThanOrEqual(profile.renderRadius * 2 + 1);
     }
     vi.unstubAllGlobals();
+  });
+
+  it("ignores pages outside the real viewport even when an observer marks them intersecting", () => {
+    const page = selectPdfViewportPage([
+      { page: 79, top: -1500, bottom: -400, isIntersecting: true, intersectionRatio: 0.1 },
+      { page: 80, top: 45, bottom: 1080, isIntersecting: true, intersectionRatio: 0.92 },
+      { page: 92, top: 5100, bottom: 6200, isIntersecting: true, intersectionRatio: 0.1 },
+    ], 0, 900, 92);
+
+    expect(page).toBe(80);
+  });
+
+  it("selects the page crossing the reading line from the complete visible-entry set", () => {
+    const page = selectPdfViewportPage([
+      { page: 94, top: -920, bottom: 36, isIntersecting: true, intersectionRatio: 0.04 },
+      { page: 95, top: 56, bottom: 1040, isIntersecting: true, intersectionRatio: 0.86 },
+      { page: 96, top: 1060, bottom: 2040, isIntersecting: false, intersectionRatio: 0 },
+    ], 0, 900, 92);
+
+    expect(page).toBe(95);
   });
 
   it("partitions local drafts by user, tenant, document, and revision", () => {
