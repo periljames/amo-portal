@@ -115,7 +115,7 @@ def approval_preconditions(*, dataset_count: int, open_error_count: int) -> None
     if dataset_count < 1:
         raise ValueError("an import batch must contain at least one dataset")
     if open_error_count:
-        raise ValueError(open ERROR reconciliation issues block approval")
+        raise ValueError("open ERROR reconciliation issues block approval")
 
 
 class AdapterRegistry:
