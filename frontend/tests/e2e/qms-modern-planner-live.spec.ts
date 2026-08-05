@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
+
 const LIVE_ENABLED = process.env.E2E_LIVE_QUALITY === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
