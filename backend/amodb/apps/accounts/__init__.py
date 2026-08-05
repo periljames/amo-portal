@@ -12,6 +12,7 @@ from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
 from . import (  # noqa: F401
+    assignment_integrity,
     corporate_structure_models,
     models,
     reporting_line_models,
@@ -31,6 +32,7 @@ from . import router_admin as _router_admin
 from . import router_public as _router_public
 from . import router_corporate_structure as _router_corporate_structure
 from . import router_reporting_lines as _router_reporting_lines
+from . import router_reporting_lifecycle as _router_reporting_lifecycle
 
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -57,6 +59,26 @@ def _attach_router_dependency(router, dependency) -> None:
         if isinstance(route, APIRoute):
             _attach_route_dependency(route, dependency)
 
+
+def _strict_reporting_admin_actor(user: models.User) -> bool:
+    """Reserve tenant-wide reporting scope for actual tenant administrators.
+
+    Quality and safety managers can still manage units where they are formally
+    appointed as unit managers, deputies, accountable managers or supervisory
+    position holders. Their functional account role alone no longer exposes the
+    entire tenant hierarchy.
+    """
+    role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")) or "").upper()
+    return bool(
+        getattr(user, "is_superuser", False)
+        or getattr(user, "is_amo_admin", False)
+        or role == "AMO_ADMIN"
+    )
+
+
+# Reporting-line helper functions resolve this policy at request time. Keep
+# tenant-wide scope separate from functional quality and safety roles.
+_router_reporting_lines._is_admin_actor = _strict_reporting_admin_actor
 
 # These endpoints resolve module-level helpers at request time. Keep the router
 # modules importable while replacing only the governed policy functions.
@@ -110,11 +132,13 @@ _router_public.router.include_router(department_home_router.router)
 _router_public.router.include_router(portal_preferences_router.router)
 _router_public.router.include_router(_router_corporate_structure.portal_router)
 _router_public.router.include_router(_router_reporting_lines.portal_router)
+_router_public.router.include_router(_router_reporting_lifecycle.portal_router)
 
 __all__ = [
     "models",
     "schemas",
     "services",
+    "assignment_integrity",
     "corporate_structure_models",
     "reporting_line_models",
     "admin_profile_router",
