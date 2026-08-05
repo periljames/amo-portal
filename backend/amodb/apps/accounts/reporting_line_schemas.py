@@ -39,6 +39,9 @@ class ReportingOccupantRead(BaseModel):
     reporting_manager_name: Optional[str] = None
     assignment_type: str
     is_primary: bool
+    fte_percent: Decimal = Decimal("100")
+    matrix_reporting: bool = False
+    matrix_reason: Optional[str] = None
     effective_from: date
     effective_to: Optional[date] = None
 
