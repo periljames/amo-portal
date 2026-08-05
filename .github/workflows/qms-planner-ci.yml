@@ -13,6 +13,7 @@ on:
       - "backend/amodb/apps/quality/tests/test_planner_router.py"
       - "frontend/package.json"
       - "frontend/src/pages/qms/**"
+      - "frontend/src/pages/qualityAudits/QualityAuditPlanSchedule*.tsx"
       - "frontend/src/styles/qms-modern-planner*.css"
       - "frontend/tests/e2e/qms-planner-*.spec.ts"
   workflow_dispatch:
@@ -94,8 +95,10 @@ jobs:
           src/pages/qms/planner/qmsPlannerClock.test.ts
           src/pages/qms/planner/qmsPlannerModel.ts
           src/pages/qms/planner/qmsPlannerModel.test.ts
+          src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx
           tests/e2e/qms-modern-planner-live.spec.ts
           tests/e2e/qms-planner-lifecycle.spec.ts
+          tests/e2e/qms-planner-audit-handoff.spec.ts
       - name: Build production frontend
         run: npm run build
       - name: Install Chromium
@@ -115,4 +118,5 @@ jobs:
           npx playwright test \
             tests/e2e/qms-modern-planner-live.spec.ts \
             tests/e2e/qms-planner-lifecycle.spec.ts \
+            tests/e2e/qms-planner-audit-handoff.spec.ts \
             --workers=1
