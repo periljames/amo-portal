@@ -13,13 +13,7 @@ from .evaluator import evaluate_expression, impact_analysis
 
 
 def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        default=str,
-    )
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
 def compute_content_hash(version: models.EffectivityRuleVersion) -> str:
@@ -59,7 +53,9 @@ def get_version(db: Session, version_id: str) -> models.EffectivityRuleVersion:
 
 
 def create_rule_set(
-    db: Session, payload: schemas.RuleSetCreate, actor_id: str | None
+    db: Session,
+    payload: schemas.RuleSetCreate,
+    actor_id: str | None,
 ) -> models.EffectivityRuleSet:
     duplicate = (
         db.query(models.EffectivityRuleSet.id)
@@ -69,7 +65,8 @@ def create_rule_set(
     if duplicate:
         raise HTTPException(status_code=409, detail="Effectivity rule-set code already exists")
     row = models.EffectivityRuleSet(
-        **payload.model_dump(), created_by_user_id=actor_id
+        **payload.model_dump(),
+        created_by_user_id=actor_id,
     )
     db.add(row)
     db.commit()
@@ -82,7 +79,7 @@ def create_version(
     rule_set_id: str,
     payload: schemas.RuleVersionCreate,
     actor_id: str | None,
-) -> models.EffectityRuleVersion:
+) -> models.EffectivityRuleVersion:
     rule_set = db.get(models.EffectivityRuleSet, rule_set_id)
     if not rule_set:
         raise HTTPException(status_code=404, detail="Effectivity rule set not found")
@@ -133,4 +130,50 @@ def publish_version(
     version = get_version(db, version_id)
     require_draft(version)
     actual_hash = compute_content_hash(version)
-    if expected_hash and expected_hash€„ô…ÑÕ…±}¡…Í è(€€€€€€€É…¥Í”!QQAá•ÁÑ¥½¸ (€€€€€€€€€€€ÍÑ…ÑÕÍ}½‘”ôÐÀä°(€€€€€€€€€€€‘•Ñ…¥°ô‰™™•Ñ¥Ù¥Ñä½¹Ñ•¹Ð¡…¹•…™Ñ•ÈÉ•Ù¥•ÜìÉ•™É•Í ‰•™½É”ÁÕ‰±¥Í¡¥¹œˆ°(€€€€€€€€¤(€€€ÕÉÉ•¹Ð€ô€ (€€€€€€€‘ˆ¹ÅÕ•Éä¡µ½‘•±Ì¹™™•Ñ¥Ù¥ÑåIÕ±•Y•ÉÍ¥½¸¤(€€€€€€€€¹™¥±Ñ•È (€€€€€€€€€€€µ½‘•±Ì¹™™•Ñ¥Ù¥ÑåIÕ±•Y•ÉÍ¥½¸¹ÉÕ±•}Í•Ñ}¥€ôôÙ•ÉÍ¥½¸¹ÉÕ±•}Í•Ñ}¥°(€€€€€€€€€€€µ½‘•±Ì¹™™•Ñ¥Ù¥ÑåIÕ±•Y•ÉÍ¥½¸¹ÍÑ…ÑÕÌ€ôô€‰AU	1%M!ˆ°(€€€€€€€€¤(€€€€€€€€¹Ý¥Ñ¡}™½É}ÕÁ‘…Ñ” ¤(€€€€€€€€¹…±° ¤(€€€€¤(€€€™½ÈÁÉ•Ù¥½ÕÌ¥¸ÕÉÉ•¹Ðè(€€€€€€€ÁÉ•Ù¥½ÕÌ¹ÍÑ…ÑÕÌ€ô€‰MUAIMˆ(€€€€€€€‘ˆ¹…‘¡ÁÉ•Ù¥½ÕÌ¤(€€€Ù•ÉÍ¥½¸¹½¹Ñ•¹Ñ}¡…Í €ô…ÑÕ…±}¡…Í (€€€Ù•ÉÍ¥½¸¹ÍÑ…ÑÕÌ€ô€‰AU	1%M!ˆ(€€€Ù•ÉÍ¥½¸¹ÁÕ‰±¥Í¡•‘}‰å}ÕÍ•É}¥€ô…Ñ½É}¥(€€€Ù•ÉÍ¥½¸¹ÁÕ‰±¥Í¡•‘}…Ð€ô‘…Ñ•Ñ¥µ”¹¹½Ü¡Ñ¥µ•é½¹”¹ÕÑŒ¤(€€€‘ˆ¹…‘¡Ù•ÉÍ¥½¸¤(€€€‘ˆ¹½µµ¥Ð ¤(€€€‘ˆ¹É•™É•Í ¡Ù•ÉÍ¥½¸¤(€€€É•ÑÕÉ¸Ù•ÉÍ¥½¸(()‘•˜•Ù…±Õ…Ñ•}Í…Ù•‘}Ù•ÉÍ¥½¸ (€€€‘ˆèM•ÍÍ¥½¸°Ù•ÉÍ¥½¹}¥èÍÑÈ°½¹Ñ•áÐè‘¥ÑmÍÑÈ°¹åt(¤€´ø‘¥ÑmÍÑÈ°¹åtè(€€€Ù•ÉÍ¥½¸€ô•Ñ}Ù•ÉÍ¥½¸¡‘ˆ°Ù•ÉÍ¥½¹}¥¤(€€€É•ÑÕÉ¸•Ù…±Õ…Ñ•}•áÁÉ•ÍÍ¥½¸¡Ù•ÉÍ¥½¸¹•áÁÉ•ÍÍ¥½¹}©Í½¸°½¹Ñ•áÐ¤¹Ñ½}‘¥Ð ¤(()}}…±±}|€ôl(€€€€‰½µÁÕÑ•}½¹Ñ•¹Ñ}¡…Í ˆ°(€€€€‰É•…Ñ•}ÉÕ±•}Í•Ðˆ°(€€€€‰É•…Ñ•}Ù•ÉÍ¥½¸ˆ°(€€€€‰•Ù…±Õ…Ñ•}•áÁÉ•ÍÍ¥½¸ˆ°(€€€€‰•Ù…±Õ…Ñ•}Í…Ù•‘}Ù•ÉÍ¥½¸ˆ°(€€€€‰¥µÁ…Ñ}…¹…±åÍ¥Ìˆ°(€€€€‰ÁÕ‰±¥Í¡}Ù•ÉÍ¥½¸ˆ°(€€€€‰É•ÅÕ¥É•}…Ñ…±½Õ•}ÝÉ¥Ñ•Èˆ°(€€€€‰É•ÅÕ¥É•}‘É…™Ðˆ°)t(
+    if expected_hash and expected_hash != actual_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="Effectivity content changed after review; refresh before publishing",
+        )
+    current = (
+        db.query(models.EffectivityRuleVersion)
+        .filter(
+            models.EffectivityRuleVersion.rule_set_id == version.rule_set_id,
+            models.EffectivityRuleVersion.status == "PUBLISHED",
+        )
+        .with_for_update()
+        .all()
+    )
+    for previous in current:
+        previous.status = "SUPERSEDED"
+        db.add(previous)
+    version.content_hash = actual_hash
+    version.status = "PUBLISHED"
+    version.published_by_user_id = actor_id
+    version.published_at = datetime.now(timezone.utc)
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+def evaluate_saved_version(
+    db: Session,
+    version_id: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    version = get_version(db, version_id)
+    return evaluate_expression(version.expression_json, context).to_dict()
+
+
+__all__ = [
+    "compute_content_hash",
+    "create_rule_set",
+    "create_version",
+    "evaluate_expression",
+    "evaluate_saved_version",
+    "impact_analysis",
+    "publish_version",
+    "require_catalogue_writer",
+    "require_draft",
+]
