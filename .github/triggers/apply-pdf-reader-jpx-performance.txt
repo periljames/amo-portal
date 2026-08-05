@@ -1,1 +1,1 @@
-Validate the versioned PDF.js runtime in both Vite development and production, then run the adaptive reader and navigation contracts.
+Rerun the versioned PDF.js runtime validation using a non-normalized encoded traversal test, then commit the adaptive reader repair.
