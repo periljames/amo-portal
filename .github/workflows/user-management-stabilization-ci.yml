@@ -1,87 +1,99 @@
 name: User Management Stabilization CI
 
-on:
+"on":
+  push:
   pull_request:
-    paths:
-      - "backend/amodb/apps/accounts/**"
-      - "backend/amodb/apps/workforce/**"
-      - "backend/amodb/apps/realtime/**"
-      - "backend/amodb/alembic/versions/accounts_20260805_corporate_structure.py"
-      - "backend/amodb/alembic/versions/accounts_20260805_reporting_lines.py"
-      - "frontend/src/pages/AdminDashboardPage.tsx"
-      - "frontend/src/pages/admin-users/**"
-      - "frontend/src/services/adminUserDirectory.ts"
-      - "frontend/src/services/corporateStructure.ts"
-      - "frontend/src/services/reportingLines.ts"
-      - "frontend/src/components/realtime/RealtimeProvider.tsx"
-      - "frontend/src/app/PortalRouteSurface.tsx"
-      - "frontend/src/app/portalRouteManifest.ts"
-      - "frontend/src/styles/admin-user-management-v2.css"
-      - "frontend/src/styles/admin-corporate-structure.css"
-      - "frontend/src/styles/admin-user-governance.css"
-      - "frontend/src/styles/workforce-portals.css"
-      - "frontend/src/styles/reporting-line-builder.css"
-      - ".github/scripts/retry_transient.py"
-      - ".github/workflows/user-management-stabilization-ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: user-management-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: user_management_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d user_management_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      ENVIRONMENT: test
+      TESTING: "true"
+      SECRET_KEY: user-management-ci-secret-not-for-production
+      JWT_SECRET_KEY: user-management-ci-jwt-secret-not-for-production
+      PYTHONPATH: backend
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/user_management_ci
+      DATABASE_WRITE_URL: postgresql://postgres:postgres@127.0.0.1:5432/user_management_ci
+      WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/user_management_ci
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           show-progress: false
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Compile affected backend modules
+        run: python -m compileall -q backend/amodb/apps/accounts backend/amodb/apps/workforce backend/amodb/apps/realtime
+
+      - name: Verify full mapper startup
+        working-directory: backend
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; configure_mappers(); print('All application mappers configured')"
+
+      - name: Verify a single Alembic head
+        run: |
+          set -euo pipefail
+          HEAD_COUNT=$(alembic -c backend/amodb/alembic.ini heads | grep -c '(head)')
+          test "$HEAD_COUNT" -eq 1
+
+      - name: Upgrade a clean PostgreSQL schema
+        run: alembic -c backend/amodb/alembic.ini upgrade heads
+
+      - name: Run account and workforce tests
+        working-directory: backend
+        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests
+
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install backend dependencies with bounded transient retries
-        run: >-
-          python .github/scripts/retry_transient.py
-          --attempts 4
-          --label "user-management backend dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Compile affected backend modules
-        run: python -m compileall -q backend/amodb/apps/accounts backend/amodb/apps/workforce backend/amodb/apps/realtime
-      - name: Verify full mapper startup
-        working-directory: backend
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-          SECRET_KEY: mapper-test-secret
-        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; configure_mappers(); print('All application mappers configured')"
-      - name: Run account and workforce tests
-        working-directory: backend
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          SECRET_KEY: mapper-test-secret
-        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests
-      - name: Install frontend dependencies with bounded transient retries
+
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "user-management frontend dependency install"
-          -- npm ci --prefer-offline --no-audit --fund=false
-          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+        run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Run tenant-shell route contracts
+        working-directory: frontend
+        run: npm run test:tenant-shell
+
       - name: Typecheck and production build
         working-directory: frontend
         run: npm run build
-      - name: Lint user management, organization and presence changes
+
+      - name: Lint user management and corporate structure
         working-directory: frontend
         run: >-
           npm exec -- eslint
