@@ -32,6 +32,9 @@ export interface ReportingOccupant {
   reporting_manager_name: string | null;
   assignment_type: string;
   is_primary: boolean;
+  fte_percent: string;
+  matrix_reporting: boolean;
+  matrix_reason: string | null;
   effective_from: string;
   effective_to: string | null;
 }
