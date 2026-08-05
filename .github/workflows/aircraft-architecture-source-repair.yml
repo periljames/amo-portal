@@ -1,0 +1,62 @@
+name: Aircraft Architecture Source Repair
+
+on:
+  push:
+    branches:
+      - agent/aircraft-induction-architecture
+    paths:
+      - ".github/workflows/aircraft-architecture-source-repair.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-training-router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/aircraft-induction-architecture
+          fetch-depth: 0
+      - name: Repair malformed Training content-disposition expression
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/amodb/apps/training/router.py")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          replacement = [
+              "    safe_path_name = path.name.replace('\\\"', '_')",
+              "    content_disposition = (",
+              "        f'attachment; filename=\"{document_key.lower().replace(\"_\", \"-\")}-{safe_path_name}\"'",
+              "    )",
+          ]
+          matches = [
+              index
+              for index, line in enumerate(lines)
+              if "content_disposition = f" in line and "path.name.replace" in line
+          ]
+          if len(matches) > 1:
+              raise SystemExit(f"Refusing ambiguous repair; found {len(matches)} candidate lines")
+          if matches:
+              index = matches[0]
+              lines[index:index + 1] = replacement
+              path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              print(f"Repaired {path}:{index + 1}")
+          else:
+              print("Training router repair already applied; no source change required")
+          PY
+      - name: Compile repaired Training router
+        run: python -m py_compile backend/amodb/apps/training/router.py
+      - name: Commit source repair
+        run: |
+          if git diff --quiet -- backend/amodb/apps/training/router.py; then
+            echo "No repair commit required."
+            exit 0
+          fi
+          git config user.name "amo-portal-architecture-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/amodb/apps/training/router.py
+          git commit -m "Phase U1 QC: repair Training router syntax"
+          git push origin HEAD:agent/aircraft-induction-architecture
