@@ -6,6 +6,7 @@ import { RefreshCcw, ShieldAlert } from "lucide-react";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
+import "../../styles/qms-text-scale-override.css";
 
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
