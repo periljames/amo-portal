@@ -1,6 +1,9 @@
 name: Quality Module CI
 
 on:
+  push:
+    branches:
+      - agent/qms-modern-business-planner
   pull_request:
     paths:
       - "backend/amodb/quality_main.py"
