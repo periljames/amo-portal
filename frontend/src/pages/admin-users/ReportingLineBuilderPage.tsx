@@ -56,6 +56,17 @@ type AssignmentAction = "update" | "end" | "transfer";
 
 const today = new Date().toISOString().slice(0, 10);
 
+function nextCalendarDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function latestDate(...values: string[]): string {
+  return values.reduce((latest, current) => current > latest ? current : latest);
+}
+
 function message(error: unknown): string {
   return error instanceof Error
     ? error.message
@@ -1153,16 +1164,18 @@ function AssignmentLifecyclePanel({
   onEnd: (endOn: string, reason: string) => Promise<void>;
   onTransfer: (payload: ReportingAssignmentTransferInput) => Promise<void>;
 }) {
+  const minimumEndDate = occupant.effective_from;
+  const minimumTransferDate = nextCalendarDate(occupant.effective_from);
   const [action, setAction] = useState<AssignmentAction>("update");
   const [managerId, setManagerId] = useState(occupant.reporting_manager_user_id ?? "");
   const [displayTitle, setDisplayTitle] = useState(occupant.display_title);
   const [assignmentType, setAssignmentType] = useState(occupant.assignment_type);
   const [effectiveTo, setEffectiveTo] = useState(occupant.effective_to ?? "");
-  const [fte, setFte] = useState("100");
-  const [matrix, setMatrix] = useState(false);
-  const [matrixReason, setMatrixReason] = useState("");
+  const [fte, setFte] = useState(occupant.fte_percent);
+  const [matrix, setMatrix] = useState(occupant.matrix_reporting);
+  const [matrixReason, setMatrixReason] = useState(occupant.matrix_reason ?? "");
   const [notes, setNotes] = useState("");
-  const [endOn, setEndOn] = useState(today);
+  const [endOn, setEndOn] = useState(latestDate(today, minimumEndDate));
   const [endReason, setEndReason] = useState("");
 
   const transferPositions = workspace.positions.filter(
@@ -1173,14 +1186,17 @@ function AssignmentLifecyclePanel({
   const [targetPositionId, setTargetPositionId] = useState(
     transferPositions[0]?.id ?? "",
   );
-  const [transferDate, setTransferDate] = useState(today);
+  const [transferDate, setTransferDate] = useState(
+    latestDate(today, minimumTransferDate),
+  );
   const [transferManagerId, setTransferManagerId] = useState(
     directManager(transferPositions[0])?.user_id ?? "",
   );
   const [transferDisplayTitle, setTransferDisplayTitle] = useState(
     transferPositions[0]?.canonical_title ?? "",
   );
-  const [transferType, setTransferType] = useState("SUBSTANTIVE");
+  const [transferType, setTransferType] = useState(occupant.assignment_type);
+  const [transferFte, setTransferFte] = useState(occupant.fte_percent);
   const [transferMatrix, setTransferMatrix] = useState(false);
   const [transferMatrixReason, setTransferMatrixReason] = useState("");
   const [transferReason, setTransferReason] = useState("");
@@ -1230,7 +1246,7 @@ function AssignmentLifecyclePanel({
       effective_from: transferDate,
       reporting_manager_user_id: transferManagerId || null,
       assignment_type: transferType,
-      fte_percent: "100",
+      fte_percent: transferFte,
       matrix_reporting: transferMatrix,
       matrix_reason: transferMatrix ? transferMatrixReason.trim() || null : null,
       display_title: transferDisplayTitle.trim() || null,
@@ -1356,7 +1372,7 @@ function AssignmentLifecyclePanel({
               <span>Scheduled end</span>
               <input
                 type="date"
-                min={occupant.effective_from}
+                min={minimumEndDate}
                 value={effectiveTo}
                 onChange={(event) => setEffectiveTo(event.target.value)}
               />
@@ -1397,7 +1413,7 @@ function AssignmentLifecyclePanel({
             <input
               required
               type="date"
-              min={occupant.effective_from}
+              min={minimumEndDate}
               value={endOn}
               onChange={(event) => setEndOn(event.target.value)}
             />
@@ -1453,7 +1469,7 @@ function AssignmentLifecyclePanel({
                 <input
                   required
                   type="date"
-                  min={occupant.effective_from}
+                  min={minimumTransferDate}
                   value={transferDate}
                   onChange={(event) => setTransferDate(event.target.value)}
                 />
@@ -1504,18 +1520,32 @@ function AssignmentLifecyclePanel({
                   />
                 </label>
               ) : null}
-              <label>
-                <span>New assignment type</span>
-                <select value={transferType} onChange={(event) => setTransferType(event.target.value)}>
-                  {[
-                    "SUBSTANTIVE",
-                    "ACTING",
-                    "INTERIM",
-                    "SECONDMENT",
-                    "TEMPORARY",
-                  ].map((value) => <option key={value}>{value}</option>)}
-                </select>
-              </label>
+              <div className="reporting-builder__form-row">
+                <label>
+                  <span>New assignment type</span>
+                  <select value={transferType} onChange={(event) => setTransferType(event.target.value)}>
+                    {[
+                      "SUBSTANTIVE",
+                      "ACTING",
+                      "INTERIM",
+                      "SECONDMENT",
+                      "TEMPORARY",
+                    ].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>New FTE percentage</span>
+                  <input
+                    required
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    value={transferFte}
+                    onChange={(event) => setTransferFte(event.target.value)}
+                  />
+                </label>
+              </div>
               {targetPosition?.is_regulatory_post ? (
                 <label>
                   <span>Appointment reference</span>
