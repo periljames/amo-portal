@@ -10,6 +10,7 @@ const EhmDashboardPage = lazy(() => import("../pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazy(() => import("../pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazy(() => import("../pages/ehm/EhmUploadsPage"));
 const CorporateStructurePage = lazy(() => import("../pages/admin-users/CorporateStructurePage"));
+const ReportingLineBuilderPage = lazy(() => import("../pages/admin-users/ReportingLineBuilderPage"));
 const UserGovernancePage = lazy(() => import("../pages/admin-users/UserGovernancePage"));
 const ManagerTeamPage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).ManagerTeamPage }));
 const MyOrganizationProfilePage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).MyOrganizationProfilePage }));
@@ -71,6 +72,9 @@ function CorporateWorkforceRoutes({ parts, location }: { parts: string[]; locati
   }
   if (parts[0] === "manager" && parts[1] === "team" && parts.length === 2) {
     return <Routes location={location}><Route path="/manager/team" element={<ProtectedSurface label="manager team"><ManagerTeamPage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "manager" && parts[1] === "structure" && parts.length === 2) {
+    return <Routes location={location}><Route path="/manager/structure" element={<ProtectedSurface label="reporting lines"><ReportingLineBuilderPage /></ProtectedSurface>} /></Routes>;
   }
   if (parts[0] === "my-profile" && parts.length === 1) {
     return <Routes location={location}><Route path="/my-profile" element={<ProtectedSurface label="organization profile"><MyOrganizationProfilePage /></ProtectedSurface>} /></Routes>;
