@@ -73,6 +73,10 @@ jobs:
       - name: Upgrade a clean PostgreSQL schema
         run: alembic -c backend/amodb/alembic.ini upgrade heads
 
+      - name: Run PostgreSQL reporting integrity smoke
+        working-directory: backend
+        run: python amodb/apps/accounts/tests/reporting_postgres_smoke.py
+
       - name: Run account and workforce tests
         working-directory: backend
         shell: bash
