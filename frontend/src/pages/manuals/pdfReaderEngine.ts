@@ -38,6 +38,7 @@ export type SearchablePdfDocument = {
 };
 
 const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+const VERTICAL_SCROLL_VALUES = new Set(["auto", "scroll", "overlay"]);
 
 export function clampPdfValue(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -72,12 +73,36 @@ export function isPdfDraftLifecycleCurrent(savingLifecycle: number, currentLifec
   return savingLifecycle === currentLifecycle;
 }
 
+function allowsVerticalScroll(element: HTMLElement): boolean {
+  const overflowY = String(window.getComputedStyle(element).overflowY || "").toLowerCase();
+  return VERTICAL_SCROLL_VALUES.has(overflowY);
+}
+
+/**
+ * Resolve the portal surface that actually owns vertical scrolling. The current
+ * tenant shell scrolls `.tenant-shell__main`; the older application shell used
+ * `.app-shell__scroll`. Walking the ancestor chain keeps the reader compatible
+ * with future shell wrappers without falling back to `window`, which is not
+ * scrollable while the portal shell has `overflow: hidden`.
+ */
+export function resolvePortalScrollRoot(element: HTMLElement): HTMLElement | null {
+  const shell = element.closest<HTMLElement>(".tenant-shell__main, .app-shell__scroll");
+  if (shell && allowsVerticalScroll(shell)) return shell;
+
+  let ancestor = element.parentElement;
+  while (ancestor) {
+    if (allowsVerticalScroll(ancestor)) return ancestor;
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
+
 export function resolvePdfReaderScrollRoot(readerRoot: HTMLElement): HTMLElement | null {
   const viewport =
     readerRoot.querySelector<HTMLElement>(":scope > .pdfv2-viewport")
     ?? readerRoot.querySelector<HTMLElement>(":scope > .pdf-engine-viewport");
-  if (viewport && ["auto", "scroll"].includes(window.getComputedStyle(viewport).overflowY)) return viewport;
-  return readerRoot.closest<HTMLElement>(".app-shell__scroll");
+  if (viewport && allowsVerticalScroll(viewport)) return viewport;
+  return resolvePortalScrollRoot(readerRoot);
 }
 
 /**
