@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -131,7 +132,7 @@ class GuidedAssignmentCreate(BaseModel):
     is_primary: bool = True
     effective_from: date
     effective_to: Optional[date] = None
-    fte_percent: float = Field(default=100, gt=0, le=100)
+    fte_percent: Decimal = Field(default=Decimal("100"), gt=0, le=100)
     matrix_reporting: bool = False
     matrix_reason: Optional[str] = None
     display_title: Optional[str] = Field(default=None, min_length=2, max_length=128)
