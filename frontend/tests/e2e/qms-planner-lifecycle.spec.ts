@@ -133,7 +133,7 @@ function monthDay(page: Page, day: number) {
 test.describe("QMS planner lifecycle", () => {
   test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure" });
 
-  test("restores focus to each dialog opener and never stacks dialogs", async ({ page }) => {
+  test("contains dialog focus, restores each opener, and never stacks dialogs", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "week");
 
@@ -148,6 +148,24 @@ test.describe("QMS planner lifecycle", () => {
     const quickDialog = page.getByRole("dialog", { name: "Create an audit schedule draft" });
     await expect(quickDialog).toBeVisible();
     await expect(page.locator("[role='dialog'][aria-modal='true']")).toHaveCount(1);
+
+    const quickControls = quickDialog.locator([
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(","));
+    const firstQuickControl = quickControls.first();
+    const lastQuickControl = quickControls.last();
+    await lastQuickControl.focus();
+    await page.keyboard.press("Tab");
+    await expect(firstQuickControl).toBeFocused();
+    await firstQuickControl.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(lastQuickControl).toBeFocused();
+
     await page.keyboard.press("Escape");
     await expect(quickDialog).toBeHidden();
     await expect(page.locator(".qms-planner-quick-schedule")).toBeFocused();
