@@ -35,7 +35,7 @@ class RolloutChecklistUpdate(BaseModel):
 class RolloutAircraftTransition(BaseModel):
     status: Literal["PLANNED", "DUAL_RUN", "CUTOVER", "VERIFIED", "COMPLETE", "HOLD"]
     notes: Optional[str] = Field(default=None, max_length=4000)
-    migration_batch_id: Optional[str] = None
+    induction_id: Optional[str] = None
 
 
 class RolloutWaveTransition(BaseModel):
@@ -66,7 +66,7 @@ class RolloutWaveAircraftRead(BaseModel):
     aircraft_serial_number: str
     registration: str
     status: str
-    migration_batch_id: Optional[str] = None
+    induction_id: Optional[str] = None
     dual_run_started_at: Optional[datetime] = None
     cutover_at: Optional[datetime] = None
     verified_at: Optional[datetime] = None
@@ -117,17 +117,7 @@ class SpreadsheetCreate(BaseModel):
     owner: Optional[str] = Field(default=None, max_length=255)
     location: Optional[str] = Field(default=None, max_length=512)
     purpose: str = Field(min_length=3, max_length=4000)
-    data_domain: Literal[
-        "AIRCRAFT_MASTER",
-        "UTILISATION",
-        "MAINTENANCE_PROGRAM",
-        "FORECAST",
-        "WORK_PACKAGE",
-        "DEFERRAL",
-        "COMPONENT",
-        "TECHNICAL_RECORDS",
-        "OTHER",
-    ]
+    data_domain: Literal["AIRCRAFT_MASTER", "UTILISATION", "MAINTENANCE_PROGRAM", "FORECAST", "WORK_PACKAGE", "DEFERRAL", "COMPONENT", "TECHNICAL_RECORDS", "OTHER"]
     replacement_route: Optional[str] = Field(default=None, max_length=255)
     retirement_criteria_json: list[str] = Field(default_factory=list, max_length=100)
 

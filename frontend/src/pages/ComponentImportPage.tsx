@@ -1,8 +1,5 @@
-import React from "react";
-import AircraftImportPage from "./AircraftImportPage";
-
-const ComponentImportPage: React.FC = () => (
-  <AircraftImportPage initialSection="components" />
-);
-
-export default ComponentImportPage;
+// Components are inducted as part of the aircraft's actual configuration.
+// A separate component-import workflow would bypass type-template effectivity
+// and configuration conformity, so every former entry point renders the one
+// universal induction cockpit.
+export { default } from "./AircraftImportPage";
