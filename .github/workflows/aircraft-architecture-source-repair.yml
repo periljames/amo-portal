@@ -19,35 +19,47 @@ jobs:
         with:
           ref: agent/aircraft-induction-architecture
           fetch-depth: 0
-      - name: Repair malformed Training content-disposition expression
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Repair Python 3.11-incompatible Training f-strings
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path("backend/amodb/apps/training/router.py")
           lines = path.read_text(encoding="utf-8").splitlines()
-          replacement = [
-              "    safe_path_name = path.name.replace('\\\"', '_')",
-              "    content_disposition = (",
-              "        f'attachment; filename=\"{document_key.lower().replace(\"_\", \"-\")}-{safe_path_name}\"'",
-              "    )",
-          ]
-          matches = [
-              index
-              for index, line in enumerate(lines)
-              if "content_disposition = f" in line and "path.name.replace" in line
-          ]
-          if len(matches) > 1:
-              raise SystemExit(f"Refusing ambiguous repair; found {len(matches)} candidate lines")
-          if matches:
-              index = matches[0]
-              lines[index:index + 1] = replacement
+          repairs = 0
+
+          for index, line in list(enumerate(lines)):
+              if "rendered = f" in line and "json.dumps(payload, separators=" in line:
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines[index:index + 1] = [
+                      f'{indent}rendered_payload = json.dumps(payload, separators=(",", ":"))',
+                      f'{indent}rendered = f"{{_TRAINING_EVENT_META_PREFIX}}{{rendered_payload}}"',
+                  ]
+                  repairs += 1
+                  break
+
+          for index, line in list(enumerate(lines)):
+              if "content_disposition = f" in line and "path.name.replace" in line:
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines[index:index + 1] = [
+                      f'{indent}safe_path_name = path.name.replace(\'"\', "_")',
+                      f'{indent}content_disposition = (',
+                      f'{indent}    f\'attachment; filename="{{document_key.lower().replace("_", "-")}}-{{safe_path_name}}"\'',
+                      f'{indent})',
+                  ]
+                  repairs += 1
+                  break
+
+          if repairs:
               path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-              print(f"Repaired {path}:{index + 1}")
+              print(f"Applied {repairs} Python 3.11 source repair(s) to {path}")
           else:
-              print("Training router repair already applied; no source change required")
+              print("Training router repairs already applied; no source change required")
           PY
-      - name: Compile repaired Training router
+      - name: Compile repaired Training router with Python 3.11
         run: python -m py_compile backend/amodb/apps/training/router.py
       - name: Commit source repair
         run: |
@@ -58,5 +70,5 @@ jobs:
           git config user.name "amo-portal-architecture-bot"
           git config user.email "actions@users.noreply.github.com"
           git add backend/amodb/apps/training/router.py
-          git commit -m "Phase U1 QC: repair Training router syntax"
+          git commit -m "Phase U1 QC: repair Training router Python 3.11 syntax"
           git push origin HEAD:agent/aircraft-induction-architecture
