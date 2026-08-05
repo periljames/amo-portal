@@ -57,32 +57,29 @@ jobs:
 
           path = Path("frontend/src/pages/planning/DailyAircraftUtilisationPage.tsx")
           source = path.read_text()
-          old = '''      return {
-                ...current,
-                [componentId]: {
-                  enabled: false,
-                  hours: defaultHours || "0.00",
-                  cycles: defaultCycles || "0",
-                  reason: "",
-                  ...current[componentId],
-                  ...patch,
-                },
-              };'''
-          new = '''      const existing = current[componentId] ?? {
-                enabled: false,
-                hours: defaultHours || "0.00",
-                cycles: defaultCycles || "0",
-                reason: "",
-              };
-              return {
-                ...current,
-                [componentId]: {
-                  ...existing,
-                  ...patch,
-                },
-              };'''
-          if old not in source:
-              raise SystemExit("expected frontend override snippet was not found")
+          old = "\n".join([
+              "        [componentId]: {",
+              "          enabled: false,",
+              "          hours: defaultHours || \"0.00\",",
+              "          cycles: defaultCycles || \"0\",",
+              "          reason: \"\",",
+              "          ...current[componentId],",
+              "          ...patch,",
+              "        },",
+          ])
+          new = "\n".join([
+              "        [componentId]: {",
+              "          ...(current[componentId] ?? {",
+              "            enabled: false,",
+              "            hours: defaultHours || \"0.00\",",
+              "            cycles: defaultCycles || \"0\",",
+              "            reason: \"\",",
+              "          }),",
+              "          ...patch,",
+              "        },",
+          ])
+          if source.count(old) != 1:
+              raise SystemExit("expected one frontend override snippet")
           path.write_text(source.replace(old, new))
           PY
 
