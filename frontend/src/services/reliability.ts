@@ -413,6 +413,26 @@ export type ReliabilityIngestionResult = {
   batch: ReliabilityIngestionBatch; created_event_ids: number[];
   duplicate_external_ids: string[]; rejected_records: Array<Record<string, unknown>>;
 };
+export type ReliabilityInternalSourceCoverageItem = {
+  code: string; module: string; dataset: string; source_id?: string | null;
+  source_status: string; integration_status: string; record_count: number;
+  latest_record_at?: string | null; last_sync_at?: string | null;
+  manual_fallback: boolean; detail: string;
+};
+export type ReliabilityInternalSourceCoverage = {
+  generated_at: string; items: ReliabilityInternalSourceCoverageItem[];
+};
+export type ManualReliabilityEntryPayload = {
+  event_type: string; occurred_at: string; description: string; submitted_reason: string;
+  source_reference?: string | null; severity?: string; aircraft_serial_number?: string | null;
+  work_order_id?: number | null; task_card_id?: number | null; component_id?: number | null;
+  ata_chapter?: string | null; reference_code?: string | null; engine_position?: string | null;
+  flight_number?: string | null; origin_station?: string | null; destination_station?: string | null;
+  delay_minutes?: number | null; mel_reference?: string | null; cdl_reference?: string | null;
+  deferral_expires_at?: string | null; part_number?: string | null;
+  component_serial_number?: string | null; confirmed_failure?: boolean | null;
+  repeat_key?: string | null; extra_fields?: Record<string, unknown>;
+};
 export type ReliabilityDataQualityIssue = {
   id: string; amo_id: string; source_id?: string | null; batch_id?: string | null;
   record_id?: string | null; issue_code: string; severity: string; status: string;
@@ -582,6 +602,12 @@ export const ingestReliabilitySource = (sourceId: string, records: Array<Record<
   reliabilityMutation(`/reliability/sources/${encodeURIComponent(sourceId)}/ingest`, "POST", { records, metadata_json });
 export const harvestInternalReliabilitySources = (): Promise<ReliabilityIngestionResult[]> =>
   reliabilityMutation("/reliability/sources/harvest-internal", "POST");
+export const configureReliabilityInternalSources = (): Promise<ReliabilityInternalSourceCoverage> =>
+  reliabilityMutation("/reliability/internal-sources/configure", "POST");
+export const getReliabilityInternalSourceCoverage = (): Promise<ReliabilityInternalSourceCoverage> =>
+  apiRequest("/reliability/internal-sources/coverage", { cacheTtlMs: 10_000 });
+export const createManualReliabilityEntry = (payload: ManualReliabilityEntryPayload): Promise<ReliabilityIngestionResult> =>
+  reliabilityMutation("/reliability/manual-entry", "POST", payload);
 export const listReliabilityIngestionBatches = (sourceId?: string): Promise<ReliabilityIngestionBatch[]> =>
   apiRequest(`/reliability/ingestion-batches${queryString({ source_id: sourceId, limit: 200 })}`, { cacheTtlMs: 10_000 });
 export const listReliabilityDataQualityIssues = (status?: string, sourceId?: string): Promise<ReliabilityDataQualityIssue[]> =>

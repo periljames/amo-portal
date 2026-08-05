@@ -8,6 +8,7 @@ import {
   bootstrapReliability,
   createReliabilityAiReview,
   createReliabilityAuthoritySubmission,
+  createManualReliabilityEntry,
   createReliabilityChange,
   createReliabilityHandoff,
   createReliabilityMeeting,
@@ -17,6 +18,7 @@ import {
   createReliabilityProgrammeVersion,
   createReliabilitySource,
   createReliabilityThresholdVersion,
+  configureReliabilityInternalSources,
   decideReliabilityAiReview,
   executeReliabilityCalculation,
   getFracasLifecycle,
@@ -24,6 +26,7 @@ import {
   getReliabilityAnalytics,
   getReliabilityCapabilities,
   getReliabilityCompliance,
+  getReliabilityInternalSourceCoverage,
   harvestInternalReliabilitySources,
   ingestReliabilitySource,
   listEffectivenessReviews,
@@ -70,6 +73,7 @@ import {
   type ReliabilityDataQualityIssue,
   type ReliabilityHandoff,
   type ReliabilityIngestionBatch,
+  type ReliabilityInternalSourceCoverage,
   type ReliabilityMeeting,
   type ReliabilityMetricDefinition,
   type ReliabilityProgramme,
@@ -314,6 +318,7 @@ function SourcesView() {
   const capabilities = useReliabilityCapabilities();
   const sources = useResource<ReliabilitySource[]>(() => listReliabilitySources(), []);
   const batches = useResource<ReliabilityIngestionBatch[]>(() => listReliabilityIngestionBatches(), []);
+  const coverage = useResource<ReliabilityInternalSourceCoverage>(() => getReliabilityInternalSourceCoverage(), []);
   const [selectedSource, setSelectedSource] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -326,6 +331,7 @@ function SourcesView() {
       setMessage("Reliability source operation completed.");
       sources.refresh();
       batches.refresh();
+      coverage.refresh();
     } catch (error) {
       setActionError(errorMessage(error));
     }
@@ -363,6 +369,39 @@ function SourcesView() {
     void runAction(() => ingestReliabilitySource(selectedSource, records, { submitted_from: "reliability-ui" }));
   };
 
+  const submitManual = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const numberOrNull = (name: string): number | null => {
+      const raw = String(data.get(name) || "").trim();
+      return raw ? Number(raw) : null;
+    };
+    void runAction(() => createManualReliabilityEntry({
+      event_type: String(data.get("event_type") || "DEFECT"),
+      occurred_at: new Date(String(data.get("occurred_at") || new Date().toISOString())).toISOString(),
+      description: String(data.get("description") || ""),
+      submitted_reason: String(data.get("submitted_reason") || ""),
+      source_reference: String(data.get("source_reference") || "") || null,
+      severity: String(data.get("severity") || "MEDIUM"),
+      aircraft_serial_number: String(data.get("aircraft_serial_number") || "") || null,
+      work_order_id: numberOrNull("work_order_id"),
+      task_card_id: numberOrNull("task_card_id"),
+      component_id: numberOrNull("component_id"),
+      ata_chapter: String(data.get("ata_chapter") || "") || null,
+      reference_code: String(data.get("reference_code") || "") || null,
+      engine_position: String(data.get("engine_position") || "") || null,
+      flight_number: String(data.get("flight_number") || "") || null,
+      origin_station: String(data.get("origin_station") || "") || null,
+      destination_station: String(data.get("destination_station") || "") || null,
+      delay_minutes: numberOrNull("delay_minutes"),
+      mel_reference: String(data.get("mel_reference") || "") || null,
+      cdl_reference: String(data.get("cdl_reference") || "") || null,
+      part_number: String(data.get("part_number") || "") || null,
+      component_serial_number: String(data.get("component_serial_number") || "") || null,
+      confirmed_failure: data.get("confirmed_failure") === "true" ? true : data.get("confirmed_failure") === "false" ? false : null,
+    }));
+  };
+
   return (
     <>
       <section className="reliability-v2__section">
@@ -370,9 +409,9 @@ function SourcesView() {
           eyebrow="Source control"
           title="Automated Reliability ingestion"
           detail="Register authoritative sources, retain immutable raw records, validate canonical occurrences and expose failed records instead of hiding them."
-          actions={<button className="btn btn-secondary" type="button" disabled={!hasCapability(capabilities, "reliability.ingest")} onClick={() => void runAction(() => harvestInternalReliabilitySources())}>Harvest internal sources</button>}
+          actions={<><button className="btn btn-secondary" type="button" disabled={!hasCapability(capabilities, "reliability.source.manage")} onClick={() => void runAction(() => configureReliabilityInternalSources())}>Configure sources</button><button className="btn btn-primary" type="button" disabled={!hasCapability(capabilities, "reliability.ingest")} onClick={() => void runAction(() => harvestInternalReliabilitySources())}>Sync workpack data</button></>}
         />
-        <RequestState loading={sources.loading || batches.loading} error={sources.error || batches.error || actionError} />
+        <RequestState loading={sources.loading || batches.loading || coverage.loading} error={sources.error || batches.error || coverage.error || actionError} />
         {message && <div className="reliability-v2__success">{message}</div>}
         <div className="reliability-v2__split reliability-v2__split--forms">
           <form className="reliability-v2__form" onSubmit={submitSource}>
@@ -397,6 +436,44 @@ function SourcesView() {
             <PermissionNote capability="reliability.ingest" snapshot={capabilities} />
           </form>
         </div>
+      </section>
+      <section className="reliability-v2__section">
+        <PageHeading eyebrow="Controlled fallback" title="Manual Reliability entry" detail="Use this only when the authoritative upstream module cannot provide the record. Work-order and task-card links are validated against the current tenant and the entry retains its manual justification." />
+        <form className="reliability-v2__form" onSubmit={submitManual}>
+          <div className="reliability-v2__form-grid">
+            <label>Occurrence type<select name="event_type" defaultValue="DEFECT">{EVENT_TYPES.map((eventType) => <option key={eventType}>{eventType}</option>)}</select></label>
+            <label>Occurred at<input name="occurred_at" type="datetime-local" defaultValue={localDateTime()} required /></label>
+            <label>Severity<select name="severity" defaultValue="MEDIUM"><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></label>
+            <label>Aircraft serial<input name="aircraft_serial_number" placeholder="Filled from task/work order when linked" /></label>
+            <label>Work order ID<input name="work_order_id" type="number" min="1" /></label>
+            <label>Task card ID<input name="task_card_id" type="number" min="1" /></label>
+            <label>Component ID<input name="component_id" type="number" min="1" /></label>
+            <label>ATA chapter<input name="ata_chapter" placeholder="32" /></label>
+            <label>Reference<input name="reference_code" placeholder="Tech log / card / report reference" /></label>
+            <label>Source reference<input name="source_reference" placeholder="External document or verbal report reference" /></label>
+            <label>Flight number<input name="flight_number" /></label>
+            <label>Delay minutes<input name="delay_minutes" type="number" min="0" /></label>
+            <label>Origin<input name="origin_station" maxLength={8} /></label>
+            <label>Destination<input name="destination_station" maxLength={8} /></label>
+            <label>Engine position<input name="engine_position" /></label>
+            <label>Part number<input name="part_number" /></label>
+            <label>Component serial<input name="component_serial_number" /></label>
+            <label>Confirmed failure<select name="confirmed_failure" defaultValue=""><option value="">Not determined</option><option value="true">Yes</option><option value="false">No / NFF</option></select></label>
+            <label>MEL reference<input name="mel_reference" /></label>
+            <label>CDL reference<input name="cdl_reference" /></label>
+          </div>
+          <label>Description<textarea name="description" rows={4} required /></label>
+          <label>Why manual entry is required<textarea name="submitted_reason" rows={3} required placeholder="State why the upstream module or source record was unavailable and who supplied the evidence." /></label>
+          <button className="btn btn-primary" disabled={!hasCapability(capabilities, "reliability.ingest")}>Validate and record occurrence</button>
+          <PermissionNote capability="reliability.ingest" snapshot={capabilities} />
+        </form>
+      </section>
+      <section className="reliability-v2__section">
+        <PageHeading eyebrow="Integration coverage" title="Authoritative module wiring" detail="This shows whether each required upstream dataset is configured, contains records and has been synchronised. Manual fallback does not make a missing upstream feed healthy." />
+        <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Source</th><th>Module</th><th>Dataset</th><th>Coverage</th><th>Records</th><th>Latest record</th><th>Last sync</th><th>Detail</th></tr></thead><tbody>
+          {(coverage.data?.items || []).map((item) => <tr key={item.code}><td><strong>{item.code}</strong><small>{item.source_status}</small></td><td>{item.module}</td><td>{item.dataset}</td><td><span className={statusClass(item.integration_status)}>{item.integration_status.replaceAll("_", " ")}</span></td><td>{item.record_count}</td><td>{displayDate(item.latest_record_at)}</td><td>{displayDate(item.last_sync_at)}</td><td>{item.detail}</td></tr>)}
+          {!coverage.data?.items.length && <tr><td colSpan={8}>Source coverage has not been evaluated.</td></tr>}
+        </tbody></table></div>
       </section>
       <section className="reliability-v2__section">
         <PageHeading eyebrow="Source health" title="Registered inputs" detail="A source is not considered healthy until it has successfully delivered current data." />
