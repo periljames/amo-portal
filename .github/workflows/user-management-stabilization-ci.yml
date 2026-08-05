@@ -103,6 +103,10 @@ jobs:
         working-directory: frontend
         run: npm run test:tenant-shell
 
+      - name: Run reporting-line client contracts
+        working-directory: frontend
+        run: npm exec -- vitest run src/services/reportingLines.test.ts
+
       - name: Typecheck and production build
         working-directory: frontend
         run: npm run build
@@ -118,6 +122,7 @@ jobs:
             src/services/adminUserDirectory.ts \
             src/services/corporateStructure.ts \
             src/services/reportingLines.ts \
+            src/services/reportingLines.test.ts \
             src/components/realtime/RealtimeProvider.tsx \
             src/app/PortalRouteSurface.tsx \
             src/app/portalRouteManifest.ts \
