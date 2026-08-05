@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -28,6 +28,10 @@ class PersonnelTitlePreference(Base):
             "ix_personnel_title_preferences_assignment_status",
             "assignment_id",
             "status",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'SUPERSEDED')",
+            name="ck_personnel_title_preferences_status",
         ),
     )
 
