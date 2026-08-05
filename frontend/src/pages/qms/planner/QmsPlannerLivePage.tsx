@@ -13,12 +13,16 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-function isFocusable(element: Element | null): element is HTMLElement {
-  if (!(element instanceof HTMLElement) || !element.isConnected) return false;
-  if (element.matches(":disabled, [aria-disabled='true']")) return false;
+function isRendered(element: HTMLElement): boolean {
+  if (!element.isConnected || element.closest("[aria-hidden='true']")) return false;
   const style = window.getComputedStyle(element);
   if (style.display === "none" || style.visibility === "hidden") return false;
-  if (!element.getClientRects().length) return false;
+  return element.getClientRects().length > 0;
+}
+
+function isFocusable(element: Element | null): element is HTMLElement {
+  if (!(element instanceof HTMLElement) || !isRendered(element)) return false;
+  if (element.matches(":disabled, [aria-disabled='true']")) return false;
   return typeof element.focus === "function";
 }
 
@@ -83,7 +87,7 @@ function usePlannerDialogFocusManagement(): void {
   useEffect(() => {
     const currentDialogs = (): HTMLElement[] => Array.from(
       document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
-    );
+    ).filter(isRendered);
 
     const rememberOutsideFocus = (event: FocusEvent) => {
       const target = event.target;
