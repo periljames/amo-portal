@@ -148,6 +148,7 @@ type ViewDefinition = {
 };
 
 const BASE = "/reliability/operational-sources";
+const PAGE_OPENED_AT = Date.now();
 const VIEW_DEFINITIONS: ViewDefinition[] = [
   { id: "overview", label: "Control overview", shortLabel: "Overview", description: "Attention, source health and pending lifecycle work." },
   { id: "flight", label: "Flight Operations", shortLabel: "Flight Ops", description: "Technical interruptions and operational consequences." },
@@ -202,7 +203,7 @@ function toLocalInput(value?: string | Date | null): string {
 }
 
 function localDateTime(offsetHours = 0): string {
-  return toLocalInput(new Date(Date.now() + offsetHours * 60 * 60 * 1000));
+  return toLocalInput(new Date(PAGE_OPENED_AT + offsetHours * 60 * 60 * 1000));
 }
 
 function iso(value: string): string {
@@ -270,7 +271,7 @@ function recommendedSeverity(eventType: string, delay: number | null): string {
 }
 
 function relativeExpiry(value: string): string {
-  const milliseconds = new Date(value).getTime() - Date.now();
+  const milliseconds = new Date(value).getTime() - PAGE_OPENED_AT;
   if (!Number.isFinite(milliseconds)) return "Unknown";
   const hours = Math.round(Math.abs(milliseconds) / 3_600_000);
   if (milliseconds < 0) return `${hours} h overdue`;
@@ -366,7 +367,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
     };
     void initialise();
     return () => { active = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setError(null);
@@ -726,7 +727,7 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
         {filtered.map((row) => <tr key={row.id}>
           <td><strong>{row.deferral_number}</strong><small>{row.deferral_type} {row.category ? `Category ${row.category}` : ""} · Rev {row.revision}</small></td>
           <td><strong>{row.aircraft_serial_number}</strong><small>{row.item_reference} · {row.defect_reference}</small><details><summary>View defect</summary><p>{row.description}</p></details></td>
-          <td><strong>{displayDate(row.expires_at)}</strong><small className={new Date(row.expires_at).getTime() < Date.now() && row.status !== "CLOSED" ? "rel-ops__text-danger" : ""}>{relativeExpiry(row.expires_at)}</small><small>Applied {displayDate(row.applied_at)}</small></td>
+          <td><strong>{displayDate(row.expires_at)}</strong><small className={new Date(row.expires_at).getTime() < PAGE_OPENED_AT && row.status !== "CLOSED" ? "rel-ops__text-danger" : ""}>{relativeExpiry(row.expires_at)}</small><small>Applied {displayDate(row.applied_at)}</small></td>
           <td><span className={statusClass(row.status)}>{row.status}</span><small>Event {row.canonical_event_id || "not ingested"}</small></td>
           <td><div className="rel-ops__row-actions">{row.status === "DRAFT" && <button className="btn btn-primary" type="button" onClick={() => onAction({ kind: "DEFERRAL_APPROVE", row })}>Review & approve</button>}{["OPEN", "EXTENDED"].includes(row.status) && <button className="btn btn-secondary" type="button" onClick={() => onAction({ kind: "DEFERRAL_EXTEND", row })}>Extend</button>}{["OPEN", "EXTENDED", "EXPIRED"].includes(row.status) && <button className="btn btn-secondary" type="button" onClick={() => onAction({ kind: "DEFERRAL_CLOSE", row })}>Close</button>}</div></td>
         </tr>)}
