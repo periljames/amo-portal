@@ -24,17 +24,15 @@ jobs:
 
           component = Path("frontend/src/components/QMS/QualityExcellenceCockpit.tsx")
           text = component.read_text(encoding="utf-8")
-          old = '''                    <button type="button" onClick={() => openDrawer("evidence", control)}><Link2 size={14} /> Evidence</button>
-                    <button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>
-                    {control.approval_status === "DRAFT" || control.approval_status === "REJECTED" ? <button type="button" onClick={() => approvalMutation.mutate({ control, status: "PENDING_APPROVAL" })}>Submit</button> : null}'''
-          new = '''                    <button type="button" onClick={() => openDrawer("evidence", control)}><Link2 size={14} /> Evidence</button>
-                    {control.approval_status === "APPROVED"
+          old = '<button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>'
+          new = '''{control.approval_status === "APPROVED"
                       ? <button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>
-                      : <span className="qew-control-table__test-guard"><LockKeyhole size={13} /> Approve before testing</span>}
-                    {control.approval_status === "DRAFT" || control.approval_status === "REJECTED" ? <button type="button" onClick={() => approvalMutation.mutate({ control, status: "PENDING_APPROVAL" })}>Submit</button> : null}'''
-          if old not in text:
-              raise SystemExit("Control action block did not match expected source")
-          component.write_text(text.replace(old, new), encoding="utf-8")
+                      : <span className="qew-control-table__test-guard"><LockKeyhole size={13} /> Approve before testing</span>}'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'qew-control-table__test-guard' not in text:
+              raise SystemExit("Control test action was not found")
+          component.write_text(text, encoding="utf-8")
 
           spec = Path("frontend/tests/e2e/qms-excellence-cockpit.spec.ts")
           text = spec.read_text(encoding="utf-8")
@@ -47,5 +45,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add frontend/src/components/QMS/QualityExcellenceCockpit.tsx frontend/tests/e2e/qms-excellence-cockpit.spec.ts
-          git commit -m "Guard control testing until approval" || exit 0
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Guard control testing until approval"
           git push origin HEAD:agent/qms-modern-business-planner
