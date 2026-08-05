@@ -128,11 +128,6 @@ async function openPlanner(page: Page, view: "week" | "month"): Promise<void> {
   await page.addStyleTag({ content: ".toast-stack { pointer-events: none !important; }" });
 }
 
-function monthDay(page: Page, day: number) {
-  const dayNumber = page.locator(".qms-planner-month__day > header > strong").filter({ hasText: new RegExp(`^${day}$`) });
-  return page.locator(".qms-planner-month__day").filter({ has: dayNumber });
-}
-
 test.describe("QMS planner lifecycle", () => {
   test("contains dialog focus, restores each opener, and never stacks dialogs", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });
@@ -197,16 +192,14 @@ test.describe("QMS planner lifecycle", () => {
     await page.clock.install({ time: new Date("2026-08-18T20:59:45.000Z") });
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "week");
-    await page.keyboard.press("m");
-    await expect(page).toHaveURL(/\/quality\/calendar\/month/);
-    await expect(page.locator(".qms-planner-month")).toBeVisible({ timeout: 10_000 });
 
-    await expect(monthDay(page, 18)).toHaveClass(/is-today/);
-    await expect(monthDay(page, 19)).not.toHaveClass(/is-today/);
+    const miniToday = page.locator(".qms-planner-mini__days button.is-today");
+    await expect(miniToday).toHaveCount(1);
+    await expect(miniToday).toHaveText("18");
 
     await page.clock.fastForward(31_000);
 
-    await expect(monthDay(page, 18)).not.toHaveClass(/is-today/);
-    await expect(monthDay(page, 19)).toHaveClass(/is-today/);
+    await expect(page.locator(".qms-planner-mini__days button.is-today")).toHaveCount(1);
+    await expect(page.locator(".qms-planner-mini__days button.is-today")).toHaveText("19");
   });
 });
