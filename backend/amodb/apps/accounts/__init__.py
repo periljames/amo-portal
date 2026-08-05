@@ -28,6 +28,7 @@ from .admin_profile_concurrency import (
 from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
 from .auth_session_context import bind_auth_session_to_token_refresh
+from .reporting_workspace_enrichment import install_reporting_workspace_enrichment
 from . import router_admin as _router_admin
 from . import router_public as _router_public
 from . import router_corporate_structure as _router_corporate_structure
@@ -76,9 +77,12 @@ def _strict_reporting_admin_actor(user: models.User) -> bool:
     )
 
 
-# Reporting-line helper functions resolve this policy at request time. Keep
-# tenant-wide scope separate from functional quality and safety roles.
+# Reporting-line helper functions resolve these policies at request time. Keep
+# tenant-wide scope separate from functional quality and safety roles, and expose
+# exact FTE/matrix state for assignment corrections without rebuilding the scoped
+# hierarchy query.
 _router_reporting_lines._is_admin_actor = _strict_reporting_admin_actor
+install_reporting_workspace_enrichment(_router_reporting_lines)
 
 # These endpoints resolve module-level helpers at request time. Keep the router
 # modules importable while replacing only the governed policy functions.
