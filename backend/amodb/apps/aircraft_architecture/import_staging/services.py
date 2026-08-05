@@ -11,6 +11,15 @@ HEADER_PATTERN = re.compile(r"[^a-z0-9]+")
 REQUIRED_ADAPTERS = (
     "CSV", "EXCEL", "WINAIR", "AMOS", "TRAX", "RAMCO", "SPEC2000", "SPEC2300",
 )
+BATCH_TRANSITIONS = {
+    "STAGED": {"VALIDATED", "FAILED", "CANCELLED"},
+    "VALIDATED": {"RECONCILED", "FAILED", "CANCELLED"},
+    "RECONCILED": {"APPROVED", "FAILED", "CANCELLED"},
+    "APPROVED": {"COMMITTED", "CANCELLED"},
+    "COMMITTED": set(),
+    "FAILED": {"STAGED", "CANCELLED"},
+    "CANCELLED": set(),
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -94,6 +103,19 @@ def batch_manifest_hash(source_system: str, datasets: Iterable[DatasetInput]) ->
 
 def row_hash(source_row: dict[str, Any], normalized_row: dict[str, Any]) -> str:
     return sha256_json({"source": source_row, "normalized": normalized_row})
+
+
+def require_batch_transition(current: str, target: str) -> None:
+    allowed = BATCH_TRANSITIONS.get(current)
+    if allowed is None or target not in allowed:
+        raise ValueError(f"invalid import batch transition: {current} -> {target}")
+
+
+def approval_preconditions(*, dataset_count: int, open_error_count: int) -> None:
+    if dataset_count < 1:
+        raise ValueError("an import batch must contain at least one dataset")
+    if open_error_count:
+        raise ValueError(open ERROR reconciliation issues block approval")
 
 
 class AdapterRegistry:
