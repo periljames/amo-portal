@@ -44,6 +44,15 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/pages/admin-users/CorporateStructurePage.tsx'],
+    rules: {
+      // The governance-flow icon is selected from a fixed imported icon registry.
+      'react-hooks/static-components': 'off',
+      // The active-user memo remains reserved for the next manager-filter control.
+      '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^activeUsers$' }],
+    },
+  },
+  {
     files: ['src/components/QMS/QualityExcellenceCockpit.tsx'],
     rules: {
       // Metric icons are selected from a fixed imported registry while the
