@@ -4,6 +4,14 @@ import { plannerClockAt } from "./qmsPlannerClock";
 
 const PLANNER_TIMEZONE = "Africa/Nairobi";
 const CLOCK_REFRESH_MS = 30_000;
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 function isFocusable(element: Element | null): element is HTMLElement {
   if (!(element instanceof HTMLElement) || !element.isConnected) return false;
@@ -12,6 +20,10 @@ function isFocusable(element: Element | null): element is HTMLElement {
   if (style.display === "none" || style.visibility === "hidden") return false;
   if (!element.getClientRects().length) return false;
   return typeof element.focus === "function";
+}
+
+function focusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isFocusable);
 }
 
 function firstFocusable(...candidates: Array<HTMLElement | null>): HTMLElement | null {
@@ -63,12 +75,16 @@ function shortcutTrigger(event: KeyboardEvent): HTMLElement | null {
   return null;
 }
 
-function usePlannerDialogFocusRestoration(): void {
+function usePlannerDialogFocusManagement(): void {
   const lastOutsideFocusRef = useRef<HTMLElement | null>(null);
   const intendedTriggerRef = useRef<HTMLElement | null>(null);
   const openDialogsRef = useRef(new Map<HTMLElement, HTMLElement | null>());
 
   useEffect(() => {
+    const currentDialogs = (): HTMLElement[] => Array.from(
+      document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
+    );
+
     const rememberOutsideFocus = (event: FocusEvent) => {
       const target = event.target;
       if (target instanceof HTMLElement && !target.closest("[role='dialog']")) {
@@ -81,17 +97,45 @@ function usePlannerDialogFocusRestoration(): void {
       if (isFocusable(target) && !target.closest("[role='dialog']")) intendedTriggerRef.current = target;
     };
 
-    const rememberShortcutTrigger = (event: KeyboardEvent) => {
+    const manageDialogKeyboard = (event: KeyboardEvent) => {
       const trigger = shortcutTrigger(event);
       if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
+
+      if (event.key !== "Tab") return;
+      const dialogs = currentDialogs();
+      const topDialog = dialogs[dialogs.length - 1];
+      if (!topDialog) return;
+
+      const controls = focusableElements(topDialog);
+      if (!controls.length) {
+        event.preventDefault();
+        topDialog.tabIndex = -1;
+        topDialog.focus({ preventScroll: true });
+        return;
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!active || !topDialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+        return;
+      }
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      }
     };
 
     const observer = new MutationObserver(() => {
-      const currentDialogs = new Set(
-        Array.from(document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']")),
-      );
+      const dialogs = currentDialogs();
+      const currentDialogSet = new Set(dialogs);
 
-      currentDialogs.forEach((dialog) => {
+      dialogs.forEach((dialog) => {
         if (openDialogsRef.current.has(dialog)) return;
         const intended = intendedTriggerRef.current;
         const outside = lastOutsideFocusRef.current;
@@ -100,17 +144,25 @@ function usePlannerDialogFocusRestoration(): void {
           firstFocusable(intended, outside, fallbackTrigger(dialog)),
         );
         intendedTriggerRef.current = null;
+
+        window.requestAnimationFrame(() => {
+          const active = document.activeElement as HTMLElement | null;
+          if (active && dialog.contains(active)) return;
+          const autofocus = dialog.querySelector<HTMLElement>("[autofocus]");
+          const target = firstFocusable(autofocus, focusableElements(dialog)[0] || null);
+          if (target) target.focus({ preventScroll: true });
+        });
       });
 
       const removedTriggers: HTMLElement[] = [];
       for (const [dialog, trigger] of openDialogsRef.current) {
-        if (currentDialogs.has(dialog)) continue;
+        if (currentDialogSet.has(dialog)) continue;
         openDialogsRef.current.delete(dialog);
         if (isFocusable(trigger)) removedTriggers.push(trigger);
       }
 
       const restoreTarget = removedTriggers[0] || null;
-      if (!currentDialogs.size && restoreTarget) {
+      if (!dialogs.length && restoreTarget) {
         window.requestAnimationFrame(() => {
           if (isFocusable(restoreTarget)) restoreTarget.focus({ preventScroll: true });
         });
@@ -119,14 +171,14 @@ function usePlannerDialogFocusRestoration(): void {
 
     document.addEventListener("focusin", rememberOutsideFocus, true);
     document.addEventListener("pointerdown", rememberPointerTrigger, true);
-    document.addEventListener("keydown", rememberShortcutTrigger, true);
+    document.addEventListener("keydown", manageDialogKeyboard, true);
     observer.observe(document.body, { childList: true, subtree: true });
 
     return () => {
       observer.disconnect();
       document.removeEventListener("focusin", rememberOutsideFocus, true);
       document.removeEventListener("pointerdown", rememberPointerTrigger, true);
-      document.removeEventListener("keydown", rememberShortcutTrigger, true);
+      document.removeEventListener("keydown", manageDialogKeyboard, true);
       openDialogsRef.current.clear();
     };
   }, []);
@@ -134,7 +186,7 @@ function usePlannerDialogFocusRestoration(): void {
 
 export default function QmsPlannerLivePage(): React.ReactElement {
   const [clockInstant, setClockInstant] = useState(() => new Date());
-  usePlannerDialogFocusRestoration();
+  usePlannerDialogFocusManagement();
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
