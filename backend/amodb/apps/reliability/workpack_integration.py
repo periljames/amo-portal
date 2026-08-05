@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -101,7 +101,10 @@ class ManualReliabilityEntry(BaseModel):
     delay_minutes: Optional[int] = Field(default=None, ge=0, le=2147483647)
     mel_reference: Optional[str] = Field(default=None, max_length=80)
     cdl_reference: Optional[str] = Field(default=None, max_length=80)
-    deferral_expires_at: Optional[datetime] = None
+    deferred_until: Optional[datetime] = Field(
+        default=None,
+        validation_alias=AliasChoices("deferred_until", "deferral_expires_at"),
+    )
     part_number: Optional[str] = Field(default=None, max_length=80)
     component_serial_number: Optional[str] = Field(default=None, max_length=80)
     confirmed_failure: Optional[bool] = None
@@ -175,6 +178,46 @@ def _sync_cursor(last_success_at: Optional[datetime]) -> datetime:
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     resolved = _as_utc(last_success_at)
     return max(resolved - timedelta(minutes=5), epoch) if resolved else epoch
+
+
+def _latest_datetime(*values: Optional[datetime]) -> Optional[datetime]:
+    resolved = [_as_utc(value) for value in values if value is not None]
+    return max((value for value in resolved if value is not None), default=None)
+
+
+def _removal_event_type(reason: Optional[str]) -> str:
+    normalized = " ".join((reason or "").upper().replace("_", " ").split())
+    unscheduled_markers = ("UNSCHEDULED", "UNPLANNED", "PREMATURE", "FAILURE", "DEFECT")
+    if any(marker in normalized for marker in unscheduled_markers):
+        return "UNSCHEDULED_REMOVAL"
+    scheduled_markers = ("SCHEDULED", "PLANNED", "LIFE LIMIT", "TIME EXPIRED", "TBO")
+    if any(marker in normalized for marker in scheduled_markers):
+        return "SCHEDULED_REMOVAL"
+    # Unknown removals remain unscheduled for conservative Reliability treatment.
+    return "UNSCHEDULED_REMOVAL"
+
+
+def _assert_reference_match(label: str, provided: Optional[Any], authoritative: Optional[Any]) -> None:
+    if provided is None or authoritative is None:
+        return
+    if str(provided) != str(authoritative):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} conflicts with the selected authoritative workpack record.",
+        )
+
+
+def _advance_internal_source_after_batch(
+    source: domain.ReliabilitySource,
+    batch: schemas.ReliabilityIngestionBatchRead,
+    *,
+    now: datetime,
+) -> None:
+    # A duplicate-only overlap is a successful sync and must advance the cursor.
+    if batch.invalid_count == 0:
+        source.last_success_at = now
+        source.last_failure_at = None
+    source.next_poll_at = now + timedelta(minutes=max(source.poll_interval_minutes or 60, 5))
 
 
 def _source_configuration(spec: InternalSourceSpec) -> Dict[str, Any]:
@@ -300,7 +343,12 @@ def _task_is_reliability_relevant(task: work_models.TaskCard) -> bool:
 def _task_record(task: work_models.TaskCard) -> Dict[str, Any]:
     work_order = task.work_order
     occurred_at = _as_utc(task.actual_end) or _as_utc(task.actual_start) or _as_utc(task.updated_at) or _as_utc(task.created_at)
-    revision_at = _as_utc(task.updated_at) or _as_utc(task.created_at) or occurred_at
+    revision_at = _latest_datetime(
+        task.updated_at,
+        task.created_at,
+        getattr(work_order, "updated_at", None),
+        getattr(work_order, "created_at", None),
+    ) or occurred_at
     category = _enum_value(task.category)
     origin = _enum_value(task.origin_type)
     priority = _enum_value(task.priority) or "MEDIUM"
@@ -346,7 +394,11 @@ def _workpack_records(db: Session, *, amo_id: str, cursor: datetime) -> List[Dic
         .filter(
             work_models.TaskCard.amo_id == amo_id,
             work_models.WorkOrder.amo_id == amo_id,
-            or_(work_models.TaskCard.updated_at > cursor, work_models.TaskCard.created_at > cursor),
+            or_(
+                work_models.TaskCard.updated_at > cursor,
+                work_models.TaskCard.created_at > cursor,
+                work_models.WorkOrder.updated_at > cursor,
+            ),
         )
         .order_by(work_models.TaskCard.updated_at.asc(), work_models.TaskCard.id.asc())
         .limit(5000)
@@ -360,9 +412,8 @@ def _removal_record(
     movement: Optional[legacy.PartMovementLedger],
     instance: Optional[legacy.ComponentInstance],
 ) -> Dict[str, Any]:
-    reason = (removal.removal_reason or "").upper()
-    scheduled = any(token in reason for token in ("SCHEDULED", "PLANNED", "LIFE LIMIT", "TIME EXPIRED", "TBO"))
-    event_type = "SCHEDULED_REMOVAL" if scheduled else "UNSCHEDULED_REMOVAL"
+    event_type = _removal_event_type(removal.removal_reason)
+    scheduled = event_type == "SCHEDULED_REMOVAL"
     return {
         "external_id": f"REMOVAL_EVENT:{removal.id}",
         "event_type": event_type,
@@ -476,23 +527,28 @@ def harvest_internal_sources(
         cursor = _sync_cursor(source.last_success_at)
         records = builder(db, amo_id=amo_id, cursor=cursor)
         if records:
-            results.append(
-                services.ingest_batch(
-                    db,
-                    amo_id=amo_id,
-                    source=source,
-                    payload=schemas.ReliabilityBatchIngest(
-                        records=records,
-                        metadata_json={
-                            "adapter": "canonical-internal-v1",
-                            "source_code": code,
-                            "cursor": cursor.isoformat(),
-                            "authoritative_tables": source.configuration_json.get("authoritative_tables", []),
-                        },
-                    ),
-                    actor_user_id=actor_user_id,
-                )
+            result = services.ingest_batch(
+                db,
+                amo_id=amo_id,
+                source=source,
+                payload=schemas.ReliabilityBatchIngest(
+                    records=records,
+                    metadata_json={
+                        "adapter": "canonical-internal-v1",
+                        "source_code": code,
+                        "cursor": cursor.isoformat(),
+                        "authoritative_tables": source.configuration_json.get("authoritative_tables", []),
+                    },
+                ),
+                actor_user_id=actor_user_id,
             )
+            _advance_internal_source_after_batch(
+                source,
+                result.batch,
+                now=datetime.now(timezone.utc),
+            )
+            db.commit()
+            results.append(result)
         else:
             now = datetime.now(timezone.utc)
             source.last_success_at = now
@@ -537,18 +593,39 @@ def _hydrate_manual_links(
             raise HTTPException(status_code=422, detail="The selected task card does not exist in this tenant.")
         if work_order and task.work_order_id != work_order.id:
             raise HTTPException(status_code=422, detail="The task card does not belong to the selected work order.")
+        _assert_reference_match("Aircraft", values.get("aircraft_serial_number"), task.aircraft_serial_number)
+        _assert_reference_match("Component", values.get("component_id"), task.aircraft_component_id)
         work_order = work_order or task.work_order
         values["work_order_id"] = task.work_order_id
-        values["aircraft_serial_number"] = values.get("aircraft_serial_number") or task.aircraft_serial_number
+        values["aircraft_serial_number"] = task.aircraft_serial_number
         values["ata_chapter"] = values.get("ata_chapter") or task.ata_chapter
-        values["component_id"] = values.get("component_id") or task.aircraft_component_id
+        values["component_id"] = task.aircraft_component_id or values.get("component_id")
         values["reference_code"] = values.get("reference_code") or task.task_code
         values["repeat_key"] = values.get("repeat_key") or f"{task.aircraft_serial_number}:{task.ata_chapter or 'UNK'}:{task.task_code or task.title}"[:255]
     if work_order:
-        values["aircraft_serial_number"] = values.get("aircraft_serial_number") or work_order.aircraft_serial_number
+        _assert_reference_match("Aircraft", values.get("aircraft_serial_number"), work_order.aircraft_serial_number)
+        values["aircraft_serial_number"] = work_order.aircraft_serial_number
         values["work_package_ref"] = work_order.work_package_ref
         values["work_order_number"] = work_order.wo_number
         values["check_type"] = work_order.check_type
+    component = None
+    if values.get("component_id"):
+        component = (
+            db.query(fleet_models.AircraftComponent)
+            .filter(
+                fleet_models.AircraftComponent.amo_id == amo_id,
+                fleet_models.AircraftComponent.id == values["component_id"],
+            )
+            .first()
+        )
+        if not component:
+            raise HTTPException(status_code=422, detail="The selected component does not exist in this tenant.")
+        _assert_reference_match("Aircraft", values.get("aircraft_serial_number"), component.aircraft_serial_number)
+        _assert_reference_match("Part number", values.get("part_number"), component.part_number)
+        _assert_reference_match("Component serial number", values.get("component_serial_number"), component.serial_number)
+        values["aircraft_serial_number"] = values.get("aircraft_serial_number") or component.aircraft_serial_number
+        values["part_number"] = values.get("part_number") or component.part_number
+        values["component_serial_number"] = values.get("component_serial_number") or component.serial_number
     if values.get("aircraft_serial_number"):
         aircraft = (
             db.query(fleet_models.Aircraft)

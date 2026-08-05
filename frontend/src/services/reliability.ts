@@ -429,7 +429,7 @@ export type ManualReliabilityEntryPayload = {
   ata_chapter?: string | null; reference_code?: string | null; engine_position?: string | null;
   flight_number?: string | null; origin_station?: string | null; destination_station?: string | null;
   delay_minutes?: number | null; mel_reference?: string | null; cdl_reference?: string | null;
-  deferral_expires_at?: string | null; part_number?: string | null;
+  deferred_until?: string | null; part_number?: string | null;
   component_serial_number?: string | null; confirmed_failure?: boolean | null;
   repeat_key?: string | null; extra_fields?: Record<string, unknown>;
 };

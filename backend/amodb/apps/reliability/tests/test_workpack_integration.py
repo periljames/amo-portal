@@ -84,3 +84,30 @@ def test_sync_cursor_overlaps_last_success_without_crossing_epoch():
     last_success = datetime(2026, 8, 5, 7, 0, tzinfo=timezone.utc)
     assert integration._sync_cursor(last_success) == last_success - timedelta(minutes=5)
     assert integration._sync_cursor(None) == datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def test_unscheduled_reason_cannot_be_misclassified_as_scheduled():
+    assert integration._removal_event_type("UNSCHEDULED FAILURE") == "UNSCHEDULED_REMOVAL"
+    assert integration._removal_event_type("Planned TBO change") == "SCHEDULED_REMOVAL"
+    assert integration._removal_event_type(None) == "UNSCHEDULED_REMOVAL"
+
+
+def test_authoritative_reference_conflicts_are_rejected():
+    with pytest.raises(Exception) as caught:
+        integration._assert_reference_match("Aircraft", "AC-1", "AC-2")
+    assert getattr(caught.value, "status_code", None) == 422
+
+
+def test_duplicate_only_batch_advances_internal_source_cursor():
+    source = SimpleNamespace(
+        last_success_at=None,
+        last_failure_at=datetime.now(timezone.utc),
+        next_poll_at=None,
+        poll_interval_minutes=60,
+    )
+    batch = SimpleNamespace(invalid_count=0, valid_count=0, duplicate_count=3)
+    now = datetime.now(timezone.utc)
+    integration._advance_internal_source_after_batch(source, batch, now=now)
+    assert source.last_success_at == now
+    assert source.last_failure_at is None
+    assert source.next_poll_at == now + timedelta(minutes=60)
