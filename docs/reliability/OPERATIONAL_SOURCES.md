@@ -67,4 +67,4 @@ The operational interface follows source workflows rather than exposing database
 - Workbook mapping uses guided source-column selection instead of requiring users to write JSON.
 - Approval, extension, assessment, release, rejection and closure actions use controlled forms rather than browser prompt dialogs.
 
-Derived values are calculated and validated in the API, not trusted only to browser logic, so imports and future clients obey the same operational rules.
+Derived values are calculated and validated in the API, not trusted only to browser logic, so imports and future clients obey the same operational rules. This prevents separate clients from creating contradictory operational facts.
