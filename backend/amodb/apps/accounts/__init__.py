@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from . import (  # noqa: F401
     assignment_integrity,
     corporate_structure_models,
+    effective_title_sync,
     models,
     reporting_line_models,
     schemas,
@@ -143,6 +144,7 @@ __all__ = [
     "schemas",
     "services",
     "assignment_integrity",
+    "effective_title_sync",
     "corporate_structure_models",
     "reporting_line_models",
     "admin_profile_router",
