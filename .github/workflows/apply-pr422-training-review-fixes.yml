@@ -1,8 +1,11 @@
 name: Apply PR 422 Training review fixes
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-pr422-training-review-fixes.yml
   workflow_dispatch:
 
 permissions:
@@ -26,34 +29,15 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Retrieve and apply exact reviewed patch
+      - name: Retrieve and apply reviewed patch
         env:
           GH_TOKEN: ${{ github.token }}
           COMMENT_ID: '5178920889'
         run: |
           set -euo pipefail
           gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --jq .body > /tmp/training-review-comment.txt
-          python - <<'PY'
-          import base64
-          from pathlib import Path
-
-          body = Path('/tmp/training-review-comment.txt').read_text(encoding='utf-8')
-          start_marker = 'PATCH_BASE64_BEGIN'
-          end_marker = 'PATCH_BASE64_END'
-          if start_marker not in body or end_marker not in body:
-              raise SystemExit('Reviewed patch markers were not found.')
-          encoded = ''.join(body.split(start_marker, 1)[1].split(end_marker, 1)[0].split())
-          patch = base64.b64decode(encoded, validate=True)
-          Path('/tmp/training-six-fixes.diff').write_bytes(patch)
-          print(f'Decoded {len(patch)} patch bytes.')
-          PY
+          sed -n '/PATCH_BASE64_BEGIN/,/PATCH_BASE64_END/p' /tmp/training-review-comment.txt | sed '1d;$d' | tr -d '\n\r\t ' | base64 --decode > /tmp/training-six-fixes.diff
+          test -s /tmp/training-six-fixes.diff
           git apply --check /tmp/training-six-fixes.diff
           git apply /tmp/training-six-fixes.diff
           rm -f .github/workflows/apply-training-review-fixes.yml
@@ -71,6 +55,13 @@ jobs:
             printf '%s\n' "$actual"
             exit 1
           fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
         run: python -m pip install -r backend/requirements.txt
@@ -122,7 +113,7 @@ jobs:
           git add -A
           git commit -m 'Address Training workbook reconciliation review'
           git push origin HEAD:agent/training-workbook-control-centre
-          gh pr comment 422 --body "Applied all six latest Training workbook review fixes. Focused backend tests, Alembic graph validation, frontend production build, and CSS contract checks passed in workflow run ${GITHUB_RUN_ID}."
+          gh pr comment 422 --body "Applied all six Training workbook review fixes. Focused backend tests, Alembic graph validation, frontend production build, and CSS contract checks passed in workflow run ${GITHUB_RUN_ID}."
 
       - name: Remove temporary workflow from main
         if: success()
@@ -141,4 +132,4 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr comment 422 --body "The scheduled application of the six Training review fixes failed in workflow run ${GITHUB_RUN_ID}. No reviewed product changes were pushed by this run."
+        run: gh pr comment 422 --body "The automated application of the six Training review fixes failed in workflow run ${GITHUB_RUN_ID}. No reviewed product changes were pushed by this run."
