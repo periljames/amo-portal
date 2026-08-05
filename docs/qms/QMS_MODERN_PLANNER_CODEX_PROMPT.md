@@ -1,321 +1,164 @@
-# Codex Implementation Prompt — QMS Modern Business Planner
+# QMS Modern Planner — Final Verification Contract
 
-Use the repository as the only implementation source of truth. Work from the current branch and do not reintroduce the former calendar markup into `QmsCanonicalLegacyPage`.
+This document supersedes the earlier broad implementation prompt. The planner slice is implemented in PR #436. Do not expand this pull request into resource scheduling, natural-language planning, a calendar framework migration, or unrelated QMS redesign work.
 
-## Role
+## 1. Source of truth
 
-Act as a principal React/TypeScript engineer, FastAPI/PostgreSQL architect, UX systems designer, accessibility engineer, and aviation QMS compliance engineer.
+Review the current branch only. The relevant implementation is:
 
-## Objective
+### Frontend
 
-Complete and harden the new QMS planner so it is a fast, modern business-planning surface comparable in interaction quality to Notion Calendar, while preserving tenant isolation, permissions, auditability, and controlled aviation/QMS workflows.
-
-The new planner already exists in:
-
-- `frontend/src/pages/qms/planner/QmsPlannerPage.tsx`
-- `frontend/src/pages/qms/planner/qmsPlannerModel.ts`
-- `frontend/src/styles/qms-modern-planner.css`
-- `backend/amodb/apps/quality/planner_router.py`
-
-The old QMS implementation is intentionally preserved in:
-
+- `frontend/src/pages/qms/QmsCanonicalPage.tsx`
 - `frontend/src/pages/qms/QmsCanonicalLegacyPage.tsx`
+- `frontend/src/pages/qms/planner/QmsPlannerLivePage.tsx`
+- `frontend/src/pages/qms/planner/QmsPlannerPageV2.tsx`
+- `frontend/src/pages/qms/planner/qmsPlannerClock.ts`
+- `frontend/src/pages/qms/planner/qmsPlannerModel.ts`
+- `frontend/src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx`
+- `frontend/src/pages/qualityAudits/QualityAuditPlanScheduleBasePage.tsx`
+- `frontend/src/styles/qms-modern-planner-v2.css`
+
+### Backend
+
+- `backend/amodb/apps/quality/planner_calendar_router.py`
+- `backend/amodb/apps/quality/planner_router.py`
+- `backend/amodb/apps/quality/canonical_router.py`
 - `backend/amodb/apps/quality/canonical_router_legacy.py`
+- `backend/amodb/apps/quality/tests/test_planner_router.py`
 
-Do not modify unrelated QMS workflows unless required to repair a compile/runtime issue introduced by the planner.
+### Browser coverage
 
-## Non-negotiable constraints
+- `frontend/tests/e2e/qms-modern-planner-live.spec.ts`
+- `frontend/tests/e2e/qms-planner-lifecycle.spec.ts`
+- `frontend/tests/e2e/qms-planner-audit-handoff.spec.ts`
 
-1. **Tenant safety**
-   - Every read and mutation must filter by `amo_id`.
-   - Set PostgreSQL tenant/user context before queries.
-   - Never accept a tenant ID from the request body.
+## 2. Non-negotiable acceptance rules
 
-2. **Permission safety**
-   - Frontend capability flags are advisory only.
-   - Backend must enforce `qms.calendar.manage` for every planner mutation.
-   - Read-only projected events, especially training expiries, must never become draggable.
+### Tenant and permission safety
 
-3. **Controlled schedule changes**
-   - A drag/drop or keyboard move must require a meaningful reason.
-   - Use optimistic UI only when rollback is guaranteed.
-   - Protect against stale writes with `expected_old_date` or a stronger version token.
-   - Preserve end-date duration when moving multi-day events.
-   - Never silently move dependent records.
+- Every calendar source read and mutation must be tenant-scoped by `amo_id`.
+- PostgreSQL tenant/user context must be set before database access.
+- The planner must not accept a tenant ID from the request body.
+- Mutation authority must be enforced by the backend.
+- Generated training-expiry records must remain read-only.
 
-4. **No destructive shortcuts**
-   - Do not delete or rename existing API routes.
-   - Do not rewrite the full QMS page solely for stylistic reasons.
-   - Do not bypass migrations or write directly to production data during tests.
-   - Do not use `any` to hide TypeScript errors.
+### Source lifecycle safety
 
-5. **Accessibility parity**
-   - Every pointer interaction must have a keyboard equivalent.
-   - Event cards must remain semantic buttons or links.
-   - Keep visible focus treatment and reduced-motion support.
-   - Provide screen-reader announcements before enabling advanced drag libraries.
+- Audit schedules must be active and not deleted.
+- Active audits must not be deleted, closed, or cancelled.
+- CARs must not be closed or cancelled.
+- Training events must not be cancelled.
+- Training-expiry projections must use the latest active record for each user/course and exclude renewed or superseded records when lifecycle columns exist.
+- The lifecycle predicate used by a reschedule must be present in both the locked read and the conditional update.
 
-6. **Performance**
-   - Do not fetch hidden ranges unnecessarily.
-   - Abort superseded requests.
-   - Do not render thousands of agenda rows without virtualization.
-   - Do not add high-frequency pointer listeners to every event card.
+### Controlled mutation safety
 
-## Required work sequence
+- Rescheduling requires a reason.
+- `expected_old_date` protects against stale writes.
+- Multi-day duration is preserved.
+- A failed persistence attempt restores the frontend state.
+- Exactly one source row must be updated.
+- The source update and append-only activity entry commit in the same transaction.
 
-### 1. Build and type audit
+### Route safety
 
-Run:
+- The hardened exact calendar endpoint, capability endpoint, and reschedule endpoint must precede generic QMS catch-alls.
+- There must be one GET operation for `/integrations/calendar` on each canonical router family.
+- Non-calendar QMS routes must continue to use the established legacy page implementation.
 
-```bash
-cd frontend
-npm run build
-npm run lint
-npm run check:css
-npx vitest run src/pages/qms/planner/qmsPlannerModel.test.ts
-```
+### Accessibility and keyboard safety
 
-Repair all TypeScript, ESLint, CSS-contract, and unit-test failures. Do not suppress errors.
+- Escape closes exactly the topmost planner dialog on the first press.
+- Dialog shortcuts cannot stack additional dialogs.
+- Focus enters the active dialog, remains contained with Tab/Shift+Tab, and returns to the opener when closed.
+- Every icon-only close control has an accessible name.
+- Ctrl/Cmd/Alt browser shortcuts are not intercepted except intentional Ctrl/Cmd+K.
+- Shift+Arrow remains the keyboard equivalent for a move proposal.
 
-Run:
+### Clock safety
+
+- Current date/time calculations use Africa/Nairobi rather than browser-local time.
+- The live current-time display advances while the page remains open.
+- Today-dependent state changes across EAT midnight without a browser reload.
+- Only one bounded page-level clock timer is used.
+
+### Audit creation handoff
+
+- Planner title, date, one-time frequency, duration, and requested EAT time must be retained.
+- Navigation must open the established **Create audit schedule** drawer.
+- The handoff must be marked consumed so later query changes do not reopen it.
+- Unsupported quick-create types must stay disabled rather than discarding entered data.
+
+## 3. Required verification commands
+
+### Backend
 
 ```bash
 cd backend
-pytest amodb/apps/quality/tests/test_planner_router.py -q
+python -m compileall -q \
+  amodb/apps/quality/canonical_router.py \
+  amodb/apps/quality/canonical_router_legacy.py \
+  amodb/apps/quality/planner_calendar_router.py \
+  amodb/apps/quality/planner_router.py \
+  amodb/apps/quality/tests/test_planner_router.py
+
+APP_ENV=test \
+ALLOW_SQLITE_FOR_TESTS=1 \
+DATABASE_URL=sqlite+pysqlite:///:memory: \
+DATABASE_WRITE_URL=sqlite+pysqlite:///:memory: \
+SECRET_KEY=qms-planner-verification \
+QUALITY_SCHEMA_STRICT=0 \
+pytest -q amodb/apps/quality/tests/test_planner_router.py
 ```
 
-Repair backend import, validation, and test failures.
-
-### 2. Route verification
-
-Verify:
-
-- `/maintenance/:amoCode/quality/calendar/month`
-- `/maintenance/:amoCode/quality/calendar/week`
-- `/maintenance/:amoCode/quality/calendar/day`
-- `/maintenance/:amoCode/quality/calendar/list`
-
-All must render `QmsPlannerPage`.
-
-All non-calendar QMS routes must still render `QmsCanonicalLegacyPage`.
-
-Add or update route tests if this distinction is not covered.
-
-### 3. Planner API verification
-
-Verify that `canonical_router.py` exposes both legacy endpoints and:
-
-- `GET /integrations/calendar/planner-capabilities`
-- `PATCH /integrations/calendar/reschedule`
-
-Add endpoint-level tests using a disposable test database or transaction fixture. Cover:
-
-- successful audit move;
-- successful multi-day audit move with preserved duration;
-- successful training-event move;
-- CAR due-date move;
-- read-only training-expiry rejection;
-- cross-tenant record rejection;
-- missing permission rejection;
-- stale expected-date conflict;
-- unchanged-date rejection;
-- reason validation;
-- rollback when update fails.
-
-### 4. Immutable schedule-change ledger
-
-Add a canonical QMS planner change-log model and Alembic migration. Do not reuse a training-only audit table.
-
-Minimum fields:
-
-- `id` UUID;
-- `amo_id`;
-- `actor_user_id`;
-- `support_session_id` nullable;
-- `event_id`;
-- `module`;
-- `entity_type`;
-- `entity_id`;
-- `event_type`;
-- `old_start_date`;
-- `old_end_date` nullable;
-- `new_start_date`;
-- `new_end_date` nullable;
-- `reason`;
-- `trace_id`;
-- `created_at` UTC;
-- optional JSON metadata for client view, timezone, conflicts, and notification results.
-
-Rules:
-
-- append-only;
-- tenant-scoped indexes;
-- no update/delete application endpoint;
-- insert in the same transaction as the source schedule change;
-- rollback both source change and ledger insert on failure.
-
-### 5. Conflict service
-
-Before confirming a move, return server-side conflicts for:
-
-- same lead auditor/owner on target date;
-- overlapping active audit dates;
-- training-event overlap for the same participants when participant data is available;
-- closed/cancelled/obsolete records;
-- invalid end-date ordering;
-- source-specific locked workflow states.
-
-Expose a dry-run endpoint or support `validate_only=true` on reschedule. Client-side conflict hints must not replace server validation.
-
-### 6. Drag/drop hardening
-
-The current implementation uses native HTML drag/drop and Shift+Arrow parity.
-
-Evaluate whether to retain it or adopt dnd-kit. If adopting dnd-kit:
-
-- add Pointer and Keyboard sensors;
-- use activation distance or long-press constraints to avoid accidental mobile drags;
-- add screen-reader instructions and live announcements;
-- preserve Shift+Arrow or an equivalent documented keyboard workflow;
-- keep optimistic rollback;
-- do not change source records until confirmation completes.
-
-Do not add a large calendar framework only to reproduce existing month/week markup. If FullCalendar is proposed, document licensing, bundle size, theme integration, accessibility tradeoffs, and why the current custom planner cannot meet requirements.
-
-### 7. Timed event support
-
-Extend the canonical event API to return ISO start/end datetimes and tenant timezone where source data supports time.
-
-Then implement:
-
-- 15/30-minute snap grid;
-- drag between all-day and timed sections;
-- resize handles for eligible planned events;
-- current-time indicator using tenant timezone;
-- visible overlap stacking;
-- invalid-drop preview;
-- rollback on persistence failure.
-
-Never synthesize a time for date-only regulatory or expiry records.
-
-### 8. Resource lanes
-
-Add a switchable resource view for:
-
-- auditor/owner;
-- department/auditee;
-- base/location;
-- eventually aircraft/fleet.
-
-Do not duplicate events to fake lanes. Normalize resource IDs in the API and render the same event against resolved resources.
-
-### 9. Saved views and preferences
-
-The current localStorage preferences are acceptable as an immediate fallback. Add tenant-scoped, per-user persisted preferences for:
-
-- default view;
-- visible day span;
-- density;
-- hidden categories;
-- weekend visibility;
-- rail state;
-- selected resource grouping;
-- timezone display choice.
-
-Use localStorage only as a cache/fallback after server persistence exists.
-
-### 10. Source completeness
-
-Extend the integrated calendar source registry for:
-
-- management-review meetings/actions;
-- controlled-document review dates;
-- external/regulatory commitments;
-- supplier approval/evaluation dates;
-- calibration due dates;
-- finding response/verification dates;
-- CAR effectiveness reviews;
-- risk treatment deadlines;
-- change-control implementation/review dates.
-
-Each source must declare:
-
-- view permission;
-- mutation permission;
-- authoritative date fields;
-- mutable/read-only status;
-- source link;
-- category;
-- owner/resource fields;
-- conflict rules.
-
-Do not show an enabled source filter with no backend source implementation unless it is visibly marked unavailable.
-
-### 11. Truncation and pagination
-
-The calendar must never silently omit events.
-
-Return:
-
-```json
-{
-  "items": [],
-  "total": 438,
-  "returned": 300,
-  "has_more": true,
-  "counts_by_category": {},
-  "counts_by_due_state": {},
-  "timezone": "Africa/Nairobi"
-}
-```
-
-For bounded month/week/day ranges, either fetch all pages or show an explicit incomplete-period warning. Virtualize large agenda lists.
-
-### 12. E2E verification
-
-Run the existing live planner test with a disposable tenant:
+### Frontend
 
 ```bash
-E2E_LIVE_QUALITY=1 npm run test:e2e -- tests/e2e/qms-modern-planner-live.spec.ts
+cd frontend
+npm ci --prefer-offline --no-audit --fund=false
+npm run test:qms-planner
+npm run check:css
+npm exec -- eslint \
+  src/pages/qms/QmsCanonicalPage.tsx \
+  src/pages/qms/planner/QmsPlannerLivePage.tsx \
+  src/pages/qms/planner/QmsPlannerPageV2.tsx \
+  src/pages/qms/planner/qmsPlannerClock.ts \
+  src/pages/qms/planner/qmsPlannerClock.test.ts \
+  src/pages/qms/planner/qmsPlannerModel.ts \
+  src/pages/qms/planner/qmsPlannerModel.test.ts \
+  src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx \
+  tests/e2e/qms-modern-planner-live.spec.ts \
+  tests/e2e/qms-planner-lifecycle.spec.ts \
+  tests/e2e/qms-planner-audit-handoff.spec.ts
+npm run build
+npx playwright install --with-deps chromium
+npm run preview -- --host 127.0.0.1 --port 4173
 ```
 
-Add mutation tests only behind `E2E_ALLOW_QUALITY_MUTATION=1` and only against disposable records.
+In another shell:
 
-Required viewport coverage:
+```bash
+cd frontend
+npx playwright test \
+  tests/e2e/qms-modern-planner-live.spec.ts \
+  tests/e2e/qms-planner-lifecycle.spec.ts \
+  tests/e2e/qms-planner-audit-handoff.spec.ts \
+  --workers=1
+```
 
-- 390×844;
-- 768×1024;
-- 1366×768;
-- 1600×950;
-- ultra-wide desktop.
+## 4. Review output
 
-Verify no document-level horizontal overflow, no clipped bottom sheets, and no focus traps.
+A final review must report only concrete P0, P1, or P2 defects that are reproducible from the current head. Do not restate already-fixed historical findings and do not require deferred product enhancements as merge blockers.
 
-## Visual acceptance criteria
+The following are outside this PR unless a regression proves they are required for the delivered slice:
 
-The interface must:
+- CAR/CAPA, training, management-review, or generic quick-create contracts;
+- timed resize and snap persistence;
+- cross-resource conflict dry-runs;
+- resource lanes;
+- tenant-configurable timezone API;
+- additional Reviews/Other source families;
+- server-persisted saved views;
+- natural-language scheduling.
 
-- feel like a planner rather than a dashboard card;
-- keep the central timeline visually dominant;
-- use thin grid lines and restrained shadows;
-- avoid box-in-box nesting;
-- use readable operational typography at standard text scale;
-- make current day/time, overdue items, selected items, and conflicts immediately legible;
-- animate only meaningful state changes;
-- retain full light/dark theme support;
-- remain usable at the portal's Standard, Large, and Extra Large text scales.
-
-## Completion output
-
-Provide:
-
-1. exact files changed;
-2. database migrations and rollback notes;
-3. API contract changes;
-4. permissions introduced or required;
-5. tests run with exact results;
-6. screenshots for desktop, tablet, and mobile;
-7. known limitations;
-8. follow-up items that are deliberately outside this PR.
-
-Do not claim completion unless the build and relevant automated tests pass.
+Do not claim readiness unless the focused backend tests, planner unit tests, targeted lint, production build, CSS contract, and deterministic browser tests pass in a runnable checkout.
