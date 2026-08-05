@@ -50,6 +50,42 @@ jobs:
           echo "8fd4528f93dd6e7efa907569c0bcd29f8948ad10df7bc502a057086ebfbda40b  /tmp/daily-utilisation.tgz" | sha256sum --check --strict
           tar -xzf /tmp/daily-utilisation.tgz -C .
 
+      - name: Apply reviewed frontend typing correction
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/pages/planning/DailyAircraftUtilisationPage.tsx")
+          source = path.read_text()
+          old = '''      return {
+                ...current,
+                [componentId]: {
+                  enabled: false,
+                  hours: defaultHours || "0.00",
+                  cycles: defaultCycles || "0",
+                  reason: "",
+                  ...current[componentId],
+                  ...patch,
+                },
+              };'''
+          new = '''      const existing = current[componentId] ?? {
+                enabled: false,
+                hours: defaultHours || "0.00",
+                cycles: defaultCycles || "0",
+                reason: "",
+              };
+              return {
+                ...current,
+                [componentId]: {
+                  ...existing,
+                  ...patch,
+                },
+              };'''
+          if old not in source:
+              raise SystemExit("expected frontend override snippet was not found")
+          path.write_text(source.replace(old, new))
+          PY
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
