@@ -14,6 +14,7 @@ import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
 import { clearApiResponseCache } from "./services/apiClient";
 import { installPortalFetchErrorBridge } from "./services/portalFetchErrorBridge";
+import { installPortalUploadGuard } from "./services/portalUploadGuard";
 import { preloadRoute } from "./app/routePreload";
 
 import "./styles/auth.css";
@@ -29,7 +30,14 @@ const App: React.FC = () => {
 
   void scheme;
 
-  useEffect(() => installPortalFetchErrorBridge(), []);
+  useEffect(() => {
+    const removeFetchBridge = installPortalFetchErrorBridge();
+    const removeUploadGuard = installPortalUploadGuard();
+    return () => {
+      removeUploadGuard();
+      removeFetchBridge();
+    };
+  }, []);
 
   useEffect(() => {
     return onSessionEvent((detail) => {
