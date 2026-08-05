@@ -50,6 +50,7 @@ jobs:
           )
           contract.write_text(source, encoding='utf-8')
           PY
+          python .github/scripts/apply_pdf_reader_contract_followup.py
 
       - name: Install locked frontend dependencies
         working-directory: frontend
@@ -96,6 +97,46 @@ jobs:
           print("OpenJPEG WASM, JavaScript fallback and QCMS assets are present in the production build.")
           PY
 
+      - name: Verify decoder resources from the Vite development server
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pdfjs_version="$(node -p "require('./node_modules/pdfjs-dist/package.json').version")"
+          npm run dev -- --host 127.0.0.1 --port 4174 --strictPort >/tmp/pdf-reader-vite.log 2>&1 &
+          vite_pid=$!
+          cleanup() {
+            kill "$vite_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 40); do
+            if curl --silent --fail --output /dev/null "http://127.0.0.1:4174/"; then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/pdf-reader-vite.log
+            exit 1
+          fi
+          root="http://127.0.0.1:4174/pdfjs/${pdfjs_version}"
+          curl --fail --silent --show-error --output /tmp/openjpeg.wasm --dump-header /tmp/openjpeg.headers "${root}/wasm/openjpeg.wasm"
+          curl --fail --silent --show-error --output /tmp/openjpeg-fallback.js "${root}/wasm/openjpeg_nowasm_fallback.js"
+          curl --fail --silent --show-error --output /tmp/cmap.bcmap "${root}/cmaps/Adobe-GB1-UCS2.bcmap"
+          curl --fail --silent --show-error --output /tmp/foxit-serif.pfb "${root}/standard_fonts/FoxitSerif.pfb"
+          test -s /tmp/openjpeg.wasm
+          test -s /tmp/openjpeg-fallback.js
+          test -s /tmp/cmap.bcmap
+          test -s /tmp/foxit-serif.pfb
+          grep -qi '^Content-Type: application/wasm' /tmp/openjpeg.headers
+          grep -qi '^Cache-Control: public, max-age=31536000, immutable' /tmp/openjpeg.headers
+          if curl --silent --fail --output /dev/null "${root}/wasm/../../package.json"; then
+            echo 'Unsafe PDF.js asset traversal unexpectedly succeeded.'
+            exit 1
+          fi
+          echo 'Vite development serves OpenJPEG, CMap and standard-font assets from the versioned same-origin path.'
+
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
 
@@ -110,6 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f .github/scripts/apply_pdf_reader_runtime_fix.py
+          rm -f .github/scripts/apply_pdf_reader_contract_followup.py
           rm -f .github/triggers/apply-pdf-reader-jpx-performance.txt
           rm -f .github/workflows/apply-pdf-reader-jpx-performance.yml
           git config user.name 'github-actions[bot]'
