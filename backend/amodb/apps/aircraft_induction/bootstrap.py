@@ -2,6 +2,7 @@
 
 from . import service_facade as hardened
 from . import services as base
+from . import auto_mapping as _auto_mapping  # noqa: F401
 from . import xlsb_support as _xlsb_support  # noqa: F401
 
 base.publish_revision = hardened.publish_revision
