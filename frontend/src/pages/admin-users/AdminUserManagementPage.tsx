@@ -200,6 +200,14 @@ function PlacementCell({
     : user.base_station_name || "Unassigned";
   const code = isDepartment ? null : user.base_station_code;
   const canEdit = user.is_active || Boolean(value);
+  const activeDepartments = departments.filter((department) => department.is_active);
+  const currentDepartment = value
+    ? departments.find((department) => department.id === value)
+    : undefined;
+  const currentBase = value ? bases.find((base) => base.id === value) : undefined;
+  const currentValueIsAssignable = isDepartment
+    ? Boolean(currentDepartment?.is_active)
+    : Boolean(currentBase);
 
   if (editing) {
     return (
@@ -215,21 +223,23 @@ function PlacementCell({
           <option value="">Unassigned</option>
           {user.is_active
             ? isDepartment
-              ? departments
-                  .filter((department) => department.is_active)
-                  .map((department) => (
-                    <option key={department.id} value={department.id}>
-                      {department.name}
-                    </option>
-                  ))
+              ? activeDepartments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))
               : bases.map((base) => (
                   <option key={base.id} value={base.id}>
                     {base.code} · {base.name}
                   </option>
                 ))
             : null}
-          {!user.is_active && value ? (
-            <option value={value}>{code ? `${code} · ${label}` : label}</option>
+          {value && (!user.is_active || !currentValueIsAssignable) ? (
+            <option value={value}>
+              {code
+                ? `${code} · ${label}`
+                : `${label}${currentDepartment && !currentDepartment.is_active ? " (inactive)" : ""}`}
+            </option>
           ) : null}
         </select>
         <IconButton label="Cancel editing" onClick={() => setEditing(false)} disabled={pending}>
@@ -1017,7 +1027,7 @@ export default function AdminUserManagementPage() {
                       return (
                         <tr
                           key={user.id}
-                          className={`${selectedIds.includes(user.id) ? "is-selected" : ""}${
+                          className={`${selectedIds.includes(user.id) ? " is-selected" : ""}${
                             !user.is_active ? " is-inactive" : ""
                           }`}
                         >
@@ -1315,8 +1325,11 @@ export default function AdminUserManagementPage() {
                   >
                     <option value="LINE">Line</option>
                     <option value="BASE">Base</option>
-                    <option value="SHOP">Shop</option>
-                    <option value="ALL">All</option>
+                    <option value="COMPONENT">Component</option>
+                    <option value="STRUCTURES">Structures</option>
+                    <option value="AVIONICS">Avionics</option>
+                    <option value="POWERPLANT">Powerplant</option>
+                    <option value="OTHER">Other</option>
                   </select>
                 </label>
                 <label>
