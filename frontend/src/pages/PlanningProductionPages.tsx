@@ -1,6 +1,5 @@
 export {
   PlanningDashboardPage,
-  PlanningUtilisationPage,
   PlanningForecastPage,
   PlanningAmpPage,
   PlanningTaskLibraryPage,
@@ -13,6 +12,8 @@ export {
   PublicationReviewPage,
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
+
+export { DailyAircraftUtilisationPage as PlanningUtilisationPage } from "./planning/DailyAircraftUtilisationPage";
 
 export {
   ProductionDashboardPage,

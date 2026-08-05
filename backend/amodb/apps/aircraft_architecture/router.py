@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from .aircraft_catalogue.router import router as catalogue_router
+from .daily_utilisation.router import router as daily_utilisation_router
 from .effectivity.router import router as effectivity_router
 from .import_staging.router import router as import_staging_router
 from .tenant_programmes.router import router as tenant_programmes_router
@@ -12,3 +13,4 @@ router.include_router(catalogue_router)
 router.include_router(effectivity_router)
 router.include_router(import_staging_router)
 router.include_router(tenant_programmes_router)
+router.include_router(daily_utilisation_router)
