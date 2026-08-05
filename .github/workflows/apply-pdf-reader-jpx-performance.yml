@@ -49,12 +49,38 @@ jobs:
           set -euo pipefail
           npm run build
           pdfjs_version="$(node -p "require('./node_modules/pdfjs-dist/package.json').version")"
-          test -f "dist/pdfjs/${pdfjs_version}/wasm/openjpeg.wasm"
-          test -f "dist/pdfjs/${pdfjs_version}/wasm/openjpeg_nowasm_fallback.js"
-          test -d "dist/pdfjs/${pdfjs_version}/cmaps"
-          test -d "dist/pdfjs/${pdfjs_version}/standard_fonts"
-          test "$(find "dist/pdfjs/${pdfjs_version}/cmaps" -type f | wc -l)" -gt 20
-          test "$(find "dist/pdfjs/${pdfjs_version}/standard_fonts" -type f | wc -l)" -gt 5
+          export PDFJS_VERSION="$pdfjs_version"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path.cwd()
+          version = os.environ["PDFJS_VERSION"]
+          for directory in ("wasm", "cmaps", "standard_fonts"):
+              source = root / "node_modules" / "pdfjs-dist" / directory
+              target = root / "dist" / "pdfjs" / version / directory
+              if not source.is_dir():
+                  raise SystemExit(f"Missing installed PDF.js source directory: {source}")
+              if not target.is_dir():
+                  raise SystemExit(f"Missing built PDF.js asset directory: {target}")
+              source_files = {path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file()}
+              target_files = {path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file()}
+              missing = sorted(source_files - target_files)
+              if missing:
+                  raise SystemExit(f"PDF.js {directory} assets missing from build: {missing[:20]}")
+              print(f"Verified {len(source_files)} copied PDF.js {directory} files.")
+
+          wasm_names = {
+              path.name.lower()
+              for path in (root / "dist" / "pdfjs" / version / "wasm").rglob("*")
+              if path.is_file()
+          }
+          if not any("openjpeg" in name for name in wasm_names):
+              raise SystemExit(f"OpenJPEG runtime not found. Built WASM files: {sorted(wasm_names)}")
+          if not any("qcms" in name for name in wasm_names):
+              raise SystemExit(f"QCMS runtime not found. Built WASM files: {sorted(wasm_names)}")
+          print("OpenJPEG and QCMS runtime assets are present in the production build.")
+          PY
 
       - name: Run focused source contracts
         run: |
