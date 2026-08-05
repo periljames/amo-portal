@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { apiRequest, qmsPath } from "../../services/apiClient";
 
 
 const ACTIVE_REFRESH_INTERVAL_MS = 45_000;
@@ -10,6 +11,11 @@ const MUTATION_ACTION_PATTERN = /\b(save|create|update|submit|approve|issue|run|
 
 function isQualityPath(pathname: string): boolean {
   return /^\/maintenance\/[^/]+\/quality(?:\/|$)/i.test(pathname);
+}
+
+function qualityAmoCode(pathname: string): string | null {
+  const match = pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/|$)/i);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function isQualityQueryKey(queryKey: readonly unknown[]): boolean {
@@ -118,7 +124,19 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") refresh(false);
     };
-    const onExplicitRefresh = () => refresh(true, true);
+    const onExplicitRefresh = () => {
+      refresh(true, true);
+      const amoCode = qualityAmoCode(location.pathname);
+      if (!amoCode) return;
+      // A bounded authoritative probe guarantees that an explicit refresh always
+      // reaches the tenant backend even when the current legacy page is not backed
+      // by a mounted React Query observer. The page queries are still revalidated
+      // above, and probe failure does not interrupt the workspace.
+      void apiRequest<Record<string, unknown>>(qmsPath(amoCode, "/dashboard-lite"), {
+        timeoutMs: 8_000,
+        cacheTtlMs: 0,
+      }).catch(() => undefined);
+    };
     const onClick = (event: MouseEvent) => {
       const element = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
       if (!element) return;
