@@ -2,6 +2,7 @@ import { authHeaders, getCachedUser } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
+import { getPdfReaderPerformanceProfile } from "./pdfPerformance";
 
 export type PublicationUploadPreview = {
   filename: string;
@@ -270,11 +271,12 @@ export function publicationPdfSource(path: string): {
   const userId = getCachedUser()?.id;
   const separator = path.includes("?") ? "&" : "?";
   const partitionedPath = userId ? `${path}${separator}reader_user=${encodeURIComponent(userId)}` : path;
+  const performance = getPdfReaderPerformanceProfile();
   return {
     url: `${getApiBaseUrl()}${partitionedPath}`,
     httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
-    rangeChunkSize: 512 * 1024,
+    rangeChunkSize: performance.rangeChunkSize,
     disableAutoFetch: false,
     disableRange: false,
     disableStream: false,

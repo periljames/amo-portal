@@ -1,1 +1,0 @@
-Rerun the complete PDF.js decoder validation using the runtime asset directory allowlist, then commit the adaptive reader repair.

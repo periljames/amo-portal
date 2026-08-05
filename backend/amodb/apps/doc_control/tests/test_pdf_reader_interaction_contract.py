@@ -47,7 +47,8 @@ def test_render_window_is_bounded_stable_and_prefetches_ahead() -> None:
     assert "radius * 2 + 1" in source
     assert "function samePages" in source
     assert "samePages(current, next) ? current : next" in source
-    assert 'rootMargin: "1200px 0px"' in source
+    assert "performanceProfile.prefetchMarginPx" in source
+    assert "hotPageWindow" in source
     assert "currentPageRef.current" in source
 
 
@@ -99,11 +100,25 @@ def test_scripted_source_uses_server_sanitized_reader_but_preserves_original_dow
     assert 'X-Publication-Source": "script-disabled-working-template"' in form_override
 
 
-def test_jpx_images_use_secure_pdfjs_decoder_fallback() -> None:
+def test_jpx_images_use_packaged_pdfjs_decoders() -> None:
     config = _source(READER_CONFIG)
+    vite = _source(REPOSITORY_ROOT / "frontend/vite.config.ts")
 
-    assert "useWasm: false" in config
-    assert "JavaScript OpenJPEG fallback" in config
+    assert "useWasm: true" in config
+    assert "wasmUrl:" in config
+    assert "cMapUrl:" in config
+    assert "standardFontDataUrl:" in config
+    assert "__PDFJS_ASSET_VERSION__" in config
+    assert "fs.cpSync" in vite
+    assert "pdfJsRuntimeAssetsPlugin" in vite
+    assert "configureServer(server)" in vite
+    assert "pdfJsAssetDirectorySet.has" in vite
+    assert "assetPath.startsWith(allowedRoot)" in vite
+    assert "application/wasm" in vite
+    assert "max-age=31536000, immutable" in vite
+    assert "nullopenjpeg_nowasm_fallback.js" in vite
+    for directory in ("wasm", "cmaps", "standard_fonts"):
+        assert directory in vite
     assert "isEvalSupported: false" in config
     assert "enableScripting: false" in config
 
