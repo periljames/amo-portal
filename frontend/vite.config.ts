@@ -1,13 +1,28 @@
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import type { ServerOptions } from 'node:https'
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { defineConfig, loadEnv, normalizePath, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 import { DEV_API_PROXY_PATTERN, shouldServePlatformSpa } from './src/services/devProxyRouting'
 
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
+const require = createRequire(import.meta.url)
+const pdfJsPackagePath = require.resolve('pdfjs-dist/package.json')
+const pdfJsDistRoot = path.dirname(pdfJsPackagePath)
+const pdfJsPackage = JSON.parse(fs.readFileSync(pdfJsPackagePath, 'utf8')) as { version?: string }
+const pdfJsAssetVersion = String(pdfJsPackage.version || 'unknown')
+const pdfJsAssetDirectories = ['wasm', 'cmaps', 'standard_fonts'] as const
+
+const pdfJsStaticAssetsPlugin = () => viteStaticCopy({
+  targets: pdfJsAssetDirectories.map((directory) => ({
+    src: normalizePath(path.join(pdfJsDistRoot, directory, '*')),
+    dest: `pdfjs/${pdfJsAssetVersion}/${directory}`,
+  })),
+})
 
 const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
   const configured = env.VITE_ALLOWED_HOSTS
@@ -82,7 +97,10 @@ export default defineConfig(({ mode }) => {
   const proxy = resolveDevProxy(env)
 
   return {
-    plugins: [platformSpaNavigationPlugin(), react()],
+    define: {
+      __PDFJS_ASSET_VERSION__: JSON.stringify(pdfJsAssetVersion),
+    },
+    plugins: [platformSpaNavigationPlugin(), pdfJsStaticAssetsPlugin(), react()],
     server: {
       https,
       allowedHosts,
