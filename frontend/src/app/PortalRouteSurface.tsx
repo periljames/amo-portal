@@ -112,6 +112,40 @@ export const AppRouter: React.FC = () => {
     );
   }
 
+  if (module === "admin" && view === "reporting-lines" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/reporting-lines"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="reporting lines">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <ReportingLineBuilderPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "my-profile" && parts.length === 3) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/my-profile"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="organization profile">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="my-profile">
+                <MyOrganizationProfilePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
   if (
     DEPARTMENT_HOMES.has(module)
     && (parts.length === 3 || (parts.length === 4 && SIMPLE_DEPARTMENT_VIEWS.has(view)))
