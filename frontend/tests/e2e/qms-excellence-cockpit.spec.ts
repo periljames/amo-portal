@@ -312,7 +312,7 @@ test("QMS root directly renders the cross-module assurance control centre", asyn
   await expect(cockpit).toBeVisible();
   await expect(cockpit.getByRole("heading", { name: "Quality Control Centre" })).toBeVisible();
   await expect(cockpit.getByLabel(/Operational readiness 78 percent/)).toBeVisible();
-  await expect(cockpit.getByText("Overdue corrective actions")).toBeVisible();
+  await expect(cockpit.getByText("Overdue corrective actions", { exact: true }).first()).toBeVisible();
   await expect(cockpit.getByText("Expired supplier approvals")).toBeVisible();
   await expect(cockpit.getByText("Overdue calibration")).toBeVisible();
   await expect(page.locator("html")).not.toHaveClass(/quality-excellence-active/);
@@ -324,7 +324,7 @@ test("Quality management selects and links a validated tenant source record", as
 
   await expect(page.getByRole("heading", { name: "Versioned control library" })).toBeVisible();
   await expect(page.getByText("145.A.65-C01 · v1")).toBeVisible();
-  await page.getByRole("button", { name: "Evidence" }).click();
+  await page.getByRole("button", { name: "Evidence", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Link authoritative evidence" })).toBeVisible();
   await page.getByPlaceholder("Search controlled document").fill("MOE");
   await page.getByRole("button", { name: /MOE-3.2 · Quality audit procedure/ }).click();
