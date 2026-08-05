@@ -6,7 +6,7 @@ on:
       - agent/aircraft-induction-architecture
     paths:
       - ".github/workflows/aircraft-daily-utilisation-apply.yml"
-      - ".github/transfer/daily-utilisation.part*"
+      - ".github/transfer/daily-utilisation.bin*"
 
 permissions:
   contents: write
@@ -37,14 +37,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/aircraft-induction-architecture
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Reconstruct and verify reviewed source bundle
         run: |
-          cat .github/transfer/daily-utilisation.part00 \
-              .github/transfer/daily-utilisation.part01 \
-              .github/transfer/daily-utilisation.part02 > /tmp/daily-utilisation.b64
-          base64 --decode /tmp/daily-utilisation.b64 > /tmp/daily-utilisation.tgz
+          cat .github/transfer/daily-utilisation.bin00 \
+              .github/transfer/daily-utilisation.bin01 \
+              .github/transfer/daily-utilisation.bin02 \
+              .github/transfer/daily-utilisation.bin03 \
+              .github/transfer/daily-utilisation.bin04 \
+              .github/transfer/daily-utilisation.bin05 > /tmp/daily-utilisation.tgz
           echo "8fd4528f93dd6e7efa907569c0bcd29f8948ad10df7bc502a057086ebfbda40b  /tmp/daily-utilisation.tgz" | sha256sum --check --strict
           tar -xzf /tmp/daily-utilisation.tgz -C .
 
