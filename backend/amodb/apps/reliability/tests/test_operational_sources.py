@@ -10,27 +10,106 @@ from amodb.apps.reliability import operational_sources as ops
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
 
-def test_flight_delay_requires_whole_delay_minutes():
-    with pytest.raises(ValidationError):
-        ops.FlightOperationCreate(
-            record_number="OPS-001",
-            event_type="TECHNICAL_DELAY",
-            occurred_at=NOW,
-            aircraft_serial_number="AC-001",
-            flight_number="SLK101",
-            description="Technical departure delay.",
-        )
-
+def test_flight_delay_is_derived_from_departure_times():
     payload = ops.FlightOperationCreate(
         record_number="OPS-001",
         event_type="TECHNICAL_DELAY",
-        occurred_at=NOW,
+        scheduled_departure_at=NOW,
+        actual_departure_at=NOW + timedelta(minutes=18),
         aircraft_serial_number="AC-001",
         flight_number="SLK101",
-        delay_minutes=18,
         description="Technical departure delay.",
     )
     assert payload.delay_minutes == 18
+    assert payload.occurred_at == NOW + timedelta(minutes=18)
+    assert payload.dispatch_impact == "DELAYED_DEPARTURE"
+
+
+def test_flight_delay_rejects_missing_or_conflicting_timing():
+    common = dict(
+        record_number="OPS-001",
+        event_type="TECHNICAL_DELAY",
+        aircraft_serial_number="AC-001",
+        flight_number="SLK101",
+        description="Technical departure delay.",
+    )
+    with pytest.raises(ValidationError, match="scheduled and actual"):
+        ops.FlightOperationCreate(**common)
+    with pytest.raises(ValidationError, match="after scheduled"):
+        ops.FlightOperationCreate(
+            **common,
+            scheduled_departure_at=NOW,
+            actual_departure_at=NOW,
+        )
+    with pytest.raises(ValidationError, match="must match"):
+        ops.FlightOperationCreate(
+            **common,
+            scheduled_departure_at=NOW,
+            actual_departure_at=NOW + timedelta(minutes=18),
+            delay_minutes=17,
+        )
+
+
+def test_flight_event_rejects_conflicting_dispatch_impact():
+    with pytest.raises(ValidationError, match="dispatch_impact conflicts"):
+        ops.FlightOperationCreate(
+            record_number="OPS-CONFLICT",
+            event_type="DIVERSION",
+            occurred_at=NOW,
+            aircraft_serial_number="AC-001",
+            flight_number="SLK100",
+            dispatch_impact="RETURN_TO_GATE",
+            description="Conflicting operational classification.",
+        )
+
+
+def test_flight_cancellation_uses_schedule_without_actual_departure():
+    payload = ops.FlightOperationCreate(
+        record_number="OPS-002",
+        event_type="TECHNICAL_CANCELLATION",
+        occurred_at=NOW - timedelta(minutes=30),
+        scheduled_departure_at=NOW,
+        aircraft_serial_number="AC-001",
+        flight_number="SLK102",
+        description="Flight cancelled following an unserviceable condition.",
+    )
+    assert payload.delay_minutes is None
+    assert payload.dispatch_impact == "CANCELLED"
+    with pytest.raises(ValidationError, match="cannot contain an actual departure"):
+        ops.FlightOperationCreate(
+            record_number="OPS-003",
+            event_type="TECHNICAL_CANCELLATION",
+            occurred_at=NOW - timedelta(minutes=30),
+            scheduled_departure_at=NOW,
+            actual_departure_at=NOW + timedelta(minutes=5),
+            aircraft_serial_number="AC-001",
+            flight_number="SLK103",
+            description="Contradictory cancellation timing.",
+        )
+
+
+def test_non_delay_flight_event_derives_dispatch_impact():
+    payload = ops.FlightOperationCreate(
+        record_number="OPS-004",
+        event_type="DIVERSION",
+        occurred_at=NOW,
+        aircraft_serial_number="AC-001",
+        flight_number="SLK104",
+        description="Diversion due to a technical indication.",
+    )
+    assert payload.dispatch_impact == "DIVERTED"
+    assert payload.delay_minutes is None
+
+
+def test_non_delay_flight_event_requires_occurrence_time():
+    with pytest.raises(ValidationError, match="requires an occurrence time"):
+        ops.FlightOperationCreate(
+            record_number="OPS-004",
+            event_type="DIVERSION",
+            aircraft_serial_number="AC-001",
+            flight_number="SLK104",
+            description="Diversion due to a technical indication.",
+        )
 
 
 def test_deferral_expiry_cannot_precede_application():
