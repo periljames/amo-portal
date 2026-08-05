@@ -2,7 +2,8 @@ import { getCachedUser } from "../../services/auth";
 import type { PdfReaderCapabilities } from "../../services/pdfReader";
 import type { PdfWorkingCopyIdentity } from "./pdfWorkingCopyStore";
 
-const CACHE_PREFIX = "amo-pdf-capabilities:v1";
+const CACHE_SCHEMA_VERSION = "v1";
+const CACHE_PREFIX = `amo-pdf-capabilities:${CACHE_SCHEMA_VERSION}`;
 const CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 type CachedCapabilities = {
