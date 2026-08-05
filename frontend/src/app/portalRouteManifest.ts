@@ -62,7 +62,7 @@ const PLANNING: FeatureSection[] = [
     feature("planning-ad-sb-eo", "AD / SB / EO Control", "ad-sb-eo-control", "planning.ad-sb-eo-control"),
     feature("planning-non-routine", "Non-Routine Review", "non-routine-review", "planning.non-routine-review"),
     feature("planning-watchlists", "Watchlists", "watchlists", "planning.watchlists"),
-    feature("planning-publications", "Publication Review", "publication-review", "planning.publication-review"),
+    feature("planning-publications", "Publication Review", "publication-review", "planning.publications"),
     feature("planning-compliance", "Compliance Actions", "compliance-actions", "planning.compliance-actions"),
   ] },
 ];
@@ -361,6 +361,7 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
     { id: "admin-access", label: "People & Access", items: [
       item("admin-users", "User Management", "users", "users"),
       item("admin-corporate-structure", "Corporate Structure", "organization", "users"),
+      item("admin-reporting-lines", "Reporting Lines", "reporting-lines", "users"),
     ] },
     { id: "admin-configuration", label: "Portal Configuration", items: [
       item("admin-settings", "Usage & Limits", "settings", "settings"),
@@ -390,7 +391,7 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
     label: "Workspace",
     items: [
       { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, assigned), exact: true },
-      { id: "my-profile", label: "My Organization Profile", icon: "users", path: "/my-profile" },
+      { id: "my-profile", label: "My Organization Profile", icon: "users", path: `${base}/my-profile` },
       { id: "my-training", label: "My Training", icon: "training", path: `${base}/training` },
       { id: "my-roster", label: "My Roster", icon: "calendar", path: `${base}/rostering/my-roster` },
     ],
