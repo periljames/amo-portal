@@ -1,7 +1,8 @@
-"""Apply the hardened service implementations before API route functions run."""
+"""Initialize universal induction policy and source adapters."""
 
 from . import service_facade as hardened
 from . import services as base
+from . import xlsb_support as _xlsb_support  # noqa: F401
 
 base.publish_revision = hardened.publish_revision
 base.create_tenant_program_revision = hardened.create_tenant_program_revision
