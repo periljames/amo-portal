@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -168,6 +168,13 @@ def _date_as_utc(value: Optional[date]) -> Optional[datetime]:
     if value is None:
         return None
     return datetime.combine(value, time.max, tzinfo=timezone.utc)
+
+
+def _sync_cursor(last_success_at: Optional[datetime]) -> datetime:
+    """Overlap internal sync windows so records committed near a cutoff cannot be lost."""
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    resolved = _as_utc(last_success_at)
+    return max(resolved - timedelta(minutes=5), epoch) if resolved else epoch
 
 
 def _source_configuration(spec: InternalSourceSpec) -> Dict[str, Any]:
@@ -458,7 +465,6 @@ def harvest_internal_sources(
     if not actor_user_id:
         raise HTTPException(status_code=400, detail="An accountable actor is required for internal Reliability sync.")
     sources, _ = ensure_reserved_sources(db, amo_id=amo_id, actor_user_id=actor_user_id)
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     builders = {
         "WORKPACK-TASKS": _workpack_records,
         "COMPONENT-REMOVALS": _component_records,
@@ -467,7 +473,7 @@ def harvest_internal_sources(
     results: List[schemas.ReliabilityIngestionResult] = []
     for code, builder in builders.items():
         source = sources[code]
-        cursor = _as_utc(source.last_success_at) or epoch
+        cursor = _sync_cursor(source.last_success_at)
         records = builder(db, amo_id=amo_id, cursor=cursor)
         if records:
             results.append(
@@ -488,7 +494,9 @@ def harvest_internal_sources(
                 )
             )
         else:
-            source.next_poll_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            source.last_success_at = now
+            source.next_poll_at = now + timedelta(minutes=max(source.poll_interval_minutes or 60, 5))
             db.commit()
 
     usage_source = sources["TECH-RECORDS-USAGE"]

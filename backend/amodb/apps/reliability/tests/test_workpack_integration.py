@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -78,3 +78,9 @@ def test_router_registers_manual_and_coverage_contracts():
     assert "/reliability/manual-entry" in paths
     assert "/reliability/internal-sources/configure" in paths
     assert "/reliability/internal-sources/coverage" in paths
+
+
+def test_sync_cursor_overlaps_last_success_without_crossing_epoch():
+    last_success = datetime(2026, 8, 5, 7, 0, tzinfo=timezone.utc)
+    assert integration._sync_cursor(last_success) == last_success - timedelta(minutes=5)
+    assert integration._sync_cursor(None) == datetime(1970, 1, 1, tzinfo=timezone.utc)
