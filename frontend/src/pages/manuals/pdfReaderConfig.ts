@@ -1,31 +1,30 @@
+import { getPdfReaderPerformanceProfile, pdfDevicePixelRatio } from "../../services/pdfPerformance";
+
+declare const __PDFJS_ASSET_VERSION__: string;
+
+const applicationBase = String(import.meta.env.BASE_URL || "/").replace(/\/?$/, "/");
+const pdfJsAssetRoot = `${applicationBase}pdfjs/${encodeURIComponent(__PDFJS_ASSET_VERSION__)}/`;
+
 /**
  * React-PDF compares the options object by identity. Keep one immutable object
- * for the lifetime of the application so reader state updates never recreate
- * the underlying PDFDocumentLoadingTask.
+ * for the lifetime of the application so reader state changes never recreate
+ * the PDFDocumentLoadingTask.
  *
- * PDF.js 5 prefers WebAssembly for JPEG 2000 (JPX) decoding. The portal does
- * not publish PDF.js decoder binaries or relax its content-security policy for
- * runtime WASM compilation, so the default path leaves JPX image XObjects blank.
- * PDF.js includes a JavaScript OpenJPEG fallback; selecting it explicitly keeps
- * controlled manuals complete without weakening the portal CSP. Bounded page
- * rendering limits the additional decode cost to the active page window.
- *
- * Scripting is disabled independently of rendering. AcroForm widgets remain
- * interactive, while field JavaScript is removed from the server-side reader
- * derivative and cannot execute in PDF.js.
+ * PDF.js 5 requires its decoder/font resources to be published separately.
+ * The Vite build copies the exact installed pdfjs-dist resources under the
+ * versioned same-origin path used below. This prevents the broken
+ * `nullopenjpeg_nowasm_fallback.js` import and supports JPX/JPEG 2000 scans,
+ * packed CMaps and standard PDF fonts without weakening script controls.
  */
 export const PDF_DOCUMENT_OPTIONS = Object.freeze({
   isEvalSupported: false,
   enableScripting: false,
-  enableXfa: true,
-  useWasm: false,
+  enableXfa: false,
+  useWasm: true,
+  wasmUrl: `${pdfJsAssetRoot}wasm/`,
+  cMapUrl: `${pdfJsAssetRoot}cmaps/`,
+  cMapPacked: true,
+  standardFontDataUrl: `${pdfJsAssetRoot}standard_fonts/`,
 });
 
-/**
- * Keep text and forms sharp without forcing every continuously rendered page
- * to allocate a full device-resolution canvas on high-DPI displays.
- */
-export function pdfDevicePixelRatio(maximum = 1.4): number {
-  if (typeof window === "undefined") return 1;
-  return Math.min(window.devicePixelRatio || 1, maximum);
-}
+export { getPdfReaderPerformanceProfile, pdfDevicePixelRatio };
