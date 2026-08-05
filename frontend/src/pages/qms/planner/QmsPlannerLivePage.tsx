@@ -8,23 +8,37 @@ const CLOCK_REFRESH_MS = 30_000;
 function isFocusable(element: Element | null): element is HTMLElement {
   if (!(element instanceof HTMLElement) || !element.isConnected) return false;
   if (element.matches(":disabled, [aria-disabled='true']")) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  if (!element.getClientRects().length) return false;
   return typeof element.focus === "function";
+}
+
+function firstFocusable(...candidates: Array<HTMLElement | null>): HTMLElement | null {
+  return candidates.find((candidate) => isFocusable(candidate)) || null;
 }
 
 function fallbackTrigger(dialog: HTMLElement): HTMLElement | null {
   if (dialog.matches(".qms-planner-command")) {
-    return document.querySelector<HTMLElement>(".qms-planner-toolbar__search");
+    return firstFocusable(document.querySelector<HTMLElement>(".qms-planner-toolbar__search"));
   }
   if (dialog.matches(".qms-planner-create-modal")) {
-    return document.querySelector<HTMLElement>(".qms-planner-quick-schedule")
-      || document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child");
+    return firstFocusable(
+      document.querySelector<HTMLElement>(".qms-planner-quick-schedule"),
+      document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child"),
+    );
   }
   if (dialog.matches(".qms-planner-shortcuts")) {
-    return document.querySelector<HTMLElement>(".qms-planner-shortcut-link");
+    return firstFocusable(
+      document.querySelector<HTMLElement>(".qms-planner-shortcut-link"),
+      document.querySelector<HTMLElement>(".qms-planner-shortcut-summary button"),
+    );
   }
   if (dialog.querySelector("#qms-reschedule-title")) {
-    return document.querySelector<HTMLElement>(".qms-planner-inspector__actions button")
-      || document.querySelector<HTMLElement>(".qms-planner-event.is-selected");
+    return firstFocusable(
+      document.querySelector<HTMLElement>(".qms-planner-inspector__actions button"),
+      document.querySelector<HTMLElement>(".qms-planner-event.is-selected"),
+    );
   }
   return null;
 }
@@ -32,14 +46,19 @@ function fallbackTrigger(dialog: HTMLElement): HTMLElement | null {
 function shortcutTrigger(event: KeyboardEvent): HTMLElement | null {
   const key = event.key.toLowerCase();
   if (event.key === "/" || ((event.ctrlKey || event.metaKey) && key === "k")) {
-    return document.querySelector<HTMLElement>(".qms-planner-toolbar__search");
+    return firstFocusable(document.querySelector<HTMLElement>(".qms-planner-toolbar__search"));
   }
   if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "c") {
-    return document.querySelector<HTMLElement>(".qms-planner-quick-schedule")
-      || document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child");
+    return firstFocusable(
+      document.querySelector<HTMLElement>(".qms-planner-quick-schedule"),
+      document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child"),
+    );
   }
   if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "?") {
-    return document.querySelector<HTMLElement>(".qms-planner-shortcut-link");
+    return firstFocusable(
+      document.querySelector<HTMLElement>(".qms-planner-shortcut-link"),
+      document.querySelector<HTMLElement>(".qms-planner-shortcut-summary button"),
+    );
   }
   return null;
 }
@@ -78,7 +97,7 @@ function usePlannerDialogFocusRestoration(): void {
         const outside = lastOutsideFocusRef.current;
         openDialogsRef.current.set(
           dialog,
-          isFocusable(intended) ? intended : isFocusable(outside) ? outside : fallbackTrigger(dialog),
+          firstFocusable(intended, outside, fallbackTrigger(dialog)),
         );
         intendedTriggerRef.current = null;
       });
