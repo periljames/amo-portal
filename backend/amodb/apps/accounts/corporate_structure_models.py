@@ -34,7 +34,10 @@ class OrganizationUnit(Base):
         UniqueConstraint("amo_id", "code", name="uq_org_units_amo_code"),
         Index("ix_org_units_amo_parent", "amo_id", "parent_id"),
         Index("ix_org_units_amo_type_active", "amo_id", "unit_type", "is_active"),
-        CheckConstraint("headcount_limit IS NULL OR headcount_limit >= 0", name="ck_org_units_headcount_nonnegative"),
+        CheckConstraint(
+            "headcount_limit IS NULL OR headcount_limit >= 0",
+            name="headcount_nonnegative",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -71,7 +74,7 @@ class OrganizationPosition(Base):
     __table_args__ = (
         UniqueConstraint("amo_id", "code", name="uq_org_positions_amo_code"),
         Index("ix_org_positions_unit_active", "unit_id", "is_active"),
-        CheckConstraint("headcount_limit >= 1", name="ck_org_positions_headcount_positive"),
+        CheckConstraint("headcount_limit >= 1", name="headcount_positive"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -106,14 +109,14 @@ class PositionAssignment(Base):
     __table_args__ = (
         Index("ix_position_assignments_amo_user_status", "amo_id", "user_id", "status"),
         Index("ix_position_assignments_position_dates", "position_id", "effective_from", "effective_to"),
-        CheckConstraint("fte_percent > 0 AND fte_percent <= 100", name="ck_position_assignments_fte_range"),
+        CheckConstraint("fte_percent > 0 AND fte_percent <= 100", name="fte_range"),
         CheckConstraint(
             "effective_to IS NULL OR effective_to >= effective_from",
-            name="ck_position_assignments_effective_period",
+            name="effective_period",
         ),
         CheckConstraint(
             "matrix_reporting = false OR length(trim(coalesce(matrix_reason, ''))) > 0",
-            name="ck_position_assignments_matrix_reason",
+            name="matrix_reason",
         ),
     )
 
@@ -146,10 +149,13 @@ class WorkforceEngagement(Base):
     __tablename__ = "workforce_engagements"
     __table_args__ = (
         Index("ix_workforce_engagements_amo_user_status", "amo_id", "user_id", "status"),
-        CheckConstraint("probation_months IS NULL OR probation_months >= 0", name="ck_workforce_engagements_probation_nonnegative"),
+        CheckConstraint(
+            "probation_months IS NULL OR probation_months >= 0",
+            name="probation_nonnegative",
+        ),
         CheckConstraint(
             "end_date IS NULL OR end_date >= start_date",
-            name="ck_workforce_engagements_effective_period",
+            name="effective_period",
         ),
     )
 
