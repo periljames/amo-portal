@@ -31,7 +31,7 @@ class PersonnelTitlePreference(Base):
         ),
         CheckConstraint(
             "status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'SUPERSEDED')",
-            name="ck_personnel_title_preferences_status",
+            name="status",
         ),
     )
 
