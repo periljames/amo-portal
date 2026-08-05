@@ -37,11 +37,23 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Apply deterministic reader patch
-        run: python .github/scripts/apply_pdf_reader_runtime_fix.py
+        run: |
+          python .github/scripts/apply_pdf_reader_runtime_fix.py
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Install supported PDF.js asset copier
+          contract = Path('backend/amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py')
+          source = contract.read_text(encoding='utf-8')
+          source = source.replace(
+              '    assert "viteStaticCopy" in vite\n',
+              '    assert "fs.cpSync" in vite\n    assert "pdfJsRuntimeAssetsPlugin" in vite\n',
+          )
+          contract.write_text(source, encoding='utf-8')
+          PY
+
+      - name: Install locked frontend dependencies
         working-directory: frontend
-        run: npm install --save-dev vite-plugin-static-copy@4.1.1 --no-audit --fund=false
+        run: npm ci --prefer-offline --no-audit --fund=false
 
       - name: Build frontend and verify shipped decoder resources
         working-directory: frontend
@@ -75,11 +87,13 @@ jobs:
               for path in (root / "dist" / "pdfjs" / version / "wasm").rglob("*")
               if path.is_file()
           }
-          if not any("openjpeg" in name for name in wasm_names):
-              raise SystemExit(f"OpenJPEG runtime not found. Built WASM files: {sorted(wasm_names)}")
-          if not any("qcms" in name for name in wasm_names):
-              raise SystemExit(f"QCMS runtime not found. Built WASM files: {sorted(wasm_names)}")
-          print("OpenJPEG and QCMS runtime assets are present in the production build.")
+          if "openjpeg.wasm" not in wasm_names:
+              raise SystemExit(f"OpenJPEG WASM runtime not found. Built files: {sorted(wasm_names)}")
+          if "openjpeg_nowasm_fallback.js" not in wasm_names:
+              raise SystemExit(f"OpenJPEG JavaScript fallback not found. Built files: {sorted(wasm_names)}")
+          if "qcms_bg.wasm" not in wasm_names:
+              raise SystemExit(f"QCMS runtime not found. Built files: {sorted(wasm_names)}")
+          print("OpenJPEG WASM, JavaScript fallback and QCMS assets are present in the production build.")
           PY
 
       - name: Run focused source contracts
