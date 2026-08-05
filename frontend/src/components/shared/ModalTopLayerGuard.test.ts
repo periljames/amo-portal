@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const guard = readFileSync(new URL("./ModalTopLayerGuard.tsx", import.meta.url), "utf8");
 const guardCss = readFileSync(new URL("../../styles/modal-top-layer.css", import.meta.url), "utf8");
+const main = readFileSync(new URL("../../main.tsx", import.meta.url), "utf8");
 const routeGate = readFileSync(new URL("../QMS/QualityEnhancementsRouteGate.tsx", import.meta.url), "utf8");
 const standaloneManuals = readFileSync(new URL("../../standalone/manuals-main.tsx", import.meta.url), "utf8");
 const workforce = readFileSync(
@@ -17,10 +18,12 @@ describe("portal-wide modal top layer", () => {
     expect(guard).toContain("showPopover");
     expect(guard).toContain(":popover-open");
     expect(guard).toContain("selectTopLayerHost");
+    expect(guard).toContain("viewportWidth * 0.88");
     expect(guard).toContain("portal-modal-fallback-ancestor");
   });
 
   it("mounts the guard in both portal entry paths", () => {
+    expect(main).toContain("<QualityEnhancementsRouteGate />");
     expect(routeGate).toContain("<ModalTopLayerGuard />");
     expect(standaloneManuals).toContain("<ModalTopLayerGuard />");
   });
@@ -39,5 +42,6 @@ describe("portal-wide modal top layer", () => {
     expect(guardCss).toContain("overflow: hidden !important");
     expect(guardCss).toContain(".portal-modal-fallback-host");
     expect(guardCss).toContain("transform: none !important");
+    expect(guard).toContain("clearAddedPopoverAttribute");
   });
 });
