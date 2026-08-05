@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
-from amodb.apps.workforce import hr_service, models
+from amodb.apps.workforce import hr_schemas, hr_service, models
 from amodb.apps.workforce.work_pattern_assignment_locking import (
     postgres_safe_assignment_lock_scope,
     scope_employee_pattern_for_update,
+    scope_overtime_request_for_update,
 )
 
 
@@ -54,6 +55,24 @@ def test_assignment_lock_is_scoped_to_the_base_table() -> None:
 
     after = str(state.statement.compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE OF employee_work_pattern_assignments" in after
+    assert after.count("FOR UPDATE") == 1
+
+
+def test_overtime_lock_is_scoped_to_the_base_table() -> None:
+    statement = select(models.OvertimeRequest).with_for_update()
+    before = str(statement.compile(dialect=postgresql.dialect()))
+    assert "LEFT OUTER JOIN" in before
+    assert before.rstrip().endswith("FOR UPDATE")
+
+    state = SimpleNamespace(
+        is_select=True,
+        statement=statement,
+        all_mappers=[models.OvertimeRequest.__mapper__],
+    )
+    scope_overtime_request_for_update(state)
+
+    after = str(state.statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE OF overtime_requests" in after
     assert after.count("FOR UPDATE") == 1
 
 
@@ -253,6 +272,131 @@ def test_default_day_bootstrap_assigns_contracted_user_on_postgresql() -> None:
                 models.EmployeeWorkPatternAssignment.amo_id == amo_id,
                 models.EmployeeWorkPatternAssignment.user_id == user_id,
             )
+            .count()
+            == 1
+        )
+    finally:
+        _close_postgres_session(engine, connection, transaction, db)
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="PostgreSQL integration database is not configured",
+)
+def test_overtime_decision_executes_with_joined_relationships_on_postgresql() -> None:
+    engine, connection, transaction, db = _postgres_session()
+
+    today = date.today()
+    amo_id = _id()
+    requester_id = _id()
+    supervisor_id = _id()
+    base_id = _id()
+    request_id = _id()
+    starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    try:
+        db.add(
+            account_models.AMO(
+                id=amo_id,
+                amo_code=f"OT-{amo_id[:8]}",
+                name="Overtime Lock Test",
+                login_slug=f"overtime-{amo_id[:8]}",
+                time_zone="UTC",
+            )
+        )
+        db.flush()
+
+        db.add(
+            foundation_models.BaseStation(
+                id=base_id,
+                amo_id=amo_id,
+                code="OT-BASE",
+                name="Overtime Base",
+                base_type=foundation_models.BaseStationType.MAIN_BASE,
+            )
+        )
+        db.flush()
+
+        db.add_all(
+            [
+                account_models.User(
+                    id=requester_id,
+                    amo_id=amo_id,
+                    staff_code=f"OT-{requester_id[:8]}",
+                    email=f"{requester_id[:8]}@overtime-test.invalid",
+                    first_name="Overtime",
+                    last_name="Requester",
+                    full_name="Overtime Requester",
+                    role=account_models.AccountRole.TECHNICIAN,
+                    hashed_password="not-a-real-password-hash",
+                ),
+                account_models.User(
+                    id=supervisor_id,
+                    amo_id=amo_id,
+                    staff_code=f"OT-{supervisor_id[:8]}",
+                    email=f"{supervisor_id[:8]}@overtime-test.invalid",
+                    first_name="Overtime",
+                    last_name="Supervisor",
+                    full_name="Overtime Supervisor",
+                    role=account_models.AccountRole.MANAGER,
+                    hashed_password="not-a-real-password-hash",
+                ),
+            ]
+        )
+        db.flush()
+
+        db.add(
+            models.EmploymentContract(
+                id=_id(),
+                amo_id=amo_id,
+                user_id=requester_id,
+                contract_type=models.ContractType.PERMANENT,
+                employment_status=models.EmploymentStatus.ACTIVE,
+                effective_from=today,
+                effective_to=None,
+                standard_weekly_minutes=2400,
+                standard_daily_minutes=480,
+                fte_percentage=100,
+                primary_base_station_id=base_id,
+                supervisor_user_id=supervisor_id,
+                overtime_eligible=True,
+                created_by_user_id=supervisor_id,
+                updated_by_user_id=supervisor_id,
+            )
+        )
+        db.flush()
+
+        db.add(
+            models.OvertimeRequest(
+                id=request_id,
+                amo_id=amo_id,
+                user_id=requester_id,
+                starts_at=starts_at,
+                ends_at=starts_at + timedelta(hours=2),
+                requested_minutes=120,
+                reason="Operational coverage",
+                status=models.OvertimeRequestStatus.SUBMITTED,
+                created_by_user_id=requester_id,
+            )
+        )
+        db.flush()
+
+        row = hr_service.decide_overtime(
+            db,
+            amo_id=amo_id,
+            actor_user_id=supervisor_id,
+            request_id=request_id,
+            payload=hr_schemas.HrOvertimeDecisionRequest(
+                stage="SUPERVISOR",
+                decision="APPROVED",
+                comment="Coverage requirement verified",
+            ),
+        )
+
+        assert row.status == models.OvertimeRequestStatus.SUPERVISOR_APPROVED
+        assert (
+            db.query(models.OvertimeApproval)
+            .filter(models.OvertimeApproval.overtime_request_id == request_id)
             .count()
             == 1
         )
