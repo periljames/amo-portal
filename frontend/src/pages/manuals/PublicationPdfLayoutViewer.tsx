@@ -83,11 +83,38 @@ function searchResultPage(button: Element): number | null {
   return Number.isInteger(page) && page > 0 ? page : null;
 }
 
-function alignActiveNavigationRow(layout: HTMLElement): boolean {
+function navigationRowPage(row: HTMLElement): number | null {
+  const label = row.querySelector("small")?.textContent || row.textContent || "";
+  const match = label.match(/(?:\bp(?:age)?\.?\s*)(\d+)\b/i);
+  const page = Number(match?.[1] || 0);
+  return Number.isInteger(page) && page > 0 ? page : null;
+}
+
+function alignActiveNavigationRow(layout: HTMLElement, currentPage: number): boolean {
   const readerPage = layout.closest<HTMLElement>(".publication-reader-page");
   const container = readerPage?.querySelector<HTMLElement>(".publication-toc__list");
-  const row = container?.querySelector<HTMLElement>(".publication-toc__row.active");
-  if (!container || !row) return false;
+  if (!container) return false;
+
+  const rows = [...container.querySelectorAll<HTMLElement>(".publication-toc__row")];
+  const pageRows = rows
+    .map((row) => ({ row, page: navigationRowPage(row) }))
+    .filter((entry): entry is { row: HTMLElement; page: number } => Boolean(entry.page));
+  const exact = pageRows.find((entry) => entry.page === currentPage);
+  const preceding = pageRows
+    .filter((entry) => entry.page <= currentPage)
+    .sort((left, right) => right.page - left.page)[0];
+  const following = pageRows
+    .filter((entry) => entry.page > currentPage)
+    .sort((left, right) => left.page - right.page)[0];
+  const fallback = container.querySelector<HTMLElement>(".publication-toc__row.active");
+  const row = exact?.row || preceding?.row || following?.row || fallback;
+  if (!row) return false;
+
+  rows.forEach((candidate) => {
+    candidate.classList.toggle("active", candidate === row);
+    candidate.toggleAttribute("aria-current", candidate === row);
+  });
+  readerPage?.setAttribute("data-pdf-current-page", String(currentPage));
 
   const containerRect = container.getBoundingClientRect();
   const rowRect = row.getBoundingClientRect();
@@ -167,7 +194,7 @@ export default function PublicationPdfLayoutViewer({
       if (cancelled) return;
       frame = window.requestAnimationFrame(() => {
         if (cancelled) return;
-        if (alignActiveNavigationRow(layout)) return;
+        if (alignActiveNavigationRow(layout, currentPage)) return;
         if (attempt >= 14) return;
         timer = window.setTimeout(() => synchronize(attempt + 1), attempt < 4 ? 16 : 48);
       });
