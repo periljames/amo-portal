@@ -35,5 +35,9 @@ The workbook is a migration and reconciliation source. It is not retained as the
 - Training history uses the existing renewal and record-lifecycle controls.
 - New People rows never silently create accounts.
 - A personnel-only choice creates an inactive non-login identity linked to the personnel profile so licences and training history remain queryable without granting portal access.
+- Account-creation and personnel-only decisions are revalidated at commit; identity races return the row to explicit review.
+- Credentials are reconciled per person and authority: replacements are superseded, removals retired, and only the current credential remains primary.
 - Matrix rules are evaluated by the backend compliance engine, not inferred by the frontend.
+- Before the first explicit required `ALL` rule, active mandatory catalogue fallback courses are materialized as canonical requirements.
+- Post-preview commit failures retain review decisions and may be retried; commit progress remains isolated from tentative row results.
 - Derived workbook sheets are represented by live portal capabilities rather than duplicated stored calculations.

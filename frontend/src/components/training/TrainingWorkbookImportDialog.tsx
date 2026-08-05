@@ -66,6 +66,9 @@ function stageLabel(job: TrainingWorkbookImportJob | null): string {
     QUEUED_COMMIT: "Preparing controlled import",
     COMMITTING_COURSES: "Writing course catalogue",
     COMMITTING_PEOPLE: "Writing personnel and licences",
+    COMMITTING_ROLE_GROUPS: "Writing applicability groups",
+    COMMITTING_PERSON_ROLES: "Writing personnel role assignments",
+    COMMITTING_COURSE_MATRIX: "Writing course requirement matrix",
     COMMITTING_TRAINING: "Writing training history",
     COMPLETED: "Import completed",
     FAILED: "Import failed",
@@ -122,7 +125,9 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   const processed = job?.processed_rows || 0;
   const total = job?.total_rows || 0;
   const processingPercent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : uploadProgress?.percent ? Math.round(uploadProgress.percent) : 0;
-  const isReviewReady = job?.status === "PREVIEW_READY" || job?.status === "REVIEW_REQUIRED";
+  const previewCompleted = Boolean(job && job.sheets.length > 0 && job.total_rows > 0);
+  const isRetryableFailure = job?.status === "FAILED" && previewCompleted;
+  const isReviewReady = job?.status === "PREVIEW_READY" || job?.status === "REVIEW_REQUIRED" || isRetryableFailure;
   const unresolvedDecisions = reviewRows.filter((row) => row.decision_required && !decisions[row.id]).length;
 
   const filteredReviewRows = useMemo(() => {
@@ -339,6 +344,13 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
               </div>
             ) : null}
 
+            {isRetryableFailure && job.error_message ? (
+              <div className="training-import-alert training-import-alert--danger">
+                <AlertTriangle size={18} />
+                <span>The reviewed commit failed and can be retried. {job.error_message}</span>
+              </div>
+            ) : null}
+
             <section className="training-import-metrics" aria-label="Import reconciliation">
               {[
                 ["Create", job.created_count],
@@ -460,7 +472,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
             <>
               {job.duplicate_of_job_id ? <label className="training-import-force"><input type="checkbox" checked={forceReimport} onChange={(event) => setForceReimport(event.target.checked)} /> Force reviewed re-import</label> : null}
               <button type="button" className="primary-chip-btn" onClick={() => void commit()} disabled={committing || unresolvedDecisions > 0}>
-                {committing ? "Starting import…" : `Commit ${Math.max(0, total - job.failed_count - job.skipped_count).toLocaleString()} reviewed rows`}
+                {committing ? "Starting import…" : isRetryableFailure ? "Retry reviewed import" : `Commit ${Math.max(0, total - job.failed_count - job.skipped_count).toLocaleString()} reviewed rows`}
               </button>
             </>
           ) : null}

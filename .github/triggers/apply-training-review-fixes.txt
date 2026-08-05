@@ -1,1 +1,0 @@
-Apply the exact tested patch from PR comment 5178920889 and remove this trigger after successful validation.

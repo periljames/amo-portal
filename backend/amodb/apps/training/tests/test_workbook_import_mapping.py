@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from datetime import date
 
-from amodb.apps.training.workbook_import import WORKBOOK_SHEETS, _course_payload, _default_frequency_months, _person_payload, _workbook_params
+from amodb.apps.training.workbook_import import (
+    WORKBOOK_SHEETS,
+    PersonnelIdentityChanged,
+    _course_payload,
+    _default_frequency_months,
+    _licence_reconciliation_status,
+    _materialize_mandatory_catalogue_requirements,
+    _person_payload,
+    _workbook_params,
+)
 
 
 def test_training_tracker_operational_and_derived_sheets_are_explicitly_mapped():
@@ -78,6 +87,22 @@ def test_courses_sheet_accepts_tracker_course_type_and_recurrent_frequency():
     assert payload["status"] == "Recurrent"
     assert payload["frequency_months"] == 24
     assert payload["is_mandatory"] is True
+
+
+def test_identity_races_have_a_dedicated_review_signal():
+    error = PersonnelIdentityChanged("row-17", "identity changed")
+    assert error.row_id == "row-17"
+    assert str(error) == "identity changed"
+
+
+def test_licence_replacement_and_removal_are_reconciled_by_authority():
+    assert _licence_reconciliation_status("KCAA-OLD", "KCAA-NEW") == "SUPERSEDED"
+    assert _licence_reconciliation_status("KCAA-OLD", None) == "RETIRED"
+    assert _licence_reconciliation_status("KCAA-OLD", "KCAA-OLD") == "ACTIVE"
+
+
+def test_mandatory_fallback_materializer_is_available_before_matrix_sync():
+    assert callable(_materialize_mandatory_catalogue_requirements)
 
 
 
