@@ -42,24 +42,29 @@ function browserHints(): {
 
 /**
  * Use browser network and memory hints to choose a bounded rendering policy.
- * Fast clients fetch large byte ranges and keep a wider page window hot. Slow
- * or data-saving clients retain the progressive path without penalising normal
- * office networks with tiny serial range requests.
+ * Normal office clients receive 20 MiB PDF ranges. A demonstrably stable,
+ * high-throughput connection on a capable device receives 50 MiB bursts.
+ * Constrained clients retain a progressive path without governing everyone
+ * else by the slowest possible network profile.
  */
 export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   const { connection, deviceMemory, hardwareConcurrency } = browserHints();
   const effectiveType = String(connection?.effectiveType || "").toLowerCase();
   const downlink = Number(connection?.downlink || 0);
+  const rtt = Number(connection?.rtt || 0);
   const saveData = Boolean(connection?.saveData);
   const constrainedNetwork = saveData || effectiveType === "slow-2g" || effectiveType === "2g";
   const modestNetwork = effectiveType === "3g" || (downlink > 0 && downlink < 5);
   const capableDevice = deviceMemory >= 8 && hardwareConcurrency >= 8;
-  const fastNetwork = effectiveType === "4g" || downlink >= 12 || (!connection && capableDevice);
+  const superStableNetwork = capableDevice
+    && effectiveType === "4g"
+    && downlink >= 25
+    && (rtt <= 0 || rtt <= 80);
 
   if (constrainedNetwork) {
     return {
       mode: "constrained",
-      rangeChunkSize: 128 * KIB,
+      rangeChunkSize: 512 * KIB,
       renderRadius: 2,
       hotPageLimit: 5,
       prefetchMarginPx: 900,
@@ -70,32 +75,32 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   if (modestNetwork || deviceMemory < 4) {
     return {
       mode: "balanced",
-      rangeChunkSize: 512 * KIB,
-      renderRadius: 3,
-      hotPageLimit: 8,
-      prefetchMarginPx: 1800,
+      rangeChunkSize: 4 * MIB,
+      renderRadius: 4,
+      hotPageLimit: 10,
+      prefetchMarginPx: 3000,
       maxDevicePixelRatio: 1.25,
     };
   }
 
-  if (fastNetwork && capableDevice) {
+  if (superStableNetwork) {
     return {
       mode: "burst",
-      rangeChunkSize: 4 * MIB,
-      renderRadius: 5,
-      hotPageLimit: 15,
-      prefetchMarginPx: 5000,
-      maxDevicePixelRatio: 1.5,
+      rangeChunkSize: 50 * MIB,
+      renderRadius: 8,
+      hotPageLimit: 24,
+      prefetchMarginPx: 12000,
+      maxDevicePixelRatio: 1.6,
     };
   }
 
   return {
     mode: "balanced",
-    rangeChunkSize: 1 * MIB,
-    renderRadius: 4,
-    hotPageLimit: 11,
-    prefetchMarginPx: 3200,
-    maxDevicePixelRatio: 1.4,
+    rangeChunkSize: 20 * MIB,
+    renderRadius: 6,
+    hotPageLimit: 18,
+    prefetchMarginPx: 7000,
+    maxDevicePixelRatio: 1.45,
   };
 }
 
