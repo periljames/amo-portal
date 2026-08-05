@@ -47,8 +47,7 @@ def block_direct_usage_delete(
 
 # The original importer was embedded in the fleet router. During application
 # import this module is loaded before ``fleet.router`` is registered in main,
-# allowing the legacy importer routes to be removed from the router object
-# entirely. They are not aliases, redirects, or hidden OpenAPI operations.
+# allowing the retired route objects to be removed rather than redirected.
 from . import router as fleet_router_module  # noqa: E402
 
 LEGACY_IMPORT_PATH_FRAGMENTS = (
@@ -82,3 +81,8 @@ def _is_legacy_import_route(route) -> bool:
 fleet_router_module.router.routes[:] = [
     route for route in fleet_router_module.router.routes if not _is_legacy_import_route(route)
 ]
+
+# Remove the retired persistence tables from active SQLAlchemy metadata after
+# fleet.models has been imported. This prevents future Alembic autogeneration
+# from re-creating the deleted importer schema.
+from amodb.apps.aircraft_induction import legacy_cleanup as _legacy_cleanup  # noqa: E402,F401
