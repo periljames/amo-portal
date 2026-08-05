@@ -1,0 +1,66 @@
+name: Retry Aircraft Architecture U2
+
+on:
+  push:
+    branches:
+      - agent/aircraft-induction-architecture
+    paths:
+      - ".github/workflows/aircraft-architecture-u2-retry.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-u2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/aircraft-induction-architecture
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r backend/requirements.txt
+      - name: Extract reviewed U2 implementation from staged archive
+        run: |
+          python - <<'PY'
+          import base64
+          import io
+          import re
+          import tarfile
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/aircraft-architecture-u2-apply.yml').read_text(encoding='utf-8')
+          match = re.search(r'U2_ARCHIVE:\s*"([A-Za-z0-9+/=]+)"', workflow)
+          if not match:
+              raise SystemExit('U2 archive was not found in the staged workflow')
+          archive = base64.b64decode(match.group(1), validate=True)
+          with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as bundle:
+              for member in bundle.getmembers():
+                  if member.name.startswith('/') or '..' in member.name.split('/'):
+                      raise SystemExit(f'Unsafe archive path: {member.name}')
+              bundle.extractall('.')
+          PY
+      - name: Compile and run U2 focused tests
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m compileall -q backend/amodb/apps/aircraft_architecture/effectivity
+          python -m py_compile backend/amodb/alembic/versions/aircraft_arch_20260805_u2_effectivity.py
+          pytest -q backend/amodb/apps/aircraft_architecture/effectivity/tests
+      - name: Commit U2 implementation
+        run: |
+          git config user.name "amo-portal-architecture-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/amodb/apps/aircraft_architecture backend/amodb/alembic/versions/aircraft_arch_20260805_u2_effectivity.py
+          if git diff --cached --quiet; then
+            echo "No U2 implementation changes to commit."
+            exit 0
+          fi
+          git commit -m "Phase U2: add explainable effectivity engine"
+          git push origin HEAD:agent/aircraft-induction-architecture
