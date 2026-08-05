@@ -62,7 +62,7 @@ const PLANNING: FeatureSection[] = [
     feature("planning-ad-sb-eo", "AD / SB / EO Control", "ad-sb-eo-control", "planning.ad-sb-eo-control"),
     feature("planning-non-routine", "Non-Routine Review", "non-routine-review", "planning.non-routine-review"),
     feature("planning-watchlists", "Watchlists", "watchlists", "planning.watchlists"),
-    feature("planning-publications", "Publication Review", "publication-review", "planning.publications"),
+    feature("planning-publications", "Publication Review", "publication-review", "planning.publication-review"),
     feature("planning-compliance", "Compliance Actions", "compliance-actions", "planning.compliance-actions"),
   ] },
 ];
