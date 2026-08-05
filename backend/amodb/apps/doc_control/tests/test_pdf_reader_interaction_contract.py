@@ -44,18 +44,24 @@ def test_reader_renders_real_canvas_pages_and_supports_all_pdf_destination_forms
     assert "target.pageIndex" in source
     assert "pdf.getDestination(destination)" in source
     assert "pdf.getPageIndex(reference)" in source
-    assert 'jump(page, "smooth")' in source
+    assert 'jump(page, "auto")' in source
     assert "onItemClick={(target: PdfItemClickTarget)" in source
     assert "renderAnnotationLayer" in source
+    assert 'externalLinkTarget="_blank"' in source
 
 
-def test_render_window_is_bounded_stable_and_prefetches_ahead() -> None:
+def test_render_window_is_bounded_stable_and_tracks_only_the_real_viewport() -> None:
     source = _source(READER_CORE)
+    engine = _source(READER_ENGINE)
 
     assert "radius * 2 + 1" in source
     assert "function samePages" in source
     assert "samePages(current, next) ? current : next" in source
-    assert "performanceProfile.prefetchMarginPx" in source
+    assert 'rootMargin: "0px 0px"' in source
+    assert "visibilityEntriesRef.current" in source
+    assert "selectPdfViewportPage" in source
+    assert "entry.bottom > viewportTop" in engine
+    assert "entry.top < viewportBottom" in engine
     assert "hotPageWindow" in source
     assert "currentPageRef.current" in source
 
@@ -235,6 +241,7 @@ def test_reader_scrolling_and_draft_finalization_are_instance_scoped() -> None:
     assert "deletePdfWorkingCopy(identity)" in source
     assert "searchController.current?.abort()" in source
     assert "clearNavigationTimer()" in source
+    assert "visibilityEntriesRef.current.clear()" in source
 
 
 def test_download_menu_exposes_three_distinct_outputs() -> None:
