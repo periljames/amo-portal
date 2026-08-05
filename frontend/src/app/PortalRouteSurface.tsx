@@ -129,6 +129,63 @@ export const AppRouter: React.FC = () => {
     );
   }
 
+  if (
+    module === "admin"
+    && view === "users"
+    && parts[4]
+    && parts[5] === "governance"
+    && parts.length === 6
+  ) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/users/:id/governance"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="personnel governance">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <UserGovernancePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "manager" && view === "team" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/manager/team"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="manager team">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="manager-team">
+                <ManagerTeamPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "manager" && view === "structure" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/manager/structure"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="reporting lines">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="manager-team">
+                <ReportingLineBuilderPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
   if (module === "my-profile" && parts.length === 3) {
     return (
       <Routes location={location}>
