@@ -1,7 +1,7 @@
 """Cross-cutting integrity controls for corporate position assignments.
 
 The reporting-line and corporate-structure routers both create and change
-``PositionAssignment`` rows.  This module installs one SQLAlchemy flush guard so
+``PositionAssignment`` rows. This module installs one SQLAlchemy flush guard so
 all write paths receive the same overlap, primary-position and headcount rules.
 The guard locks the affected user and position rows before checking, which
 serialises concurrent writes on PostgreSQL and prevents two requests from both
@@ -70,7 +70,7 @@ def _overlap_filter(row: org_models.PositionAssignment):
     )
 
 
-def _pending_overlap_count(
+def _candidate_overlap_count(
     candidates: Iterable[org_models.PositionAssignment],
     row: org_models.PositionAssignment,
     *,
@@ -103,6 +103,7 @@ def validate_assignment_integrity(session: Session, *_args) -> None:
     candidates = _candidate_rows(session)
     if not candidates:
         return
+    candidate_ids = [str(row.id) for row in candidates if row.id]
 
     with session.no_autoflush:
         for row in candidates:
@@ -115,7 +116,6 @@ def validate_assignment_integrity(session: Session, *_args) -> None:
                 continue
 
             _lock_subjects(session, row)
-            exclude_id = str(row.id) if row.id else None
 
             if bool(row.is_primary):
                 primary_query = session.query(org_models.PositionAssignment.id).filter(
@@ -125,11 +125,11 @@ def validate_assignment_integrity(session: Session, *_args) -> None:
                     org_models.PositionAssignment.status.in_(ACTIVE_STATUSES),
                     *_overlap_filter(row),
                 )
-                if exclude_id:
+                if candidate_ids:
                     primary_query = primary_query.filter(
-                        org_models.PositionAssignment.id != exclude_id,
+                        ~org_models.PositionAssignment.id.in_(candidate_ids),
                     )
-                if primary_query.first() or _pending_overlap_count(
+                if primary_query.first() or _candidate_overlap_count(
                     candidates,
                     row,
                     same_user_primary=True,
@@ -156,11 +156,11 @@ def validate_assignment_integrity(session: Session, *_args) -> None:
                 org_models.PositionAssignment.status.in_(ACTIVE_STATUSES),
                 *_overlap_filter(row),
             )
-            if exclude_id:
+            if candidate_ids:
                 occupied_query = occupied_query.filter(
-                    org_models.PositionAssignment.id != exclude_id,
+                    ~org_models.PositionAssignment.id.in_(candidate_ids),
                 )
-            occupied = occupied_query.count() + _pending_overlap_count(
+            occupied = occupied_query.count() + _candidate_overlap_count(
                 candidates,
                 row,
                 same_position=True,
