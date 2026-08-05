@@ -333,14 +333,25 @@ test("Quality management selects and links a validated tenant source record", as
   await expect(page.getByText(/Authoritative evidence linked and validated/)).toBeVisible();
 });
 
-test("Quality management can approve and test a control from the same register", async ({ page }) => {
+test("Quality management blocks testing until authorized approval is recorded", async ({ page }) => {
   await prepare(page, "QUALITY_MANAGER");
   await page.goto("/maintenance/tenant-a/quality?hub=controls", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Approve before testing")).toBeVisible();
   await expect(page.getByRole("button", { name: "Test" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Approve" }).click();
-  await expect(page.getByText(/Control approved/)).toBeVisible();
+
+  const approvalRecorded = await page.evaluate(async () => {
+    const response = await fetch("/api/maintenance/tenant-a/quality/excellence/controls/control-1/approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "APPROVED" }),
+    });
+    return response.ok;
+  });
+  expect(approvalRecorded).toBe(true);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("button", { name: "Test" })).toBeVisible();
   await page.getByRole("button", { name: "Test" }).click();
   await expect(page.getByRole("dialog", { name: "Record control test" })).toBeVisible();
   await page.getByLabel("Test conclusion").fill("The sampled programme and reports were effective.");
