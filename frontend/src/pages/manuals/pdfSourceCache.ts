@@ -49,11 +49,18 @@ function cacheKey(
   return `${origin}/__amo_pdf_source_cache__/v1/${parts.join("/")}`;
 }
 
-function authenticatedReaderUrl(path: string, identity: PdfWorkingCopyIdentity): string {
+function authenticatedReaderUrl(
+  path: string,
+  identity: PdfWorkingCopyIdentity,
+  sourceSha256?: string,
+): string {
   if (/^(?:blob:|data:)/i.test(path)) return path;
   const absolute = /^https?:\/\//i.test(path) ? path : `${getApiBaseUrl()}${path}`;
   const url = new URL(absolute, typeof window === "undefined" ? "https://amo.invalid" : window.location.origin);
   if (!url.searchParams.has("reader_user")) url.searchParams.set("reader_user", ownerId(identity));
+  if (sourceSha256 && !url.searchParams.has("reader_source_sha256")) {
+    url.searchParams.set("reader_source_sha256", sourceSha256.toLowerCase());
+  }
   return url.toString();
 }
 
@@ -152,10 +159,10 @@ async function warmSource(
 
   const headers = new Headers(authHeaders());
   headers.delete("Range");
-  const response = await fetch(authenticatedReaderUrl(readerUrl, identity), {
+  const response = await fetch(authenticatedReaderUrl(readerUrl, identity, sourceSha256), {
     headers,
     credentials: "same-origin",
-    cache: "reload",
+    cache: "force-cache",
   });
   if (!response.ok || response.status === 206) return false;
 
