@@ -6,6 +6,12 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality import planner_calendar_router as calendar_module
+from amodb.apps.quality.planner_calendar_router import (
+    _active_training_lifecycle_sql,
+    _calendar_page,
+    qms_planner_calendar,
+)
 from amodb.apps.quality.planner_router import (
     CalendarRescheduleRequest,
     _MUTABLE_CALENDAR_SOURCES,
@@ -84,6 +90,60 @@ def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None
     assert '"trace_id": trace_id' in source
 
 
+def test_training_projection_selects_only_latest_active_record(monkeypatch) -> None:
+    monkeypatch.setattr(
+        calendar_module,
+        "_table_columns",
+        lambda _db, _table: {"record_status", "source_status"},
+    )
+    lifecycle = _active_training_lifecycle_sql(object())
+    assert "r.record_status" in lifecycle
+    assert "r.source_status" in lifecycle
+    assert "RENEWED" in lifecycle
+    assert "SUPERSEDED" in lifecycle
+
+    source = inspect.getsource(qms_planner_calendar)
+    assert "ROW_NUMBER() OVER" in source
+    assert "PARTITION BY r.user_id, r.course_id" in source
+    assert "record_rank = 1" in source
+    assert source.index("record_rank = 1") < source.index("event_date >= :start_date")
+
+
+def test_calendar_page_is_stable_and_reports_next_offset() -> None:
+    events = [
+        {"id": "3", "date": "2026-08-20", "title": "Zulu"},
+        {"id": "1", "date": "2026-08-18", "title": "Alpha"},
+        {"id": "2", "date": "2026-08-19", "title": "Bravo"},
+    ]
+    page, has_more, next_offset = _calendar_page(events=events, offset=1, limit=1)
+    assert [item["id"] for item in page] == ["2"]
+    assert has_more is True
+    assert next_offset == 2
+
+
+def test_calendar_rejects_invalid_range_before_query(monkeypatch) -> None:
+    class Context:
+        amo_id = "amo-a"
+        amo_code = "tenant-a"
+        user_id = "quality-user-a"
+
+    monkeypatch.setattr(calendar_module, "set_postgres_tenant_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(calendar_module, "_pg_set_read_timeout", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        qms_planner_calendar(
+            start=date(2026, 8, 20),
+            end=date(2026, 8, 18),
+            limit=120,
+            offset=0,
+            view="week",
+            source="all",
+            ctx=Context(),
+            db=object(),
+        )
+    assert exc_info.value.status_code == 422
+
+
 def test_canonical_router_reexports_dashboard_private_helpers() -> None:
     assert callable(canonical_router._pg_set_read_timeout)
     assert callable(canonical_router._recover_qms_read_session)
@@ -94,6 +154,14 @@ def _route_index(api_router, endpoint) -> int:
     return next(
         index
         for index, route_item in enumerate(api_router.routes)
+        if getattr(route_item, "endpoint", None) is endpoint
+    )
+
+
+def _route_count(api_router, endpoint) -> int:
+    return sum(
+        1
+        for route_item in api_router.routes
         if getattr(route_item, "endpoint", None) is endpoint
     )
 
@@ -112,5 +180,16 @@ def _catchall_index(api_router, method: str) -> int:
     [canonical_router.core_router, canonical_router.router, canonical_router.legacy_router],
 )
 def test_planner_routes_precede_generic_catchalls(api_router) -> None:
+    assert _route_index(api_router, qms_planner_calendar) < _catchall_index(api_router, "GET")
     assert _route_index(api_router, qms_planner_capabilities) < _catchall_index(api_router, "GET")
     assert _route_index(api_router, qms_planner_reschedule) < _catchall_index(api_router, "PATCH")
+    assert _route_count(api_router, qms_planner_calendar) == 1
+
+    calendar_gets = [
+        route_item
+        for route_item in api_router.routes
+        if str(getattr(route_item, "path", "")).endswith("/integrations/calendar")
+        and "GET" in set(getattr(route_item, "methods", None) or ())
+    ]
+    assert len(calendar_gets) == 1
+    assert getattr(calendar_gets[0], "endpoint", None) is qms_planner_calendar
