@@ -1,3 +1,14 @@
 # Runtime verification artifacts (do not commit)
 .artifacts/
 var/artifacts/
+
+# Python runtime and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend dependency and build output
+frontend/node_modules/
+frontend/dist/
