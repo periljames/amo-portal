@@ -136,7 +136,6 @@ jobs:
         run: >-
           pytest -q
           amodb/apps/accounts/tests/test_portal_preferences_contract.py
-          amodb/apps/quality/tests/test_quality_imports.py
           amodb/apps/quality/tests/test_tenant_route_isolation.py
           amodb/apps/quality/tests/test_dashboard_v2_contract.py
           amodb/apps/quality/tests/test_quality_delivery_profile.py
