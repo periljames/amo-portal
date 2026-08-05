@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { isAuthenticated } from "../services/auth";
 import PortalRoutes from "../portalRoutes";
 
@@ -89,6 +90,23 @@ export const AppRouter: React.FC = () => {
   const amoCode = parts[1];
   const module = parts[2] || "";
   const view = parts[3] || "";
+
+  if (module === "admin" && view === "organization" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/organization"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="corporate structure">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <CorporateStructurePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
 
   if (
     DEPARTMENT_HOMES.has(module)
