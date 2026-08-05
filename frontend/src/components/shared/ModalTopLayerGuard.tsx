@@ -21,9 +21,12 @@ type ManagedDialog = {
 };
 
 function isNativeModalDialog(element: HTMLElement): boolean {
-  return typeof HTMLDialogElement !== "undefined"
-    && element instanceof HTMLDialogElement
-    && element.open;
+  if (typeof HTMLDialogElement === "undefined" || !(element instanceof HTMLDialogElement)) return false;
+  try {
+    return element.matches(":modal");
+  } catch {
+    return false;
+  }
 }
 
 function isVisibleModal(element: HTMLElement): boolean {
@@ -106,7 +109,13 @@ export function ModalTopLayerGuard() {
       fallbackAncestors.delete(host);
     };
 
+    const clearAddedPopoverAttribute = (host: HTMLElement) => {
+      if (addedPopoverAttribute.delete(host)) host.removeAttribute("popover");
+    };
+
     const useFallbackLayer = (host: HTMLElement) => {
+      clearAddedPopoverAttribute(host);
+      if (host.classList.contains(FALLBACK_HOST_CLASS)) return;
       host.classList.add(FALLBACK_HOST_CLASS);
       addFallbackAncestors(host);
     };
@@ -140,7 +149,7 @@ export function ModalTopLayerGuard() {
           // The feature may have removed the host between observation and cleanup.
         }
       }
-      if (addedPopoverAttribute.delete(host)) host.removeAttribute("popover");
+      clearAddedPopoverAttribute(host);
       removeFallbackAncestors(host);
       host.classList.remove(TOP_LAYER_CLASS, SURFACE_CLASS, HOST_CLASS, FALLBACK_HOST_CLASS);
       delete host.dataset.portalModalLayer;
@@ -183,7 +192,7 @@ export function ModalTopLayerGuard() {
             try {
               current.host.showPopover();
             } catch {
-              if (!current.host.classList.contains(FALLBACK_HOST_CLASS)) useFallbackLayer(current.host);
+              useFallbackLayer(current.host);
             }
           }
           continue;
