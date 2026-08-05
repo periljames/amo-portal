@@ -38,10 +38,11 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --jq .body > /tmp/training-review-comment.txt
           sed -n '/PATCH_BASE64_BEGIN/,/PATCH_BASE64_END/p' /tmp/training-review-comment.txt | sed '1d;$d' | tr -d '\n\r\t ' | base64 --decode > /tmp/training-six-fixes.diff
           test -s /tmp/training-six-fixes.diff
-          git apply --3way /tmp/training-six-fixes.diff
+          patch --batch --forward --fuzz=3 -p1 < /tmp/training-six-fixes.diff
           rm -f .github/workflows/apply-training-review-fixes.yml
           rm -f .github/triggers/apply-training-review-fixes.txt
           rm -f .github/triggers/direct-training-review-fix.txt
+          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print -exec cat {} \;; exit 1; } || true
           git diff --check
 
       - name: Verify reviewed file set
