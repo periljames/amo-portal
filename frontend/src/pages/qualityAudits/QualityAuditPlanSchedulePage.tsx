@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import QualityAuditPlanScheduleBasePage from "./QualityAuditPlanScheduleBasePage";
 
 const PLANNER_SOURCE = "planner";
+const HANDOFF_STATE_KEY = "planner_handoff";
+const HANDOFF_OPENED = "opened";
 const CREATE_BUTTON_LABEL = "Create schedule";
 
 function isCreateScheduleButton(element: HTMLButtonElement): boolean {
@@ -21,7 +23,8 @@ export default function QualityAuditPlanSchedulePage(): React.ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const handledRef = useRef(false);
-  const isPlannerHandoff = searchParams.get("source") === PLANNER_SOURCE;
+  const isPlannerHandoff = searchParams.get("source") === PLANNER_SOURCE
+    && searchParams.get(HANDOFF_STATE_KEY) !== HANDOFF_OPENED;
 
   useEffect(() => {
     if (!isPlannerHandoff || handledRef.current) return;
@@ -39,8 +42,8 @@ export default function QualityAuditPlanSchedulePage(): React.ReactElement {
       createButton.click();
 
       const next = new URLSearchParams(searchParams);
-      next.delete("source");
       next.delete("create");
+      next.set(HANDOFF_STATE_KEY, HANDOFF_OPENED);
       setSearchParams(next, { replace: true });
       return true;
     };
