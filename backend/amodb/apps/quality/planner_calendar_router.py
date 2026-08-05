@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import time
 import uuid
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -28,7 +27,7 @@ from .tenant_security import (
 
 
 planner_calendar_router = APIRouter()
-_PLANNER_TIMEZONE = ZoneInfo("Africa/Nairobi")
+_PLANNER_TIMEZONE = timezone(timedelta(hours=3), name="Africa/Nairobi")
 _VALID_SOURCES = {"all", "audits", "cars", "training", "month", "week", "list", "agenda", "year"}
 
 
@@ -81,7 +80,9 @@ def qms_planner_calendar(
 
     bounded_limit = max(1, min(limit, 500))
     bounded_offset = max(0, offset)
-    source_limit = min(max(bounded_limit + bounded_offset + 20, 120), 700)
+    # Each source must return enough rows to construct the requested global page
+    # plus one look-ahead row. A fixed cap silently lost events on later pages.
+    source_limit = bounded_offset + bounded_limit + 1
     requested_source = (source or "all").strip().lower()
     if requested_source not in _VALID_SOURCES:
         raise HTTPException(
