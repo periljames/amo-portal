@@ -131,10 +131,14 @@ jobs:
           test -s /tmp/foxit-serif.pfb
           grep -qi '^Content-Type: application/wasm' /tmp/openjpeg.headers
           grep -qi '^Cache-Control: public, max-age=31536000, immutable' /tmp/openjpeg.headers
-          if curl --silent --fail --output /dev/null "${root}/wasm/../../package.json"; then
-            echo 'Unsafe PDF.js asset traversal unexpectedly succeeded.'
-            exit 1
-          fi
+          traversal_status="$(curl --path-as-is --silent --output /dev/null --write-out '%{http_code}' "${root}/wasm/%2e%2e/%2e%2e/package.json")"
+          case "$traversal_status" in
+            400|403|404) ;;
+            *)
+              echo "Unsafe PDF.js encoded traversal returned HTTP ${traversal_status}."
+              exit 1
+              ;;
+          esac
           echo 'Vite development serves OpenJPEG, CMap and standard-font assets from the versioned same-origin path.'
 
       - name: Install backend dependencies
