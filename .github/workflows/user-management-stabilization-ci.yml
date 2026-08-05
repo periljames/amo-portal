@@ -109,13 +109,25 @@ jobs:
 
       - name: Lint user management and corporate structure
         working-directory: frontend
-        run: >-
-          npm exec -- eslint
-          src/pages/AdminDashboardPage.tsx
-          src/pages/admin-users
-          src/services/adminUserDirectory.ts
-          src/services/corporateStructure.ts
-          src/services/reportingLines.ts
-          src/components/realtime/RealtimeProvider.tsx
-          src/app/PortalRouteSurface.tsx
-          src/app/portalRouteManifest.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- eslint \
+            src/pages/AdminDashboardPage.tsx \
+            src/pages/admin-users \
+            src/services/adminUserDirectory.ts \
+            src/services/corporateStructure.ts \
+            src/services/reportingLines.ts \
+            src/components/realtime/RealtimeProvider.tsx \
+            src/app/PortalRouteSurface.tsx \
+            src/app/portalRouteManifest.ts \
+            2>&1 | tee ../user-management-eslint.log
+
+      - name: Upload frontend lint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-management-eslint
+          path: user-management-eslint.log
+          if-no-files-found: warn
+          retention-days: 7
