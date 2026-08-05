@@ -11,7 +11,13 @@ from fastapi import Depends
 from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
-from . import models, schemas, services, corporate_structure_models  # noqa: F401
+from . import (  # noqa: F401
+    corporate_structure_models,
+    models,
+    reporting_line_models,
+    schemas,
+    services,
+)
 from . import admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
 from .admin_profile_access import active_admin_profile_session
 from .admin_profile_concurrency import (
@@ -24,6 +30,7 @@ from .auth_session_context import bind_auth_session_to_token_refresh
 from . import router_admin as _router_admin
 from . import router_public as _router_public
 from . import router_corporate_structure as _router_corporate_structure
+from . import router_reporting_lines as _router_reporting_lines
 
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -95,18 +102,21 @@ for _route in _router_public.router.routes:
 # resolves the AMO and validates effective department access before returning any
 # composed data. Portal preferences are also mounted here so every deployment
 # profile that already exposes the authenticated accounts router receives the
-# same per-user accessibility and appearance contract. Corporate workforce
-# routes expose only the signed-in person's record or their direct reports;
-# controlled mutations remain on the elevated administration router.
+# same per-user accessibility and appearance contract. Corporate workforce and
+# reporting routes expose only the signed-in person's record, direct reports or
+# explicitly managed organization scope. Display-title changes remain separate
+# from access roles, capabilities, credentials and aviation authorisations.
 _router_public.router.include_router(department_home_router.router)
 _router_public.router.include_router(portal_preferences_router.router)
 _router_public.router.include_router(_router_corporate_structure.portal_router)
+_router_public.router.include_router(_router_reporting_lines.portal_router)
 
 __all__ = [
     "models",
     "schemas",
     "services",
     "corporate_structure_models",
+    "reporting_line_models",
     "admin_profile_router",
     "department_home_router",
     "portal_preferences_router",
