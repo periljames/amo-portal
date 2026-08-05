@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { getPdfReaderPerformanceProfile } from "../../services/pdfPerformance";
 import { registerAuthoritativePdfSource } from "../../services/pdfWorkingCopyAuthority";
 import {
   highlightPdfText,
@@ -75,6 +76,24 @@ describe("controlled PDF reader engine", () => {
     expect(pdfReaderShortcut({ ...base, ctrlKey: true, key: "0" })).toBe("RESET_ZOOM");
     expect(pdfReaderShortcut({ ...base, ctrlKey: false, key: "PageDown" })).toBe("NEXT_PAGE");
     expect(pdfReaderShortcut({ ...base, ctrlKey: false, key: "x" })).toBeNull();
+  });
+
+  it("keeps visible-page authority inside the real viewport on every performance profile", () => {
+    const profiles = [
+      { connection: { effectiveType: "2g", saveData: true }, deviceMemory: 2, hardwareConcurrency: 2 },
+      { connection: { effectiveType: "3g", downlink: 3 }, deviceMemory: 4, hardwareConcurrency: 4 },
+      { connection: { effectiveType: "4g", downlink: 30, rtt: 45 }, deviceMemory: 16, hardwareConcurrency: 12 },
+      { connection: { effectiveType: "4g", downlink: 10, rtt: 100 }, deviceMemory: 8, hardwareConcurrency: 8 },
+    ];
+
+    for (const navigatorValue of profiles) {
+      vi.stubGlobal("navigator", navigatorValue);
+      const profile = getPdfReaderPerformanceProfile();
+      expect(profile.prefetchMarginPx).toBe(0);
+      expect(profile.renderRadius).toBeGreaterThan(0);
+      expect(profile.hotPageLimit).toBeGreaterThanOrEqual(profile.renderRadius * 2 + 1);
+    }
+    vi.unstubAllGlobals();
   });
 
   it("partitions local drafts by user, tenant, document, and revision", () => {
