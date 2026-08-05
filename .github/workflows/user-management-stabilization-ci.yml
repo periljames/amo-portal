@@ -65,7 +65,9 @@ jobs:
       - name: Verify a single Alembic head
         run: |
           set -euo pipefail
+          alembic -c backend/amodb/alembic.ini heads --verbose
           HEAD_COUNT=$(alembic -c backend/amodb/alembic.ini heads | grep -c '(head)')
+          echo "Alembic head count: ${HEAD_COUNT}"
           test "$HEAD_COUNT" -eq 1
 
       - name: Upgrade a clean PostgreSQL schema
