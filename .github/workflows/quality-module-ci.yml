@@ -242,6 +242,7 @@ jobs:
             tests/e2e/qms-excellence-cockpit.spec.ts \
             tests/e2e/qms-usability-enhancements.spec.ts \
             tests/e2e/qms-modern-planner-live.spec.ts \
+            tests/e2e/qms-planner-lifecycle.spec.ts \
             --workers=1
       - name: Lint Quality-owned frontend surfaces
         run: >-
