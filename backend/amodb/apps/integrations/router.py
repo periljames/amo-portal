@@ -10,14 +10,10 @@ from amodb.security import require_roles
 from amodb.apps.accounts.models import AccountRole, User
 
 from . import schemas, services
-from .migration_router import router as migration_router
 from .winair_router import router as winair_router
 
 
-router = APIRouter(
-    prefix="/integrations",
-    tags=["integrations"],
-)
+router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 
 @router.get("/configs", response_model=List[schemas.IntegrationConfigRead])
@@ -28,11 +24,7 @@ def list_configs(
     return services.list_integration_configs(db, amo_id=current_user.effective_amo_id)
 
 
-@router.post(
-    "/configs",
-    response_model=schemas.IntegrationConfigRead,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/configs", response_model=schemas.IntegrationConfigRead, status_code=status.HTTP_201_CREATED)
 def create_config(
     payload: schemas.IntegrationConfigCreate,
     db: Session = Depends(get_db),
@@ -51,10 +43,7 @@ def create_config(
     return config
 
 
-@router.put(
-    "/configs/{config_id}",
-    response_model=schemas.IntegrationConfigRead,
-)
+@router.put("/configs/{config_id}", response_model=schemas.IntegrationConfigRead)
 def update_config(
     config_id: str,
     payload: schemas.IntegrationConfigUpdate,
@@ -85,19 +74,10 @@ def list_outbox(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
 ):
-    return services.list_outbound_events(
-        db,
-        amo_id=current_user.effective_amo_id,
-        integration_id=integration_id,
-        limit=limit,
-    )
+    return services.list_outbound_events(db, amo_id=current_user.effective_amo_id, integration_id=integration_id, limit=limit)
 
 
-@router.post(
-    "/{integration_key}/ingest",
-    response_model=schemas.IntegrationInboundEventRead,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/{integration_key}/ingest", response_model=schemas.IntegrationInboundEventRead, status_code=status.HTTP_201_CREATED)
 async def ingest_event(
     integration_key: str,
     payload: schemas.IntegrationInboundIngest,
@@ -127,4 +107,3 @@ async def ingest_event(
 
 
 router.include_router(winair_router)
-router.include_router(migration_router)
