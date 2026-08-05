@@ -57,6 +57,9 @@ def main() -> None:
     first_user_id = _id()
     second_user_id = _id()
 
+    # These models do not expose ORM relationships for every foreign key. Seed
+    # parent rows in explicit transactions so the smoke test verifies database
+    # integrity rather than depending on SQLAlchemy mapper flush ordering.
     session = Session()
     try:
         session.add(
@@ -67,6 +70,8 @@ def main() -> None:
                 login_slug=f"reporting-{amo_id[:8]}",
             )
         )
+        session.commit()
+
         session.add(
             models.Department(
                 id=department_id,
@@ -75,6 +80,17 @@ def main() -> None:
                 name="Engineering",
             )
         )
+        session.add(
+            foundation_models.BaseStation(
+                id=base_id,
+                amo_id=amo_id,
+                code="CI-BASE",
+                name="CI Base",
+                base_type=foundation_models.BaseStationType.MAIN_BASE,
+            )
+        )
+        session.commit()
+
         session.add_all(
             [
                 models.User(
@@ -103,15 +119,8 @@ def main() -> None:
                 ),
             ]
         )
-        session.add(
-            foundation_models.BaseStation(
-                id=base_id,
-                amo_id=amo_id,
-                code="CI-BASE",
-                name="CI Base",
-                base_type=foundation_models.BaseStationType.MAIN_BASE,
-            )
-        )
+        session.commit()
+
         session.add(
             org_models.OrganizationUnit(
                 id=unit_id,
@@ -123,6 +132,8 @@ def main() -> None:
                 unit_type="DEPARTMENT",
             )
         )
+        session.commit()
+
         session.add_all(
             [
                 org_models.OrganizationPosition(
