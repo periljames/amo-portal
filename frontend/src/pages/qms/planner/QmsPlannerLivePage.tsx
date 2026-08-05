@@ -102,17 +102,17 @@ function usePlannerDialogFocusRestoration(): void {
         intendedTriggerRef.current = null;
       });
 
-      let restoreTarget: HTMLElement | null = null;
-      openDialogsRef.current.forEach((trigger, dialog) => {
-        if (currentDialogs.has(dialog)) return;
+      const removedTriggers: HTMLElement[] = [];
+      for (const [dialog, trigger] of openDialogsRef.current) {
+        if (currentDialogs.has(dialog)) continue;
         openDialogsRef.current.delete(dialog);
-        if (!restoreTarget && isFocusable(trigger)) restoreTarget = trigger;
-      });
+        if (isFocusable(trigger)) removedTriggers.push(trigger);
+      }
 
+      const restoreTarget = removedTriggers[0] || null;
       if (!currentDialogs.size && restoreTarget) {
-        const target = restoreTarget;
         window.requestAnimationFrame(() => {
-          if (isFocusable(target)) target.focus({ preventScroll: true });
+          if (isFocusable(restoreTarget)) restoreTarget.focus({ preventScroll: true });
         });
       }
     });
