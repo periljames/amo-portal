@@ -1,0 +1,48 @@
+name: One-time planner test normalization
+
+on:
+  push:
+    branches:
+      - agent/qms-modern-business-planner
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/qms-modern-business-planner
+          fetch-depth: 0
+      - name: Move Playwright worker options to file scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path("frontend/tests/e2e/qms-modern-planner-live.spec.ts"),
+              Path("frontend/tests/e2e/qms-planner-audit-handoff.spec.ts"),
+              Path("frontend/tests/e2e/qms-planner-lifecycle.spec.ts"),
+          ]
+          global_use = 'test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });'
+          for path in paths:
+              lines = path.read_text(encoding="utf-8").splitlines()
+              lines = [line for line in lines if not line.strip().startswith("test.use({")]
+              if global_use not in lines:
+                  lines.insert(1, "")
+                  lines.insert(2, global_use)
+              path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+      - name: Commit normalized tests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/tests/e2e/qms-modern-planner-live.spec.ts frontend/tests/e2e/qms-planner-audit-handoff.spec.ts frontend/tests/e2e/qms-planner-lifecycle.spec.ts
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Normalize Playwright test settings"
+          git push origin HEAD:agent/qms-modern-business-planner
