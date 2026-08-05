@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React from "react";
 import type { ChartCardProps, ChartPoint, DashboardFilters, DashboardMetric, DashboardResponse, EngineSeriesResponse, MetricStatus, SavedView } from "./reliabilityAnalyticsTypes";
 
@@ -98,6 +99,7 @@ export function readSavedViews(): SavedView[] {
     return [];
   }
 }
+
 
 function isChartPoint(value: unknown): value is ChartPoint {
   if (!value || typeof value !== "object") return false;
@@ -236,3 +238,4 @@ export function FilterSelect({ label, value, options, onChange }: { label: strin
     </label>
   );
 }
+
