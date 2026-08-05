@@ -4,7 +4,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import type { DocumentationRecord } from "../../services/documentation";
 import { flattenPdfWorkingCopy, getPdfReaderCapabilities, submitPdfWorkingCopy, type PdfReaderCapabilities } from "../../services/pdfReader";
 import { downloadBlob, fetchPublicationBlob, publicationPdfSource } from "../../services/publications";
-import { PDF_DOCUMENT_OPTIONS, pdfDevicePixelRatio } from "./pdfReaderConfig";
+import { PDF_DOCUMENT_OPTIONS, getPdfReaderPerformanceProfile, pdfDevicePixelRatio } from "./pdfReaderConfig";
 import {
   clampPdfValue,
   copyPdfBytes,
@@ -93,6 +93,25 @@ const nearbyPages = (page: number, count: number, radius = RENDER_RADIUS) => new
   Array.from({ length: radius * 2 + 1 }, (_, index) => page - radius + index)
     .filter((value) => value >= 1 && value <= count),
 );
+
+function hotPageWindow(
+  current: Set<number>,
+  page: number,
+  count: number,
+  radius: number,
+  limit: number,
+): Set<number> {
+  const immediate = nearbyPages(page, count, radius);
+  const candidates = [...new Set([...immediate, ...current])]
+    .filter((value) => value >= 1 && value <= count)
+    .sort((left, right) => {
+      const immediatePriority = Number(!immediate.has(left)) - Number(!immediate.has(right));
+      if (immediatePriority) return immediatePriority;
+      const distance = Math.abs(left - page) - Math.abs(right - page);
+      return distance || left - right;
+    });
+  return new Set(candidates.slice(0, Math.max(immediate.size, limit)));
+}
 
 function samePages(left: Set<number>, right: Set<number>): boolean {
   if (left.size !== right.size) return false;
@@ -200,6 +219,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   const [searchIndex, setSearchIndex] = useState(-1);
   const [searchBusy, setSearchBusy] = useState(false);
 
+  const performanceProfile = useMemo(() => getPdfReaderPerformanceProfile(), []);
   const source = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
   const readerFile = useMemo(() => draft ? { data: new Uint8Array(draft.bytes.slice(0)) } : source, [draft, source]);
   const outputName = safePdfFilename(filename || "", `${title}.pdf`);
@@ -222,9 +242,17 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   );
 
   const setRenderWindow = useCallback((page: number, count: number) => {
-    const next = nearbyPages(page, count);
-    setRendered((current) => samePages(current, next) ? current : next);
-  }, []);
+    setRendered((current) => {
+      const next = hotPageWindow(
+        current,
+        page,
+        count,
+        performanceProfile.renderRadius,
+        performanceProfile.hotPageLimit,
+      );
+      return samePages(current, next) ? current : next;
+    });
+  }, [performanceProfile.hotPageLimit, performanceProfile.renderRadius]);
 
   const setDirtyState = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -484,11 +512,11 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
       setRenderWindow(page, pageCount);
       if (page !== currentPageRef.current) publishPage(page);
-    }, { root, rootMargin: "1200px 0px", threshold: [0.01, 0.2, 0.6] });
+    }, { root, rootMargin: `${performanceProfile.prefetchMarginPx}px 0px`, threshold: [0.01, 0.2, 0.6] });
 
     pageRefs.current.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [clearNavigationTimer, pageCount, pageWidth, publishPage, setRenderWindow]);
+  }, [clearNavigationTimer, pageCount, pageWidth, performanceProfile.prefetchMarginPx, publishPage, setRenderWindow]);
 
   const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
     pdfRef.current = pdf;
@@ -758,7 +786,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
                 renderForms={safeForm}
                 externalLinkTarget="_blank"
                 externalLinkRel="noopener noreferrer"
-                devicePixelRatio={pdfDevicePixelRatio()}
+                devicePixelRatio={pdfDevicePixelRatio(performanceProfile.maxDevicePixelRatio)}
                 customTextRenderer={({ str }: { str: string }) => highlightPdfText(str, query, searchOptions, false)}
                 loading={<div className="pdfv2-placeholder">Rendering page {page}…</div>}
                 error={<div className="pdfv2-placeholder">Page {page} could not be rendered.</div>}

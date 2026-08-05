@@ -135,7 +135,10 @@ def test_pdfium_import_and_dependency_are_confined() -> None:
         text = path.read_text(encoding="utf-8")
         if re.search(r"(?:import|from)\s+pypdfium2", text):
             imports.append(path.relative_to(ROOT).as_posix())
-    assert imports == ["backend/amodb/apps/doc_control/pdfium_service.py"]
+    assert imports == [
+        "backend/amodb/apps/doc_control/pdf_capability_service.py",
+        "backend/amodb/apps/doc_control/pdfium_service.py",
+    ]
 
 
 def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
@@ -277,3 +280,29 @@ def test_reader_ci_covers_engine_and_frontend_contracts() -> None:
 
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in publications
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in document_control
+
+def test_reader_network_profile_bursts_on_capable_clients() -> None:
+    performance = _read("frontend/src/services/pdfPerformance.ts")
+    publications = _read("frontend/src/services/publications.ts")
+    core = _reader_core()
+
+    assert "rangeChunkSize: 4 * MIB" in performance
+    assert "rangeChunkSize: 128 * KIB" in performance
+    assert 'mode: "burst"' in performance
+    assert "performance.rangeChunkSize" in publications
+    assert "disableAutoFetch: false" in publications
+    assert "disableRange: false" in publications
+    assert "disableStream: false" in publications
+    assert "performanceProfile.renderRadius" in core
+    assert "performanceProfile.hotPageLimit" in core
+    assert "performanceProfile.prefetchMarginPx" in core
+
+
+def test_publication_navigation_uses_unique_render_identity() -> None:
+    reader = _read("frontend/src/pages/manuals/PublicationsReaderPage.tsx")
+
+    assert "renderKey: string" in reader
+    assert "renderKey: `section:${section.id}:${index}`" in reader
+    assert "key={item.renderKey}" in reader
+    assert "navRowRefs.current[item.renderKey]" in reader
+    assert "collapsed.has(item.renderKey)" in reader
