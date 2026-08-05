@@ -35,6 +35,44 @@ class _Session:
         self.rollback_count += 1
 
 
+class _OwnerQuery:
+    def __init__(self, row):
+        self._row = row
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self._row
+
+
+class _OwnerSession:
+    def __init__(self, *rows):
+        self._rows = list(rows)
+        self.query_count = 0
+
+    def query(self, *_args, **_kwargs):
+        self.query_count += 1
+        return _OwnerQuery(self._rows.pop(0))
+
+
+def test_accountable_actor_prefers_active_source_owner():
+    db = _OwnerSession(("SOURCE-OWNER",), ("APPROVER", "CREATOR"))
+
+    assert scheduler._accountable_actor_id(db, amo_id="AMO-1") == "SOURCE-OWNER"
+    assert db.query_count == 1
+
+
+def test_accountable_actor_falls_back_to_programme_owner():
+    db = _OwnerSession(None, (None, "PROGRAMME-CREATOR"))
+
+    assert scheduler._accountable_actor_id(db, amo_id="AMO-1") == "PROGRAMME-CREATOR"
+    assert db.query_count == 2
+
+
 def test_scheduled_cycle_propagates_recorded_accountable_actor(monkeypatch):
     db = _Session([("AMO-1",)])
     calls: list[tuple[str, str, str | None]] = []
