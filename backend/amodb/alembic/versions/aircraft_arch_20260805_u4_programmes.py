@@ -65,8 +65,8 @@ def upgrade() -> None:
         sa.CheckConstraint("status IN ('DRAFT','PUBLISHED','SUPERSEDED','WITHDRAWN')", name="ck_tenant_maintenance_programme_revision_status"),
     )
     op.create_index("ix_tenant_maintenance_programme_revisions_programme_id", "tenant_maintenance_programme_revisions", ["programme_id"])
-    op.create_index("ix_tenant_maintenance_programme_revisions_aircraft_type_revision_id", "tenant_maintenance_programme_revisions", ["aircraft_type_revision_id"])
-    op.create_index("ix_tenant_maintenance_programme_revisions_effectivity_rule_version_id", "tenant_maintenance_programme_revisions", ["effectivity_rule_version_id"])
+    op.create_index("ix_tmp_revision_type", "tenant_maintenance_programme_revisions", ["aircraft_type_revision_id"])
+    op.create_index("ix_tmp_revision_effectivity", "tenant_maintenance_programme_revisions", ["effectivity_rule_version_id"])
     op.create_index("ix_tenant_maintenance_programme_revision_status", "tenant_maintenance_programme_revisions", ["programme_id", "status"])
 
     op.create_table(
