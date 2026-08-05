@@ -1,0 +1,57 @@
+/*
+ * One portal-wide modal layer. Feature dialogs may be rendered deep inside a
+ * route, but active ARIA modals are promoted to the browser top layer by
+ * ModalTopLayerGuard so sticky shell controls can never cover them.
+ */
+body.portal-modal-layer-active {
+  overflow: hidden !important;
+}
+
+.portal-modal-top-layer,
+.portal-modal-fallback-host {
+  z-index: 2147483000 !important;
+}
+
+/* A full-screen backdrop, drawer root or modal shell keeps its own layout. */
+.portal-modal-top-layer--host {
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+/* A route-local dialog surface is centred independently of route geometry. */
+.portal-modal-top-layer--surface {
+  position: fixed !important;
+  inset: auto !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.portal-modal-top-layer::backdrop {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+/*
+ * Browser fallback for environments without the Popover top-layer API. Only
+ * ancestors of the active modal are neutralised, and only while it is open.
+ */
+.portal-modal-fallback-ancestor {
+  z-index: auto !important;
+  transform: none !important;
+  filter: none !important;
+  perspective: none !important;
+  isolation: auto !important;
+  contain: none !important;
+  will-change: auto !important;
+}

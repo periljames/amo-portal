@@ -12,6 +12,9 @@ on:
       - "frontend/src/components/Layout/**"
       - "frontend/src/components/offline/**"
       - "frontend/src/components/realtime/**"
+      - "frontend/src/components/shared/ModalTopLayerGuard*"
+      - "frontend/src/components/QMS/QualityEnhancementsRouteGate.tsx"
+      - "frontend/src/standalone/manuals-main.tsx"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/workforce.ts"
       - "frontend/src/services/fleet.ts"
@@ -25,6 +28,7 @@ on:
       - "frontend/src/services/queryPersister.ts"
       - "frontend/src/styles/**"
       - "frontend/src/main.tsx"
+      - "frontend/scripts/check-modal-layer.mjs"
       - "frontend/public/portal-sw.js"
       - "frontend/public/portal.webmanifest"
       - "frontend/package.json"
@@ -123,8 +127,11 @@ jobs:
         run: >-
           npm exec -- eslint
           src/main.tsx
+          src/components/QMS/QualityEnhancementsRouteGate.tsx
+          src/components/shared/ModalTopLayerGuard.tsx
           src/components/offline
           src/pages/rostering
+          src/standalone/manuals-main.tsx
           src/services/rostering.ts
           src/services/workforce.ts
           src/services/fleet.ts
@@ -136,5 +143,9 @@ jobs:
           src/services/offlineHttp.ts
           src/services/offlinePersistence.ts
           src/services/queryPersister.ts
-      - name: Run rostering and offline regression tests
-        run: npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
+      - name: Run rostering, modal layer and offline regression tests
+        run: >-
+          npm exec -- vitest run
+          src/pages/rostering
+          src/components/shared/ModalTopLayerGuard.test.ts
+          src/services/offlineHttp.test.ts
