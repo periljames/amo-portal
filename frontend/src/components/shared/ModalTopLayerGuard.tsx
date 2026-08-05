@@ -25,7 +25,7 @@ function isNativeModalDialog(element: HTMLElement): boolean {
   try {
     return element.matches(":modal");
   } catch {
-    return false;
+    return element.open;
   }
 }
 
@@ -45,14 +45,16 @@ function isVisibleModal(element: HTMLElement): boolean {
 }
 
 function selectTopLayerHost(dialog: HTMLElement): ManagedDialog {
-  const viewportArea = Math.max(window.innerWidth * window.innerHeight, 1);
+  const viewportWidth = Math.max(window.innerWidth, 1);
+  const viewportHeight = Math.max(window.innerHeight, 1);
   let current: HTMLElement | null = dialog;
 
   while (current && current !== document.body && current !== document.documentElement) {
     const bounds = current.getBoundingClientRect();
-    const coverage = (Math.max(bounds.width, 0) * Math.max(bounds.height, 0)) / viewportArea;
     const position = window.getComputedStyle(current).position;
-    if ((position === "fixed" || position === "absolute") && coverage >= 0.55) {
+    const coversViewport = bounds.width >= viewportWidth * 0.88
+      && bounds.height >= viewportHeight * 0.88;
+    if ((position === "fixed" || position === "absolute") && coversViewport) {
       return { host: current as PopoverElement, surface: false };
     }
     current = current.parentElement;
