@@ -42,6 +42,12 @@ type PdfDocumentHandle = {
   annotationStorage?: { onSetModified?: () => void; onResetModified?: () => void };
 };
 
+type PdfItemClickTarget = {
+  dest?: string | unknown[] | null;
+  pageIndex?: number | null;
+  pageNumber?: number | null;
+};
+
 export type PdfReaderOutlineItem = { id: string; title: string; page: number; level: number };
 export type PdfReaderNavigationRequest = { page: number; token: number };
 export type PdfReaderCoreProps = {
@@ -489,6 +495,28 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     }, NAVIGATION_SETTLE_MS);
   }, [clearNavigationTimer, pageCount, publishPage, setRenderWindow]);
 
+  const followPdfItem = useCallback(async (target: PdfItemClickTarget) => {
+    let page = Number(target.pageNumber || 0);
+    if (!page && target.pageIndex !== null && target.pageIndex !== undefined) {
+      const pageIndex = Number(target.pageIndex);
+      if (Number.isInteger(pageIndex) && pageIndex >= 0) page = pageIndex + 1;
+    }
+
+    let destination = target.dest;
+    const pdf = pdfRef.current;
+    if (!page && typeof destination === "string" && pdf?.getDestination) {
+      destination = await pdf.getDestination(destination).catch(() => null);
+    }
+    if (!page && Array.isArray(destination)) {
+      const reference = destination[0];
+      if (typeof reference === "number") page = reference + 1;
+      else if (reference && pdf?.getPageIndex) {
+        page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
+      }
+    }
+    if (page > 0) jump(page, "smooth");
+  }, [jump]);
+
   useEffect(() => {
     if (navigationRequest?.page && pageCount) jump(navigationRequest.page);
   }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
@@ -757,9 +785,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
         options={PDF_DOCUMENT_OPTIONS}
         onLoadSuccess={loadDocument}
         onLoadError={(error: unknown) => setLoadError(error instanceof Error ? error.message : "The PDF could not be opened")}
-        onItemClick={({ pageNumber }: { pageNumber?: number | null }) => {
-          if (pageNumber) jump(pageNumber);
-        }}
+        onItemClick={(target: PdfItemClickTarget) => { void followPdfItem(target); }}
         loading={<div className="pdfv2-loading"><LoaderCircle className="is-spinning" size={20} />Opening document…</div>}
       >
         <div className="pdfv2-pages-list">
