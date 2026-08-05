@@ -10,14 +10,20 @@ def replace_once(source: str, old: str, new: str, label: str) -> str:
 
 services_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/services.py")
 services = services_path.read_text()
-services_path.write_text(
-    replace_once(
-        services,
-        "            role=roles.get(component.component_id) or classify_component(\n",
-        "            target_type=roles.get(component.component_id) or classify_component(\n",
-        "classification constructor keyword",
-    )
+classification_pattern = re.compile(
+    r"(classification\s*=\s*Classification\(\s*)role=(roles\.get\(component\.component_id\)\s+or\s+classify_component\()",
+    re.MULTILINE,
 )
+services, classification_count = classification_pattern.subn(
+    r"\1target_type=\2",
+    services,
+    count=1,
+)
+if classification_count != 1:
+    raise SystemExit(
+        f"expected one Classification role keyword; found {classification_count}"
+    )
+services_path.write_text(services)
 
 
 test_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py")
