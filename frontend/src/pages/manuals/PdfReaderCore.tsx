@@ -40,6 +40,10 @@ const READ_ONLY_FALLBACK: PdfReaderCapabilities = {
 function cachedReadOnly(capabilities: PdfReaderCapabilities): PdfReaderCapabilities {
   return {
     ...capabilities,
+    // A cached fingerprint may accelerate source retrieval, but it must never
+    // authorize a working copy. The live capability response restores the
+    // authoritative checksum before draft admission or form editing begins.
+    source_sha256: "",
     has_acroform: false,
     can_fill: false,
     can_save_draft: false,
@@ -59,7 +63,7 @@ function readOnlyFallback(
     : "PDF form capabilities could not be verified";
   return {
     ...READ_ONLY_FALLBACK,
-    source_sha256: source?.source_sha256 || "",
+    source_sha256: "",
     page_count: source?.page_count || 0,
     reader_pdf_url: source?.reader_pdf_url || null,
     source_has_javascript: source?.source_has_javascript,
