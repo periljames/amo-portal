@@ -94,14 +94,25 @@ function scheduleIdle(task: () => void): () => void {
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
   const externallyManaged = suppliedCapabilities !== undefined;
-  const identityKey = useMemo(() => [
-    props.identity.tenant.toLowerCase(),
+  const readerIdentity = useMemo(() => ({
+    tenant: props.identity.tenant,
+    manualId: props.identity.manualId,
+    revisionId: props.identity.revisionId,
+    userId: props.identity.userId,
+  }), [
     props.identity.manualId,
     props.identity.revisionId,
-  ].join(":"), [props.identity.manualId, props.identity.revisionId, props.identity.tenant]);
+    props.identity.tenant,
+    props.identity.userId,
+  ]);
+  const identityKey = useMemo(() => [
+    readerIdentity.tenant.toLowerCase(),
+    readerIdentity.manualId,
+    readerIdentity.revisionId,
+  ].join(":"), [readerIdentity]);
   const initialCachedCapabilities = useMemo(
-    () => suppliedCapabilities || readCachedPdfCapabilities(props.identity),
-    [identityKey, suppliedCapabilities],
+    () => suppliedCapabilities || readCachedPdfCapabilities(readerIdentity),
+    [readerIdentity, suppliedCapabilities],
   );
   const mayHydrateSourceCache = useRef(Boolean(initialCachedCapabilities?.source_sha256));
   const initialCacheFingerprint = useRef(initialCachedCapabilities?.source_sha256 || "");
@@ -115,7 +126,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     if (externallyManaged) {
       const next = suppliedCapabilities || READ_ONLY_FALLBACK;
       setResolvedCapabilities(next);
-      if (suppliedCapabilities?.source_sha256) cachePdfCapabilities(props.identity, suppliedCapabilities);
+      if (suppliedCapabilities?.source_sha256) cachePdfCapabilities(readerIdentity, suppliedCapabilities);
       setSourceCachePending(Boolean(suppliedCapabilities?.source_sha256));
       mayHydrateSourceCache.current = Boolean(suppliedCapabilities?.source_sha256);
       initialCacheFingerprint.current = suppliedCapabilities?.source_sha256 || "";
@@ -124,9 +135,9 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
 
     let active = true;
     getPdfReaderCapabilities(
-      props.identity.tenant,
-      props.identity.manualId,
-      props.identity.revisionId,
+      readerIdentity.tenant,
+      readerIdentity.manualId,
+      readerIdentity.revisionId,
     )
       .then((capabilities) => {
         if (!active) return;
@@ -136,19 +147,19 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
           && previous.source_sha256 !== capabilities.source_sha256,
         );
         if (sourceChanged) {
-          clearCachedPdfCapabilities(props.identity);
+          clearCachedPdfCapabilities(readerIdentity);
           setCachedPdfUrl((current) => {
             if (current) URL.revokeObjectURL(current);
             return null;
           });
           setSourceCachePending(false);
           void deleteCachedPdfSource(
-            props.identity,
+            readerIdentity,
             previous!.source_sha256,
             previous!.reader_pdf_url || props.fileUrl,
           );
         }
-        cachePdfCapabilities(props.identity, capabilities);
+        cachePdfCapabilities(readerIdentity, capabilities);
         setResolvedCapabilities(capabilities);
       })
       .catch((error) => {
@@ -161,10 +172,9 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     };
   }, [
     externallyManaged,
-    identityKey,
     initialCachedCapabilities,
     props.fileUrl,
-    props.identity,
+    readerIdentity,
     suppliedCapabilities,
   ]);
 
@@ -179,7 +189,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       return;
     }
     let active = true;
-    readCachedPdfSource(props.identity, fingerprint, readerFileUrl)
+    readCachedPdfSource(readerIdentity, fingerprint, readerFileUrl)
       .then((bytes) => {
         if (!active || !bytes) return;
         const localUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
@@ -194,7 +204,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         setSourceCachePending(false);
       });
     return () => { active = false; };
-  }, [identityKey, props.identity, readerFileUrl]);
+  }, [readerFileUrl, readerIdentity]);
 
   useEffect(() => () => {
     if (cachedPdfUrl) URL.revokeObjectURL(cachedPdfUrl);
@@ -205,16 +215,15 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     if (!fingerprint || cachedPdfUrl || sourceCachePending) return;
     return scheduleIdle(() => {
       void warmPdfSourceCache(
-        props.identity,
+        readerIdentity,
         fingerprint,
         readerFileUrl,
       );
     });
   }, [
     cachedPdfUrl,
-    identityKey,
-    props.identity,
     readerFileUrl,
+    readerIdentity,
     resolvedCapabilities.source_sha256,
     sourceCachePending,
   ]);
@@ -228,6 +237,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   return <PdfReaderCoreV2
     {...props}
     key={identityKey}
+    identity={readerIdentity}
     fileUrl={cachedPdfUrl || readerFileUrl}
     originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
     capabilities={resolvedCapabilities}
