@@ -7,6 +7,8 @@ on:
       - "frontend/src/components/feedback/**"
       - "frontend/src/services/portalError*"
       - "frontend/src/services/portalFetchErrorBridge.ts"
+      - "frontend/src/services/portalInlineErrorMirror.ts"
+      - "frontend/src/services/portalUploadGuard.ts"
       - "frontend/src/styles/components/toast.css"
       - ".github/workflows/portal-error-feedback-ci.yml"
   workflow_dispatch:
