@@ -1,0 +1,30 @@
+.workforce-portal { max-width: 1540px; margin: 0 auto; }
+.workforce-back { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 8px; color: var(--corp-muted); font-size: 11px; font-weight: 700; text-decoration: none; }
+.workforce-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+.workforce-metrics article { padding: 12px 14px; border: 1px solid var(--corp-border); border-radius: 9px; background: var(--corp-surface); }
+.workforce-metrics strong,
+.workforce-metrics span { display: block; }
+.workforce-metrics strong { font-size: 22px; }
+.workforce-metrics span { margin-top: 3px; color: var(--corp-muted); font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
+.workforce-metrics .is-risk { border-color: #e9c1a5; background: #fffaf5; }
+.workforce-metrics .is-risk strong { color: #a4480d; }
+.workforce-table { margin-top: 10px; max-height: calc(100vh - 235px); }
+.workforce-empty { display: grid; place-items: center; gap: 7px; min-height: 220px; padding: 28px; color: var(--corp-muted); text-align: center; }
+.workforce-empty strong { color: var(--text-color, #0f172a); }
+.workforce-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.workforce-profile-grid .corp-panel header h2 { display: flex; align-items: center; gap: 7px; }
+.workforce-profile-grid dl { display: grid; grid-template-columns: minmax(120px, .45fr) minmax(0, 1fr); gap: 0; margin: 0; padding: 8px 14px 14px; }
+.workforce-profile-grid dt,
+.workforce-profile-grid dd { margin: 0; padding: 8px 0; border-bottom: 1px solid var(--corp-border); }
+.workforce-profile-grid dt { color: var(--corp-muted); font-size: 10.5px; font-weight: 700; }
+.workforce-profile-grid dd { font-size: 12px; font-weight: 650; }
+.workforce-credentials > div { padding: 10px 14px; border-bottom: 1px solid var(--corp-border); }
+.workforce-credentials strong,
+.workforce-credentials span,
+.workforce-credentials small { display: block; }
+.workforce-credentials span,
+.workforce-credentials small { margin-top: 3px; color: var(--corp-muted); }
+.workforce-credentials p { padding: 14px; color: var(--corp-muted); }
+@media (max-width: 800px) { .workforce-metrics, .workforce-profile-grid { grid-template-columns: 1fr; } }
+[data-theme="dark"] .workforce-metrics .is-risk,
+.dark .workforce-metrics .is-risk { border-color: #7b4c2e; background: #2c1d14; }

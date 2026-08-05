@@ -6,11 +6,17 @@ on:
       - "backend/amodb/apps/accounts/**"
       - "backend/amodb/apps/workforce/**"
       - "backend/amodb/apps/realtime/**"
+      - "backend/amodb/alembic/versions/accounts_20260805_corporate_structure.py"
       - "frontend/src/pages/AdminDashboardPage.tsx"
       - "frontend/src/pages/admin-users/**"
       - "frontend/src/services/adminUserDirectory.ts"
+      - "frontend/src/services/corporateStructure.ts"
       - "frontend/src/components/realtime/RealtimeProvider.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/styles/admin-user-management-v2.css"
+      - "frontend/src/styles/admin-corporate-structure.css"
+      - "frontend/src/styles/admin-user-governance.css"
+      - "frontend/src/styles/workforce-portals.css"
       - ".github/scripts/retry_transient.py"
       - ".github/workflows/user-management-stabilization-ci.yml"
   workflow_dispatch:
@@ -71,6 +77,13 @@ jobs:
       - name: Typecheck and production build
         working-directory: frontend
         run: npm run build
-      - name: Lint user management and presence changes
+      - name: Lint user management, organization and presence changes
         working-directory: frontend
-        run: npm exec -- eslint src/pages/AdminDashboardPage.tsx src/pages/admin-users src/services/adminUserDirectory.ts src/components/realtime/RealtimeProvider.tsx
+        run: >-
+          npm exec -- eslint
+          src/pages/AdminDashboardPage.tsx
+          src/pages/admin-users
+          src/services/adminUserDirectory.ts
+          src/services/corporateStructure.ts
+          src/components/realtime/RealtimeProvider.tsx
+          src/app/PortalRouteSurface.tsx

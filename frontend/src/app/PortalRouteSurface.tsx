@@ -8,6 +8,10 @@ const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
 const EhmDashboardPage = lazy(() => import("../pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazy(() => import("../pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazy(() => import("../pages/ehm/EhmUploadsPage"));
+const CorporateStructurePage = lazy(() => import("../pages/admin-users/CorporateStructurePage"));
+const UserGovernancePage = lazy(() => import("../pages/admin-users/UserGovernancePage"));
+const ManagerTeamPage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).ManagerTeamPage }));
+const MyOrganizationProfilePage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).MyOrganizationProfilePage }));
 
 const DEPARTMENT_HOMES = new Set([
   "planning",
@@ -37,6 +41,11 @@ function LoadingRoute({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function ProtectedSurface({ label, children }: { label: string; children: React.ReactElement }): React.ReactElement {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
+}
+
 function AuthenticatedSurface({
   amoCode,
   label,
@@ -52,9 +61,28 @@ function AuthenticatedSurface({
   return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
 }
 
+function CorporateWorkforceRoutes({ parts, location }: { parts: string[]; location: ReturnType<typeof useLocation> }): React.ReactElement | null {
+  if (parts[0] === "admin" && parts[1] === "organization" && parts.length === 2) {
+    return <Routes location={location}><Route path="/admin/organization" element={<ProtectedSurface label="corporate structure"><CorporateStructurePage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "admin" && parts[1] === "users" && parts[2] && parts[3] === "governance" && parts.length === 4) {
+    return <Routes location={location}><Route path="/admin/users/:id/governance" element={<ProtectedSurface label="personnel governance"><UserGovernancePage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "manager" && parts[1] === "team" && parts.length === 2) {
+    return <Routes location={location}><Route path="/manager/team" element={<ProtectedSurface label="manager team"><ManagerTeamPage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "my-profile" && parts.length === 1) {
+    return <Routes location={location}><Route path="/my-profile" element={<ProtectedSurface label="organization profile"><MyOrganizationProfilePage /></ProtectedSurface>} /></Routes>;
+  }
+  return null;
+}
+
 export const AppRouter: React.FC = () => {
   const location = useLocation();
   const parts = pathSegments(location.pathname);
+  const corporateRoute = CorporateWorkforceRoutes({ parts, location });
+  if (corporateRoute) return corporateRoute;
+
   const isTenantPath = parts[0] === "maintenance" && Boolean(parts[1]);
   if (!isTenantPath) return <PortalRoutes />;
 
@@ -87,7 +115,6 @@ export const AppRouter: React.FC = () => {
       </Routes>
     );
   }
-
 
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {
