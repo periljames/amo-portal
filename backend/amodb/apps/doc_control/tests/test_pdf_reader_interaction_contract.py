@@ -13,6 +13,9 @@ READER_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderEngineV2.
 READER_OPERATIONAL_STYLES = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfReaderOperationalFixes.css"
 READER_LAYOUT = REPOSITORY_ROOT / "frontend/src/pages/manuals/publicationReaderZoom.css"
 LAYOUT_VIEWER = REPOSITORY_ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
+CAPABILITY_CACHE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfCapabilityCache.ts"
+SOURCE_CACHE = REPOSITORY_ROOT / "frontend/src/pages/manuals/pdfSourceCache.ts"
+PUBLICATIONS_SERVICE = REPOSITORY_ROOT / "frontend/src/services/publications.ts"
 FAST_READER = REPOSITORY_ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 FORM_OVERRIDE = REPOSITORY_ROOT / "backend/amodb/apps/manuals/pdf_reader_form_override_router.py"
 CAPABILITY_SERVICE = REPOSITORY_ROOT / "backend/amodb/apps/doc_control/pdf_capability_service.py"
@@ -25,7 +28,7 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_reader_renders_real_canvas_pages_and_supports_deterministic_navigation() -> None:
+def test_reader_renders_real_canvas_pages_and_supports_all_pdf_destination_forms() -> None:
     source = _source(READER_CORE)
 
     assert 'renderMode="canvas"' in source
@@ -36,8 +39,13 @@ def test_reader_renders_real_canvas_pages_and_supports_deterministic_navigation(
     assert "jump(navigationRequest.page)" in source
     assert "navigationTargetRef.current" in source
     assert "if (target !== null && page !== target) return" in source
-    assert "onItemClick=" in source
-    assert "if (pageNumber) jump(pageNumber)" in source
+    assert "const followPdfItem" in source
+    assert "target.pageNumber" in source
+    assert "target.pageIndex" in source
+    assert "pdf.getDestination(destination)" in source
+    assert "pdf.getPageIndex(reference)" in source
+    assert 'jump(page, "smooth")' in source
+    assert "onItemClick={(target: PdfItemClickTarget)" in source
     assert "renderAnnotationLayer" in source
 
 
@@ -62,17 +70,42 @@ def test_fit_modes_measure_the_visible_viewport() -> None:
     assert "ResizeObserver" in source
 
 
-def test_acroform_capabilities_are_resolved_before_pdfjs_first_render() -> None:
+def test_reader_paints_immediately_then_revalidates_capabilities_without_remounting() -> None:
     entry = _source(READER_ENTRY)
+    capability_cache = _source(CAPABILITY_CACHE)
 
+    assert "readCachedPdfCapabilities" in entry
+    assert "cachedReadOnly" in entry
+    assert "READ_ONLY_FALLBACK" in entry
     assert "getPdfReaderCapabilities" in entry
-    assert "const externallyManaged = suppliedCapabilities !== undefined" in entry
-    assert "if (!resolvedCapabilities)" in entry
-    assert "Checking PDF fields and permissions" in entry
-    assert '"acroform" : "read-only"' in entry
-    assert "key={readerModeKey}" in entry
+    assert "cachePdfCapabilities" in entry
+    assert "key={identityKey}" in entry
+    assert "key={readerModeKey}" not in entry
+    assert "if (!resolvedCapabilities)" not in entry
     assert "capabilities={resolvedCapabilities}" in entry
-    assert entry.index("if (!resolvedCapabilities)") < entry.index("<PdfReaderCoreV2")
+    assert "CACHE_MAX_AGE_MS" in capability_cache
+    assert "window.sessionStorage" in capability_cache
+    assert "can_fill: false" in entry
+
+
+def test_reader_reuses_a_partitioned_persistent_pdf_source_cache() -> None:
+    entry = _source(READER_ENTRY)
+    source_cache = _source(SOURCE_CACHE)
+    publications = _source(PUBLICATIONS_SERVICE)
+
+    assert "readCachedPdfSource" in entry
+    assert "warmPdfSourceCache" in entry
+    assert "Opening cached document" in entry
+    assert "URL.createObjectURL" in entry
+    assert "fileUrl={cachedPdfUrl || readerFileUrl}" in entry
+    assert 'CACHE_NAME = "amo-controlled-pdf-source-cache-v1"' in source_cache
+    assert "MAX_USER_CACHE_BYTES" in source_cache
+    assert "MAX_USER_CACHE_ENTRIES" in source_cache
+    assert '"X-AMO-PDF-Owner"' in source_cache
+    assert '"X-AMO-PDF-Source-SHA256"' in source_cache
+    assert "reader_user" in source_cache
+    assert "/^(?:blob:|data:)/i.test(path)" in publications
+    assert "withCredentials: false" in publications
 
 
 def test_capability_failure_keeps_reader_available_and_shows_exact_reason() -> None:
@@ -81,7 +114,7 @@ def test_capability_failure_keeps_reader_available_and_shows_exact_reason() -> N
     assert "function readOnlyFallback" in entry
     assert "error instanceof Error && error.message.trim()" in entry
     assert "The document remains available in read-only mode" in entry
-    assert "setResolvedCapabilities(readOnlyFallback(error))" in entry
+    assert "setResolvedCapabilities(readOnlyFallback(error, initialCachedCapabilities))" in entry
 
 
 def test_scripted_source_uses_server_sanitized_reader_but_preserves_original_download() -> None:
@@ -93,7 +126,7 @@ def test_scripted_source_uses_server_sanitized_reader_but_preserves_original_dow
     assert "source_has_javascript?: boolean" in service
     assert "javascript_policy?" in service
     assert "const readerFileUrl = resolvedCapabilities.reader_pdf_url || props.fileUrl" in entry
-    assert "fileUrl={readerFileUrl}" in entry
+    assert "fileUrl={cachedPdfUrl || readerFileUrl}" in entry
     assert "originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}" in entry
     assert 'payload["reader_pdf_url"]' in form_override
     assert "script-disabled.pdf" in form_override
@@ -153,6 +186,18 @@ def test_search_moves_the_document_and_the_exact_occurrence() -> None:
     assert 'target.closest(".publication-search-results button")' in layout
     assert "searchResultPage(button)" in layout
     assert "setReaderNavigationRequest({ page: destination, token: Date.now() })" in layout
+
+
+def test_contents_pane_tracks_the_active_pdf_page_after_scroll_and_jump() -> None:
+    layout = _source(LAYOUT_VIEWER)
+
+    assert "function alignActiveNavigationRow" in layout
+    assert 'querySelector<HTMLElement>(".publication-toc__list")' in layout
+    assert 'querySelector<HTMLElement>(".publication-toc__row.active")' in layout
+    assert "container.getBoundingClientRect()" in layout
+    assert "container.scrollTo" in layout
+    assert "attempt >= 14" in layout
+    assert "[currentPage, readerNavigationRequest?.token]" in layout
 
 
 def test_pdf_layout_resizes_with_navigation_without_breaking_sticky_controls() -> None:
