@@ -41,7 +41,12 @@ class OrganizationUnit(Base):
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
     parent_id = Column(String(36), ForeignKey("organization_units.id", ondelete="SET NULL"), nullable=True, index=True)
     department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
-    base_station_id = Column(String(36), nullable=True, index=True)
+    base_station_id = Column(
+        String(36),
+        ForeignKey("base_stations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     code = Column(String(64), nullable=False)
     name = Column(String(255), nullable=False)
     unit_type = Column(String(32), nullable=False, default="DEPARTMENT", index=True)
@@ -102,6 +107,14 @@ class PositionAssignment(Base):
         Index("ix_position_assignments_amo_user_status", "amo_id", "user_id", "status"),
         Index("ix_position_assignments_position_dates", "position_id", "effective_from", "effective_to"),
         CheckConstraint("fte_percent > 0 AND fte_percent <= 100", name="ck_position_assignments_fte_range"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_position_assignments_effective_period",
+        ),
+        CheckConstraint(
+            "matrix_reporting = false OR length(trim(coalesce(matrix_reason, ''))) > 0",
+            name="ck_position_assignments_matrix_reason",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -134,6 +147,10 @@ class WorkforceEngagement(Base):
     __table_args__ = (
         Index("ix_workforce_engagements_amo_user_status", "amo_id", "user_id", "status"),
         CheckConstraint("probation_months IS NULL OR probation_months >= 0", name="ck_workforce_engagements_probation_nonnegative"),
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_workforce_engagements_effective_period",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
