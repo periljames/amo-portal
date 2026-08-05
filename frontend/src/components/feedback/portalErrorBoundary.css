@@ -1,0 +1,70 @@
+.portal-fatal-error {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-critical-feedback, 2147482000);
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(15 23 42 / 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.portal-fatal-error__card {
+  width: min(38rem, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: 1.35rem;
+  border: 2px solid rgb(239 68 68 / 0.85);
+  border-radius: 1rem;
+  background: var(--surface-elevated, var(--surface));
+  color: var(--text-primary);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 0.42);
+}
+
+.portal-fatal-error__card:focus-visible {
+  outline: 3px solid rgb(248 113 113);
+  outline-offset: 4px;
+}
+
+.portal-fatal-error__card > svg {
+  color: rgb(239 68 68);
+}
+
+.portal-fatal-error__card h1 {
+  margin: 0 0 0.45rem;
+  font-size: 1.2rem;
+}
+
+.portal-fatal-error__card p {
+  margin: 0.25rem 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.portal-fatal-error__card button {
+  grid-column: 2;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid rgb(239 68 68 / 0.72);
+  border-radius: 0.6rem;
+  background: rgb(239 68 68 / 0.12);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 560px) {
+  .portal-fatal-error__card {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-fatal-error__card button {
+    grid-column: 1;
+  }
+}
