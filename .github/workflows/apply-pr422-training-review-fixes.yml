@@ -38,11 +38,71 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --jq .body > /tmp/training-review-comment.txt
           sed -n '/PATCH_BASE64_BEGIN/,/PATCH_BASE64_END/p' /tmp/training-review-comment.txt | sed '1d;$d' | tr -d '\n\r\t ' | base64 --decode > /tmp/training-six-fixes.diff
           test -s /tmp/training-six-fixes.diff
-          patch --batch --forward --fuzz=3 -p1 < /tmp/training-six-fixes.diff
+          patch --batch --forward --fuzz=3 -p1 < /tmp/training-six-fixes.diff || true
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/amodb/apps/training/workbook_import.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    except Exception as exc:
+                  work_db.rollback()
+                  progress_db.rollback()
+                  job = progress_db.get(TrainingWorkbookImportJob, job_id)
+                  if job:
+                      if str(exc) == "IMPORT_CANCELLED":
+                          job.status = "CANCELLED"
+                          job.stage = "CANCELLED"
+                      else:
+                          job.status = "FAILED"
+                          job.stage = "FAILED"
+                          job.error_message = str(exc)
+                      job.completed_at = utcnow()
+                      progress_db.add(job)
+                      progress_db.commit()
+          '''
+          new = '''    except Exception as exc:
+                  work_db.rollback()
+                  progress_db.rollback()
+                  job = progress_db.get(TrainingWorkbookImportJob, job_id)
+                  if job:
+                      if isinstance(exc, PersonnelIdentityChanged):
+                          row = progress_db.get(TrainingWorkbookImportRow, exc.row_id)
+                          if row:
+                              row.status = "REVIEW"
+                              row.decision = None
+                              row.decision_required = True
+                              row.issue_code = "IDENTITY_CHANGED"
+                              row.issue_message = str(exc)
+                              progress_db.add(row)
+                          job.status = "REVIEW_REQUIRED"
+                          job.stage = "REVIEW"
+                          job.error_message = str(exc)
+                      if str(exc) == "IMPORT_CANCELLED":
+                          job.status = "CANCELLED"
+                          job.stage = "CANCELLED"
+                      elif not isinstance(exc, PersonnelIdentityChanged):
+                          job.status = "FAILED"
+                          job.stage = "FAILED"
+                          job.error_message = str(exc)
+                      job.completed_at = utcnow()
+                      progress_db.add(job)
+                      progress_db.commit()
+          '''
+          if 'IDENTITY_CHANGED' not in text:
+              if old not in text:
+                  raise SystemExit('Could not locate commit failure handler for reviewed identity-race fix.')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          rm -f backend/amodb/apps/training/workbook_import.py.rej
           rm -f .github/workflows/apply-training-review-fixes.yml
           rm -f .github/triggers/apply-training-review-fixes.txt
           rm -f .github/triggers/direct-training-review-fix.txt
-          find . -name '*.rej' -print -quit | grep -q . && { find . -name '*.rej' -print -exec cat {} \;; exit 1; } || true
+          test "$(find . -name '*.rej' -print -quit)" = ""
+          grep -q 'class PersonnelIdentityChanged' backend/amodb/apps/training/workbook_import.py
+          grep -q '_materialize_mandatory_catalogue_requirements' backend/amodb/apps/training/workbook_import.py
+          grep -q 'IDENTITY_CHANGED' backend/amodb/apps/training/workbook_import.py
+          grep -q 'Retry reviewed import' frontend/src/components/training/TrainingWorkbookImportDialog.tsx
           git diff --check
 
       - name: Verify reviewed file set
