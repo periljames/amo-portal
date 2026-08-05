@@ -1,0 +1,61 @@
+name: Apply Reliability UX Lint Correction
+
+on:
+  push:
+    branches:
+      - agent/reliability-operational-ux-refactor
+    paths:
+      - .github/workflows/reliability-ux-lint-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/reliability-operational-ux-refactor
+      - name: Apply render-purity correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/pages/reliability/ReliabilityOperationalControl.tsx')
+          text = path.read_text()
+          text = text.replace(
+              'const BASE = "/reliability/operational-sources";\n',
+              'const BASE = "/reliability/operational-sources";\nconst PAGE_OPENED_AT = Date.now();\n',
+              1,
+          )
+          text = text.replace(
+              'return toLocalInput(new Date(Date.now() + offsetHours * 60 * 60 * 1000));',
+              'return toLocalInput(new Date(PAGE_OPENED_AT + offsetHours * 60 * 60 * 1000));',
+              1,
+          )
+          text = text.replace(
+              'const milliseconds = new Date(value).getTime() - Date.now();',
+              'const milliseconds = new Date(value).getTime() - PAGE_OPENED_AT;',
+              1,
+          )
+          text = text.replace(
+              '  }, []); // eslint-disable-line react-hooks/exhaustive-deps\n',
+              '  }, []);\n',
+              1,
+          )
+          text = text.replace(
+              'new Date(row.expires_at).getTime() < Date.now() && row.status !== "CLOSED"',
+              'new Date(row.expires_at).getTime() < PAGE_OPENED_AT && row.status !== "CLOSED"',
+              1,
+          )
+          path.write_text(text)
+          PY
+          rm .github/workflows/reliability-ux-lint-fix.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/reliability/ReliabilityOperationalControl.tsx .github/workflows/reliability-ux-lint-fix.yml
+          git commit -m 'Fix Reliability UX render purity'
+          git push origin HEAD:agent/reliability-operational-ux-refactor
