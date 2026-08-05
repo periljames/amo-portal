@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
+
 const LIVE_ENABLED = process.env.E2E_LIVE_QUALITY === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
@@ -190,7 +192,6 @@ async function openMockPlanner(page: Page, state: MockPlannerState, view = "week
 }
 
 test.describe("Quality Operations Planner deterministic browser regressions", () => {
-  test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure" });
 
   test("renders planner controls and preserves browser-modified shortcuts", async ({ page }) => {
     const state: MockPlannerState = { eventDate: "2026-08-18", rescheduleBody: null };
@@ -295,7 +296,6 @@ test.describe("Quality Operations Planner deterministic browser regressions", ()
 
 test.describe("Quality Operations Planner live tenant verification", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_QUALITY=1 to run against a connected AMO environment.");
-  test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
   test("renders the planner rails, context centre, timeline, commands, and keyboard views", async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 });

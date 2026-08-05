@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
+
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: 4_102_444_800 })}.signature`;
@@ -149,7 +151,6 @@ async function prepareApplication(page: Page): Promise<void> {
 }
 
 test.describe("QMS planner authoritative audit handoff", () => {
-  test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure" });
 
   test("opens the real audit schedule drawer with the planner draft retained", async ({ page }) => {
     await prepareApplication(page);
