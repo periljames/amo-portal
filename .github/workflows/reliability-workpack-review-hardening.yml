@@ -1,0 +1,92 @@
+name: Reliability workpack review hardening
+
+on:
+  push:
+    branches:
+      - agent/reliability-workpack-wiring
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reliability_review
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d reliability_review"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      ENVIRONMENT: test
+      TESTING: 'true'
+      RELIABILITY_SCHEDULER_ENABLED: 'false'
+      SECRET_KEY: reliability-review-secret-not-for-production
+      JWT_SECRET_KEY: reliability-review-jwt-not-for-production
+      PYTHONPATH: backend
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_review
+      WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_review
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: agent/reliability-workpack-wiring
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply review corrections
+        run: python scripts/review_harden_reliability_workpack.py
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Validate backend and PostgreSQL
+        run: |
+          python -m compileall -q backend/amodb/apps/reliability
+          python -c "from amodb.main import app; from sqlalchemy.orm import configure_mappers; configure_mappers(); assert app"
+          python -m alembic -c backend/amodb/alembic.ini upgrade heads
+          python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
+          pytest -q backend/amodb/apps/reliability/tests
+
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit --fund=false
+          npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
+          npm run build
+
+      - name: Validate final hygiene
+        run: |
+          git diff --check
+          test ! -e scripts/review_harden_reliability_workpack.py
+          test ! -e .github/workflows/reliability-workpack-review-hardening.yml
+          test ! -e backend/reliability_workpack_test.db
+
+      - name: Commit reviewed implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden Reliability workpack provenance and sync"
+          git push origin HEAD:agent/reliability-workpack-wiring
