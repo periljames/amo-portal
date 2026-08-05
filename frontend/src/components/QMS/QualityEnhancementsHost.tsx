@@ -111,7 +111,7 @@ const QualityEnhancementsHost: React.FC = () => {
     return <CarInviteResponsiveStyleLoader />;
   }
 
-  const auditEnhancement = route?.activeTab === "checklist" ? (
+  const auditEnhancement = route && route.activeTab === "checklist" ? (
     <Suspense fallback={null}>
       <QualityChecklistPdfFormEditorHost />
     </Suspense>
