@@ -3,6 +3,7 @@
 from . import models  # noqa: E402,F401
 from . import advanced_models  # noqa: E402,F401
 from . import formula_hardening  # noqa: E402,F401
+from . import analytics_threshold_hardening  # noqa: E402,F401
 from . import advanced_schemas  # noqa: E402,F401
 from . import formula_schema_hardening  # noqa: E402,F401
 from .router import router  # noqa: E402,F401
