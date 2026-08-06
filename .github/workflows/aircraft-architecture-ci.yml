@@ -107,7 +107,30 @@ jobs:
       - name: Import application and initialize mappers
         run: python -c "import amodb.main; from sqlalchemy.orm import configure_mappers; configure_mappers()"
       - name: Run aircraft architecture tests
-        run: pytest -q backend/amodb/apps/aircraft_architecture
+        shell: bash
+        run: |
+          set +e
+          pytest -q --tb=short backend/amodb/apps/aircraft_architecture 2>&1 | tee /tmp/aircraft-architecture-pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### Aircraft architecture test failure"
+              echo '```text'
+              tail -n 180 /tmp/aircraft-architecture-pytest.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY'
+          from pathlib import Path
+
+          lines = Path("/tmp/aircraft-architecture-pytest.log").read_text(
+              encoding="utf-8", errors="replace"
+          ).splitlines()[-100:]
+          message = "\n".join(lines)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Aircraft architecture tests failed::{message}")
+          PY
+          fi
+          exit "$status"
 
   frontend-gate:
     runs-on: ubuntu-24.04
