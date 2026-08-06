@@ -1,17 +1,33 @@
+/*
+ * Workforce dialogs are rendered inside route content. A body-level fixed
+ * backdrop can sit in a higher root stacking context than the dialog whenever
+ * the application shell uses transform, filter or isolation. That failure mode
+ * dims and blurs the dialog together with the page, leaving an unusable form.
+ *
+ * Keep the visual scrim attached to the dialog itself. The spread shadow shares
+ * the dialog's stacking context, so it can never cover the dialog content.
+ */
 body:has(.hr-decision)::before {
-  content: "";
-  position: fixed;
-  z-index: 10990;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.62);
-  backdrop-filter: blur(3px);
+  content: none;
+}
+
+body:has(.hr-decision) {
+  overflow: hidden;
+}
+
+body:has(.hr-decision) #root {
+  pointer-events: none;
 }
 
 .hr-decision {
   z-index: 11000 !important;
   width: min(680px, calc(100vw - 32px)) !important;
   max-height: calc(100vh - 40px) !important;
-  box-shadow: 0 34px 100px rgba(2, 6, 23, 0.42) !important;
+  isolation: isolate;
+  pointer-events: auto;
+  box-shadow:
+    0 0 0 100vmax rgba(2, 6, 23, 0.56),
+    0 34px 100px rgba(2, 6, 23, 0.42) !important;
 }
 
 .hr-contract-editor {

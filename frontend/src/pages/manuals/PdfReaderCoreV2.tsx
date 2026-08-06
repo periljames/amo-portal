@@ -15,8 +15,10 @@ import {
   resolvePdfReaderScrollRoot,
   safePdfFilename,
   searchPdfDocument,
+  selectPdfViewportPage,
   type PdfSearchOptions,
   type PdfSearchResult,
+  type PdfViewportEntry,
 } from "./pdfReaderEngine";
 import { deletePdfWorkingCopy, readPdfWorkingCopy, savePdfWorkingCopy, type PdfWorkingCopyIdentity, type StoredPdfWorkingCopy } from "./pdfWorkingCopyStore";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -28,7 +30,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.m
 const PdfDocument = Document as unknown as FC<any>;
 const PdfPage = Page as unknown as FC<any>;
 const RENDER_RADIUS = 3;
-const NAVIGATION_SETTLE_MS = 900;
+const NAVIGATION_SETTLE_MS = 3000;
 const PAGE_TOP_OFFSET = 92;
 
 type PdfDocumentHandle = {
@@ -40,6 +42,12 @@ type PdfDocumentHandle = {
   hasJSActions?: () => Promise<boolean>;
   saveDocument?: () => Promise<Uint8Array>;
   annotationStorage?: { onSetModified?: () => void; onResetModified?: () => void };
+};
+
+type PdfItemClickTarget = {
+  dest?: string | unknown[] | null;
+  pageIndex?: number | null;
+  pageNumber?: number | null;
 };
 
 export type PdfReaderOutlineItem = { id: string; title: string; page: number; level: number };
@@ -176,6 +184,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef(new Map<number, HTMLDivElement>());
+  const visibilityEntriesRef = useRef(new Map<number, PdfViewportEntry>());
   const pdfRef = useRef<PdfDocumentHandle | null>(null);
   const serializing = useRef<Promise<Uint8Array> | null>(null);
   const autosaveTimer = useRef<number | null>(null);
@@ -253,6 +262,18 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       return samePages(current, next) ? current : next;
     });
   }, [performanceProfile.hotPageLimit, performanceProfile.renderRadius]);
+
+  const primeRenderTarget = useCallback((page: number, count: number) => {
+    const target = clampPdfValue(page, 1, Math.max(1, count));
+    setRendered((current) => {
+      const retained = [...current]
+        .filter((value) => value >= 1 && value <= count && value !== target)
+        .sort((left, right) => Math.abs(left - target) - Math.abs(right - target) || left - right)
+        .slice(0, Math.max(0, performanceProfile.hotPageLimit - 1));
+      const next = new Set([target, ...retained]);
+      return samePages(current, next) ? current : next;
+    });
+  }, [performanceProfile.hotPageLimit]);
 
   const setDirtyState = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -450,6 +471,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
   useEffect(() => () => {
     invalidateDraftLifecycle();
     clearNavigationTimer();
+    visibilityEntriesRef.current.clear();
     searchController.current?.abort();
   }, [clearNavigationTimer, invalidateDraftLifecycle]);
 
@@ -465,21 +487,30 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     const page = clampPdfValue(requested, 1, pageCount);
     navigationTargetRef.current = page;
     clearNavigationTimer();
-    setRenderWindow(page, pageCount);
+    primeRenderTarget(page, pageCount);
     publishPage(page);
+    setActionError("");
 
     const scroll = (attempt = 0) => {
       const host = hostRef.current;
       const element = pageRefs.current.get(page);
       if (!host || !element) {
-        if (attempt < 8) window.requestAnimationFrame(() => scroll(attempt + 1));
+        if (attempt < 36) window.setTimeout(() => scroll(attempt + 1), 60);
         return;
       }
       const root = resolvePdfReaderScrollRoot(host);
       const rootTop = root?.getBoundingClientRect().top || 0;
-      const top = element.getBoundingClientRect().top - rootTop - PAGE_TOP_OFFSET;
-      if (root) root.scrollTo({ top: Math.max(0, root.scrollTop + top), behavior });
-      else window.scrollBy({ top, behavior });
+      const delta = element.getBoundingClientRect().top - rootTop - PAGE_TOP_OFFSET;
+      if (Math.abs(delta) > 1) {
+        const nextBehavior: ScrollBehavior = attempt === 0 ? behavior : "auto";
+        if (root) root.scrollTo({ top: Math.max(0, root.scrollTop + delta), behavior: nextBehavior });
+        else window.scrollBy({ top: delta, behavior: nextBehavior });
+      }
+      const renderedCanvas = Boolean(element.querySelector("canvas"));
+      if (renderedCanvas) setRenderWindow(page, pageCount);
+      if (attempt < 36 && (!renderedCanvas || Math.abs(delta) > 2)) {
+        window.setTimeout(() => scroll(attempt + 1), 60);
+      }
     };
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => scroll()));
 
@@ -487,7 +518,37 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       navigationTargetRef.current = null;
       navigationTimerRef.current = null;
     }, NAVIGATION_SETTLE_MS);
-  }, [clearNavigationTimer, pageCount, publishPage, setRenderWindow]);
+  }, [clearNavigationTimer, pageCount, primeRenderTarget, publishPage, setRenderWindow]);
+
+  const followPdfItem = useCallback(async (target: PdfItemClickTarget) => {
+    try {
+      let page = Number(target.pageNumber || 0);
+      if (!page && target.pageIndex !== null && target.pageIndex !== undefined) {
+        const pageIndex = Number(target.pageIndex);
+        if (Number.isInteger(pageIndex) && pageIndex >= 0) page = pageIndex + 1;
+      }
+
+      let destination = target.dest;
+      const pdf = pdfRef.current;
+      if (!page && typeof destination === "string" && pdf?.getDestination) {
+        destination = await pdf.getDestination(destination).catch(() => null);
+      }
+      if (!page && Array.isArray(destination)) {
+        const reference = destination[0];
+        if (typeof reference === "number") page = reference + 1;
+        else if (reference && pdf?.getPageIndex) {
+          page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
+        }
+      }
+      if (page > 0) {
+        jump(page, "auto");
+        return;
+      }
+      setActionError("The selected PDF link does not contain a resolvable page destination.");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "The selected PDF link could not be opened.");
+    }
+  }, [jump]);
 
   useEffect(() => {
     if (navigationRequest?.page && pageCount) jump(navigationRequest.page);
@@ -495,36 +556,61 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
 
   useEffect(() => {
     if (!pageCount || typeof IntersectionObserver === "undefined" || !hostRef.current) return;
-    const root = resolvePdfReaderScrollRoot(hostRef.current);
+    const host = hostRef.current;
+    const root = resolvePdfReaderScrollRoot(host);
+    visibilityEntriesRef.current.clear();
     const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting);
-      if (!visible.length) return;
-      const page = Number((visible.sort(
-        (left, right) => Math.abs(left.boundingClientRect.top - 120) - Math.abs(right.boundingClientRect.top - 120),
-      )[0].target as HTMLElement).dataset.pageNumber || 1);
+      entries.forEach((entry) => {
+        const page = Number((entry.target as HTMLElement).dataset.pageNumber || 0);
+        if (!Number.isInteger(page) || page < 1) return;
+        visibilityEntriesRef.current.set(page, {
+          page,
+          top: entry.boundingClientRect.top,
+          bottom: entry.boundingClientRect.bottom,
+          isIntersecting: entry.isIntersecting,
+          intersectionRatio: entry.intersectionRatio,
+        });
+      });
+
+      const rootRect = root?.getBoundingClientRect();
+      const viewportTop = rootRect?.top || 0;
+      const viewportBottom = rootRect?.bottom || window.innerHeight;
+      const page = selectPdfViewportPage(
+        visibilityEntriesRef.current.values(),
+        viewportTop,
+        viewportBottom,
+        PAGE_TOP_OFFSET,
+      );
+      if (!page) return;
 
       const target = navigationTargetRef.current;
       if (target !== null && page !== target) return;
-      if (target === page) {
-        navigationTargetRef.current = null;
-        clearNavigationTimer();
-      }
 
-      setRenderWindow(page, pageCount);
+      primeRenderTarget(page, pageCount);
       if (page !== currentPageRef.current) publishPage(page);
-    }, { root, rootMargin: `${performanceProfile.prefetchMarginPx}px 0px`, threshold: [0.01, 0.2, 0.6] });
+    }, { root, rootMargin: "0px 0px", threshold: [0.01, 0.2, 0.6] });
 
     pageRefs.current.forEach((element) => observer.observe(element));
-    return () => observer.disconnect();
-  }, [clearNavigationTimer, pageCount, pageWidth, performanceProfile.prefetchMarginPx, publishPage, setRenderWindow]);
+    return () => {
+      observer.disconnect();
+      visibilityEntriesRef.current.clear();
+    };
+  }, [pageCount, pageWidth, primeRenderTarget, publishPage]);
 
   const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
     pdfRef.current = pdf;
+    visibilityEntriesRef.current.clear();
     const count = Math.max(1, Number(pdf.numPages || 1));
     const restored = clampPdfValue(initialPage, 1, count);
     setPageCount(count);
     setPageRatios({});
-    setRenderWindow(restored, count);
+    setRendered(hotPageWindow(
+      new Set(),
+      restored,
+      count,
+      performanceProfile.renderRadius,
+      performanceProfile.hotPageLimit,
+    ));
     publishPage(restored);
     setLoadError("");
     if (pdf.annotationStorage) pdf.annotationStorage.onSetModified = () => markEdited(currentPageRef.current);
@@ -544,7 +630,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
         setActionError("Scripted PDF actions are disabled; form fields remain read-only.");
       }
     }).catch(() => undefined);
-  }, [capabilities.has_acroform, initialPage, markEdited, onAcroFormDetected, onOutlineReady, publishPage, setRenderWindow]);
+  }, [capabilities.has_acroform, initialPage, markEdited, onAcroFormDetected, onOutlineReady, performanceProfile.hotPageLimit, performanceProfile.renderRadius, publishPage]);
 
   const workingFile = useCallback(async () => new File(
     [copyPdfBytes(await serialize())],
@@ -755,11 +841,11 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       <PdfDocument
         file={readerFile}
         options={PDF_DOCUMENT_OPTIONS}
+        externalLinkTarget="_blank"
+        externalLinkRel="noopener noreferrer"
         onLoadSuccess={loadDocument}
         onLoadError={(error: unknown) => setLoadError(error instanceof Error ? error.message : "The PDF could not be opened")}
-        onItemClick={({ pageNumber }: { pageNumber?: number | null }) => {
-          if (pageNumber) jump(pageNumber);
-        }}
+        onItemClick={(target: PdfItemClickTarget) => { void followPdfItem(target); }}
         loading={<div className="pdfv2-loading"><LoaderCircle className="is-spinning" size={20} />Opening document…</div>}
       >
         <div className="pdfv2-pages-list">
@@ -784,8 +870,6 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
                 renderTextLayer
                 renderAnnotationLayer
                 renderForms={safeForm}
-                externalLinkTarget="_blank"
-                externalLinkRel="noopener noreferrer"
                 devicePixelRatio={pdfDevicePixelRatio(performanceProfile.maxDevicePixelRatio)}
                 customTextRenderer={({ str }: { str: string }) => highlightPdfText(str, query, searchOptions, false)}
                 loading={<div className="pdfv2-placeholder">Rendering page {page}…</div>}
@@ -802,6 +886,15 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
                   const height = Number(loaded?.originalHeight || loaded?.view?.[3] || width * 1.414);
                   const nextRatio = height / width;
                   setPageRatios((values) => Math.abs((values[page] || 0) - nextRatio) < 0.0001 ? values : ({ ...values, [page]: nextRatio }));
+                  if (page === navigationTargetRef.current) window.requestAnimationFrame(() => jump(page));
+                }}
+                onRenderSuccess={() => {
+                  if (page === currentPageRef.current || page === navigationTargetRef.current) {
+                    window.requestAnimationFrame(() => {
+                      setRenderWindow(page, pageCount);
+                      if (page === navigationTargetRef.current) jump(page);
+                    });
+                  }
                 }}
                 onRenderTextLayerSuccess={() => {
                   if (activeResult?.page === page) window.requestAnimationFrame(() => revealSearchResult(activeResult));

@@ -50,6 +50,48 @@ def _advisory_lock(db: Session) -> Iterator[bool]:
                 logger.debug("Reliability scheduler advisory unlock failed", exc_info=True)
 
 
+def _accountable_actor_id(db: Session, *, amo_id: str) -> str | None:
+    """Resolve the recorded owner whose approved setup authorises automation.
+
+    Scheduled ingestion must not be attributed to an arbitrary active user. The
+    actor is taken first from the tenant's active Reliability source ownership,
+    then from the latest Reliability programme approval/creation trail.
+    """
+    source_row = (
+        db.query(domain.ReliabilitySource.created_by_user_id)
+        .filter(
+            domain.ReliabilitySource.amo_id == amo_id,
+            domain.ReliabilitySource.status == "ACTIVE",
+            domain.ReliabilitySource.created_by_user_id.is_not(None),
+        )
+        .order_by(
+            domain.ReliabilitySource.updated_at.desc(),
+            domain.ReliabilitySource.id.desc(),
+        )
+        .first()
+    )
+    if source_row and source_row[0]:
+        return str(source_row[0])
+
+    programme_row = (
+        db.query(
+            domain.ReliabilityProgrammeVersion.approved_by_user_id,
+            domain.ReliabilityProgrammeVersion.created_by_user_id,
+        )
+        .filter(domain.ReliabilityProgrammeVersion.amo_id == amo_id)
+        .order_by(
+            domain.ReliabilityProgrammeVersion.updated_at.desc(),
+            domain.ReliabilityProgrammeVersion.id.desc(),
+        )
+        .first()
+    )
+    if programme_row:
+        actor_user_id = programme_row[0] or programme_row[1]
+        if actor_user_id:
+            return str(actor_user_id)
+    return None
+
+
 def run_reliability_cycle() -> dict[str, int]:
     db = WriteSessionLocal()
     harvested = 0
@@ -76,18 +118,26 @@ def run_reliability_cycle() -> dict[str, int]:
             tenants = len(amo_ids)
             for amo_id in sorted(amo_ids):
                 try:
-                    harvested += len(
-                        services.harvest_internal_sources(
-                            db,
-                            amo_id=amo_id,
-                            actor_user_id=None,
+                    actor_user_id = _accountable_actor_id(db, amo_id=amo_id)
+                    if actor_user_id:
+                        harvested += len(
+                            services.harvest_internal_sources(
+                                db,
+                                amo_id=amo_id,
+                                actor_user_id=actor_user_id,
+                            )
                         )
-                    )
+                    else:
+                        logger.warning(
+                            "Reliability internal-source harvest skipped for tenant %s: "
+                            "no accountable source or programme owner is recorded",
+                            amo_id,
+                        )
                     calculations += len(
                         services.run_due_metrics(
                             db,
                             amo_id=amo_id,
-                            actor_user_id=None,
+                            actor_user_id=actor_user_id,
                         )
                     )
                 except Exception:

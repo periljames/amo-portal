@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run check:modals && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "check:css": "node scripts/check-css-contract.mjs",
+    "check:modals": "node scripts/check-modal-layer.mjs",
     "perf:report": "node scripts/perf-report.mjs",
     "perf:rostering": "node scripts/rostering-perf-budget.mjs",
     "perf:rostering:browser": "node scripts/measure-rostering-load.mjs",

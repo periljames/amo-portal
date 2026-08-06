@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { getPdfReaderPerformanceProfile } from "../../services/pdfPerformance";
 import { registerAuthoritativePdfSource } from "../../services/pdfWorkingCopyAuthority";
 import {
   highlightPdfText,
@@ -9,6 +10,8 @@ import {
   pdfReaderShortcut,
   searchPdfDocument,
   resolvePdfReaderScrollRoot,
+  resolvePortalScrollRoot,
+  selectPdfViewportPage,
 } from "./pdfReaderEngine";
 import {
   pdfWorkingCopyKey,
@@ -77,6 +80,44 @@ describe("controlled PDF reader engine", () => {
     expect(pdfReaderShortcut({ ...base, ctrlKey: false, key: "x" })).toBeNull();
   });
 
+  it("keeps visible-page authority inside the real viewport on every performance profile", () => {
+    const profiles = [
+      { connection: { effectiveType: "2g", saveData: true }, deviceMemory: 2, hardwareConcurrency: 2 },
+      { connection: { effectiveType: "3g", downlink: 3 }, deviceMemory: 4, hardwareConcurrency: 4 },
+      { connection: { effectiveType: "4g", downlink: 30, rtt: 45 }, deviceMemory: 16, hardwareConcurrency: 12 },
+      { connection: { effectiveType: "4g", downlink: 10, rtt: 100 }, deviceMemory: 8, hardwareConcurrency: 8 },
+    ];
+
+    for (const navigatorValue of profiles) {
+      vi.stubGlobal("navigator", navigatorValue);
+      const profile = getPdfReaderPerformanceProfile();
+      expect(profile.prefetchMarginPx).toBe(0);
+      expect(profile.renderRadius).toBeGreaterThan(0);
+      expect(profile.hotPageLimit).toBeGreaterThanOrEqual(profile.renderRadius * 2 + 1);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("ignores pages outside the real viewport even when an observer marks them intersecting", () => {
+    const page = selectPdfViewportPage([
+      { page: 79, top: -1500, bottom: -400, isIntersecting: true, intersectionRatio: 0.1 },
+      { page: 80, top: 45, bottom: 1080, isIntersecting: true, intersectionRatio: 0.92 },
+      { page: 92, top: 5100, bottom: 6200, isIntersecting: true, intersectionRatio: 0.1 },
+    ], 0, 900, 92);
+
+    expect(page).toBe(80);
+  });
+
+  it("selects the page crossing the reading line from the complete visible-entry set", () => {
+    const page = selectPdfViewportPage([
+      { page: 94, top: -920, bottom: 36, isIntersecting: true, intersectionRatio: 0.04 },
+      { page: 95, top: 56, bottom: 1040, isIntersecting: true, intersectionRatio: 0.86 },
+      { page: 96, top: 1060, bottom: 2040, isIntersecting: false, intersectionRatio: 0 },
+    ], 0, 900, 92);
+
+    expect(page).toBe(95);
+  });
+
   it("partitions local drafts by user, tenant, document, and revision", () => {
     const first = pdfWorkingCopyKey({ userId: "user-1", tenant: "KQ", manualId: "manual-1", revisionId: "rev-1" });
     const otherUser = pdfWorkingCopyKey({ userId: "user-2", tenant: "KQ", manualId: "manual-1", revisionId: "rev-1" });
@@ -122,18 +163,40 @@ describe("controlled PDF reader engine", () => {
     expect(isPdfDraftLifecycleCurrent(3, 4)).toBe(false);
   });
 
-  it("selects the compact reader's direct scrolling viewport", () => {
+  it("uses the current tenant shell as the full-page PDF scroll root", () => {
+    const tenantMain = {} as HTMLElement;
+    const reader = {
+      querySelector: vi.fn(() => null),
+      closest: vi.fn((selector: string) => selector.includes(".tenant-shell__main") ? tenantMain : null),
+      parentElement: null,
+    } as unknown as HTMLElement;
+    vi.stubGlobal("window", {
+      getComputedStyle: (element: HTMLElement) => ({ overflowY: element === tenantMain ? "auto" : "visible" }),
+    });
+
+    expect(resolvePortalScrollRoot(reader)).toBe(tenantMain);
+    expect(resolvePdfReaderScrollRoot(reader)).toBe(tenantMain);
+    expect(reader.closest).toHaveBeenCalledWith(".tenant-shell__main, .app-shell__scroll");
+    vi.unstubAllGlobals();
+  });
+
+  it("selects the compact reader's direct scrolling viewport before the portal shell", () => {
     const shell = {} as HTMLElement;
     const compactViewport = {} as HTMLElement;
-    let overflowY = "auto";
+    let viewportOverflow = "auto";
     const reader = {
       querySelector: vi.fn((selector: string) => selector.includes("pdfv2") ? compactViewport : null),
       closest: vi.fn(() => shell),
+      parentElement: null,
     } as unknown as HTMLElement;
-    vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY }) });
+    vi.stubGlobal("window", {
+      getComputedStyle: (element: HTMLElement) => ({
+        overflowY: element === compactViewport ? viewportOverflow : "auto",
+      }),
+    });
 
     expect(resolvePdfReaderScrollRoot(reader)).toBe(compactViewport);
-    overflowY = "visible";
+    viewportOverflow = "visible";
     expect(resolvePdfReaderScrollRoot(reader)).toBe(shell);
     expect(reader.querySelector).toHaveBeenCalledWith(":scope > .pdfv2-viewport");
     vi.unstubAllGlobals();
@@ -144,6 +207,7 @@ describe("controlled PDF reader engine", () => {
     const reader = {
       querySelector: vi.fn((selector: string) => selector.includes("pdf-engine") ? legacyViewport : null),
       closest: vi.fn(() => null),
+      parentElement: null,
     } as unknown as HTMLElement;
     vi.stubGlobal("window", { getComputedStyle: () => ({ overflowY: "auto" }) });
 

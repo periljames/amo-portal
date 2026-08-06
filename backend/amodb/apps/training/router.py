@@ -272,8 +272,7 @@ def _build_training_event_notes(notes: Optional[str], metadata: Optional[dict]) 
     plain_notes = (notes or "").strip()
     if not payload:
         return plain_notes or None
-    rendered_payload = json.dumps(payload, separators=(",", ":"))
-    rendered = f"{_TRAINING_EVENT_META_PREFIX}{rendered_payload}"
+    rendered = f"{_TRAINING_EVENT_META_PREFIX}{json.dumps(payload, separators=(",", ":"))}"
     if plain_notes:
         rendered = f"{rendered}\n\n{plain_notes}"
     return rendered

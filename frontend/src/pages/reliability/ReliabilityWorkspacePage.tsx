@@ -23,11 +23,12 @@ import {
   type ReliabilityWorkbench,
 } from "../../services/reliability";
 import ReliabilityReportsView from "./ReliabilityReportsView";
+import ReliabilityOperationalControl from "./ReliabilityOperationalControl";
 import { FracasGovernancePanel, OccurrenceProvenancePanel, ReliabilityAdvancedView, type AdvancedReliabilityViewId } from "./ReliabilityAdvancedViews";
 import "../../styles/reliability-v2.css";
 
 type ViewId =
-  | "workbench" | "events" | "alerts" | "cases" | "fleet" | "systems"
+  | "workbench" | "operations" | "events" | "alerts" | "cases" | "fleet" | "systems"
   | "components" | "engines" | "calculations" | "program" | "changes"
   | "handoffs" | "meetings" | "authority" | "ai" | "compliance"
   | "sources" | "ingestion" | "data-quality" | "reports";
@@ -35,7 +36,7 @@ type ViewId =
 type RouteState = { view: ViewId; entityId: number | null };
 
 const VIEWS = new Set<ViewId>([
-  "workbench", "events", "alerts", "cases", "fleet", "systems", "components",
+  "workbench", "operations", "events", "alerts", "cases", "fleet", "systems", "components",
   "engines", "calculations", "program", "changes", "handoffs", "meetings",
   "authority", "ai", "compliance", "sources", "ingestion", "data-quality", "reports",
 ]);
@@ -86,13 +87,14 @@ const ReliabilityWorkspacePage: React.FC = () => {
   const loadKey = `${route.view}:${route.entityId ?? "list"}`;
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
-  const loading = resolvedKey !== loadKey;
+  const loading = route.view === "operations" ? false : resolvedKey !== loadKey;
   const error = requestError?.key === loadKey ? requestError.message : null;
 
   useEffect(() => {
     let active = true;
 
     async function load(): Promise<void> {
+      if (route.view === "operations") return;
       if (route.view === "workbench") {
         const data = await getReliabilityWorkbench(10);
         if (active) setWorkbench(data);
@@ -159,10 +161,12 @@ const ReliabilityWorkspacePage: React.FC = () => {
             <h1>Reliability</h1>
             <p>Detection, technical investigation, corrective action and measured effectiveness.</p>
           </div>
-          <div className="reliability-v2__actions"><Link className="btn btn-secondary" to={`${basePath}/compliance`}>Compliance control</Link><Link className="btn btn-secondary" to={route.view === "reports" ? basePath : `${basePath}/reports`}>{route.view === "reports" ? "Reliability workbench" : "Controlled reports"}</Link></div>
+          <div className="reliability-v2__actions">
+            <Link className="btn btn-primary" to={`${basePath}/operations`}>Operational sources</Link>
+            <Link className="btn btn-secondary" to={`${basePath}/compliance`}>Compliance control</Link>
+            <Link className="btn btn-secondary" to={route.view === "reports" ? basePath : `${basePath}/reports`}>{route.view === "reports" ? "Reliability workbench" : "Controlled reports"}</Link>
+          </div>
         </header>
-
-
 
         {loading && <div className="reliability-v2__loading" role="status">Loading authoritative reliability data…</div>}
         {error && <div className="reliability-v2__error" role="alert">{error}</div>}
@@ -200,6 +204,7 @@ type ViewProps = {
 
 function renderView(props: ViewProps): React.ReactNode {
   const { route, basePath } = props;
+  if (route.view === "operations") return <ReliabilityOperationalControl />;
   if (route.view === "workbench") return props.workbench ? <Workbench data={props.workbench} basePath={basePath} /> : null;
   if (route.view === "events") return props.event ? <><EventDetail item={props.event} basePath={basePath} /><OccurrenceProvenancePanel eventId={props.event.id} /></> : <EventRegister rows={props.events} basePath={basePath} />;
   if (route.view === "alerts") return props.alert ? <AlertDetail item={props.alert} basePath={basePath} /> : <AlertRegister rows={props.alerts} basePath={basePath} />;
@@ -299,6 +304,5 @@ function DetailSurface({ back, title, status, fields }: { back: string; title: s
 function FreshnessTable({ rows }: { rows: ReliabilityFreshness[] }) {
   return <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Source</th><th>Status</th><th>Latest record</th><th>Age</th><th>Issue</th></tr></thead><tbody>{rows.map((row) => <tr key={row.source}><td>{row.source}</td><td><span className={statusClass(row.status)}>{row.status}</span></td><td>{displayDate(row.latest_record_at)}</td><td>{row.age_days == null ? "—" : `${row.age_days} days`}</td><td>{row.detail || (row.issue_count ? `${row.issue_count} issues` : "None detected")}</td></tr>)}</tbody></table></div>;
 }
-
 
 export default ReliabilityWorkspacePage;
