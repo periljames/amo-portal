@@ -22,8 +22,8 @@ const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPl
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
 const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspace")
   .then((module) => ({ default: module.RosteringSetupWorkspace })));
-const LazyWorkforceHrWorkspace = lazy(() => import("./components/WorkforceHrWorkspace")
-  .then((module) => ({ default: module.WorkforceHrWorkspace })));
+const LazyWorkforceHrWorkspace = lazy(() => import("./components/WorkforceHrWorkspaceV2")
+  .then((module) => ({ default: module.WorkforceHrWorkspaceV2 })));
 
 function DeferredWorkspace({ label, children }: { label: string; children: ReactNode }) {
   return <Suspense fallback={<RosterLoading label={label} />}>{children}</Suspense>;
