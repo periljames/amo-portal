@@ -396,9 +396,9 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
     pageCount,
     performanceProfile.hotPageLimit,
   );
-  const measurements = virtualizer.getMeasurements();
+  const virtualItemsByIndex = new Map(virtualItems.map((item) => [item.index, item]));
   const renderItems = renderIndexes
-    .map((index) => measurements[index])
+    .map((index) => virtualItemsByIndex.get(index))
     .filter((item): item is VirtualItem => Boolean(item));
 
   const setDirtyState = useCallback((value: boolean) => {
@@ -482,7 +482,7 @@ export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
       : retained);
   }, [pageCount, performanceProfile.hotPageLimit]);
 
-  const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {
+  const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {
     if (!pageCount) return;
     const page = clampPdfValue(requested, 1, pageCount);
     navigationTargetRef.current = page;
