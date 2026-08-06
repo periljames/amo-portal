@@ -1,4 +1,4 @@
-export const DATASET_ORDER = ["AU", "AI", "PM", "OOS", "RM", "SM", "STRUCTURES", "RECURRING", "ECTM"] as const;
+export const DATASET_ORDER = ["AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "STRUCTURES", "RECURRING", "ECTM", "ADD"] as const;
 export type WorkbookDatasetCode = (typeof DATASET_ORDER)[number];
 
 export const WORKBOOK_PROFILES = [
