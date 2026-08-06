@@ -86,15 +86,23 @@ jobs:
           amodb/apps/doc_control/pdf_capability_service.py
           amodb/apps/doc_control/pdf_capability_prewarm.py
           amodb/apps/doc_control/pdf_safe_processing_service.py
-      - name: Run controlled PDF engine and source contracts
+      - name: Run PDF engine and provenance contracts
         working-directory: backend
         run: >-
-          pytest -q
+          pytest -q --tb=short
           amodb/apps/doc_control/tests/test_pdf_reader_engine.py
           amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
           amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py
-          amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py
-          amodb/apps/doc_control/tests/test_pdf_capability_service.py
+      - name: Run PDF interaction architecture contracts
+        working-directory: backend
+        run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py
+      - name: Run PDF capability cache contracts
+        working-directory: backend
+        run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_capability_service.py
+      - name: Run PDF form and route-order contracts
+        working-directory: backend
+        run: >-
+          pytest -q --tb=short
           amodb/apps/manuals/tests/test_pdf_reader_form_override.py
           amodb/apps/manuals/tests/test_pdf_reader_override_route_order.py
       - uses: actions/setup-node@v6
