@@ -202,6 +202,7 @@ export default function PublicationPdfLayoutViewer({
   if (!identity) {
     return <div className="publication-native-pdf__error" role="alert">The controlled PDF source could not be identified.</div>;
   }
+  const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
     <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
@@ -217,6 +218,7 @@ export default function PublicationPdfLayoutViewer({
           </div> : null}
         </div> : null}
         <PdfReaderCore
+          key={readerIdentityKey}
           fileUrl={fileUrl}
           originalDownloadUrl={fileUrl}
           title={title}
