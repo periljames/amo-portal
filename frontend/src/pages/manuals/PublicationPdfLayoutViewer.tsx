@@ -83,54 +83,22 @@ function searchResultPage(button: Element): number | null {
   return Number.isInteger(page) && page > 0 ? page : null;
 }
 
-function navigationRowPage(row: HTMLElement): number | null {
-  const label = row.querySelector("small")?.textContent || row.textContent || "";
-  const match = label.match(/(?:\bp(?:age)?\.?\s*)(\d+)\b/i);
-  const page = Number(match?.[1] || 0);
-  return Number.isInteger(page) && page > 0 ? page : null;
-}
-
-function alignActiveNavigationRow(layout: HTMLElement, currentPage: number): boolean {
+function keepReactActiveRowVisible(layout: HTMLElement, attempt = 0): void {
   const readerPage = layout.closest<HTMLElement>(".publication-reader-page");
   const container = readerPage?.querySelector<HTMLElement>(".publication-toc__list");
-  if (!container) return false;
-
-  const rows = [...container.querySelectorAll<HTMLElement>(".publication-toc__row")];
-  const pageRows = rows
-    .map((row) => ({ row, page: navigationRowPage(row) }))
-    .filter((entry): entry is { row: HTMLElement; page: number } => Boolean(entry.page));
-  const exact = pageRows.find((entry) => entry.page === currentPage);
-  const preceding = pageRows
-    .filter((entry) => entry.page <= currentPage)
-    .sort((left, right) => right.page - left.page)[0];
-  const following = pageRows
-    .filter((entry) => entry.page > currentPage)
-    .sort((left, right) => left.page - right.page)[0];
-  const fallback = container.querySelector<HTMLElement>(".publication-toc__row.active");
-  const row = exact?.row || preceding?.row || following?.row || fallback;
-  if (!row) return false;
-
-  rows.forEach((candidate) => {
-    const active = candidate === row;
-    candidate.classList.toggle("active", active);
-    if (active) candidate.setAttribute("aria-current", "page");
-    else candidate.removeAttribute("aria-current");
-  });
-  readerPage?.setAttribute("data-pdf-current-page", String(currentPage));
+  const active = container?.querySelector<HTMLElement>(
+    '.publication-toc__row.active, .publication-toc__row:has([aria-current="page"]), [aria-current="page"]',
+  );
+  if (!container || !active) {
+    if (attempt < 16) window.setTimeout(() => keepReactActiveRowVisible(layout, attempt + 1), attempt < 5 ? 16 : 48);
+    return;
+  }
 
   const containerRect = container.getBoundingClientRect();
+  const row = active.closest<HTMLElement>(".publication-toc__row") || active;
   const rowRect = row.getBoundingClientRect();
-  const margin = 18;
-  const above = rowRect.top < containerRect.top + margin;
-  const below = rowRect.bottom > containerRect.bottom - margin;
-  if (!above && !below) return true;
-
-  const centeredTop = container.scrollTop
-    + rowRect.top
-    - containerRect.top
-    - Math.max(0, (container.clientHeight - rowRect.height) / 2);
-  container.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
-  return true;
+  if (rowRect.top >= containerRect.top + 12 && rowRect.bottom <= containerRect.bottom - 12) return;
+  row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
 }
 
 export default function PublicationPdfLayoutViewer({
@@ -174,7 +142,6 @@ export default function PublicationPdfLayoutViewer({
       if (!button || !page.contains(button)) return;
       const destination = searchResultPage(button);
       if (!destination) return;
-
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
@@ -188,26 +155,8 @@ export default function PublicationPdfLayoutViewer({
   useEffect(() => {
     const layout = layoutRef.current;
     if (!layout) return;
-    let cancelled = false;
-    let frame = 0;
-    let timer = 0;
-
-    const synchronize = (attempt: number) => {
-      if (cancelled) return;
-      frame = window.requestAnimationFrame(() => {
-        if (cancelled) return;
-        if (alignActiveNavigationRow(layout, currentPage)) return;
-        if (attempt >= 14) return;
-        timer = window.setTimeout(() => synchronize(attempt + 1), attempt < 4 ? 16 : 48);
-      });
-    };
-
-    synchronize(0);
-    return () => {
-      cancelled = true;
-      if (frame) window.cancelAnimationFrame(frame);
-      if (timer) window.clearTimeout(timer);
-    };
+    const frame = window.requestAnimationFrame(() => keepReactActiveRowVisible(layout));
+    return () => window.cancelAnimationFrame(frame);
   }, [currentPage, readerNavigationRequest?.token]);
 
   useEffect(() => {
@@ -253,7 +202,6 @@ export default function PublicationPdfLayoutViewer({
   if (!identity) {
     return <div className="publication-native-pdf__error" role="alert">The controlled PDF source could not be identified.</div>;
   }
-  const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
     <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
@@ -269,7 +217,6 @@ export default function PublicationPdfLayoutViewer({
           </div> : null}
         </div> : null}
         <PdfReaderCore
-          key={readerIdentityKey}
           fileUrl={fileUrl}
           originalDownloadUrl={fileUrl}
           title={title}
