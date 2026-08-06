@@ -1,0 +1,191 @@
+.rel-wb {
+  --rel-wb-border: color-mix(in srgb, var(--border-color, #64748b) 34%, transparent);
+  --rel-wb-surface: color-mix(in srgb, var(--surface-color, #fff) 96%, transparent);
+  --rel-wb-muted: var(--text-secondary, #64748b);
+  --rel-wb-accent: var(--primary-color, #1d4ed8);
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding-bottom: 2rem;
+}
+
+.rel-wb__header { align-items: flex-start; }
+.rel-wb__header .reliability-v2__actions { max-width: 720px; }
+.rel-wb__global-error { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.rel-wb__global-error span { flex: 1 1 260px; }
+
+.rel-wb__section-nav,
+.rel-wb__dataset-nav {
+  display: grid;
+  gap: .55rem;
+  min-width: 0;
+}
+
+.rel-wb__section-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.rel-wb__dataset-nav { grid-template-columns: repeat(9, minmax(100px, 1fr)); overflow-x: auto; padding-bottom: .25rem; }
+
+.rel-wb__section-nav button,
+.rel-wb__dataset-nav button {
+  appearance: none;
+  border: 1px solid var(--rel-wb-border);
+  border-radius: .75rem;
+  background: var(--rel-wb-surface);
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+  padding: .7rem .8rem;
+  text-align: left;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.rel-wb__section-nav button:hover,
+.rel-wb__dataset-nav button:hover { border-color: var(--rel-wb-accent); transform: translateY(-1px); }
+.rel-wb__section-nav button:focus-visible,
+.rel-wb__dataset-nav button:focus-visible { outline: 3px solid color-mix(in srgb, var(--rel-wb-accent) 30%, transparent); outline-offset: 2px; }
+.rel-wb__section-nav button.is-active,
+.rel-wb__dataset-nav button.is-active { border-color: var(--rel-wb-accent); box-shadow: inset 0 0 0 1px var(--rel-wb-accent), 0 8px 20px color-mix(in srgb, var(--rel-wb-accent) 12%, transparent); }
+.rel-wb__section-nav strong,
+.rel-wb__dataset-nav strong { display: block; font-size: .86rem; }
+.rel-wb__section-nav span,
+.rel-wb__dataset-nav span { display: block; color: var(--rel-wb-muted); font-size: .73rem; line-height: 1.35; margin-top: .2rem; }
+.rel-wb__dataset-nav button { text-align: center; }
+.rel-wb__dataset-nav strong { font-size: .95rem; }
+
+.rel-wb__intro,
+.rel-wb__panel {
+  border: 1px solid var(--rel-wb-border);
+  border-radius: .9rem;
+  background: var(--rel-wb-surface);
+  min-width: 0;
+}
+
+.rel-wb__intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; padding: 1rem 1.1rem; }
+.rel-wb__intro h2,
+.rel-wb__panel h3 { margin: .15rem 0 .35rem; }
+.rel-wb__intro p { max-width: 920px; margin-bottom: 0; }
+.rel-wb__sheet-tags { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
+.rel-wb__sheet-tags span { border: 1px solid var(--rel-wb-border); border-radius: 999px; color: var(--rel-wb-muted); font-size: .72rem; padding: .28rem .55rem; white-space: nowrap; }
+.rel-wb__formula { display: grid; grid-template-columns: auto auto; gap: .25rem .6rem; border-left: 3px solid var(--rel-wb-accent); padding: .5rem .75rem; min-width: 260px; }
+.rel-wb__formula strong { font-size: .76rem; }
+.rel-wb__formula span { color: var(--rel-wb-muted); font-size: .76rem; }
+
+.rel-wb__panel { overflow: hidden; }
+.rel-wb__panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--rel-wb-border); padding: .85rem 1rem; }
+.rel-wb__panel-heading > span,
+.rel-wb__panel-heading > select { color: var(--rel-wb-muted); font-size: .75rem; }
+.rel-wb__panel-heading p { margin: 0; }
+.rel-wb__panel-heading h3 { font-size: 1rem; }
+
+.rel-wb__metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .55rem; }
+.rel-wb__metrics article { border: 1px solid var(--rel-wb-border); border-radius: .75rem; background: var(--rel-wb-surface); padding: .7rem .8rem; }
+.rel-wb__metrics span { color: var(--rel-wb-muted); display: block; font-size: .72rem; }
+.rel-wb__metrics strong { display: block; font-size: 1.2rem; margin-top: .25rem; }
+.rel-wb__panel > .rel-wb__metrics { margin: .9rem 1rem 0; }
+
+.rel-wb__form { display: grid; gap: 1rem; padding: 1rem; }
+.rel-wb__form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.rel-wb__form-grid--common { border-bottom: 1px solid var(--rel-wb-border); padding-bottom: 1rem; }
+.rel-wb__form-grid label,
+.rel-wb__modal label { display: grid; gap: .3rem; min-width: 0; }
+.rel-wb__form-grid label > span,
+.rel-wb__modal label > span { align-items: center; color: var(--rel-wb-muted); display: flex; font-size: .72rem; font-weight: 650; gap: .4rem; }
+.rel-wb__form-grid label > span em { border: 1px solid var(--rel-wb-border); border-radius: 999px; font-size: .65rem; font-style: normal; font-weight: 500; padding: .12rem .35rem; }
+.rel-wb__form-grid input,
+.rel-wb__form-grid select,
+.rel-wb__form-grid textarea,
+.rel-wb__modal textarea,
+.rel-wb__panel-heading select {
+  width: 100%;
+  border: 1px solid var(--rel-wb-border);
+  border-radius: .55rem;
+  background: var(--input-bg, var(--rel-wb-surface));
+  color: inherit;
+  font: inherit;
+  min-height: 2.35rem;
+  padding: .5rem .62rem;
+}
+.rel-wb__form-grid textarea,
+.rel-wb__modal textarea { resize: vertical; }
+.rel-wb__form-grid select[multiple] { min-height: 8rem; }
+.rel-wb__form-grid small { color: var(--rel-wb-muted); font-size: .68rem; }
+.rel-wb__span-2 { grid-column: span 2; }
+.rel-wb__checkbox { align-items: center !important; align-self: end; display: flex !important; gap: .55rem !important; min-height: 2.35rem; }
+.rel-wb__checkbox input,
+.rel-wb__fieldset input { inline-size: 1rem; block-size: 1rem; }
+.rel-wb__checkbox span { color: inherit !important; }
+.rel-wb__provenance { border: 1px dashed var(--rel-wb-border); border-radius: .65rem; padding: .6rem .75rem; }
+.rel-wb__provenance summary { cursor: pointer; font-size: .78rem; font-weight: 650; }
+.rel-wb__provenance[open] summary { margin-bottom: .75rem; }
+.rel-wb__form-actions { display: flex; justify-content: flex-end; gap: .55rem; padding: 0 1rem 1rem; }
+.rel-wb__form .rel-wb__form-actions { padding: 0; }
+.rel-wb__fieldset { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem .8rem; border: 1px solid var(--rel-wb-border); border-radius: .65rem; padding: .75rem; }
+.rel-wb__fieldset legend { font-size: .75rem; font-weight: 700; padding: 0 .3rem; }
+.rel-wb__fieldset label { align-items: center; display: flex; gap: .4rem; font-size: .75rem; }
+
+.rel-wb__success { border: 1px solid color-mix(in srgb, #15803d 45%, transparent); border-radius: .65rem; background: color-mix(in srgb, #15803d 10%, transparent); padding: .65rem .8rem; font-size: .8rem; }
+.rel-wb__missing { color: #b91c1c; font-weight: 650; }
+.rel-wb__complete { color: #15803d; font-weight: 650; }
+progress { accent-color: var(--rel-wb-accent); max-width: 110px; }
+
+.rel-wb__table-wrap { max-width: 100%; overflow: auto; }
+.rel-wb__table { border-collapse: separate; border-spacing: 0; min-width: 880px; width: 100%; }
+.rel-wb__table th { position: sticky; top: 0; z-index: 1; background: var(--surface-elevated, var(--rel-wb-surface)); border-bottom: 1px solid var(--rel-wb-border); color: var(--rel-wb-muted); font-size: .68rem; letter-spacing: .025em; padding: .55rem .65rem; text-align: left; text-transform: uppercase; }
+.rel-wb__table td { border-bottom: 1px solid var(--rel-wb-border); font-size: .76rem; padding: .65rem; vertical-align: top; }
+.rel-wb__table tbody tr:last-child td { border-bottom: 0; }
+.rel-wb__table tbody tr:focus-visible { outline: 2px solid var(--rel-wb-accent); outline-offset: -2px; }
+.rel-wb__table td strong,
+.rel-wb__table td span,
+.rel-wb__table td small { display: block; }
+.rel-wb__table td span { margin-top: .18rem; }
+.rel-wb__table td small { color: var(--rel-wb-muted); margin-top: .18rem; }
+.rel-wb__table td b { font-size: .68rem; }
+.rel-wb__table code { font-size: .7rem; }
+.rel-wb__row-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.rel-wb__pagination { align-items: center; display: flex; justify-content: space-between; gap: .75rem; border-top: 1px solid var(--rel-wb-border); padding: .65rem .8rem; }
+.rel-wb__pagination span { color: var(--rel-wb-muted); font-size: .72rem; }
+
+.rel-wb__classification { border-radius: 999px; display: inline-block !important; font-size: .66rem; font-weight: 750; padding: .2rem .45rem; }
+.rel-wb__classification--normal { background: color-mix(in srgb, #15803d 13%, transparent); color: #15803d; }
+.rel-wb__classification--warning { background: color-mix(in srgb, #b45309 13%, transparent); color: #b45309; }
+.rel-wb__classification--alert { background: color-mix(in srgb, #b91c1c 13%, transparent); color: #b91c1c; }
+.rel-wb__classification--no-exposure { background: color-mix(in srgb, #64748b 14%, transparent); color: var(--rel-wb-muted); }
+.rel-wb__chart { min-height: 360px; padding: .5rem 1rem 1rem; }
+.rel-wb__panel--chart .rel-wb__table-wrap { border-top: 1px solid var(--rel-wb-border); }
+
+.rel-wb__modal-backdrop { align-items: center; background: rgb(2 6 23 / .58); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 10000; }
+.rel-wb__modal { background: var(--surface-color, #fff); border: 1px solid var(--rel-wb-border); border-radius: .85rem; box-shadow: 0 24px 70px rgb(2 6 23 / .3); display: grid; gap: 1rem; max-width: 600px; padding: 1rem; width: 100%; }
+.rel-wb__modal .rel-wb__form-actions { padding: 0; }
+
+@media (max-width: 1180px) {
+  .rel-wb__section-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rel-wb__form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rel-wb__fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .rel-wb__section-nav,
+  .rel-wb__form-grid,
+  .rel-wb__fieldset { grid-template-columns: 1fr; }
+  .rel-wb__intro,
+  .rel-wb__panel-heading { align-items: stretch; flex-direction: column; }
+  .rel-wb__span-2 { grid-column: auto; }
+  .rel-wb__sheet-tags { justify-content: flex-start; }
+  .rel-wb__formula { min-width: 0; }
+  .rel-wb__pagination { align-items: stretch; flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rel-wb__section-nav button,
+  .rel-wb__dataset-nav button { transition: none; }
+}
+
+@media print {
+  .rel-wb__section-nav,
+  .rel-wb__dataset-nav,
+  .rel-wb__form,
+  .rel-wb__pagination,
+  .rel-wb__row-actions,
+  .rel-wb__header .reliability-v2__actions { display: none !important; }
+  .rel-wb__panel,
+  .rel-wb__intro { break-inside: avoid; box-shadow: none; }
+}
