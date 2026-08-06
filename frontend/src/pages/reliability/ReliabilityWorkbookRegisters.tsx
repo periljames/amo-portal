@@ -40,12 +40,6 @@ function datetimeValue(value: unknown): string {
   return new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-function displayDate(value?: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
 function statusClass(value: string): string {
   return `reliability-v2__status reliability-v2__status--${value.toLowerCase().replaceAll("_", "-")}`;
 }
@@ -59,7 +53,7 @@ function fieldValue(value: unknown): string {
 
 function payloadSummary(record: WorkbookRecord, definition?: DatasetDefinition): Array<[string, string]> {
   const fields = definition?.fields || [];
-  const preferred = fields.filter((field) => record.payload[field.key] not in [undefined]);
+  const preferred = fields.filter((field) => record.payload[field.key] !== undefined);
   const populated = preferred.filter((field) => record.payload[field.key] != null && record.payload[field.key] !== "").slice(0, 3);
   return populated.map((field) => [field.label, fieldValue(record.payload[field.key])]);
 }
@@ -236,7 +230,7 @@ export function ReliabilityWorkbookRegisters({ catalog, aircraft, activeDataset,
           </tr>)}
           {records.length === 0 && <tr><td colSpan={6}>No {definition.name.toLowerCase()} records match this page.</td></tr>}
         </tbody></table></div>}
-        <div className="rel-wb__pagination"><button type="button" className="btn btn-secondary" disabled={page === 0 || loading} onClick={() => setPage(Math.max(0, page - 1))}>Previous</button><span>Records {page * 50 + 1}–{page * 50 + records.length}</span><button type="button" className="btn btn-secondary" disabled={records.length < 50 || loading} onClick={() => setPage(page + 1)}>Next</button></div>
+        <div className="rel-wb__pagination"><button type="button" className="btn btn-secondary" disabled={page === 0 || loading} onClick={() => setPage(Math.max(0, page - 1))}>Previous</button><span>Records {records.length ? page * 50 + 1 : 0}–{page * 50 + records.length}</span><button type="button" className="btn btn-secondary" disabled={records.length < 50 || loading} onClick={() => setPage(page + 1)}>Next</button></div>
       </section>
     </>}
 
