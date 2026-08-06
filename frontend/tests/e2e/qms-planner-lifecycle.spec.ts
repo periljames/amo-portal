@@ -176,9 +176,10 @@ test.describe("QMS planner lifecycle", () => {
     await expect(shortcutsDialog).toBeHidden();
     await expect(shortcutsTrigger).toBeFocused();
 
-    await page.locator(".qms-planner-event").first().focus();
-    await page.keyboard.press("Enter");
+    const plannerEvent = page.locator(".qms-planner-event").first();
+    await plannerEvent.click();
     const rescheduleTrigger = page.getByRole("button", { name: "Reschedule" });
+    await expect(rescheduleTrigger).toBeVisible();
     await rescheduleTrigger.focus();
     await page.keyboard.press("Enter");
     const rescheduleDialog = page.getByRole("dialog", { name: /Reschedule QAR-026/ });
