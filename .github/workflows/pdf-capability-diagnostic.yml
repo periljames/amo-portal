@@ -20,6 +20,7 @@ jobs:
       SECRET_KEY: pdf-capability-diagnostic-secret
       JWT_SECRET_KEY: pdf-capability-diagnostic-jwt-secret
       PYTHONPATH: backend
+      PYTHONWARNINGS: ignore
     steps:
       - uses: actions/checkout@v6
         with:
@@ -31,17 +32,21 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Run capability tests with full diagnostics
+      - name: Run capability tests with focused diagnostics
         working-directory: backend
         shell: bash
         run: |
           set +e
-          pytest -vv -s --tb=long amodb/apps/doc_control/tests/test_pdf_capability_service.py 2>&1 | tee /tmp/pdf-capability-test.log
+          pytest -vv -s --tb=long --disable-warnings amodb/apps/doc_control/tests/test_pdf_capability_service.py 2>&1 | tee /tmp/pdf-capability-test.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             python - <<'PY'
           from pathlib import Path
-          text = Path('/tmp/pdf-capability-test.log').read_text(encoding='utf-8', errors='replace')[-12000:]
+          text = Path('/tmp/pdf-capability-test.log').read_text(encoding='utf-8', errors='replace')
+          marker = '=================================== FAILURES ==================================='
+          if marker in text:
+              text = text.split(marker, 1)[1]
+          text = text[-14000:]
           text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print(f'::error title=PDF capability test failure::{text}')
           PY
