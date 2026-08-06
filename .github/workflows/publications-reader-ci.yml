@@ -6,6 +6,7 @@ on:
       - "backend/amodb/apps/manuals/**"
       - "backend/amodb/apps/doc_control/pdfium_service.py"
       - "backend/amodb/apps/doc_control/pdf_capability_service.py"
+      - "backend/amodb/apps/doc_control/pdf_capability_prewarm.py"
       - "backend/amodb/apps/doc_control/pdf_safe_processing_service.py"
       - "backend/amodb/apps/doc_control/tests/test_pdf_*.py"
       - "backend/docs/document_control/PDF_READER_ENGINE_HARDENING_*.md"
@@ -83,6 +84,7 @@ jobs:
           amodb/apps/manuals
           amodb/apps/doc_control/pdfium_service.py
           amodb/apps/doc_control/pdf_capability_service.py
+          amodb/apps/doc_control/pdf_capability_prewarm.py
           amodb/apps/doc_control/pdf_safe_processing_service.py
       - name: Run controlled PDF engine and source contracts
         working-directory: backend
@@ -127,8 +129,8 @@ jobs:
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: tenant-completion-secret
       QUALITY_SCHEMA_STRICT: "0"
       PYTHONPATH: backend
