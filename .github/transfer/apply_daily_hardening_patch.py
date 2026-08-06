@@ -24,7 +24,18 @@ services, classification_count = classification_role_pattern.subn(
     count=1,
 )
 if classification_count == 0 and len(classification_target_pattern.findall(services)) != 1:
-    raise SystemExit("expected one Classification role or target_type keyword")
+    lines = services.splitlines()
+    contexts = []
+    for index, line in enumerate(lines):
+        if "Classification" in line or "classify_component" in line:
+            start = max(0, index - 4)
+            end = min(len(lines), index + 10)
+            contexts.append(
+                f"lines {start + 1}-{end}:\n"
+                + "\n".join(f"{line_number + 1}: {lines[line_number]}" for line_number in range(start, end))
+            )
+    detail = "\n---\n".join(contexts[:8]) or "no Classification/classify_component context found"
+    raise SystemExit("expected one Classification role or target_type keyword\n" + detail)
 services_path.write_text(services)
 
 
