@@ -62,7 +62,7 @@ async function openWorkspace(page: Page): Promise<void> {
     localStorage.setItem("amo_code", "SAFARILINK");
     localStorage.setItem("amo_slug", "safarilink");
     localStorage.setItem("amo_department", "reliability");
-    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "uat-user", amo_id: "uat-amo", department_id: "uat-rel", staff_code: "REL-UAT",
       email: "uat@example.invalid", first_name: "Reliability", last_name: "UAT", full_name: "Reliability UAT",
@@ -74,7 +74,7 @@ async function openWorkspace(page: Page): Promise<void> {
   });
   await page.route("**/*", fulfilApi);
   await page.goto("/maintenance/safarilink/reliability/workbook-parity");
-  await expect(page.getByTestId("reliability-workbook-parity")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("reliability-workbook-parity"), `Expected workbook parity workspace at ${page.url()}`).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe("Reliability workbook parity representative-tenant UAT", () => {
