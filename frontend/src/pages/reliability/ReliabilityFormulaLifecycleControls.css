@@ -1,0 +1,35 @@
+.reliability-formula-lifecycle {
+  scroll-margin-top: 5rem;
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-color, Canvas) 96%, currentColor 4%);
+}
+
+.reliability-formula-lifecycle__forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .reliability-formula-lifecycle__forms {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .reliability-formula-lifecycle__forms,
+  .reliability-formula-lifecycle .reliability-v2__actions {
+    display: none !important;
+  }
+
+  .reliability-formula-lifecycle {
+    break-inside: avoid;
+    border-color: #777;
+    background: #fff;
+    color: #000;
+  }
+}
