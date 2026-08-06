@@ -138,12 +138,14 @@ class HrDefaultDayBatchPreview(HrSchema):
     assignable_count: int
     already_assigned_count: int
     ineligible_count: int
+    selection_token: str
     capped: bool = False
 
 
 class HrDefaultDayBatchApplyRequest(HrSchema):
     selection: HrPeopleSelection
     expected_match_count: int = Field(ge=0, le=10000)
+    expected_selection_token: str = Field(min_length=64, max_length=64)
 
 
 class HrDefaultDayBatchResult(HrSchema):
