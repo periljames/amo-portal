@@ -159,6 +159,8 @@ function operation(status: "QUEUED" | "RUNNING" | "COMPLETED", progress: number)
 test.use({ serviceWorkers: "block" });
 
 test("governed Workforce remains bounded and completes a 10,000-person batch", async ({ page }) => {
+  page.on("pageerror", (error) => console.error(`[pageerror] ${error.stack || error.message}`));
+  page.on("console", (message) => { if (message.type() === "error") console.error(`[browser-console] ${message.text()}`); });
   await installSession(page);
   let operationPolls = 0;
   let submittedBody: any = null;
@@ -216,7 +218,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     }
     if (path.includes("/onboarding")) return json(route, { is_complete: true, missing: [] });
     if (path.endsWith("/rostering/dashboard")) return json(route, { generated_at: "2026-08-06T08:00:00Z", top_findings: [], upcoming_periods: [] });
-    return json(route, []);
+    return json(route, { detail: "Not required by the Workforce scale scenario" }, 404);
   });
 
   await page.goto(`${ROSTER_ROOT}/settings?section=workforce`);
