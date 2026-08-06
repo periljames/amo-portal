@@ -1,0 +1,43 @@
+name: PR 466 Playwright command patch
+
+on:
+  push:
+    branches:
+      - fix/workforce-default-day-pattern-postgres-lock
+    paths:
+      - .github/workflows/pr466-playwright-command-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/workforce-default-day-pattern-postgres-lock
+          fetch-depth: 0
+      - name: Use the configured default Playwright project
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('.github/workflows/workforce-directory-scale-ci.yml'),
+              Path('.github/workflows/duty-rostering-ci.yml'),
+          ]
+          old = 'npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts --project=chromium'
+          new = 'npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts'
+          for path in paths:
+              source = path.read_text(encoding='utf-8')
+              if source.count(old) != 1:
+                  raise SystemExit(f'{path}: expected one Playwright command, found {source.count(old)}')
+              path.write_text(source.replace(old, new), encoding='utf-8')
+          PY
+          git rm .github/workflows/pr466-playwright-command-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/workforce-directory-scale-ci.yml .github/workflows/duty-rostering-ci.yml
+          git commit -m "ci(workforce): use configured Playwright project"
+          git push origin HEAD:fix/workforce-default-day-pattern-postgres-lock
