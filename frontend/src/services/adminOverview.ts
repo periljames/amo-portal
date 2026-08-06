@@ -39,9 +39,28 @@ export type OverviewSummary = {
   recent_activity_available: boolean;
 };
 
+function uniqueRecentActivity(items: OverviewActivity[]): OverviewActivity[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = [
+      item.occurred_at || "",
+      item.action,
+      item.entity_type,
+      item.actor_user_id || "system",
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function fetchOverviewSummary(opts?: { silent?: boolean }): Promise<OverviewSummary> {
-  return apiGet<OverviewSummary>("/accounts/admin/overview-summary", {
+  const response = await apiGet<OverviewSummary>("/accounts/admin/overview-summary", {
     headers: authHeaders(),
     silent: opts?.silent ?? false,
   });
+  return {
+    ...response,
+    recent_activity: uniqueRecentActivity(response.recent_activity || []),
+  };
 }
