@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from amodb.apps.accounts import models as account_models
 from amodb.apps.fleet import models as fleet_models
 from amodb.apps.aircraft_architecture.aircraft_induction import models as induction_models
-from amodb.apps.aircraft_architecture.aircraft_induction import router as induction_router
+from amodb.apps.aircraft_architecture.aircraft_induction.router import read_induction
 from amodb.apps.aircraft_architecture.aircraft_induction import services as induction_services
 from amodb.apps.aircraft_architecture.content_packs import models as pack_models
 from amodb.apps.aircraft_architecture.content_packs import schemas as pack_schemas
@@ -222,7 +222,7 @@ def test_tenant_scoped_idempotency_and_lookup_do_not_cross_tenants(sessions):
         ).count() == 2
 
         with pytest.raises(HTTPException) as hidden:
-            induction_router.read_induction(induction_a.id, db=db, user=user_b)
+            read_induction(induction_a.id, db=db, user=user_b)
         assert hidden.value.status_code == 404
 
         foreign_programme = payload_a.model_copy(
