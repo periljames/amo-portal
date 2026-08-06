@@ -13,6 +13,7 @@ from . import operational_sources  # noqa: E402,F401
 from . import operational_hardening  # noqa: E402,F401
 from . import analytics_dashboard  # noqa: E402,F401
 from . import workbook_parity  # noqa: E402,F401
+from . import workbook_parity_contract_hardening  # noqa: E402,F401
 from . import workbook_parity_defaults  # noqa: E402,F401
 from . import workbook_parity_statistics  # noqa: E402,F401
 
