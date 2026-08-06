@@ -11,6 +11,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
+from ..work import models as work_models
 from . import commitments, models
 
 UTC = timezone.utc
@@ -125,6 +126,19 @@ def _task_detail(assignment: models.RosterAssignment) -> tuple[str, str]:
     return "\n".join(dict.fromkeys(summaries)), ", ".join(dict.fromkeys(aircraft))
 
 
+def _published_assignment_loader_options():
+    """Build SQLAlchemy 2-compatible eager-loader paths for calendar events."""
+    return (
+        selectinload(models.RosterAssignment.shift_template),
+        selectinload(models.RosterAssignment.base_station),
+        selectinload(models.RosterAssignment.task_links)
+        .selectinload(models.RosterTaskAssignmentLink.task_assignment)
+        .selectinload(work_models.TaskAssignment.task)
+        .selectinload(work_models.TaskCard.work_order)
+        .selectinload(work_models.WorkOrder.aircraft),
+    )
+
+
 def _published_assignments(
     db: Session,
     *,
@@ -138,15 +152,7 @@ def _published_assignments(
     return db.query(models.RosterAssignment).join(
         models.RosterVersion,
         models.RosterAssignment.version_id == models.RosterVersion.id,
-    ).options(
-        selectinload(models.RosterAssignment.shift_template),
-        selectinload(models.RosterAssignment.base_station),
-        selectinload(models.RosterAssignment.task_links)
-        .selectinload(models.RosterTaskAssignmentLink.task_assignment)
-        .selectinload("task")
-        .selectinload("work_order")
-        .selectinload("aircraft"),
-    ).filter(
+    ).options(*_published_assignment_loader_options()).filter(
         models.RosterAssignment.amo_id == amo_id,
         models.RosterAssignment.user_id == user_id,
         models.RosterAssignment.deleted_at.is_(None),
