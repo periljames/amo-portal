@@ -93,7 +93,16 @@ export function WorkforceBulkSetupPanel({ canManageContracts, canInitializeDefau
     if (count && !window.confirm("Changing filters clears the current bulk selection. Continue?")) return;
     clearSelection(); setFilters((f) => ({ ...f, [name]: value || null })); setPage(1);
   };
-  const toggle = (id: string) => { clearPreview(); const setter = allMatching ? setExcluded : setSelected; setter((old) => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; }); };
+  const toggle = (id: string) => {
+    clearPreview();
+    const setter = allMatching ? setExcluded : setSelected;
+    setter((old) => {
+      const next = new Set(old);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const togglePage = () => { clearPreview(); const setter = allMatching ? setExcluded : setSelected; setter((old) => { const next = new Set(old); people.forEach(({ user_id }) => pageChecked ? next.delete(user_id) : next.add(user_id)); return next; }); };
   const run = async (name: string, action: () => Promise<void>) => { setBusy(name); setError(null); setMessage(null); try { await action(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(null); } };
   const contractPayload = { selection, defaults, overrides: Object.values(overrides) as HrContractOverride[], preview_limit: 250 };
