@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
+from amodb.apps.rostering import models as rostering_models  # noqa: F401
 from amodb.apps.workforce import hr_service, models
 from amodb.apps.workforce.work_pattern_assignment_locking import (
     scope_employee_pattern_for_update,
