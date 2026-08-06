@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_indexer import index_revision_background
+from amodb.apps.doc_control.pdf_capability_warmup import warm_pdf_capability_cache_background
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -128,5 +129,11 @@ async def upload_pdf_revision_guarded(
         db=db,
         current_user=current_user,
     )
-    background_tasks.add_task(index_revision_background, result["revision_id"])
-    return {**result, "reference_index_status": "PENDING"}
+    revision_id = result["revision_id"]
+    background_tasks.add_task(warm_pdf_capability_cache_background, revision_id)
+    background_tasks.add_task(index_revision_background, revision_id)
+    return {
+        **result,
+        "reference_index_status": "PENDING",
+        "pdf_capability_status": "PENDING",
+    }
