@@ -54,6 +54,7 @@ async function fulfilApi(route: Route): Promise<void> {
   if (path.endsWith("/mappings")) return json([]);
   if (path.endsWith("/parity")) return json(DATASETS.map((code) => ({ dataset_code: code, dataset_name: code, required_fields: [], optional_fields: [], mapped_required_fields: [], missing_required_fields: [], coverage_pct: 100, record_count: 0 })));
   if (path.endsWith("/contracts")) return json({ mapping: { profiles: { "SAFARILINK-C208B-RP": {}, "SAFARILINK-DHC8-RP": {}, "GENERIC-ANALYSIS-TEMPLATE": {} }, datasets: {} }, report_layouts: { required_datasets: DATASETS, layouts: {} } });
+  if (path.endsWith("/imports")) return json({ total: 0, offset: 0, limit: 50, items: [] });
   if (path.endsWith("/report-layouts")) return json([
     { id: 1, code: "C208B-RP", name: "Cessna 208B Reliability Programme Report", aircraft_family: "C208B", revision: 1, active: true, sections: [], page_settings: {} },
     { id: 2, code: "DHC8-RP", name: "DHC8 Reliability Programme Report", aircraft_family: "DHC8", revision: 1, active: true, sections: [], page_settings: {} },
@@ -96,8 +97,9 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
 
     await page.getByRole("button", { name: /Statistical alerts/ }).click();
     await expect(page.getByRole("heading", { name: "Statistical alert calculation" })).toBeVisible();
-    await page.getByRole("button", { name: /Mapping & parity/ }).click();
+    await page.getByRole("button", { name: /Mapping & imports/ }).click();
     await expect(page.getByRole("heading", { name: "Field mapping and parity" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Controlled workbook import" })).toBeVisible();
     await page.getByRole("button", { name: /Report layouts/ }).click();
     await expect(page.getByRole("heading", { name: "Report layouts" })).toBeVisible();
     await expect(page.getByText("Cessna 208B Reliability Programme Report")).toBeVisible();
