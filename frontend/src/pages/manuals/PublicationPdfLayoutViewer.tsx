@@ -1,5 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Link2, List, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  Link2,
+  List,
+  Maximize2,
+  Minimize2,
+  Share2,
+  X,
+} from "lucide-react";
 
 import {
   getPublicationReferences,
@@ -12,6 +26,7 @@ import PdfReaderCore, {
   type PdfReaderOutlineItem,
 } from "./PdfReaderCore";
 import "./publicationReaderZoom.css";
+import "./publicationReaderFocusMode.css";
 
 export type PdfOutlineItem = PdfReaderOutlineItem;
 
@@ -31,7 +46,15 @@ type PublicationPdfLayoutViewerProps = {
   onOutlineReady?: (items: PdfOutlineItem[]) => void;
 };
 
-type SourceIdentity = { tenant: string; manualId: string; revisionId: string };
+type SourceIdentity = {
+  tenant: string;
+  manualId: string;
+  revisionId: string;
+};
+
+const READER_MODE_CLASS = "publication-reader-page--reader-mode";
+const READER_MODE_BODY_CLASS = "publication-reader-mode-active";
+const NAVIGATION_COMMAND_TTL_MS = 15_000;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -58,7 +81,9 @@ function hotspotStyle(reference: DocumentationReference): CSSProperties | null {
   const y = Number(box.y);
   const width = Number(box.width);
   const height = Number(box.height);
-  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+    return null;
+  }
   return {
     left: `${clamp(x, 0, 1) * 100}%`,
     top: `${clamp(y, 0, 1) * 100}%`,
@@ -83,56 +108,15 @@ function searchResultPage(button: Element): number | null {
   return Number.isInteger(page) && page > 0 ? page : null;
 }
 
-function navigationRowPage(row: HTMLElement): number | null {
-  const label = row.querySelector("small")?.textContent || row.textContent || "";
-  const match = label.match(/(?:\bp(?:age)?\.?\s*)(\d+)\b/i);
-  const page = Number(match?.[1] || 0);
-  return Number.isInteger(page) && page > 0 ? page : null;
-}
-
-function alignActiveNavigationRow(layout: HTMLElement, currentPage: number): boolean {
-  const readerPage = layout.closest<HTMLElement>(".publication-reader-page");
-  const container = readerPage?.querySelector<HTMLElement>(".publication-toc__list");
-  if (!container) return false;
-
-  const rows = [...container.querySelectorAll<HTMLElement>(".publication-toc__row")];
-  const pageRows = rows
-    .map((row) => ({ row, page: navigationRowPage(row) }))
-    .filter((entry): entry is { row: HTMLElement; page: number } => Boolean(entry.page));
-  const exact = pageRows.find((entry) => entry.page === currentPage);
-  const preceding = pageRows
-    .filter((entry) => entry.page <= currentPage)
-    .sort((left, right) => right.page - left.page)[0];
-  const following = pageRows
-    .filter((entry) => entry.page > currentPage)
-    .sort((left, right) => left.page - right.page)[0];
-  const fallback = container.querySelector<HTMLElement>(".publication-toc__row.active");
-  const row = exact?.row || preceding?.row || following?.row || fallback;
-  if (!row) return false;
-
-  rows.forEach((candidate) => {
-    const active = candidate === row;
-    candidate.classList.toggle("active", active);
-    if (active) candidate.setAttribute("aria-current", "page");
-    else candidate.removeAttribute("aria-current");
-  });
-  readerPage?.setAttribute("data-pdf-current-page", String(currentPage));
-
-  const containerRect = container.getBoundingClientRect();
-  const rowRect = row.getBoundingClientRect();
-  const margin = 18;
-  const above = rowRect.top < containerRect.top + margin;
-  const below = rowRect.bottom > containerRect.bottom - margin;
-  if (!above && !below) return true;
-
-  const centeredTop = container.scrollTop
-    + rowRect.top
-    - containerRect.top
-    - Math.max(0, (container.clientHeight - rowRect.height) / 2);
-  container.scrollTo({ top: Math.max(0, centeredTop), behavior: "smooth" });
-  return true;
-}
-
+/**
+ * Layout integration intentionally has no second TOC state controller.
+ *
+ * PublicationsReaderPage remains the sole owner of active navigation rows.
+ * This component translates reader outline data and explicit search/reference
+ * actions into one-shot reader navigation commands. Once the reader begins to
+ * move, the command is released so resize, fit and virtualizer remeasurement
+ * cannot replay an old destination and snap the user back.
+ */
 export default function PublicationPdfLayoutViewer({
   fileUrl,
   title,
@@ -149,23 +133,62 @@ export default function PublicationPdfLayoutViewer({
   onOutlineReady,
 }: PublicationPdfLayoutViewerProps) {
   const identity = useMemo(() => sourceIdentity(fileUrl), [fileUrl]);
-  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const readerRootRef = useRef<HTMLDivElement | null>(null);
+  const navigationClearTimerRef = useRef<number | null>(null);
   const [automaticReferences, setAutomaticReferences] = useState<DocumentationReference[]>([]);
   const [indexState, setIndexState] = useState<DocumentationIndexState | null>(null);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
-  const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(activeReferenceId || null);
+  const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(
+    activeReferenceId || null,
+  );
   const [referenceListOpen, setReferenceListOpen] = useState(false);
-  const [readerNavigationRequest, setReaderNavigationRequest] = useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+  const [readerNavigationRequest, setReaderNavigationRequest] =
+    useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+  const [readerMode, setReaderMode] = useState(false);
+  const [pageLinkCopied, setPageLinkCopied] = useState(false);
+
+  const clearReaderNavigationCommand = useCallback(() => {
+    if (navigationClearTimerRef.current !== null) {
+      window.clearTimeout(navigationClearTimerRef.current);
+      navigationClearTimerRef.current = null;
+    }
+    setReaderNavigationRequest(null);
+  }, []);
+
+  const dispatchReaderNavigation = useCallback((request: PdfReaderNavigationRequest) => {
+    if (navigationClearTimerRef.current !== null) {
+      window.clearTimeout(navigationClearTimerRef.current);
+    }
+    setReaderNavigationRequest(request);
+    navigationClearTimerRef.current = window.setTimeout(() => {
+      navigationClearTimerRef.current = null;
+      setReaderNavigationRequest((current) => (
+        current?.token === request.token ? null : current
+      ));
+    }, NAVIGATION_COMMAND_TTL_MS);
+  }, []);
 
   useEffect(() => {
     if (!navigationRequest) return;
-    setReaderNavigationRequest(navigationRequest);
-  }, [navigationRequest?.page, navigationRequest?.token]);
+    dispatchReaderNavigation(navigationRequest);
+  }, [
+    dispatchReaderNavigation,
+    navigationRequest?.page,
+    navigationRequest?.token,
+  ]);
 
   useEffect(() => {
-    const layout = layoutRef.current;
-    const page = layout?.closest<HTMLElement>(".publication-reader-page");
-    if (!layout || !page) return;
+    const root = readerRootRef.current;
+    if (!root) return;
+
+    const releaseConsumedCommand = () => clearReaderNavigationCommand();
+    root.addEventListener("scroll", releaseConsumedCommand, true);
+    return () => root.removeEventListener("scroll", releaseConsumedCommand, true);
+  }, [clearReaderNavigationCommand]);
+
+  useEffect(() => {
+    const page = document.querySelector<HTMLElement>(".publication-reader-page");
+    if (!page) return;
 
     const routeIndexedSearchToPdf = (event: Event) => {
       const target = event.target;
@@ -177,58 +200,110 @@ export default function PublicationPdfLayoutViewer({
 
       event.preventDefault();
       event.stopPropagation();
-      event.stopImmediatePropagation();
-      setReaderNavigationRequest({ page: destination, token: Date.now() });
+      dispatchReaderNavigation({ page: destination, token: Date.now() });
     };
 
     page.addEventListener("click", routeIndexedSearchToPdf, true);
     return () => page.removeEventListener("click", routeIndexedSearchToPdf, true);
-  }, []);
+  }, [dispatchReaderNavigation]);
+
+  const readerPageElement = useCallback(() => (
+    readerRootRef.current?.closest<HTMLElement>(".publication-reader-page") || null
+  ), []);
+
+  const leaveReaderMode = useCallback(() => {
+    const page = readerPageElement();
+    page?.classList.remove(READER_MODE_CLASS);
+    document.body.classList.remove(READER_MODE_BODY_CLASS);
+    setReaderMode(false);
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [readerPageElement]);
+
+  const enterReaderMode = useCallback(() => {
+    const page = readerPageElement();
+    if (!page) return;
+    page.classList.add(READER_MODE_CLASS);
+    document.body.classList.add(READER_MODE_BODY_CLASS);
+    setReaderMode(true);
+    if (page.requestFullscreen && !document.fullscreenElement) {
+      void page.requestFullscreen().catch(() => undefined);
+    }
+  }, [readerPageElement]);
 
   useEffect(() => {
-    const layout = layoutRef.current;
-    if (!layout) return;
-    let cancelled = false;
-    let frame = 0;
-    let timer = 0;
-
-    const synchronize = (attempt: number) => {
-      if (cancelled) return;
-      frame = window.requestAnimationFrame(() => {
-        if (cancelled) return;
-        if (alignActiveNavigationRow(layout, currentPage)) return;
-        if (attempt >= 14) return;
-        timer = window.setTimeout(() => synchronize(attempt + 1), attempt < 4 ? 16 : 48);
-      });
+    const synchronizeFullscreenState = () => {
+      const page = readerPageElement();
+      if (!page) return;
+      if (document.fullscreenElement === page) {
+        page.classList.add(READER_MODE_CLASS);
+        document.body.classList.add(READER_MODE_BODY_CLASS);
+        setReaderMode(true);
+        return;
+      }
+      if (!document.fullscreenElement && page.classList.contains(READER_MODE_CLASS)) {
+        page.classList.remove(READER_MODE_CLASS);
+        document.body.classList.remove(READER_MODE_BODY_CLASS);
+        setReaderMode(false);
+      }
     };
 
-    synchronize(0);
+    const exitFallbackOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const page = readerPageElement();
+      if (!page?.classList.contains(READER_MODE_CLASS)) return;
+      page.classList.remove(READER_MODE_CLASS);
+      document.body.classList.remove(READER_MODE_BODY_CLASS);
+      setReaderMode(false);
+    };
+
+    document.addEventListener("fullscreenchange", synchronizeFullscreenState);
+    document.addEventListener("keydown", exitFallbackOnEscape);
     return () => {
-      cancelled = true;
-      if (frame) window.cancelAnimationFrame(frame);
-      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("fullscreenchange", synchronizeFullscreenState);
+      document.removeEventListener("keydown", exitFallbackOnEscape);
+      const page = readerPageElement();
+      page?.classList.remove(READER_MODE_CLASS);
+      document.body.classList.remove(READER_MODE_BODY_CLASS);
+      if (navigationClearTimerRef.current !== null) {
+        window.clearTimeout(navigationClearTimerRef.current);
+      }
     };
-  }, [currentPage, readerNavigationRequest?.token]);
+  }, [readerPageElement]);
 
   useEffect(() => {
     if (!identity || references.length) return;
     let active = true;
     let timer = 0;
+
     const load = () => {
-      getPublicationReferences(identity.tenant, identity.manualId, identity.revisionId)
+      getPublicationReferences(
+        identity.tenant,
+        identity.manualId,
+        identity.revisionId,
+      )
         .then((response) => {
           if (!active) return;
           setAutomaticReferences(response.items || []);
           setIndexState(response.index || null);
           if (indexing(response.index)) timer = window.setTimeout(load, 1400);
         })
-        .catch(() => { if (active) timer = window.setTimeout(load, 3500); });
+        .catch(() => {
+          if (active) timer = window.setTimeout(load, 3500);
+        });
     };
+
     load();
-    return () => { active = false; if (timer) window.clearTimeout(timer); };
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [identity, references.length]);
 
-  useEffect(() => { setSelectedReferenceId(activeReferenceId || null); }, [activeReferenceId]);
+  useEffect(() => {
+    setSelectedReferenceId(activeReferenceId || null);
+  }, [activeReferenceId]);
 
   const allReferences = references.length ? references : automaticReferences;
   const referencesByPage = useMemo(() => {
@@ -240,7 +315,11 @@ export default function PublicationPdfLayoutViewer({
     }
     return grouped;
   }, [allReferences]);
-  const selectedReference = allReferences.find((reference) => reference.id === (activeReferenceId || selectedReferenceId)) || null;
+
+  const selectedReference =
+    allReferences.find(
+      (reference) => reference.id === (activeReferenceId || selectedReferenceId),
+    ) || null;
   const currentReferences = referencesByPage.get(currentPage) || [];
 
   const openReference = (reference: DocumentationReference) => {
@@ -250,24 +329,110 @@ export default function PublicationPdfLayoutViewer({
     onReferenceClick?.(reference);
   };
 
+  const copyControlledPageLink = async () => {
+    const url = new URL(window.location.href);
+    url.hash = `pdf-page-${currentPage}`;
+    await navigator.clipboard.writeText(url.toString());
+    setPageLinkCopied(true);
+    window.setTimeout(() => setPageLinkCopied(false), 1800);
+  };
+
   if (!identity) {
-    return <div className="publication-native-pdf__error" role="alert">The controlled PDF source could not be identified.</div>;
+    return (
+      <div className="publication-native-pdf__error" role="alert">
+        The controlled PDF source could not be identified.
+      </div>
+    );
   }
-  const readerIdentityKey = `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
+
+  const readerIdentityKey =
+    `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
-    <div ref={layoutRef} className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
+    <div
+      ref={readerRootRef}
+      className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}
+      onPointerDownCapture={(event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest(".pdfv3-zoom")) {
+          clearReaderNavigationCommand();
+        }
+      }}
+    >
       <div className="publication-native-pdf">
-        {indexing(indexState) ? <div className="pdf-engine-notice">Indexing linked documents…</div> : null}
-        {currentReferences.length ? <div className="publication-page-links-control">
-          <button type="button" className="publication-page-links-button" onClick={() => setReferenceListOpen((value) => !value)}><Link2 size={14} /> {currentReferences.length} linked</button>
-          {referenceListOpen ? <div className="publication-page-links-popover">
-            <header><strong>Linked items on page {currentPage}</strong><button type="button" onClick={() => setReferenceListOpen(false)} aria-label="Close linked items"><X size={14} /></button></header>
-            {currentReferences.map((reference) => <button type="button" key={reference.id} disabled={!reference.target} onClick={() => openReference(reference)}>
-              <List size={14} /><span><strong>{reference.raw_token}</strong><small>{reference.target ? `${reference.target.code} · ${reference.target.title}` : `${humanize(reference.status)} · awaiting Document Control`}</small></span>
-            </button>)}
-          </div> : null}
-        </div> : null}
+        <div className="publication-reader-utility-dock" aria-label="Reader utilities">
+          <button
+            type="button"
+            onClick={() => void copyControlledPageLink()}
+            title="Copy a permission-controlled link to this revision and page"
+          >
+            <Share2 size={15} />
+            <span>{pageLinkCopied ? "Link copied" : "Copy page link"}</span>
+          </button>
+          <button
+            type="button"
+            className="publication-reader-mode-toggle"
+            aria-pressed={readerMode}
+            onClick={() => {
+              if (readerMode) leaveReaderMode();
+              else enterReaderMode();
+            }}
+          >
+            {readerMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            <span>{readerMode ? "Exit reader mode" : "Reader mode"}</span>
+            {readerMode ? <kbd>Esc</kbd> : null}
+          </button>
+        </div>
+
+        {indexing(indexState) ? (
+          <div className="pdf-engine-notice">Indexing linked documents…</div>
+        ) : null}
+
+        {currentReferences.length ? (
+          <div className="publication-page-links-control">
+            <button
+              type="button"
+              className="publication-page-links-button"
+              onClick={() => setReferenceListOpen((value) => !value)}
+            >
+              <Link2 size={14} />
+              {currentReferences.length} linked
+            </button>
+            {referenceListOpen ? (
+              <div className="publication-page-links-popover">
+                <header>
+                  <strong>Linked items on page {currentPage}</strong>
+                  <button
+                    type="button"
+                    onClick={() => setReferenceListOpen(false)}
+                    aria-label="Close linked items"
+                  >
+                    <X size={14} />
+                  </button>
+                </header>
+                {currentReferences.map((reference) => (
+                  <button
+                    type="button"
+                    key={reference.id}
+                    disabled={!reference.target}
+                    onClick={() => openReference(reference)}
+                  >
+                    <List size={14} />
+                    <span>
+                      <strong>{reference.raw_token}</strong>
+                      <small>
+                        {reference.target
+                          ? `${reference.target.code} · ${reference.target.title}`
+                          : `${humanize(reference.status)} · awaiting Document Control`}
+                      </small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <PdfReaderCore
           key={readerIdentityKey}
           fileUrl={fileUrl}
@@ -279,28 +444,49 @@ export default function PublicationPdfLayoutViewer({
           navigationRequest={readerNavigationRequest}
           initialPage={initialPage}
           initialZoom={initialZoom}
-          onPageChange={(pageNumber: number) => {
+          onPageChange={(pageNumber) => {
             setCurrentPage(pageNumber);
+            setReaderNavigationRequest((current) => (
+              current?.page === pageNumber ? null : current
+            ));
             onPageChange?.(pageNumber);
           }}
           onZoomChange={onZoomChange}
           onAcroFormDetected={onAcroFormDetected}
           onOutlineReady={onOutlineReady}
-          renderPageOverlay={(pageNumber: number) => <>{(referencesByPage.get(pageNumber) || []).map((reference) => {
-            const style = hotspotStyle(reference);
-            if (!style || !reference.target) return null;
-            return <button
-              type="button"
-              key={reference.id}
-              className={`publication-reference-hotspot ${(activeReferenceId || selectedReferenceId) === reference.id ? "active" : ""}`}
-              style={style}
-              aria-label={`${reference.raw_token}: open ${reference.target.code}`}
-              onClick={() => openReference(reference)}
-            />;
-          })}</>}
+          renderPageOverlay={(pageNumber) => (
+            <>
+              {(referencesByPage.get(pageNumber) || []).map((reference) => {
+                const style = hotspotStyle(reference);
+                if (!style || !reference.target) return null;
+                return (
+                  <button
+                    type="button"
+                    key={reference.id}
+                    className={[
+                      "publication-reference-hotspot",
+                      (activeReferenceId || selectedReferenceId) === reference.id
+                        ? "active"
+                        : "",
+                    ].filter(Boolean).join(" ")}
+                    style={style}
+                    aria-label={`${reference.raw_token}: open ${reference.target.code}`}
+                    onClick={() => openReference(reference)}
+                  />
+                );
+              })}
+            </>
+          )}
         />
       </div>
-      {selectedReference ? <LinkedDocumentationPanel tenant={identity.tenant} referenceId={selectedReference.id} onClose={() => setSelectedReferenceId(null)} /> : null}
+
+      {selectedReference ? (
+        <LinkedDocumentationPanel
+          tenant={identity.tenant}
+          referenceId={selectedReference.id}
+          onClose={() => setSelectedReferenceId(null)}
+        />
+      ) : null}
     </div>
   );
 }

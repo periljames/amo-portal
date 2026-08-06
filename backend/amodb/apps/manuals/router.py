@@ -18,6 +18,7 @@ from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
 from .pdf_reader_form_override_router import router as _pdf_reader_form_override_router
+from .pdf_reader_precomputed_router import router as _pdf_reader_precomputed_router
 from .pdf_reader_router import router as _pdf_reader_router
 from .publications_fast_reader_router import router as _fast_reader_router
 from .publications_router import router as _publications_router
@@ -33,11 +34,11 @@ for _route in _pdf_reader_form_override_router.routes:
 
 
 router = APIRouter()
-# Guards, safe automatic form execution, progressive delivery, PDF engine
-# processing, and version-aware reference routes must precede compatibility
-# routes because Starlette resolves identical paths in declaration order.
-# Reader knowledge routes authorize both the source and target documents.
+# Guards and precomputed capability routes precede compatibility routes because
+# Starlette resolves identical paths in declaration order. The legacy override
+# remains mounted for flatten/submit routes that are not replaced.
 router.include_router(_upload_guard_router)
+router.include_router(_pdf_reader_precomputed_router)
 router.include_router(_pdf_reader_form_override_router)
 router.include_router(_pdf_reader_router)
 router.include_router(_fast_reader_router)
