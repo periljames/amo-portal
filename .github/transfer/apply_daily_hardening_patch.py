@@ -8,6 +8,59 @@ def replace_once(source: str, old: str, new: str, label: str) -> str:
     return source.replace(old, new)
 
 
+def ensure_fixture_component_kind(
+    source: str,
+    position_prefix: str,
+    component_kind: str,
+) -> str:
+    pattern = re.compile(
+        rf'(?m)^(?P<indent>[ \t]*)position="(?P<position>{re.escape(position_prefix)}-\d+)",'
+    )
+    matches = list(pattern.finditer(source))
+    if not matches:
+        raise SystemExit(
+            f"expected at least one {component_kind} fixture position with prefix {position_prefix}"
+        )
+
+    result: list[str] = []
+    cursor = 0
+    inserted = 0
+    accepted = 0
+    for match in matches:
+        constructor_start = source.rfind("FleetComponent(", 0, match.start())
+        if constructor_start < 0:
+            raise SystemExit(
+                f"could not locate FleetComponent constructor for {match.group('position')}"
+            )
+        constructor_prefix = source[constructor_start:match.start()]
+        existing = re.search(
+            r'(?m)^\s*component_kind\s*=\s*["\'](?P<kind>[A-Z_]+)["\']\s*,',
+            constructor_prefix,
+        )
+
+        result.append(source[cursor:match.start()])
+        if existing:
+            if existing.group("kind") != component_kind:
+                raise SystemExit(
+                    f"fixture {match.group('position')} has component_kind="
+                    f"{existing.group('kind')}, expected {component_kind}"
+                )
+            accepted += 1
+        else:
+            result.append(
+                f'{match.group("indent")}component_kind="{component_kind}",\n'
+            )
+            inserted += 1
+        result.append(source[match.start():match.end()])
+        cursor = match.end()
+
+    result.append(source[cursor:])
+    print(
+        f"{component_kind} fixture roles: inserted={inserted}; already_correct={accepted}"
+    )
+    return "".join(result)
+
+
 services_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/services.py")
 services = services_path.read_text()
 classification_role_pattern = re.compile(
@@ -45,6 +98,29 @@ if classification_count == 0:
             f"ambiguous Classification correction state: target_count={target_count}\n" + detail
         )
 services_path.write_text(services)
+
+
+migration_path = Path(
+    "backend/amodb/alembic/versions/20260805_016_aircraft_daily_utilisation.py"
+)
+migration = migration_path.read_text()
+payload_hash_pattern = re.compile(
+    r'(sa\.Column\(\s*["\']payload_hash["\']\s*,\s*)sa\.String\(\)(\s*,)',
+    re.MULTILINE,
+)
+migration, payload_hash_count = payload_hash_pattern.subn(
+    r"\1sa.String(length=64)\2",
+    migration,
+    count=1,
+)
+if payload_hash_count == 0:
+    corrected_payload_hash_pattern = re.compile(
+        r'sa\.Column\(\s*["\']payload_hash["\']\s*,\s*sa\.String\(\s*(?:length\s*=\s*)?64\s*\)',
+        re.MULTILINE,
+    )
+    if len(corrected_payload_hash_pattern.findall(migration)) != 1:
+        raise SystemExit("expected exactly one bounded payload_hash column")
+migration_path.write_text(migration)
 
 
 test_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py")
@@ -103,6 +179,8 @@ source = replace_once(source, anchor, block + anchor, "integration-test insertio
 if source.count("WriteSessionLocal()") != 2:
     raise SystemExit(f"expected two integration session constructors; found {source.count('WriteSessionLocal()')}")
 source = source.replace("WriteSessionLocal()", "_new_session()")
+source = ensure_fixture_component_kind(source, "ENG", "ENGINE")
+source = ensure_fixture_component_kind(source, "PROP", "PROPELLER")
 test_path.write_text(source)
 
 architecture_path = Path(".github/workflows/aircraft-architecture-ci.yml")
