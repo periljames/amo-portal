@@ -167,7 +167,7 @@ def test_contents_is_controlled_only_by_publications_reader_react_state() -> Non
     assert "container.scrollTo" not in layout
     assert "routeIndexedSearchToPdf" in layout
     assert "setReaderNavigationRequest" in layout
-    assert "onOutlineReady={onOutlineReady}" not in layout
+    assert "onOutlineReady={onOutlineReady}" in layout
 
 
 def test_pdf_capabilities_and_safe_derivative_are_precomputed_by_checksum() -> None:
