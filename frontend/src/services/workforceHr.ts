@@ -63,6 +63,7 @@ export function applyWorkforceHrDefaultDayBatch(
 export async function exportWorkforceHrPeople(selection: HrPeopleSelection): Promise<void> {
   const result = await apiBlob("/workforce/hr/people/export", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: jsonBody(selection),
   });
   downloadBlob(result.blob, result.filename || "workforce-people.csv");
