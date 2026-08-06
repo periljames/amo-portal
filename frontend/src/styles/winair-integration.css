@@ -1,0 +1,159 @@
+.winair-page {
+  --winair-gap: clamp(0.75rem, 1.2vw, 1.25rem);
+}
+
+.winair-subnav {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 0 var(--winair-gap);
+  padding: 0.3rem;
+  width: fit-content;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.75rem;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.winair-subnav a {
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.55rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 650;
+}
+
+.winair-subnav a.is-active {
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.winair-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: var(--winair-gap);
+  margin-bottom: var(--winair-gap);
+}
+
+.winair-profile-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.winair-profile-list > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 0.7rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.winair-profile-list > button:hover,
+.winair-profile-list > button.is-selected {
+  border-color: var(--accent-color, #4677ff);
+  background: color-mix(in srgb, var(--accent-color, #4677ff) 9%, transparent);
+}
+
+.winair-profile-list button > span {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.winair-profile-list button > span:first-child {
+  flex-direction: column;
+}
+
+.winair-profile-list small {
+  color: var(--text-muted, #6b7280);
+}
+
+.winair-profile-detail {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+}
+
+.winair-profile-detail > div:not(.planning-inline-actions):not(.alert) {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.winair-profile-detail span,
+.winair-form-grid label > span,
+.winair-authority-grid label > span {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.84rem;
+}
+
+.winair-profile-detail code {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
+.winair-form-grid,
+.winair-authority-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.winair-form-grid label,
+.winair-authority-grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.winair-authority-grid {
+  margin: 1rem 0;
+  padding: 0.9rem;
+  border-radius: 0.7rem;
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+
+.winair-diff {
+  max-width: 26rem;
+  max-height: 10rem;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.winair-page .planning-panel + .planning-panel {
+  margin-top: var(--winair-gap);
+}
+
+@media (max-width: 1100px) {
+  .winair-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .winair-form-grid,
+  .winair-authority-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .winair-profile-list > button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .winair-profile-detail > div:not(.planning-inline-actions):not(.alert) {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
