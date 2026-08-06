@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+
 class DashboardFilterOptions(BaseModel):
     aircraft: list[str] = Field(default_factory=list)
     aircraft_types: list[str] = Field(default_factory=list)
@@ -17,6 +18,26 @@ class DashboardFilterOptions(BaseModel):
     engine_metrics: list[str] = Field(default_factory=list)
 
 
+class CalculationFormula(BaseModel):
+    code: str
+    name: str
+    version: str
+    origin: Literal["SYSTEM", "PROGRAMME"] = "SYSTEM"
+    latex: str
+    mathml: str
+    expression: dict[str, Any] = Field(default_factory=dict)
+    unit: str
+    precision: int = 3
+    rounding_mode: str = "HALF_UP"
+    numerator_label: str
+    denominator_label: str | None = None
+    multiplier: float | None = None
+    methodology: str
+    denominator_policy: str
+    source_fields: list[str] = Field(default_factory=list)
+    applied_to: list[str] = Field(default_factory=list)
+
+
 class DashboardMetric(BaseModel):
     code: str
     label: str
@@ -27,6 +48,7 @@ class DashboardMetric(BaseModel):
     status: Literal["GOOD", "WATCH", "ALERT", "NEUTRAL", "NO_DATA"] = "NEUTRAL"
     denominator: float | int | None = None
     detail: str = ""
+    formula_code: str | None = None
     drilldown: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -80,6 +102,7 @@ class DashboardResponse(BaseModel):
     comparison_end: date
     bucket: Literal["DAY", "WEEK", "MONTH"]
     filters: DashboardFilterOptions
+    formulae: list[CalculationFormula] = Field(default_factory=list)
     summary: list[DashboardMetric]
     time_series: list[ChartPoint]
     event_mix: list[ChartPoint]
