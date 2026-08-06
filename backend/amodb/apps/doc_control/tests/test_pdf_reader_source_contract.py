@@ -16,7 +16,6 @@ def _reader_core() -> str:
 
 
 def _runs_reader_backend_contracts(workflow: str) -> bool:
-    """Accept an explicit reader list or the complete Document Control suite."""
     complete_suite = "pytest -q amodb/apps/doc_control/tests" in workflow
     explicit_suite = all(
         test_name in workflow
@@ -27,6 +26,12 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
         )
     )
     return complete_suite or explicit_suite
+
+
+def _builds_frontend(workflow: str) -> bool:
+    complete_build = "npm run build" in workflow
+    separated_build = "npx tsc -b" in workflow and "npx vite build" in workflow
+    return complete_build or separated_build
 
 
 def test_one_browser_pdf_engine_owns_react_pdf_loading() -> None:
@@ -47,9 +52,23 @@ def test_one_browser_pdf_engine_owns_react_pdf_loading() -> None:
     assert "publicationPdfSource(fileUrl)" in core
 
 
-def test_optional_inspection_never_blocks_first_page() -> None:
+def test_one_final_reader_source_is_resolved_before_pdfjs_mounts() -> None:
+    bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
+
+    assert "type ReaderBootstrap" in bridge
+    assert "sameControlledSource" in bridge
+    assert "cachedReadOnly" in bridge
+    assert "liveVerified" in bridge
+    assert "Preparing controlled document" in bridge
+    assert "sourceCachePending" not in bridge
+    assert "Opening cached document" not in bridge
+    assert "readerFileUrl" not in bridge
+    assert "capabilities={bootstrap.capabilities}" in bridge
+
+
+def test_optional_document_inspection_never_blocks_page_count_initialization() -> None:
     core = _reader_core()
-    load_handler = core.split("const loadDocument = useCallback", 1)[1].split("const workingFile", 1)[0]
+    load_handler = core.split("const loadDocument = useCallback", 1)[1].split("const onPageRatio", 1)[0]
 
     assert "setPageCount" in load_handler
     assert "Promise.all" in load_handler
@@ -57,6 +76,28 @@ def test_optional_inspection_never_blocks_first_page() -> None:
     assert "getFieldObjects" in core
     assert "hasJSActions" in core
     assert ".catch(() => undefined)" in load_handler
+
+
+def test_reader_uses_real_virtualization_and_one_internal_scroll_owner() -> None:
+    core = _reader_core()
+    virtual = _read("frontend/src/pages/manuals/pdfReaderVirtualization.ts")
+    styles = _read("frontend/src/pages/manuals/pdfReaderVirtualized.css")
+
+    assert 'from "@tanstack/react-virtual"' in core
+    assert "useVirtualizer" in core
+    assert "getScrollElement: () => viewportRef.current" in core
+    assert "virtualizer.getVirtualItems()" in core
+    assert "virtualizer.getTotalSize()" in core
+    assert "pages.map" not in core
+    assert "IntersectionObserver" not in core
+    assert "window.scrollBy" not in core
+    assert "selectPdfVirtualPage" in core
+    assert "prioritizePdfRenderIndexes" in core
+    assert "updatePdfRetainedPages" in core
+    assert "targetIndex" in virtual
+    assert "overflow-y: auto" in styles
+    assert ".pdfv2-page-shell.is-rendering canvas" in styles
+    assert ".pdfv2-page-shell.is-ready canvas" in styles
 
 
 def test_forms_and_working_copies_are_governed() -> None:
@@ -79,7 +120,6 @@ def test_forms_and_working_copies_are_governed() -> None:
     assert "transaction.oncomplete" in write_tail
     assert "resolve(row)" in write_tail.split("transaction.oncomplete", 1)[1]
     assert write_tail.index(".put(row)") < write_tail.index("transaction.oncomplete")
-
     assert "registerAuthoritativePdfSource" in capabilities
     assert "page_numbers_json" in capabilities
     assert "authoritativePdfSourceChecksum" in store
@@ -112,12 +152,7 @@ def test_dirty_state_is_scoped_to_the_reader_instance() -> None:
 def test_output_choices_are_explicit_and_not_conflated() -> None:
     core = _reader_core()
     service = _read("frontend/src/services/pdfReader.ts")
-    for label in (
-        "Original PDF",
-        "Editable PDF",
-        "Completed form pages",
-        "Submit retained record",
-    ):
+    for label in ("Original PDF", "Editable PDF", "Completed form pages", "Submit retained record"):
         assert label in core
     assert '"WORKING_COPY"' in core
     assert "flattenPdfWorkingCopy" in core
@@ -179,7 +214,6 @@ def test_async_pdf_routes_offload_blocking_inspection_and_flattening() -> None:
     assert "from starlette.concurrency import run_in_threadpool" in router
     assert "from starlette.concurrency import run_in_threadpool" in access
     assert "from starlette.concurrency import run_in_threadpool" in override
-
     direct_flatten = router.split("async def flatten_reader_working_copy", 1)[1].split("@router.post", 1)[0]
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1].split("@router.get", 1)[0]
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
@@ -188,7 +222,6 @@ def test_async_pdf_routes_offload_blocking_inspection_and_flattening() -> None:
         assert "await run_in_threadpool(" in route_source
         assert "process_completed_pdf," in route_source
         assert route_source.index("await read_bounded_pdf_upload(artifact)") < route_source.index("process_completed_pdf,")
-
     assert "async def flatten_completed_form_pages" in override
     assert "await run_in_threadpool(_changed_form_pages" in override
     assert "await run_in_threadpool(_extract_completed_pages" in override
@@ -205,11 +238,9 @@ def test_execution_scope_precedes_capabilities_and_uploaded_bytes() -> None:
     assert "can_execute_profile(current_user, execution)" in router
     assert "require_execution_scope(current_user, execution)" in router
     assert "require_execution_scope(current_user, execution_profile)" in access
-
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
     assert direct_submit.index("require_execution_scope(current_user, execution)") < direct_read
-
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
     linked_read = linked_submit.index("await read_bounded_pdf_upload(artifact)")
     assert linked_submit.index("require_execution_scope(current_user, execution_profile)") < linked_read
@@ -222,16 +253,13 @@ def test_source_checksum_and_template_provenance_precede_record_creation() -> No
     assert "hmac.compare_digest(actual_sha256, expected_sha256)" in router
     assert "PDF_SOURCE_CHECKSUM_MISMATCH" in router
     assert "PDF_SOURCE_CHECKSUM_MISSING" in router
-
     process = router.split("def process_completed_pdf", 1)[1].split("def _load_direct_context", 1)[0]
     assert process.index("inspect_pdf_bytes(content)") < process.index("flatten_pdf_bytes(content)")
     assert process.index("validate_template_provenance") < process.index("reject_visual_overlays")
     assert process.index("reject_visual_overlays") < process.index("flatten_pdf_bytes(content)")
-
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     assert direct_submit.index("source_inspection = await run_in_threadpool(_inspection, revision)") < direct_submit.index("process_completed_pdf,")
     assert direct_submit.index("process_completed_pdf,") < direct_submit.index("create_documentation_record")
-
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
     assert linked_submit.index("revision = _controlled_target_revision") < linked_submit.index("process_completed_pdf,")
     assert "expected_source=source_inspection" in linked_submit
@@ -244,14 +272,12 @@ def test_authorization_and_signature_guards_precede_bounded_upload_processing() 
     assert "async def read_bounded_pdf_upload" in router
     assert "await artifact.read(_UPLOAD_CHUNK_BYTES)" in router
     assert "len(content) > MAX_PDF_BYTES" in router
-
     linked_submit = access.split("async def submit_linked_resource_with_source_access", 1)[1]
     linked_read = linked_submit.index("await read_bounded_pdf_upload(artifact)")
     assert linked_submit.index("_load_authorized_reference") < linked_read
     assert linked_submit.index("detail, execution_profile = _authorized_linked_detail") < linked_read
     assert linked_submit.index('execution.get("requires_signature")') < linked_read
     assert linked_submit.index("source_inspection = await run_in_threadpool(_inspection, revision)") < linked_read
-
     direct_submit = router.split("async def submit_reader_working_copy", 1)[1]
     direct_read = direct_submit.index("await read_bounded_pdf_upload(artifact)")
     assert direct_submit.index("_load_direct_context") < direct_read
@@ -267,22 +293,22 @@ def test_reader_routes_precede_compatibility_routes() -> None:
     assert composition.index("router.include_router(_knowledge_reader_access_router)") < composition.index("router.include_router(_knowledge_reader_router)")
 
 
-def test_reader_ci_covers_engine_and_frontend_contracts() -> None:
+def test_reader_ci_covers_engine_virtualization_and_frontend_builds() -> None:
     publications = _read(".github/workflows/publications-reader-ci.yml")
     document_control = _read(".github/workflows/document-control-domain-ci.yml")
 
     assert _runs_reader_backend_contracts(publications)
     assert _runs_reader_backend_contracts(document_control)
-
-    for workflow in (publications, document_control):
-        assert "pdfReaderEngine.test.ts" in workflow
-        assert "npm run build" in workflow
-
+    assert "pdfReaderEngine.test.ts" in publications
+    assert "pdfReaderVirtualization.test.ts" in publications
+    assert "pdfReaderEngine.test.ts" in document_control
+    assert _builds_frontend(publications)
+    assert _builds_frontend(document_control)
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in publications
     assert "frontend/src/services/pdfWorkingCopyAuthority.ts" in document_control
 
 
-def test_reader_network_profile_uses_20_mib_default_and_50_mib_stable_bursts() -> None:
+def test_reader_network_profile_keeps_large_ranges_but_bounds_canvases() -> None:
     performance = _read("frontend/src/services/pdfPerformance.ts")
     publications = _read("frontend/src/services/publications.ts")
     core = _reader_core()
@@ -293,13 +319,15 @@ def test_reader_network_profile_uses_20_mib_default_and_50_mib_stable_bursts() -
     assert "downlink >= 25" in performance
     assert "rtt <= 80" in performance
     assert 'mode: "burst"' in performance
+    assert "hotPageLimit: 12" in performance
+    assert "hotPageLimit: 10" in performance
     assert "performance.rangeChunkSize" in publications
     assert "disableAutoFetch: false" in publications
     assert "disableRange: false" in publications
     assert "disableStream: false" in publications
     assert "performanceProfile.renderRadius" in core
     assert "performanceProfile.hotPageLimit" in core
-    assert "performanceProfile.prefetchMarginPx" in core
+    assert "useVirtualizer" in core
 
 
 def test_publication_navigation_uses_unique_render_identity() -> None:
