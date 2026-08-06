@@ -43,12 +43,12 @@ jobs:
             python - <<'PY'
           from pathlib import Path
           text = Path('/tmp/pdf-capability-test.log').read_text(encoding='utf-8', errors='replace')
-          marker = '=================================== FAILURES ==================================='
-          if marker in text:
-              text = text.split(marker, 1)[1]
-          text = text[-14000:]
-          text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f'::error title=PDF capability test failure::{text}')
+          lines = text.splitlines()
+          exception_lines = [line for line in lines if line.startswith('E ') or line.startswith('FAILED ') or 'short test summary info' in line]
+          tail = '\n'.join(lines[-80:])
+          detail = ('\n'.join(exception_lines[-20:]) + '\n\n' + tail)[-7000:]
+          detail = detail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=PDF capability test failure::{detail}')
           PY
           fi
           exit "$status"
