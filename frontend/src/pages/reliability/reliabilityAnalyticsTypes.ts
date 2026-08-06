@@ -3,6 +3,26 @@ import type React from "react";
 export type MetricStatus = "GOOD" | "WATCH" | "ALERT" | "NEUTRAL" | "NO_DATA";
 export type MetricDirection = "UP" | "DOWN" | "FLAT" | "UNKNOWN";
 
+export type CalculationFormula = {
+  code: string;
+  name: string;
+  version: string;
+  origin: "SYSTEM" | "PROGRAMME";
+  latex: string;
+  mathml: string;
+  expression: Record<string, unknown>;
+  unit: string;
+  precision: number;
+  rounding_mode: string;
+  numerator_label: string;
+  denominator_label?: string | null;
+  multiplier?: number | null;
+  methodology: string;
+  denominator_policy: string;
+  source_fields: string[];
+  applied_to: string[];
+};
+
 export type DashboardMetric = {
   code: string;
   label: string;
@@ -13,6 +33,7 @@ export type DashboardMetric = {
   status: MetricStatus;
   denominator?: number | null;
   detail: string;
+  formula_code?: string | null;
   drilldown: DrilldownDescriptor;
 };
 
@@ -49,6 +70,7 @@ export type DashboardResponse = {
   comparison_end: string;
   bucket: "DAY" | "WEEK" | "MONTH";
   filters: FilterOptions;
+  formulae: CalculationFormula[];
   summary: DashboardMetric[];
   time_series: ChartPoint[];
   event_mix: ChartPoint[];
@@ -141,6 +163,8 @@ export type SavedView = {
   filters: DashboardFilters;
 };
 
+export type ChartTableRow = Record<string, unknown>;
+
 export type ChartCardProps = {
   id: string;
   eyebrow: string;
@@ -150,4 +174,6 @@ export type ChartCardProps = {
   children: React.ReactNode;
   onExport?: () => void;
   wide?: boolean;
+  tableRows?: ChartTableRow[];
+  formulaCodes?: string[];
 };
