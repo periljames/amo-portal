@@ -10,8 +10,11 @@ import { ReliabilityAnalyticsHealthCharts } from "./ReliabilityAnalyticsHealthCh
 import { ReliabilityAnalyticsOperationalCharts } from "./ReliabilityAnalyticsOperationalCharts";
 import { ReliabilityAnalyticsRegisters } from "./ReliabilityAnalyticsRegisters";
 import { ReliabilityAnalyticsToolbar } from "./ReliabilityAnalyticsToolbar";
+import { ReliabilityFormulaAdministration } from "./ReliabilityFormulaAdministration";
+import { ReliabilityFormulaLibrary } from "./ReliabilityFormulaLibrary";
 import "../../styles/reliability-v2.css";
 import "./ReliabilityAnalyticsWorkspace.css";
+import "./ReliabilityFormulaWorkbench.css";
 
 const ReliabilityAnalyticsWorkspace: React.FC = () => {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
@@ -204,6 +207,13 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
           </div>
         </header>
 
+        <nav className="reliability-analytics__section-nav" aria-label="Reliability analytics sections">
+          <a href="#reliability-analytics-graphs">Interactive graphs</a>
+          <a href="#reliability-formula-library">Formula library</a>
+          <a href="#reliability-formula-administration">Metric administration</a>
+          <a href="#reliability-dashboard-evidence">Evidence register</a>
+        </nav>
+
         <ReliabilityAnalyticsToolbar
           filters={filters}
           data={data}
@@ -231,6 +241,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
             <span><strong>Measured period</strong>{data.period_start} → {data.period_end}</span>
             <span><strong>Comparison</strong>{data.comparison_start} → {data.comparison_end}</span>
             <span><strong>Resolution</strong>{data.bucket.toLowerCase()}</span>
+            <span><strong>Formulae</strong>{data.formulae.length} controlled definitions</span>
             <span><strong>Generated</strong>{formatDate(data.generated_at)}</span>
           </section>
 
@@ -242,14 +253,23 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
               <strong>{formatMetric(metric)}</strong>
               <small>{metric.delta_pct == null ? metric.detail : `${metric.delta_pct > 0 ? "+" : ""}${formatNumber(metric.delta_pct, 1)}% vs prior period`}</small>
               {metric.denominator != null && <em>Exposure / sample: {formatNumber(metric.denominator, 1)}</em>}
+              {metric.formula_code && <em>Formula: {metric.formula_code}</em>}
             </button>)}
           </section>
 
-          <div className="reliability-analytics__grid">
-            <ReliabilityAnalyticsOperationalCharts trendRows={trendRows} eventMixRows={eventMixRows} ataRows={ataRows} aircraftRows={aircraftRows} stationRows={stationRows} routeRows={routeRows} componentRows={componentRows} removalAgeRows={removalAgeRows} shopVisitRows={shopVisitRows} oilRows={oilRows} onPoint={handleChartClick} />
-            <ReliabilityAnalyticsControlCharts data={data} onPoint={handleChartClick} />
-            <ReliabilityAnalyticsHealthCharts data={data} onPoint={handleChartClick} onEnginePoint={handleEngineChartClick} engineMetric={engineMetric} setEngineMetric={setEngineMetric} engineSeries={engineSeries} engineRows={engineRows} engineSeriesNames={engineSeriesNames} engineLoading={engineLoading} />
-          </div>
+          <section id="reliability-analytics-graphs" className="reliability-analytics__graph-workspace" aria-label="Interactive Reliability graphs">
+            <div className="reliability-analytics__graph-heading">
+              <div><p className="reliability-v2__eyebrow">Interactive evidence</p><h2>Operational and engineering graphs</h2><p>Hover for values, select records, zoom ordered trends, control engine series, open full screen, export the visual or inspect the underlying table.</p></div>
+            </div>
+            <div className="reliability-analytics__grid">
+              <ReliabilityAnalyticsOperationalCharts trendRows={trendRows} eventMixRows={eventMixRows} ataRows={ataRows} aircraftRows={aircraftRows} stationRows={stationRows} routeRows={routeRows} componentRows={componentRows} removalAgeRows={removalAgeRows} shopVisitRows={shopVisitRows} oilRows={oilRows} onPoint={handleChartClick} />
+              <ReliabilityAnalyticsControlCharts data={data} onPoint={handleChartClick} />
+              <ReliabilityAnalyticsHealthCharts data={data} onPoint={handleChartClick} onEnginePoint={handleEngineChartClick} engineMetric={engineMetric} setEngineMetric={setEngineMetric} engineSeries={engineSeries} engineRows={engineRows} engineSeriesNames={engineSeriesNames} engineLoading={engineLoading} />
+            </div>
+          </section>
+
+          <ReliabilityFormulaLibrary formulae={data.formulae} />
+          <ReliabilityFormulaAdministration formulae={data.formulae} />
 
           <ReliabilityAnalyticsRegisters
             data={data}
