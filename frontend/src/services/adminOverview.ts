@@ -54,6 +54,16 @@ function uniqueRecentActivity(items: OverviewActivity[]): OverviewActivity[] {
   });
 }
 
+function normalizedSystemStatus(system: OverviewSystemStatus): OverviewSystemStatus {
+  const errors = [...new Set((system.errors || []).map((value) => String(value).trim()).filter(Boolean))];
+  return {
+    ...system,
+    errors,
+    status: system.status === "healthy" && errors.length ? "degraded" : system.status,
+    refresh_paused: Boolean(system.refresh_paused || errors.length),
+  };
+}
+
 export async function fetchOverviewSummary(opts?: { silent?: boolean }): Promise<OverviewSummary> {
   const response = await apiGet<OverviewSummary>("/accounts/admin/overview-summary", {
     headers: authHeaders(),
@@ -61,6 +71,7 @@ export async function fetchOverviewSummary(opts?: { silent?: boolean }): Promise
   });
   return {
     ...response,
+    system: normalizedSystemStatus(response.system),
     recent_activity: uniqueRecentActivity(response.recent_activity || []),
   };
 }
