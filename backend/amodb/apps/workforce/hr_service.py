@@ -1429,7 +1429,7 @@ def bootstrap_default_day_pattern(
             models.EmployeeWorkPatternAssignment.effective_to.is_(None),
             models.EmployeeWorkPatternAssignment.effective_to >= today,
         ),
-    ).with_for_update().all()
+    ).with_for_update(of=models.EmployeeWorkPatternAssignment).all()
     occupied = {str(row.user_id): row for row in current_rows}
 
     assigned = 0

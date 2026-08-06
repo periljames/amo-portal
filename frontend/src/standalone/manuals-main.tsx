@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { ModalTopLayerGuard } from "../components/shared/ModalTopLayerGuard";
 import { ManualsReaderRoutes, TenantBrandingProvider } from "../packages/manuals-reader";
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
     <BrowserRouter>
       <TenantBrandingProvider tenantSlug={tenantSlug}>
         <ManualsReaderRoutes />
+        <ModalTopLayerGuard />
       </TenantBrandingProvider>
     </BrowserRouter>
   );
