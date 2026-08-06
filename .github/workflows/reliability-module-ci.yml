@@ -143,7 +143,10 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          ancestry = {revision.revision for revision in script.walk_revisions(head, 'base')}
+          ancestry = {
+              revision.revision
+              for revision in script.walk_revisions(base='base', head=head)
+          }
           assert 'rel_20260805_ops_exact_counts' in ancestry, f'Reliability head is not an ancestor of {head}'
           print(f'alembic_head={head}')
           PY
