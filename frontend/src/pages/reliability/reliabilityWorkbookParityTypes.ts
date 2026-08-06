@@ -204,4 +204,77 @@ export type ReportSnapshot = {
   download_url: string;
 };
 
+export type WorkbookImportStatus = "PREVIEW_READY" | "PROCESSING" | "COMPLETED" | "PARTIAL_FAILED" | "FAILED";
+export type WorkbookImportRowStatus = "VALID" | "INVALID" | "COMMITTED" | "FAILED";
+
+export type WorkbookImportSheet = {
+  name: string;
+  state: string;
+  max_row: number;
+  max_column: number;
+};
+
+export type WorkbookImportBatch = {
+  id: number;
+  profile_code: string;
+  dataset_code: WorkbookDatasetCode;
+  original_filename: string;
+  sanitized_filename: string;
+  file_extension: string;
+  file_size_bytes: number;
+  source_hash: string;
+  status: WorkbookImportStatus;
+  detected_sheets: WorkbookImportSheet[];
+  selected_sheet: string;
+  header_row: number;
+  header_map: Record<string, string>;
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  committed_rows: number;
+  failed_rows: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+};
+
+export type WorkbookImportRow = {
+  id: number;
+  row_number: number;
+  status: WorkbookImportRowStatus;
+  raw_values: Record<string, unknown>;
+  mapped_values: Record<string, unknown>;
+  errors: string[];
+  row_source_hash: string;
+  attempt_count?: number;
+  last_error?: string | null;
+  workbook_record_id?: number | null;
+};
+
+export type WorkbookImportPreview = WorkbookImportBatch & {
+  preview_rows: WorkbookImportRow[];
+  preview_truncated: boolean;
+};
+
+export type WorkbookImportList = {
+  total: number;
+  offset: number;
+  limit: number;
+  items: WorkbookImportBatch[];
+};
+
+export type WorkbookImportDetail = WorkbookImportBatch & {
+  row_total: number;
+  row_offset: number;
+  row_limit: number;
+  rows: WorkbookImportRow[];
+};
+
+export type WorkbookImportCommitResult = WorkbookImportBatch & {
+  processed: number;
+  remaining_valid_rows?: number;
+  reset_rows?: number;
+  message?: string;
+};
+
 export type WorkspaceSection = "registers" | "alerts" | "mapping" | "reports";
