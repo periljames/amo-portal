@@ -94,6 +94,24 @@ services:
       PLATFORM_COMMAND_LEASE_SECONDS: ${PLATFORM_COMMAND_LEASE_SECONDS:-180}
       PLATFORM_COMMAND_POLL_SECONDS: ${PLATFORM_COMMAND_POLL_SECONDS:-1}
 
+  workforce-worker:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - python
+      - -m
+      - amodb.apps.workforce.worker_main
+      - --operation-limit
+      - ${WORKFORCE_WORKER_OPERATION_LIMIT:-10}
+    environment:
+      <<: *backend-environment
+      WORKFORCE_WORKER_POLL_SECONDS: ${WORKFORCE_WORKER_POLL_SECONDS:-2}
+      WORKFORCE_WORKER_OPERATION_LIMIT: ${WORKFORCE_WORKER_OPERATION_LIMIT:-10}
+      WORKFORCE_BULK_INLINE_DISPATCH: "0"
+      WORKFORCE_ALLOW_LEGACY_TENANT_PATTERN_BOOTSTRAP: "0"
+
 networks:
   amo-saas:
     driver: bridge
