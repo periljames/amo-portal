@@ -95,6 +95,7 @@ jobs:
           pytest -q
           amodb/apps/workforce/tests/test_default_day_pattern_postgres_locking.py
           amodb/apps/workforce/tests/test_hr_people_directory.py
+          amodb/apps/workforce/tests/test_hr_people_directory_scale.py
 
   frontend:
     name: Workforce directory frontend
