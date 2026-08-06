@@ -140,6 +140,7 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import sys
           from sqlalchemy import create_engine, text
 
           expected_metric_columns = {
@@ -186,20 +187,39 @@ jobs:
                   )
               """)).scalars())
 
+          failures = []
+          if width is None or width < 128:
+              failures.append(f'Alembic version capacity is {width}; expected at least 128.')
+          if versions != ['rel_20260806_formula_snapshots']:
+              failures.append(
+                  'Alembic version rows are '
+                  f'{versions}; expected only rel_20260806_formula_snapshots.'
+              )
+          missing_metric = sorted(expected_metric_columns - metric_columns)
+          if missing_metric:
+              failures.append(f'Missing metric formula columns: {missing_metric}.')
+          missing_run = sorted(expected_run_columns - run_columns)
+          if missing_run:
+              failures.append(f'Missing calculation snapshot columns: {missing_run}.')
+          missing_constraints = sorted(expected_constraints - constraints)
+          if missing_constraints:
+              failures.append(f'Missing formula constraints: {missing_constraints}.')
+
           print(f'alembic_version_capacity={width}')
           print(f'alembic_versions={versions}')
-          print(f'missing_metric_columns={sorted(expected_metric_columns - metric_columns)}')
-          print(f'missing_run_columns={sorted(expected_run_columns - run_columns)}')
-          print(f'missing_constraints={sorted(expected_constraints - constraints)}')
-          print(f'metric_formula_columns={sorted(expected_metric_columns & metric_columns)}')
-          print(f'run_formula_columns={sorted(expected_run_columns & run_columns)}')
-          print(f'formula_constraints={sorted(expected_constraints & constraints)}')
+          print(f'missing_metric_columns={missing_metric}')
+          print(f'missing_run_columns={missing_run}')
+          print(f'missing_constraints={missing_constraints}')
 
-          assert width is not None and width >= 128, width
-          assert versions == ['rel_20260806_formula_snapshots'], versions
-          assert expected_metric_columns.issubset(metric_columns), metric_columns
-          assert expected_run_columns.issubset(run_columns), run_columns
-          assert expected_constraints.issubset(constraints), constraints
+          if failures:
+              for failure in failures:
+                  safe = failure.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(
+                      '::error file=.github/workflows/reliability-module-ci.yml,'
+                      f'line=159,title=Reliability formula schema::{safe}'
+                  )
+              sys.exit(1)
+
           print('formula schema verification passed')
           PY
 
