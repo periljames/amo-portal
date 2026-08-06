@@ -14,6 +14,10 @@ import type {
   StatisticalAlertRequest,
   WorkbookDatasetCode,
   WorkbookFieldDefinition,
+  WorkbookImportCommitResult,
+  WorkbookImportDetail,
+  WorkbookImportList,
+  WorkbookImportPreview,
   WorkbookRecord,
   WorkbookRecordCreate,
   WorkbookRecordStatus,
@@ -120,6 +124,68 @@ export async function readMappingParity(): Promise<ParityRow[]> {
 
 export async function readParityContracts(): Promise<ParityContracts> {
   return apiRequest<ParityContracts>(`${ROOT}/contracts`, { cacheTtlMs: 0 });
+}
+
+export async function previewWorkbookImport(input: {
+  file: File;
+  profileCode: string;
+  datasetCode: WorkbookDatasetCode;
+  sourceSheet?: string;
+  headerRow?: number;
+}): Promise<WorkbookImportPreview> {
+  const body = new FormData();
+  body.set("profile_code", input.profileCode);
+  body.set("dataset_code", input.datasetCode);
+  body.set("header_row", String(input.headerRow ?? 1));
+  if (input.sourceSheet?.trim()) body.set("source_sheet", input.sourceSheet.trim());
+  body.set("workbook", input.file, input.file.name);
+  return apiRequest<WorkbookImportPreview>(`${ROOT}/imports/preview`, {
+    method: "POST",
+    body,
+    timeoutMs: 120_000,
+  });
+}
+
+export async function listWorkbookImports(filters: {
+  status?: string;
+  profileCode?: string;
+  datasetCode?: WorkbookDatasetCode;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<WorkbookImportList> {
+  return apiRequest<WorkbookImportList>(`${ROOT}/imports${queryString({
+    status: filters.status,
+    profile_code: filters.profileCode,
+    dataset_code: filters.datasetCode,
+    limit: filters.limit ?? 50,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 0 });
+}
+
+export async function readWorkbookImport(
+  batchId: number,
+  filters: { rowStatus?: string; limit?: number; offset?: number } = {},
+): Promise<WorkbookImportDetail> {
+  return apiRequest<WorkbookImportDetail>(`${ROOT}/imports/${batchId}${queryString({
+    row_status: filters.rowStatus,
+    limit: filters.limit ?? 200,
+    offset: filters.offset ?? 0,
+  })}`, { cacheTtlMs: 0 });
+}
+
+export async function commitWorkbookImport(batchId: number, chunkSize = 100): Promise<WorkbookImportCommitResult> {
+  return apiRequest<WorkbookImportCommitResult>(`${ROOT}/imports/${batchId}/commit`, {
+    method: "POST",
+    body: JSON.stringify({ chunk_size: chunkSize }),
+    timeoutMs: 120_000,
+  });
+}
+
+export async function retryWorkbookImport(batchId: number): Promise<WorkbookImportCommitResult> {
+  return apiRequest<WorkbookImportCommitResult>(`${ROOT}/imports/${batchId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ failed_only: true }),
+  });
 }
 
 export async function seedDefaultReportLayouts(): Promise<ReportLayout[]> {
