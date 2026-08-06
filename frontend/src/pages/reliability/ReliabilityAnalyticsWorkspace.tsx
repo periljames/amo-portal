@@ -10,6 +10,7 @@ import { ReliabilityAnalyticsHealthCharts } from "./ReliabilityAnalyticsHealthCh
 import { ReliabilityAnalyticsOperationalCharts } from "./ReliabilityAnalyticsOperationalCharts";
 import { ReliabilityAnalyticsRegisters } from "./ReliabilityAnalyticsRegisters";
 import { ReliabilityAnalyticsToolbar } from "./ReliabilityAnalyticsToolbar";
+import { ReliabilityCalculationEvidence } from "./ReliabilityCalculationEvidence";
 import { ReliabilityFormulaAdministration } from "./ReliabilityFormulaAdministration";
 import { ReliabilityFormulaLibrary } from "./ReliabilityFormulaLibrary";
 import "../../styles/reliability-v2.css";
@@ -211,6 +212,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
           <a href="#reliability-analytics-graphs">Interactive graphs</a>
           <a href="#reliability-formula-library">Formula library</a>
           <a href="#reliability-formula-administration">Metric administration</a>
+          <a href="#reliability-calculation-evidence-heading">Calculation snapshots</a>
           <a href="#reliability-dashboard-evidence">Evidence register</a>
         </nav>
 
@@ -270,6 +272,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
 
           <ReliabilityFormulaLibrary formulae={data.formulae} />
           <ReliabilityFormulaAdministration formulae={data.formulae} />
+          <ReliabilityCalculationEvidence />
 
           <ReliabilityAnalyticsRegisters
             data={data}
