@@ -29,9 +29,7 @@ function browserHints(): {
   deviceMemory: number;
   hardwareConcurrency: number;
 } {
-  if (typeof navigator === "undefined") {
-    return { deviceMemory: 4, hardwareConcurrency: 4 };
-  }
+  if (typeof navigator === "undefined") return { deviceMemory: 4, hardwareConcurrency: 4 };
   const hinted = navigator as NavigatorWithPerformanceHints;
   return {
     connection: hinted.connection || hinted.mozConnection || hinted.webkitConnection,
@@ -41,17 +39,11 @@ function browserHints(): {
 }
 
 /**
- * Use browser network and memory hints to choose a bounded rendering policy.
- * Normal office clients receive 20 MiB PDF ranges. A demonstrably stable,
- * high-throughput connection on a capable device receives 50 MiB bursts.
- * Constrained clients retain a progressive path without governing everyone
- * else by the slowest possible network profile.
- *
- * The page observer is also the authority for the toolbar page number and the
- * active Contents row. Its root margin must therefore remain zero. Nearby-page
- * preloading is provided by renderRadius/hotPageLimit after the truly visible
- * page is selected; treating pages thousands of pixels outside the viewport as
- * visible causes the wrong render window to be retained during jumps.
+ * Network range size and canvas concurrency are separate concerns. Fast
+ * clients receive the requested 20 MiB default and 50 MiB stable-network PDF
+ * ranges, while the virtualized renderer keeps only a bounded number of
+ * completed canvases mounted. This avoids the previous 18-24 canvas burst that
+ * could consume hundreds of megabytes and delay the selected page.
  */
 export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   const { connection, deviceMemory, hardwareConcurrency } = browserHints();
@@ -71,10 +63,10 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     return {
       mode: "constrained",
       rangeChunkSize: 512 * KIB,
-      renderRadius: 2,
-      hotPageLimit: 5,
+      renderRadius: 1,
+      hotPageLimit: 3,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.1,
+      maxDevicePixelRatio: 1,
     };
   }
 
@@ -82,10 +74,10 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     return {
       mode: "balanced",
       rangeChunkSize: 4 * MIB,
-      renderRadius: 4,
-      hotPageLimit: 10,
+      renderRadius: 2,
+      hotPageLimit: 6,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.25,
+      maxDevicePixelRatio: 1.15,
     };
   }
 
@@ -93,20 +85,20 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     return {
       mode: "burst",
       rangeChunkSize: 50 * MIB,
-      renderRadius: 8,
-      hotPageLimit: 24,
+      renderRadius: 4,
+      hotPageLimit: 12,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.6,
+      maxDevicePixelRatio: 1.5,
     };
   }
 
   return {
     mode: "balanced",
     rangeChunkSize: 20 * MIB,
-    renderRadius: 6,
-    hotPageLimit: 18,
+    renderRadius: 3,
+    hotPageLimit: 10,
     prefetchMarginPx: 0,
-    maxDevicePixelRatio: 1.45,
+    maxDevicePixelRatio: 1.35,
   };
 }
 
