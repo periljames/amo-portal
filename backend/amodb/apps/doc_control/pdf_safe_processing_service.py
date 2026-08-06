@@ -100,11 +100,21 @@ def _count_widgets(document: Any) -> int:
 
 
 def _javascript_object_xrefs(document: Any) -> set[int]:
+    """Return only standalone JavaScript action objects.
+
+    A widget, page, or catalog may contain a nested `/AA` JavaScript action but
+    must never be replaced wholesale. `xref_get_key(xref, "S")` reads the
+    object's top-level action subtype, allowing the caller to clear widget and
+    catalog references while deleting only orphanable action dictionaries.
+    """
+
     scripted: set[int] = set()
     for xref in range(1, document.xref_length()):
-        source = document.xref_object(xref, compressed=False) or ""
-        executable = _INERT_JS_PATTERN.sub("", source)
-        if _JS_KEY_PATTERN.search(executable) or _JAVASCRIPT_SUBTYPE_PATTERN.search(executable):
+        kind, raw_value = document.xref_get_key(xref, "S")
+        if kind != "name":
+            continue
+        subtype = base._decode_pdf_name_escapes(str(raw_value or "")).strip().lstrip("/").casefold()
+        if subtype in {"javascript", "js"}:
             scripted.add(xref)
     return scripted
 
