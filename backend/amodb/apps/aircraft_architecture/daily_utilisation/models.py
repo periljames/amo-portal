@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -30,7 +31,11 @@ class DailyUtilisationEntry(Base):
 
     __tablename__ = "aircraft_daily_utilisation_entries"
     __table_args__ = (
-        UniqueConstraint("amo_id", "idempotency_key", name="uq_daily_util_idempotency"),
+        UniqueConstraint(
+            "amo_id",
+            "idempotency_key",
+            name="uq_daily_util_idempotency",
+        ),
         UniqueConstraint(
             "amo_id",
             "aircraft_serial_number",
@@ -38,8 +43,14 @@ class DailyUtilisationEntry(Base):
             "revision_no",
             name="uq_daily_util_aircraft_date_revision",
         ),
-        CheckConstraint("flight_hours >= 0", name="ck_daily_util_hours_nonneg"),
-        CheckConstraint("cycles >= 0", name="ck_daily_util_cycles_nonneg"),
+        CheckConstraint(
+            "flight_hours >= 0",
+            name="ck_daily_util_hours_nonneg",
+        ),
+        CheckConstraint(
+            "cycles >= 0",
+            name="ck_daily_util_cycles_nonneg",
+        ),
         CheckConstraint(
             "status IN ('DRAFT','POSTED','SUPERSEDED','REJECTED')",
             name="ck_daily_util_status",
@@ -54,7 +65,12 @@ class DailyUtilisationEntry(Base):
             "aircraft_serial_number",
             "operation_date",
         ),
-        Index("ix_daily_util_status", "amo_id", "status", "operation_date"),
+        Index(
+            "ix_daily_util_status",
+            "amo_id",
+            "status",
+            "operation_date",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
@@ -82,12 +98,16 @@ class DailyUtilisationEntry(Base):
     revision_no = Column(Integer, nullable=False, default=1)
     supersedes_entry_id = Column(
         String(36),
-        ForeignKey("aircraft_daily_utilisation_entries.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "aircraft_daily_utilisation_entries.id",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
     )
     idempotency_key = Column(String(96), nullable=False)
     content_hash = Column(String(64), nullable=False)
     remarks = Column(Text, nullable=True)
+    correction_reason = Column(Text, nullable=True)
 
     created_by_user_id = Column(
         String(36),
@@ -99,7 +119,11 @@ class DailyUtilisationEntry(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+    )
     posted_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -115,18 +139,32 @@ class DailyUtilisationExposure(Base):
             name="uq_daily_util_exposure_target",
         ),
         CheckConstraint(
-            "target_type IN ('AIRFRAME','ENGINE','PROPELLER','APU','COMPONENT')",
+            "target_type IN "
+            "('AIRFRAME','ENGINE','PROPELLER','APU','COMPONENT')",
             name="ck_daily_util_exposure_target",
         ),
-        CheckConstraint("hours_delta >= 0", name="ck_daily_util_exposure_hours"),
-        CheckConstraint("cycles_delta >= 0", name="ck_daily_util_exposure_cycles"),
-        Index("ix_daily_util_exposure_entry", "entry_id", "target_type"),
+        CheckConstraint(
+            "hours_delta >= 0",
+            name="ck_daily_util_exposure_hours",
+        ),
+        CheckConstraint(
+            "cycles_delta >= 0",
+            name="ck_daily_util_exposure_cycles",
+        ),
+        Index(
+            "ix_daily_util_exposure_entry",
+            "entry_id",
+            "target_type",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
     entry_id = Column(
         String(36),
-        ForeignKey("aircraft_daily_utilisation_entries.id", ondelete="CASCADE"),
+        ForeignKey(
+            "aircraft_daily_utilisation_entries.id",
+            ondelete="CASCADE",
+        ),
         nullable=False,
         index=True,
     )
@@ -143,8 +181,133 @@ class DailyUtilisationExposure(Base):
     hours_delta = Column(Numeric(12, 2), nullable=False)
     cycles_delta = Column(Integer, nullable=False)
     before_hours = Column(Numeric(14, 2), nullable=True)
-    before_cycles = Column(Integer, nullable=True)
+    before_cycles = Column(BigInteger, nullable=True)
     after_hours = Column(Numeric(14, 2), nullable=True)
-    after_cycles = Column(Integer, nullable=True)
+    after_cycles = Column(BigInteger, nullable=True)
     baseline_missing = Column(Boolean, nullable=False, default=False)
     override_reason = Column(Text, nullable=True)
+
+
+class AircraftExactUtilisationState(Base):
+    """Authoritative exact current airframe totals derived from the ledger."""
+
+    __tablename__ = "aircraft_exact_utilisation_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "amo_id",
+            "aircraft_serial_number",
+            name="uq_aircraft_exact_utilisation_state",
+        ),
+        CheckConstraint(
+            "total_hours >= 0",
+            name="ck_aircraft_exact_hours_nonneg",
+        ),
+        CheckConstraint(
+            "total_cycles >= 0",
+            name="ck_aircraft_exact_cycles_nonneg",
+        ),
+        Index(
+            "ix_aircraft_exact_utilisation_scope",
+            "amo_id",
+            "aircraft_serial_number",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    total_hours = Column(Numeric(14, 2), nullable=False)
+    total_cycles = Column(BigInteger, nullable=False)
+    last_entry_id = Column(
+        String(36),
+        ForeignKey(
+            "aircraft_daily_utilisation_entries.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    version_no = Column(Integer, nullable=False, default=1)
+    approved_source_reference = Column(String(255), nullable=False)
+    approved_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+        onupdate=_utcnow,
+    )
+
+
+class ComponentExactUtilisationState(Base):
+    """Authoritative exact current totals for an installed component."""
+
+    __tablename__ = "component_exact_utilisation_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "aircraft_component_id",
+            name="uq_component_exact_utilisation_state",
+        ),
+        CheckConstraint(
+            "total_hours IS NULL OR total_hours >= 0",
+            name="ck_component_exact_hours_nonneg",
+        ),
+        CheckConstraint(
+            "total_cycles IS NULL OR total_cycles >= 0",
+            name="ck_component_exact_cycles_nonneg",
+        ),
+        Index(
+            "ix_component_exact_utilisation_scope",
+            "amo_id",
+            "aircraft_component_id",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    aircraft_component_id = Column(
+        Integer,
+        ForeignKey("aircraft_components.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    total_hours = Column(Numeric(14, 2), nullable=True)
+    total_cycles = Column(BigInteger, nullable=True)
+    last_entry_id = Column(
+        String(36),
+        ForeignKey(
+            "aircraft_daily_utilisation_entries.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    version_no = Column(Integer, nullable=False, default=1)
+    approved_source_reference = Column(String(255), nullable=False)
+    approved_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+        onupdate=_utcnow,
+    )
