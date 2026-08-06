@@ -35,6 +35,13 @@ def test_tanstack_virtualizer_owns_page_mounting_and_render_priority() -> None:
     assert "IntersectionObserver" not in source
 
 
+def test_tanstack_remeasurement_uses_the_supported_instance_api() -> None:
+    source = _source(CORE)
+
+    assert "virtualizer.measure()" in source
+    assert "virtualizer.resize()" not in source
+
+
 def test_navigation_publishes_only_from_the_confirmed_physical_viewport() -> None:
     source = _source(CORE)
 
