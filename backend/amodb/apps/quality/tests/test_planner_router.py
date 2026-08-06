@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality import planner_calendar_router as calendar_module
+from amodb.apps.quality.planner_calendar_enrichment_router import qms_planner_calendar_enriched
 from amodb.apps.quality.planner_calendar_router import (
     _active_training_lifecycle_sql,
     _calendar_page,
@@ -180,10 +181,10 @@ def _catchall_index(api_router, method: str) -> int:
     [canonical_router.core_router, canonical_router.router, canonical_router.legacy_router],
 )
 def test_planner_routes_precede_generic_catchalls(api_router) -> None:
-    assert _route_index(api_router, qms_planner_calendar) < _catchall_index(api_router, "GET")
+    assert _route_index(api_router, qms_planner_calendar_enriched) < _catchall_index(api_router, "GET")
     assert _route_index(api_router, qms_planner_capabilities) < _catchall_index(api_router, "GET")
     assert _route_index(api_router, qms_planner_reschedule) < _catchall_index(api_router, "PATCH")
-    assert _route_count(api_router, qms_planner_calendar) == 1
+    assert _route_count(api_router, qms_planner_calendar_enriched) == 1
 
     calendar_gets = [
         route_item
@@ -192,4 +193,49 @@ def test_planner_routes_precede_generic_catchalls(api_router) -> None:
         and "GET" in set(getattr(route_item, "methods", None) or ())
     ]
     assert len(calendar_gets) == 1
-    assert getattr(calendar_gets[0], "endpoint", None) is qms_planner_calendar
+    assert getattr(calendar_gets[0], "endpoint", None) is qms_planner_calendar_enriched
+
+
+def test_router_cloning_does_not_copy_planner_lifecycle_handlers() -> None:
+    for api_router in (canonical_router.core_router, canonical_router.router, canonical_router.legacy_router):
+        lifecycle_names = {
+            getattr(handler, "__name__", "")
+            for handler in [*api_router.on_startup, *api_router.on_shutdown]
+        }
+        assert "_start_scheduler" not in lifecycle_names
+        assert "_stop_scheduler" not in lifecycle_names
+
+
+def _deployed_calendar_routes(app):
+    return [
+        route_item
+        for route_item in app.routes
+        if str(getattr(route_item, "path", "")).endswith("/integrations/calendar")
+        and "GET" in set(getattr(route_item, "methods", None) or ())
+    ]
+
+
+@pytest.mark.parametrize("app_module", ["amodb.main", "amodb.quality_main"])
+def test_deployed_apps_have_one_enriched_calendar_per_public_family(app_module: str) -> None:
+    module = __import__(app_module, fromlist=["app"])
+    app = module.app
+    routes = _deployed_calendar_routes(app)
+    by_path: dict[str, list] = {}
+    for route_item in routes:
+        by_path.setdefault(str(route_item.path), []).append(route_item)
+
+    canonical_path = "/api/maintenance/{amo_code}/quality/integrations/calendar"
+    legacy_path = "/api/maintenance/{amo_code}/qms/integrations/calendar"
+    assert len(by_path.get(canonical_path, [])) == 1
+    assert len(by_path.get(legacy_path, [])) == 1
+    assert all(
+        getattr(route_item, "endpoint", None) is qms_planner_calendar_enriched
+        for route_item in [*by_path[canonical_path], *by_path[legacy_path]]
+    )
+
+    operation_ids = [
+        str(getattr(route_item, "operation_id", ""))
+        for route_item in app.routes
+        if getattr(route_item, "operation_id", None)
+    ]
+    assert len(operation_ids) == len(set(operation_ids))
