@@ -35,9 +35,9 @@ export function ReliabilityFormulaLifecycleControls(): React.ReactElement {
   const [thresholds, setThresholds] = useState<ReliabilityThresholdVersion[]>([]);
   const [capabilities, setCapabilities] = useState<ReliabilityCapabilitySnapshot>(EMPTY_CAPABILITIES);
   const [programmeVersionId, setProgrammeVersionId] = useState("");
-  const [programmeTarget, setProgrammeTarget] = useState("SUBMITTED");
+  const [programmeTarget, setProgrammeTarget] = useState("IN_REVIEW");
   const [thresholdId, setThresholdId] = useState("");
-  const [thresholdTarget, setThresholdTarget] = useState("SUBMITTED");
+  const [thresholdTarget, setThresholdTarget] = useState("APPROVED");
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,17 +120,24 @@ export function ReliabilityFormulaLifecycleControls(): React.ReactElement {
     }
   };
 
+  const programmeNeedsApprovalCapability = ["APPROVED", "EFFECTIVE"].includes(programmeTarget);
+  const thresholdNeedsApprovalCapability = ["APPROVED", "EFFECTIVE"].includes(thresholdTarget);
+  const canTransitionProgramme = can(capabilities, "reliability.programme.manage")
+    && (!programmeNeedsApprovalCapability || can(capabilities, "reliability.programme.approve"));
+  const canTransitionThreshold = can(capabilities, "reliability.metric.manage")
+    && (!thresholdNeedsApprovalCapability || can(capabilities, "reliability.programme.approve"));
+
   return (
     <section className="reliability-formula-lifecycle" aria-labelledby="reliability-formula-lifecycle-heading">
       <div className="reliability-formula-admin__heading">
         <div>
           <p className="reliability-v2__eyebrow">Approval and effectivity</p>
           <h2 id="reliability-formula-lifecycle-heading">Formula lifecycle control</h2>
-          <p>Submit, approve, make effective, supersede or withdraw programme and threshold versions with a retained rationale.</p>
+          <p>Move programme and threshold versions through the exact API lifecycle with a retained rationale and capability-gated approval.</p>
         </div>
         <div className="reliability-v2__actions">
           <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading || working}>Refresh lifecycle</button>
-          <button type="button" className="btn btn-primary" onClick={() => void runDue()} disabled={working || !can(capabilities, "reliability.metric.execute")}>Run due calculations</button>
+          <button type="button" className="btn btn-primary" onClick={() => void runDue()} disabled={working || !can(capabilities, "reliability.metric.manage")}>Run due calculations</button>
         </div>
       </div>
 
@@ -143,17 +150,21 @@ export function ReliabilityFormulaLifecycleControls(): React.ReactElement {
           <form className="reliability-formula-admin__form" onSubmit={(event) => void transitionProgramme(event)}>
             <h3>Transition programme version</h3>
             <label>Programme version<select value={programmeVersionId} onChange={(event) => setProgrammeVersionId(event.target.value)} required><option value="">Select version</option>{versions.map((version) => <option key={version.id} value={version.id}>{version.revision} · {version.status}</option>)}</select></label>
-            <label>Target status<select value={programmeTarget} onChange={(event) => setProgrammeTarget(event.target.value)}><option>SUBMITTED</option><option>APPROVED</option><option>EFFECTIVE</option><option>SUPERSEDED</option><option>WITHDRAWN</option></select></label>
+            <label>Target status<select value={programmeTarget} onChange={(event) => setProgrammeTarget(event.target.value)}><option>IN_REVIEW</option><option>APPROVED</option><option>EFFECTIVE</option><option>SUPERSEDED</option><option>REJECTED</option></select></label>
             <label>Transition rationale<textarea name="rationale" rows={4} required minLength={5} /></label>
-            <button className="btn btn-primary" disabled={working || !(can(capabilities, "reliability.programme.manage") || can(capabilities, "reliability.programme.approve"))}>Apply programme transition</button>
+            <button className="btn btn-primary" disabled={working || !canTransitionProgramme}>Apply programme transition</button>
+            {!can(capabilities, "reliability.programme.manage") && <small>Required capability: reliability.programme.manage</small>}
+            {programmeNeedsApprovalCapability && !can(capabilities, "reliability.programme.approve") && <small>Approval targets also require: reliability.programme.approve</small>}
           </form>
 
           <form className="reliability-formula-admin__form" onSubmit={(event) => void transitionThreshold(event)}>
             <h3>Transition threshold version</h3>
             <label>Threshold version<select value={thresholdId} onChange={(event) => setThresholdId(event.target.value)} required><option value="">Select threshold</option>{thresholds.map((threshold) => { const metric = metrics.find((row) => row.id === threshold.metric_definition_id); return <option key={threshold.id} value={threshold.id}>{metric?.code || threshold.metric_definition_id} · {threshold.version} · {threshold.status}</option>; })}</select></label>
-            <label>Target status<select value={thresholdTarget} onChange={(event) => setThresholdTarget(event.target.value)}><option>SUBMITTED</option><option>APPROVED</option><option>EFFECTIVE</option><option>SUPERSEDED</option><option>WITHDRAWN</option></select></label>
+            <label>Target status<select value={thresholdTarget} onChange={(event) => setThresholdTarget(event.target.value)}><option>APPROVED</option><option>EFFECTIVE</option><option>SUPERSEDED</option><option>REJECTED</option></select></label>
             <label>Approval or transition rationale<textarea name="rationale" rows={4} required minLength={5} /></label>
-            <button className="btn btn-primary" disabled={working || !(can(capabilities, "reliability.metric.manage") || can(capabilities, "reliability.programme.approve"))}>Apply threshold transition</button>
+            <button className="btn btn-primary" disabled={working || !canTransitionThreshold}>Apply threshold transition</button>
+            {!can(capabilities, "reliability.metric.manage") && <small>Required capability: reliability.metric.manage</small>}
+            {thresholdNeedsApprovalCapability && !can(capabilities, "reliability.programme.approve") && <small>Approval targets also require: reliability.programme.approve</small>}
           </form>
         </div>
       )}
