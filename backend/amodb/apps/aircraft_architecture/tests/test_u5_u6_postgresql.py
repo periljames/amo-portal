@@ -355,9 +355,24 @@ def test_atomic_induction_idempotency_lineage_and_immutability(sessions, engine)
     with pytest.raises(DBAPIError):
         with engine.begin() as connection:
             connection.execute(
+                text("DELETE FROM aircraft_inductions WHERE id = :id"),
+                {"id": induction_id},
+            )
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
                 text(
                     "UPDATE aircraft_exact_utilisation_states "
                     "SET total_hours = total_hours + 1 WHERE aircraft_serial_number = :serial"
+                ),
+                {"serial": payload.aircraft_serial_number},
+            )
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "DELETE FROM aircraft_exact_utilisation_states "
+                    "WHERE aircraft_serial_number = :serial"
                 ),
                 {"serial": payload.aircraft_serial_number},
             )
