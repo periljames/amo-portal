@@ -171,7 +171,7 @@ def publish_revision(
     previous = db.query(models.AircraftContentPackRevision).filter(
         models.AircraftContentPackRevision.pack_id == revision.pack_id,
         models.AircraftContentPackRevision.status == "PUBLISHED",
-    ).with_for_update().all()
+    ).with_for_update(of=models.AircraftContentPackRevision).all()
     for row in previous:
         row.status = "SUPERSEDED"
         db.add(row)
