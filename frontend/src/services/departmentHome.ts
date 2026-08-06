@@ -58,21 +58,30 @@ export type DepartmentHomeResponse = {
 };
 
 function waitForRetry(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
+  }
   return new Promise((resolve, reject) => {
-    const handle = window.setTimeout(resolve, milliseconds);
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const handle = window.setTimeout(() => finish(resolve), milliseconds);
     const onAbort = () => {
       window.clearTimeout(handle);
-      reject(new DOMException("Request was cancelled", "AbortError"));
+      finish(() => reject(new DOMException("Request was cancelled", "AbortError")));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
 /**
- * A department route transition can briefly race backend/session readiness.
- * Retry one transient failure before showing the blocking workspace error; the
- * cached stale response remains available through apiRequest when appropriate.
+ * A route transition can briefly race backend/session readiness. Retry one
+ * transient failure before showing the blocking workspace error; apiRequest
+ * can still serve a tenant-scoped stale response when the network is down.
  */
 export async function getDepartmentHome(
   amoCode: string,
@@ -98,5 +107,7 @@ export async function getDepartmentHome(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Department home could not be loaded.");
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Department home could not be loaded.");
 }
