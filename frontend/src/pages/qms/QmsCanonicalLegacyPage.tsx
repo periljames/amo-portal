@@ -1780,12 +1780,15 @@ export default function QmsCanonicalPage(): React.ReactElement {
       void import("../../services/training");
       void import("../../services/qms");
     };
-    const idle = (window as any).requestIdleCallback as undefined | ((cb: () => void, options?: { timeout?: number }) => number);
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const idle = idleWindow.requestIdleCallback;
     if (idle) {
       const id = idle(run, { timeout: 900 });
       return () => {
-        const cancel = (window as any).cancelIdleCallback as undefined | ((id: number) => void);
-        if (cancel) cancel(id);
+        idleWindow.cancelIdleCallback?.(id);
       };
     }
     const timer = window.setTimeout(run, 250);
