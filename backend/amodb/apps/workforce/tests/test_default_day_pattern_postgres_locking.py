@@ -14,7 +14,6 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
 from amodb.apps.workforce import hr_service, models
 from amodb.apps.workforce.work_pattern_assignment_locking import (
-    postgres_safe_assignment_lock_scope,
     scope_employee_pattern_for_update,
 )
 
@@ -39,6 +38,8 @@ def test_default_pattern_assignment_lock_targets_only_the_base_table() -> None:
 
     after = str(state.statement.compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE OF employee_work_pattern_assignments" in after
+    assert "FOR UPDATE OF users" not in after
+    assert "FOR UPDATE OF work_patterns" not in after
     assert after.count("FOR UPDATE") == 1
 
 
