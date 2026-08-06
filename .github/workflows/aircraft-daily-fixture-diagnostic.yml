@@ -1,0 +1,64 @@
+name: Aircraft Daily Fixture Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/aircraft-induction-architecture
+    paths:
+      - .github/workflows/aircraft-daily-fixture-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-fixture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/aircraft-induction-architecture
+      - name: Reconstruct reviewed bundle
+        run: |
+          cat .github/transfer/daily-hardening.bin00 \
+              .github/transfer/daily-hardening.bin01 \
+              .github/transfer/daily-hardening.bin02 \
+              .github/transfer/daily-hardening.bin03 \
+              .github/transfer/daily-hardening.bin04 > /tmp/daily_hardening_bundle.tgz
+          echo "d5ae046e553ad117bbe9d8d3f04864f5edf59fb72ba4b3c1fe1dd78b09bee3dd  /tmp/daily_hardening_bundle.tgz" | sha256sum --check --strict
+          tar -xzf /tmp/daily_hardening_bundle.tgz -C .
+      - name: Print component fixture constructors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py")
+          source = path.read_text()
+          lines = source.splitlines()
+          terms = (
+              "FleetComponent(",
+              "position",
+              "component_kind",
+              "engine",
+              "propeller",
+              "part_number",
+              "serial_number",
+          )
+          indexes = [
+              index
+              for index, line in enumerate(lines)
+              if any(term.lower() in line.lower() for term in terms)
+          ]
+          printed = set()
+          for index in indexes:
+              start = max(0, index - 5)
+              end = min(len(lines), index + 11)
+              key = (start, end)
+              if key in printed:
+                  continue
+              printed.add(key)
+              print(f"--- lines {start + 1}-{end} ---")
+              for line_number in range(start, end):
+                  print(f"{line_number + 1}: {lines[line_number]}")
+          print(f"FleetComponent constructors: {source.count('FleetComponent(')}")
+          PY
