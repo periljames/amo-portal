@@ -138,7 +138,7 @@ class HrDefaultDayBatchPreview(HrSchema):
     assignable_count: int
     already_assigned_count: int
     ineligible_count: int
-    selection_token: str
+    selection_token: str = ""
     capped: bool = False
 
 
