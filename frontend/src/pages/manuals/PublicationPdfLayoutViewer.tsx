@@ -93,8 +93,8 @@ function searchResultPage(button: Element): number | null {
  * Layout integration intentionally has no second TOC state controller.
  *
  * PublicationsReaderPage remains the sole owner of active navigation rows.
- * This component only translates explicit search/reference actions into the
- * reader's single navigation request channel.
+ * This component translates reader outline data and explicit search/reference
+ * actions into that parent's state and the reader's navigation request channel.
  */
 export default function PublicationPdfLayoutViewer({
   fileUrl,
@@ -109,6 +109,7 @@ export default function PublicationPdfLayoutViewer({
   onPageChange,
   onZoomChange,
   onAcroFormDetected,
+  onOutlineReady,
 }: PublicationPdfLayoutViewerProps) {
   const identity = useMemo(() => sourceIdentity(fileUrl), [fileUrl]);
   const [automaticReferences, setAutomaticReferences] = useState<DocumentationReference[]>([]);
@@ -284,6 +285,7 @@ export default function PublicationPdfLayoutViewer({
           }}
           onZoomChange={onZoomChange}
           onAcroFormDetected={onAcroFormDetected}
+          onOutlineReady={onOutlineReady}
           renderPageOverlay={(pageNumber) => (
             <>
               {(referencesByPage.get(pageNumber) || []).map((reference) => {
