@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -9,6 +18,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import router_legacy as legacy
+from .pdf_reader_precompute import precompute_pdf_reader_assets
 
 
 router = APIRouter(prefix="/manuals", tags=["Manual Upload RBAC"])
@@ -22,8 +32,14 @@ def _require_upload_scope(
 ) -> None:
     legacy._require_manual_control_user(current_user)
     tenant = legacy._tenant_by_slug(db, tenant_slug)
-    if not getattr(current_user, "is_superuser", False) and str(current_user.amo_id or "") != str(tenant.amo_id):
-        raise HTTPException(status_code=403, detail="The requested tenant is outside the active AMO context")
+    if (
+        not getattr(current_user, "is_superuser", False)
+        and str(current_user.amo_id or "") != str(tenant.amo_id)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="The requested tenant is outside the active AMO context",
+        )
 
 
 @router.post("/t/{tenant_slug}/upload-docx/preview", include_in_schema=False)
@@ -128,5 +144,13 @@ async def upload_pdf_revision_guarded(
         db=db,
         current_user=current_user,
     )
-    background_tasks.add_task(index_revision_background, result["revision_id"])
-    return {**result, "reference_index_status": "PENDING"}
+    revision_id = result["revision_id"]
+    # Capability inspection and any script-disabled derivative are materialized
+    # while the uploaded revision is being indexed, not when a reader opens it.
+    background_tasks.add_task(precompute_pdf_reader_assets, revision_id)
+    background_tasks.add_task(index_revision_background, revision_id)
+    return {
+        **result,
+        "reference_index_status": "PENDING",
+        "pdf_reader_precompute_status": "PENDING",
+    }
