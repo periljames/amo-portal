@@ -12,6 +12,7 @@ from . import router as rostering_route_module
 from .automation_router import router as automation_router
 from .commitments_router import router as commitments_router
 from ..workforce.bulk_router import router as workforce_bulk_router
+from ..workforce.governance_router import router as workforce_governance_router
 from ..workforce.hr_router import router as workforce_hr_router
 from ..workforce.router_entry import router as workforce_router
 
@@ -21,6 +22,7 @@ router.include_router(automation_router)
 router.include_router(commitments_router)
 router.include_router(workforce_router)
 router.include_router(workforce_hr_router)
+router.include_router(workforce_governance_router)
 router.include_router(workforce_bulk_router)
 
 __all__ = ["router"]
