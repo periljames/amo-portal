@@ -32,28 +32,24 @@ jobs:
               .github/transfer/daily-hardening.bin04 > /tmp/daily_hardening_bundle.tgz
           echo "d5ae046e553ad117bbe9d8d3f04864f5edf59fb72ba4b3c1fe1dd78b09bee3dd  /tmp/daily_hardening_bundle.tgz" | sha256sum --check --strict
           tar -xzf /tmp/daily_hardening_bundle.tgz -C .
-      - name: Print component-kind ownership and fixture constructors
+      - name: Print daily utilisation test bindings
         run: |
-          echo '=== component_kind repository matches ==='
-          grep -RIn --exclude-dir=.venv --exclude='*.pyc' 'component_kind' backend/amodb || true
-          echo '=== aircraft component model ==='
           python - <<'PY'
           from pathlib import Path
 
-          model_path = Path("backend/amodb/apps/fleet/models.py")
-          model_lines = model_path.read_text().splitlines()
-          for index, line in enumerate(model_lines):
-              if "class AircraftComponent" in line or "component_kind" in line:
-                  start = max(0, index - 5)
-                  end = min(len(model_lines), index + 30)
-                  print(f"--- {model_path}: lines {start + 1}-{end} ---")
-                  for line_number in range(start, end):
-                      print(f"{line_number + 1}: {model_lines[line_number]}")
-
-          test_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py")
-          lines = test_path.read_text().splitlines()
-          for start, end in ((45, 100),):
-              print(f"--- {test_path}: lines {start + 1}-{end} ---")
-              for line_number in range(start, min(end, len(lines))):
-                  print(f"{line_number + 1}: {lines[line_number]}")
+          paths = (
+              Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_database_contract.py"),
+              Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py"),
+              Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/__init__.py"),
+          )
+          for path in paths:
+              lines = path.read_text().splitlines()
+              print(f"=== {path} ===")
+              ranges = [(0, min(len(lines), 55))]
+              if path.name == "test_posting_integration.py":
+                  ranges.extend(((140, min(len(lines), 190)), (250, min(len(lines), 305)))
+              for start, end in ranges:
+                  print(f"--- lines {start + 1}-{end} ---")
+                  for index in range(start, end):
+                      print(f"{index + 1}: {lines[index]}")
           PY
