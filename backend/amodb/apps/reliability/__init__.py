@@ -15,8 +15,11 @@ from . import analytics_dashboard  # noqa: E402,F401
 from . import workbook_parity  # noqa: E402,F401
 from . import workbook_parity_contract_hardening  # noqa: E402,F401
 from . import workbook_parity_defaults  # noqa: E402,F401
+from . import workbook_reference_hardening  # noqa: E402,F401
 from . import workbook_parity_imports  # noqa: E402,F401
+from . import workbook_reference_import  # noqa: E402,F401
 from . import workbook_parity_statistics  # noqa: E402,F401
+from . import workbook_analysis_integrity  # noqa: E402,F401
 
 workpack_integration.register(router)
 operational_hardening.apply(operational_sources)
@@ -26,5 +29,9 @@ operational_sources.register(router)
 analytics_dashboard.register(router)
 workbook_parity.register(router)
 workbook_parity_defaults.register(router)
+# Governed routes register before legacy compatibility routes so exact workbook-
+# reference and source-audit contracts are authoritative.
+workbook_reference_import.register(router)
 workbook_parity_imports.register(router)
+workbook_analysis_integrity.register(router)
 workbook_parity_statistics.register(router)

@@ -41,8 +41,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: reliability_ci
-        ports:
-          - 5432:5432
+        ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres -d reliability_ci"
           --health-interval=10s
@@ -60,8 +59,7 @@ jobs:
       WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
       - name: Enforce scoped diff
         if: github.event_name == 'pull_request'
         shell: bash
@@ -100,14 +98,13 @@ jobs:
           set -euo pipefail
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_20260806_workbook_imports' /tmp/alembic-heads.txt
+          grep -q 'rel_20260806_reference_integrity' /tmp/alembic-heads.txt
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
-      - name: Verify formula and workbook parity schema
+      - name: Verify formula, workbook and exactness schema
         run: |
           python - <<'PY'
-          import os
-          import sys
+          import os, sys
           from sqlalchemy import create_engine, text
           expected_metric_columns = {'formula_latex', 'formula_mathml', 'formula_expression_json', 'formula_unit', 'formula_precision', 'formula_rounding_mode', 'denominator_policy', 'formula_source_fields_json'}
           expected_run_columns = {'formula_snapshot_json', 'formula_snapshot_hash'}
@@ -121,22 +118,25 @@ jobs:
               run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_calculation_runs'")).scalars())
               constraints = set(connection.execute(text("SELECT conname FROM pg_constraint WHERE conrelid IN ('reliability_metric_definitions'::regclass,'reliability_calculation_runs'::regclass)")).scalars())
               workbook_tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'reliability_%'")).scalars())
+              numeric_columns = list(connection.execute(text("SELECT data_type FROM information_schema.columns WHERE (table_name='reliability_defect_trends' AND column_name IN ('utilisation_hours','utilisation_cycles','defect_rate_per_100_fh')) OR (table_name='reliability_kpis' AND column_name IN ('value','numerator','denominator'))")).scalars())
           failures = []
           if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
-          if versions != ['rel_20260806_workbook_imports']: failures.append(f'Alembic version rows are {versions}.')
+          if versions != ['rel_20260806_reference_integrity']: failures.append(f'Alembic version rows are {versions}.')
           if expected_metric_columns - metric_columns: failures.append(f'Missing metric columns: {sorted(expected_metric_columns - metric_columns)}.')
           if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
           if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
           if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook tables: {sorted(expected_workbook_tables - workbook_tables)}.')
+          if len(numeric_columns) != 6 or any(value != 'numeric' for value in numeric_columns): failures.append(f'Legacy Reliability analytical columns are not all fixed-point numeric: {numeric_columns}.')
           if failures:
-              print('\n'.join(failures))
-              sys.exit(1)
-          print('formula and workbook parity schema verification passed')
+              print('\n'.join(failures)); sys.exit(1)
+          print('formula, workbook and exactness schema verification passed')
           PY
       - name: Run PostgreSQL append-only calculation regression
         run: python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
       - name: Run PostgreSQL operational-source integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_operational_sources_regression.py
+      - name: Run PostgreSQL workbook-reference integrity regression
+        run: python backend/amodb/apps/reliability/tests/postgresql_workbook_reference_integrity_regression.py
       - name: Run Reliability tests
         run: pytest -q backend/amodb/apps/reliability/tests
 
