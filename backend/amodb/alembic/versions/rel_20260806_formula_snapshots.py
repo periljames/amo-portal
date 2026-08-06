@@ -22,7 +22,11 @@ depends_on = None
 
 
 def _number(value) -> str:
-    return str(Decimal(str(value or 1)).normalize())
+    number = Decimal(str(value if value is not None else 1))
+    text = format(number, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _metric_snapshot(row) -> dict:
