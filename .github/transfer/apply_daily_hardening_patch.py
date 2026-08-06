@@ -23,19 +23,27 @@ services, classification_count = classification_role_pattern.subn(
     services,
     count=1,
 )
-if classification_count == 0 and len(classification_target_pattern.findall(services)) != 1:
-    lines = services.splitlines()
-    contexts = []
-    for index, line in enumerate(lines):
-        if "Classification" in line or "classify_component" in line:
-            start = max(0, index - 4)
-            end = min(len(lines), index + 10)
-            contexts.append(
-                f"lines {start + 1}-{end}:\n"
-                + "\n".join(f"{line_number + 1}: {lines[line_number]}" for line_number in range(start, end))
-            )
-    detail = "\n---\n".join(contexts[:8]) or "no Classification/classify_component context found"
-    raise SystemExit("expected one Classification role or target_type keyword\n" + detail)
+if classification_count == 0:
+    target_count = len(classification_target_pattern.findall(services))
+    if target_count == 1:
+        pass
+    elif target_count == 0 and "Classification" not in services and "classify_component" not in services:
+        print("classification keyword correction is not applicable to this reviewed bundle")
+    else:
+        lines = services.splitlines()
+        contexts = []
+        for index, line in enumerate(lines):
+            if "Classification" in line or "classify_component" in line:
+                start = max(0, index - 4)
+                end = min(len(lines), index + 10)
+                contexts.append(
+                    f"lines {start + 1}-{end}:\n"
+                    + "\n".join(f"{line_number + 1}: {lines[line_number]}" for line_number in range(start, end))
+                )
+        detail = "\n---\n".join(contexts[:8]) or "no Classification/classify_component context found"
+        raise SystemExit(
+            f"ambiguous Classification correction state: target_count={target_count}\n" + detail
+        )
 services_path.write_text(services)
 
 
