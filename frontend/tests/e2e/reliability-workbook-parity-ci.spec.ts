@@ -19,6 +19,11 @@ const fields: Record<string, Array<Record<string, unknown>>> = {
   ADD: [{ key: "deferral_type", label: "Deferral type", data_type: "select", required: true, options: ["MEL", "CDL"] }],
 };
 
+function futureToken(): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
+}
+
 function catalog() {
   return DATASETS.map((code) => ({
     code,
@@ -45,31 +50,50 @@ function catalog() {
 async function fulfilApi(route: Route): Promise<void> {
   const url = new URL(route.request().url());
   const path = url.pathname;
-  if (!path.includes("/reliability/workbook-parity")) return route.continue();
-  const json = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-  if (path.endsWith("/catalog")) return json(catalog());
-  if (path.endsWith("/records")) return json([]);
-  if (path.endsWith("/oos-metrics")) return json({ records: 3, downtime_hours: 18.5, scheduled_available_hours: 720, available_hours: 701.5, availability_pct: 97.43, mttr_hours: 6.17 });
-  if (path.endsWith("/statistical-alerts")) return json([]);
-  if (path.endsWith("/mappings")) return json([]);
-  if (path.endsWith("/parity")) return json(DATASETS.map((code) => ({ dataset_code: code, dataset_name: code, required_fields: [], optional_fields: [], mapped_required_fields: [], missing_required_fields: [], coverage_pct: 100, record_count: 0 })));
-  if (path.endsWith("/contracts")) return json({ mapping: { profiles: { "SAFARILINK-C208B-RP": {}, "SAFARILINK-DHC8-RP": {}, "GENERIC-ANALYSIS-TEMPLATE": {} }, datasets: {} }, report_layouts: { required_datasets: DATASETS, layouts: {} } });
-  if (path.endsWith("/imports")) return json({ total: 0, offset: 0, limit: 50, items: [] });
-  if (path.endsWith("/report-layouts")) return json([
-    { id: 1, code: "C208B-RP", name: "Cessna 208B Reliability Programme Report", aircraft_family: "C208B", revision: 1, active: true, sections: [], page_settings: {} },
-    { id: 2, code: "DHC8-RP", name: "DHC8 Reliability Programme Report", aircraft_family: "DHC8", revision: 1, active: true, sections: [], page_settings: {} },
-  ]);
-  if (path.endsWith("/reports")) return json([]);
-  return json({});
+  const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+  if (path.includes("/reliability/workbook-parity")) {
+    if (path.endsWith("/catalog")) return json(catalog());
+    if (path.endsWith("/records")) return json([]);
+    if (path.endsWith("/oos-metrics")) return json({ records: 3, downtime_hours: 18.5, scheduled_available_hours: 720, available_hours: 701.5, availability_pct: 97.43, mttr_hours: 6.17 });
+    if (path.endsWith("/statistical-alerts")) return json([]);
+    if (path.endsWith("/mappings")) return json([]);
+    if (path.endsWith("/parity")) return json(DATASETS.map((code) => ({ dataset_code: code, dataset_name: code, required_fields: [], optional_fields: [], mapped_required_fields: [], missing_required_fields: [], coverage_pct: 100, record_count: 0 })));
+    if (path.endsWith("/contracts")) return json({ mapping: { profiles: { "SAFARILINK-C208B-RP": {}, "SAFARILINK-DHC8-RP": {}, "GENERIC-ANALYSIS-TEMPLATE": {} }, datasets: {} }, report_layouts: { required_datasets: DATASETS, layouts: {} } });
+    if (path.endsWith("/imports")) return json({ total: 0, offset: 0, limit: 50, items: [] });
+    if (path.endsWith("/report-layouts")) return json([
+      { id: 1, code: "C208B-RP", name: "Cessna 208B Reliability Programme Report", aircraft_family: "C208B", revision: 1, active: true, sections: [], page_settings: {} },
+      { id: 2, code: "DHC8-RP", name: "DHC8 Reliability Programme Report", aircraft_family: "DHC8", revision: 1, active: true, sections: [], page_settings: {} },
+    ]);
+    if (path.endsWith("/reports")) return json([]);
+    return json({});
+  }
+
+  if (url.origin === "http://127.0.0.1:8080") {
+    if (path.includes("/accounts/admin/admin-profile/")) return json({ eligible: false, active: false });
+    if (path.endsWith("/auth/onboarding-status")) return json({ is_complete: true, missing: [] });
+    return json({ detail: "Not configured in Reliability render UAT" }, 404);
+  }
+
+  return route.continue();
 }
 
 async function openWorkspace(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    localStorage.setItem("amo_portal_token", "representative-tenant-token");
+  const token = futureToken();
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.addInitScript(({ storedToken }) => {
+    const onboarding = JSON.stringify({ is_complete: true, missing: [] });
+    localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "SAFARILINK");
     localStorage.setItem("amo_slug", "safarilink");
     localStorage.setItem("amo_department", "reliability");
-    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    localStorage.setItem("amo_onboarding_status", onboarding);
+    sessionStorage.setItem("amo_onboarding_status", onboarding);
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "uat-user", amo_id: "uat-amo", department_id: "uat-rel", staff_code: "REL-UAT",
       email: "uat@example.invalid", first_name: "Reliability", last_name: "UAT", full_name: "Reliability UAT",
@@ -78,10 +102,16 @@ async function openWorkspace(page: Page): Promise<void> {
       is_active: true, is_superuser: false, is_amo_admin: false, must_change_password: false,
       last_login_at: null, last_login_ip: null, created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
     }));
-  });
+  }, { storedToken: token });
   await page.route("**/*", fulfilApi);
-  await page.goto("/maintenance/safarilink/reliability/workbook-parity");
-  await expect(page.getByTestId("reliability-workbook-parity"), `Expected workbook parity workspace at ${page.url()}`).toBeVisible({ timeout: 30_000 });
+  await page.goto("/maintenance/safarilink/reliability/workbook-parity", { waitUntil: "networkidle" });
+
+  try {
+    await expect(page.getByTestId("reliability-workbook-parity"), `Expected workbook parity workspace at ${page.url()}`).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    const body = (await page.locator("body").innerText().catch(() => "<body unavailable>")).slice(0, 4000);
+    throw new Error(`Workbook parity workspace did not render. URL: ${page.url()}\nBody: ${body}\nBrowser errors: ${consoleErrors.join(" | ") || "none"}\n${String(error)}`);
+  }
 }
 
 test.describe("Reliability workbook parity representative-tenant UAT", () => {
