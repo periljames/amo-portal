@@ -62,6 +62,7 @@ async function openWorkspace(page: Page): Promise<void> {
     localStorage.setItem("amo_code", "SAFARILINK");
     localStorage.setItem("amo_slug", "safarilink");
     localStorage.setItem("amo_department", "reliability");
+    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "uat-user", amo_id: "uat-amo", department_id: "uat-rel", staff_code: "REL-UAT",
       email: "uat@example.invalid", first_name: "Reliability", last_name: "UAT", full_name: "Reliability UAT",
