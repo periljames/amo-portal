@@ -289,26 +289,38 @@ def upgrade() -> None:
     op.alter_column("reliability_calculation_runs", "formula_snapshot_hash", existing_type=sa.String(length=64), nullable=False)
 
     op.create_check_constraint(
-        "ck_reliability_metric_formula_latex_present",
+        op.f("ck_reliability_metric_formula_latex_present"),
         "reliability_metric_definitions",
         "char_length(formula_latex) > 0",
     )
     op.create_check_constraint(
-        "ck_reliability_metric_formula_mathml_present",
+        op.f("ck_reliability_metric_formula_mathml_present"),
         "reliability_metric_definitions",
         "char_length(formula_mathml) > 0",
     )
     op.create_check_constraint(
-        "ck_reliability_formula_snapshot_hash_format",
+        op.f("ck_reliability_formula_snapshot_hash_format"),
         "reliability_calculation_runs",
         "formula_snapshot_hash ~ '^[0-9a-f]{64}$'",
     )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_reliability_formula_snapshot_hash_format", "reliability_calculation_runs", type_="check")
-    op.drop_constraint("ck_reliability_metric_formula_mathml_present", "reliability_metric_definitions", type_="check")
-    op.drop_constraint("ck_reliability_metric_formula_latex_present", "reliability_metric_definitions", type_="check")
+    op.drop_constraint(
+        op.f("ck_reliability_formula_snapshot_hash_format"),
+        "reliability_calculation_runs",
+        type_="check",
+    )
+    op.drop_constraint(
+        op.f("ck_reliability_metric_formula_mathml_present"),
+        "reliability_metric_definitions",
+        type_="check",
+    )
+    op.drop_constraint(
+        op.f("ck_reliability_metric_formula_latex_present"),
+        "reliability_metric_definitions",
+        type_="check",
+    )
     op.drop_column("reliability_calculation_runs", "formula_snapshot_hash")
     op.drop_column("reliability_calculation_runs", "formula_snapshot_json")
     op.drop_column("reliability_metric_definitions", "formula_source_fields_json")
