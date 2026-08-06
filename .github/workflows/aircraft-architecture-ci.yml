@@ -14,7 +14,12 @@ on:
       - "frontend/src/pages/planning/DailyAircraftUtilisationPage.tsx"
       - "frontend/src/pages/PlanningProductionPages.tsx"
       - "frontend/src/services/dailyUtilisation.ts"
+      - "frontend/src/services/dailyUtilisation.test.ts"
       - "frontend/src/styles/daily-utilisation.css"
+      - "frontend/tests/e2e/aircraft-daily-utilisation.spec.ts"
+      - "frontend/playwright.aircraft-architecture.config.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - ".github/workflows/aircraft-architecture-ci.yml"
 
 permissions:
@@ -103,3 +108,34 @@ jobs:
         run: python -c "import amodb.main; from sqlalchemy.orm import configure_mappers; configure_mappers()"
       - name: Run aircraft architecture tests
         run: pytest -q backend/amodb/apps/aircraft_architecture
+
+  frontend-gate:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Lint architecture frontend surface
+        run: >-
+          npx eslint
+          src/services/dailyUtilisation.ts
+          src/services/dailyUtilisation.test.ts
+          src/pages/planning/DailyAircraftUtilisationPage.tsx
+          tests/e2e/aircraft-daily-utilisation.spec.ts
+          playwright.aircraft-architecture.config.ts
+      - name: Run architecture frontend unit tests
+        run: npm run test:aircraft-architecture
+      - name: Typecheck and build production frontend
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run aircraft architecture Playwright acceptance
+        run: npx playwright test --config playwright.aircraft-architecture.config.ts
