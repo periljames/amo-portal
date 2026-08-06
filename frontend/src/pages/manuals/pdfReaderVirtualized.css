@@ -1,0 +1,154 @@
+.pdfv2-reader.pdfv2-reader--virtualized,
+.pdfv2-reader.pdfv2-reader--booting {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: calc(100dvh - var(--tenant-topbar-height, 50px) - 104px);
+  min-height: 500px;
+  max-height: calc(100dvh - var(--tenant-topbar-height, 50px) - 72px);
+  overflow: hidden;
+  background: var(--pdfv2-stage);
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-toolbar,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-search,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-notice,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-error,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-success {
+  flex: 0 0 auto;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: 16px 16px 28px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  scroll-behavior: auto;
+  contain: layout paint style;
+  background: var(--pdfv2-stage);
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-virtual-stage {
+  position: relative;
+  width: 100%;
+  min-width: max-content;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-virtual-item {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  box-sizing: border-box;
+  padding-bottom: 20px;
+  translate: -50% 0;
+  transform-origin: top center;
+  will-change: transform;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell {
+  position: relative;
+  width: 100%;
+  min-height: 1px;
+  overflow: hidden;
+  background: #fff;
+  isolation: isolate;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell .react-pdf__Page,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell canvas {
+  width: 100% !important;
+  height: auto !important;
+  background: #fff !important;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-rendering canvas,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-rendering .react-pdf__Page__textContent,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-rendering .react-pdf__Page__annotations {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-ready canvas,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-ready .react-pdf__Page__textContent,
+.pdfv2-reader.pdfv2-reader--virtualized .pdfv2-page-shell.is-ready .react-pdf__Page__annotations {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.pdfv2-render-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 280px;
+  padding: 24px;
+  background: linear-gradient(110deg, #fff 8%, #f1f5f9 18%, #fff 33%);
+  background-size: 200% 100%;
+  color: #64748b;
+  font-size: 0.78rem;
+  animation: pdfv2-shimmer 1.2s linear infinite;
+  pointer-events: none;
+}
+
+.pdfv2-render-cover.is-error {
+  background: #fff;
+  color: #b91c1c;
+  animation: none;
+}
+
+.pdfv2-navigation-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: max-content;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.pdfv2-error--viewport {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer a,
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer section,
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer input,
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer textarea,
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer select,
+.pdfv2-reader.pdfv2-reader--virtualized .annotationLayer button {
+  pointer-events: auto !important;
+}
+
+.publication-reader-page:has(.pdfv2-reader--virtualized) .publication-to-top {
+  display: none !important;
+}
+
+.publication-reader-page:has(.pdfv2-reader--virtualized) .publication-document-canvas,
+.publication-reader-page:has(.pdfv2-reader--virtualized) .publication-native-pdf,
+.publication-reader-page:has(.pdfv2-reader--virtualized) .publication-linked-layout {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .pdfv2-reader.pdfv2-reader--virtualized,
+  .pdfv2-reader.pdfv2-reader--booting {
+    height: calc(100dvh - var(--tenant-topbar-height, 50px) - 86px);
+    min-height: 420px;
+  }
+
+  .pdfv2-reader.pdfv2-reader--virtualized .pdfv2-viewport {
+    padding-inline: 8px;
+  }
+}
