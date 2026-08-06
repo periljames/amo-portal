@@ -1,15 +1,22 @@
 """Controlled Workforce bulk-operation endpoints."""
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
-from . import bulk_schemas, bulk_service, permissions, services
+from . import bulk_governance, bulk_schemas, bulk_service, permissions, services
 
 router = APIRouter(prefix="/workforce/hr", tags=["workforce-hr-bulk"])
+
+_OPERATION_PATTERN = (
+    "^(CREATE_CONTRACTS|ASSIGN_DEFAULT_DAY_PATTERN|ASSIGN_ORGANIZATION|ASSIGN_POSITION|"
+    "ASSIGN_BASES|ASSIGN_SUPERVISOR|UPDATE_GROUPS|UPDATE_CONTRACT_SETTINGS|SCHEDULE_OFFBOARDING)$"
+)
 
 
 def _amo(user: account_models.User) -> str:
@@ -47,7 +54,15 @@ def _require_default_pattern_management(db: Session, user: account_models.User) 
 
 
 def _queue(background_tasks: BackgroundTasks, operation: bulk_schemas.BulkOperationRead, created: bool) -> None:
-    if created and operation.status == "QUEUED":
+    """Production leaves work queued for the standalone worker.
+
+    Inline execution is an explicit development/test escape hatch only.
+    """
+    if (
+        created
+        and operation.status == "QUEUED"
+        and os.getenv("WORKFORCE_BULK_INLINE_DISPATCH", "0") == "1"
+    ):
         background_tasks.add_task(bulk_service.process_operation, operation.id)
 
 
@@ -130,6 +145,35 @@ def submit_default_pattern_batch(
         raise _error(str(exc), code="WORKFORCE_DEFAULT_PATTERN_BATCH_INVALID") from exc
 
 
+@router.post(
+    "/bulk-operations/personnel",
+    response_model=bulk_schemas.BulkOperationRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def submit_personnel_mutation(
+    payload: bulk_schemas.PersonnelMutationRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=128),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_contract_management(db, current_user)
+    try:
+        operation, created = bulk_governance.submit_personnel_mutation(
+            db,
+            amo_id=_amo(current_user),
+            actor=current_user,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        db.commit()
+        _queue(background_tasks, operation, created)
+        return operation
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="WORKFORCE_PERSONNEL_MUTATION_INVALID") from exc
+
+
 @router.get(
     "/bulk-operations",
     response_model=bulk_schemas.BulkOperationsPage,
@@ -138,7 +182,7 @@ def get_bulk_operations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
     operation_status: str | None = Query(default=None, alias="status", pattern="^(QUEUED|RUNNING|COMPLETED|COMPLETED_WITH_ERRORS|FAILED)$"),
-    operation_type: str | None = Query(default=None, pattern="^(CREATE_CONTRACTS|ASSIGN_DEFAULT_DAY_PATTERN)$"),
+    operation_type: str | None = Query(default=None, pattern=_OPERATION_PATTERN),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -282,7 +326,7 @@ def resume_bulk_operation(
             operation_id=operation_id,
         )
         db.commit()
-        background_tasks.add_task(bulk_service.process_operation, operation.id)
+        _queue(background_tasks, operation, True)
         return operation
     except ValueError as exc:
         db.rollback()
