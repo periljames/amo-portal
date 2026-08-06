@@ -19,6 +19,10 @@ export type HrActionItem = {
   action_path?: string | null;
 };
 
+export type HrContractState = "EFFECTIVE" | "FUTURE" | "MISSING";
+export type HrPatternState = "DEFAULT" | "ASSIGNED" | "MISSING";
+export type HrReadinessState = "READY" | "NEEDS_ATTENTION" | "BLOCKED";
+
 export type HrPersonReadiness = {
   user_id: string;
   contract_id?: string | null;
@@ -27,10 +31,14 @@ export type HrPersonReadiness = {
   email?: string | null;
   has_effective_contract: boolean;
   uses_default_day_pattern: boolean;
+  account_role?: string | null;
   position_title?: string | null;
+  department_id?: string | null;
   department_code?: string | null;
+  department_name?: string | null;
   employment_status?: string | null;
   contract_type?: string | null;
+  contract_state: HrContractState;
   contract_effective_from?: string | null;
   contract_effective_to?: string | null;
   primary_base_station_id?: string | null;
@@ -47,17 +55,91 @@ export type HrPersonReadiness = {
   work_pattern_code?: string | null;
   work_pattern_name?: string | null;
   work_pattern_effective_from?: string | null;
+  pattern_state: HrPatternState;
   active_leave_status?: string | null;
-  readiness_state: string;
+  group_ids: string[];
+  group_names: string[];
+  readiness_state: HrReadinessState;
   readiness_reasons: string[];
 };
 
 export type HrPeoplePage = {
-    items: HrPersonReadiness[];
-    page: number;
-    page_size: number;
-    total: number;
-    pages: number;
+  items: HrPersonReadiness[];
+  page: number;
+  page_size: number;
+  total: number;
+  pages: number;
+};
+
+export type HrPeopleFilters = {
+  search?: string | null;
+  department_id?: string | null;
+  role?: string | null;
+  position_title?: string | null;
+  contract_type?: string | null;
+  employment_status?: string | null;
+  base_station_id?: string | null;
+  group_id?: string | null;
+  readiness_state?: HrReadinessState | null;
+  contract_state?: HrContractState | null;
+  pattern_state?: HrPatternState | null;
+  expires_within_days?: number | null;
+  sort_by?: "name" | "staff_code" | "department" | "role" | "position_title";
+  sort_dir?: "asc" | "desc";
+};
+
+export type HrFilterOption = {
+  value: string;
+  label: string;
+  count: number;
+  secondary?: string | null;
+};
+
+export type HrPeopleFacets = {
+  departments: HrFilterOption[];
+  roles: HrFilterOption[];
+  position_titles: HrFilterOption[];
+  contract_types: HrFilterOption[];
+  employment_statuses: HrFilterOption[];
+  bases: HrFilterOption[];
+  groups: HrFilterOption[];
+  readiness_states: HrFilterOption[];
+  contract_states: HrFilterOption[];
+  pattern_states: HrFilterOption[];
+};
+
+export type HrPeopleSelection =
+  | {
+      mode: "EXPLICIT";
+      user_ids: string[];
+      exclude_user_ids?: string[];
+      filters?: HrPeopleFilters;
+    }
+  | {
+      mode: "FILTERED";
+      user_ids?: string[];
+      exclude_user_ids: string[];
+      filters: HrPeopleFilters;
+    };
+
+export type HrDefaultDayBatchPreview = {
+  matched_count: number;
+  eligible_count: number;
+  assignable_count: number;
+  already_assigned_count: number;
+  ineligible_count: number;
+  capped: boolean;
+};
+
+export type HrDefaultDayBatchResult = {
+  shift_template_id: string;
+  work_pattern_id: string;
+  matched_count: number;
+  eligible_count: number;
+  assigned_count: number;
+  already_assigned_count: number;
+  ineligible_count: number;
+  skipped_conflict_count: number;
 };
 
 export type HrOvertimeRequest = {
