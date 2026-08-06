@@ -4,17 +4,11 @@ on:
   pull_request:
     paths:
       - '.github/workflows/reliability-module-ci.yml'
-      - '.github/workflows/reliability-hotfix-finalizer.yml'
-      - '.github/workflows/reliability-hotfix-pr-finalizer.yml'
-      - '.github/workflows/reliability-hotfix-scheduled.yml'
-      - '.github/workflows/reliability-review-finalize-v2.yml'
-      - '.github/workflows/reliability-review-fixes.yml'
       - 'backend/amodb/alembic/env.py'
       - 'backend/amodb/alembic/versions/qms_vernum_128.py'
       - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
       - 'backend/amodb/apps/reliability/**'
-      - 'backend/scripts/apply_reliability_review_fixes.py'
       - 'backend/amodb/main.py'
       - 'docs/reliability/**'
       - 'frontend/src/app/PortalRouteSurface.tsx'
@@ -26,6 +20,7 @@ on:
       - 'frontend/src/portalRoutes.tsx'
       - 'frontend/src/services/reliability.ts'
       - 'frontend/src/styles/reliability-v2.css'
+      - 'frontend/tests/e2e/reliability-workbook-parity-ci.spec.ts'
   workflow_dispatch:
 
 permissions:
@@ -76,30 +71,10 @@ jobs:
           git fetch origin "${{ github.event.pull_request.base.ref }}"
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
-          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
+          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
-            exit 1
-          fi
-
-      - name: Verify recovery machinery is absent
-        shell: bash
-        run: |
-          set -euo pipefail
-          test ! -e .github/workflows/reliability-hotfix-finalizer.yml
-          test ! -e .github/workflows/reliability-hotfix-pr-finalizer.yml
-          test ! -e .github/workflows/reliability-hotfix-scheduled.yml
-          test ! -e .github/workflows/reliability-review-finalize-v2.yml
-          test ! -e .github/workflows/reliability-review-fixes.yml
-          test ! -e backend/scripts/apply_reliability_review_fixes.py
-          test ! -e docs/reliability/.review-fix-trigger
-          test ! -e docs/reliability/.review-fix-trigger-v2
-          test ! -e docs/reliability/.hotfix-trigger
-          if git grep -n -E 'apply_reliability_review_fixes|review-fix-trigger|hotfix-trigger|Reliability Hotfix Scheduled|Reliability Review Finalizer' -- \
-            .github/workflows docs/reliability backend/scripts \
-            ':(exclude).github/workflows/reliability-module-ci.yml'; then
-            echo 'Temporary Reliability recovery reference remains.'
             exit 1
           fi
 
@@ -124,19 +99,18 @@ jobs:
           print('application import and mapper configuration passed')
           PY
 
-      - name: Verify one Alembic head
+      - name: Verify one current Alembic head
         shell: bash
         run: |
           set -euo pipefail
-          set -o pipefail
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_20260806_formula_snapshots' /tmp/alembic-heads.txt
+          grep -q 'rel_20260806_workbook_parity' /tmp/alembic-heads.txt
 
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
 
-      - name: Verify Alembic revision, formula schema and capacity
+      - name: Verify Alembic revision, formula schema and workbook parity tables
         run: |
           python - <<'PY'
           import os
@@ -144,13 +118,8 @@ jobs:
           from sqlalchemy import create_engine, text
 
           expected_metric_columns = {
-              'formula_latex',
-              'formula_mathml',
-              'formula_expression_json',
-              'formula_unit',
-              'formula_precision',
-              'formula_rounding_mode',
-              'denominator_policy',
+              'formula_latex', 'formula_mathml', 'formula_expression_json', 'formula_unit',
+              'formula_precision', 'formula_rounding_mode', 'denominator_policy',
               'formula_source_fields_json',
           }
           expected_run_columns = {'formula_snapshot_json', 'formula_snapshot_hash'}
@@ -159,68 +128,45 @@ jobs:
               'ck_reliability_metric_formula_mathml_present',
               'ck_reliability_formula_snapshot_hash_format',
           }
+          expected_workbook_tables = {
+              'reliability_workbook_records',
+              'reliability_workbook_field_mappings',
+              'reliability_statistical_alert_results',
+              'reliability_report_layouts',
+              'reliability_workbook_report_snapshots',
+          }
 
           engine = create_engine(os.environ['DATABASE_URL'])
           with engine.connect() as connection:
               width = connection.execute(text("""
-                  SELECT character_maximum_length
-                  FROM information_schema.columns
-                  WHERE table_name = 'alembic_version'
-                    AND column_name = 'version_num'
+                  SELECT character_maximum_length FROM information_schema.columns
+                  WHERE table_name = 'alembic_version' AND column_name = 'version_num'
               """)).scalar_one()
-              versions = list(connection.execute(text(
-                  'SELECT version_num FROM alembic_version ORDER BY version_num'
-              )).scalars())
-              metric_columns = set(connection.execute(text("""
-                  SELECT column_name FROM information_schema.columns
-                  WHERE table_name = 'reliability_metric_definitions'
-              """)).scalars())
-              run_columns = set(connection.execute(text("""
-                  SELECT column_name FROM information_schema.columns
-                  WHERE table_name = 'reliability_calculation_runs'
-              """)).scalars())
+              versions = list(connection.execute(text('SELECT version_num FROM alembic_version ORDER BY version_num')).scalars())
+              metric_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'reliability_metric_definitions'")).scalars())
+              run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'reliability_calculation_runs'")).scalars())
               constraints = set(connection.execute(text("""
-                  SELECT conname FROM pg_constraint
-                  WHERE conrelid IN (
+                  SELECT conname FROM pg_constraint WHERE conrelid IN (
                       'reliability_metric_definitions'::regclass,
                       'reliability_calculation_runs'::regclass
                   )
               """)).scalars())
+              workbook_tables = set(connection.execute(text("""
+                  SELECT table_name FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name LIKE 'reliability_%'
+              """)).scalars())
 
           failures = []
-          if width is None or width < 128:
-              failures.append(f'Alembic version capacity is {width}; expected at least 128.')
-          if versions != ['rel_20260806_formula_snapshots']:
-              failures.append(
-                  'Alembic version rows are '
-                  f'{versions}; expected only rel_20260806_formula_snapshots.'
-              )
-          missing_metric = sorted(expected_metric_columns - metric_columns)
-          if missing_metric:
-              failures.append(f'Missing metric formula columns: {missing_metric}.')
-          missing_run = sorted(expected_run_columns - run_columns)
-          if missing_run:
-              failures.append(f'Missing calculation snapshot columns: {missing_run}.')
-          missing_constraints = sorted(expected_constraints - constraints)
-          if missing_constraints:
-              failures.append(f'Missing formula constraints: {missing_constraints}.')
-
-          print(f'alembic_version_capacity={width}')
-          print(f'alembic_versions={versions}')
-          print(f'missing_metric_columns={missing_metric}')
-          print(f'missing_run_columns={missing_run}')
-          print(f'missing_constraints={missing_constraints}')
-
+          if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
+          if versions != ['rel_20260806_workbook_parity']: failures.append(f'Alembic version rows are {versions}; expected only rel_20260806_workbook_parity.')
+          if expected_metric_columns - metric_columns: failures.append(f'Missing metric formula columns: {sorted(expected_metric_columns - metric_columns)}.')
+          if expected_run_columns - run_columns: failures.append(f'Missing calculation snapshot columns: {sorted(expected_run_columns - run_columns)}.')
+          if expected_constraints - constraints: failures.append(f'Missing formula constraints: {sorted(expected_constraints - constraints)}.')
+          if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook parity tables: {sorted(expected_workbook_tables - workbook_tables)}.')
           if failures:
-              for failure in failures:
-                  safe = failure.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-                  print(
-                      '::error file=.github/workflows/reliability-module-ci.yml,'
-                      f'line=159,title=Reliability formula schema::{safe}'
-                  )
+              print('\n'.join(failures))
               sys.exit(1)
-
-          print('formula schema verification passed')
+          print('formula and workbook parity schema verification passed')
           PY
 
       - name: Run PostgreSQL append-only calculation regression
@@ -247,9 +193,29 @@ jobs:
       - name: Run tenant-shell route contracts
         working-directory: frontend
         run: npm run test:tenant-shell
+      - name: Run workbook parity model tests
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/reliability/reliabilityWorkbookParityModel.test.ts
       - name: Lint Reliability-owned frontend
         working-directory: frontend
-        run: npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
+        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
+      - name: Install Chromium for representative-tenant UAT
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run representative-tenant browser UAT
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 > /tmp/reliability-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173 >/dev/null
+          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts
