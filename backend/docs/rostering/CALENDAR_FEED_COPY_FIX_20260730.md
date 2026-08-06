@@ -2,6 +2,8 @@
 
 ## Replacement scope
 
+Replacement PR: #470.
+
 This implementation supersedes the stale code in PR #385 without merging that branch. It was rebuilt from current `main` at `1660b38964e5580baf6195c328e87c7ce33e6039` and keeps the original production scope: repair the personal `.ics` feed and provide clear feedback for clipboard copy actions.
 
 ## Calendar feed defect and correction
@@ -42,4 +44,4 @@ Failed writes receive a visible error state and announcement while the rejection
 
 ## Merge rule
 
-Only the exact head of the replacement pull request may be considered for merge after all current required workflows complete successfully. PR #385 remains unmerged and is not release evidence for this replacement.
+Only the exact head of replacement PR #470 may be considered for merge after all current required workflows complete successfully. PR #385 remains unmerged and is not release evidence for this replacement.
