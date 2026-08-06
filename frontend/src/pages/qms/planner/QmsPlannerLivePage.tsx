@@ -52,7 +52,8 @@ function fallbackTrigger(dialog: HTMLElement): HTMLElement | null {
   }
   if (dialog.querySelector("#qms-reschedule-title")) {
     return firstFocusable(
-      document.querySelector<HTMLElement>(".qms-planner-inspector__actions button"),
+      Array.from(document.querySelectorAll<HTMLElement>(".qms-planner-inspector__actions button"))
+        .find((button) => /^reschedule$/i.test(button.textContent?.trim() || "")) || null,
       document.querySelector<HTMLElement>(".qms-planner-event.is-selected"),
     );
   }
@@ -103,6 +104,15 @@ function usePlannerDialogFocusManagement(): void {
     };
 
     const manageDialogKeyboard = (event: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isFocusable(active)
+        && !active.closest("[role='dialog']")
+      ) {
+        intendedTriggerRef.current = active;
+      }
+
       const trigger = shortcutTrigger(event);
       if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
 
@@ -119,7 +129,6 @@ function usePlannerDialogFocusManagement(): void {
         return;
       }
 
-      const active = document.activeElement as HTMLElement | null;
       const first = controls[0];
       const last = controls[controls.length - 1];
       if (!active || !topDialog.contains(active)) {
