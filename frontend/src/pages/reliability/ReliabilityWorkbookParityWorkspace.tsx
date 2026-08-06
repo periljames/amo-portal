@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { listWorkbookCatalog } from "./reliabilityWorkbookParityApi";
 import { ReliabilityMappingParity, ReliabilityStatisticalAlerts } from "./ReliabilityWorkbookGovernance";
+import { ReliabilityWorkbookImports } from "./ReliabilityWorkbookImports";
 import { ReliabilityWorkbookRegisters } from "./ReliabilityWorkbookRegisters";
 import { ReliabilityWorkbookReports } from "./ReliabilityWorkbookReports";
 import type { WorkbookDatasetCode, WorkbookFieldDefinition, WorkspaceSection } from "./reliabilityWorkbookParityTypes";
@@ -11,9 +12,9 @@ import "../../styles/reliability-v2.css";
 import "./ReliabilityWorkbookParityWorkspace.css";
 
 const SECTIONS: Array<{ id: WorkspaceSection; label: string; description: string; route: string }> = [
-  { id: "registers", label: "Source registers", description: "AU, AI, PM, OOS, removals, scheduled findings, structures, recurrence and ECTM", route: "workbook-registers" },
+  { id: "registers", label: "Source registers", description: "Twelve controlled Reliability datasets with lifecycle and provenance", route: "workbook-registers" },
   { id: "alerts", label: "Statistical alerts", description: "Mean, sample standard deviation, warning and alert limits", route: "statistical-alerts" },
-  { id: "mapping", label: "Mapping & parity", description: "C208B, DHC8 and operator workbook field contracts", route: "workbook-mapping" },
+  { id: "mapping", label: "Mapping & imports", description: "Profile contracts, field parity and governed workbook intake", route: "workbook-mapping" },
   { id: "reports", label: "Report layouts", description: "Versioned programme layouts, preview and retained outputs", route: "workbook-reports" },
 ];
 
@@ -66,7 +67,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
         <div>
           <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
           <h1>Workbook parity control centre</h1>
-          <p>Replace the C208B, DHC8 and operator analysis workbooks with governed source records, statistical calculations and retained reports.</p>
+          <p>Replace repeated C208B, DHC8 and operator workbook entry with governed registers, reviewed imports, statistical calculations and retained reports.</p>
         </div>
         <div className="rel-wp__header-actions">
           <Link className="btn btn-secondary" to={basePath}>Analytics dashboard</Link>
@@ -86,7 +87,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
       {!loading && !error && <>
         {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}
         {section === "alerts" && <ReliabilityStatisticalAlerts catalog={catalog} />}
-        {section === "mapping" && <ReliabilityMappingParity catalog={catalog} />}
+        {section === "mapping" && <div className="rel-wp__stack"><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
         {section === "reports" && <ReliabilityWorkbookReports />}
       </>}
     </main>
