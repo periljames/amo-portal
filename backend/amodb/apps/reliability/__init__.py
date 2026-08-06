@@ -15,6 +15,7 @@ from . import analytics_dashboard  # noqa: E402,F401
 from . import workbook_parity  # noqa: E402,F401
 from . import workbook_parity_contract_hardening  # noqa: E402,F401
 from . import workbook_parity_defaults  # noqa: E402,F401
+from . import workbook_parity_imports  # noqa: E402,F401
 from . import workbook_parity_statistics  # noqa: E402,F401
 
 workpack_integration.register(router)
@@ -25,4 +26,5 @@ operational_sources.register(router)
 analytics_dashboard.register(router)
 workbook_parity.register(router)
 workbook_parity_defaults.register(router)
+workbook_parity_imports.register(router)
 workbook_parity_statistics.register(router)
