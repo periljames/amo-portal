@@ -47,7 +47,12 @@ jobs:
               print(f"=== {path} ===")
               ranges = [(0, min(len(lines), 55))]
               if path.name == "test_posting_integration.py":
-                  ranges.extend(((140, min(len(lines), 190)), (250, min(len(lines), 305)))
+                  ranges.extend(
+                      (
+                          (140, min(len(lines), 190)),
+                          (250, min(len(lines), 305)),
+                      )
+                  )
               for start, end in ranges:
                   print(f"--- lines {start + 1}-{end} ---")
                   for index in range(start, end):
