@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pymupdf
 
+from amodb.apps.doc_control import pdf_capability_service as capability_service
 from amodb.apps.doc_control.pdf_capability_service import inspect_pdf_capabilities_bytes
 from amodb.apps.doc_control.pdf_safe_processing_service import (
     inspect_script_disabled_pdf_bytes,
@@ -77,3 +78,21 @@ def test_script_disabled_derivative_preserves_fields_and_passes_full_inspection(
     assert inspection.has_javascript is False
     assert inspection.can_flatten is True
     assert inspection.template_fingerprint is not None
+
+
+def test_capability_inspection_reuses_the_checksum_cache(tmp_path, monkeypatch) -> None:
+    source = _acroform_pdf_bytes(scripted=True)
+    monkeypatch.setattr(capability_service, "CAPABILITY_CACHE_ROOT", tmp_path)
+
+    first = inspect_pdf_capabilities_bytes(source)
+    cached_files = list(tmp_path.glob("*.json"))
+    assert len(cached_files) == 1
+
+    def fail_if_worker_runs(*_args, **_kwargs):
+        raise AssertionError("The PDF capability subprocess must not run for a cached immutable source")
+
+    monkeypatch.setattr(capability_service.subprocess, "run", fail_if_worker_runs)
+    second = inspect_pdf_capabilities_bytes(source)
+
+    assert second == first
+    assert second.source_sha256 == first.source_sha256
