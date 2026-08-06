@@ -25,50 +25,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: reliability-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  normalize-build-blocker:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-      - name: Commit exact TanStack scroll-behavior source correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('frontend/src/pages/manuals/PdfReaderCoreV3.tsx')
-          source = path.read_text(encoding='utf-8')
-          old = 'const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {'
-          new = 'const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {'
-          if old not in source:
-              if new in source:
-                  print('PDF reader scroll behavior is already normalized.')
-                  raise SystemExit(0)
-              raise SystemExit('Expected PdfReaderCoreV3 jump signature was not found; refusing a broad edit.')
-          path.write_text(source.replace(old, new, 1), encoding='utf-8')
-          PY
-          if git diff --quiet -- frontend/src/pages/manuals/PdfReaderCoreV3.tsx; then
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add frontend/src/pages/manuals/PdfReaderCoreV3.tsx
-          git commit -m 'Fix PDF virtualizer scroll behavior type'
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
   reliability-backend:
-    needs: normalize-build-blocker
-    if: always() && (needs.normalize-build-blocker.result == 'success' || needs.normalize-build-blocker.result == 'skipped')
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -177,8 +141,6 @@ jobs:
         run: pytest -q backend/amodb/apps/reliability/tests
 
   reliability-frontend:
-    needs: normalize-build-blocker
-    if: always() && (needs.normalize-build-blocker.result == 'success' || needs.normalize-build-blocker.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
