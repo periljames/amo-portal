@@ -47,7 +47,8 @@ describe("Reliability workbook parity model", () => {
   it("keeps every workbook dataset and statistical alerts in report layouts", () => {
     const sections = activeReportSections(defaultReportSections());
     const datasets = sections.flatMap((section) => section.dataset_code ? [section.dataset_code] : []);
-    expect(new Set(datasets).size).toBe(9);
+    expect(new Set(datasets).size).toBe(12);
+    expect(datasets).toEqual(expect.arrayContaining(["FI", "SR", "ADD"]));
     expect(sections.some((section) => section.kind === "STATISTICAL_ALERTS")).toBe(true);
     expect(moveSection(sections, 1, 1)[2].code).toBe("AU");
   });
