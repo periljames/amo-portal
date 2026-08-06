@@ -10,6 +10,7 @@ from ..accounts import models as account_models
 from . import (
     hr_people_directory,
     hr_schemas,
+    hr_selection_integrity,
     hr_service,
     permissions,
     schemas,
@@ -179,12 +180,19 @@ def hr_preview_default_day_pattern_batch(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_default_pattern_permissions(db, current_user)
+    amo_id = _amo(current_user)
     try:
-        return hr_people_directory.preview_default_day_pattern_batch(
+        _, selection_token = hr_selection_integrity.resolve_with_token(
             db,
-            amo_id=_amo(current_user),
+            amo_id=amo_id,
             selection=selection,
         )
+        result = hr_people_directory.preview_default_day_pattern_batch(
+            db,
+            amo_id=amo_id,
+            selection=selection,
+        )
+        return result.model_copy(update={"selection_token": selection_token})
     except ValueError as exc:
         raise _error(str(exc), code="HR_DEFAULT_DAY_BATCH_PREVIEW_INVALID") from exc
 
@@ -199,10 +207,24 @@ def hr_apply_default_day_pattern_batch(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_default_pattern_permissions(db, current_user)
+    amo_id = _amo(current_user)
     try:
+        selected_ids, selection_token = hr_selection_integrity.resolve_with_token(
+            db,
+            amo_id=amo_id,
+            selection=payload.selection,
+        )
+        if len(selected_ids) != payload.expected_match_count:
+            raise ValueError(
+                "The filtered population count changed after preview. Review the updated selection before applying the pattern."
+            )
+        if selection_token != payload.expected_selection_token:
+            raise ValueError(
+                "The selected employees changed after preview. Review the updated selection before applying the pattern."
+            )
         result = hr_people_directory.apply_default_day_pattern_batch(
             db,
-            amo_id=_amo(current_user),
+            amo_id=amo_id,
             actor_user_id=current_user.id,
             payload=payload,
         )
