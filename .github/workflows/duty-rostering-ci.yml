@@ -261,7 +261,7 @@ jobs:
           cat /tmp/workforce-preview.log
           exit 1
       - name: Run 10,000-person Workforce browser acceptance
-        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts --project=chromium
+        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v6
