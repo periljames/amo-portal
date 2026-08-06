@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pymupdf
 
+from amodb.apps.doc_control import pdf_capability_service
 from amodb.apps.doc_control.pdf_capability_service import inspect_pdf_capabilities_bytes
 from amodb.apps.doc_control.pdf_safe_processing_service import (
     inspect_script_disabled_pdf_bytes,
@@ -77,3 +78,28 @@ def test_script_disabled_derivative_preserves_fields_and_passes_full_inspection(
     assert inspection.has_javascript is False
     assert inspection.can_flatten is True
     assert inspection.template_fingerprint is not None
+
+
+def test_capability_inspection_reuses_checksum_cache(tmp_path, monkeypatch) -> None:
+    work_root = tmp_path / "work"
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(pdf_capability_service, "CAPABILITY_WORK_ROOT", work_root)
+    monkeypatch.setattr(pdf_capability_service, "CAPABILITY_CACHE_ROOT", cache_root)
+
+    calls = 0
+    original_run = pdf_capability_service.subprocess.run
+
+    def counted_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(pdf_capability_service.subprocess, "run", counted_run)
+    source = _acroform_pdf_bytes(scripted=True)
+
+    first = inspect_pdf_capabilities_bytes(source)
+    second = inspect_pdf_capabilities_bytes(source)
+
+    assert first == second
+    assert calls == 1
+    assert list(cache_root.glob("v3-*.json"))
