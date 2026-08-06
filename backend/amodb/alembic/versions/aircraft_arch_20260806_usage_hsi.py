@@ -26,6 +26,7 @@ USAGE_COLUMNS = (
     ("tscoa_after", sa.Float()),
     ("hours_to_mx", sa.Float()),
     ("days_to_mx", sa.Integer()),
+    ("note", sa.Text()),
 )
 
 
