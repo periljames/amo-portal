@@ -6,7 +6,7 @@ from pathlib import Path
 
 from amodb.database import WriteSessionLocal
 
-from .pdf_capability_service import CAPABILITY_CACHE_ROOT, PdfEngineError, _safe_cache_root, warm_pdf_revision_capabilities
+from .pdf_capability_service import CAPABILITY_CACHE_ROOT, warm_pdf_revision_capabilities
 
 
 _LOCK_STALE_SECONDS = 30 * 60
@@ -14,8 +14,11 @@ _LOCK_STALE_SECONDS = 30 * 60
 
 def _acquire_prewarm_lock() -> Path | None:
     try:
-        root = _safe_cache_root()
-    except PdfEngineError:
+        CAPABILITY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+        root = CAPABILITY_CACHE_ROOT.resolve()
+    except OSError:
+        return None
+    if not root.is_dir():
         return None
 
     lock_path = (root / "prewarm.lock").resolve()
