@@ -1,5 +1,19 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Link2, List, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  Link2,
+  List,
+  Maximize2,
+  Minimize2,
+  Share2,
+  X,
+} from "lucide-react";
 
 import {
   getPublicationReferences,
@@ -12,6 +26,7 @@ import PdfReaderCore, {
   type PdfReaderOutlineItem,
 } from "./PdfReaderCore";
 import "./publicationReaderZoom.css";
+import "./publicationReaderFocusMode.css";
 
 export type PdfOutlineItem = PdfReaderOutlineItem;
 
@@ -36,6 +51,10 @@ type SourceIdentity = {
   manualId: string;
   revisionId: string;
 };
+
+const READER_MODE_CLASS = "publication-reader-page--reader-mode";
+const READER_MODE_BODY_CLASS = "publication-reader-mode-active";
+const NAVIGATION_COMMAND_TTL_MS = 15_000;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -94,7 +113,9 @@ function searchResultPage(button: Element): number | null {
  *
  * PublicationsReaderPage remains the sole owner of active navigation rows.
  * This component translates reader outline data and explicit search/reference
- * actions into that parent's state and the reader's navigation request channel.
+ * actions into one-shot reader navigation commands. Once the reader begins to
+ * move, the command is released so resize, fit and virtualizer remeasurement
+ * cannot replay an old destination and snap the user back.
  */
 export default function PublicationPdfLayoutViewer({
   fileUrl,
@@ -112,6 +133,8 @@ export default function PublicationPdfLayoutViewer({
   onOutlineReady,
 }: PublicationPdfLayoutViewerProps) {
   const identity = useMemo(() => sourceIdentity(fileUrl), [fileUrl]);
+  const readerRootRef = useRef<HTMLDivElement | null>(null);
+  const navigationClearTimerRef = useRef<number | null>(null);
   const [automaticReferences, setAutomaticReferences] = useState<DocumentationReference[]>([]);
   const [indexState, setIndexState] = useState<DocumentationIndexState | null>(null);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
@@ -121,11 +144,47 @@ export default function PublicationPdfLayoutViewer({
   const [referenceListOpen, setReferenceListOpen] = useState(false);
   const [readerNavigationRequest, setReaderNavigationRequest] =
     useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+  const [readerMode, setReaderMode] = useState(false);
+  const [pageLinkCopied, setPageLinkCopied] = useState(false);
+
+  const clearReaderNavigationCommand = useCallback(() => {
+    if (navigationClearTimerRef.current !== null) {
+      window.clearTimeout(navigationClearTimerRef.current);
+      navigationClearTimerRef.current = null;
+    }
+    setReaderNavigationRequest(null);
+  }, []);
+
+  const dispatchReaderNavigation = useCallback((request: PdfReaderNavigationRequest) => {
+    if (navigationClearTimerRef.current !== null) {
+      window.clearTimeout(navigationClearTimerRef.current);
+    }
+    setReaderNavigationRequest(request);
+    navigationClearTimerRef.current = window.setTimeout(() => {
+      navigationClearTimerRef.current = null;
+      setReaderNavigationRequest((current) => (
+        current?.token === request.token ? null : current
+      ));
+    }, NAVIGATION_COMMAND_TTL_MS);
+  }, []);
 
   useEffect(() => {
     if (!navigationRequest) return;
-    setReaderNavigationRequest(navigationRequest);
-  }, [navigationRequest?.page, navigationRequest?.token]);
+    dispatchReaderNavigation(navigationRequest);
+  }, [
+    dispatchReaderNavigation,
+    navigationRequest?.page,
+    navigationRequest?.token,
+  ]);
+
+  useEffect(() => {
+    const root = readerRootRef.current;
+    if (!root) return;
+
+    const releaseConsumedCommand = () => clearReaderNavigationCommand();
+    root.addEventListener("scroll", releaseConsumedCommand, true);
+    return () => root.removeEventListener("scroll", releaseConsumedCommand, true);
+  }, [clearReaderNavigationCommand]);
 
   useEffect(() => {
     const page = document.querySelector<HTMLElement>(".publication-reader-page");
@@ -141,12 +200,77 @@ export default function PublicationPdfLayoutViewer({
 
       event.preventDefault();
       event.stopPropagation();
-      setReaderNavigationRequest({ page: destination, token: Date.now() });
+      dispatchReaderNavigation({ page: destination, token: Date.now() });
     };
 
     page.addEventListener("click", routeIndexedSearchToPdf, true);
     return () => page.removeEventListener("click", routeIndexedSearchToPdf, true);
-  }, []);
+  }, [dispatchReaderNavigation]);
+
+  const readerPageElement = useCallback(() => (
+    readerRootRef.current?.closest<HTMLElement>(".publication-reader-page") || null
+  ), []);
+
+  const leaveReaderMode = useCallback(() => {
+    const page = readerPageElement();
+    page?.classList.remove(READER_MODE_CLASS);
+    document.body.classList.remove(READER_MODE_BODY_CLASS);
+    setReaderMode(false);
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [readerPageElement]);
+
+  const enterReaderMode = useCallback(() => {
+    const page = readerPageElement();
+    if (!page) return;
+    page.classList.add(READER_MODE_CLASS);
+    document.body.classList.add(READER_MODE_BODY_CLASS);
+    setReaderMode(true);
+    if (page.requestFullscreen && !document.fullscreenElement) {
+      void page.requestFullscreen().catch(() => undefined);
+    }
+  }, [readerPageElement]);
+
+  useEffect(() => {
+    const synchronizeFullscreenState = () => {
+      const page = readerPageElement();
+      if (!page) return;
+      if (document.fullscreenElement === page) {
+        page.classList.add(READER_MODE_CLASS);
+        document.body.classList.add(READER_MODE_BODY_CLASS);
+        setReaderMode(true);
+        return;
+      }
+      if (!document.fullscreenElement && page.classList.contains(READER_MODE_CLASS)) {
+        page.classList.remove(READER_MODE_CLASS);
+        document.body.classList.remove(READER_MODE_BODY_CLASS);
+        setReaderMode(false);
+      }
+    };
+
+    const exitFallbackOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const page = readerPageElement();
+      if (!page?.classList.contains(READER_MODE_CLASS)) return;
+      page.classList.remove(READER_MODE_CLASS);
+      document.body.classList.remove(READER_MODE_BODY_CLASS);
+      setReaderMode(false);
+    };
+
+    document.addEventListener("fullscreenchange", synchronizeFullscreenState);
+    document.addEventListener("keydown", exitFallbackOnEscape);
+    return () => {
+      document.removeEventListener("fullscreenchange", synchronizeFullscreenState);
+      document.removeEventListener("keydown", exitFallbackOnEscape);
+      const page = readerPageElement();
+      page?.classList.remove(READER_MODE_CLASS);
+      document.body.classList.remove(READER_MODE_BODY_CLASS);
+      if (navigationClearTimerRef.current !== null) {
+        window.clearTimeout(navigationClearTimerRef.current);
+      }
+    };
+  }, [readerPageElement]);
 
   useEffect(() => {
     if (!identity || references.length) return;
@@ -205,6 +329,14 @@ export default function PublicationPdfLayoutViewer({
     onReferenceClick?.(reference);
   };
 
+  const copyControlledPageLink = async () => {
+    const url = new URL(window.location.href);
+    url.hash = `pdf-page-${currentPage}`;
+    await navigator.clipboard.writeText(url.toString());
+    setPageLinkCopied(true);
+    window.setTimeout(() => setPageLinkCopied(false), 1800);
+  };
+
   if (!identity) {
     return (
       <div className="publication-native-pdf__error" role="alert">
@@ -217,8 +349,41 @@ export default function PublicationPdfLayoutViewer({
     `${identity.tenant}:${identity.manualId}:${identity.revisionId}`;
 
   return (
-    <div className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}>
+    <div
+      ref={readerRootRef}
+      className={`publication-linked-layout ${selectedReference ? "has-selection" : ""}`}
+      onPointerDownCapture={(event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest(".pdfv3-zoom")) {
+          clearReaderNavigationCommand();
+        }
+      }}
+    >
       <div className="publication-native-pdf">
+        <div className="publication-reader-utility-dock" aria-label="Reader utilities">
+          <button
+            type="button"
+            onClick={() => void copyControlledPageLink()}
+            title="Copy a permission-controlled link to this revision and page"
+          >
+            <Share2 size={15} />
+            <span>{pageLinkCopied ? "Link copied" : "Copy page link"}</span>
+          </button>
+          <button
+            type="button"
+            className="publication-reader-mode-toggle"
+            aria-pressed={readerMode}
+            onClick={() => {
+              if (readerMode) leaveReaderMode();
+              else enterReaderMode();
+            }}
+          >
+            {readerMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            <span>{readerMode ? "Exit reader mode" : "Reader mode"}</span>
+            {readerMode ? <kbd>Esc</kbd> : null}
+          </button>
+        </div>
+
         {indexing(indexState) ? (
           <div className="pdf-engine-notice">Indexing linked documents…</div>
         ) : null}
@@ -281,6 +446,9 @@ export default function PublicationPdfLayoutViewer({
           initialZoom={initialZoom}
           onPageChange={(pageNumber) => {
             setCurrentPage(pageNumber);
+            setReaderNavigationRequest((current) => (
+              current?.page === pageNumber ? null : current
+            ));
             onPageChange?.(pageNumber);
           }}
           onZoomChange={onZoomChange}
