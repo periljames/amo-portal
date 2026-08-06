@@ -1,5 +1,15 @@
-import { apiJson, jsonBody, queryString } from "./typedApi";
-import type { HrDashboard, HrDefaultDayBootstrap, HrOvertimeRequest, HrPeoplePage } from "../types/workforceHr";
+import { apiBlob, apiJson, downloadBlob, jsonBody, queryString } from "./typedApi";
+import type {
+  HrDashboard,
+  HrDefaultDayBatchPreview,
+  HrDefaultDayBatchResult,
+  HrDefaultDayBootstrap,
+  HrOvertimeRequest,
+  HrPeopleFacets,
+  HrPeopleFilters,
+  HrPeoplePage,
+  HrPeopleSelection,
+} from "../types/workforceHr";
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
 export type WorkforceHrPatternAssignmentCreate = {
@@ -10,20 +20,52 @@ export type WorkforceHrPatternAssignmentCreate = {
   cycle_anchor_date: string;
 };
 
-export function getWorkforceHrDashboard(peopleLimit = 200): Promise<HrDashboard> {
+export function getWorkforceHrDashboard(peopleLimit = 50): Promise<HrDashboard> {
   return apiJson(`/workforce/hr/dashboard${queryString({ people_limit: peopleLimit })}`, {
     offline: { cacheTtlMs: 60_000 },
   });
 }
 
-export function listWorkforceHrPeople(params: {
-    page?: number;
-    page_size?: number;
-    search?: string;
+export function listWorkforceHrPeople(params: HrPeopleFilters & {
+  page?: number;
+  page_size?: number;
 } = {}): Promise<HrPeoplePage> {
-    return apiJson(`/workforce/hr/people${queryString(params)}`, {
-        offline: { cacheTtlMs: 60_000 },
-    });
+  return apiJson(`/workforce/hr/people${queryString(params)}`, {
+    offline: { cacheTtlMs: 60_000 },
+  });
+}
+
+export function getWorkforceHrPeopleFacets(): Promise<HrPeopleFacets> {
+  return apiJson("/workforce/hr/people/facets", {
+    offline: { cacheTtlMs: 5 * 60_000 },
+  });
+}
+
+export function previewWorkforceHrDefaultDayBatch(
+  selection: HrPeopleSelection,
+): Promise<HrDefaultDayBatchPreview> {
+  return apiJson("/workforce/hr/people/default-day-pattern/preview", {
+    method: "POST",
+    body: jsonBody(selection),
+  });
+}
+
+export function applyWorkforceHrDefaultDayBatch(
+  selection: HrPeopleSelection,
+  expectedMatchCount: number,
+): Promise<HrDefaultDayBatchResult> {
+  return apiJson("/workforce/hr/people/default-day-pattern/apply", {
+    method: "POST",
+    body: jsonBody({ selection, expected_match_count: expectedMatchCount }),
+  });
+}
+
+export async function exportWorkforceHrPeople(selection: HrPeopleSelection): Promise<void> {
+  const result = await apiBlob("/workforce/hr/people/export", {
+    method: "POST",
+    body: jsonBody(selection),
+  });
+  downloadBlob(result.blob, result.filename || "workforce-people.csv");
 }
 
 export function bootstrapWorkforceHrDefaultDayPattern(): Promise<HrDefaultDayBootstrap> {
@@ -44,7 +86,6 @@ export function assignWorkforceHrPattern(
     body: jsonBody(payload),
   });
 }
-
 
 export type WorkforceHrOvertimeCreate = {
   user_id?: string | null;
