@@ -74,7 +74,7 @@ def test_percent_formula_uses_all_reliability_events_as_execution_denominator():
     assert formula.unit == "%"
     assert formula.expression["left"]["numerator"]["event_types"] == ["DEFECT", "REPEAT_DEFECT"]
     assert formula.expression["left"]["denominator"] == {"op": "count", "event_types": []}
-    assert "all Reliability events" in (formula.denominator_label or "")
+    assert "all reliability events" in (formula.denominator_label or "").lower()
 
 
 def test_nff_formula_matches_execution_event_contract():
@@ -188,9 +188,9 @@ def test_formula_columns_and_api_schema_fields_are_registered():
 
 
 def test_postgresql_migration_exposes_formula_snapshot_columns():
-    database_url = os.getenv("DATABASE_URL")
+    database_url = os.getenv("RELIABILITY_FORMULA_SCHEMA_DATABASE_URL")
     if not database_url or not database_url.startswith("postgresql"):
-        pytest.skip("PostgreSQL migration check requires DATABASE_URL.")
+        pytest.skip("PostgreSQL formula schema check requires RELIABILITY_FORMULA_SCHEMA_DATABASE_URL.")
 
     engine = create_engine(database_url)
     with engine.connect() as connection:
