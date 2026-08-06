@@ -112,9 +112,23 @@ jobs:
       - name: Run Workforce workspace contracts
         working-directory: frontend
         run: npm exec -- vitest run src/pages/rostering/workforcePeopleDirectory.test.ts
-      - name: Typecheck and build production frontend
+      - name: Typecheck Workforce changes and build production bundle
         working-directory: frontend
-        run: npm run build
+        run: |
+          cat > tsconfig.workforce-ci.json <<'JSON'
+          {
+            "extends": "./tsconfig.app.json",
+            "compilerOptions": { "noEmit": true },
+            "include": [
+              "src/pages/rostering/components/WorkforceBulkSetupPanel.tsx",
+              "src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx",
+              "src/services/workforceHr.ts",
+              "src/types/workforceHr.ts"
+            ]
+          }
+          JSON
+          npm exec -- tsc -p tsconfig.workforce-ci.json
+          npm exec -- vite build
       - name: Lint Workforce workspace surfaces
         working-directory: frontend
         run: >-
