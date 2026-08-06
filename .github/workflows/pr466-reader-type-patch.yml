@@ -1,0 +1,39 @@
+name: PR 466 reader type patch
+
+on:
+  push:
+    branches:
+      - fix/workforce-default-day-pattern-postgres-lock
+    paths:
+      - .github/workflows/pr466-reader-type-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/workforce-default-day-pattern-postgres-lock
+          fetch-depth: 0
+      - name: Narrow virtualizer scroll behavior and remove this workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+          source = path.read_text(encoding="utf-8")
+          old = 'const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {'
+          new = 'const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {'
+          if source.count(old) != 1:
+              raise SystemExit(f"Expected exactly one reader callback signature, found {source.count(old)}")
+          path.write_text(source.replace(old, new), encoding="utf-8")
+          PY
+          git rm .github/workflows/pr466-reader-type-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/manuals/PdfReaderCoreV3.tsx
+          git commit -m "fix(manuals): narrow PDF virtualizer scroll behavior"
+          git push origin HEAD:fix/workforce-default-day-pattern-postgres-lock
