@@ -627,7 +627,7 @@ export default function PdfReaderCoreV3({
   }, []);
 
   useEffect(() => {
-    virtualizer.resize();
+    virtualizer.measure();
   }, [pageRatios, pageWidth, virtualizer]);
 
   useEffect(() => {
