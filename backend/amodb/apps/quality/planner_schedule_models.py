@@ -73,12 +73,14 @@ class QMSPlannerScheduleMetadata(Base):
         index=True,
     )
     occurrence_date = Column(Date, nullable=True, index=True)
+    end_date = Column(Date, nullable=True, index=True)
 
     start_time = Column(Time(timezone=False), nullable=True)
     end_time = Column(Time(timezone=False), nullable=True)
     timezone_name = Column(String(64), nullable=False, default="Africa/Nairobi")
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    responsible_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     attendee_user_ids_json = Column(Text, nullable=False, default="[]")
     external_attendees_json = Column(Text, nullable=False, default="[]")
     notify_attendees = Column(Boolean, nullable=False, default=True)
@@ -132,6 +134,7 @@ class QMSPlannerScheduleMetadata(Base):
             "lifecycle_status IN ('ACTIVE','SUSPENDED','CANCELLED','COMPLETED')",
             name="ck_qms_planner_metadata_lifecycle",
         ),
+        CheckConstraint("end_date IS NULL OR occurrence_date IS NULL OR end_date >= occurrence_date", name="ck_qms_planner_metadata_date_order"),
         CheckConstraint("version >= 1", name="ck_qms_planner_metadata_version"),
         Index("ix_qms_planner_metadata_amo_occurrence", "amo_id", "occurrence_date"),
         Index("ix_qms_planner_metadata_amo_lifecycle", "amo_id", "lifecycle_status"),
