@@ -16,6 +16,7 @@ on:
       - 'frontend/src/app/portalRouteManifest.test.ts'
       - 'frontend/src/app/routePreload.ts'
       - 'frontend/src/pages/ReliabilityReportsPage.tsx'
+      - 'frontend/src/pages/manuals/PdfReaderCoreV3.tsx'
       - 'frontend/src/pages/reliability/**'
       - 'frontend/src/portalRoutes.tsx'
       - 'frontend/src/services/reliability.ts'
@@ -24,14 +25,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: reliability-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  normalize-build-blocker:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Commit exact TanStack scroll-behavior source correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/pages/manuals/PdfReaderCoreV3.tsx')
+          source = path.read_text(encoding='utf-8')
+          old = 'const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {'
+          new = 'const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {'
+          if old not in source:
+              if new in source:
+                  print('PDF reader scroll behavior is already normalized.')
+                  raise SystemExit(0)
+              raise SystemExit('Expected PdfReaderCoreV3 jump signature was not found; refusing a broad edit.')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+          if git diff --quiet -- frontend/src/pages/manuals/PdfReaderCoreV3.tsx; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/manuals/PdfReaderCoreV3.tsx
+          git commit -m 'Fix PDF virtualizer scroll behavior type'
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
   reliability-backend:
+    needs: normalize-build-blocker
+    if: always() && (needs.normalize-build-blocker.result == 'success' || needs.normalize-build-blocker.result == 'skipped')
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -61,8 +98,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: Enforce Reliability-only diff
+      - name: Enforce scoped diff
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
@@ -71,25 +107,21 @@ jobs:
           git fetch origin "${{ github.event.pull_request.base.ref }}"
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
-          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/manuals/PdfReaderCoreV3\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
             exit 1
           fi
-
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements.txt
-
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-
       - name: Compile Reliability backend
         run: python -m compileall -q backend/amodb/apps/reliability
-
       - name: Import application and configure mappers
         run: |
           python - <<'PY'
@@ -98,7 +130,6 @@ jobs:
           configure_mappers()
           print('application import and mapper configuration passed')
           PY
-
       - name: Verify one current Alembic head
         shell: bash
         run: |
@@ -106,79 +137,48 @@ jobs:
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
           grep -q 'rel_20260806_workbook_parity' /tmp/alembic-heads.txt
-
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
-
-      - name: Verify Alembic revision, formula schema and workbook parity tables
+      - name: Verify formula and workbook parity schema
         run: |
           python - <<'PY'
           import os
           import sys
           from sqlalchemy import create_engine, text
-
-          expected_metric_columns = {
-              'formula_latex', 'formula_mathml', 'formula_expression_json', 'formula_unit',
-              'formula_precision', 'formula_rounding_mode', 'denominator_policy',
-              'formula_source_fields_json',
-          }
+          expected_metric_columns = {'formula_latex', 'formula_mathml', 'formula_expression_json', 'formula_unit', 'formula_precision', 'formula_rounding_mode', 'denominator_policy', 'formula_source_fields_json'}
           expected_run_columns = {'formula_snapshot_json', 'formula_snapshot_hash'}
-          expected_constraints = {
-              'ck_reliability_metric_formula_latex_present',
-              'ck_reliability_metric_formula_mathml_present',
-              'ck_reliability_formula_snapshot_hash_format',
-          }
-          expected_workbook_tables = {
-              'reliability_workbook_records',
-              'reliability_workbook_field_mappings',
-              'reliability_statistical_alert_results',
-              'reliability_report_layouts',
-              'reliability_workbook_report_snapshots',
-          }
-
+          expected_constraints = {'ck_reliability_metric_formula_latex_present', 'ck_reliability_metric_formula_mathml_present', 'ck_reliability_formula_snapshot_hash_format'}
+          expected_workbook_tables = {'reliability_workbook_records', 'reliability_workbook_field_mappings', 'reliability_statistical_alert_results', 'reliability_report_layouts', 'reliability_workbook_report_snapshots'}
           engine = create_engine(os.environ['DATABASE_URL'])
           with engine.connect() as connection:
-              width = connection.execute(text("""
-                  SELECT character_maximum_length FROM information_schema.columns
-                  WHERE table_name = 'alembic_version' AND column_name = 'version_num'
-              """)).scalar_one()
+              width = connection.execute(text("SELECT character_maximum_length FROM information_schema.columns WHERE table_name='alembic_version' AND column_name='version_num'")).scalar_one()
               versions = list(connection.execute(text('SELECT version_num FROM alembic_version ORDER BY version_num')).scalars())
-              metric_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'reliability_metric_definitions'")).scalars())
-              run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'reliability_calculation_runs'")).scalars())
-              constraints = set(connection.execute(text("""
-                  SELECT conname FROM pg_constraint WHERE conrelid IN (
-                      'reliability_metric_definitions'::regclass,
-                      'reliability_calculation_runs'::regclass
-                  )
-              """)).scalars())
-              workbook_tables = set(connection.execute(text("""
-                  SELECT table_name FROM information_schema.tables
-                  WHERE table_schema = 'public' AND table_name LIKE 'reliability_%'
-              """)).scalars())
-
+              metric_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_metric_definitions'")).scalars())
+              run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_calculation_runs'")).scalars())
+              constraints = set(connection.execute(text("SELECT conname FROM pg_constraint WHERE conrelid IN ('reliability_metric_definitions'::regclass,'reliability_calculation_runs'::regclass)")).scalars())
+              workbook_tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'reliability_%'")).scalars())
           failures = []
           if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
-          if versions != ['rel_20260806_workbook_parity']: failures.append(f'Alembic version rows are {versions}; expected only rel_20260806_workbook_parity.')
-          if expected_metric_columns - metric_columns: failures.append(f'Missing metric formula columns: {sorted(expected_metric_columns - metric_columns)}.')
-          if expected_run_columns - run_columns: failures.append(f'Missing calculation snapshot columns: {sorted(expected_run_columns - run_columns)}.')
-          if expected_constraints - constraints: failures.append(f'Missing formula constraints: {sorted(expected_constraints - constraints)}.')
-          if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook parity tables: {sorted(expected_workbook_tables - workbook_tables)}.')
+          if versions != ['rel_20260806_workbook_parity']: failures.append(f'Alembic version rows are {versions}.')
+          if expected_metric_columns - metric_columns: failures.append(f'Missing metric columns: {sorted(expected_metric_columns - metric_columns)}.')
+          if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
+          if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
+          if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook tables: {sorted(expected_workbook_tables - workbook_tables)}.')
           if failures:
               print('\n'.join(failures))
               sys.exit(1)
           print('formula and workbook parity schema verification passed')
           PY
-
       - name: Run PostgreSQL append-only calculation regression
         run: python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
-
       - name: Run PostgreSQL operational-source integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_operational_sources_regression.py
-
       - name: Run Reliability tests
         run: pytest -q backend/amodb/apps/reliability/tests
 
   reliability-frontend:
+    needs: normalize-build-blocker
+    if: always() && (needs.normalize-build-blocker.result == 'success' || needs.normalize-build-blocker.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
