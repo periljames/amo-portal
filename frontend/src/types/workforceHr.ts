@@ -3,6 +3,16 @@ export type HrActionItem = { id: string; category: string; severity: string; tit
 export type HrContractState = "EFFECTIVE" | "FUTURE" | "MISSING";
 export type HrPatternState = "DEFAULT" | "ASSIGNED" | "MISSING";
 export type HrReadinessState = "READY" | "NEEDS_ATTENTION" | "BLOCKED";
+export type HrLifecycleState = "ACTIVE" | "ONBOARDING" | "SUSPENDED" | "OFFBOARDING_SCHEDULED" | "INACTIVE";
+export type HrPlacementType = "PRIMARY" | "SECONDARY" | "MATRIX";
+
+export type HrPlacement = {
+  id: string; user_id: string; org_unit_id: string; org_unit_name: string; org_path_names: string[];
+  position_id?: string | null; position_title?: string | null; preferred_title?: string | null;
+  job_family_id?: string | null; job_family_name?: string | null; grade_id?: string | null; grade_name?: string | null;
+  placement_type: HrPlacementType; base_station_id?: string | null; base_station_name?: string | null;
+  supervisor_user_id?: string | null; supervisor_name?: string | null; effective_from: string; effective_to?: string | null;
+};
 
 export type HrPersonReadiness = {
   user_id: string; contract_id?: string | null; staff_code: string; full_name: string; email?: string | null;
@@ -17,6 +27,12 @@ export type HrPersonReadiness = {
   work_pattern_name?: string | null; work_pattern_effective_from?: string | null; pattern_state: HrPatternState;
   active_leave_status?: string | null; group_ids: string[]; group_names: string[];
   readiness_state: HrReadinessState; readiness_reasons: string[];
+  primary_org_unit_id?: string | null; primary_org_unit_name?: string | null; primary_org_path?: string[];
+  canonical_position_id?: string | null; canonical_position_title?: string | null; preferred_title?: string | null;
+  job_family_id?: string | null; job_family_name?: string | null; grade_id?: string | null; grade_name?: string | null;
+  supervisor_user_id?: string | null; secondary_org_units?: HrPlacement[]; matrix_org_units?: HrPlacement[];
+  secondary_base_station_id?: string | null; secondary_base_code?: string | null;
+  lifecycle_state?: HrLifecycleState; offboarding_effective_on?: string | null;
 };
 
 export type HrPeoplePage = { items: HrPersonReadiness[]; page: number; page_size: number; total: number; pages: number };
@@ -25,7 +41,15 @@ export type HrPeopleFilters = {
   contract_type?: string | null; employment_status?: string | null; base_station_id?: string | null;
   group_id?: string | null; readiness_state?: HrReadinessState | null; contract_state?: HrContractState | null;
   pattern_state?: HrPatternState | null; expires_within_days?: number | null;
-  sort_by?: "name" | "staff_code" | "department" | "role" | "position_title";
+  org_unit_id?: string | null; include_descendants?: boolean; placement_type?: HrPlacementType | null;
+  position_id?: string | null; job_family_id?: string | null; grade_id?: string | null;
+  supervisor_user_id?: string | null; secondary_base_station_id?: string | null;
+  contract_effective_from_on_or_after?: string | null; contract_effective_from_on_or_before?: string | null;
+  contract_effective_to_on_or_after?: string | null; contract_effective_to_on_or_before?: string | null;
+  lifecycle_state?: HrLifecycleState | null;
+  sort_by?: "name" | "staff_code" | "department" | "role" | "position_title" | "org_unit" | "position" |
+    "job_family" | "grade" | "supervisor" | "contract_start" | "contract_end" | "primary_base" |
+    "secondary_base" | "employment_status";
   sort_dir?: "asc" | "desc";
 };
 export type HrFilterOption = { value: string; label: string; count: number; secondary?: string | null };
@@ -33,7 +57,9 @@ export type HrPeopleFacets = {
   departments: HrFilterOption[]; roles: HrFilterOption[]; position_titles: HrFilterOption[];
   contract_types: HrFilterOption[]; employment_statuses: HrFilterOption[]; bases: HrFilterOption[];
   groups: HrFilterOption[]; readiness_states: HrFilterOption[]; contract_states: HrFilterOption[];
-  pattern_states: HrFilterOption[];
+  pattern_states: HrFilterOption[]; org_units?: HrFilterOption[]; positions?: HrFilterOption[];
+  job_families?: HrFilterOption[]; grades?: HrFilterOption[]; supervisors?: HrFilterOption[];
+  secondary_bases?: HrFilterOption[]; placement_types?: HrFilterOption[]; lifecycle_states?: HrFilterOption[];
 };
 export type HrPeopleSelection =
   | { mode: "EXPLICIT"; user_ids: string[]; exclude_user_ids?: string[]; filters?: HrPeopleFilters }
@@ -98,9 +124,13 @@ export type HrContractBatchPreview = {
   selection_token: string; matched_count: number; eligible_count: number; blocked_count: number;
   already_contracted_count: number; rows: HrContractPreviewRow[]; rows_truncated: boolean;
 };
+
+export type HrBulkOperationType = "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN" | "ASSIGN_ORGANIZATION" |
+  "ASSIGN_POSITION" | "ASSIGN_BASES" | "ASSIGN_SUPERVISOR" | "UPDATE_GROUPS" |
+  "UPDATE_CONTRACT_SETTINGS" | "SCHEDULE_OFFBOARDING";
 export type HrBulkOperationStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "COMPLETED_WITH_ERRORS" | "FAILED";
 export type HrBulkOperation = {
-  id: string; operation_type: "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN";
+  id: string; operation_type: HrBulkOperationType;
   status: HrBulkOperationStatus; idempotency_key: string; selection_token: string; total_count: number;
   processed_count: number; succeeded_count: number; skipped_count: number; failed_count: number;
   progress_percent: number; retry_of_operation_id?: string | null; last_error?: string | null;
@@ -115,3 +145,31 @@ export type HrBulkOperationItem = {
 };
 export type HrBulkOperationItemsPage = { items: HrBulkOperationItem[]; page: number; page_size: number; total: number; pages: number };
 export type HrBulkOperationsPage = { items: HrBulkOperation[]; page: number; page_size: number; total: number; pages: number };
+
+export type HrOrgUnit = { id: string; parent_id?: string | null; legacy_department_id?: string | null; code: string; name: string; unit_type: string; description?: string | null; is_active: boolean; sort_order: number; depth: number; path_ids: string[]; path_names: string[] };
+export type HrOrgUnitWrite = Omit<HrOrgUnit, "id" | "depth" | "path_ids" | "path_names">;
+export type HrJobFamily = { id: string; code: string; name: string; description?: string | null; is_active: boolean };
+export type HrJobFamilyWrite = Omit<HrJobFamily, "id">;
+export type HrGrade = { id: string; code: string; name: string; rank_order: number; description?: string | null; is_active: boolean };
+export type HrGradeWrite = Omit<HrGrade, "id">;
+export type HrPosition = { id: string; code: string; canonical_title: string; job_family_id?: string | null; job_family_name?: string | null; grade_id?: string | null; grade_name?: string | null; description?: string | null; is_supervisory: boolean; is_active: boolean };
+export type HrPositionWrite = Omit<HrPosition, "id" | "job_family_name" | "grade_name">;
+export type HrSupervisorOption = { user_id: string; staff_code: string; full_name: string; position_title?: string | null; org_unit_name?: string | null; is_supervisory_position: boolean };
+export type HrSupervisorOptionsPage = { items: HrSupervisorOption[]; page: number; page_size: number; total: number; pages: number };
+
+export type HrPersonnelMutationType = Exclude<HrBulkOperationType, "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN">;
+export type HrContractSettingsMutation = {
+  contract_type?: string | null; employment_status?: string | null; effective_to?: string | null;
+  standard_weekly_minutes?: number | null; standard_daily_minutes?: number | null; fte_percentage?: number | null;
+  cost_centre?: string | null; overtime_eligible?: boolean | null; night_shift_eligible?: boolean | null;
+  standby_eligible?: boolean | null;
+};
+export type HrPersonnelMutationPayload = {
+  selection: HrPeopleSelection; expected_match_count: number; expected_selection_token: string;
+  mutation_type: HrPersonnelMutationType; effective_on: string; org_unit_id?: string | null;
+  placement_type?: HrPlacementType | null; position_id?: string | null; preferred_title?: string | null;
+  primary_base_station_id?: string | null; secondary_base_station_id?: string | null;
+  supervisor_user_id?: string | null; group_ids?: string[]; group_mode?: "ADD" | "REMOVE" | "REPLACE" | null;
+  contract_settings?: HrContractSettingsMutation | null; offboarding_reason?: string | null;
+  revoke_access?: boolean; end_contracts?: boolean; remove_groups?: boolean;
+};
