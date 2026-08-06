@@ -142,6 +142,23 @@ jobs:
           import os
           from sqlalchemy import create_engine, text
 
+          expected_metric_columns = {
+              'formula_latex',
+              'formula_mathml',
+              'formula_expression_json',
+              'formula_unit',
+              'formula_precision',
+              'formula_rounding_mode',
+              'denominator_policy',
+              'formula_source_fields_json',
+          }
+          expected_run_columns = {'formula_snapshot_json', 'formula_snapshot_hash'}
+          expected_constraints = {
+              'ck_reliability_metric_formula_latex_present',
+              'ck_reliability_metric_formula_mathml_present',
+              'ck_reliability_formula_snapshot_hash_format',
+          }
+
           engine = create_engine(os.environ['DATABASE_URL'])
           with engine.connect() as connection:
               width = connection.execute(text("""
@@ -150,7 +167,9 @@ jobs:
                   WHERE table_name = 'alembic_version'
                     AND column_name = 'version_num'
               """)).scalar_one()
-              version = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+              versions = list(connection.execute(text(
+                  'SELECT version_num FROM alembic_version ORDER BY version_num'
+              )).scalars())
               metric_columns = set(connection.execute(text("""
                   SELECT column_name FROM information_schema.columns
                   WHERE table_name = 'reliability_metric_definitions'
@@ -166,25 +185,22 @@ jobs:
                       'reliability_calculation_runs'::regclass
                   )
               """)).scalars())
+
+          print(f'alembic_version_capacity={width}')
+          print(f'alembic_versions={versions}')
+          print(f'missing_metric_columns={sorted(expected_metric_columns - metric_columns)}')
+          print(f'missing_run_columns={sorted(expected_run_columns - run_columns)}')
+          print(f'missing_constraints={sorted(expected_constraints - constraints)}')
+          print(f'metric_formula_columns={sorted(expected_metric_columns & metric_columns)}')
+          print(f'run_formula_columns={sorted(expected_run_columns & run_columns)}')
+          print(f'formula_constraints={sorted(expected_constraints & constraints)}')
+
           assert width is not None and width >= 128, width
-          assert version == 'rel_20260806_formula_snapshots', version
-          assert {
-              'formula_latex',
-              'formula_mathml',
-              'formula_expression_json',
-              'formula_unit',
-              'formula_precision',
-              'formula_rounding_mode',
-              'denominator_policy',
-              'formula_source_fields_json',
-          }.issubset(metric_columns), metric_columns
-          assert {'formula_snapshot_json', 'formula_snapshot_hash'}.issubset(run_columns), run_columns
-          assert {
-              'ck_reliability_metric_formula_latex_present',
-              'ck_reliability_metric_formula_mathml_present',
-              'ck_reliability_formula_snapshot_hash_format',
-          }.issubset(constraints), constraints
-          print(f'alembic_version={version}; capacity={width}; formula schema verified')
+          assert versions == ['rel_20260806_formula_snapshots'], versions
+          assert expected_metric_columns.issubset(metric_columns), metric_columns
+          assert expected_run_columns.issubset(run_columns), run_columns
+          assert expected_constraints.issubset(constraints), constraints
+          print('formula schema verification passed')
           PY
 
       - name: Run PostgreSQL append-only calculation regression
