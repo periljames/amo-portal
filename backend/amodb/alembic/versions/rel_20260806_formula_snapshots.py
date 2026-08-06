@@ -103,45 +103,59 @@ def upgrade() -> None:
         FROM reliability_metric_definitions
     """)).mappings().all()
 
-    for metric in metrics:
-        snapshot = _metric_snapshot(type("MetricRow", (), dict(metric))())
-        bind.execute(
-            sa.text("""
-                UPDATE reliability_metric_definitions
-                SET formula_latex = :latex,
-                    formula_mathml = :mathml,
-                    formula_expression_json = CAST(:expression AS jsonb),
-                    formula_unit = :unit,
-                    formula_precision = :precision,
-                    formula_rounding_mode = :rounding,
-                    denominator_policy = :policy,
-                    formula_source_fields_json = CAST(:source_fields AS jsonb)
-                WHERE id = :metric_id
-            """),
-            {
-                "metric_id": metric["id"],
-                "latex": snapshot["latex"],
-                "mathml": snapshot["mathml"],
-                "expression": json.dumps(snapshot["expression"]),
-                "unit": snapshot["unit"],
-                "precision": snapshot["precision"],
-                "rounding": snapshot["rounding_mode"],
-                "policy": snapshot["denominator_policy"],
-                "source_fields": json.dumps(snapshot["source_fields"]),
-            },
-        )
-        bind.execute(
-            sa.text("""
-                UPDATE reliability_calculation_runs
-                SET formula_snapshot_json = CAST(:snapshot AS jsonb),
-                    formula_snapshot_hash = :snapshot_hash
-                WHERE metric_definition_id = :metric_id
-            """),
-            {
-                "metric_id": metric["id"],
-                "snapshot": json.dumps(snapshot),
-                "snapshot_hash": _hash(snapshot),
-            },
+    # Calculation runs are intentionally append-only. Disable only the named guard
+    # inside this transactional migration while historical rows receive the exact
+    # formula snapshot that governed their already-retained result. PostgreSQL rolls
+    # the trigger state back with the migration if any statement fails.
+    op.execute(
+        "ALTER TABLE reliability_calculation_runs "
+        "DISABLE TRIGGER trg_reliability_calculation_runs_append_only"
+    )
+    try:
+        for metric in metrics:
+            snapshot = _metric_snapshot(type("MetricRow", (), dict(metric))())
+            bind.execute(
+                sa.text("""
+                    UPDATE reliability_metric_definitions
+                    SET formula_latex = :latex,
+                        formula_mathml = :mathml,
+                        formula_expression_json = CAST(:expression AS jsonb),
+                        formula_unit = :unit,
+                        formula_precision = :precision,
+                        formula_rounding_mode = :rounding,
+                        denominator_policy = :policy,
+                        formula_source_fields_json = CAST(:source_fields AS jsonb)
+                    WHERE id = :metric_id
+                """),
+                {
+                    "metric_id": metric["id"],
+                    "latex": snapshot["latex"],
+                    "mathml": snapshot["mathml"],
+                    "expression": json.dumps(snapshot["expression"]),
+                    "unit": snapshot["unit"],
+                    "precision": snapshot["precision"],
+                    "rounding": snapshot["rounding_mode"],
+                    "policy": snapshot["denominator_policy"],
+                    "source_fields": json.dumps(snapshot["source_fields"]),
+                },
+            )
+            bind.execute(
+                sa.text("""
+                    UPDATE reliability_calculation_runs
+                    SET formula_snapshot_json = CAST(:snapshot AS jsonb),
+                        formula_snapshot_hash = :snapshot_hash
+                    WHERE metric_definition_id = :metric_id
+                """),
+                {
+                    "metric_id": metric["id"],
+                    "snapshot": json.dumps(snapshot),
+                    "snapshot_hash": _hash(snapshot),
+                },
+            )
+    finally:
+        op.execute(
+            "ALTER TABLE reliability_calculation_runs "
+            "ENABLE TRIGGER trg_reliability_calculation_runs_append_only"
         )
 
     op.alter_column("reliability_metric_definitions", "formula_latex", existing_type=sa.Text(), nullable=False)
