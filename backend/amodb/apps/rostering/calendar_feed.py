@@ -11,6 +11,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
+from ..work import models as work_models
 from . import commitments, models
 
 UTC = timezone.utc
@@ -143,9 +144,9 @@ def _published_assignments(
         selectinload(models.RosterAssignment.base_station),
         selectinload(models.RosterAssignment.task_links)
         .selectinload(models.RosterTaskAssignmentLink.task_assignment)
-        .selectinload("task")
-        .selectinload("work_order")
-        .selectinload("aircraft"),
+        .selectinload(work_models.TaskAssignment.task)
+        .selectinload(work_models.TaskCard.work_order)
+        .selectinload(work_models.WorkOrder.aircraft),
     ).filter(
         models.RosterAssignment.amo_id == amo_id,
         models.RosterAssignment.user_id == user_id,

@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO, subDays } from "date-fns";
 import {
   CalendarCheck2,
   CalendarPlus,
   CheckCircle2,
+  CircleAlert,
   Clock3,
   Copy,
   Download,
@@ -57,9 +58,12 @@ const SHORT_STALE_MS = 45_000;
 const ATTENDANCE_STALE_MS = 15_000;
 const REFERENCE_STALE_MS = 6 * 60 * 60_000;
 const CALENDAR_STALE_MS = 24 * 60 * 60_000;
+const COPY_SUCCESS_MS = 1_800;
+const COPY_FAILURE_MS = 2_600;
 
 type AttendanceMode = "CLOCKED_OUT" | "WORKING" | "ON_BREAK";
 type AttendanceAction = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END";
+type CalendarCopyState = "idle" | "copying" | "copied" | "failed";
 
 const ALLOWED_ATTENDANCE_ACTIONS: Record<AttendanceMode, AttendanceAction[]> = {
   CLOCKED_OUT: ["CLOCK_IN"],
@@ -181,12 +185,20 @@ export function MyRosterWorkspace() {
   const [leaveReason, setLeaveReason] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarSetupStarted, setCalendarSetupStarted] = useState(false);
+  const [calendarCopyState, setCalendarCopyState] = useState<CalendarCopyState>("idle");
+  const calendarCopyResetTimer = useRef<number | null>(null);
   const calendarStorageKey = calendarLinkStorageKey(userId);
   const [linkedFeedPath, setLinkedFeedPath] = useState(() => {
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem(calendarStorageKey) || "";
   });
   const leaveYear = new Date().getFullYear();
+
+  useEffect(() => () => {
+    if (calendarCopyResetTimer.current !== null) {
+      window.clearTimeout(calendarCopyResetTimer.current);
+    }
+  }, []);
 
   const rosterKey = useMemo(
     () => ["rostering", "self-service", "roster", range.from, range.to] as const,
@@ -432,12 +444,31 @@ export function MyRosterWorkspace() {
     }
   };
 
+  const scheduleCalendarCopyReset = (delay: number) => {
+    if (calendarCopyResetTimer.current !== null) {
+      window.clearTimeout(calendarCopyResetTimer.current);
+    }
+    calendarCopyResetTimer.current = window.setTimeout(() => {
+      setCalendarCopyState("idle");
+      calendarCopyResetTimer.current = null;
+    }, delay);
+  };
+
   const copyCalendarFeed = async () => {
-    if (!calendarUrls) return;
+    if (!calendarUrls || calendarCopyState === "copying") return;
+    setActionError(null);
+    setCalendarCopyState("copying");
     try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard access is unavailable in this browser context.");
+      }
       await navigator.clipboard.writeText(calendarUrls.httpsUrl);
+      setCalendarCopyState("copied");
+      scheduleCalendarCopyReset(COPY_SUCCESS_MS);
     } catch {
+      setCalendarCopyState("failed");
       setActionError("The browser could not copy the calendar address. Open the subscription link and copy it manually.");
+      scheduleCalendarCopyReset(COPY_FAILURE_MS);
     }
   };
 
@@ -546,11 +577,42 @@ export function MyRosterWorkspace() {
                 <div className="wr-calendar-popover__actions">
                   <button
                     type="button"
-                    className="wr-button wr-button--secondary"
+                    className={`wr-button wr-button--secondary wr-calendar-copy-button is-${calendarCopyState}`}
                     onClick={() => void copyCalendarFeed()}
+                    disabled={calendarCopyState === "copying"}
+                    data-feedback={calendarCopyState}
+                    aria-label={calendarCopyState === "copied"
+                      ? "Calendar URL copied"
+                      : calendarCopyState === "failed"
+                        ? "Calendar URL copy failed"
+                        : "Copy calendar URL"}
                   >
-                    <Copy size={14} /> Copy URL
+                    {calendarCopyState === "copied" ? (
+                      <CheckCircle2 size={14} aria-hidden="true" />
+                    ) : calendarCopyState === "failed" ? (
+                      <CircleAlert size={14} aria-hidden="true" />
+                    ) : (
+                      <Copy
+                        size={14}
+                        aria-hidden="true"
+                        className={calendarCopyState === "copying" ? "is-copying" : ""}
+                      />
+                    )}
+                    <span>{calendarCopyState === "copying"
+                      ? "Copying…"
+                      : calendarCopyState === "copied"
+                        ? "Copied"
+                        : calendarCopyState === "failed"
+                          ? "Copy failed"
+                          : "Copy URL"}</span>
                   </button>
+                  <span className="wr-visually-hidden" role="status" aria-live="polite">
+                    {calendarCopyState === "copied"
+                      ? "Calendar URL copied to the clipboard."
+                      : calendarCopyState === "failed"
+                        ? "Calendar URL could not be copied."
+                        : ""}
+                  </span>
                   {!calendarLinked ? (
                     <a
                       className="wr-button wr-button--primary"
