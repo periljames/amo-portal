@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from sqlalchemy import Column, Integer, String, Text, event, select
 
 from . import advanced_models as domain
+from . import analytics_formulae
 from .analytics_formulae import _custom_metric_formula, _system_formulae
 from .analytics_types import CalculationFormula
 
@@ -109,6 +110,7 @@ def apply() -> None:
     event.listen(domain.ReliabilityMetricDefinition, "before_insert", _populate_metric_formula)
     event.listen(domain.ReliabilityMetricDefinition, "before_update", _populate_metric_formula)
     event.listen(domain.ReliabilityCalculationRun, "before_insert", _populate_run_formula)
+    analytics_formulae.build_formula_catalog = build_persisted_formula_catalog
     domain._reliability_formula_hardening_applied = True
 
 
