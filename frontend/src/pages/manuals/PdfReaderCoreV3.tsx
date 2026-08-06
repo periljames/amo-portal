@@ -559,7 +559,7 @@ export default function PdfReaderCoreV3({
     });
   }, [synchronizePhysicalPage]);
 
-  const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {
+  const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {
     if (!pageCount) return;
     const page = clampPdfValue(requested, 1, pageCount);
     pendingPageRef.current = page;
