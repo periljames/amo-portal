@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from decimal import Decimal
+from html import escape
 
 from alembic import op
 import sqlalchemy as sa
@@ -29,35 +30,125 @@ def _number(value) -> str:
     return text or "0"
 
 
-def _metric_snapshot(row) -> dict:
-    event_types = [str(value) for value in list(row.numerator_event_types or [])]
-    event_label = ", ".join(event_types) if event_types else "configured events"
-    numerator_latex = "N_{" + ("+".join(event_types) if event_types else "events") + "}"
-    denominator = str(row.denominator_type or "NONE")
-    multiplier = _number(row.multiplier)
-    method = str(row.method or "RATE").upper()
+def _event_latex(event_types: list[str], fallback: str = "events") -> str:
+    if not event_types:
+        return rf"N_{{\mathrm{{{fallback}}}}}"
+    text = "+".join(event_types).replace("_", r"\_")
+    return rf"N_{{\mathrm{{{text}}}}}"
 
-    if method == "COUNT" or denominator == "NONE":
-        latex = numerator_latex
-        mathml = f'<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>N({event_label})</mi></math>'
-        expression = {"op": "count", "event_types": event_types}
+
+def _event_mathml(event_types: list[str], fallback: str = "events") -> str:
+    label = ", ".join(event_types) if event_types else fallback
+    return f"<mi>{escape(f'N({label})')}</mi>"
+
+
+def _math(body: str) -> str:
+    return f'<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow>{body}</mrow></math>'
+
+
+def _metric_snapshot(row) -> dict:
+    configured_types = [str(value) for value in list(row.numerator_event_types or [])]
+    method = str(row.method or "RATE").upper()
+    denominator = str(row.denominator_type or "NONE").upper()
+    multiplier = Decimal(str(row.multiplier if row.multiplier is not None else 1))
+    multiplier_text = _number(multiplier)
+    numerator_types = configured_types
+    source_fields = ["reliability_events.event_type"]
+
+    if method == "NFF_RATE":
+        numerator_types = ["NO_FAULT_FOUND"]
+        numerator_latex = _event_latex(numerator_types)
+        denominator_latex = _event_latex(["UNSCHEDULED_REMOVAL"])
+        latex = rf"NFF\%=\frac{{{numerator_latex}}}{{{denominator_latex}}}\times {multiplier_text}"
+        mathml = _math(
+            f"<mfrac>{_event_mathml(numerator_types)}{_event_mathml(['UNSCHEDULED_REMOVAL'])}</mfrac>"
+            f"<mo>×</mo><mn>{multiplier_text}</mn>"
+        )
+        expression = {
+            "op": "multiply",
+            "left": {
+                "op": "divide",
+                "numerator": {"op": "count", "event_types": numerator_types},
+                "denominator": {"op": "count", "event_types": ["UNSCHEDULED_REMOVAL"]},
+            },
+            "right": float(multiplier),
+        }
+        denominator_label = "Unscheduled-removal events"
+        unit = "%" if multiplier == Decimal("100") else f"ratio × {multiplier_text}"
+        contract = (
+            "Counts no-fault-found events and divides them by unscheduled-removal events "
+            "within the same governed period and scope."
+        )
+        source_fields.append("reliability_events.event_type=UNSCHEDULED_REMOVAL")
+    elif method == "PERCENT":
+        numerator_latex = _event_latex(numerator_types)
+        latex = rf"P\%=\frac{{{numerator_latex}}}{{N_{{\mathrm{{ALL\ RELIABILITY\ EVENTS}}}}}}\times {multiplier_text}"
+        mathml = _math(
+            f"<mfrac>{_event_mathml(numerator_types)}{_event_mathml([], 'all reliability events')}</mfrac>"
+            f"<mo>×</mo><mn>{multiplier_text}</mn>"
+        )
+        expression = {
+            "op": "multiply",
+            "left": {
+                "op": "divide",
+                "numerator": {"op": "count", "event_types": numerator_types},
+                "denominator": {"op": "count", "event_types": []},
+            },
+            "right": float(multiplier),
+        }
+        denominator_label = "All Reliability events in the same governed period and scope"
+        unit = "%" if multiplier == Decimal("100") else f"ratio × {multiplier_text}"
+        contract = (
+            "Divides the configured event population by all Reliability events in the same "
+            "period and scope."
+        )
+        source_fields.append("reliability_events.id")
+    elif method == "COUNT" or denominator == "NONE":
+        latex = _event_latex(numerator_types)
+        mathml = _math(_event_mathml(numerator_types))
+        expression = {"op": "count", "event_types": numerator_types}
         denominator_label = None
         unit = "count"
+        contract = "Counts the configured Reliability event types in the governed period and scope."
     elif method == "MTBUR":
+        numerator_latex = _event_latex(numerator_types)
         latex = rf"MTBUR=\frac{{{denominator}}}{{{numerator_latex}}}"
-        mathml = f'<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mfrac><mi>{denominator}</mi><mi>N({event_label})</mi></mfrac></math>'
-        expression = {"op": "divide", "numerator": denominator, "denominator": {"op": "count", "event_types": event_types}}
-        denominator_label = "Qualifying event count"
+        mathml = _math(f"<mfrac><mi>{escape(denominator)}</mi>{_event_mathml(numerator_types)}</mfrac>")
+        expression = {
+            "op": "divide",
+            "numerator": {"op": "exposure", "type": denominator},
+            "denominator": {"op": "count", "event_types": numerator_types},
+        }
+        denominator_label = "Configured qualifying event count"
         unit = f"{denominator} / event"
+        contract = f"Divides governed {denominator} exposure by the configured qualifying event count."
+        source_fields.append(f"exposure.{denominator.lower()}")
     else:
-        latex = rf"R=\frac{{{numerator_latex}}}{{{denominator}}}\times {multiplier}"
-        mathml = f'<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mfrac><mi>N({event_label})</mi><mi>{denominator}</mi></mfrac><mo>×</mo><mn>{multiplier}</mn></mrow></math>'
-        expression = {"op": "multiply", "left": {"op": "divide", "numerator": {"op": "count", "event_types": event_types}, "denominator": denominator}, "right": float(Decimal(multiplier))}
-        denominator_label = denominator
-        unit = f"per {multiplier} {denominator}"
+        numerator_latex = _event_latex(numerator_types)
+        latex = rf"R=\frac{{{numerator_latex}}}{{{denominator}}}\times {multiplier_text}"
+        mathml = _math(
+            f"<mfrac>{_event_mathml(numerator_types)}<mi>{escape(denominator)}</mi></mfrac>"
+            f"<mo>×</mo><mn>{multiplier_text}</mn>"
+        )
+        expression = {
+            "op": "multiply",
+            "left": {
+                "op": "divide",
+                "numerator": {"op": "count", "event_types": numerator_types},
+                "denominator": {"op": "exposure", "type": denominator},
+            },
+            "right": float(multiplier),
+        }
+        denominator_label = f"Governed {denominator} exposure"
+        unit = f"events / {multiplier_text} {denominator}"
+        contract = (
+            f"Divides the configured qualifying event count by governed {denominator} "
+            f"exposure and multiplies the result by {multiplier_text}."
+        )
+        source_fields.append(f"exposure.{denominator.lower()}")
 
-    minimum = str(row.minimum_exposure or 0)
-    description = str(row.description or f"Controlled {method} metric from the Reliability programme definition.")
+    description = str(row.description or "").strip()
+    methodology = f"{description} Calculation contract: {contract}" if description else contract
     return {
         "code": f"programme.{row.code}",
         "name": str(row.name),
@@ -69,12 +160,15 @@ def _metric_snapshot(row) -> dict:
         "unit": unit,
         "precision": 3,
         "rounding_mode": "HALF_UP",
-        "numerator_label": event_label,
+        "numerator_label": ", ".join(numerator_types) if numerator_types else "Configured qualifying events",
         "denominator_label": denominator_label,
-        "multiplier": None if method in {"COUNT", "MTBUR"} or denominator == "NONE" else float(Decimal(multiplier)),
-        "methodology": description,
-        "denominator_policy": f"Minimum exposure: {minimum}. Direction: {row.direction}.",
-        "source_fields": ["reliability_events.event_type", f"exposure.{denominator.lower()}"],
+        "multiplier": None if method in {"COUNT", "MTBUR"} or denominator == "NONE" else float(multiplier),
+        "methodology": methodology,
+        "denominator_policy": (
+            f"Withhold or classify as insufficient exposure below {row.minimum_exposure}. "
+            f"Configured threshold direction: {row.direction}."
+        ),
+        "source_fields": source_fields,
         "applied_to": [f"programme_metric.{row.code}"],
     }
 
@@ -103,10 +197,9 @@ def upgrade() -> None:
         FROM reliability_metric_definitions
     """)).mappings().all()
 
-    # Calculation runs are intentionally append-only. Disable only the named guard
-    # inside this transactional migration while historical rows receive the exact
-    # formula snapshot that governed their already-retained result. PostgreSQL rolls
-    # the trigger state back with the migration if any statement fails.
+    # Calculation runs are append-only. Disable only the named guard inside this
+    # transactional migration while historical rows receive a controlled formula
+    # reconstruction from their metric definition. The trigger is always re-enabled.
     op.execute(
         "ALTER TABLE reliability_calculation_runs "
         "DISABLE TRIGGER trg_reliability_calculation_runs_append_only"
@@ -139,19 +232,45 @@ def upgrade() -> None:
                     "source_fields": json.dumps(snapshot["source_fields"]),
                 },
             )
-            bind.execute(
+            runs = bind.execute(
                 sa.text("""
-                    UPDATE reliability_calculation_runs
-                    SET formula_snapshot_json = CAST(:snapshot AS jsonb),
-                        formula_snapshot_hash = :snapshot_hash
+                    SELECT id, formula_version
+                    FROM reliability_calculation_runs
                     WHERE metric_definition_id = :metric_id
                 """),
-                {
-                    "metric_id": metric["id"],
-                    "snapshot": json.dumps(snapshot),
-                    "snapshot_hash": _hash(snapshot),
-                },
-            )
+                {"metric_id": metric["id"]},
+            ).mappings().all()
+            for run in runs:
+                run_snapshot = dict(snapshot)
+                run_snapshot["version"] = str(run["formula_version"] or snapshot["version"])
+                run_snapshot["snapshot_provenance"] = {
+                    "mode": "MIGRATION_BACKFILL",
+                    "source": "reliability_metric_definitions",
+                    "migration": revision,
+                }
+                snapshot_hash = _hash(run_snapshot)
+                lineage_patch = {
+                    "formula_snapshot_hash": snapshot_hash,
+                    "formula_code": run_snapshot["code"],
+                    "formula_version": run_snapshot["version"],
+                    "formula_snapshot_provenance": "MIGRATION_BACKFILL",
+                }
+                bind.execute(
+                    sa.text("""
+                        UPDATE reliability_calculation_runs
+                        SET formula_snapshot_json = CAST(:snapshot AS jsonb),
+                            formula_snapshot_hash = :snapshot_hash,
+                            source_lineage_json = COALESCE(source_lineage_json, '{}'::jsonb)
+                                || CAST(:lineage_patch AS jsonb)
+                        WHERE id = :run_id
+                    """),
+                    {
+                        "run_id": run["id"],
+                        "snapshot": json.dumps(run_snapshot),
+                        "snapshot_hash": snapshot_hash,
+                        "lineage_patch": json.dumps(lineage_patch),
+                    },
+                )
     finally:
         op.execute(
             "ALTER TABLE reliability_calculation_runs "
