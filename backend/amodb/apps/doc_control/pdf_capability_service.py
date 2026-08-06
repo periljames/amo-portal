@@ -17,6 +17,10 @@ from .pdfium_service import MAX_PDF_BYTES, MAX_PDF_PAGES, PdfEngineError, PdfIns
 
 CAPABILITY_TIMEOUT_SECONDS = int(os.getenv("PDF_CAPABILITY_TIMEOUT_SECONDS", "25"))
 CAPABILITY_WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
+CAPABILITY_CACHE_VERSION = "v3"
+CAPABILITY_CACHE_ROOT = Path(
+    os.getenv("PDF_CAPABILITY_CACHE_DIR", "uploads/pdf-capability-cache")
+).resolve()
 _JS_KEY_PATTERN = re.compile(r"/(?:JavaScript|JS)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
 _EMPTY_JS_PATTERN = re.compile(r"/JS\s*(?:\(\s*\)|<\s*>)", re.IGNORECASE)
 _ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
@@ -55,21 +59,108 @@ def _safe_work_root() -> Path:
     CAPABILITY_WORK_ROOT.mkdir(parents=True, exist_ok=True)
     root = CAPABILITY_WORK_ROOT.resolve()
     if not root.is_dir():
-        raise PdfEngineError("PDF_WORK_DIR_INVALID", "The PDF processing work directory is unavailable", status_code=500)
+        raise PdfEngineError(
+            "PDF_WORK_DIR_INVALID",
+            "The PDF processing work directory is unavailable",
+            status_code=500,
+        )
     return root
+
+
+def _safe_cache_root() -> Path:
+    CAPABILITY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    root = CAPABILITY_CACHE_ROOT.resolve()
+    if not root.is_dir():
+        raise PdfEngineError(
+            "PDF_CAPABILITY_CACHE_INVALID",
+            "The PDF capability cache directory is unavailable",
+            status_code=500,
+        )
+    return root
+
+
+def _capability_cache_path(source_sha256: str) -> Path:
+    root = _safe_cache_root()
+    filename = f"{CAPABILITY_CACHE_VERSION}-{source_sha256.lower()}.json"
+    target = (root / filename).resolve()
+    if target.parent != root:
+        raise PdfEngineError(
+            "PDF_CAPABILITY_CACHE_INVALID",
+            "Unsafe PDF capability cache path",
+            status_code=500,
+        )
+    return target
+
+
+def _read_cached_inspection(source_sha256: str) -> PdfInspection | None:
+    path = _capability_cache_path(source_sha256)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("cached capability payload must be an object")
+        if str(payload.get("source_sha256") or "").lower() != source_sha256.lower():
+            raise ValueError("cached capability checksum does not match")
+        return PdfInspection(**payload)
+    except Exception:
+        path.unlink(missing_ok=True)
+        return None
+
+
+def _write_cached_inspection(inspection: PdfInspection) -> None:
+    path = _capability_cache_path(inspection.source_sha256)
+    payload = {
+        "engine": inspection.engine,
+        "engine_version": inspection.engine_version,
+        "source_sha256": inspection.source_sha256,
+        "page_count": inspection.page_count,
+        "form_type": inspection.form_type,
+        "has_acroform": inspection.has_acroform,
+        "has_javascript": inspection.has_javascript,
+        "is_dynamic_xfa": inspection.is_dynamic_xfa,
+        "encrypted": inspection.encrypted,
+        "can_flatten": inspection.can_flatten,
+        "unsupported_reason": inspection.unsupported_reason,
+        "template_fingerprint": inspection.template_fingerprint,
+    }
+    root = path.parent
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{inspection.source_sha256}-",
+        suffix=".tmp",
+        dir=root,
+        delete=False,
+        mode="w",
+        encoding="utf-8",
+    ) as handle:
+        temporary = Path(handle.name).resolve()
+        json.dump(payload, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _object_action_profile(source: str) -> tuple[bool, bool]:
     normalized = base._decode_pdf_name_escapes(source or "")
     executable = _EMPTY_JS_PATTERN.sub("", normalized)
     has_javascript = bool(_JS_KEY_PATTERN.search(executable))
-    subtypes = {match.group(1).casefold() for match in _ACTION_SUBTYPE_PATTERN.finditer(executable)}
+    subtypes = {
+        match.group(1).casefold()
+        for match in _ACTION_SUBTYPE_PATTERN.finditer(executable)
+    }
     unsafe_non_script = bool(subtypes & _DANGEROUS_NON_SCRIPT_SUBTYPES)
     if _ACTION_OBJECT_PATTERN.search(executable):
         unsafe_non_script = unsafe_non_script or bool(
-            not subtypes or any(subtype not in _SAFE_ACTION_SUBTYPES for subtype in subtypes)
+            not subtypes
+            or any(subtype not in _SAFE_ACTION_SUBTYPES for subtype in subtypes)
         )
-    return has_javascript or bool(subtypes & {"javascript", "js"}), unsafe_non_script
+    return (
+        has_javascript or bool(subtypes & {"javascript", "js"}),
+        unsafe_non_script,
+    )
 
 
 def _security_profile(content: bytes) -> tuple[bool, bool]:
@@ -80,7 +171,10 @@ def _security_profile(content: bytes) -> tuple[bool, bool]:
     try:
         document = pymupdf.open(stream=content, filetype="pdf")
     except Exception as exc:
-        raise PdfEngineError("PDF_INVALID", "The PDF parser could not open this document") from exc
+        raise PdfEngineError(
+            "PDF_INVALID",
+            "The PDF parser could not open this document",
+        ) from exc
 
     try:
         encrypted = bool(document.needs_pass or document.is_encrypted)
@@ -89,7 +183,10 @@ def _security_profile(content: bytes) -> tuple[bool, bool]:
 
         has_javascript = False
         sources = [document.xref_object(-1, compressed=False)]
-        sources.extend(document.xref_object(xref, compressed=False) for xref in range(1, document.xref_length()))
+        sources.extend(
+            document.xref_object(xref, compressed=False)
+            for xref in range(1, document.xref_length())
+        )
         for source in sources:
             scripted, unsafe_non_script = _object_action_profile(source or "")
             has_javascript = has_javascript or scripted
@@ -128,7 +225,10 @@ def _inspect_worker(source_path: Path) -> dict[str, Any]:
     try:
         document = pdfium.PdfDocument(source_path)
     except Exception as exc:
-        raise PdfEngineError("PDF_INVALID", "PDFium could not open this PDF") from exc
+        raise PdfEngineError(
+            "PDF_INVALID",
+            "PDFium could not open this PDF",
+        ) from exc
 
     try:
         page_count = len(document)
@@ -172,9 +272,17 @@ def _read_result(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise PdfEngineError("PDF_CAPABILITY_FAILED", "PDF capability inspection returned invalid metadata", status_code=500) from exc
+        raise PdfEngineError(
+            "PDF_CAPABILITY_FAILED",
+            "PDF capability inspection returned invalid metadata",
+            status_code=500,
+        ) from exc
     if not isinstance(payload, dict):
-        raise PdfEngineError("PDF_CAPABILITY_FAILED", "PDF capability inspection returned invalid metadata", status_code=500)
+        raise PdfEngineError(
+            "PDF_CAPABILITY_FAILED",
+            "PDF capability inspection returned invalid metadata",
+            status_code=500,
+        )
     if payload.get("error"):
         error = payload["error"] if isinstance(payload["error"], dict) else {}
         raise PdfEngineError(
@@ -187,11 +295,23 @@ def _read_result(path: Path) -> dict[str, Any]:
 
 def inspect_pdf_capabilities_bytes(content: bytes) -> PdfInspection:
     _validate_input(content)
+    source_sha256 = hashlib.sha256(content).hexdigest()
+    try:
+        cached = _read_cached_inspection(source_sha256)
+    except (OSError, PdfEngineError):
+        cached = None
+    if cached is not None:
+        return cached
+
     root = _safe_work_root()
     with tempfile.TemporaryDirectory(prefix="pdf-capability-", dir=root) as raw_dir:
         work_dir = Path(raw_dir).resolve()
         if work_dir.parent != root:
-            raise PdfEngineError("PDF_WORK_DIR_ESCAPE", "Unsafe PDF processing path", status_code=500)
+            raise PdfEngineError(
+                "PDF_WORK_DIR_ESCAPE",
+                "Unsafe PDF processing path",
+                status_code=500,
+            )
         source_path = work_dir / "input.pdf"
         result_path = work_dir / "result.json"
         source_path.write_bytes(content)
@@ -221,25 +341,65 @@ def inspect_pdf_capabilities_bytes(content: bytes) -> PdfInspection:
                 status_code=504,
             ) from exc
         if result_path.exists():
-            return PdfInspection(**_read_result(result_path))
-        detail = (completed.stderr or completed.stdout or "PDF capability worker failed").strip()[-1000:]
-        raise PdfEngineError("PDF_CAPABILITY_FAILED", detail, status_code=500)
+            inspection = PdfInspection(**_read_result(result_path))
+            if inspection.source_sha256.lower() != source_sha256.lower():
+                raise PdfEngineError(
+                    "PDF_SOURCE_CHECKSUM_MISMATCH",
+                    "The PDF capability worker returned a different source checksum",
+                    status_code=409,
+                )
+            try:
+                _write_cached_inspection(inspection)
+            except (OSError, PdfEngineError):
+                # Capability caching is an acceleration only. A valid worker
+                # result must still be returned when the cache volume is read-only.
+                pass
+            return inspection
+        detail = (
+            completed.stderr
+            or completed.stdout
+            or "PDF capability worker failed"
+        ).strip()[-1000:]
+        raise PdfEngineError(
+            "PDF_CAPABILITY_FAILED",
+            detail,
+            status_code=500,
+        )
 
 
 def _worker_main(source: str, result: str) -> int:
     result_path = Path(result).resolve()
     try:
-        result_path.write_text(json.dumps(_inspect_worker(Path(source).resolve()), sort_keys=True), encoding="utf-8")
+        result_path.write_text(
+            json.dumps(_inspect_worker(Path(source).resolve()), sort_keys=True),
+            encoding="utf-8",
+        )
         return 0
     except PdfEngineError as exc:
         result_path.write_text(
-            json.dumps({"error": {"code": exc.code, "message": exc.message, "status_code": exc.status_code}}),
+            json.dumps(
+                {
+                    "error": {
+                        "code": exc.code,
+                        "message": exc.message,
+                        "status_code": exc.status_code,
+                    }
+                }
+            ),
             encoding="utf-8",
         )
         return 2
     except Exception as exc:
         result_path.write_text(
-            json.dumps({"error": {"code": "PDF_CAPABILITY_FAILED", "message": str(exc)[:1000], "status_code": 500}}),
+            json.dumps(
+                {
+                    "error": {
+                        "code": "PDF_CAPABILITY_FAILED",
+                        "message": str(exc)[:1000],
+                        "status_code": 500,
+                    }
+                }
+            ),
             encoding="utf-8",
         )
         return 3
