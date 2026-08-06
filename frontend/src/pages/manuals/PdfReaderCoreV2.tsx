@@ -1,121 +1,57 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  FilePenLine,
-  LoaderCircle,
-  Minus,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist";
-import * as pdfjsViewer from "pdfjs-dist/web/pdf_viewer.mjs";
-
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FC, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, FilePenLine, LoaderCircle, Minus, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
+import { Document, Page, pdfjs } from "react-pdf";
 import type { DocumentationRecord } from "../../services/documentation";
+import { flattenPdfWorkingCopy, getPdfReaderCapabilities, submitPdfWorkingCopy, type PdfReaderCapabilities } from "../../services/pdfReader";
+import { downloadBlob, fetchPublicationBlob, publicationPdfSource } from "../../services/publications";
+import { PDF_DOCUMENT_OPTIONS, getPdfReaderPerformanceProfile, pdfDevicePixelRatio } from "./pdfReaderConfig";
 import {
-  flattenPdfWorkingCopy,
-  submitPdfWorkingCopy,
-  type PdfReaderCapabilities,
-} from "../../services/pdfReader";
-import {
-  downloadBlob,
-  fetchPublicationBlob,
-  publicationPdfSource,
-} from "../../services/publications";
-import {
+  clampPdfValue,
   copyPdfBytes,
+  highlightPdfText,
+  isPdfDraftLifecycleCurrent,
+  isPdfWorkingCopyGenerationCurrent,
   outputPdfFilename,
+  resolvePdfReaderScrollRoot,
   safePdfFilename,
+  searchPdfDocument,
+  selectPdfViewportPage,
+  type PdfSearchOptions,
+  type PdfSearchResult,
+  type PdfViewportEntry,
 } from "./pdfReaderEngine";
-import { PDF_DOCUMENT_OPTIONS } from "./pdfReaderConfig";
-import {
-  deletePdfWorkingCopy,
-  readPdfWorkingCopy,
-  savePdfWorkingCopy,
-  type PdfWorkingCopyIdentity,
-  type StoredPdfWorkingCopy,
-} from "./pdfWorkingCopyStore";
-import "pdfjs-dist/web/pdf_viewer.css";
-import "./pdfJsControlledViewer.css";
+import { deletePdfWorkingCopy, readPdfWorkingCopy, savePdfWorkingCopy, type PdfWorkingCopyIdentity, type StoredPdfWorkingCopy } from "./pdfWorkingCopyStore";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import "./pdfReaderEngineV2.css";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+const PdfDocument = Document as unknown as FC<any>;
+const PdfPage = Page as unknown as FC<any>;
+const RENDER_RADIUS = 3;
+const NAVIGATION_SETTLE_MS = 3000;
+const PAGE_TOP_OFFSET = 92;
 
 type PdfDocumentHandle = {
   numPages: number;
-  annotationStorage?: {
-    onSetModified?: () => void;
-    onResetModified?: () => void;
-  };
   getOutline?: () => Promise<any[] | null>;
   getDestination?: (name: string) => Promise<any[] | null>;
   getPageIndex?: (value: unknown) => Promise<number>;
   getFieldObjects?: () => Promise<Record<string, Array<Record<string, unknown>>> | null>;
+  hasJSActions?: () => Promise<boolean>;
   saveDocument?: () => Promise<Uint8Array>;
-  destroy?: () => Promise<void>;
+  annotationStorage?: { onSetModified?: () => void; onResetModified?: () => void };
 };
 
-type PdfLoadingTask = {
-  promise: Promise<PdfDocumentHandle>;
-  destroy?: () => Promise<void>;
+type PdfItemClickTarget = {
+  dest?: string | unknown[] | null;
+  pageIndex?: number | null;
+  pageNumber?: number | null;
 };
 
-type PdfViewerHandle = {
-  pagesCount: number;
-  currentPageNumber: number;
-  currentScale: number;
-  currentScaleValue: string | number;
-  setDocument: (document: PdfDocumentHandle | null) => void;
-  scrollPageIntoView: (options: { pageNumber: number; destArray?: unknown[] }) => void;
-  cleanup?: () => void;
-};
-
-type PdfLinkServiceHandle = {
-  setViewer: (viewer: PdfViewerHandle) => void;
-  setDocument: (document: PdfDocumentHandle | null, baseUrl?: string | null) => void;
-};
-
-type PdfFindControllerHandle = {
-  setDocument?: (document: PdfDocumentHandle | null) => void;
-};
-
-type ViewerEventBus = {
-  on: (name: string, listener: (event: any) => void) => void;
-  off: (name: string, listener: (event: any) => void) => void;
-  dispatch: (name: string, payload: Record<string, unknown>) => void;
-};
-
-export type PdfReaderOutlineItem = {
-  id: string;
-  title: string;
-  page: number;
-  level: number;
-};
-
-export type PdfReaderNavigationRequest = {
-  page: number;
-  token: number;
-};
-
+export type PdfReaderOutlineItem = { id: string; title: string; page: number; level: number };
+export type PdfReaderNavigationRequest = { page: number; token: number };
 export type PdfReaderCoreProps = {
   fileUrl: string;
   originalDownloadUrl?: string;
@@ -141,7 +77,7 @@ export type PdfReaderCoreProps = {
 const READ_ONLY: PdfReaderCapabilities = {
   renderer: "PDF.js",
   processor: "PDFium",
-  processor_version: "unavailable",
+  processor_version: "checking",
   source_sha256: "",
   page_count: 0,
   has_acroform: false,
@@ -157,52 +93,62 @@ const READ_ONLY: PdfReaderCapabilities = {
   can_submit: false,
 };
 
-const clamp = (value: number, minimum: number, maximum: number) =>
-  Math.min(maximum, Math.max(minimum, value));
+const uniquePages = (values: Iterable<number>) => [...new Set(values)]
+  .filter((value) => Number.isInteger(value) && value > 0)
+  .sort((a, b) => a - b);
 
-const normalizedPages = (values: Iterable<number>) =>
-  [...new Set(values)]
-    .filter((value) => Number.isInteger(value) && value > 0)
-    .sort((left, right) => left - right);
+const nearbyPages = (page: number, count: number, radius = RENDER_RADIUS) => new Set(
+  Array.from({ length: radius * 2 + 1 }, (_, index) => page - radius + index)
+    .filter((value) => value >= 1 && value <= count),
+);
+
+function hotPageWindow(
+  current: Set<number>,
+  page: number,
+  count: number,
+  radius: number,
+  limit: number,
+): Set<number> {
+  const immediate = nearbyPages(page, count, radius);
+  const candidates = [...new Set([...immediate, ...current])]
+    .filter((value) => value >= 1 && value <= count)
+    .sort((left, right) => {
+      const immediatePriority = Number(!immediate.has(left)) - Number(!immediate.has(right));
+      if (immediatePriority) return immediatePriority;
+      const distance = Math.abs(left - page) - Math.abs(right - page);
+      return distance || left - right;
+    });
+  return new Set(candidates.slice(0, Math.max(immediate.size, limit)));
+}
+
+function samePages(left: Set<number>, right: Set<number>): boolean {
+  if (left.size !== right.size) return false;
+  for (const page of left) if (!right.has(page)) return false;
+  return true;
+}
 
 async function outlineItems(pdf: PdfDocumentHandle): Promise<PdfReaderOutlineItem[]> {
   const source = await pdf.getOutline?.().catch(() => null);
   if (!Array.isArray(source)) return [];
-
   const rows: PdfReaderOutlineItem[] = [];
   const visit = async (items: any[], level: number, prefix: string) => {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       let destination = item?.dest;
-      if (typeof destination === "string") {
-        destination = await pdf.getDestination?.(destination).catch(() => null);
-      }
+      if (typeof destination === "string") destination = await pdf.getDestination?.(destination).catch(() => null);
       const reference = Array.isArray(destination) ? destination[0] : null;
       let page = typeof reference === "number" ? reference + 1 : 0;
-      if (!page && reference && pdf.getPageIndex) {
-        page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
-      }
+      if (!page && reference && pdf.getPageIndex) page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
       const id = `${prefix}-${index}`;
-      if (page > 0) {
-        rows.push({
-          id,
-          title: String(item?.title || `Page ${page}`),
-          page,
-          level,
-        });
-      }
+      if (page > 0) rows.push({ id, title: String(item?.title || `Page ${page}`), page, level });
       if (item?.items?.length) await visit(item.items, level + 1, id);
     }
   };
-
   await visit(source, 1, "outline");
   return rows.sort((left, right) => left.page - right.page || left.level - right.level);
 }
 
-function formPagesFromFields(
-  fields: Record<string, Array<Record<string, unknown>>> | null,
-  pageCount: number,
-): number[] {
+function detectedFormPages(fields: Record<string, Array<Record<string, unknown>>> | null, pageCount: number): number[] {
   const pages = new Set<number>();
   Object.values(fields || {}).flat().forEach((field) => {
     const raw = Number(field.page ?? field.pageIndex ?? field.page_number);
@@ -210,93 +156,124 @@ function formPagesFromFields(
     const page = raw >= 0 && raw < pageCount ? raw + 1 : raw;
     if (page >= 1 && page <= pageCount) pages.add(page);
   });
-  return normalizedPages(pages);
+  return uniquePages(pages);
 }
 
-function pageNumberFromTarget(target: EventTarget | null, fallback: number): number {
-  if (!(target instanceof Element)) return fallback;
-  const page = Number(target.closest<HTMLElement>(".page[data-page-number]")?.dataset.pageNumber || 0);
-  return Number.isInteger(page) && page > 0 ? page : fallback;
-}
+export default function PdfReaderCoreV2(props: PdfReaderCoreProps) {
+  const {
+    fileUrl,
+    originalDownloadUrl,
+    title,
+    filename,
+    identity,
+    uncontrolled = false,
+    initialPage = 1,
+    initialZoom = 100,
+    navigationRequest,
+    capabilities: suppliedCapabilities,
+    compact = false,
+    renderPageOverlay,
+    onPageChange,
+    onZoomChange,
+    onAcroFormDetected,
+    onOutlineReady,
+    onDirtyChange,
+    onSubmitWorkingCopy,
+    onRecordCreated,
+  } = props;
 
-/**
- * Controlled PDF reader built on PDF.js' own PDFViewer, rendering queue,
- * link service and find controller. The browser viewer owns page lifecycle;
- * React owns only commands, verified state and controlled-record actions.
- */
-export default function PdfReaderCoreV2({
-  fileUrl,
-  originalDownloadUrl,
-  title,
-  filename,
-  identity,
-  uncontrolled = false,
-  initialPage = 1,
-  initialZoom = 100,
-  navigationRequest,
-  capabilities: suppliedCapabilities,
-  compact = false,
-  renderPageOverlay,
-  onPageChange,
-  onZoomChange,
-  onAcroFormDetected,
-  onOutlineReady,
-  onDirtyChange,
-  onSubmitWorkingCopy,
-  onRecordCreated,
-}: PdfReaderCoreProps) {
-  const capabilities = suppliedCapabilities || READ_ONLY;
-  const hostRef = useRef<HTMLElement | null>(null);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const viewerElementRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const pageRefs = useRef(new Map<number, HTMLDivElement>());
+  const visibilityEntriesRef = useRef(new Map<number, PdfViewportEntry>());
   const pdfRef = useRef<PdfDocumentHandle | null>(null);
-  const viewerRef = useRef<PdfViewerHandle | null>(null);
-  const eventBusRef = useRef<ViewerEventBus | null>(null);
-  const loadingTaskRef = useRef<PdfLoadingTask | null>(null);
-  const currentPageRef = useRef(Math.max(1, initialPage));
-  const autosaveTimerRef = useRef<number | null>(null);
-  const serializingRef = useRef<Promise<Uint8Array> | null>(null);
-  const editedPagesRef = useRef(new Set<number>());
+  const serializing = useRef<Promise<Uint8Array> | null>(null);
+  const autosaveTimer = useRef<number | null>(null);
+  const autosaveInFlightRef = useRef<Promise<void> | null>(null);
+  const autosaveQueuedRef = useRef(false);
+  const editGenerationRef = useRef(0);
+  const lifecycleGenerationRef = useRef(0);
+  const persistDraftRef = useRef<() => Promise<void>>(async () => undefined);
+  const editedRef = useRef(new Set<number>());
   const dirtyRef = useRef(false);
-  const overlayNodesRef = useRef(new Map<number, HTMLElement>());
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const currentPageRef = useRef(Math.max(1, initialPage));
+  const navigationTargetRef = useRef<number | null>(null);
+  const navigationTimerRef = useRef<number | null>(null);
+  const searchInput = useRef<HTMLInputElement | null>(null);
+  const searchController = useRef<AbortController | null>(null);
 
-  const [draftResolved, setDraftResolved] = useState(!capabilities.source_sha256);
+  const [capabilities, setCapabilities] = useState<PdfReaderCapabilities>(suppliedCapabilities || READ_ONLY);
+  const [capabilityError, setCapabilityError] = useState("");
   const [draft, setDraft] = useState<StoredPdfWorkingCopy | null>(null);
-  const [hasDraft, setHasDraft] = useState(false);
-  const [pageCount, setPageCount] = useState(Math.max(0, capabilities.page_count || 0));
+  const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [pageInput, setPageInput] = useState(String(Math.max(1, initialPage)));
-  const [zoomMode, setZoomMode] = useState<"WIDTH" | "PAGE" | "CUSTOM">(
-    initialZoom === 100 ? "WIDTH" : "CUSTOM",
-  );
-  const [zoomPercent, setZoomPercent] = useState(clamp(initialZoom, 50, 250));
+  const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
+  const [rendered, setRendered] = useState(new Set([Math.max(1, initialPage)]));
+  const [hostSize, setHostSize] = useState({ width: 960, height: 720 });
+  const [zoom, setZoom] = useState(clampPdfValue(initialZoom, 50, 250));
+  const [fitMode, setFitMode] = useState<"WIDTH" | "PAGE" | "CUSTOM">("WIDTH");
   const [fieldCount, setFieldCount] = useState(0);
   const [formPages, setFormPages] = useState<number[]>([]);
   const [editedPages, setEditedPages] = useState<number[]>([]);
   const [dirty, setDirty] = useState(false);
   const [draftState, setDraftState] = useState<"" | "SAVING" | "SAVED" | "ERROR">("");
-  const [loadState, setLoadState] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState<"" | "ORIGINAL" | "WORKING" | "FLATTEN" | "SUBMIT">("");
   const [record, setRecord] = useState<DocumentationRecord | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [wholeWord, setWholeWord] = useState(false);
-  const [findCount, setFindCount] = useState({ current: 0, total: 0 });
-  const [overlayRevision, setOverlayRevision] = useState(0);
+  const [searchOptions, setSearchOptions] = useState<PdfSearchOptions>({ caseSensitive: false, wholeWord: false });
+  const [searchResults, setSearchResults] = useState<PdfSearchResult[]>([]);
+  const [searchIndex, setSearchIndex] = useState(-1);
+  const [searchBusy, setSearchBusy] = useState(false);
 
+  const performanceProfile = useMemo(() => getPdfReaderPerformanceProfile(), []);
+  const source = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
+  const readerFile = useMemo(() => draft ? { data: new Uint8Array(draft.bytes.slice(0)) } : source, [draft, source]);
   const outputName = safePdfFilename(filename || "", `${title}.pdf`);
   const formDetected = Boolean(capabilities.has_acroform || fieldCount > 0);
   const safeForm = Boolean(
     capabilities.can_fill
-      && formDetected
-      && !capabilities.has_javascript
-      && !capabilities.is_dynamic_xfa
-      && !capabilities.encrypted,
+    && formDetected
+    && !capabilities.has_javascript
+    && !capabilities.is_dynamic_xfa
+    && !capabilities.encrypted,
   );
+  const availableWidth = Math.max(260, Math.min(1600, hostSize.width - (compact ? 16 : 36)));
+  const ratio = pageRatios[currentPage] || 1.414;
+  const pageWidth = Math.round(
+    fitMode === "PAGE"
+      ? Math.max(230, Math.min(availableWidth, (hostSize.height - 74) / ratio))
+      : fitMode === "CUSTOM"
+        ? availableWidth * (zoom / 100)
+        : availableWidth,
+  );
+
+  const setRenderWindow = useCallback((page: number, count: number) => {
+    setRendered((current) => {
+      const next = hotPageWindow(
+        current,
+        page,
+        count,
+        performanceProfile.renderRadius,
+        performanceProfile.hotPageLimit,
+      );
+      return samePages(current, next) ? current : next;
+    });
+  }, [performanceProfile.hotPageLimit, performanceProfile.renderRadius]);
+
+  const primeRenderTarget = useCallback((page: number, count: number) => {
+    const target = clampPdfValue(page, 1, Math.max(1, count));
+    setRendered((current) => {
+      const retained = [...current]
+        .filter((value) => value >= 1 && value <= count && value !== target)
+        .sort((left, right) => Math.abs(left - target) - Math.abs(right - target) || left - right)
+        .slice(0, Math.max(0, performanceProfile.hotPageLimit - 1));
+      const next = new Set([target, ...retained]);
+      return samePages(current, next) ? current : next;
+    });
+  }, [performanceProfile.hotPageLimit]);
 
   const setDirtyState = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -305,351 +282,355 @@ export default function PdfReaderCoreV2({
   }, [onDirtyChange]);
 
   const setEdited = useCallback((values: Iterable<number>) => {
-    const pages = normalizedPages(values);
-    editedPagesRef.current = new Set(pages);
+    const pages = uniquePages(values);
+    editedRef.current = new Set(pages);
     setEditedPages(pages);
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    if (!capabilities.source_sha256) {
-      setDraftResolved(true);
-      return () => { active = false; };
+  const clearAutosaveTimer = useCallback(() => {
+    if (autosaveTimer.current !== null) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
     }
+  }, []);
 
-    setDraftResolved(false);
-    readPdfWorkingCopy(identity)
-      .then((stored) => {
+  const clearNavigationTimer = useCallback(() => {
+    if (navigationTimerRef.current !== null) {
+      window.clearTimeout(navigationTimerRef.current);
+      navigationTimerRef.current = null;
+    }
+  }, []);
+
+  const invalidateDraftLifecycle = useCallback(() => {
+    lifecycleGenerationRef.current += 1;
+    autosaveQueuedRef.current = false;
+    clearAutosaveTimer();
+  }, [clearAutosaveTimer]);
+
+  useEffect(() => {
+    if (suppliedCapabilities) {
+      setCapabilities(suppliedCapabilities);
+      setCapabilityError("");
+      return;
+    }
+    let active = true;
+    getPdfReaderCapabilities(identity.tenant, identity.manualId, identity.revisionId)
+      .then((value) => {
         if (!active) return;
-        if (stored) {
-          setDraft(stored);
-          setHasDraft(true);
-          setEdited(stored.editedPages || []);
-        }
+        setCapabilities(value);
+        setCapabilityError("");
       })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setDraftResolved(true);
+      .catch((error) => {
+        if (!active) return;
+        setCapabilities(READ_ONLY);
+        setCapabilityError(error instanceof Error ? error.message : "PDF processing is unavailable");
       });
-
     return () => { active = false; };
-  }, [
-    capabilities.source_sha256,
-    identity.manualId,
-    identity.revisionId,
-    identity.tenant,
-    identity.userId,
-    setEdited,
-  ]);
-
-  const source = useMemo(() => {
-    if (draft) {
-      return {
-        data: new Uint8Array(draft.bytes.slice(0)),
-        ...PDF_DOCUMENT_OPTIONS,
-        enableXfa: false,
-        isEvalSupported: false,
-      };
-    }
-    return {
-      ...publicationPdfSource(fileUrl),
-      ...PDF_DOCUMENT_OPTIONS,
-      enableXfa: false,
-      isEvalSupported: false,
-    };
-  }, [draft, fileUrl]);
-
-  const sourceKey = draft
-    ? `draft:${draft.savedAt}:${draft.byteLength}`
-    : `source:${fileUrl}:${capabilities.source_sha256}`;
-
-  const publishConfirmedPage = useCallback((page: number) => {
-    if (!Number.isInteger(page) || page < 1) return;
-    currentPageRef.current = page;
-    setCurrentPage((value) => value === page ? value : page);
-    setPageInput(String(page));
-    onPageChange?.(page);
-
-    const viewer = viewerElementRef.current;
-    viewer?.querySelectorAll<HTMLElement>(".page.is-current").forEach((element) => {
-      element.classList.remove("is-current");
-    });
-    viewer?.querySelector<HTMLElement>(`.page[data-page-number="${page}"]`)?.classList.add("is-current");
-    hostRef.current?.setAttribute("data-current-page", String(page));
-  }, [onPageChange]);
-
-  const navigateToPage = useCallback((requested: number) => {
-    const viewer = viewerRef.current;
-    const count = pageCount || viewer?.pagesCount || 0;
-    if (!viewer || !count) return;
-    const page = clamp(Math.trunc(requested || currentPageRef.current), 1, count);
-    setActionError("");
-    viewer.scrollPageIntoView({ pageNumber: page });
-    // Do not publish here. updateviewarea is the single authority after the
-    // physical viewer has moved.
-  }, [pageCount]);
-
-  const applyScale = useCallback((mode: "WIDTH" | "PAGE" | "CUSTOM", value = zoomPercent) => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    setZoomMode(mode);
-    if (mode === "CUSTOM") setZoomPercent(clamp(value, 50, 250));
-    if (mode === "WIDTH") viewer.currentScaleValue = "page-width";
-    else if (mode === "PAGE") viewer.currentScaleValue = "page-fit";
-    else viewer.currentScaleValue = clamp(value, 50, 250) / 100;
-  }, [zoomPercent]);
-
-  useEffect(() => {
-    if (!draftResolved) return;
-    const container = viewportRef.current;
-    const viewerElement = viewerElementRef.current;
-    if (!container || !viewerElement) return;
-
-    let active = true;
-    setLoadState("LOADING");
-    setLoadError("");
-    setActionError("");
-    setPageCount(Math.max(0, capabilities.page_count || 0));
-    overlayNodesRef.current.clear();
-    viewerElement.replaceChildren();
-
-    const eventBus = new pdfjsViewer.EventBus() as unknown as ViewerEventBus;
-    const linkService = new pdfjsViewer.PDFLinkService({
-      eventBus,
-      externalLinkTarget: 2,
-      externalLinkRel: "noopener noreferrer",
-    } as any) as unknown as PdfLinkServiceHandle;
-    const findController = new pdfjsViewer.PDFFindController({
-      eventBus,
-      linkService,
-    }) as unknown as PdfFindControllerHandle;
-    const viewer = new pdfjsViewer.PDFViewer({
-      container,
-      eventBus,
-      linkService,
-      findController,
-      annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS,
-      textLayerMode: 1,
-      removePageBorders: false,
-      enableHWA: true,
-    } as any) as unknown as PdfViewerHandle;
-
-    eventBusRef.current = eventBus;
-    viewerRef.current = viewer;
-    linkService.setViewer(viewer);
-
-    const onPagesInit = () => {
-      if (!active) return;
-      setLoadState("READY");
-      const mode = zoomMode;
-      if (mode === "WIDTH") viewer.currentScaleValue = "page-width";
-      else if (mode === "PAGE") viewer.currentScaleValue = "page-fit";
-      else viewer.currentScaleValue = clamp(zoomPercent, 50, 250) / 100;
-      window.requestAnimationFrame(() => navigateToPage(clamp(initialPage, 1, viewer.pagesCount || 1)));
-    };
-
-    const onPagesLoaded = (event: any) => {
-      if (!active) return;
-      setPageCount(Math.max(1, Number(event?.pagesCount || viewer.pagesCount || pdfRef.current?.numPages || 1)));
-    };
-
-    const onUpdateViewArea = (event: any) => {
-      if (!active) return;
-      const page = Number(event?.location?.pageNumber || viewer.currentPageNumber || 0);
-      if (Number.isInteger(page) && page > 0) publishConfirmedPage(page);
-    };
-
-    const onPageRendered = (event: any) => {
-      if (!active) return;
-      const page = Number(event?.pageNumber || 0);
-      if (!Number.isInteger(page) || page < 1) return;
-      const pageElement = viewerElement.querySelector<HTMLElement>(`.page[data-page-number="${page}"]`);
-      if (!pageElement) return;
-      pageElement.classList.add("is-rendered");
-      let overlay = pageElement.querySelector<HTMLElement>(":scope > .pdfv2-page-overlay");
-      if (!overlay) {
-        overlay = document.createElement("div");
-        overlay.className = "pdfv2-page-overlay";
-        pageElement.appendChild(overlay);
-      }
-      overlayNodesRef.current.set(page, overlay);
-      setOverlayRevision((value) => value + 1);
-    };
-
-    const onScaleChanging = (event: any) => {
-      if (!active) return;
-      const next = Math.round(Number(event?.scale || viewer.currentScale || 1) * 100);
-      if (Number.isFinite(next) && next > 0) {
-        setZoomPercent(next);
-        onZoomChange?.(next);
-      }
-    };
-
-    const onFindMatchesCount = (event: any) => {
-      if (!active) return;
-      setFindCount({
-        current: Math.max(0, Number(event?.matchesCount?.current || 0)),
-        total: Math.max(0, Number(event?.matchesCount?.total || 0)),
-      });
-    };
-
-    const onFindControlState = (event: any) => {
-      if (!active) return;
-      const total = Math.max(0, Number(event?.matchesCount?.total || 0));
-      if (total === 0 && query.trim()) setFindCount({ current: 0, total: 0 });
-    };
-
-    eventBus.on("pagesinit", onPagesInit);
-    eventBus.on("pagesloaded", onPagesLoaded);
-    eventBus.on("updateviewarea", onUpdateViewArea);
-    eventBus.on("pagerendered", onPageRendered);
-    eventBus.on("scalechanging", onScaleChanging);
-    eventBus.on("updatefindmatchescount", onFindMatchesCount);
-    eventBus.on("updatefindcontrolstate", onFindControlState);
-
-    const loadingTask = pdfjsLib.getDocument(source as any) as unknown as PdfLoadingTask;
-    loadingTaskRef.current = loadingTask;
-    loadingTask.promise
-      .then(async (pdf) => {
-        if (!active) {
-          await pdf.destroy?.().catch(() => undefined);
-          return;
-        }
-        pdfRef.current = pdf;
-        setPageCount(Math.max(1, pdf.numPages));
-        viewer.setDocument(pdf);
-        linkService.setDocument(pdf, null);
-        findController.setDocument?.(pdf);
-
-        if (pdf.annotationStorage) {
-          pdf.annotationStorage.onSetModified = () => {
-            const page = currentPageRef.current;
-            setEdited(new Set([...editedPagesRef.current, page]));
-            setDirtyState(true);
-            setDraftState("");
-          };
-        }
-
-        Promise.all([
-          pdf.getFieldObjects?.().catch(() => null) || Promise.resolve(null),
-          outlineItems(pdf),
-        ])
-          .then(([fields, outline]) => {
-            if (!active) return;
-            const count = Object.values(fields || {}).flat().length;
-            setFieldCount(count);
-            setFormPages(formPagesFromFields(fields, pdf.numPages));
-            onAcroFormDetected?.(Boolean(capabilities.has_acroform || count > 0));
-            onOutlineReady?.(outline);
-          })
-          .catch(() => undefined);
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setLoadState("ERROR");
-        setLoadError(error instanceof Error ? error.message : "The PDF could not be opened.");
-      });
-
-    return () => {
-      active = false;
-      eventBus.off("pagesinit", onPagesInit);
-      eventBus.off("pagesloaded", onPagesLoaded);
-      eventBus.off("updateviewarea", onUpdateViewArea);
-      eventBus.off("pagerendered", onPageRendered);
-      eventBus.off("scalechanging", onScaleChanging);
-      eventBus.off("updatefindmatchescount", onFindMatchesCount);
-      eventBus.off("updatefindcontrolstate", onFindControlState);
-      overlayNodesRef.current.clear();
-      setOverlayRevision((value) => value + 1);
-      viewer.cleanup?.();
-      viewer.setDocument(null);
-      linkService.setDocument(null);
-      findController.setDocument?.(null);
-      void loadingTask.destroy?.().catch(() => undefined);
-      void pdfRef.current?.destroy?.().catch(() => undefined);
-      loadingTaskRef.current = null;
-      pdfRef.current = null;
-      viewerRef.current = null;
-      eventBusRef.current = null;
-      viewerElement.replaceChildren();
-    };
-    // The immutable source key is the only document-lifecycle dependency.
-    // Capability display changes and navigation never reload the PDF.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftResolved, sourceKey]);
-
-  useEffect(() => {
-    if (!navigationRequest?.page || !pageCount) return;
-    navigateToPage(navigationRequest.page);
-  }, [navigateToPage, navigationRequest?.page, navigationRequest?.token, pageCount]);
+  }, [identity.manualId, identity.revisionId, identity.tenant, suppliedCapabilities]);
 
   useEffect(() => {
     onAcroFormDetected?.(formDetected);
   }, [formDetected, onAcroFormDetected]);
 
-  const serialize = useCallback(async () => {
-    const pdf = pdfRef.current;
-    if (!pdf?.saveDocument) throw new Error("This PDF cannot be saved as a working copy.");
-    if (!serializingRef.current) {
-      serializingRef.current = pdf.saveDocument().finally(() => {
-        serializingRef.current = null;
+  useEffect(() => {
+    lifecycleGenerationRef.current += 1;
+    editGenerationRef.current = 0;
+    autosaveQueuedRef.current = false;
+    clearAutosaveTimer();
+  }, [capabilities.source_sha256, clearAutosaveTimer, identity.manualId, identity.revisionId, identity.tenant]);
+
+  useEffect(() => {
+    if (!capabilities.source_sha256) return;
+    let active = true;
+    readPdfWorkingCopy(identity)
+      .then((value) => {
+        if (!active || !value) return;
+        setDraft(value);
+        setEdited(value.editedPages || []);
+        setDirtyState(true);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [capabilities.source_sha256, identity.manualId, identity.revisionId, identity.tenant, identity.userId, setDirtyState, setEdited]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const update = () => {
+      const root = resolvePdfReaderScrollRoot(host);
+      setHostSize({
+        width: Math.max(300, host.clientWidth),
+        height: Math.max(420, (root?.clientHeight || window.innerHeight) - 94),
       });
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(host);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    onZoomChange?.(fitMode === "CUSTOM" ? zoom : Math.round(pageWidth / availableWidth * 100));
+  }, [availableWidth, fitMode, onZoomChange, pageWidth, zoom]);
+
+  const serialize = useCallback(async () => {
+    if (!pdfRef.current?.saveDocument) throw new Error("This PDF cannot be saved as a working copy");
+    if (!serializing.current) {
+      serializing.current = pdfRef.current.saveDocument().finally(() => { serializing.current = null; });
     }
-    return serializingRef.current;
+    return serializing.current;
   }, []);
 
   const persistDraft = useCallback(async () => {
     if (!capabilities.can_save_draft || !dirtyRef.current) return;
-    setDraftState("SAVING");
-    try {
-      const bytes = await serialize();
-      await savePdfWorkingCopy(
-        identity,
-        outputPdfFilename(outputName, "WORKING_COPY"),
-        copyPdfBytes(bytes),
-        capabilities.source_sha256,
-        [...editedPagesRef.current],
-      );
-      setHasDraft(true);
-      setDirtyState(false);
-      setDraftState("SAVED");
-    } catch {
-      setDraftState("ERROR");
+    if (autosaveInFlightRef.current) {
+      autosaveQueuedRef.current = true;
+      await autosaveInFlightRef.current;
+      return;
     }
-  }, [
-    capabilities.can_save_draft,
-    capabilities.source_sha256,
-    identity,
-    outputName,
-    serialize,
-    setDirtyState,
-  ]);
 
-  const markEdited = useCallback((page: number) => {
-    setEdited(new Set([...editedPagesRef.current, Math.max(1, page)]));
-    setDirtyState(true);
-    setDraftState("");
-    if (autosaveTimerRef.current !== null) window.clearTimeout(autosaveTimerRef.current);
-    if (capabilities.can_save_draft) {
-      autosaveTimerRef.current = window.setTimeout(() => {
-        autosaveTimerRef.current = null;
-        void persistDraft();
-      }, 800);
-    }
-  }, [capabilities.can_save_draft, persistDraft, setDirtyState, setEdited]);
+    const savingGeneration = editGenerationRef.current;
+    const savingLifecycle = lifecycleGenerationRef.current;
+    const savingPages = [...editedRef.current];
+    setDraftState("SAVING");
+
+    const saveTask = (async () => {
+      try {
+        const bytes = await serialize();
+        if (!isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)) return;
+
+        await savePdfWorkingCopy(
+          identity,
+          outputPdfFilename(outputName, "WORKING_COPY"),
+          copyPdfBytes(bytes),
+          capabilities.source_sha256,
+          savingPages,
+        );
+
+        if (!isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)) {
+          await deletePdfWorkingCopy(identity).catch(() => undefined);
+          return;
+        }
+
+        if (isPdfWorkingCopyGenerationCurrent(savingGeneration, editGenerationRef.current)) {
+          setDirtyState(false);
+          setDraftState("SAVED");
+        } else {
+          setDirtyState(true);
+          setDraftState("");
+          autosaveQueuedRef.current = true;
+        }
+      } catch {
+        if (isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)) setDraftState("ERROR");
+      } finally {
+        autosaveInFlightRef.current = null;
+        const shouldFollowUp = autosaveQueuedRef.current
+          && isPdfDraftLifecycleCurrent(savingLifecycle, lifecycleGenerationRef.current)
+          && dirtyRef.current;
+        autosaveQueuedRef.current = false;
+        if (shouldFollowUp) window.setTimeout(() => void persistDraftRef.current(), 0);
+      }
+    })();
+
+    autosaveInFlightRef.current = saveTask;
+    await saveTask;
+  }, [capabilities.can_save_draft, capabilities.source_sha256, identity, outputName, serialize, setDirtyState]);
 
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
+    persistDraftRef.current = persistDraft;
+  }, [persistDraft]);
+
+  const markEdited = useCallback((page: number) => {
+    editGenerationRef.current += 1;
+    setEdited(new Set([...editedRef.current, Math.max(1, page)]));
+    setDirtyState(true);
+    setDraftState("");
+    clearAutosaveTimer();
+    if (capabilities.can_save_draft) {
+      autosaveTimer.current = window.setTimeout(() => {
+        autosaveTimer.current = null;
+        void persistDraftRef.current();
+      }, 800);
+    }
+  }, [capabilities.can_save_draft, clearAutosaveTimer, setDirtyState, setEdited]);
+
+  useEffect(() => {
+    const warnOnUnload = (event: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
-    window.addEventListener("beforeunload", warn);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      if (autosaveTimerRef.current !== null) window.clearTimeout(autosaveTimerRef.current);
-    };
+    window.addEventListener("beforeunload", warnOnUnload);
+    return () => window.removeEventListener("beforeunload", warnOnUnload);
   }, []);
+
+  useEffect(() => () => {
+    invalidateDraftLifecycle();
+    clearNavigationTimer();
+    visibilityEntriesRef.current.clear();
+    searchController.current?.abort();
+  }, [clearNavigationTimer, invalidateDraftLifecycle]);
+
+  const publishPage = useCallback((page: number) => {
+    currentPageRef.current = page;
+    setCurrentPage((current) => current === page ? current : page);
+    setPageInput(String(page));
+    onPageChange?.(page);
+  }, [onPageChange]);
+
+  const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {
+    if (!pageCount) return;
+    const page = clampPdfValue(requested, 1, pageCount);
+    navigationTargetRef.current = page;
+    clearNavigationTimer();
+    primeRenderTarget(page, pageCount);
+    publishPage(page);
+    setActionError("");
+
+    const scroll = (attempt = 0) => {
+      const host = hostRef.current;
+      const element = pageRefs.current.get(page);
+      if (!host || !element) {
+        if (attempt < 36) window.setTimeout(() => scroll(attempt + 1), 60);
+        return;
+      }
+      const root = resolvePdfReaderScrollRoot(host);
+      const rootTop = root?.getBoundingClientRect().top || 0;
+      const delta = element.getBoundingClientRect().top - rootTop - PAGE_TOP_OFFSET;
+      if (Math.abs(delta) > 1) {
+        const nextBehavior: ScrollBehavior = attempt === 0 ? behavior : "auto";
+        if (root) root.scrollTo({ top: Math.max(0, root.scrollTop + delta), behavior: nextBehavior });
+        else window.scrollBy({ top: delta, behavior: nextBehavior });
+      }
+      const renderedCanvas = Boolean(element.querySelector("canvas"));
+      if (renderedCanvas) setRenderWindow(page, pageCount);
+      if (attempt < 36 && (!renderedCanvas || Math.abs(delta) > 2)) {
+        window.setTimeout(() => scroll(attempt + 1), 60);
+      }
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scroll()));
+
+    navigationTimerRef.current = window.setTimeout(() => {
+      navigationTargetRef.current = null;
+      navigationTimerRef.current = null;
+    }, NAVIGATION_SETTLE_MS);
+  }, [clearNavigationTimer, pageCount, primeRenderTarget, publishPage, setRenderWindow]);
+
+  const followPdfItem = useCallback(async (target: PdfItemClickTarget) => {
+    try {
+      let page = Number(target.pageNumber || 0);
+      if (!page && target.pageIndex !== null && target.pageIndex !== undefined) {
+        const pageIndex = Number(target.pageIndex);
+        if (Number.isInteger(pageIndex) && pageIndex >= 0) page = pageIndex + 1;
+      }
+
+      let destination = target.dest;
+      const pdf = pdfRef.current;
+      if (!page && typeof destination === "string" && pdf?.getDestination) {
+        destination = await pdf.getDestination(destination).catch(() => null);
+      }
+      if (!page && Array.isArray(destination)) {
+        const reference = destination[0];
+        if (typeof reference === "number") page = reference + 1;
+        else if (reference && pdf?.getPageIndex) {
+          page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
+        }
+      }
+      if (page > 0) {
+        jump(page, "auto");
+        return;
+      }
+      setActionError("The selected PDF link does not contain a resolvable page destination.");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "The selected PDF link could not be opened.");
+    }
+  }, [jump]);
+
+  useEffect(() => {
+    if (navigationRequest?.page && pageCount) jump(navigationRequest.page);
+  }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
+
+  useEffect(() => {
+    if (!pageCount || typeof IntersectionObserver === "undefined" || !hostRef.current) return;
+    const host = hostRef.current;
+    const root = resolvePdfReaderScrollRoot(host);
+    visibilityEntriesRef.current.clear();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const page = Number((entry.target as HTMLElement).dataset.pageNumber || 0);
+        if (!Number.isInteger(page) || page < 1) return;
+        visibilityEntriesRef.current.set(page, {
+          page,
+          top: entry.boundingClientRect.top,
+          bottom: entry.boundingClientRect.bottom,
+          isIntersecting: entry.isIntersecting,
+          intersectionRatio: entry.intersectionRatio,
+        });
+      });
+
+      const rootRect = root?.getBoundingClientRect();
+      const viewportTop = rootRect?.top || 0;
+      const viewportBottom = rootRect?.bottom || window.innerHeight;
+      const page = selectPdfViewportPage(
+        visibilityEntriesRef.current.values(),
+        viewportTop,
+        viewportBottom,
+        PAGE_TOP_OFFSET,
+      );
+      if (!page) return;
+
+      const target = navigationTargetRef.current;
+      if (target !== null && page !== target) return;
+
+      primeRenderTarget(page, pageCount);
+      if (page !== currentPageRef.current) publishPage(page);
+    }, { root, rootMargin: "0px 0px", threshold: [0.01, 0.2, 0.6] });
+
+    pageRefs.current.forEach((element) => observer.observe(element));
+    return () => {
+      observer.disconnect();
+      visibilityEntriesRef.current.clear();
+    };
+  }, [pageCount, pageWidth, primeRenderTarget, publishPage]);
+
+  const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
+    pdfRef.current = pdf;
+    visibilityEntriesRef.current.clear();
+    const count = Math.max(1, Number(pdf.numPages || 1));
+    const restored = clampPdfValue(initialPage, 1, count);
+    setPageCount(count);
+    setPageRatios({});
+    setRendered(hotPageWindow(
+      new Set(),
+      restored,
+      count,
+      performanceProfile.renderRadius,
+      performanceProfile.hotPageLimit,
+    ));
+    publishPage(restored);
+    setLoadError("");
+    if (pdf.annotationStorage) pdf.annotationStorage.onSetModified = () => markEdited(currentPageRef.current);
+
+    Promise.all([
+      pdf.getFieldObjects?.().catch(() => null) || null,
+      pdf.hasJSActions?.().catch(() => false) || false,
+      outlineItems(pdf),
+    ]).then(([fields, scripts, outline]) => {
+      const countFields = Object.values(fields || {}).flat().length;
+      const pages = detectedFormPages(fields, count);
+      setFieldCount(countFields);
+      setFormPages(pages);
+      onAcroFormDetected?.(Boolean(capabilities.has_acroform || countFields > 0));
+      onOutlineReady?.(outline);
+      if (scripts && (capabilities.has_acroform || countFields)) {
+        setActionError("Scripted PDF actions are disabled; form fields remain read-only.");
+      }
+    }).catch(() => undefined);
+  }, [capabilities.has_acroform, initialPage, markEdited, onAcroFormDetected, onOutlineReady, performanceProfile.hotPageLimit, performanceProfile.renderRadius, publishPage]);
 
   const workingFile = useCallback(async () => new File(
     [copyPdfBytes(await serialize())],
@@ -657,20 +638,17 @@ export default function PdfReaderCoreV2({
     { type: "application/pdf" },
   ), [outputName, serialize]);
 
-  const perform = useCallback(async (
-    kind: typeof busy,
-    action: () => Promise<void>,
-  ) => {
+  const perform = async (kind: typeof busy, action: () => Promise<void>) => {
     setBusy(kind);
     setActionError("");
     try {
       await action();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "The PDF action failed.");
+      setActionError(error instanceof Error ? error.message : "The PDF action failed");
     } finally {
       setBusy("");
     }
-  }, []);
+  };
 
   const downloadOriginal = () => perform("ORIGINAL", async () => {
     const result = await fetchPublicationBlob(originalDownloadUrl || fileUrl);
@@ -699,335 +677,234 @@ export default function PdfReaderCoreV2({
     const file = await workingFile();
     const created = onSubmitWorkingCopy
       ? await onSubmitWorkingCopy(file)
-      : await submitPdfWorkingCopy(
-        identity.tenant,
-        identity.manualId,
-        identity.revisionId,
-        file,
-        { completed_page_numbers: editedPages.length ? editedPages : formPages },
-      );
+      : await submitPdfWorkingCopy(identity.tenant, identity.manualId, identity.revisionId, file, {
+        completed_page_numbers: editedPages.length ? editedPages : formPages,
+      });
+    invalidateDraftLifecycle();
+    editGenerationRef.current = 0;
     setRecord(created);
     setDirtyState(false);
     setEdited([]);
-    setDraft(null);
-    setHasDraft(false);
     await deletePdfWorkingCopy(identity).catch(() => undefined);
+    setDraft(null);
     onRecordCreated?.(created);
   });
 
   const discard = async () => {
     if (dirty && !window.confirm("Discard the working copy?")) return;
+    invalidateDraftLifecycle();
+    editGenerationRef.current = 0;
     await deletePdfWorkingCopy(identity).catch(() => undefined);
     setDraft(null);
-    setHasDraft(false);
     setDirtyState(false);
     setEdited([]);
     setDraftState("");
   };
 
-  const dispatchFind = useCallback((type: "" | "again", findPrevious = false) => {
-    const eventBus = eventBusRef.current;
-    if (!eventBus) return;
-    const text = query.trim();
-    if (!text) {
-      setFindCount({ current: 0, total: 0 });
+  const revealSearchResult = useCallback((result?: PdfSearchResult, attempt = 0) => {
+    if (!result) return;
+    const page = pageRefs.current.get(result.page);
+    if (!page) return;
+    const marks = [...page.querySelectorAll<HTMLElement>(".pdf-engine-search-mark")];
+    marks.forEach((mark) => mark.classList.remove("is-active"));
+    const target = marks[Math.max(0, result.ordinal - 1)] || marks[0];
+    if (!target) {
+      if (attempt < 12) window.requestAnimationFrame(() => revealSearchResult(result, attempt + 1));
       return;
     }
-    eventBus.dispatch("find", {
-      source: hostRef.current,
-      type,
-      query: text,
-      phraseSearch: true,
-      caseSensitive,
-      entireWord: wholeWord,
-      highlightAll: true,
-      findPrevious,
-      matchDiacritics: false,
-    });
-  }, [caseSensitive, query, wholeWord]);
+    target.classList.add("is-active");
+    const host = hostRef.current;
+    const root = host ? resolvePdfReaderScrollRoot(host) : null;
+    const rootRect = root?.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (root && rootRect && (targetRect.top < rootRect.top + PAGE_TOP_OFFSET || targetRect.bottom > rootRect.bottom - 28)) {
+      root.scrollBy({ top: targetRect.top - rootRect.top - PAGE_TOP_OFFSET - 24, behavior: "smooth" });
+    }
+  }, []);
 
-  const zoomBy = (delta: number) => {
-    const next = clamp(zoomPercent + delta, 50, 250);
-    setZoomPercent(next);
-    applyScale("CUSTOM", next);
+  const runSearch = async () => {
+    if (!pdfRef.current || query.trim().length < 2) return;
+    searchController.current?.abort();
+    const controller = new AbortController();
+    searchController.current = controller;
+    setSearchBusy(true);
+    try {
+      const rows = await searchPdfDocument(pdfRef.current as any, query.trim(), searchOptions, controller.signal);
+      if (controller.signal.aborted) return;
+      setSearchResults(rows);
+      setSearchIndex(rows.length ? 0 : -1);
+      if (rows[0]) {
+        jump(rows[0].page);
+        window.requestAnimationFrame(() => revealSearchResult(rows[0]));
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setActionError(error instanceof Error ? error.message : "PDF search failed");
+      }
+    } finally {
+      if (searchController.current === controller) searchController.current = null;
+      if (!controller.signal.aborted) setSearchBusy(false);
+    }
   };
 
-  const overlays = renderPageOverlay
-    ? [...overlayNodesRef.current.entries()].map(([page, node]) => (
-      createPortal(renderPageOverlay(page), node, `pdf-overlay-${page}-${overlayRevision}`)
-    ))
-    : null;
+  const moveSearch = (step: number) => {
+    if (!searchResults.length) return;
+    const index = (searchIndex + step + searchResults.length) % searchResults.length;
+    const result = searchResults[index];
+    setSearchIndex(index);
+    jump(result.page);
+    window.requestAnimationFrame(() => revealSearchResult(result));
+  };
 
-  return (
-    <section
-      ref={hostRef}
-      className={[
-        "pdfv2-reader",
-        compact ? "is-compact" : "",
-        uncontrolled ? "is-uncontrolled" : "",
-        safeForm ? "is-form-active" : "",
-      ].filter(Boolean).join(" ")}
-      onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => {
-        if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
+  const pages = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
+  const activeResult = searchResults[searchIndex];
+
+  useEffect(() => {
+    if (!activeResult || !rendered.has(activeResult.page)) return;
+    window.requestAnimationFrame(() => revealSearchResult(activeResult));
+  }, [activeResult, pageWidth, query, rendered, revealSearchResult]);
+
+  return <section
+    ref={hostRef}
+    className={`pdfv2-reader ${compact ? "is-compact" : ""} ${uncontrolled ? "is-uncontrolled" : ""} ${safeForm ? "is-form-active" : ""}`}
+    onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === "f") {
         event.preventDefault();
         setSearchOpen(true);
-        window.requestAnimationFrame(() => searchInputRef.current?.focus());
-      }}
-    >
-      <header className="pdfv2-toolbar">
-        <div className="pdfv2-pages">
-          <button
-            type="button"
-            aria-label="Previous page"
-            onClick={() => navigateToPage(currentPage - 1)}
-            disabled={currentPage <= 1}
-          >
-            <ChevronLeft size={17} />
-          </button>
-          <input
-            value={pageInput}
-            aria-label="Page number"
-            inputMode="numeric"
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              setPageInput(event.target.value.replace(/\D+/g, ""));
-            }}
-            onBlur={() => navigateToPage(Number(pageInput || currentPage))}
-            onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-              if (event.key === "Enter") navigateToPage(Number(pageInput || currentPage));
-            }}
-          />
-          <span>/ {pageCount || "—"}</span>
-          <button
-            type="button"
-            aria-label="Next page"
-            onClick={() => navigateToPage(currentPage + 1)}
-            disabled={!pageCount || currentPage >= pageCount}
-          >
-            <ChevronRight size={17} />
-          </button>
-        </div>
-
-        <div className="pdfv2-zoom">
-          <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-10)}>
-            <Minus size={17} />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (zoomMode === "WIDTH") applyScale("PAGE");
-              else if (zoomMode === "PAGE") applyScale("CUSTOM", 100);
-              else applyScale("WIDTH");
-            }}
-          >
-            {zoomMode === "WIDTH" ? "Fit width" : zoomMode === "PAGE" ? "Fit page" : `${zoomPercent}%`}
-          </button>
-          <button type="button" aria-label="Zoom in" onClick={() => zoomBy(10)}>
-            <Plus size={17} />
-          </button>
-        </div>
-
-        <div className="pdfv2-actions">
-          <button
-            type="button"
-            className={searchOpen ? "active" : ""}
-            onClick={() => {
-              setSearchOpen((value) => !value);
-              window.requestAnimationFrame(() => searchInputRef.current?.focus());
-            }}
-          >
-            <Search size={16} />
-            <span>Search</span>
-          </button>
-          {safeForm ? (
-            <span className="pdfv2-form-state">
-              <FilePenLine size={15} />
-              Form active{editedPages.length ? ` · ${editedPages.length} changed` : ""}
-            </span>
-          ) : null}
-          <details className="pdfv2-menu">
-            <summary>
-              <Download size={16} />
-              <span>Download</span>
-            </summary>
-            <div>
-              <button
-                type="button"
-                disabled={Boolean(busy) || !capabilities.can_download_original}
-                onClick={() => void downloadOriginal()}
-              >
-                Original PDF
-              </button>
-              <button
-                type="button"
-                disabled={Boolean(busy) || !capabilities.can_download_working || !pdfRef.current?.saveDocument}
-                onClick={() => void downloadWorking()}
-              >
-                Editable PDF
-              </button>
-              <button
-                type="button"
-                disabled={Boolean(busy) || !capabilities.can_flatten || !safeForm || !pdfRef.current?.saveDocument}
-                onClick={() => void downloadCompleted()}
-              >
-                Completed form pages{editedPages.length ? ` (${editedPages.length})` : ""}
-              </button>
-            </div>
-          </details>
-          <details className="pdfv2-menu">
-            <summary aria-label="More PDF actions">
-              <MoreHorizontal size={18} />
-            </summary>
-            <div>
-              {capabilities.can_submit ? (
-                <button type="button" disabled={Boolean(busy)} onClick={() => void submit()}>
-                  Submit retained record
-                </button>
-              ) : null}
-              {hasDraft || dirty ? (
-                <button type="button" onClick={() => void discard()}>
-                  <Trash2 size={14} />
-                  Discard working copy
-                </button>
-              ) : null}
-            </div>
-          </details>
-        </div>
-      </header>
-
-      {searchOpen ? (
-        <div className="pdfv2-search">
-          <Search size={16} />
-          <input
-            ref={searchInputRef}
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-            onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-              if (event.key === "Enter") dispatchFind("");
-            }}
-            placeholder="Search this PDF"
-          />
-          <label>
-            <input
-              type="checkbox"
-              checked={caseSensitive}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setCaseSensitive(event.target.checked)}
-            />
-            Aa
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={wholeWord}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setWholeWord(event.target.checked)}
-            />
-            Word
-          </label>
-          <button type="button" disabled={query.trim().length < 2} onClick={() => dispatchFind("")}>
-            Find
-          </button>
-          <span>{findCount.total ? `${findCount.current}/${findCount.total}` : ""}</span>
-          <button
-            type="button"
-            aria-label="Previous search result"
-            disabled={!findCount.total}
-            onClick={() => dispatchFind("again", true)}
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <button
-            type="button"
-            aria-label="Next search result"
-            disabled={!findCount.total}
-            onClick={() => dispatchFind("again", false)}
-          >
-            <ChevronRight size={16} />
-          </button>
-          <button
-            type="button"
-            aria-label="Close PDF search"
-            onClick={() => {
-              setSearchOpen(false);
-              setFindCount({ current: 0, total: 0 });
-              eventBusRef.current?.dispatch("find", {
-                source: hostRef.current,
-                type: "",
-                query: "",
-                highlightAll: false,
-              });
-            }}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      ) : null}
-
-      {capabilities.unsupported_reason && !safeForm ? (
-        <div className="pdfv2-notice">
-          <AlertTriangle size={16} />
-          {capabilities.unsupported_reason}
-        </div>
-      ) : null}
-      {formDetected && !safeForm && !capabilities.unsupported_reason ? (
-        <div className="pdfv2-notice">
-          <AlertTriangle size={16} />
-          This PDF contains form fields, but controlled form execution is unavailable for this document or user.
-        </div>
-      ) : null}
-      {safeForm ? (
-        <div className="pdfv2-notice pdfv2-notice--form">
-          <FilePenLine size={16} />
-          Fields are active. Entries stay in a local working copy until you download or submit.
-          <small>
-            {draftState === "SAVING"
-              ? "Saving…"
-              : draftState === "SAVED"
-                ? "Saved"
-                : draftState === "ERROR"
-                  ? "Save failed"
-                  : ""}
-          </small>
-        </div>
-      ) : null}
-      {actionError ? (
-        <div className="pdfv2-error">
-          <AlertTriangle size={17} />
-          {actionError}
-        </div>
-      ) : null}
-      {record ? (
-        <div className="pdfv2-success">
-          <CheckCircle2 size={17} />
-          Record {record.record_number} created.
-          <a href={record.download_url}>Open</a>
-        </div>
-      ) : null}
-
-      <div
-        ref={viewportRef}
-        className="pdfv2-viewport pdf-engine-viewport"
-        tabIndex={0}
-        onInput={(event: FormEvent<HTMLDivElement>) => {
-          if (safeForm) markEdited(pageNumberFromTarget(event.target, currentPageRef.current));
-        }}
-        onChange={(event: FormEvent<HTMLDivElement>) => {
-          if (safeForm) markEdited(pageNumberFromTarget(event.target, currentPageRef.current));
-        }}
-      >
-        <div ref={viewerElementRef} className="pdfViewer" />
-        {loadState === "LOADING" ? (
-          <div className="pdfv2-loading" role="status">
-            <LoaderCircle className="is-spinning" size={20} />
-            Opening document…
-          </div>
-        ) : null}
-        {loadState === "ERROR" ? (
-          <div className="pdfv2-error pdfv2-error--viewport" role="alert">
-            <AlertTriangle size={18} />
-            {loadError}
-          </div>
-        ) : null}
+        window.requestAnimationFrame(() => searchInput.current?.focus());
+      }
+    }}
+  >
+    <header className="pdfv2-toolbar">
+      <div className="pdfv2-pages">
+        <button type="button" aria-label="Previous page" onClick={() => jump(currentPage - 1)} disabled={currentPage <= 1}><ChevronLeft size={17} /></button>
+        <input value={pageInput} aria-label="Page number" inputMode="numeric" onChange={(event: ChangeEvent<HTMLInputElement>) => setPageInput(event.target.value.replace(/\D+/g, ""))} onBlur={() => jump(Number(pageInput || currentPage))} onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") jump(Number(pageInput || currentPage)); }} />
+        <span>/ {pageCount || "—"}</span>
+        <button type="button" aria-label="Next page" onClick={() => jump(currentPage + 1)} disabled={!pageCount || currentPage >= pageCount}><ChevronRight size={17} /></button>
       </div>
-      {overlays}
-    </section>
-  );
+      <div className="pdfv2-zoom">
+        <button type="button" aria-label="Zoom out" onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value - 10, 50, 250)); }}><Minus size={17} /></button>
+        <button type="button" onClick={() => {
+          if (fitMode === "WIDTH") setFitMode("PAGE");
+          else if (fitMode === "PAGE") { setFitMode("CUSTOM"); setZoom(100); }
+          else setFitMode("WIDTH");
+        }}>{fitMode === "WIDTH" ? "Fit width" : fitMode === "PAGE" ? "Fit page" : `${zoom}%`}</button>
+        <button type="button" aria-label="Zoom in" onClick={() => { setFitMode("CUSTOM"); setZoom((value) => clampPdfValue(value + 10, 50, 250)); }}><Plus size={17} /></button>
+      </div>
+      <div className="pdfv2-actions">
+        <button type="button" className={searchOpen ? "active" : ""} onClick={() => { setSearchOpen((value) => !value); window.requestAnimationFrame(() => searchInput.current?.focus()); }}><Search size={16} /><span>Search</span></button>
+        {safeForm ? <span className="pdfv2-form-state"><FilePenLine size={15} /> Form active{editedPages.length ? ` · ${editedPages.length} changed` : ""}</span> : null}
+        <details className="pdfv2-menu">
+          <summary><Download size={16} /><span>Download</span></summary>
+          <div>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_download_original} onClick={() => void downloadOriginal()}>Original PDF</button>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_download_working || !pdfRef.current?.saveDocument} onClick={() => void downloadWorking()}>Editable PDF</button>
+            <button type="button" disabled={Boolean(busy) || !capabilities.can_flatten || !safeForm || !pdfRef.current?.saveDocument} onClick={() => void downloadCompleted()}>Completed form pages{editedPages.length ? ` (${editedPages.length})` : ""}</button>
+          </div>
+        </details>
+        <details className="pdfv2-menu">
+          <summary aria-label="More PDF actions"><MoreHorizontal size={18} /></summary>
+          <div>
+            {capabilities.can_submit ? <button type="button" disabled={Boolean(busy)} onClick={() => void submit()}>Submit retained record</button> : null}
+            {draft || dirty ? <button type="button" onClick={() => void discard()}><Trash2 size={14} /> Discard working copy</button> : null}
+          </div>
+        </details>
+      </div>
+    </header>
+
+    {searchOpen ? <div className="pdfv2-search">
+      <Search size={16} />
+      <input ref={searchInput} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") void runSearch(); }} placeholder="Search this PDF" />
+      <label><input type="checkbox" checked={Boolean(searchOptions.caseSensitive)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchOptions((value) => ({ ...value, caseSensitive: event.target.checked }))} /> Aa</label>
+      <label><input type="checkbox" checked={Boolean(searchOptions.wholeWord)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchOptions((value) => ({ ...value, wholeWord: event.target.checked }))} /> Word</label>
+      <button type="button" disabled={searchBusy || query.trim().length < 2} onClick={() => void runSearch()}>{searchBusy ? <LoaderCircle className="is-spinning" size={15} /> : "Find"}</button>
+      <span>{searchResults.length ? `${searchIndex + 1}/${searchResults.length}` : ""}</span>
+      <button type="button" aria-label="Previous search result" disabled={!searchResults.length} onClick={() => moveSearch(-1)}><ChevronLeft size={16} /></button>
+      <button type="button" aria-label="Next search result" disabled={!searchResults.length} onClick={() => moveSearch(1)}><ChevronRight size={16} /></button>
+      <button type="button" aria-label="Close PDF search" onClick={() => { searchController.current?.abort(); setSearchBusy(false); setSearchOpen(false); }}><X size={16} /></button>
+    </div> : null}
+
+    {capabilityError ? <div className="pdfv2-notice"><AlertTriangle size={16} />{capabilityError}</div> : null}
+    {capabilities.unsupported_reason && !safeForm ? <div className="pdfv2-notice"><AlertTriangle size={16} />{capabilities.unsupported_reason}</div> : null}
+    {formDetected && !safeForm && !capabilities.unsupported_reason ? <div className="pdfv2-notice"><AlertTriangle size={16} />This PDF contains form fields, but controlled form execution is unavailable for this document or user.</div> : null}
+    {safeForm ? <div className="pdfv2-notice pdfv2-notice--form"><FilePenLine size={16} />Fields are active. Entries stay in a local working copy until you download or submit.<small>{draftState === "SAVING" ? "Saving…" : draftState === "SAVED" ? "Saved" : draftState === "ERROR" ? "Save failed" : ""}</small></div> : null}
+    {actionError ? <div className="pdfv2-error"><AlertTriangle size={17} />{actionError}</div> : null}
+    {record ? <div className="pdfv2-success"><CheckCircle2 size={17} />Record {record.record_number} created.<a href={record.download_url}>Open</a></div> : null}
+
+    <div
+      className="pdfv2-viewport"
+      onInput={(event: FormEvent<HTMLDivElement>) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+      onChange={(event: FormEvent<HTMLDivElement>) => safeForm && markEdited(Number((event.target as HTMLElement).closest("[data-page-number]")?.getAttribute("data-page-number") || currentPageRef.current))}
+    >
+      {loadError ? <div className="pdfv2-error"><AlertTriangle size={18} />{loadError}</div> : null}
+      <PdfDocument
+        file={readerFile}
+        options={PDF_DOCUMENT_OPTIONS}
+        externalLinkTarget="_blank"
+        externalLinkRel="noopener noreferrer"
+        onLoadSuccess={loadDocument}
+        onLoadError={(error: unknown) => setLoadError(error instanceof Error ? error.message : "The PDF could not be opened")}
+        onItemClick={(target: PdfItemClickTarget) => { void followPdfItem(target); }}
+        loading={<div className="pdfv2-loading"><LoaderCircle className="is-spinning" size={20} />Opening document…</div>}
+      >
+        <div className="pdfv2-pages-list">
+          {pages.map((page) => {
+            const pageRatio = pageRatios[page] || 1.414;
+            const style = {
+              "--pdfv2-page-width": `${pageWidth}px`,
+              "--pdfv2-page-height": `${Math.round(pageWidth * pageRatio)}px`,
+            } as CSSProperties;
+            return <div
+              key={page}
+              ref={(element: HTMLDivElement | null) => { if (element) pageRefs.current.set(page, element); else pageRefs.current.delete(page); }}
+              className={`pdfv2-page ${page === currentPage ? "is-current" : ""}`}
+              data-page-number={page}
+              style={style}
+            >
+              {uncontrolled ? <span className="pdfv2-watermark">UNCONTROLLED DRAFT</span> : null}
+              {rendered.has(page) ? <PdfPage
+                pageNumber={page}
+                width={pageWidth}
+                renderMode="canvas"
+                renderTextLayer
+                renderAnnotationLayer
+                renderForms={safeForm}
+                devicePixelRatio={pdfDevicePixelRatio(performanceProfile.maxDevicePixelRatio)}
+                customTextRenderer={({ str }: { str: string }) => highlightPdfText(str, query, searchOptions, false)}
+                loading={<div className="pdfv2-placeholder">Rendering page {page}…</div>}
+                error={<div className="pdfv2-placeholder">Page {page} could not be rendered.</div>}
+                onGetAnnotationsSuccess={(annotations: any[]) => {
+                  if (annotations.some((item) => item?.subtype === "Widget" || item?.fieldType)) {
+                    setFieldCount((value) => Math.max(1, value));
+                    setFormPages((values) => uniquePages([...values, page]));
+                    onAcroFormDetected?.(true);
+                  }
+                }}
+                onLoadSuccess={(loaded: any) => {
+                  const width = Number(loaded?.originalWidth || loaded?.view?.[2] || 1);
+                  const height = Number(loaded?.originalHeight || loaded?.view?.[3] || width * 1.414);
+                  const nextRatio = height / width;
+                  setPageRatios((values) => Math.abs((values[page] || 0) - nextRatio) < 0.0001 ? values : ({ ...values, [page]: nextRatio }));
+                  if (page === navigationTargetRef.current) window.requestAnimationFrame(() => jump(page));
+                }}
+                onRenderSuccess={() => {
+                  if (page === currentPageRef.current || page === navigationTargetRef.current) {
+                    window.requestAnimationFrame(() => {
+                      setRenderWindow(page, pageCount);
+                      if (page === navigationTargetRef.current) jump(page);
+                    });
+                  }
+                }}
+                onRenderTextLayerSuccess={() => {
+                  if (activeResult?.page === page) window.requestAnimationFrame(() => revealSearchResult(activeResult));
+                }}
+              /> : <div className="pdfv2-placeholder pdfv2-placeholder--queued">Page {page}</div>}
+              {renderPageOverlay?.(page)}
+            </div>;
+          })}
+        </div>
+      </PdfDocument>
+    </div>
+  </section>;
 }

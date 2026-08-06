@@ -1,22 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  getPdfReaderCapabilities,
-  type PdfReaderCapabilities,
-} from "../../services/pdfReader";
+import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
+import { getPdfReaderPerformanceProfile } from "../../services/pdfPerformance";
+import PdfReaderCoreV3, {
+  type PdfReaderCoreProps,
+  type PdfReaderNavigationRequest,
+  type PdfReaderOutlineItem,
+} from "./PdfReaderCoreV3";
 import {
   cachePdfCapabilities,
   clearCachedPdfCapabilities,
   readCachedPdfCapabilities,
 } from "./pdfCapabilityCache";
 import {
+  deleteCachedPdfSource,
+  readCachedPdfSource,
   warmPdfSourceCache,
 } from "./pdfSourceCache";
-import PdfReaderCoreV2, {
-  type PdfReaderCoreProps,
-  type PdfReaderNavigationRequest,
-  type PdfReaderOutlineItem,
-} from "./PdfReaderCoreV2";
+
+const CACHE_LOOKUP_BUDGET_MS = 140;
 
 const READ_ONLY_FALLBACK: PdfReaderCapabilities = {
   renderer: "PDF.js",
@@ -37,27 +39,50 @@ const READ_ONLY_FALLBACK: PdfReaderCapabilities = {
   can_submit: false,
 };
 
-function readOnlyFallback(error: unknown): PdfReaderCapabilities {
+function cachedReadOnly(capabilities: PdfReaderCapabilities): PdfReaderCapabilities {
+  return {
+    ...capabilities,
+    source_sha256: "",
+    has_acroform: false,
+    can_fill: false,
+    can_save_draft: false,
+    can_download_working: false,
+    can_flatten: false,
+    can_submit: false,
+    unsupported_reason: null,
+  };
+}
+
+function readOnlyFallback(
+  error: unknown,
+  source?: PdfReaderCapabilities | null,
+): PdfReaderCapabilities {
   const detail = error instanceof Error && error.message.trim()
     ? error.message.trim()
     : "PDF form capabilities could not be verified";
   return {
     ...READ_ONLY_FALLBACK,
+    page_count: source?.page_count || 0,
+    reader_pdf_url: source?.reader_pdf_url || null,
+    source_has_javascript: source?.source_has_javascript,
+    javascript_policy: source?.javascript_policy,
     unsupported_reason: `${detail}. The document remains available in read-only mode.`,
   };
 }
 
+function wait(milliseconds: number): Promise<null> {
+  return new Promise((resolve) => window.setTimeout(() => resolve(null), milliseconds));
+}
+
 /**
- * Resolve the immutable, script-safe source before mounting PDF.js.
- *
- * Cached capability metadata makes revisits immediate. A cold visit performs one
- * capability request and then mounts exactly one PDF source. Live revalidation
- * may update permissions, but it never replaces the mounted source unless the
- * immutable checksum itself changed.
+ * Resolve one immutable source before PDF.js mounts. Cached metadata can select
+ * the same source quickly, but it never authorizes forms or draft custody until
+ * the live checksum and permission response succeeds.
  */
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
   const externallyManaged = suppliedCapabilities !== undefined;
+  const profile = useMemo(() => getPdfReaderPerformanceProfile(), []);
   const identity = useMemo(() => ({
     tenant: props.identity.tenant,
     manualId: props.identity.manualId,
@@ -69,90 +94,147 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     props.identity.tenant,
     props.identity.userId,
   ]);
-  const cachedAtMount = useRef<PdfReaderCapabilities | null>(
-    suppliedCapabilities || readCachedPdfCapabilities(identity),
+  const cachedCapabilities = useMemo(
+    () => suppliedCapabilities || readCachedPdfCapabilities(identity),
+    [identity, suppliedCapabilities],
   );
-  const [capabilities, setCapabilities] = useState<PdfReaderCapabilities | null>(
-    cachedAtMount.current,
+
+  const [capabilities, setCapabilities] = useState<PdfReaderCapabilities>(
+    cachedCapabilities ? cachedReadOnly(cachedCapabilities) : READ_ONLY_FALLBACK,
   );
-  const [sourceResolutionError, setSourceResolutionError] = useState("");
-  const mountedSourceRef = useRef<string | null>(
-    cachedAtMount.current
-      ? cachedAtMount.current.reader_pdf_url || props.fileUrl
-      : null,
-  );
+  const [readerFileUrl, setReaderFileUrl] = useState<string | null>(null);
+  const [readerKey, setReaderKey] = useState("");
+  const objectUrlRef = useRef<string | null>(null);
+  const sourceMountedRef = useRef(false);
+  const generationRef = useRef(0);
 
   useEffect(() => {
-    if (externallyManaged) {
-      const next = suppliedCapabilities || READ_ONLY_FALLBACK;
-      setCapabilities(next);
-      setSourceResolutionError("");
-      mountedSourceRef.current = next.reader_pdf_url || props.fileUrl;
-      if (suppliedCapabilities?.source_sha256) {
-        cachePdfCapabilities(identity, suppliedCapabilities);
-      }
-      return;
-    }
-
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     let active = true;
-    getPdfReaderCapabilities(identity.tenant, identity.manualId, identity.revisionId)
-      .then((next) => {
-        if (!active) return;
-        const previous = cachedAtMount.current;
-        const checksumChanged = Boolean(
-          previous?.source_sha256
-            && previous.source_sha256 !== next.source_sha256,
-        );
-        if (checksumChanged) clearCachedPdfCapabilities(identity);
-        cachePdfCapabilities(identity, next);
 
-        if (!mountedSourceRef.current || checksumChanged) {
-          mountedSourceRef.current = next.reader_pdf_url || props.fileUrl;
-        } else {
-          const liveSource = next.reader_pdf_url || props.fileUrl;
-          if (liveSource !== mountedSourceRef.current) {
-            setSourceResolutionError(
-              "The controlled reader source policy changed. Reopen this publication to apply the new immutable reader source.",
-            );
-          }
-        }
-        cachedAtMount.current = next;
-        setCapabilities(next);
-      })
-      .catch((error) => {
-        if (!active) return;
-        if (!mountedSourceRef.current) mountedSourceRef.current = props.fileUrl;
-        setCapabilities(readOnlyFallback(error));
-        setSourceResolutionError(
-          error instanceof Error ? error.message : "PDF processing is unavailable",
-        );
-      });
-
-    return () => {
-      active = false;
+    const revokeObjectUrl = () => {
+      if (!objectUrlRef.current) return;
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
     };
+
+    const chooseSource = async (
+      resolved: PdfReaderCapabilities,
+      allowCachedBytes: boolean,
+    ): Promise<{ url: string; key: string }> => {
+      const remoteUrl = resolved.reader_pdf_url || props.fileUrl;
+      const fingerprint = resolved.source_sha256;
+      if (!allowCachedBytes || !fingerprint) {
+        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint || "unverified"}` };
+      }
+
+      const cachedBytes = await Promise.race([
+        readCachedPdfSource(identity, fingerprint, remoteUrl),
+        wait(CACHE_LOOKUP_BUDGET_MS),
+      ]);
+      if (!cachedBytes) return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
+
+      const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
+      revokeObjectUrl();
+      objectUrlRef.current = localUrl;
+      return { url: localUrl, key: `${remoteUrl}:${fingerprint}:cached` };
+    };
+
+    const mount = async (
+      resolved: PdfReaderCapabilities,
+      allowCachedBytes: boolean,
+    ): Promise<void> => {
+      const selected = await chooseSource(resolved, allowCachedBytes);
+      if (!active || generationRef.current !== generation) {
+        if (selected.url.startsWith("blob:")) URL.revokeObjectURL(selected.url);
+        return;
+      }
+      sourceMountedRef.current = true;
+      setReaderFileUrl(selected.url);
+      setReaderKey(selected.key);
+    };
+
+    const run = async () => {
+      if (externallyManaged) {
+        const resolved = suppliedCapabilities || READ_ONLY_FALLBACK;
+        setCapabilities(resolved);
+        if (resolved.source_sha256) cachePdfCapabilities(identity, resolved);
+        await mount(resolved, Boolean(resolved.source_sha256));
+        return;
+      }
+
+      const cached = cachedCapabilities;
+      if (cached) {
+        await mount(cached, true);
+        if (!active || generationRef.current !== generation) return;
+        setCapabilities(cachedReadOnly(cached));
+      }
+
+      try {
+        const live = await getPdfReaderCapabilities(
+          identity.tenant,
+          identity.manualId,
+          identity.revisionId,
+        );
+        if (!active || generationRef.current !== generation) return;
+
+        const sourceChanged = Boolean(
+          cached?.source_sha256
+          && cached.source_sha256.toLowerCase() !== live.source_sha256.toLowerCase(),
+        );
+        const cachedReaderUrl = cached?.reader_pdf_url || props.fileUrl;
+        const liveReaderUrl = live.reader_pdf_url || props.fileUrl;
+        const sourceUrlChanged = Boolean(cached && cachedReaderUrl !== liveReaderUrl);
+
+        if (sourceChanged) {
+          clearCachedPdfCapabilities(identity);
+          await deleteCachedPdfSource(
+            identity,
+            cached!.source_sha256,
+            cachedReaderUrl,
+          ).catch(() => undefined);
+        }
+
+        cachePdfCapabilities(identity, live);
+        setCapabilities(live);
+
+        if (!cached || sourceChanged || sourceUrlChanged || !sourceMountedRef.current) {
+          await mount(live, true);
+        }
+
+        const finalRemoteUrl = live.reader_pdf_url || props.fileUrl;
+        window.setTimeout(() => {
+          if (!active || generationRef.current !== generation) return;
+          void warmPdfSourceCache(identity, live.source_sha256, finalRemoteUrl);
+        }, profile.mode === "constrained" ? 1_500 : 120);
+      } catch (error) {
+        if (!active || generationRef.current !== generation) return;
+        const fallback = readOnlyFallback(error, cached);
+        setCapabilities(fallback);
+        if (!sourceMountedRef.current) await mount(fallback, false);
+      }
+    };
+
+    void run();
+    return () => { active = false; };
   }, [
+    cachedCapabilities,
     externallyManaged,
     identity,
+    profile.mode,
     props.fileUrl,
     suppliedCapabilities,
   ]);
 
-  const stableSource = mountedSourceRef.current;
-  const sourceKey = capabilities?.source_sha256 || "read-only";
+  useEffect(() => () => {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+  }, []);
 
-  useEffect(() => {
-    if (!stableSource || !capabilities?.source_sha256) return;
-    const timer = window.setTimeout(() => {
-      void warmPdfSourceCache(identity, capabilities.source_sha256, stableSource);
-    }, 1200);
-    return () => window.clearTimeout(timer);
-  }, [capabilities?.source_sha256, identity, stableSource]);
-
-  if (!capabilities || !stableSource) {
+  if (!readerFileUrl) {
     return (
-      <section className="pdfv2-reader" data-pdf-source-state="resolving">
-        <div className="pdfv2-loading" role="status">
+      <section className="pdfv3-reader" data-pdf-bootstrap="resolving">
+        <div className="pdfv3-document-loading" role="status">
           Preparing controlled document…
         </div>
       </section>
@@ -160,21 +242,14 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   }
 
   return (
-    <>
-      {sourceResolutionError ? (
-        <div className="pdfv2-notice" role="status">
-          {sourceResolutionError}
-        </div>
-      ) : null}
-      <PdfReaderCoreV2
-        {...props}
-        key={`${identity.tenant}:${identity.manualId}:${identity.revisionId}:${sourceKey}`}
-        identity={identity}
-        fileUrl={stableSource}
-        originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
-        capabilities={capabilities}
-      />
-    </>
+    <PdfReaderCoreV3
+      {...props}
+      key={readerKey}
+      identity={identity}
+      fileUrl={readerFileUrl}
+      originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
+      capabilities={capabilities}
+    />
   );
 }
 

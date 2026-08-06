@@ -24,32 +24,32 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
     return complete_suite or explicit_suite
 
 
-def test_one_official_browser_viewer_owns_pdf_loading() -> None:
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     publication = _read(
         "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
     )
     linked = _read("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
 
-    assert "new pdfjsViewer.PDFViewer" in core
-    assert "pdfjsLib.getDocument" in core
-    assert "PdfReaderCoreV2" in bridge
+    assert "useVirtualizer" in core
+    assert "orderedVirtualItems.map" in core
+    assert "<PdfDocument" in core
+    assert "<PdfPage" in core
+    assert "PdfReaderCoreV3" in bridge
     assert "PdfReaderCore" in publication
     assert "PdfReaderCore" in linked
-    assert "<PdfDocument" not in core
-    assert "<PdfPage" not in core
-    assert "react-pdf" not in core
 
 
 def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     store = _read("frontend/src/pages/manuals/pdfWorkingCopyStore.ts")
     capabilities = _read("frontend/src/services/pdfReader.ts")
     authority = _read("frontend/src/services/pdfWorkingCopyAuthority.ts")
 
-    assert "sourceKey" in bridge
+    assert "readerKey" in bridge
+    assert "sourceMountedRef" in bridge
     assert "capabilities.source_sha256" in core
     assert "pdf-working-copy:v1" in store
     for partition in ("userId", "tenant", "manualId", "revisionId"):
@@ -65,7 +65,7 @@ def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
 def test_pdfjs_runtime_assets_and_security_options_remain_packaged() -> None:
     config = _read("frontend/src/pages/manuals/pdfReaderConfig.ts")
     vite = _read("frontend/vite.config.ts")
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
 
     assert "useWasm: true" in config
     assert "wasmUrl:" in config
@@ -74,8 +74,9 @@ def test_pdfjs_runtime_assets_and_security_options_remain_packaged() -> None:
     assert "__PDFJS_ASSET_VERSION__" in config
     assert "fs.cpSync" in vite
     assert "pdfJsRuntimeAssetsPlugin" in vite
-    assert "isEvalSupported: false" in core
-    assert "enableXfa: false" in core
+    assert "isEvalSupported: false" in config
+    assert "enableScripting: false" in config
+    assert "enableXfa: false" in config
     assert "PDFScriptingManager" not in core
 
 
