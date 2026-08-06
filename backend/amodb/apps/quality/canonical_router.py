@@ -16,7 +16,7 @@ from .canonical_router_legacy import (
     legacy_router,
     router,
 )
-from .planner_calendar_router import planner_calendar_router
+from .planner_calendar_enrichment_router import planner_calendar_enrichment_router
 from .planner_router import planner_router
 from .planner_schedule_router import planner_schedule_router
 
@@ -88,9 +88,9 @@ def _install_planner_routes(api_router: APIRouter) -> None:
 
 
 def _install_calendar_override(api_router: APIRouter) -> None:
-    """Replace the legacy projection route with the hardened planner projection."""
+    """Replace the legacy projection route with the timed planner projection."""
 
-    calendar_routes = _capture_extension_routes(api_router, planner_calendar_router)
+    calendar_routes = _capture_extension_routes(api_router, planner_calendar_enrichment_router)
     override_keys = {_route_key(route_item) for route_item in calendar_routes}
     api_router.routes[:] = [
         route_item
