@@ -346,11 +346,11 @@ def test_postgresql_rejects_update_and_delete_for_every_immutable_u5_record(engi
                     id, entry_id, target_type, component_id, component_position,
                     component_description, derivation, hours_delta, cycles_delta,
                     before_hours, before_cycles, after_hours, after_cycles,
-                    baseline_missing
+                    baseline_missing, created_at
                 ) VALUES (
                     :id, :entry_id, 'AIRFRAME', NULL, 'AIRFRAME',
                     'Airframe', 'SHARED_DAILY', 1.25, 1,
-                    1250.25, 840, 1251.50, 841, false
+                    1250.25, 840, 1251.50, 841, false, CURRENT_TIMESTAMP
                 )
                 """
             ),
