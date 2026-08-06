@@ -146,13 +146,16 @@ export function defaultReportSections(): ReportSection[] {
     { code: "AU", title: "Aircraft utilisation", kind: "DATASET", dataset_code: "AU", include: true },
     { code: "EVENTS", title: "Operational interruptions", kind: "EVENTS", include: true },
     { code: "AI", title: "Aircraft incidents", kind: "DATASET", dataset_code: "AI", include: true },
+    { code: "FI", title: "Flight interruptions", kind: "DATASET", dataset_code: "FI", include: true },
     { code: "PM", title: "Pilot and maintenance reports", kind: "DATASET", dataset_code: "PM", include: true },
     { code: "OOS", title: "Out-of-service, availability and MTTR", kind: "DATASET", dataset_code: "OOS", include: true },
     { code: "RM", title: "Component removals", kind: "DATASET", dataset_code: "RM", include: true },
     { code: "SM", title: "Scheduled maintenance findings", kind: "DATASET", dataset_code: "SM", include: true },
+    { code: "SR", title: "Shop reports", kind: "DATASET", dataset_code: "SR", include: true },
     { code: "STRUCTURES", title: "Aircraft structural damage and repairs", kind: "DATASET", dataset_code: "STRUCTURES", include: true },
     { code: "RECURRING", title: "Recurring defects", kind: "DATASET", dataset_code: "RECURRING", include: true },
     { code: "ECTM", title: "Engine condition and trend monitoring", kind: "DATASET", dataset_code: "ECTM", include: true },
+    { code: "ADD", title: "Deferred defects / MEL / CDL", kind: "DATASET", dataset_code: "ADD", include: true },
     { code: "ALERTS", title: "Statistical alert calculations", kind: "STATISTICAL_ALERTS", include: true },
   ];
 }
