@@ -15,7 +15,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Download,
-  Filter,
   RefreshCw,
   Save,
   Search,
