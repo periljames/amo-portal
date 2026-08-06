@@ -2,7 +2,7 @@
 
 ## Status and evidence boundary
 
-The Reliability workbook-parity workspace provides controlled portal registers, lifecycle controls, statistical-alert snapshots, mapping governance and retained HTML report snapshots. It uses normalized, date-driven records rather than creating one database table or frontend page for each workbook year.
+The Reliability workbook-parity workspace provides controlled portal registers, lifecycle controls, reviewed workbook imports, statistical-alert snapshots, mapping governance and retained HTML report snapshots. It uses normalized, date-driven records rather than creating one database table or frontend page for each workbook year.
 
 Exact workbook parity is **not yet verified** because the following source files were not available in the repository or connected file library during this implementation review:
 
@@ -10,25 +10,28 @@ Exact workbook parity is **not yet verified** because the following source files
 - `ANALYSIS TEMPLATE(1).xlsx`
 - `DHC8 RELIABILITY PROGRAMME(1).xlsm`
 
-Do not label a workbook profile complete until those files have been inspected directly, including hidden sheets, formulas, validation lists, protected ranges, charts and workbook-specific naming conflicts.
+Do not label a workbook profile complete until those files have been inspected directly, including visible and hidden worksheets, formulas, validation lists, protected ranges, charts, macros as reference logic and workbook-specific naming conflicts.
 
 ## Portal datasets
 
-The current controlled register catalogue includes:
+The controlled register catalogue includes:
 
-| Code | Portal dataset |
-| --- | --- |
-| AU | Aircraft utilisation |
-| AI | Aircraft incidents |
-| PM | Pilot and maintenance reports |
-| OOS | Aircraft out of service |
-| RM | Component removals |
-| SM | Scheduled maintenance findings |
-| STRUCTURES | Structural damage and repair evidence |
-| RECURRING | Recurring defects |
-| ECTM | Engine condition and trend monitoring |
+| Code | Portal dataset | Canonical relationship |
+| --- | --- | --- |
+| AU | Aircraft utilisation | Reliability exposure and utilization records |
+| AI | Aircraft incidents | Safety-event evidence |
+| FI | Flight interruptions | Technical delay, cancellation, return, turnback, diversion, shutdown and aborted-takeoff events |
+| PM | Pilot and maintenance reports | PIREP/MAREP and defect events |
+| OOS | Aircraft out of service | Downtime, availability and MTTR evidence |
+| RM | Component removals | Scheduled and unscheduled removal events |
+| SM | Scheduled maintenance findings | Workpack/task finding evidence |
+| SR | Shop reports | Shop finding and no-fault-found events linked to removal/shop references |
+| STRUCTURES | Structural damage and repair evidence | Dedicated structural register and defect evidence |
+| RECURRING | Recurring defects | Recurrence and FRACAS-linked evidence |
+| ECTM | Engine condition and trend monitoring | ECTM/EHM events and snapshots |
+| ADD | Deferred defects / MEL / CDL | MEL/CDL deferral events and closure evidence |
 
-FI, SR and ADD remain implementation gaps. FI must integrate with canonical interruption events, SR with component removal/shop-visit evidence, and ADD with the controlled MEL/CDL deferral domain rather than creating uncontrolled duplicates.
+FI, SR and ADD use the existing canonical Reliability event types rather than creating competing interruption, shop-finding or deferral domains. Their workbook records retain the original dataset-specific fields, source provenance and derived values.
 
 ## Why records are normalized
 
@@ -78,7 +81,7 @@ The legacy `/workbook-parity` route opens the source-register section. Section c
 
 ## Seeding mappings
 
-Use the mapping workspace or call:
+Use **Mapping & imports** or call:
 
 ```text
 POST /reliability/workbook-parity/mappings/seed-defaults
@@ -87,11 +90,52 @@ GET  /reliability/workbook-parity/contracts
 GET  /reliability/workbook-parity/parity
 ```
 
-The seed action is intended to be idempotent. Profile completion must be evaluated separately for C208B, DHC8 and the analysis-template family. Current parity aggregation must not be treated as proof of exact workbook coverage until the source workbooks are available and the profile-specific endpoint contract is completed.
+The seed action is idempotent for each tenant/profile/dataset/sheet/column key. C208B, DHC8 and analysis-template mappings are retained separately. The current defaults provide a controlled portal contract and aliases; they are not proof that actual workbook headers and formulas are fully covered until the three source workbooks are inspected.
+
+## Workbook import process
+
+Open **Mapping & imports** and use **Controlled workbook import**.
+
+1. Select the workbook profile and dataset explicitly.
+2. Enter the source sheet, or leave it blank only when exactly one controlled sheet alias should match.
+3. Enter the header-row number.
+4. Select an `.xlsx` or `.xlsm` file of 25 MiB or less.
+5. Select **Preview workbook**.
+6. Review the detected sheets, header map, source SHA-256 hash, valid rows and row-level errors.
+7. Correct the source or mapping when required columns are missing or ambiguous.
+8. Commit the next bounded chunk. Each commit processes at most 100 rows from the UI and the backend enforces a maximum of 250.
+9. Retry failed rows only after the reported validation or tenant-reference problem is corrected.
+10. Open **Source registers** and approve each imported `DRAFT` only after verification.
+
+Security and integrity controls:
+
+- `.xlsx` and `.xlsm` only.
+- Extension, MIME type, size and filename checks.
+- Path components removed from filenames.
+- VBA is not loaded or executed.
+- External workbook links are not loaded.
+- Formula and formula-error cells are rejected as controlled values.
+- Invalid dates, decimals and whole numbers are not silently coerced.
+- Ambiguous and duplicate header mappings are rejected.
+- Preview is bounded to 10,000 non-empty rows.
+- Workbook, sheet, row and SHA-256 provenance are retained.
+- Duplicate previews are prevented by tenant/profile/dataset/sheet/source hash.
+- Row commits are idempotent by row source hash.
+- Imported records remain `DRAFT`; imports never auto-approve canonical Reliability evidence.
+
+Import endpoints:
+
+```text
+POST /reliability/workbook-parity/imports/preview
+GET  /reliability/workbook-parity/imports
+GET  /reliability/workbook-parity/imports/{batch_id}
+POST /reliability/workbook-parity/imports/{batch_id}/commit
+POST /reliability/workbook-parity/imports/{batch_id}/retry
+```
 
 ## Creating and approving records
 
-1. Open **Workbook registers**.
+1. Open **Source registers**.
 2. Select the dataset.
 3. Enter the event date, aircraft, ATA/reference fields and dataset-specific values.
 4. Save the record as `DRAFT`.
@@ -116,9 +160,21 @@ Warning level = Mean + warning multiplier x sample standard deviation
 Alert level   = Mean + alert multiplier x sample standard deviation
 ```
 
-The implementation uses sample standard deviation. For rates, inspect the retained numerator and denominator evidence. A missing or zero denominator must be shown as withheld, not converted to zero.
+The implementation uses sample standard deviation. For rates, inspect the retained numerator and denominator evidence. A missing or zero denominator is shown as withheld, not converted to zero.
 
 Charts can remain empty when there are fewer than two usable buckets, no approved source records, no matching aircraft/ATA population, or missing exposure denominators.
+
+## FI rate evidence
+
+FI records can retain:
+
+```text
+Dispatch reliability = successful technical dispatches / departures x 100
+Schedule completion  = completed departures / scheduled departures x 100
+ATA interruption rate = ATA interruptions / flight hours x 100
+```
+
+Each calculated value retains its numerator and denominator. When the denominator is absent or zero, the value is withheld with a reason.
 
 ## OOS availability and MTTR
 
@@ -153,52 +209,38 @@ GET  /reliability/workbook-parity/reports/{id}/html
 
 The HTML endpoint is tenant-scoped and authenticated. Raw filesystem report paths are not exposed.
 
-## Workbook migration process
-
-The required controlled import workflow is not yet complete. Before production workbook migration, implement and verify:
-
-1. Safe `.xlsx`/`.xlsm` upload with size, MIME and extension checks.
-2. Macro-disabled parsing.
-3. Explicit profile selection or reviewed detection.
-4. Sheet/header inventory and ambiguity rejection.
-5. Row preview with validation errors.
-6. Bounded chunk processing and durable progress.
-7. Source-hash idempotency and safe retry.
-8. Workbook/sheet/row provenance.
-9. Approval before canonical Reliability evidence is created.
-
-Until that workflow exists, use controlled native entry only; do not perform ad hoc bulk inserts.
-
 ## Roles
 
-Access must be enforced through tenant permissions:
+The import endpoints require a tenant context and a Reliability data-governance role such as AMO administrator, Quality Manager, Safety Manager or Planning Engineer. Production authorization must also enforce the project permission matrix for:
 
-- Viewers: read registers, calculations and retained reports.
-- Reliability data-entry users: create draft records.
-- Reliability approvers: approve validated records and mappings.
-- Reliability closure authorities: close approved records with evidence.
-- Reliability administrators: manage mapping and report-layout revisions.
+- viewing registers, calculations and reports;
+- creating draft records;
+- approving records and mappings;
+- closing records with evidence;
+- creating report-layout revisions;
+- downloading retained reports.
 
-Confirm the project permission matrix before production use; do not rely on frontend visibility alone.
+Do not rely on frontend visibility alone as an authorization control.
 
 ## Realtime verification
 
-To verify live portal data:
-
-1. Create a draft record and confirm it appears only in the active tenant.
-2. Approve it and confirm the canonical linkage/provenance.
-3. Refresh the register and verify the status and derived values remain unchanged.
-4. Recalculate the relevant metric and inspect numerator/denominator evidence.
-5. Generate a report and verify its SHA-256 hash and retained timestamp.
-6. Sign in to a different tenant and confirm the record and report are not accessible.
+1. Preview a representative workbook and verify sheet/header inventory and row errors.
+2. Commit one bounded import chunk and confirm only `DRAFT` records are created.
+3. Create a native draft record and confirm it appears only in the active tenant.
+4. Approve it and inspect canonical linkage and provenance.
+5. Refresh the register and verify status and derived values remain unchanged.
+6. Recalculate the relevant metric and inspect numerator/denominator evidence.
+7. Generate a report and verify its SHA-256 hash and retained timestamp.
+8. Sign in to a different tenant and confirm the batch, record and report are inaccessible.
 
 ## Known blockers
 
 The following prevent a complete workbook-parity declaration:
 
 - The three reference workbooks are unavailable for direct inspection.
-- FI, SR and ADD are absent from the controlled workbook catalogue.
-- The workbook upload, preview, chunked import and retry domain is absent.
-- Profile-specific parity still requires direct workbook-derived mappings.
-- Browser UAT currently uses representative API fixtures rather than a real backend test server.
-- Canonical utilization and ECTM integrations must be audited for remaining floating-point persistence and immutable correction behavior.
+- Profile-specific zero-gap coverage cannot be confirmed from actual workbook headers, hidden sheets, formulas, validation lists, protection and chart definitions.
+- Browser CI uses representative API fixtures rather than a real backend test server and does not yet execute the complete native-entry, approval, alert and report flow against PostgreSQL.
+- Canonical AU and ECTM integrations still require removal of remaining floating-point persistence and destructive utilization-update behavior.
+- A controlled superseding-record/revision endpoint is still required for approved-record corrections.
+- Role-by-role create, approve, close, mapping and report permissions require a complete authorization audit.
+- Report layouts have controlled sections and hashes but cannot be described as workbook-equivalent until the source layouts and formulas are inspected and fixture-tested.
