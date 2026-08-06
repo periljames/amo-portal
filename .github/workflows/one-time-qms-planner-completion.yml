@@ -1,0 +1,458 @@
+name: One-time QMS planner completion
+
+on:
+  push:
+    branches:
+      - agent/qms-modern-business-planner
+
+permissions:
+  contents: write
+
+jobs:
+  complete:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/qms-modern-business-planner
+          fetch-depth: 0
+      - name: Merge current main
+        run: |
+          git fetch origin main
+          git merge --no-edit origin/main
+      - name: Complete planner integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"Expected block not found in {path}: {old[:120]!r}")
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # Fix the current main TypeScript regression pulled into the PR merge ref.
+          pdf = Path("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+          if pdf.exists():
+              text = pdf.read_text(encoding="utf-8")
+              text = text.replace(
+                  'const jump = useCallback((requested: number, behavior: ScrollBehavior = "auto") => {',
+                  'const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {',
+              )
+              pdf.write_text(text, encoding="utf-8")
+
+          # Persist notification and automation lifecycle state in the planner metadata model.
+          replace_once(
+              "backend/amodb/apps/quality/planner_schedule_models.py",
+              "from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, String, Text, Time, UniqueConstraint",
+              "from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, String, Text, Time, UniqueConstraint",
+          )
+          replace_once(
+              "backend/amodb/apps/quality/planner_schedule_models.py",
+              '    external_attendees_json = Column(Text, nullable=False, default="[]")\n\n    created_by_user_id',
+              '    external_attendees_json = Column(Text, nullable=False, default="[]")\n    notify_attendees = Column(Boolean, nullable=False, default=True)\n    automation_state = Column(String(20), nullable=False, default="ACTIVE", index=True)\n    suspended_at = Column(DateTime(timezone=True), nullable=True)\n    suspended_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)\n    suspension_reason = Column(Text, nullable=True)\n\n    created_by_user_id',
+          )
+
+          migration = Path("backend/amodb/alembic/versions/quality_20260806_planner_schedule_metadata.py")
+          text = migration.read_text(encoding="utf-8")
+          text = text.replace("Revision ID: quality_20260806_planner_metadata", "Revision ID: quality_260806_planner_meta")
+          text = text.replace('revision: str = "quality_20260806_planner_metadata"', 'revision: str = "quality_260806_planner_meta"')
+          text = text.replace(
+              '        sa.Column("external_attendees_json", sa.Text(), nullable=False, server_default="[]"),\n        sa.Column("created_by_user_id"',
+              '        sa.Column("external_attendees_json", sa.Text(), nullable=False, server_default="[]"),\n        sa.Column("notify_attendees", sa.Boolean(), nullable=False, server_default=sa.true()),\n        sa.Column("automation_state", sa.String(length=20), nullable=False, server_default=sa.text("\'ACTIVE\'")),\n        sa.Column("suspended_at", sa.DateTime(timezone=True), nullable=True),\n        sa.Column("suspended_by_user_id", sa.String(length=36), nullable=True),\n        sa.Column("suspension_reason", sa.Text(), nullable=True),\n        sa.Column("created_by_user_id"',
+          )
+          text = text.replace(
+              '        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),',
+              '        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),\n        sa.ForeignKeyConstraint(["suspended_by_user_id"], ["users.id"], ondelete="SET NULL"),',
+          )
+          text = text.replace(
+              '    op.create_index("ix_qms_planner_schedule_metadata_occurrence_date", "qms_planner_schedule_metadata", ["occurrence_date"])',
+              '    op.create_index("ix_qms_planner_schedule_metadata_occurrence_date", "qms_planner_schedule_metadata", ["occurrence_date"])\n    op.create_index("ix_qms_planner_schedule_metadata_automation_state", "qms_planner_schedule_metadata", ["automation_state"])',
+          )
+          text = text.replace(
+              '    op.drop_index("ix_qms_planner_schedule_metadata_occurrence_date", table_name="qms_planner_schedule_metadata")',
+              '    op.drop_index("ix_qms_planner_schedule_metadata_automation_state", table_name="qms_planner_schedule_metadata")\n    op.drop_index("ix_qms_planner_schedule_metadata_occurrence_date", table_name="qms_planner_schedule_metadata")',
+          )
+          migration.write_text(text, encoding="utf-8")
+
+          router_path = Path("backend/amodb/apps/quality/planner_schedule_router.py")
+          text = router_path.read_text(encoding="utf-8")
+          text = re.sub(
+              r'\n\ndef _ensure_metadata_schema\(db: Session\) -> None:\n    """Temporary deployment guard; Alembic remains the authoritative schema path\."""\n    QMSPlannerScheduleMetadata\.__table__\.create\(bind=db\.get_bind\(\), checkfirst=True\)\n',
+              "",
+              text,
+              count=1,
+          )
+          text = text.replace("    _ensure_metadata_schema(db)\n", "")
+          text = text.replace(
+              "    automation_active: bool\n    created_at: datetime",
+              "    automation_active: bool\n    automation_state: str\n    suspended_at: datetime | None = None\n    suspension_reason: str | None = None\n    created_at: datetime",
+          )
+          text = text.replace(
+              "        notify_attendees=True,\n        reminder_interval_days=schedule.reminder_interval_days,\n        automation_active=bool(schedule.is_active),",
+              "        notify_attendees=bool(metadata.notify_attendees) if metadata else True,\n        reminder_interval_days=schedule.reminder_interval_days,\n        automation_active=bool(schedule.is_active),\n        automation_state=(metadata.automation_state if metadata else (\"ACTIVE\" if schedule.is_active else \"COMPLETED\")),\n        suspended_at=metadata.suspended_at if metadata else None,\n        suspension_reason=metadata.suspension_reason if metadata else None,",
+              1,
+          )
+          text = text.replace("        notify_attendees=True,\n    )\n\n\ndef _audit_recipients", "        notify_attendees=bool(metadata.notify_attendees) if metadata else True,\n    )\n\n\ndef _audit_recipients", 1)
+          text = text.replace("        notify_attendees=True,\n    )\n\n\ndef _notify_schedule_created", "        notify_attendees=bool(metadata.notify_attendees) if metadata else True,\n    )\n\n\ndef _notify_schedule_created", 1)
+          text = text.replace(
+              "        external_attendees_json=_dump_json_list([item.model_dump(mode=\"json\") for item in payload.external_attendees]),\n        created_by_user_id=ctx.user_id,",
+              "        external_attendees_json=_dump_json_list([item.model_dump(mode=\"json\") for item in payload.external_attendees]),\n        notify_attendees=payload.notify_attendees,\n        automation_state=\"ACTIVE\" if payload.automation_active else \"SUSPENDED\",\n        suspended_at=None if payload.automation_active else datetime.now(timezone.utc),\n        suspended_by_user_id=None if payload.automation_active else ctx.user_id,\n        suspension_reason=None if payload.automation_active else \"Created with automation suspended.\",\n        created_by_user_id=ctx.user_id,",
+          )
+          text = text.replace(
+              "        external_attendees_json=template_metadata.external_attendees_json if template_metadata else \"[]\",\n        created_by_user_id=actor_user_id,",
+              "        external_attendees_json=template_metadata.external_attendees_json if template_metadata else \"[]\",\n        notify_attendees=bool(template_metadata.notify_attendees) if template_metadata else True,\n        automation_state=\"OCCURRENCE\",\n        created_by_user_id=actor_user_id,",
+          )
+          text = text.replace(
+              '    schedule.is_active = active\n    metadata = _metadata_for_schedule(db, amo_id=ctx.amo_id, schedule_id=schedule.id)\n    state = "resumed" if active else "suspended"',
+              '    schedule.is_active = active\n    metadata = _metadata_for_schedule(db, amo_id=ctx.amo_id, schedule_id=schedule.id)\n    if metadata is None:\n        raise HTTPException(status_code=409, detail="Planner metadata is missing for this schedule. Run the required schema migration and repair the schedule before changing automation state.")\n    state = "resumed" if active else "suspended"\n    metadata.automation_state = "ACTIVE" if active else "SUSPENDED"\n    metadata.suspended_at = None if active else datetime.now(timezone.utc)\n    metadata.suspended_by_user_id = None if active else ctx.user_id\n    metadata.suspension_reason = None if active else payload.reason.strip()',
+          )
+          text = text.replace(
+              "        elif schedule.frequency == QMSAuditScheduleFrequency.ONE_TIME:\n                            schedule.is_active = False",
+              "        elif schedule.frequency == QMSAuditScheduleFrequency.ONE_TIME:\n                            schedule.is_active = False\n                            metadata = _metadata_for_schedule(db, amo_id=str(schedule.amo_id), schedule_id=schedule.id)\n                            if metadata is not None:\n                                metadata.automation_state = \"COMPLETED\"",
+          )
+          # Tenant-scope reminder queries and the scheduler tenant loop.
+          text = text.replace("def _run_audit_reminders(db: Session, *, today: date) -> tuple[int, int]:", "def _run_audit_reminders(db: Session, *, today: date, amo_id: str) -> tuple[int, int]:")
+          text = text.replace(
+              "            models.QMSAudit.status == models.QMSAuditStatus.PLANNED,",
+              "            models.QMSAudit.amo_id == amo_id,\n            models.QMSAudit.status == models.QMSAuditStatus.PLANNED,",
+              1,
+          )
+          start = text.index("def run_quality_planner_cycle() -> dict[str, Any]:")
+          end = text.index("\n\ndef _worker() -> None:", start)
+          replacement = '''def run_quality_planner_cycle() -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "tenants": 0,
+        "materialized": 0,
+        "upcoming_notices": 0,
+        "day_of_notices": 0,
+        "errors": 0,
+    }
+    db = WriteSessionLocal()
+    try:
+        with _advisory_lock(db) as acquired:
+            if not acquired:
+                result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                return result
+            today = datetime.now(_PLANNER_TIMEZONE).date()
+            horizon = today + timedelta(days=_materialize_lead_days())
+            amo_ids = [
+                str(row[0])
+                for row in (
+                    db.query(account_models.AMO.id)
+                    .filter(account_models.AMO.is_active.is_(True))
+                    .order_by(account_models.AMO.id.asc())
+                    .all()
+                )
+            ]
+            result["tenants"] = len(amo_ids)
+            for amo_id in amo_ids:
+                try:
+                    set_postgres_tenant_context(db, amo_id=amo_id, user_id="quality-planner-automation")
+                    schedule_ids = [
+                        row[0]
+                        for row in (
+                            db.query(models.QMSAuditSchedule.id)
+                            .filter(
+                                models.QMSAuditSchedule.amo_id == amo_id,
+                                models.QMSAuditSchedule.is_active.is_(True),
+                                models.QMSAuditSchedule.next_due_date <= horizon,
+                                models.QMSAuditSchedule.deleted_at.is_(None),
+                            )
+                            .order_by(models.QMSAuditSchedule.next_due_date.asc(), models.QMSAuditSchedule.id.asc())
+                            .all()
+                        )
+                    ]
+                    for schedule_id in schedule_ids:
+                        try:
+                            set_postgres_tenant_context(db, amo_id=amo_id, user_id="quality-planner-automation")
+                            schedule = (
+                                db.query(models.QMSAuditSchedule)
+                                .filter(
+                                    models.QMSAuditSchedule.amo_id == amo_id,
+                                    models.QMSAuditSchedule.id == schedule_id,
+                                    models.QMSAuditSchedule.is_active.is_(True),
+                                    models.QMSAuditSchedule.deleted_at.is_(None),
+                                )
+                                .with_for_update(skip_locked=True)
+                                .first()
+                            )
+                            if schedule is None:
+                                db.rollback()
+                                continue
+                            actor_user_id = _accountable_actor_id(db, schedule)
+                            occurrence_count = 0
+                            while (
+                                schedule.is_active
+                                and schedule.next_due_date <= horizon
+                                and occurrence_count < _max_catchup_occurrences()
+                            ):
+                                audit = _materialize_occurrence(
+                                    db,
+                                    schedule=schedule,
+                                    actor_user_id=actor_user_id,
+                                )
+                                occurrence_count += 1
+                                if audit is not None:
+                                    result["materialized"] += 1
+                                elif schedule.frequency == QMSAuditScheduleFrequency.ONE_TIME:
+                                    schedule.is_active = False
+                                    metadata = _metadata_for_schedule(db, amo_id=amo_id, schedule_id=schedule.id)
+                                    if metadata is not None:
+                                        metadata.automation_state = "COMPLETED"
+                                else:
+                                    schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
+                            db.commit()
+                        except IntegrityError:
+                            db.rollback()
+                            logger.info("Quality planner occurrence already materialized schedule_id=%s", schedule_id)
+                        except Exception:
+                            db.rollback()
+                            result["errors"] += 1
+                            logger.exception("Quality planner schedule materialization failed schedule_id=%s", schedule_id)
+
+                    set_postgres_tenant_context(db, amo_id=amo_id, user_id="quality-planner-automation")
+                    upcoming, day_of = _run_audit_reminders(db, today=today, amo_id=amo_id)
+                    result["upcoming_notices"] += upcoming
+                    result["day_of_notices"] += day_of
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    result["errors"] += 1
+                    logger.exception("Quality planner automatic cycle failed tenant_id=%s", amo_id)
+    finally:
+        close_session_safely(db)
+    result["completed_at"] = datetime.now(timezone.utc).isoformat()
+    with _last_cycle_lock:
+        _last_cycle.clear()
+        _last_cycle.update(result)
+    return result
+'''
+          text = text[:start] + replacement + text[end:]
+          router_path.write_text(text, encoding="utf-8")
+
+          # Calendar projection includes manually suspended schedules and lifecycle metadata.
+          calendar = Path("backend/amodb/apps/quality/planner_calendar_router.py")
+          text = calendar.read_text(encoding="utf-8")
+          text = text.replace(
+              "                SELECT id, title, kind, frequency, auditee, lead_auditor_user_id,\n                       next_due_date AS event_date\n                FROM qms_audit_schedules\n                WHERE amo_id = :amo_id\n                  AND is_active IS TRUE",
+              "                SELECT id, title, kind, frequency, auditee, lead_auditor_user_id, is_active,\n                       next_due_date AS event_date\n                FROM qms_audit_schedules\n                WHERE amo_id = :amo_id\n                  AND (\n                    is_active IS TRUE\n                    OR EXISTS (\n                        SELECT 1 FROM qms_planner_schedule_metadata metadata\n                        WHERE metadata.amo_id = qms_audit_schedules.amo_id\n                          AND metadata.schedule_id = qms_audit_schedules.id\n                          AND metadata.automation_state = 'SUSPENDED'\n                    )\n                  )",
+          )
+          text = text.replace(
+              '                        "lead_auditor_user_id": row.get("lead_auditor_user_id"),',
+              '                        "lead_auditor_user_id": row.get("lead_auditor_user_id"),\n                        "is_active": bool(row.get("is_active")),',
+              1,
+          )
+          calendar.write_text(text, encoding="utf-8")
+
+          enrichment = Path("backend/amodb/apps/quality/planner_calendar_enrichment_router.py")
+          text = enrichment.read_text(encoding="utf-8")
+          text = text.replace(
+              '        item["attendee_count"] = len(metadata.attendee_user_ids) + len(metadata.external_attendees)\n        item["source_schedule_id"]',
+              '        item["attendee_count"] = len(metadata.attendee_user_ids) + len(metadata.external_attendees)\n        item["notify_attendees"] = bool(metadata.notify_attendees)\n        item["automation_state"] = metadata.automation_state\n        item["status"] = metadata.automation_state if item.get("entity_type") == "audit_schedule" else item.get("status")\n        item["suspended_at"] = metadata.suspended_at.isoformat() if metadata.suspended_at else None\n        item["suspension_reason"] = metadata.suspension_reason\n        item["source_schedule_id"]',
+          )
+          enrichment.write_text(text, encoding="utf-8")
+
+          # Suspended schedule templates are visible but cannot be moved until resumed.
+          model = Path("frontend/src/pages/qms/planner/qmsPlannerModel.ts")
+          text = model.read_text(encoding="utf-8")
+          text = text.replace(
+              '  const entityType = text(row, "entity_type").toLowerCase();\n  return ["audit_schedule", "audit", "car", "training_event"].includes(entityType);',
+              '  const entityType = text(row, "entity_type").toLowerCase();\n  const automationState = text(row, "automation_state").toUpperCase();\n  if (entityType === "audit_schedule" && automationState === "SUSPENDED") return false;\n  return ["audit_schedule", "audit", "car", "training_event"].includes(entityType);',
+          )
+          model.write_text(text, encoding="utf-8")
+
+          # Directly mount the full authoritative schedule dialog in the planner.
+          page = Path("frontend/src/pages/qms/planner/QmsPlannerPageV2.tsx")
+          text = page.read_text(encoding="utf-8")
+          text = text.replace('import { plannerClockAt } from "./qmsPlannerClock";', 'import { plannerClockAt } from "./qmsPlannerClock";\nimport QmsPlannerScheduleDialog from "./QmsPlannerScheduleDialog";')
+          text = re.sub(r'type CreateKind = .*?\n', '', text, count=1)
+          text = re.sub(r'type QuickCreateDraft = .*?\n', 'type ScheduleDialogDraft = { title: string; date: string; time: string };\n', text, count=1)
+          text = re.sub(r'type QuickCreateOption = .*?\n', '', text, count=1)
+          text = re.sub(r'const QUICK_CREATE_OPTIONS: QuickCreateOption\[\] = \[.*?\];\n\n', '', text, count=1, flags=re.S)
+          text = text.replace('const [quickCreate, setQuickCreate] = useState<QuickCreateDraft | null>(null);', 'const [quickCreate, setQuickCreate] = useState<ScheduleDialogDraft | null>(null);')
+          old_open_start = text.index('  const openQuickCreate = (')
+          old_open_end = text.index('\n\n  const toggleCategory', old_open_start)
+          new_open = '''  const openQuickCreate = (date = selectedDate || anchorKey, time = "09:00", initialTitle = "") => {
+    if (!capabilities.can_create_audit) {
+      setToast({ tone: "danger", message: "You do not have permission to create audit schedules." });
+      return;
+    }
+    setCommandOpen(false);
+    setShortcutsOpen(false);
+    setQuickCreate({ title: initialTitle, date, time });
+  };
+'''
+          text = text[:old_open_start] + new_open + text[old_open_end:]
+          text = text.replace('setQuickCreate({ kind: "audit", title: "", date: selectedDate || anchorKey, time: "09:00" })', 'openQuickCreate(selectedDate || anchorKey, "09:00")')
+          text = text.replace('openQuickCreate(selectedDate, "09:00", "audit")', 'openQuickCreate(selectedDate, "09:00")')
+          text = text.replace('Use one workspace for audits, CAR/CAPA, training, management reviews, and other quality commitments.', 'Create governed audit schedules here and monitor audit, CAR/CAPA, and training commitments in one operational view.')
+          text = text.replace('<button type="button" disabled title="CAR creation does not yet accept a planner draft."><Circle size={15} /><span>Plan a CAR follow-up</span><ChevronRight size={14} /></button><button type="button" disabled title="Training scheduling does not yet accept a planner draft."><Circle size={15} /><span>Plan training</span><ChevronRight size={14} /></button><button type="button" disabled title="Management review creation does not yet accept a planner draft."><Circle size={15} /><span>Schedule management review</span><ChevronRight size={14} /></button>', '<span className="qms-planner-readonly"><ShieldCheck size={14} /> CAR and training records remain governed in their authoritative modules and appear here automatically.</span>')
+          old_modal_start = text.index('        {quickCreate ? (')
+          old_modal_end = text.index('\n\n        {pendingMove ? (', old_modal_start)
+          new_modal = '''        <QmsPlannerScheduleDialog
+          amoCode={amoCode}
+          open={Boolean(quickCreate)}
+          initialDate={quickCreate?.date || selectedDate || anchorKey}
+          initialTime={quickCreate?.time || "09:00"}
+          initialTitle={quickCreate?.title || ""}
+          onClose={() => setQuickCreate(null)}
+          onCreated={(created) => {
+            setQuickCreate(null);
+            setSelectedDate(created.next_due_date);
+            setToast({
+              tone: "success",
+              message: `${created.title} created. ${created.automation_active ? "Automation is active" : "Automation is suspended"}. ${created.notifications_queued} notification delivery action${created.notifications_queued === 1 ? "" : "s"} queued.`,
+            });
+            void loadPlanner(true);
+          }}
+        />'''
+          text = text[:old_modal_start] + new_modal + text[old_modal_end:]
+          page.write_text(text, encoding="utf-8")
+
+          # Add focus containment to the full dialog.
+          dialog = Path("frontend/src/pages/qms/planner/QmsPlannerScheduleDialog.tsx")
+          text = dialog.read_text(encoding="utf-8")
+          text = text.replace('  const titleRef = useRef<HTMLInputElement | null>(null);', '  const titleRef = useRef<HTMLInputElement | null>(null);\n  const dialogRef = useRef<HTMLElement | null>(null);')
+          text = text.replace(
+              '      if (event.key !== "Escape") return;\n      event.preventDefault();',
+              '      if (event.key === "Tab") {\n        const controls = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(\'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])\') || []).filter((item) => item.offsetParent !== null);\n        if (controls.length) {\n          const first = controls[0];\n          const last = controls[controls.length - 1];\n          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }\n          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }\n        }\n        return;\n      }\n      if (event.key !== "Escape") return;\n      event.preventDefault();',
+          )
+          text = text.replace('<section className="qms-schedule-dialog" role="dialog"', '<section ref={dialogRef} className="qms-schedule-dialog" role="dialog"')
+          dialog.write_text(text, encoding="utf-8")
+
+          # Include planner metadata in the shared SQLite fixture.
+          conftest = Path("backend/conftest.py")
+          text = conftest.read_text(encoding="utf-8")
+          if 'planner_schedule_models as planner_schedule_models' not in text:
+              text = text.replace('from amodb.apps.quality import models as quality_models  # noqa: E402', 'from amodb.apps.quality import models as quality_models  # noqa: E402\nfrom amodb.apps.quality import planner_schedule_models as planner_schedule_models  # noqa: E402')
+              text = text.replace('            quality_models.QMSAuditSchedule.__table__,', '            quality_models.QMSAuditSchedule.__table__,\n            planner_schedule_models.QMSPlannerScheduleMetadata.__table__,')
+          conftest.write_text(text, encoding="utf-8")
+
+          # Route-order tests must assert the actual enriched endpoint, not the replaced base projection.
+          tests = Path("backend/amodb/apps/quality/tests/test_planner_router.py")
+          text = tests.read_text(encoding="utf-8")
+          text = text.replace('from amodb.apps.quality import planner_calendar_router as calendar_module', 'from amodb.apps.quality import planner_calendar_router as calendar_module\nfrom amodb.apps.quality.planner_calendar_enrichment_router import qms_planner_calendar_enriched')
+          text = text.replace('assert _route_index(api_router, qms_planner_calendar) < _catchall_index(api_router, "GET")', 'assert _route_index(api_router, qms_planner_calendar_enriched) < _catchall_index(api_router, "GET")')
+          text = text.replace('assert getattr(calendar_gets[0], "endpoint", None) is qms_planner_calendar', 'assert getattr(calendar_gets[0], "endpoint", None) is qms_planner_calendar_enriched')
+          tests.write_text(text, encoding="utf-8")
+
+          # Planner-specific CI must compile/lint/test the new direct-scheduling surfaces.
+          workflow = Path(".github/workflows/qms-planner-ci.yml")
+          text = workflow.read_text(encoding="utf-8")
+          text = text.replace('          amodb/apps/quality/planner_router.py\n          amodb/apps/quality/tests/test_planner_router.py', '          amodb/apps/quality/planner_router.py\n          amodb/apps/quality/planner_schedule_models.py\n          amodb/apps/quality/planner_schedule_router.py\n          amodb/apps/quality/tests/test_planner_router.py\n          amodb/apps/quality/tests/test_planner_schedule_router.py')
+          text = text.replace('run: pytest -q amodb/apps/quality/tests/test_planner_router.py', 'run: pytest -q amodb/apps/quality/tests/test_planner_router.py amodb/apps/quality/tests/test_planner_schedule_router.py')
+          text = text.replace('          src/pages/qms/planner/QmsPlannerPageV2.tsx\n', '          src/pages/qms/planner/QmsPlannerPageV2.tsx\n          src/pages/qms/planner/QmsPlannerScheduleDialog.tsx\n')
+          workflow.write_text(text, encoding="utf-8")
+
+          quality_workflow = Path(".github/workflows/quality-module-ci.yml")
+          text = quality_workflow.read_text(encoding="utf-8")
+          text = text.replace('          amodb/apps/quality/tests/test_planner_router.py', '          amodb/apps/quality/tests/test_planner_router.py\n          amodb/apps/quality/tests/test_planner_schedule_router.py')
+          text = text.replace('          trigger_fix = script.get_revision("quality_260804_trigger_fix")', '          trigger_fix = script.get_revision("quality_260804_trigger_fix")\n          planner_metadata = script.get_revision("quality_260806_planner_meta")')
+          text = text.replace('          assert trigger_fix.down_revision == "quality_260804_assurance_wiring"', '          assert trigger_fix.down_revision == "quality_260804_assurance_wiring"\n          assert planner_metadata is not None\n          assert planner_metadata.down_revision == "rel_quality_20260804_merge"')
+          text = text.replace('for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix)', 'for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix, planner_metadata)')
+          quality_workflow.write_text(text, encoding="utf-8")
+
+          # Backend contract tests for direct creation, persisted recipient controls, lifecycle and automation.
+          Path("backend/amodb/apps/quality/tests/test_planner_schedule_router.py").write_text('''from __future__ import annotations
+
+from datetime import date, time
+import inspect
+
+import pytest
+from pydantic import ValidationError
+
+from amodb.apps.quality.planner_schedule_models import QMSPlannerScheduleMetadata
+from amodb.apps.quality.planner_schedule_router import (
+    PlannerAuditScheduleCreate,
+    _recipient_targets,
+    create_planner_audit_schedule,
+    run_quality_planner_cycle,
+    suspend_planner_audit_schedule,
+    resume_planner_audit_schedule,
+)
+
+
+def test_planner_schedule_payload_requires_valid_timing_and_deduplicates_attendees() -> None:
+    payload = PlannerAuditScheduleCreate(
+        title="Procurement audit",
+        audit_scope_code="MO",
+        next_due_date=date(2026, 8, 20),
+        start_time=time(9, 0),
+        end_time=time(11, 0),
+        attendee_user_ids=["user-a", "user-a", "user-b"],
+    )
+    assert payload.attendee_user_ids == ["user-a", "user-b"]
+    with pytest.raises(ValidationError):
+        PlannerAuditScheduleCreate(
+            title="Invalid timing",
+            audit_scope_code="MO",
+            next_due_date=date(2026, 8, 20),
+            start_time=time(11, 0),
+            end_time=time(10, 0),
+        )
+
+
+def test_planner_metadata_persists_attendee_and_automation_controls() -> None:
+    columns = QMSPlannerScheduleMetadata.__table__.columns
+    assert "notify_attendees" in columns
+    assert "automation_state" in columns
+    assert "suspended_at" in columns
+    assert "suspended_by_user_id" in columns
+    assert "suspension_reason" in columns
+    assert columns.notify_attendees.nullable is False
+
+
+def test_recipient_contract_covers_every_responsible_party() -> None:
+    source = inspect.getsource(_recipient_targets)
+    for role in (
+        "lead_auditor",
+        "observer_auditor",
+        "assistant_auditor",
+        "auditee",
+        "auditee_external",
+        "attendee",
+        "attendee_external",
+    ):
+        assert role in source
+    assert "seen" in source
+
+
+def test_create_is_transactional_and_queues_notifications_before_commit() -> None:
+    source = inspect.getsource(create_planner_audit_schedule)
+    assert "notify_attendees=payload.notify_attendees" in source
+    assert "automation_state=\"ACTIVE\" if payload.automation_active else \"SUSPENDED\"" in source
+    assert "_notify_schedule_created" in source
+    assert source.index("_notify_schedule_created") < source.index("db.commit()")
+    assert "create_from_planner" in source
+
+
+def test_suspend_resume_and_worker_contracts_are_automatic() -> None:
+    suspend_source = inspect.getsource(suspend_planner_audit_schedule)
+    resume_source = inspect.getsource(resume_planner_audit_schedule)
+    cycle_source = inspect.getsource(run_quality_planner_cycle)
+    assert "_change_schedule_state" in suspend_source
+    assert "_change_schedule_state" in resume_source
+    assert "QMSAuditSchedule.is_active.is_(True)" in cycle_source
+    assert "account_models.AMO.is_active.is_(True)" in cycle_source
+    assert "_run_audit_reminders" in cycle_source
+    assert "set_postgres_tenant_context" in cycle_source
+    assert "_max_catchup_occurrences" in cycle_source
+''', encoding="utf-8")
+
+          # Remove this one-time workflow from the resulting branch.
+          Path(".github/workflows/one-time-qms-planner-completion.yml").unlink()
+          PY
+      - name: Commit completed integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete direct QMS planner scheduling and automation"
+          git push origin HEAD:agent/qms-modern-business-planner
