@@ -1,0 +1,143 @@
+.publication-linked-layout {
+  position: relative;
+}
+
+.publication-reader-utility-dock {
+  position: absolute;
+  z-index: 42;
+  right: 0.85rem;
+  bottom: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  pointer-events: none;
+}
+
+.publication-reader-utility-dock button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  padding: 0.36rem 0.58rem;
+  border: 1px solid color-mix(in srgb, var(--text-primary, #0f172a) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 94%, transparent);
+  color: var(--text-primary, #0f172a);
+  box-shadow: 0 7px 22px rgba(2, 6, 23, 0.18);
+  font-size: 0.7rem;
+  font-weight: 760;
+  pointer-events: auto;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.publication-reader-utility-dock button:hover,
+.publication-reader-utility-dock button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 48%, transparent);
+  background: var(--surface-elevated, #fff);
+}
+
+.publication-reader-utility-dock kbd {
+  min-width: 1.8rem;
+  padding: 0.08rem 0.24rem;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 0.24rem;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  font: inherit;
+  font-size: 0.62rem;
+  line-height: 1.25;
+}
+
+body.publication-reader-mode-active {
+  overflow: hidden !important;
+}
+
+.publication-reader-page--reader-mode,
+.publication-reader-page--reader-mode:fullscreen {
+  position: fixed !important;
+  z-index: 2147483000 !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  background: var(--bg-base, #eef2f7) !important;
+}
+
+.publication-reader-page--reader-mode .publication-reader-status,
+.publication-reader-page--reader-mode .publication-reader-error,
+.publication-reader-page--reader-mode .publication-document-header,
+.publication-reader-page--reader-mode .publication-control-banner,
+.publication-reader-page--reader-mode .publication-floating-header,
+.publication-reader-page--reader-mode .publication-document-tabs,
+.publication-reader-page--reader-mode .publication-metadata,
+.publication-reader-page--reader-mode .publication-to-top {
+  display: none !important;
+}
+
+.publication-reader-page--reader-mode .publication-reader-workspace {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.publication-reader-page--reader-mode .publication-navigation,
+.publication-reader-page--reader-mode .publication-navigation-rail,
+.publication-reader-page--reader-mode .publication-document-canvas,
+.publication-reader-page--reader-mode .publication-linked-layout,
+.publication-reader-page--reader-mode .publication-native-pdf,
+.publication-reader-page--reader-mode .pdfv3-reader {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.publication-reader-page--reader-mode .publication-document-canvas,
+.publication-reader-page--reader-mode .publication-linked-layout,
+.publication-reader-page--reader-mode .publication-native-pdf {
+  overflow: hidden !important;
+}
+
+.publication-reader-page--reader-mode .pdfv3-reader {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.publication-reader-page--reader-mode .publication-reader-utility-dock {
+  position: fixed;
+  z-index: 2147483200;
+  right: 0.85rem;
+  bottom: 0.85rem;
+}
+
+.publication-reader-page--reader-mode .publication-reader-mode-toggle {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 52%, transparent);
+}
+
+@media (max-width: 760px) {
+  .publication-reader-utility-dock {
+    right: 0.55rem;
+    bottom: 0.55rem;
+  }
+
+  .publication-reader-utility-dock button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+  }
+
+  .publication-reader-utility-dock button span,
+  .publication-reader-utility-dock kbd {
+    display: none;
+  }
+}
