@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from .pdfium_service import MAX_PDF_BYTES, MAX_PDF_PAGES, PdfEngineError, PdfIns
 
 CAPABILITY_TIMEOUT_SECONDS = int(os.getenv("PDF_CAPABILITY_TIMEOUT_SECONDS", "25"))
 CAPABILITY_WORK_ROOT = Path(os.getenv("PDFIUM_WORK_DIR", "uploads/pdfium-work")).resolve()
+CAPABILITY_CACHE_ROOT = Path(os.getenv("PDF_CAPABILITY_CACHE_DIR", "uploads/pdf-capability-cache")).resolve()
+CAPABILITY_CACHE_VERSION = 2
 _JS_KEY_PATTERN = re.compile(r"/(?:JavaScript|JS)(?=[\s/<>{}\[\]()])", re.IGNORECASE)
 _EMPTY_JS_PATTERN = re.compile(r"/JS\s*(?:\(\s*\)|<\s*>)", re.IGNORECASE)
 _ACTION_SUBTYPE_PATTERN = re.compile(r"/S\s*/([A-Za-z0-9#]+)", re.IGNORECASE)
@@ -57,6 +60,65 @@ def _safe_work_root() -> Path:
     if not root.is_dir():
         raise PdfEngineError("PDF_WORK_DIR_INVALID", "The PDF processing work directory is unavailable", status_code=500)
     return root
+
+
+def _safe_cache_root() -> Path:
+    CAPABILITY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    root = CAPABILITY_CACHE_ROOT.resolve()
+    if not root.is_dir():
+        raise PdfEngineError("PDF_CAPABILITY_CACHE_INVALID", "The PDF capability cache is unavailable", status_code=500)
+    return root
+
+
+def _cache_path(source_sha256: str) -> Path:
+    root = _safe_cache_root()
+    digest = source_sha256.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise PdfEngineError("PDF_CAPABILITY_CACHE_KEY_INVALID", "Invalid PDF capability cache key", status_code=500)
+    target = (root / f"v{CAPABILITY_CACHE_VERSION}-{digest}.json").resolve()
+    if target.parent != root:
+        raise PdfEngineError("PDF_CAPABILITY_CACHE_PATH_INVALID", "Unsafe PDF capability cache path", status_code=500)
+    return target
+
+
+def _read_cached_inspection(source_sha256: str) -> PdfInspection | None:
+    path = _cache_path(source_sha256)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("cache payload is not an object")
+        if int(payload.get("version") or 0) != CAPABILITY_CACHE_VERSION:
+            raise ValueError("cache version mismatch")
+        inspection_payload = payload.get("inspection")
+        if not isinstance(inspection_payload, dict):
+            raise ValueError("inspection payload is missing")
+        inspection = PdfInspection(**inspection_payload)
+        if inspection.source_sha256.lower() != source_sha256.lower():
+            raise ValueError("cache checksum mismatch")
+        return inspection
+    except Exception:
+        path.unlink(missing_ok=True)
+        return None
+
+
+def _write_cached_inspection(inspection: PdfInspection) -> None:
+    path = _cache_path(inspection.source_sha256)
+    payload = {
+        "version": CAPABILITY_CACHE_VERSION,
+        "inspection": asdict(inspection),
+    }
+    root = path.parent
+    with tempfile.NamedTemporaryFile(prefix=path.stem, suffix=".tmp", dir=root, delete=False) as handle:
+        temporary = Path(handle.name).resolve()
+        handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _object_action_profile(source: str) -> tuple[bool, bool]:
@@ -187,6 +249,11 @@ def _read_result(path: Path) -> dict[str, Any]:
 
 def inspect_pdf_capabilities_bytes(content: bytes) -> PdfInspection:
     _validate_input(content)
+    source_sha256 = hashlib.sha256(content).hexdigest()
+    cached = _read_cached_inspection(source_sha256)
+    if cached is not None:
+        return cached
+
     root = _safe_work_root()
     with tempfile.TemporaryDirectory(prefix="pdf-capability-", dir=root) as raw_dir:
         work_dir = Path(raw_dir).resolve()
@@ -221,9 +288,38 @@ def inspect_pdf_capabilities_bytes(content: bytes) -> PdfInspection:
                 status_code=504,
             ) from exc
         if result_path.exists():
-            return PdfInspection(**_read_result(result_path))
+            inspection = PdfInspection(**_read_result(result_path))
+            _write_cached_inspection(inspection)
+            return inspection
         detail = (completed.stderr or completed.stdout or "PDF capability worker failed").strip()[-1000:]
         raise PdfEngineError("PDF_CAPABILITY_FAILED", detail, status_code=500)
+
+
+def warm_pdf_revision_capabilities(revision_id: str) -> None:
+    """Precompute immutable PDF capability metadata and the safe reader derivative after upload."""
+
+    from amodb.apps.manuals import models as manual_models
+    from amodb.apps.manuals.pdf_reader_router import _source_path
+    from amodb.database import WriteSessionLocal
+
+    db = WriteSessionLocal()
+    try:
+        revision = db.query(manual_models.ManualRevision).filter(manual_models.ManualRevision.id == revision_id).first()
+        if revision is None:
+            return
+        content = _source_path(revision).read_bytes()
+        inspection = inspect_pdf_capabilities_bytes(content)
+        if inspection.has_javascript:
+            from amodb.apps.manuals.pdf_reader_form_override_router import _safe_reader_cache_path
+
+            _safe_reader_cache_path(revision, inspection.source_sha256)
+    except Exception:
+        # Upload completion must not be rolled back by background precomputation.
+        # The live reader endpoint will report a precise error if preparation
+        # still fails when the document is opened.
+        return
+    finally:
+        db.close()
 
 
 def _worker_main(source: str, result: str) -> int:
