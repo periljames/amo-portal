@@ -100,7 +100,7 @@ jobs:
           set -euo pipefail
           python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_20260806_workbook_parity' /tmp/alembic-heads.txt
+          grep -q 'rel_20260806_workbook_main_merge' /tmp/alembic-heads.txt
       - name: Upgrade clean PostgreSQL schema
         run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
       - name: Verify formula and workbook parity schema
@@ -123,7 +123,7 @@ jobs:
               workbook_tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'reliability_%'")).scalars())
           failures = []
           if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
-          if versions != ['rel_20260806_workbook_parity']: failures.append(f'Alembic version rows are {versions}.')
+          if versions != ['rel_20260806_workbook_main_merge']: failures.append(f'Alembic version rows are {versions}.')
           if expected_metric_columns - metric_columns: failures.append(f'Missing metric columns: {sorted(expected_metric_columns - metric_columns)}.')
           if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
           if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
