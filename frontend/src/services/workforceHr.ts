@@ -10,11 +10,21 @@ import type {
   HrDefaultDayBatchPreview,
   HrDefaultDayBatchResult,
   HrDefaultDayBootstrap,
+  HrGrade,
+  HrGradeWrite,
+  HrJobFamily,
+  HrJobFamilyWrite,
+  HrOrgUnit,
+  HrOrgUnitWrite,
   HrOvertimeRequest,
   HrPeopleFacets,
   HrPeopleFilters,
   HrPeoplePage,
   HrPeopleSelection,
+  HrPersonnelMutationPayload,
+  HrPosition,
+  HrPositionWrite,
+  HrSupervisorOptionsPage,
 } from "../types/workforceHr";
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
@@ -40,10 +50,13 @@ export function getWorkforceHrDashboard(peopleLimit = 50): Promise<HrDashboard> 
   });
 }
 export function listWorkforceHrPeople(params: HrPeopleFilters & { page?: number; page_size?: number } = {}): Promise<HrPeoplePage> {
-  return apiJson(`/workforce/hr/people${queryString(params)}`, { offline: { cacheTtlMs: 60_000 } });
+  return apiJson(`/workforce/hr/people/governed${queryString(params)}`, { offline: { cacheTtlMs: 60_000 } });
 }
 export function getWorkforceHrPeopleFacets(): Promise<HrPeopleFacets> {
-  return apiJson("/workforce/hr/people/facets", { offline: { cacheTtlMs: 5 * 60_000 } });
+  return apiJson("/workforce/hr/people/governed/facets", { offline: { cacheTtlMs: 5 * 60_000 } });
+}
+export function previewWorkforceHrSelection(selection: HrPeopleSelection): Promise<{ matched_count: number; selection_token: string }> {
+  return apiJson("/workforce/hr/people/governed/selection-preview", { method: "POST", body: jsonBody(selection) });
 }
 export async function previewWorkforceHrDefaultDayBatch(selection: HrPeopleSelection): Promise<HrDefaultDayBatchPreview> {
   const result = await apiJson<HrDefaultDayBatchPreview>("/workforce/hr/people/default-day-pattern/preview", {
@@ -71,6 +84,7 @@ export async function exportWorkforceHrPeople(selection: HrPeopleSelection): Pro
   });
   downloadBlob(result.blob, result.filename || "workforce-people.csv");
 }
+/** @deprecated Tenant-wide bootstrap is default-denied; use controlled selection preview and durable submission. */
 export function bootstrapWorkforceHrDefaultDayPattern(): Promise<HrDefaultDayBootstrap> {
   return apiJson("/workforce/hr/default-day-pattern", { method: "POST" });
 }
@@ -128,6 +142,11 @@ export function submitWorkforceHrDefaultDayOperation(
     body: jsonBody({ selection, expected_match_count: expectedMatchCount, expected_selection_token: expectedSelectionToken }),
   });
 }
+export function submitWorkforceHrPersonnelMutation(payload: HrPersonnelMutationPayload, idempotencyKey: string): Promise<HrBulkOperation> {
+  return apiJson("/workforce/hr/bulk-operations/personnel", {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: jsonBody(payload),
+  });
+}
 export function getWorkforceHrBulkOperation(operationId: string): Promise<HrBulkOperation> {
   return apiJson(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}`, {
     offline: { cacheTtlMs: 0 },
@@ -154,4 +173,40 @@ export function resumeWorkforceHrBulkOperation(operationId: string): Promise<HrB
 export async function downloadWorkforceHrBulkFailures(operationId: string): Promise<void> {
   const result = await apiBlob(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}/failures.csv`);
   downloadBlob(result.blob, result.filename || `workforce-bulk-${operationId}-failures.csv`);
+}
+
+export function listWorkforceHrOrgUnits(includeInactive = false): Promise<HrOrgUnit[]> {
+  return apiJson(`/workforce/hr/organization-units${queryString({ include_inactive: includeInactive })}`);
+}
+export function saveWorkforceHrOrgUnit(payload: HrOrgUnitWrite, id?: string): Promise<HrOrgUnit> {
+  return apiJson(id ? `/workforce/hr/organization-units/${encodeURIComponent(id)}` : "/workforce/hr/organization-units", {
+    method: id ? "PUT" : "POST", body: jsonBody(payload),
+  });
+}
+export function listWorkforceHrJobFamilies(includeInactive = false): Promise<HrJobFamily[]> {
+  return apiJson(`/workforce/hr/job-families${queryString({ include_inactive: includeInactive })}`);
+}
+export function saveWorkforceHrJobFamily(payload: HrJobFamilyWrite, id?: string): Promise<HrJobFamily> {
+  return apiJson(id ? `/workforce/hr/job-families/${encodeURIComponent(id)}` : "/workforce/hr/job-families", {
+    method: id ? "PUT" : "POST", body: jsonBody(payload),
+  });
+}
+export function listWorkforceHrGrades(includeInactive = false): Promise<HrGrade[]> {
+  return apiJson(`/workforce/hr/grades${queryString({ include_inactive: includeInactive })}`);
+}
+export function saveWorkforceHrGrade(payload: HrGradeWrite, id?: string): Promise<HrGrade> {
+  return apiJson(id ? `/workforce/hr/grades/${encodeURIComponent(id)}` : "/workforce/hr/grades", {
+    method: id ? "PUT" : "POST", body: jsonBody(payload),
+  });
+}
+export function listWorkforceHrPositions(includeInactive = false): Promise<HrPosition[]> {
+  return apiJson(`/workforce/hr/positions${queryString({ include_inactive: includeInactive })}`);
+}
+export function saveWorkforceHrPosition(payload: HrPositionWrite, id?: string): Promise<HrPosition> {
+  return apiJson(id ? `/workforce/hr/positions/${encodeURIComponent(id)}` : "/workforce/hr/positions", {
+    method: id ? "PUT" : "POST", body: jsonBody(payload),
+  });
+}
+export function listWorkforceHrSupervisors(params: { page?: number; page_size?: number; search?: string; org_unit_id?: string; exclude_user_id?: string } = {}): Promise<HrSupervisorOptionsPage> {
+  return apiJson(`/workforce/hr/supervisors${queryString(params)}`, { offline: { cacheTtlMs: 60_000 } });
 }
