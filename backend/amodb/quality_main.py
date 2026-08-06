@@ -36,6 +36,10 @@ from .apps.bootstrap.router import router as bootstrap_router
 from .apps.training.router import router as training_router, public_router as training_public_router
 from .apps.quality import router as quality_router, public_router as quality_public_router
 from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
+from .apps.quality.planner_schedule_router import (
+    start_quality_planner_scheduler,
+    stop_quality_planner_scheduler,
+)
 from .apps.audit.router import router as audit_router
 from .apps.audit.router_events import router as audit_events_router
 from .apps.notifications.router import router as notifications_router
@@ -202,11 +206,13 @@ async def enforce_quality_request_limits(request: Request, call_next):
 def quality_schema_preflight() -> None:
     app.state.is_shutting_down = False
     _enforce_schema_head_sync()
+    start_quality_planner_scheduler()
 
 
 @app.on_event("shutdown")
 def quality_shutdown() -> None:
     app.state.is_shutting_down = True
+    stop_quality_planner_scheduler()
     dispose_engines()
 
 
