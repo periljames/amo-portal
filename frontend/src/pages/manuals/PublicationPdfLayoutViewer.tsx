@@ -114,7 +114,9 @@ export default function PublicationPdfLayoutViewer({
   );
   const [referenceListOpen, setReferenceListOpen] = useState(false);
   const [readerNavigationRequest, setReaderNavigationRequest] =
-    useState<PdfReaderNavigationRequest | null>(navigationRequest || null);
+    useState<PdfReaderNavigationRequest | null>(
+      navigationRequest || { page: Math.max(1, initialPage), token: -1 },
+    );
 
   useEffect(() => {
     if (!navigationRequest) return;
