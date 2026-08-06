@@ -62,8 +62,9 @@ describe("Scalable Workforce people directory", () => {
   it("previews controlled batch changes before applying them", () => {
     expect(serviceSource).toContain("/people/default-day-pattern/preview");
     expect(serviceSource).toContain("/people/default-day-pattern/apply");
+    expect(serviceSource).toContain("expectedMatchCount");
     expect(directorySource).toContain("Controlled batch preview");
-    expect(directorySource).toContain("expectedMatchCount");
+    expect(directorySource).toContain("preview.matched_count");
     expect(directorySource).toContain("Existing active patterns are preserved");
     expect(directorySource).toContain("Export CSV");
   });
