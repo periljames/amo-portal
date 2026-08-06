@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { isAuthenticated } from "../services/auth";
 import PortalRoutes from "../portalRoutes";
 
@@ -8,6 +9,11 @@ const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
 const EhmDashboardPage = lazy(() => import("../pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazy(() => import("../pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazy(() => import("../pages/ehm/EhmUploadsPage"));
+const CorporateStructurePage = lazy(() => import("../pages/admin-users/CorporateStructurePage"));
+const ReportingLineBuilderPage = lazy(() => import("../pages/admin-users/ReportingLineBuilderPage"));
+const UserGovernancePage = lazy(() => import("../pages/admin-users/UserGovernancePage"));
+const ManagerTeamPage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).ManagerTeamPage }));
+const MyOrganizationProfilePage = lazy(async () => ({ default: (await import("../pages/admin-users/WorkforcePortalPages")).MyOrganizationProfilePage }));
 
 const DEPARTMENT_HOMES = new Set([
   "planning",
@@ -37,6 +43,11 @@ function LoadingRoute({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function ProtectedSurface({ label, children }: { label: string; children: React.ReactElement }): React.ReactElement {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
+}
+
 function AuthenticatedSurface({
   amoCode,
   label,
@@ -52,15 +63,145 @@ function AuthenticatedSurface({
   return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
 }
 
+function CorporateWorkforceRoutes({ parts, location }: { parts: string[]; location: ReturnType<typeof useLocation> }): React.ReactElement | null {
+  if (parts[0] === "admin" && parts[1] === "organization" && parts.length === 2) {
+    return <Routes location={location}><Route path="/admin/organization" element={<ProtectedSurface label="corporate structure"><CorporateStructurePage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "admin" && parts[1] === "users" && parts[2] && parts[3] === "governance" && parts.length === 4) {
+    return <Routes location={location}><Route path="/admin/users/:id/governance" element={<ProtectedSurface label="personnel governance"><UserGovernancePage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "manager" && parts[1] === "team" && parts.length === 2) {
+    return <Routes location={location}><Route path="/manager/team" element={<ProtectedSurface label="manager team"><ManagerTeamPage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "manager" && parts[1] === "structure" && parts.length === 2) {
+    return <Routes location={location}><Route path="/manager/structure" element={<ProtectedSurface label="reporting lines"><ReportingLineBuilderPage /></ProtectedSurface>} /></Routes>;
+  }
+  if (parts[0] === "my-profile" && parts.length === 1) {
+    return <Routes location={location}><Route path="/my-profile" element={<ProtectedSurface label="organization profile"><MyOrganizationProfilePage /></ProtectedSurface>} /></Routes>;
+  }
+  return null;
+}
+
 export const AppRouter: React.FC = () => {
   const location = useLocation();
   const parts = pathSegments(location.pathname);
+  const corporateRoute = CorporateWorkforceRoutes({ parts, location });
+  if (corporateRoute) return corporateRoute;
+
   const isTenantPath = parts[0] === "maintenance" && Boolean(parts[1]);
   if (!isTenantPath) return <PortalRoutes />;
 
   const amoCode = parts[1];
   const module = parts[2] || "";
   const view = parts[3] || "";
+
+  if (module === "admin" && view === "organization" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/organization"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="corporate structure">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <CorporateStructurePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "admin" && view === "reporting-lines" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/reporting-lines"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="reporting lines">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <ReportingLineBuilderPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (
+    module === "admin"
+    && view === "users"
+    && parts[4]
+    && parts[5] === "governance"
+    && parts.length === 6
+  ) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/admin/users/:id/governance"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="personnel governance">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="admin-users">
+                <UserGovernancePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "manager" && view === "team" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/manager/team"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="manager team">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="manager-team">
+                <ManagerTeamPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "manager" && view === "structure" && parts.length === 4) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/manager/structure"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="reporting lines">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="manager-team">
+                <ReportingLineBuilderPage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  if (module === "my-profile" && parts.length === 3) {
+    return (
+      <Routes location={location}>
+        <Route
+          path="/maintenance/:amoCode/my-profile"
+          element={
+            <AuthenticatedSurface amoCode={amoCode} label="organization profile">
+              <DepartmentLayout amoCode={amoCode} activeDepartment="my-profile">
+                <MyOrganizationProfilePage />
+              </DepartmentLayout>
+            </AuthenticatedSurface>
+          }
+        />
+      </Routes>
+    );
+  }
 
   if (
     DEPARTMENT_HOMES.has(module)
@@ -87,7 +228,6 @@ export const AppRouter: React.FC = () => {
       </Routes>
     );
   }
-
 
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {

@@ -206,6 +206,10 @@ def disable_module(
 
 # Imported after router_admin has registered its legacy route. These modules
 # align the presence policy, remove the legacy directory route and install the
-# paginated implementation before amodb.main includes the router.
+# paginated implementation before amodb.main includes the router. Corporate
+# structure modules register their tenant-admin endpoints on the same protected
+# router without introducing a second administration surface.
 from . import presence_policy as _presence_policy  # noqa: E402,F401
 from . import router_user_directory as _router_user_directory  # noqa: E402,F401
+from . import router_corporate_structure as _router_corporate_structure  # noqa: E402,F401
+from . import router_corporate_reference as _router_corporate_reference  # noqa: E402,F401
