@@ -10,6 +10,7 @@ function readSource(relativePath: string): string {
 
 const directorySource = readSource("./components/WorkforcePeopleDirectory.tsx");
 const wrapperSource = readSource("./components/WorkforceHrWorkspaceV2.tsx");
+const operationsSource = readSource("./components/WorkforceOperationsWorkspace.tsx");
 const pagesSource = readSource("./WorkforceRosteringPagesV2.tsx");
 const serviceSource = readSource("../../services/workforceHr.ts");
 const typeSource = readSource("../../types/workforceHr.ts");
@@ -59,21 +60,28 @@ describe("Scalable Workforce people directory", () => {
     expect(typeSource).toContain('mode: "FILTERED"');
   });
 
-  it("previews controlled batch changes before applying them", () => {
+  it("previews controlled batch changes and binds apply to the exact selection", () => {
     expect(serviceSource).toContain("/people/default-day-pattern/preview");
     expect(serviceSource).toContain("/people/default-day-pattern/apply");
-    expect(serviceSource).toContain("expectedMatchCount");
+    expect(serviceSource).toContain("expected_match_count");
+    expect(serviceSource).toContain("expected_selection_token");
+    expect(typeSource).toContain("selection_token");
     expect(directorySource).toContain("Controlled batch preview");
     expect(directorySource).toContain("preview.matched_count");
     expect(directorySource).toContain("Existing active patterns are preserved");
     expect(directorySource).toContain("Export CSV");
   });
 
-  it("loads the large people register separately from HR operations", () => {
+  it("separates the large people register from operational queues without a duplicate people path", () => {
     expect(pagesSource).toContain("WorkforceHrWorkspaceV2");
     expect(wrapperSource).toContain("People & contracts");
     expect(wrapperSource).toContain("Leave, time & patterns");
-    expect(wrapperSource).toContain("lazy(() => import(\"./WorkforceHrWorkspace\")");
+    expect(wrapperSource).toContain("WorkforceOperationsWorkspace");
+    expect(wrapperSource).not.toContain('import("./WorkforceHrWorkspace")');
+    expect(operationsSource).toContain('type OperationsSection = "overview" | "leave" | "time" | "patterns"');
+    expect(operationsSource).not.toContain('label: "People & contracts"');
+    expect(operationsSource).toContain('pattern_state: "MISSING"');
+    expect(operationsSource).toContain("page_size: 25");
     expect(wrapperSource).toContain("getWorkforceHrDashboard(1)");
   });
 });
