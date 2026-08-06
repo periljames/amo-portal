@@ -24,10 +24,18 @@ export type PortalPreferencesPatch = Partial<Pick<
 >>;
 
 const PREFERENCES_PATH = "/auth/portal-preferences/";
+const PREFERENCES_CACHE_TTL_MS = 5 * 60_000;
 
+/**
+ * Preferences are optional shell metadata, not a route-blocking resource.
+ * Keep one tenant/user-scoped response hot so React StrictMode and multiple
+ * appearance consumers do not issue duplicate authenticated GETs.
+ */
 export async function getPortalPreferences(): Promise<PortalPreferences> {
   return apiRequest<PortalPreferences>(PREFERENCES_PATH, {
-    cacheTtlMs: 0,
+    cacheTtlMs: PREFERENCES_CACHE_TTL_MS,
+    persistCache: true,
+    staleWhileOfflineMs: 24 * 60 * 60_000,
     timeoutMs: 8_000,
   });
 }
