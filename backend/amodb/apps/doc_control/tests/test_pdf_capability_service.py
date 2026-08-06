@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pymupdf
 
 from amodb.apps.doc_control import pdf_capability_service
@@ -8,6 +10,9 @@ from amodb.apps.doc_control.pdf_safe_processing_service import (
     inspect_script_disabled_pdf_bytes,
     sanitize_pdf_javascript_bytes,
 )
+
+
+ROOT = Path(__file__).resolve().parents[5]
 
 
 def _acroform_pdf_bytes(*, scripted: bool = False) -> bytes:
@@ -103,3 +108,17 @@ def test_capability_inspection_reuses_checksum_cache(tmp_path, monkeypatch) -> N
     assert first == second
     assert calls == 1
     assert list(cache_root.glob("v3-*.json"))
+
+
+def test_pdf_upload_prewarms_capabilities_before_a_user_opens_the_reader() -> None:
+    guard = (ROOT / "backend/amodb/apps/manuals/upload_guard_router.py").read_text(encoding="utf-8")
+    warmup = (ROOT / "backend/amodb/apps/doc_control/pdf_capability_warmup.py").read_text(encoding="utf-8")
+
+    assert "warm_pdf_capability_cache_background" in guard
+    assert "background_tasks.add_task(warm_pdf_capability_cache_background, revision_id)" in guard
+    assert guard.index("warm_pdf_capability_cache_background, revision_id") < guard.index(
+        "index_revision_background, revision_id"
+    )
+    assert "WriteSessionLocal" in warmup
+    assert "hmac.compare_digest(recorded, actual)" in warmup
+    assert "inspect_pdf_capabilities_bytes(content)" in warmup
