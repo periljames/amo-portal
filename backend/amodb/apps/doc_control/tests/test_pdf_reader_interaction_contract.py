@@ -197,3 +197,48 @@ def test_pdf_capabilities_and_safe_derivative_are_precomputed_by_checksum() -> N
     ) < composition.index(
         "router.include_router(_pdf_reader_form_override_router)"
     )
+
+
+def test_navigation_success_settles_before_same_page_early_return() -> None:
+    source = _source(CORE)
+    physical = source.split("const publishPhysicalPage", 1)[1].split(
+        "const synchronizePhysicalPage", 1
+    )[0]
+    jump = source.split("const jump", 1)[1].split("const setDirtyState", 1)[0]
+
+    assert "settleNavigation(next)" in physical
+    assert physical.index("settleNavigation(next)") < physical.index(
+        "if (next === currentPageRef.current) return"
+    )
+    assert "pageIsAtReadingLine(page)" in jump
+    assert "currentPageRef.current === page" in jump
+    assert "setActionError(`Page ${page} could not be brought into view" in jump
+
+
+def test_internal_pdf_links_are_resolved_and_use_meaningful_page_hashes() -> None:
+    source = _source(CORE)
+
+    assert 'id={`pdf-page-${page}`}' in source
+    assert '".annotationLayer .linkAnnotation"' in source
+    assert "resolveInternalPage" in source
+    assert "resolvePdfTargetPage" in source
+    assert 'anchor.href = `#pdf-page-${targetPage}`' in source
+    assert "event.preventDefault()" in source
+    assert "onInternalPage(targetPage)" in source
+    assert 'window.location.hash.match(/^#pdf-page-' in source
+    assert 'window.history.replaceState(null, "", `#pdf-page-${pageNumber}`)' in source
+
+
+def test_pdf_workspace_uses_remaining_height_and_compacts_outer_chrome() -> None:
+    styles = _source(STYLES)
+
+    assert ".publication-reader-page:has(.pdfv3-reader)" in styles
+    assert "height: calc(100dvh - var(--tenant-topbar-height, 50px))" in styles
+    assert ".publication-control-banner" in styles
+    assert ".publication-floating-header select" in styles
+    assert ".publication-reader-workspace" in styles
+    assert "flex: 1 1 auto" in styles
+    assert ".publication-navigation" in styles
+    assert "height: 100%" in styles
+    assert ".publication-reader-page:has(.pdfv3-reader) .pdfv3-reader" in styles
+    assert "min-height: 0" in styles

@@ -93,9 +93,13 @@ type PdfDocumentHandle = {
 };
 
 type PdfItemClickTarget = {
+  id?: string | null;
+  subtype?: string | null;
   dest?: string | unknown[] | null;
   pageIndex?: number | null;
   pageNumber?: number | null;
+  url?: string | null;
+  unsafeUrl?: string | null;
 };
 
 export type PdfReaderOutlineItem = {
@@ -217,6 +221,8 @@ function VirtualPdfPage({
   onFormDetected,
   onEdited,
   onTextReady,
+  resolveInternalPage,
+  onInternalPage,
 }: {
   page: number;
   width: number;
@@ -231,20 +237,62 @@ function VirtualPdfPage({
   onFormDetected: (page: number) => void;
   onEdited: (page: number) => void;
   onTextReady: (page: number) => void;
+  resolveInternalPage: (target: PdfItemClickTarget) => Promise<number | null>;
+  onInternalPage: (page: number) => void;
 }) {
+  const pageRef = useRef<HTMLElement | null>(null);
+  const annotationGenerationRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState("");
+  const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
+  const [internalPages, setInternalPages] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    annotationGenerationRef.current += 1;
     setReady(false);
     setFailed("");
+    setInternalTargets({});
+    setInternalPages({});
   }, [page, width]);
+
+  useEffect(() => {
+    if (!ready || !pageRef.current) return;
+    const keys = Object.keys(internalTargets);
+    const annotations = [...pageRef.current.querySelectorAll<HTMLElement>(".annotationLayer .linkAnnotation")];
+    annotations.forEach((annotation, index) => {
+      const id = annotation.dataset.annotationId || annotation.getAttribute("data-annotation-id") || keys[index];
+      const targetPage = id ? internalPages[id] : undefined;
+      const anchor = annotation.querySelector<HTMLAnchorElement>("a");
+      if (!anchor || !targetPage) return;
+      anchor.href = `#pdf-page-${targetPage}`;
+      anchor.dataset.pdfTargetPage = String(targetPage);
+      anchor.setAttribute("aria-label", `${anchor.getAttribute("aria-label") || "PDF link"} · page ${targetPage}`);
+    });
+  }, [internalPages, internalTargets, ready]);
 
   return (
     <article
+      ref={pageRef}
+      id={`pdf-page-${page}`}
       className={`pdfv3-page${ready ? " is-ready" : ""}${active ? " is-current" : ""}`}
       data-page-number={page}
       style={{ "--pdfv3-page-width": `${width}px` } as CSSProperties}
+      onClickCapture={(event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const annotation = target.closest<HTMLElement>(".annotationLayer .linkAnnotation");
+        if (!annotation || !pageRef.current?.contains(annotation)) return;
+        const keys = Object.keys(internalTargets);
+        const annotations = [...pageRef.current.querySelectorAll<HTMLElement>(".annotationLayer .linkAnnotation")];
+        const annotationId = annotation.dataset.annotationId
+          || annotation.getAttribute("data-annotation-id")
+          || keys[annotations.indexOf(annotation)];
+        const targetPage = annotationId ? internalPages[annotationId] : undefined;
+        if (!targetPage) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onInternalPage(targetPage);
+      }}
       onInput={(event: FormEvent<HTMLElement>) => {
         if (safeForm && (event.target as HTMLElement).closest(".annotationLayer")) onEdited(page);
       }}
@@ -282,10 +330,34 @@ function VirtualPdfPage({
           )}
           loading={null}
           error={null}
-          onGetAnnotationsSuccess={(annotations: any[]) => {
-            if (annotations.some((item) => item?.subtype === "Widget" || item?.fieldType)) {
+          onGetAnnotationsSuccess={(annotations: PdfItemClickTarget[]) => {
+            if (annotations.some((item) => item?.subtype === "Widget" || (item as any)?.fieldType)) {
               onFormDetected(page);
             }
+
+            const links = annotations.filter((item) => (
+              item?.subtype === "Link"
+              && !item?.url
+              && !item?.unsafeUrl
+              && Boolean(
+                item?.dest
+                || item?.pageNumber
+                || (item?.pageIndex !== undefined && item?.pageIndex !== null)
+              )
+            ));
+            const targets = Object.fromEntries(
+              links.map((item, index) => [String(item.id || `link-${index}`), item]),
+            );
+            setInternalTargets(targets);
+            const generation = ++annotationGenerationRef.current;
+            void Promise.all(
+              Object.entries(targets).map(async ([id, item]) => [id, await resolveInternalPage(item)] as const),
+            ).then((resolved) => {
+              if (generation !== annotationGenerationRef.current) return;
+              setInternalPages(Object.fromEntries(
+                resolved.filter((entry): entry is readonly [string, number] => Boolean(entry[1])),
+              ));
+            });
           }}
           onLoadSuccess={(loaded: any) => {
             const originalWidth = Number(loaded?.originalWidth || loaded?.view?.[2] || 1);
@@ -423,8 +495,27 @@ export default function PdfReaderCoreV3({
     getItemKey: (index) => index + 1,
   });
 
+  const settleNavigation = useCallback((page: number) => {
+    if (pendingPageRef.current !== page) return;
+    pendingPageRef.current = null;
+    setActionError("");
+    if (navigationTimerRef.current !== null) {
+      window.clearTimeout(navigationTimerRef.current);
+      navigationTimerRef.current = null;
+    }
+  }, []);
+
+  const pageIsAtReadingLine = useCallback((page: number): boolean => {
+    const viewport = viewportRef.current;
+    if (!viewport) return false;
+    const anchor = viewport.scrollTop + PAGE_TOP_INSET;
+    const item = virtualizer.getVirtualItems().find((candidate) => candidate.index === page - 1);
+    return Boolean(item && item.start <= anchor + 2 && item.end > anchor);
+  }, [virtualizer]);
+
   const publishPhysicalPage = useCallback((page: number) => {
     const next = clampPdfValue(page, 1, Math.max(1, pageCount));
+    settleNavigation(next);
     if (next === currentPageRef.current) return;
     currentPageRef.current = next;
     setCurrentPage(next);
@@ -444,14 +535,7 @@ export default function PdfReaderCoreV3({
       return [...new Set(candidates)].slice(0, limit);
     });
 
-    if (pendingPageRef.current === next) {
-      pendingPageRef.current = null;
-      if (navigationTimerRef.current !== null) {
-        window.clearTimeout(navigationTimerRef.current);
-        navigationTimerRef.current = null;
-      }
-    }
-  }, [onPageChange, pageCount, profile.mode]);
+  }, [onPageChange, pageCount, profile.mode, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
     const viewport = viewportRef.current;
@@ -483,11 +567,16 @@ export default function PdfReaderCoreV3({
 
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
     navigationTimerRef.current = window.setTimeout(() => {
-      if (pendingPageRef.current === page) {
-        pendingPageRef.current = null;
-        setActionError(`Page ${page} could not be brought into view. Retry the navigation action.`);
-      }
-      navigationTimerRef.current = null;
+      window.requestAnimationFrame(() => {
+        synchronizePhysicalPage();
+        if (currentPageRef.current === page || pageIsAtReadingLine(page)) {
+          settleNavigation(page);
+        } else if (pendingPageRef.current === page) {
+          pendingPageRef.current = null;
+          setActionError(`Page ${page} could not be brought into view. Retry the navigation action.`);
+        }
+        navigationTimerRef.current = null;
+      });
     }, NAVIGATION_TIMEOUT_MS);
 
     virtualizer.scrollToIndex(page - 1, { align: "start", behavior });
@@ -495,7 +584,14 @@ export default function PdfReaderCoreV3({
       virtualizer.scrollToIndex(page - 1, { align: "start", behavior: "auto" });
       schedulePhysicalSync();
     });
-  }, [pageCount, schedulePhysicalSync, virtualizer]);
+  }, [
+    pageCount,
+    pageIsAtReadingLine,
+    schedulePhysicalSync,
+    settleNavigation,
+    synchronizePhysicalPage,
+    virtualizer,
+  ]);
 
   const setDirtyState = useCallback((value: boolean) => {
     dirtyRef.current = value;
@@ -696,6 +792,18 @@ export default function PdfReaderCoreV3({
     }
   }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
 
+  useEffect(() => {
+    if (!pageCount) return;
+    const openHashDestination = () => {
+      const match = window.location.hash.match(/^#pdf-page-(\d+)$/i);
+      if (!match) return;
+      jump(Number(match[1]), "auto");
+    };
+    openHashDestination();
+    window.addEventListener("hashchange", openHashDestination);
+    return () => window.removeEventListener("hashchange", openHashDestination);
+  }, [jump, pageCount]);
+
   const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
     pdfRef.current = pdf;
     const count = Math.max(1, Number(pdf.numPages || 1));
@@ -734,28 +842,36 @@ export default function PdfReaderCoreV3({
     virtualizer,
   ]);
 
+  const resolvePdfTargetPage = useCallback(async (
+    target: PdfItemClickTarget,
+  ): Promise<number | null> => {
+    let page = Number(target.pageNumber || 0);
+    if (!page && target.pageIndex !== null && target.pageIndex !== undefined) {
+      const index = Number(target.pageIndex);
+      if (Number.isInteger(index) && index >= 0) page = index + 1;
+    }
+
+    let destination = target.dest;
+    const pdf = pdfRef.current;
+    if (!page && typeof destination === "string" && pdf?.getDestination) {
+      destination = await pdf.getDestination(destination).catch(() => null);
+    }
+    if (!page && Array.isArray(destination)) {
+      const reference = destination[0];
+      if (typeof reference === "number") page = reference + 1;
+      else if (reference && pdf?.getPageIndex) {
+        page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
+      }
+    }
+
+    return page > 0 ? clampPdfValue(page, 1, Math.max(1, pageCount)) : null;
+  }, [pageCount]);
+
   const followPdfItem = useCallback(async (target: PdfItemClickTarget) => {
     try {
-      let page = Number(target.pageNumber || 0);
-      if (!page && target.pageIndex !== null && target.pageIndex !== undefined) {
-        const index = Number(target.pageIndex);
-        if (Number.isInteger(index) && index >= 0) page = index + 1;
-      }
-
-      let destination = target.dest;
-      const pdf = pdfRef.current;
-      if (!page && typeof destination === "string" && pdf?.getDestination) {
-        destination = await pdf.getDestination(destination).catch(() => null);
-      }
-      if (!page && Array.isArray(destination)) {
-        const reference = destination[0];
-        if (typeof reference === "number") page = reference + 1;
-        else if (reference && pdf?.getPageIndex) {
-          page = (await pdf.getPageIndex(reference).catch(() => -1)) + 1;
-        }
-      }
-
-      if (page > 0) {
+      const page = await resolvePdfTargetPage(target);
+      if (page) {
+        window.history.replaceState(null, "", `#pdf-page-${page}`);
         jump(page, "auto");
         return;
       }
@@ -765,7 +881,7 @@ export default function PdfReaderCoreV3({
         error instanceof Error ? error.message : "The selected PDF link could not be opened.",
       );
     }
-  }, [jump]);
+  }, [jump, resolvePdfTargetPage]);
 
   const workingFile = useCallback(async () => new File(
     [copyPdfBytes(await serialize())],
@@ -1281,6 +1397,11 @@ export default function PdfReaderCoreV3({
                       if (activeResult?.page === pageNumber) {
                         window.requestAnimationFrame(() => revealSearchResult(activeResult));
                       }
+                    }}
+                    resolveInternalPage={resolvePdfTargetPage}
+                    onInternalPage={(pageNumber) => {
+                      window.history.replaceState(null, "", `#pdf-page-${pageNumber}`);
+                      jump(pageNumber, "auto");
                     }}
                   />
                 </div>
