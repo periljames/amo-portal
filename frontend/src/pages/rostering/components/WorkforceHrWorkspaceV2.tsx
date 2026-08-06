@@ -7,8 +7,8 @@ import { errorMessage } from "../rosterUi";
 import { RosterLoading } from "./RosterShell";
 import { WorkforcePeopleDirectory } from "./WorkforcePeopleDirectory";
 
-const LazyWorkforceHrOperations = lazy(() => import("./WorkforceHrWorkspace")
-  .then((module) => ({ default: module.WorkforceHrWorkspace })));
+const LazyWorkforceOperations = lazy(() => import("./WorkforceOperationsWorkspace")
+  .then((module) => ({ default: module.WorkforceOperationsWorkspace })));
 
 type WorkspaceSection = "people" | "operations";
 
@@ -43,7 +43,7 @@ export function WorkforceHrWorkspaceV2() {
       {section === "operations" ? (
         <div className="hr-operations-shell">
           <Suspense fallback={<RosterLoading label="Opening Workforce operations…" />}>
-            <LazyWorkforceHrOperations />
+            <LazyWorkforceOperations />
           </Suspense>
         </div>
       ) : null}
