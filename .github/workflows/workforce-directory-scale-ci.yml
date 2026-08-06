@@ -5,11 +5,13 @@ name: Workforce Directory Scale CI
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "backend/amodb/apps/workforce/**"
-      - "backend/amodb/alembic/versions/workforce_20260806_bulk_operations.py"
+      - "backend/amodb/alembic/versions/workforce_20260806_*.py"
       - "backend/amodb/apps/rostering/application_router.py"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/workforceHr.ts"
       - "frontend/src/types/workforceHr.ts"
+      - "frontend/tests/e2e/workforce-governance-scale.spec.ts"
+      - "deploy/saas/docker-compose.yml"
       - ".github/workflows/workforce-directory-scale-ci.yml"
   workflow_dispatch:
 
@@ -69,11 +71,20 @@ jobs:
           required = {
               "/workforce/hr/people",
               "/workforce/hr/people/facets",
+              "/workforce/hr/people/governed",
+              "/workforce/hr/people/governed/facets",
+              "/workforce/hr/people/governed/selection-preview",
+              "/workforce/hr/supervisors",
+              "/workforce/hr/organization-units",
+              "/workforce/hr/job-families",
+              "/workforce/hr/grades",
+              "/workforce/hr/positions",
               "/workforce/hr/people/default-day-pattern/preview",
               "/workforce/hr/people/export",
               "/workforce/hr/people/contracts/preview",
               "/workforce/hr/bulk-operations/contracts",
               "/workforce/hr/bulk-operations/default-day-pattern",
+              "/workforce/hr/bulk-operations/personnel",
               "/workforce/hr/bulk-operations/{operation_id}",
               "/workforce/hr/bulk-operations/{operation_id}/items",
               "/workforce/hr/bulk-operations/{operation_id}/failures.csv",
@@ -85,14 +96,28 @@ jobs:
       - name: Upgrade clean PostgreSQL schema
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Run Workforce scale, lock and bulk regressions
+      - name: Run Workforce scale, governance, lock and bulk regressions
         working-directory: backend
         run: >-
           pytest -q
           amodb/apps/workforce/tests/test_default_day_pattern_postgres_locking.py
           amodb/apps/workforce/tests/test_hr_people_directory.py
           amodb/apps/workforce/tests/test_hr_people_directory_scale.py
+          amodb/apps/workforce/tests/test_workforce_governance.py
           amodb/apps/workforce/tests/test_bulk_operations.py
+      - name: Smoke standalone Workforce worker
+        working-directory: backend
+        run: python -m amodb.apps.workforce.worker_main --once
+      - name: Validate Workforce production service
+        env:
+          DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
+          CORS_ALLOWED_ORIGINS: https://portal.example.invalid
+          MQTT_BROKER_INTERNAL_URL: mqtt://broker.example.invalid:1883
+          MQTT_BROKER_WS_URL: wss://broker.example.invalid/mqtt
+          REALTIME_BROKER_WEBHOOK_SECRET: ci-broker-webhook-secret-more-than-32-characters
+          REALTIME_GATEWAY_USERNAME: amo-gateway
+          REALTIME_GATEWAY_PASSWORD: ci-gateway-password-more-than-24-characters
+        run: docker compose -f deploy/saas/docker-compose.yml config
 
   frontend:
     name: Workforce directory and batch setup frontend
@@ -121,6 +146,7 @@ jobs:
             "compilerOptions": { "noEmit": true },
             "include": [
               "src/pages/rostering/components/WorkforceBulkSetupPanel.tsx",
+              "src/pages/rostering/components/WorkforceGovernancePanel.tsx",
               "src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx",
               "src/services/workforceHr.ts",
               "src/types/workforceHr.ts"
@@ -137,6 +163,7 @@ jobs:
           src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx
           src/pages/rostering/components/WorkforcePeopleDirectory.tsx
           src/pages/rostering/components/WorkforceBulkSetupPanel.tsx
+          src/pages/rostering/components/WorkforceGovernancePanel.tsx
           src/pages/rostering/components/WorkforceOperationsWorkspace.tsx
           src/services/workforceHr.ts
           src/types/workforceHr.ts
