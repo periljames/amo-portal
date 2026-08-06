@@ -13,6 +13,7 @@ import {
   type ReliabilityProgrammeVersion,
   type ReliabilityThresholdVersion,
 } from "../../services/reliability";
+import "./ReliabilityFormulaLifecycleControls.css";
 
 const EMPTY_CAPABILITIES: ReliabilityCapabilitySnapshot = { capabilities: [], superuser: false };
 
