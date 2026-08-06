@@ -10,7 +10,7 @@ from amodb.apps.reliability import workbook_parity
 from amodb.apps.reliability import workbook_parity_defaults
 from amodb.apps.reliability import workbook_parity_statistics
 
-EXPECTED_DATASETS = {"AU", "AI", "PM", "OOS", "RM", "SM", "STRUCTURES", "RECURRING", "ECTM"}
+EXPECTED_DATASETS = {"AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "STRUCTURES", "RECURRING", "ECTM", "ADD"}
 
 
 def test_catalog_covers_every_required_workbook_register():
@@ -26,6 +26,41 @@ def test_catalog_covers_every_required_workbook_register():
 def test_aircraft_utilisation_contract_has_aircraft_engine_and_apu_exposure():
     keys = {field.key for field in workbook_parity.DATASET_CATALOG[workbook_parity.WorkbookDatasetCode.AU].fields}
     assert {"flight_hours", "flight_cycles", "landings", "engine_1_hours", "engine_1_cycles", "engine_2_hours", "engine_2_cycles", "apu_hours", "apu_cycles", "source_reference"} <= keys
+
+
+def test_flight_interruption_rates_retain_evidence_and_withhold_missing_denominators():
+    definition = workbook_parity.DATASET_CATALOG[workbook_parity.WorkbookDatasetCode.FI]
+    normalised, derived = workbook_parity._normalise_payload(definition, {
+        "reporting_period": "2026-08-01",
+        "interruption_type": "TECHNICAL_DELAY",
+        "departures": 100,
+        "technical_delays": 2,
+        "delay_minutes": 46,
+        "dispatch_successes": 98,
+        "scheduled_departures": 102,
+        "completed_departures": 100,
+        "ata_interruptions": 2,
+        "flight_hours_denominator": "240.500",
+        "defect_description": "Starter-generator dispatch interruption.",
+    })
+    assert normalised["flight_hours_denominator"] == "240.500"
+    assert derived["dispatch_reliability_pct"] == "98.000"
+    assert derived["dispatch_reliability_numerator"] == 98
+    assert derived["dispatch_reliability_denominator"] == 100
+    assert derived["schedule_completion_pct"] == "98.039"
+    assert derived["ata_interruption_rate_per_100_fh"] == "0.832"
+
+    _, withheld = workbook_parity._normalise_payload(definition, {
+        "reporting_period": "2026-08-01",
+        "interruption_type": "TECHNICAL_DELAY",
+        "departures": 0,
+        "dispatch_successes": 0,
+        "ata_interruptions": 1,
+        "defect_description": "No valid exposure available.",
+    })
+    assert withheld["dispatch_reliability_pct"] is None
+    assert withheld["ata_interruption_rate_per_100_fh"] is None
+    assert "denominator" in withheld["dispatch_reliability_withheld_reason"].lower()
 
 
 def test_oos_derives_downtime_availability_and_validates_chronology():
@@ -60,9 +95,55 @@ def test_unscheduled_removal_requires_failure_reason_and_exact_life_values():
         workbook_parity._normalise_payload(definition, {**payload, "cycles_at_removal": "1811.5"})
 
 
+def test_shop_report_enforces_chronology_and_exclusive_fault_outcome():
+    definition = workbook_parity.DATASET_CATALOG[workbook_parity.WorkbookDatasetCode.SR]
+    payload = {
+        "component_description": "Starter-generator",
+        "component_part_number": "23085-001",
+        "component_serial_number": "SG-1001",
+        "shop_visit_reference": "SV-2026-0042",
+        "induction_date": "2026-08-01",
+        "release_date": "2026-08-08",
+        "confirmed_fault": True,
+        "no_fault_found": False,
+        "finding_description": "Open field winding confirmed.",
+        "corrective_action": "Rewound and bench tested.",
+        "supplier": "Approved Repair Agency",
+        "release_document_reference": "EASA-F1-0042",
+    }
+    _, derived = workbook_parity._normalise_payload(definition, payload)
+    assert derived["shop_turnaround_days"] == 7
+    with pytest.raises(HTTPException, match="cannot be both"):
+        workbook_parity._normalise_payload(definition, {**payload, "no_fault_found": True})
+    with pytest.raises(HTTPException, match="cannot precede"):
+        workbook_parity._normalise_payload(definition, {**payload, "release_date": "2026-07-31"})
+
+
 def test_ectm_contract_includes_numeric_and_qualitative_engine_health_fields():
     keys = {field.key for field in workbook_parity.DATASET_CATALOG[workbook_parity.WorkbookDatasetCode.ECTM].fields}
     assert {"itt_c", "ng_pct", "nh_pct", "fuel_flow", "oil_pressure", "oil_temperature", "vibration", "oil_analysis_status", "oil_analysis_reference", "borescope_status", "borescope_reference", "trend_status", "analyst_comments", "oem_recommendation", "action_required"} <= keys
+
+
+def test_add_deferral_contract_derives_closure_duration_and_rejects_bad_dates():
+    definition = workbook_parity.DATASET_CATALOG[workbook_parity.WorkbookDatasetCode.ADD]
+    payload = {
+        "deferral_type": "MEL",
+        "tech_log_reference": "TL-2481",
+        "defect_description": "Weather radar inoperative.",
+        "occurrence_date": "2026-08-01",
+        "mel_cdl_reference": "MEL 34-41-01",
+        "category": "C",
+        "expiry_date": "2026-08-11",
+        "rectification_date": "2026-08-08",
+        "status": "RECTIFIED",
+        "closure_reference": "WO-2026-4412",
+    }
+    _, derived = workbook_parity._normalise_payload(definition, payload)
+    assert derived["closure_duration_days"] == 7
+    with pytest.raises(HTTPException, match="expiry cannot precede"):
+        workbook_parity._normalise_payload(definition, {**payload, "expiry_date": "2026-07-31"})
+    with pytest.raises(HTTPException, match="Rectification date cannot precede"):
+        workbook_parity._normalise_payload(definition, {**payload, "rectification_date": "2026-07-31"})
 
 
 def test_default_mapping_profiles_have_full_field_coverage():
@@ -88,8 +169,8 @@ def test_report_layouts_cover_operator_output_and_type_specific_sections():
     assert set(operator["datasets"]) == EXPECTED_DATASETS
     assert operator["missing_datasets"] == []
     assert operator["has_statistical_alerts"] is True
-    assert {"AU", "PM", "RM", "OOS", "RECURRING", "ECTM"} <= set(contract["layouts"]["C208B-RP"]["datasets"])
-    assert {"AU", "AI", "SM", "STRUCTURES", "RM", "OOS", "RECURRING", "ECTM"} <= set(contract["layouts"]["DHC8-RP"]["datasets"])
+    assert {"AU", "FI", "PM", "RM", "SR", "OOS", "RECURRING", "ECTM", "ADD"} <= set(contract["layouts"]["C208B-RP"]["datasets"])
+    assert {"AU", "AI", "FI", "SM", "SR", "STRUCTURES", "RM", "OOS", "RECURRING", "ECTM", "ADD"} <= set(contract["layouts"]["DHC8-RP"]["datasets"])
 
 
 def test_statistical_series_contains_zero_count_periods():
