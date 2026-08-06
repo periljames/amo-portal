@@ -318,12 +318,14 @@ def test_postgresql_rejects_update_and_delete_for_every_immutable_u5_record(engi
                     id, amo_id, aircraft_serial_number, operation_date, techlog_no,
                     flight_hours, cycles, nil_operation, source_type, status,
                     revision_no, idempotency_key, content_hash,
-                    created_by_user_id, posted_by_user_id, posted_at
+                    created_by_user_id, posted_by_user_id, posted_at,
+                    created_at, updated_at
                 ) VALUES (
                     :id, :amo_id, :serial, CURRENT_DATE, :techlog,
                     1.25, 1, false, 'MANUAL', 'POSTED',
                     1, :idempotency_key, :content_hash,
-                    :user_id, :user_id, CURRENT_TIMESTAMP
+                    :user_id, :user_id, CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
                 """
             ),
