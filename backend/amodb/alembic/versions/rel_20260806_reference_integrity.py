@@ -18,56 +18,84 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    # Replace the remaining binary floating-point persistence in the legacy
-    # Reliability trend/KPI paths with fixed-point numeric storage.
+def _columns(table_name: str) -> set[str]:
+    inspector = sa.inspect(op.get_bind())
+    if table_name not in inspector.get_table_names():
+        return set()
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _alter_if_present(
+    table_name: str,
+    column_name: str,
+    *,
+    existing_type: sa.types.TypeEngine,
+    target_type: sa.types.TypeEngine,
+    nullable: bool,
+    using: str,
+) -> None:
+    if column_name not in _columns(table_name):
+        return
     op.alter_column(
+        table_name,
+        column_name,
+        existing_type=existing_type,
+        type_=target_type,
+        existing_nullable=nullable,
+        postgresql_using=using,
+    )
+
+
+def upgrade() -> None:
+    # Some deployments retain the pre-cutover trend/KPI tables while clean
+    # installations correctly omit them. Convert only retained relations.
+    _alter_if_present(
         "reliability_defect_trends",
         "utilisation_hours",
         existing_type=sa.Float(),
-        type_=sa.Numeric(20, 6),
-        existing_nullable=False,
-        postgresql_using="ROUND(utilisation_hours::numeric, 6)",
+        target_type=sa.Numeric(20, 6),
+        nullable=False,
+        using="ROUND(utilisation_hours::numeric, 6)",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_defect_trends",
         "utilisation_cycles",
         existing_type=sa.Float(),
-        type_=sa.Numeric(20, 6),
-        existing_nullable=False,
-        postgresql_using="ROUND(utilisation_cycles::numeric, 6)",
+        target_type=sa.Numeric(20, 6),
+        nullable=False,
+        using="ROUND(utilisation_cycles::numeric, 6)",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_defect_trends",
         "defect_rate_per_100_fh",
         existing_type=sa.Float(),
-        type_=sa.Numeric(20, 9),
-        existing_nullable=True,
-        postgresql_using="ROUND(defect_rate_per_100_fh::numeric, 9)",
+        target_type=sa.Numeric(20, 9),
+        nullable=True,
+        using="ROUND(defect_rate_per_100_fh::numeric, 9)",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "value",
         existing_type=sa.Float(),
-        type_=sa.Numeric(24, 9),
-        existing_nullable=False,
-        postgresql_using="ROUND(value::numeric, 9)",
+        target_type=sa.Numeric(24, 9),
+        nullable=False,
+        using="ROUND(value::numeric, 9)",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "numerator",
         existing_type=sa.Float(),
-        type_=sa.Numeric(24, 9),
-        existing_nullable=True,
-        postgresql_using="ROUND(numerator::numeric, 9)",
+        target_type=sa.Numeric(24, 9),
+        nullable=True,
+        using="ROUND(numerator::numeric, 9)",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "denominator",
         existing_type=sa.Float(),
-        type_=sa.Numeric(24, 9),
-        existing_nullable=True,
-        postgresql_using="ROUND(denominator::numeric, 9)",
+        target_type=sa.Numeric(24, 9),
+        nullable=True,
+        using="ROUND(denominator::numeric, 9)",
     )
 
     op.execute(
@@ -226,51 +254,51 @@ def downgrade() -> None:
         DROP FUNCTION IF EXISTS prevent_reliability_reference_evidence_mutation();
         """
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "denominator",
         existing_type=sa.Numeric(24, 9),
-        type_=sa.Float(),
-        existing_nullable=True,
-        postgresql_using="denominator::double precision",
+        target_type=sa.Float(),
+        nullable=True,
+        using="denominator::double precision",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "numerator",
         existing_type=sa.Numeric(24, 9),
-        type_=sa.Float(),
-        existing_nullable=True,
-        postgresql_using="numerator::double precision",
+        target_type=sa.Float(),
+        nullable=True,
+        using="numerator::double precision",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_kpis",
         "value",
         existing_type=sa.Numeric(24, 9),
-        type_=sa.Float(),
-        existing_nullable=False,
-        postgresql_using="value::double precision",
+        target_type=sa.Float(),
+        nullable=False,
+        using="value::double precision",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_defect_trends",
         "defect_rate_per_100_fh",
         existing_type=sa.Numeric(20, 9),
-        type_=sa.Float(),
-        existing_nullable=True,
-        postgresql_using="defect_rate_per_100_fh::double precision",
+        target_type=sa.Float(),
+        nullable=True,
+        using="defect_rate_per_100_fh::double precision",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_defect_trends",
         "utilisation_cycles",
         existing_type=sa.Numeric(20, 6),
-        type_=sa.Float(),
-        existing_nullable=False,
-        postgresql_using="utilisation_cycles::double precision",
+        target_type=sa.Float(),
+        nullable=False,
+        using="utilisation_cycles::double precision",
     )
-    op.alter_column(
+    _alter_if_present(
         "reliability_defect_trends",
         "utilisation_hours",
         existing_type=sa.Numeric(20, 6),
-        type_=sa.Float(),
-        existing_nullable=False,
-        postgresql_using="utilisation_hours::double precision",
+        target_type=sa.Float(),
+        nullable=False,
+        using="utilisation_hours::double precision",
     )

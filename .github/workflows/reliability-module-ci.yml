@@ -118,7 +118,13 @@ jobs:
               run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_calculation_runs'")).scalars())
               constraints = set(connection.execute(text("SELECT conname FROM pg_constraint WHERE conrelid IN ('reliability_metric_definitions'::regclass,'reliability_calculation_runs'::regclass)")).scalars())
               workbook_tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'reliability_%'")).scalars())
-              numeric_columns = list(connection.execute(text("SELECT data_type FROM information_schema.columns WHERE (table_name='reliability_defect_trends' AND column_name IN ('utilisation_hours','utilisation_cycles','defect_rate_per_100_fh')) OR (table_name='reliability_kpis' AND column_name IN ('value','numerator','denominator'))")).scalars())
+              retained_legacy_columns = list(connection.execute(text("""
+                  SELECT table_name, column_name, data_type
+                  FROM information_schema.columns
+                  WHERE (table_name='reliability_defect_trends' AND column_name IN ('utilisation_hours','utilisation_cycles','defect_rate_per_100_fh'))
+                     OR (table_name='reliability_kpis' AND column_name IN ('value','numerator','denominator'))
+                  ORDER BY table_name, column_name
+              """)).mappings())
           failures = []
           if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
           if versions != ['rel_20260806_reference_integrity']: failures.append(f'Alembic version rows are {versions}.')
@@ -126,7 +132,8 @@ jobs:
           if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
           if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
           if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook tables: {sorted(expected_workbook_tables - workbook_tables)}.')
-          if len(numeric_columns) != 6 or any(value != 'numeric' for value in numeric_columns): failures.append(f'Legacy Reliability analytical columns are not all fixed-point numeric: {numeric_columns}.')
+          non_numeric = [dict(row) for row in retained_legacy_columns if row['data_type'] != 'numeric']
+          if non_numeric: failures.append(f'Retained legacy Reliability analytical columns are not fixed-point numeric: {non_numeric}.')
           if failures:
               print('\n'.join(failures)); sys.exit(1)
           print('formula, workbook and exactness schema verification passed')
