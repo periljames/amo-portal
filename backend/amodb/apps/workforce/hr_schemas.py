@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class HrSchema(BaseModel):
@@ -40,10 +40,14 @@ class HrPersonReadiness(HrSchema):
     email: Optional[str] = None
     has_effective_contract: bool = False
     uses_default_day_pattern: bool = False
+    account_role: Optional[str] = None
     position_title: Optional[str] = None
+    department_id: Optional[str] = None
     department_code: Optional[str] = None
+    department_name: Optional[str] = None
     employment_status: Optional[str] = None
     contract_type: Optional[str] = None
+    contract_state: Literal["EFFECTIVE", "FUTURE", "MISSING"] = "MISSING"
     contract_effective_from: Optional[date] = None
     contract_effective_to: Optional[date] = None
     primary_base_station_id: Optional[str] = None
@@ -60,7 +64,10 @@ class HrPersonReadiness(HrSchema):
     work_pattern_code: Optional[str] = None
     work_pattern_name: Optional[str] = None
     work_pattern_effective_from: Optional[date] = None
+    pattern_state: Literal["DEFAULT", "ASSIGNED", "MISSING"] = "MISSING"
     active_leave_status: Optional[str] = None
+    group_ids: list[str] = Field(default_factory=list)
+    group_names: list[str] = Field(default_factory=list)
     readiness_state: str
     readiness_reasons: list[str] = Field(default_factory=list)
 
@@ -71,6 +78,83 @@ class HrPeoplePage(HrSchema):
     page_size: int
     total: int
     pages: int
+
+
+class HrPeopleFilterInput(HrSchema):
+    search: Optional[str] = Field(default=None, max_length=200)
+    department_id: Optional[str] = None
+    role: Optional[str] = None
+    position_title: Optional[str] = Field(default=None, max_length=255)
+    contract_type: Optional[str] = None
+    employment_status: Optional[str] = None
+    base_station_id: Optional[str] = None
+    group_id: Optional[str] = None
+    readiness_state: Optional[Literal["READY", "NEEDS_ATTENTION", "BLOCKED"]] = None
+    contract_state: Optional[Literal["EFFECTIVE", "FUTURE", "MISSING"]] = None
+    pattern_state: Optional[Literal["DEFAULT", "ASSIGNED", "MISSING"]] = None
+    expires_within_days: Optional[int] = Field(default=None, ge=1, le=365)
+    sort_by: Literal["name", "staff_code", "department", "role", "position_title"] = "name"
+    sort_dir: Literal["asc", "desc"] = "asc"
+
+
+class HrFilterOption(HrSchema):
+    value: str
+    label: str
+    count: int
+    secondary: Optional[str] = None
+
+
+class HrPeopleFacets(HrSchema):
+    departments: list[HrFilterOption] = Field(default_factory=list)
+    roles: list[HrFilterOption] = Field(default_factory=list)
+    position_titles: list[HrFilterOption] = Field(default_factory=list)
+    contract_types: list[HrFilterOption] = Field(default_factory=list)
+    employment_statuses: list[HrFilterOption] = Field(default_factory=list)
+    bases: list[HrFilterOption] = Field(default_factory=list)
+    groups: list[HrFilterOption] = Field(default_factory=list)
+    readiness_states: list[HrFilterOption] = Field(default_factory=list)
+    contract_states: list[HrFilterOption] = Field(default_factory=list)
+    pattern_states: list[HrFilterOption] = Field(default_factory=list)
+
+
+class HrPeopleSelection(HrSchema):
+    mode: Literal["EXPLICIT", "FILTERED"]
+    user_ids: list[str] = Field(default_factory=list, max_length=10000)
+    exclude_user_ids: list[str] = Field(default_factory=list, max_length=10000)
+    filters: HrPeopleFilterInput = Field(default_factory=HrPeopleFilterInput)
+
+    @model_validator(mode="after")
+    def validate_selection(self):
+        if self.mode == "EXPLICIT" and not self.user_ids:
+            raise ValueError("At least one user must be selected")
+        if self.mode == "FILTERED" and self.user_ids:
+            raise ValueError("Filtered selections must not include explicit user IDs")
+        return self
+
+
+class HrDefaultDayBatchPreview(HrSchema):
+    matched_count: int
+    eligible_count: int
+    assignable_count: int
+    already_assigned_count: int
+    ineligible_count: int
+    capped: bool = False
+
+
+class HrDefaultDayBatchApplyRequest(HrSchema):
+    selection: HrPeopleSelection
+    expected_match_count: int = Field(ge=0, le=10000)
+
+
+class HrDefaultDayBatchResult(HrSchema):
+    shift_template_id: str
+    work_pattern_id: str
+    matched_count: int
+    eligible_count: int
+    assigned_count: int
+    already_assigned_count: int
+    ineligible_count: int
+    skipped_conflict_count: int
 
 
 class HrOvertimeRequestRead(HrSchema):
@@ -138,6 +222,7 @@ class HrDashboardResponse(HrSchema):
     pending_overtime: list[HrOvertimeRequestRead]
     attendance_exceptions: list[HrAttendanceExceptionRead] = Field(default_factory=list)
     people: list[HrPersonReadiness]
+
 
 class HrDefaultDayBootstrapResponse(HrSchema):
     shift_template_id: str
