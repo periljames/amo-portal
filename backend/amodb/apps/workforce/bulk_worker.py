@@ -50,6 +50,7 @@ def process_operation(operation_id: str) -> None:
         with WriteSessionLocal() as db:
             operation = db.query(bulk_models.WorkforceBulkOperation).filter(
                 bulk_models.WorkforceBulkOperation.id == operation_id,
+                bulk_models.WorkforceBulkOperation.status == "QUEUED",
             ).with_for_update(skip_locked=True).first()
             if operation is None or operation.status in TERMINAL_OPERATION_STATUSES:
                 return
