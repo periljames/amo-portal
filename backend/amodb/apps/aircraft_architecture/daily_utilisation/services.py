@@ -8,6 +8,7 @@ import json
 from typing import Iterable
 
 HOURS_QUANTUM = Decimal("0.01")
+CONTROLLED_ROLES = {"ENGINE", "PROPELLER", "APU", "OTHER"}
 SHARED_TARGETS = {"ENGINE", "PROPELLER"}
 
 
@@ -26,22 +27,12 @@ def as_cycles(value) -> int | None:
     return int(parsed)
 
 
-def classify_component(position: str | None, description: str | None) -> str:
-    text = f"{position or ''} {description or ''}".upper()
-    if "APU" in text or "AUXILIARY POWER" in text:
-        return "APU"
-    if "PROP" in text:
-        return "PROPELLER"
-    if "ENGINE" in text or "ENG " in f"{text} ":
-        return "ENGINE"
-    return "COMPONENT"
-
-
 @dataclass(frozen=True)
 class ComponentState:
     component_id: int
     position: str
     description: str | None
+    role: str
     current_hours: Decimal | None
     current_cycles: int | None
 
@@ -71,6 +62,13 @@ class Exposure:
     override_reason: str | None
 
 
+def _controlled_role(value: str) -> str:
+    role = str(value or "").strip().upper()
+    if role not in CONTROLLED_ROLES:
+        raise ValueError(f"component utilisation role is not controlled: {value!r}")
+    return "COMPONENT" if role == "OTHER" else role
+
+
 def _exposure(
     *,
     target_type: str,
@@ -86,11 +84,21 @@ def _exposure(
     if override is None:
         hours_delta = default_hours
         cycles_delta = default_cycles
-        derivation = "SHARED_DAILY" if target_type in SHARED_TARGETS or target_type == "AIRFRAME" else "ZERO_DEFAULT"
+        derivation = (
+            "SHARED_DAILY"
+            if target_type in SHARED_TARGETS or target_type == "AIRFRAME"
+            else "ZERO_DEFAULT"
+        )
         reason = None
     else:
-        hours_delta = as_hours(override.hours_delta if override.hours_delta is not None else default_hours) or Decimal("0.00")
-        cycles_delta = override.cycles_delta if override.cycles_delta is not None else default_cycles
+        hours_delta = as_hours(
+            override.hours_delta if override.hours_delta is not None else default_hours
+        ) or Decimal("0.00")
+        cycles_delta = (
+            override.cycles_delta
+            if override.cycles_delta is not None
+            else default_cycles
+        )
         derivation = "OVERRIDE"
         reason = override.reason.strip()
 
@@ -132,7 +140,9 @@ def build_exposures(
     known_ids = {item.component_id for item in component_rows}
     unknown = set(override_map) - known_ids
     if unknown:
-        raise ValueError(f"component overrides are not installed on this aircraft: {sorted(unknown)}")
+        raise ValueError(
+            f"component overrides are not installed on this aircraft: {sorted(unknown)}"
+        )
 
     exposures = [
         _exposure(
@@ -147,8 +157,11 @@ def build_exposures(
             override=None,
         )
     ]
-    for component in sorted(component_rows, key=lambda item: (item.position, item.component_id)):
-        target_type = classify_component(component.position, component.description)
+    for component in sorted(
+        component_rows,
+        key=lambda item: (item.position, item.component_id),
+    ):
+        target_type = _controlled_role(component.role)
         if target_type in SHARED_TARGETS:
             default_hours, default_cycles = hours, daily_cycles
         else:
@@ -174,15 +187,28 @@ def blockers_for(exposures: Iterable[Exposure]) -> list[str]:
     for item in exposures:
         if item.baseline_missing:
             blockers.append(
-                f"{item.component_position} has no approved utilisation baseline for the requested increment"
+                f"{item.component_position} has no approved utilisation baseline "
+                "for the requested increment"
             )
     return blockers
 
 
 def content_hash(payload: dict) -> str:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def default_idempotency_key(serial_number: str, operation_date: date, techlog_no: str) -> str:
-    return f"MANUAL:{serial_number}:{operation_date.isoformat()}:{techlog_no.strip().upper()}"
+def default_idempotency_key(
+    serial_number: str,
+    operation_date: date,
+    techlog_no: str,
+) -> str:
+    return (
+        f"MANUAL:{serial_number}:{operation_date.isoformat()}:"
+        f"{techlog_no.strip().upper()}"
+    )
