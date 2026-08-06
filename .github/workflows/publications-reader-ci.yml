@@ -132,19 +132,31 @@ jobs:
           --label "Publications Reader frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - id: unit
+      - id: engine_unit
         name: Run browser PDF engine unit tests
         continue-on-error: true
         working-directory: frontend
-        run: >-
-          npm exec -- vitest run
-          src/pages/manuals/pdfReaderEngine.test.ts
-          src/pages/manuals/pdfReaderVirtualization.test.ts
-      - id: build
-        name: Build Publications frontend
+        run: npm exec -- vitest run src/pages/manuals/pdfReaderEngine.test.ts
+      - id: virtual_unit
+        name: Run PDF virtualization unit tests
         continue-on-error: true
         working-directory: frontend
-        run: npm run build
+        run: npm exec -- vitest run src/pages/manuals/pdfReaderVirtualization.test.ts
+      - id: typecheck
+        name: Typecheck Publications frontend
+        continue-on-error: true
+        working-directory: frontend
+        run: npx tsc -b
+      - id: modal_audit
+        name: Run modal layer audit
+        continue-on-error: true
+        working-directory: frontend
+        run: npm run check:modals
+      - id: vite
+        name: Build Publications Vite bundle
+        continue-on-error: true
+        working-directory: frontend
+        run: npx vite build
       - name: Enforce Publications Reader validation
         if: always()
         env:
@@ -154,17 +166,35 @@ jobs:
           INTERACTION: ${{ steps.interaction.outcome }}
           CAPABILITY: ${{ steps.capability.outcome }}
           FORMS: ${{ steps.forms.outcome }}
-          UNIT: ${{ steps.unit.outcome }}
-          BUILD: ${{ steps.build.outcome }}
+          ENGINE_UNIT: ${{ steps.engine_unit.outcome }}
+          VIRTUAL_UNIT: ${{ steps.virtual_unit.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          MODAL_AUDIT: ${{ steps.modal_audit.outcome }}
+          VITE: ${{ steps.vite.outcome }}
         run: |
-          printf 'engine=%s\nsource=%s\nhardening=%s\ninteraction=%s\ncapability=%s\nforms=%s\nunit=%s\nbuild=%s\n' \
-            "$ENGINE" "$SOURCE" "$HARDENING" "$INTERACTION" "$CAPABILITY" "$FORMS" "$UNIT" "$BUILD"
           failures=0
-          for result in "$ENGINE" "$SOURCE" "$HARDENING" "$INTERACTION" "$CAPABILITY" "$FORMS" "$UNIT" "$BUILD"; do
-            if [ "$result" != "success" ]; then failures=$((failures + 1)); fi
-          done
+          check_result() {
+            name="$1"
+            result="$2"
+            printf '%s=%s\n' "$name" "$result"
+            if [ "$result" != "success" ]; then
+              failures=$((failures + 1))
+              echo "::error title=$name failed::$name completed with outcome $result."
+            fi
+          }
+          check_result engine "$ENGINE"
+          check_result source "$SOURCE"
+          check_result hardening "$HARDENING"
+          check_result interaction "$INTERACTION"
+          check_result capability "$CAPABILITY"
+          check_result forms "$FORMS"
+          check_result engine_unit "$ENGINE_UNIT"
+          check_result virtual_unit "$VIRTUAL_UNIT"
+          check_result typecheck "$TYPECHECK"
+          check_result modal_audit "$MODAL_AUDIT"
+          check_result vite "$VITE"
           if [ "$failures" -ne 0 ]; then
-            echo "::error title=Publications Reader validation failed::$failures validation group(s) failed; inspect the named steps above."
+            echo "::error title=Publications Reader validation failed::$failures validation group(s) failed."
             exit 1
           fi
 
