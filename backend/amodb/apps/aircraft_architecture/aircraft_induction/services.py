@@ -39,6 +39,18 @@ def _canonical_hash(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _source_key(
+    reference: str,
+    source_revision: str,
+    checksum_sha256: str | None,
+) -> tuple[str, str, str | None]:
+    return (
+        reference.strip(),
+        source_revision.strip(),
+        checksum_sha256.strip().lower() if checksum_sha256 else None,
+    )
+
+
 def require_human_induction_authority(user: account_models.User) -> str:
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Active user account is required")
@@ -155,6 +167,10 @@ def _validate_components(
     revision: catalogue_models.AircraftTypeTemplateRevision,
 ) -> list[tuple[schemas.ComponentInductionInput, catalogue_models.AircraftTypeComponentDefinition, str]]:
     positions, definitions = _configuration_lookup(revision)
+    approved_sources = {
+        _source_key(source.reference, source.source_revision, source.checksum_sha256)
+        for source in revision.sources
+    }
     seen_positions: set[str] = set()
     resolved = []
     for item in payload.components:
@@ -175,6 +191,18 @@ def _validate_components(
             raise HTTPException(
                 status_code=422,
                 detail=f"Part number is not approved by definition {item.definition_code}",
+            )
+        if _source_key(
+            item.source_reference,
+            item.source_revision,
+            item.source_checksum_sha256,
+        ) not in approved_sources:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Component {item.definition_code} source does not exactly match "
+                    "a controlled source on the published type revision"
+                ),
             )
         resolved.append((item, definition, _component_role(definition)))
     required_positions = {row.code for row in revision.positions if row.required}
