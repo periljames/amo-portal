@@ -114,19 +114,26 @@ class ContentSourceCreate(BaseModel):
     effective_date: date | None = None
     checksum_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     authority: str = Field(min_length=1, max_length=80)
-    provenance_json: dict[str, Any]
+    provenance_json: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("checksum_sha256")
     @classmethod
     def checksum_lower(cls, value: str) -> str:
         return value.lower()
 
-    @field_validator("provenance_json")
-    @classmethod
-    def require_provenance(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not value:
+    @model_validator(mode="after")
+    def require_or_build_provenance(self):
+        if "provenance_json" not in self.model_fields_set:
+            self.provenance_json = {
+                "authority": self.authority,
+                "source_reference": self.reference,
+                "source_revision": self.source_revision,
+                "checksum_sha256": self.checksum_sha256,
+                "provenance_basis": "CONTROLLED_SOURCE_TUPLE",
+            }
+        elif not self.provenance_json:
             raise ValueError("Controlled sources require provenance metadata")
-        return value
+        return self
 
 
 class ContentPositionCreate(BaseModel):
@@ -190,10 +197,7 @@ class ContentRevisionCreate(BaseModel):
     @model_validator(mode="after")
     def reject_duplicate_controlled_identities(self):
         identities = {
-            "source": [
-                (row.reference, row.source_revision)
-                for row in self.sources
-            ],
+            "source": [(row.reference, row.source_revision) for row in self.sources],
             "position": [row.code for row in self.positions],
             "component": [row.definition_code for row in self.components],
             "task": [row.task_code for row in self.tasks],
