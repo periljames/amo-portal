@@ -20,6 +20,17 @@ export type WorkforceHrPatternAssignmentCreate = {
   cycle_anchor_date: string;
 };
 
+const defaultDayPreviewTokens = new Map<string, string>();
+
+function selectionKey(selection: HrPeopleSelection): string {
+  const userIds = [...(selection.user_ids || [])].sort();
+  const excludedIds = [...(selection.exclude_user_ids || [])].sort();
+  const filters = Object.fromEntries(
+    Object.entries(selection.filters || {}).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  return JSON.stringify({ mode: selection.mode, user_ids: userIds, exclude_user_ids: excludedIds, filters });
+}
+
 export function getWorkforceHrDashboard(peopleLimit = 50): Promise<HrDashboard> {
   return apiJson(`/workforce/hr/dashboard${queryString({ people_limit: peopleLimit })}`, {
     offline: { cacheTtlMs: 60_000 },
@@ -41,28 +52,43 @@ export function getWorkforceHrPeopleFacets(): Promise<HrPeopleFacets> {
   });
 }
 
-export function previewWorkforceHrDefaultDayBatch(
+export async function previewWorkforceHrDefaultDayBatch(
   selection: HrPeopleSelection,
 ): Promise<HrDefaultDayBatchPreview> {
-  return apiJson("/workforce/hr/people/default-day-pattern/preview", {
-    method: "POST",
-    body: jsonBody(selection),
-  });
+  const result = await apiJson<HrDefaultDayBatchPreview>(
+    "/workforce/hr/people/default-day-pattern/preview",
+    {
+      method: "POST",
+      body: jsonBody(selection),
+    },
+  );
+  defaultDayPreviewTokens.set(selectionKey(selection), result.selection_token);
+  return result;
 }
 
-export function applyWorkforceHrDefaultDayBatch(
+export async function applyWorkforceHrDefaultDayBatch(
   selection: HrPeopleSelection,
   expectedMatchCount: number,
-  expectedSelectionToken: string,
+  expectedSelectionToken?: string,
 ): Promise<HrDefaultDayBatchResult> {
-  return apiJson("/workforce/hr/people/default-day-pattern/apply", {
-    method: "POST",
-    body: jsonBody({
-      selection,
-      expected_match_count: expectedMatchCount,
-      expected_selection_token: expectedSelectionToken,
-    }),
-  });
+  const key = selectionKey(selection);
+  const token = expectedSelectionToken || defaultDayPreviewTokens.get(key);
+  if (!token) {
+    throw new Error("Preview this exact employee selection before applying the default work pattern.");
+  }
+  const result = await apiJson<HrDefaultDayBatchResult>(
+    "/workforce/hr/people/default-day-pattern/apply",
+    {
+      method: "POST",
+      body: jsonBody({
+        selection,
+        expected_match_count: expectedMatchCount,
+        expected_selection_token: token,
+      }),
+    },
+  );
+  defaultDayPreviewTokens.delete(key);
+  return result;
 }
 
 export async function exportWorkforceHrPeople(selection: HrPeopleSelection): Promise<void> {
