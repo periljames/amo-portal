@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import React from "react";
-import type { ChartCardProps, ChartPoint, DashboardFilters, DashboardMetric, DashboardResponse, EngineSeriesResponse, MetricStatus, SavedView } from "./reliabilityAnalyticsTypes";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { ChartCardProps, ChartPoint, ChartTableRow, DashboardFilters, DashboardMetric, DashboardResponse, EngineSeriesResponse, MetricStatus, SavedView } from "./reliabilityAnalyticsTypes";
 
 export const SAVED_VIEW_KEY = "amo.reliability.analytics.saved-views.v1";
 export const CHART_HEIGHT = 320;
@@ -100,7 +100,6 @@ export function readSavedViews(): SavedView[] {
   }
 }
 
-
 function isChartPoint(value: unknown): value is ChartPoint {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ChartPoint>;
@@ -135,7 +134,7 @@ function downloadBlob(content: BlobPart, mimeType: string, filename: string): vo
 }
 
 function escapeCsv(value: unknown): string {
-  const text = value == null ? "" : String(value);
+  const text = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
   return `"${text.replaceAll('"', '""')}"`;
 }
 
@@ -145,6 +144,16 @@ function chartRows(section: string, rows: ChartPoint[]): string[] {
     ["section", "key", "label", ...metricKeys].map(escapeCsv).join(","),
     ...rows.map((row) => [section, row.key, row.label, ...metricKeys.map((key) => row.metrics[key])].map(escapeCsv).join(",")),
   ];
+}
+
+export function exportRowsCsv(rows: ChartTableRow[], filename: string): void {
+  if (!rows.length) return;
+  const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const lines = [
+    columns.map(escapeCsv).join(","),
+    ...rows.map((row) => columns.map((column) => escapeCsv(row[column])).join(",")),
+  ];
+  downloadBlob(lines.join("\n"), "text/csv;charset=utf-8", `${filename}.csv`);
 }
 
 export function exportDashboardCsv(data: DashboardResponse): void {
@@ -177,8 +186,8 @@ export function exportDashboardCsv(data: DashboardResponse): void {
     ["data_quality", data.data_quality],
   ];
   const lines = [
-    ["metric", "value", "unit", "delta_pct", "denominator", "detail"].map(escapeCsv).join(","),
-    ...data.summary.map((metric) => [metric.label, metric.value, metric.unit, metric.delta_pct, metric.denominator, metric.detail].map(escapeCsv).join(",")),
+    ["metric", "value", "unit", "delta_pct", "denominator", "formula_code", "detail"].map(escapeCsv).join(","),
+    ...data.summary.map((metric) => [metric.label, metric.value, metric.unit, metric.delta_pct, metric.denominator, metric.formula_code, metric.detail].map(escapeCsv).join(",")),
     "",
     ...sections.flatMap(([name, rows]) => [...chartRows(name, rows), ""]),
   ];
@@ -209,20 +218,70 @@ export function flattenEngineSeries(response: EngineSeriesResponse | null): Arra
   return Array.from(buckets.values()).sort((left, right) => String(left.date).localeCompare(String(right.date)));
 }
 
-export function ChartCard({ id, eyebrow, title, description, empty, children, onExport, wide = false }: ChartCardProps): React.ReactElement {
+function primitiveColumns(rows: ChartTableRow[]): string[] {
+  return Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).filter((column) =>
+    rows.some((row) => {
+      const value = row[column];
+      return value == null || ["string", "number", "boolean"].includes(typeof value);
+    }),
+  );
+}
+
+function displayCell(value: unknown): string {
+  if (value == null || value === "") return "—";
+  if (typeof value === "number") return new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+export function ChartCard({ id, eyebrow, title, description, empty, children, onExport, wide = false, tableRows = [], formulaCodes = [] }: ChartCardProps): React.ReactElement {
+  const [showTable, setShowTable] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const columns = useMemo(() => primitiveColumns(tableRows), [tableRows]);
+
+  useEffect(() => {
+    const update = () => setIsFullscreen(document.fullscreenElement === cardRef.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement === cardRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+    await cardRef.current?.requestFullscreen();
+  };
+
   return (
-    <section className={`reliability-analytics__chart-card${wide ? " reliability-analytics__chart-card--wide" : ""}`}>
+    <section ref={cardRef} className={`reliability-analytics__chart-card${wide ? " reliability-analytics__chart-card--wide" : ""}${isFullscreen ? " reliability-analytics__chart-card--fullscreen" : ""}`}>
       <div className="reliability-analytics__chart-heading">
         <div>
           <p className="reliability-v2__eyebrow">{eyebrow}</p>
           <h2>{title}</h2>
           <p>{description}</p>
+          {formulaCodes.length > 0 && <div className="reliability-analytics__formula-links" aria-label="Chart formula links">{formulaCodes.map((code) => <a href={`#formula-${code}`} key={code}>Formula: {code}</a>)}</div>}
         </div>
-        {onExport && <button className="reliability-analytics__icon-button" type="button" onClick={onExport}>Export SVG</button>}
+        <div className="reliability-analytics__chart-actions">
+          {tableRows.length > 0 && <button className="reliability-analytics__icon-button" type="button" aria-expanded={showTable} onClick={() => setShowTable((value) => !value)}>{showTable ? "Hide data" : "Data table"}</button>}
+          {tableRows.length > 0 && <button className="reliability-analytics__icon-button" type="button" onClick={() => exportRowsCsv(tableRows, `${id}-data`)}>Export CSV</button>}
+          {onExport && <button className="reliability-analytics__icon-button" type="button" onClick={onExport}>Export SVG</button>}
+          <button className="reliability-analytics__icon-button" type="button" onClick={() => void toggleFullscreen()}>{isFullscreen ? "Exit full screen" : "Full screen"}</button>
+        </div>
       </div>
       <div className="reliability-analytics__chart" id={id}>
         {empty ? <div className="reliability-analytics__empty"><strong>No measured data</strong><span>Change the period or filters, or resolve the relevant source coverage gap.</span></div> : children}
       </div>
+      {showTable && tableRows.length > 0 && (
+        <div className="reliability-analytics__chart-table" role="region" aria-label={`${title} data table`} tabIndex={0}>
+          <table>
+            <thead><tr>{columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}</tr></thead>
+            <tbody>{tableRows.map((row, index) => <tr key={`${id}-row-${index}`}>{columns.map((column) => <td key={column}>{displayCell(row[column])}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -238,4 +297,3 @@ export function FilterSelect({ label, value, options, onChange }: { label: strin
     </label>
   );
 }
-
