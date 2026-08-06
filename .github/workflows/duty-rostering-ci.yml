@@ -7,7 +7,9 @@ on:
       - "backend/amodb/apps/workforce/**"
       - "backend/amodb/apps/accounts/**"
       - "backend/amodb/apps/realtime/**"
+      - "backend/amodb/alembic/versions/workforce_*.py"
       - "frontend/src/pages/rostering/**"
+      - "frontend/tests/e2e/workforce-*.spec.ts"
       - "frontend/src/pages/AdminUserNewPage.tsx"
       - "frontend/src/components/Layout/**"
       - "frontend/src/components/offline/**"
@@ -17,6 +19,8 @@ on:
       - "frontend/src/standalone/manuals-main.tsx"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/workforce.ts"
+      - "frontend/src/services/workforceHr.ts"
+      - "frontend/src/types/workforceHr.ts"
       - "frontend/src/services/fleet.ts"
       - "frontend/src/services/maintenance.ts"
       - "frontend/src/services/workOrders.ts"
@@ -33,6 +37,7 @@ on:
       - "frontend/public/portal.webmanifest"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "deploy/saas/docker-compose.yml"
       - ".github/scripts/**"
       - ".github/workflows/duty-rostering-ci.yml"
       - ".github/workflows/recheck-transient-ci.yml"
@@ -81,6 +86,7 @@ jobs:
           print("Alembic heads:", heads)
           assert len(heads) == len(set(heads)), heads
           assert script.get_revision("workforce_20260721_complete") is not None
+          assert script.get_revision("workforce_20260806_governance") is not None
           PY
       - name: Compile affected backend modules
         run: python -m compileall -q amodb/apps/accounts amodb/apps/realtime amodb/apps/workforce amodb/apps/rostering
@@ -98,6 +104,14 @@ jobs:
           ALLOW_SQLITE_FOR_TESTS: "1"
           SECRET_KEY: mapper-test-secret
         run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
+      - name: Smoke standalone Workforce worker entrypoint
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: mapper-test-secret
+        run: python -m amodb.apps.workforce.worker_main --once
 
   frontend:
     runs-on: ubuntu-latest
@@ -134,6 +148,8 @@ jobs:
           src/standalone/manuals-main.tsx
           src/services/rostering.ts
           src/services/workforce.ts
+          src/services/workforceHr.ts
+          src/types/workforceHr.ts
           src/services/fleet.ts
           src/services/maintenance.ts
           src/services/workOrders.ts
@@ -149,3 +165,55 @@ jobs:
           src/pages/rostering
           src/components/shared/ModalTopLayerGuard.test.ts
           src/services/offlineHttp.test.ts
+
+  workforce-browser-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "Workforce browser dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Install Chromium
+        run: npm exec -- playwright install --with-deps chromium
+      - name: Build production frontend
+        run: npm run build
+      - name: Start production preview
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/workforce-preview.log 2>&1 &
+          echo $! > /tmp/workforce-preview.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/workforce-preview.log
+          exit 1
+      - name: Run 10,000-person Workforce browser acceptance
+        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts --project=chromium
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: workforce-browser-scale-diagnostics
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            /tmp/workforce-preview.log
+          if-no-files-found: ignore
+          retention-days: 7
