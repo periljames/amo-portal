@@ -8,7 +8,7 @@ from typing import Any
 from ...database import WriteSessionLocal
 from ..accounts import models as account_models
 from ..audit import services as audit_services
-from . import bulk_contracts, bulk_models
+from . import bulk_contracts, bulk_models, governance_mutations
 
 logger = logging.getLogger(__name__)
 PROCESS_CHUNK_SIZE = 100
@@ -121,6 +121,10 @@ def process_operation(operation_id: str) -> None:
                                 )
                             elif operation.operation_type == "ASSIGN_DEFAULT_DAY_PATTERN":
                                 outcome = bulk_contracts.process_default_pattern_item(
+                                    db, operation=operation, item=item, actor=actor
+                                )
+                            elif operation.operation_type in governance_mutations.MUTATION_TYPES:
+                                outcome = governance_mutations.process_personnel_mutation_item(
                                     db, operation=operation, item=item, actor=actor
                                 )
                             else:
