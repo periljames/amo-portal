@@ -221,10 +221,6 @@ def test_governed_directory_and_all_controlled_mutations() -> None:
                 ),
                 org_unit_id=engineering.id,
             )
-        db.rollback()
-        # Re-open the same outer transaction after the expected validation rollback.
-        admin = db.query(account_models.User).filter(account_models.User.id == admin.id).one()
-        target = db.query(account_models.User).filter(account_models.User.id == target.id).one()
 
         mutations = [
             ("ASSIGN_ORGANIZATION", {"effective_on": today.isoformat(), "org_unit_id": quality.id, "placement_type": "SECONDARY"}),
