@@ -18,6 +18,7 @@ from .canonical_router_legacy import (
 )
 from .planner_calendar_router import planner_calendar_router
 from .planner_router import planner_router
+from .planner_schedule_router import planner_schedule_router
 
 
 def _route_endpoint(route_item):
@@ -77,12 +78,13 @@ def _insert_before_catchalls(api_router: APIRouter, routes: list) -> None:
 
 
 def _install_planner_routes(api_router: APIRouter) -> None:
-    """Register exact capability/reschedule routes before generic QMS handlers."""
+    """Register exact planner routes before generic QMS handlers."""
 
-    _insert_before_catchalls(
-        api_router,
-        _capture_extension_routes(api_router, planner_router),
-    )
+    for extension_router in (planner_router, planner_schedule_router):
+        _insert_before_catchalls(
+            api_router,
+            _capture_extension_routes(api_router, extension_router),
+        )
 
 
 def _install_calendar_override(api_router: APIRouter) -> None:
