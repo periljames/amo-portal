@@ -95,7 +95,7 @@ def _load_type_revision(
     revision = (
         db.query(catalogue_models.AircraftTypeTemplateRevision)
         .filter(catalogue_models.AircraftTypeTemplateRevision.id == revision_id)
-        .with_for_update()
+        .with_for_update(of=catalogue_models.AircraftTypeTemplateRevision)
         .first()
     )
     if not revision:
@@ -121,7 +121,7 @@ def _load_programme_revision(
             programme_models.TenantProgrammeRevision.id == revision_id,
             programme_models.TenantMaintenanceProgramme.amo_id == amo_id,
         )
-        .with_for_update()
+        .with_for_update(of=programme_models.TenantProgrammeRevision)
         .first()
     )
     if not revision:
@@ -273,7 +273,7 @@ def induct_aircraft(
             models.AircraftInduction.amo_id == amo_id,
             models.AircraftInduction.idempotency_key == payload.idempotency_key,
         )
-        .with_for_update()
+        .with_for_update(of=models.AircraftInduction)
         .first()
     )
     if existing:
