@@ -53,10 +53,15 @@ export function previewWorkforceHrDefaultDayBatch(
 export function applyWorkforceHrDefaultDayBatch(
   selection: HrPeopleSelection,
   expectedMatchCount: number,
+  expectedSelectionToken: string,
 ): Promise<HrDefaultDayBatchResult> {
   return apiJson("/workforce/hr/people/default-day-pattern/apply", {
     method: "POST",
-    body: jsonBody({ selection, expected_match_count: expectedMatchCount }),
+    body: jsonBody({
+      selection,
+      expected_match_count: expectedMatchCount,
+      expected_selection_token: expectedSelectionToken,
+    }),
   });
 }
 
