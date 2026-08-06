@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -43,6 +46,15 @@ def _hash(payload: Any) -> str:
     ).hexdigest()
 
 
+def _advisory_lock(db: Session, key: str) -> None:
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": key},
+    )
+
+
 def require_platform_human(user: account_models.User) -> None:
     if not user.is_active or user.is_system_account:
         raise HTTPException(status_code=403, detail="An active human platform account is required")
@@ -56,6 +68,7 @@ def bootstrap_source_intake_packs(
     user: account_models.User,
 ) -> list[models.AircraftContentPack]:
     require_platform_human(user)
+    _advisory_lock(db, "aircraft-content-pack:source-intake-bootstrap")
     rows: list[models.AircraftContentPack] = []
     for definition in SOURCE_INTAKE_SCAFFOLDS:
         row = db.query(models.AircraftContentPack).filter(
@@ -68,6 +81,7 @@ def bootstrap_source_intake_packs(
                 created_by_user_id=user.id,
             )
             db.add(row)
+            db.flush()
         rows.append(row)
     db.commit()
     for row in rows:
@@ -75,20 +89,47 @@ def bootstrap_source_intake_packs(
     return rows
 
 
+def _ordered_revision_payload(
+    pack: models.AircraftContentPack,
+    payload: schemas.ContentRevisionCreate,
+) -> dict[str, Any]:
+    return {
+        "pack_code": pack.code,
+        "revision_code": payload.revision_code,
+        "sources": [
+            row.model_dump(mode="json")
+            for row in sorted(
+                payload.sources,
+                key=lambda item: (
+                    item.reference,
+                    item.source_revision,
+                    item.checksum_sha256,
+                ),
+            )
+        ],
+        "positions": [
+            row.model_dump(mode="json")
+            for row in sorted(payload.positions, key=lambda item: item.code)
+        ],
+        "components": [
+            row.model_dump(mode="json")
+            for row in sorted(
+                payload.components,
+                key=lambda item: item.definition_code,
+            )
+        ],
+        "tasks": [
+            row.model_dump(mode="json")
+            for row in sorted(payload.tasks, key=lambda item: item.task_code)
+        ],
+    }
+
+
 def revision_hash(
     pack: models.AircraftContentPack,
     payload: schemas.ContentRevisionCreate,
 ) -> str:
-    return _hash(
-        {
-            "pack_code": pack.code,
-            "revision_code": payload.revision_code,
-            "sources": [row.model_dump(mode="json") for row in payload.sources],
-            "positions": [row.model_dump(mode="json") for row in payload.positions],
-            "components": [row.model_dump(mode="json") for row in payload.components],
-            "tasks": [row.model_dump(mode="json") for row in payload.tasks],
-        }
-    )
+    return _hash(_ordered_revision_payload(pack, payload))
 
 
 def validate_source_backing(payload: schemas.ContentRevisionCreate) -> None:
@@ -115,6 +156,71 @@ def validate_source_backing(payload: schemas.ContentRevisionCreate) -> None:
             raise HTTPException(status_code=422, detail=f"Task {row.task_code} has no exact source match")
 
 
+def _payload_from_revision(
+    revision: models.AircraftContentPackRevision,
+) -> schemas.ContentRevisionCreate:
+    try:
+        return schemas.ContentRevisionCreate(
+            revision_code=revision.revision_code,
+            change_summary=revision.change_summary,
+            sources=[
+                schemas.ContentSourceCreate(
+                    source_type=row.source_type,
+                    reference=row.reference,
+                    source_revision=row.source_revision,
+                    effective_date=row.effective_date,
+                    checksum_sha256=row.checksum_sha256,
+                    authority=row.authority,
+                    provenance_json=row.provenance_json,
+                )
+                for row in revision.sources
+            ],
+            positions=[
+                schemas.ContentPositionCreate(
+                    code=row.code,
+                    label=row.label,
+                    position_kind=row.position_kind,
+                    required=row.required,
+                    source_reference=row.source_reference,
+                    metadata_json=row.metadata_json,
+                )
+                for row in revision.positions
+            ],
+            components=[
+                schemas.ContentComponentCreate(
+                    definition_code=row.definition_code,
+                    position_code=row.position_code,
+                    description=row.description,
+                    component_class=row.component_class,
+                    accepted_part_numbers_json=row.accepted_part_numbers_json,
+                    life_limit_json=row.life_limit_json,
+                    metadata_json=row.metadata_json,
+                    source_reference=row.source_reference,
+                )
+                for row in revision.components
+            ],
+            tasks=[
+                schemas.ContentTaskCreate(
+                    task_code=row.task_code,
+                    title=row.title,
+                    ata_chapter=row.ata_chapter,
+                    intervals_json=row.intervals_json,
+                    effectivity_expression_json=row.effectivity_expression_json,
+                    source_reference=row.source_reference,
+                    source_revision=row.source_revision,
+                    source_checksum_sha256=row.source_checksum_sha256,
+                    metadata_json=row.metadata_json,
+                )
+                for row in revision.tasks
+            ],
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Content-pack revision contains invalid or incomplete controlled content",
+        ) from exc
+
+
 def create_revision(
     db: Session,
     *,
@@ -124,6 +230,10 @@ def create_revision(
 ) -> models.AircraftContentPackRevision:
     require_platform_human(user)
     validate_source_backing(payload)
+    _advisory_lock(
+        db,
+        f"aircraft-content-pack:revision:{pack.id}:{payload.revision_code}",
+    )
     duplicate = db.query(models.AircraftContentPackRevision.id).filter(
         models.AircraftContentPackRevision.pack_id == pack.id,
         models.AircraftContentPackRevision.revision_code == payload.revision_code,
@@ -139,15 +249,22 @@ def create_revision(
     )
     db.add(revision)
     db.flush()
-    for row in payload.sources:
+    for row in sorted(
+        payload.sources,
+        key=lambda item: (item.reference, item.source_revision, item.checksum_sha256),
+    ):
         db.add(models.AircraftContentPackSource(revision_id=revision.id, **row.model_dump()))
-    for row in payload.positions:
+    for row in sorted(payload.positions, key=lambda item: item.code):
         db.add(models.AircraftContentPackPosition(revision_id=revision.id, **row.model_dump()))
-    for row in payload.components:
+    for row in sorted(payload.components, key=lambda item: item.definition_code):
         db.add(models.AircraftContentPackComponent(revision_id=revision.id, **row.model_dump()))
-    for row in payload.tasks:
+    for row in sorted(payload.tasks, key=lambda item: item.task_code):
         db.add(models.AircraftContentPackTask(revision_id=revision.id, **row.model_dump()))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Content-pack revision conflicts with existing data") from exc
     db.refresh(revision)
     return revision
 
@@ -160,27 +277,47 @@ def publish_revision(
     user: account_models.User,
 ) -> models.AircraftContentPackRevision:
     require_platform_human(user)
-    if revision.status != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only draft content-pack revisions can be published")
-    if revision.content_hash != expected_content_hash:
+    _advisory_lock(db, f"aircraft-content-pack:publish:{revision.id}")
+    locked = (
+        db.query(models.AircraftContentPackRevision)
+        .filter(models.AircraftContentPackRevision.id == revision.id)
+        .with_for_update(of=models.AircraftContentPackRevision)
+        .one()
+    )
+    payload = _payload_from_revision(locked)
+    validate_source_backing(payload)
+    actual_content_hash = revision_hash(locked.pack, payload)
+    if locked.content_hash != actual_content_hash:
+        raise HTTPException(status_code=409, detail="Content-pack content changed after hashing")
+    if expected_content_hash != actual_content_hash:
         raise HTTPException(status_code=409, detail="Content-pack content changed after review")
-    if not revision.sources:
+    if locked.status == "PUBLISHED":
+        return locked
+    if locked.status != "DRAFT":
+        raise HTTPException(status_code=409, detail="Only draft content-pack revisions can be published")
+    if not locked.sources:
         raise HTTPException(status_code=409, detail="A content pack cannot be published without controlled sources")
-    if not revision.positions:
+    if not locked.positions:
         raise HTTPException(status_code=409, detail="A content pack cannot be published without source-backed positions")
-    previous = db.query(models.AircraftContentPackRevision).filter(
-        models.AircraftContentPackRevision.pack_id == revision.pack_id,
-        models.AircraftContentPackRevision.status == "PUBLISHED",
-    ).with_for_update(of=models.AircraftContentPackRevision).all()
+    previous = (
+        db.query(models.AircraftContentPackRevision)
+        .filter(
+            models.AircraftContentPackRevision.pack_id == locked.pack_id,
+            models.AircraftContentPackRevision.status == "PUBLISHED",
+            models.AircraftContentPackRevision.id != locked.id,
+        )
+        .with_for_update(of=models.AircraftContentPackRevision)
+        .all()
+    )
     for row in previous:
         row.status = "SUPERSEDED"
         db.add(row)
-    revision.status = "PUBLISHED"
-    revision.published_by_user_id = user.id
-    revision.published_at = datetime.now(timezone.utc)
-    revision.pack.status = "ACTIVE"
-    db.add(revision)
-    db.add(revision.pack)
+    locked.status = "PUBLISHED"
+    locked.published_by_user_id = user.id
+    locked.published_at = datetime.now(timezone.utc)
+    locked.pack.status = "ACTIVE"
+    db.add(locked)
+    db.add(locked.pack)
     db.commit()
-    db.refresh(revision)
-    return revision
+    db.refresh(locked)
+    return locked
