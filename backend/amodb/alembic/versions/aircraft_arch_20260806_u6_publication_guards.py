@@ -40,13 +40,12 @@ def upgrade() -> None:
 
             IF OLD.status = 'DRAFT'
                AND NEW.status = 'PUBLISHED'
-               AND ROW(
-                    NEW.pack_id, NEW.revision_code, NEW.content_hash,
-                    NEW.change_summary, NEW.created_by_user_id, NEW.created_at
-               ) IS NOT DISTINCT FROM ROW(
-                    OLD.pack_id, OLD.revision_code, OLD.content_hash,
-                    OLD.change_summary, OLD.created_by_user_id, OLD.created_at
-               )
+               AND NEW.pack_id IS NOT DISTINCT FROM OLD.pack_id
+               AND NEW.revision_code IS NOT DISTINCT FROM OLD.revision_code
+               AND NEW.content_hash IS NOT DISTINCT FROM OLD.content_hash
+               AND NEW.change_summary IS NOT DISTINCT FROM OLD.change_summary
+               AND NEW.created_by_user_id IS NOT DISTINCT FROM OLD.created_by_user_id
+               AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at
                AND NEW.published_by_user_id IS NOT NULL
                AND NEW.published_at IS NOT NULL THEN
                 RETURN NEW;
@@ -54,15 +53,14 @@ def upgrade() -> None:
 
             IF OLD.status = 'PUBLISHED'
                AND NEW.status = 'SUPERSEDED'
-               AND ROW(
-                    NEW.pack_id, NEW.revision_code, NEW.content_hash,
-                    NEW.change_summary, NEW.created_by_user_id, NEW.created_at,
-                    NEW.published_by_user_id, NEW.published_at
-               ) IS NOT DISTINCT FROM ROW(
-                    OLD.pack_id, OLD.revision_code, OLD.content_hash,
-                    OLD.change_summary, OLD.created_by_user_id, OLD.created_at,
-                    OLD.published_by_user_id, OLD.published_at
-               ) THEN
+               AND NEW.pack_id IS NOT DISTINCT FROM OLD.pack_id
+               AND NEW.revision_code IS NOT DISTINCT FROM OLD.revision_code
+               AND NEW.content_hash IS NOT DISTINCT FROM OLD.content_hash
+               AND NEW.change_summary IS NOT DISTINCT FROM OLD.change_summary
+               AND NEW.created_by_user_id IS NOT DISTINCT FROM OLD.created_by_user_id
+               AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at
+               AND NEW.published_by_user_id IS NOT DISTINCT FROM OLD.published_by_user_id
+               AND NEW.published_at IS NOT DISTINCT FROM OLD.published_at THEN
                 RETURN NEW;
             END IF;
 
