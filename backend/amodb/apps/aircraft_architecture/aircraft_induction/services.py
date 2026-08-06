@@ -51,6 +51,17 @@ def _source_key(
     )
 
 
+def _controlled_source_sort_key(source: Any) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(source.reference or "").strip(),
+        str(source.source_revision or "").strip(),
+        str(source.checksum_sha256 or "").strip().lower(),
+        str(source.source_type or "").strip(),
+        str(source.authority or "").strip(),
+        str(source.id),
+    )
+
+
 def require_human_induction_authority(user: account_models.User) -> str:
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Active user account is required")
@@ -335,16 +346,6 @@ def induct_aircraft(
     )
     db.add(aircraft)
     db.flush()
-    db.add(
-        daily_models.AircraftExactUtilisationState(
-            amo_id=amo_id,
-            aircraft_serial_number=aircraft.serial_number,
-            total_hours=payload.initial_airframe_hours,
-            total_cycles=payload.initial_airframe_cycles,
-            approved_source_reference="AIRCRAFT_INDUCTION",
-            approved_by_user_id=user.id,
-        )
-    )
 
     induction = models.AircraftInduction(
         amo_id=amo_id,
@@ -360,38 +361,19 @@ def induct_aircraft(
     db.add(induction)
     db.flush()
 
-    configuration_payload = {
-        "aircraft_serial_number": aircraft.serial_number,
-        "registration": aircraft.registration,
-        "type_revision_id": type_revision.id,
-        "type_content_hash": type_revision.content_hash,
-        "sources": [
-            {
-                "id": source.id,
-                "source_type": source.source_type,
-                "reference": source.reference,
-                "source_revision": source.source_revision,
-                "checksum_sha256": source.checksum_sha256,
-                "authority": source.authority,
-            }
-            for source in sorted(type_revision.sources, key=lambda row: row.id)
-        ],
-        "components": [],
-        "initial_airframe_hours": str(payload.initial_airframe_hours),
-        "initial_airframe_cycles": payload.initial_airframe_cycles,
-    }
-    configuration = models.AircraftConfigurationSnapshot(
-        induction_id=induction.id,
-        amo_id=amo_id,
-        aircraft_serial_number=aircraft.serial_number,
-        type_revision_id=type_revision.id,
-        snapshot_hash="pending",
-        snapshot_json={},
-    )
-    db.add(configuration)
-    db.flush()
-
-    for item, definition, role in component_rows:
+    installed_components: list[
+        tuple[
+            schemas.ComponentInductionInput,
+            catalogue_models.AircraftTypeComponentDefinition,
+            str,
+            fleet_models.AircraftComponent,
+            dict[str, str],
+        ]
+    ] = []
+    for item, definition, role in sorted(
+        component_rows,
+        key=lambda row: row[0].position_code,
+    ):
         component = fleet_models.AircraftComponent(
             amo_id=amo_id,
             aircraft_serial_number=aircraft.serial_number,
@@ -413,6 +395,58 @@ def induct_aircraft(
             "revision": item.source_revision,
             "checksum_sha256": item.source_checksum_sha256,
         }
+        installed_components.append((item, definition, role, component, source_json))
+
+    configuration_payload = {
+        "aircraft_serial_number": aircraft.serial_number,
+        "registration": aircraft.registration,
+        "type_revision_id": type_revision.id,
+        "type_content_hash": type_revision.content_hash,
+        "sources": [
+            {
+                "id": source.id,
+                "source_type": source.source_type,
+                "reference": source.reference,
+                "source_revision": source.source_revision,
+                "checksum_sha256": source.checksum_sha256,
+                "authority": source.authority,
+            }
+            for source in sorted(
+                type_revision.sources,
+                key=_controlled_source_sort_key,
+            )
+        ],
+        "components": [
+            {
+                "position_code": item.position_code,
+                "definition_id": definition.id,
+                "definition_code": definition.definition_code,
+                "component_id": component.id,
+                "part_number": item.part_number,
+                "serial_number": item.serial_number,
+                "baseline_hours": str(item.baseline_hours) if item.baseline_hours is not None else None,
+                "baseline_cycles": item.baseline_cycles,
+                "utilisation_role": role,
+                "source": source_json,
+            }
+            for item, definition, role, component, source_json in installed_components
+        ],
+        "initial_airframe_hours": str(payload.initial_airframe_hours),
+        "initial_airframe_cycles": payload.initial_airframe_cycles,
+    }
+    configuration_hash = _canonical_hash(configuration_payload)
+    configuration = models.AircraftConfigurationSnapshot(
+        induction_id=induction.id,
+        amo_id=amo_id,
+        aircraft_serial_number=aircraft.serial_number,
+        type_revision_id=type_revision.id,
+        snapshot_hash=configuration_hash,
+        snapshot_json=configuration_payload,
+    )
+    db.add(configuration)
+    db.flush()
+
+    for item, definition, _role, component, source_json in installed_components:
         db.add(
             models.AircraftConfigurationSnapshotItem(
                 snapshot_id=configuration.id,
@@ -426,6 +460,18 @@ def induct_aircraft(
                 source_json=source_json,
             )
         )
+
+    db.add(
+        daily_models.AircraftExactUtilisationState(
+            amo_id=amo_id,
+            aircraft_serial_number=aircraft.serial_number,
+            total_hours=payload.initial_airframe_hours,
+            total_cycles=payload.initial_airframe_cycles,
+            approved_source_reference="AIRCRAFT_INDUCTION",
+            approved_by_user_id=user.id,
+        )
+    )
+    for item, definition, role, component, _source_json in installed_components:
         db.add(
             models.AircraftComponentUtilisationRole(
                 amo_id=amo_id,
@@ -447,25 +493,6 @@ def induct_aircraft(
                 approved_by_user_id=user.id,
             )
         )
-        configuration_payload["components"].append(
-            {
-                "position_code": item.position_code,
-                "definition_id": definition.id,
-                "definition_code": definition.definition_code,
-                "component_id": component.id,
-                "part_number": item.part_number,
-                "serial_number": item.serial_number,
-                "baseline_hours": str(item.baseline_hours) if item.baseline_hours is not None else None,
-                "baseline_cycles": item.baseline_cycles,
-                "utilisation_role": role,
-                "source": source_json,
-            }
-        )
-
-    configuration_payload["components"].sort(key=lambda row: row["position_code"])
-    configuration.snapshot_hash = _canonical_hash(configuration_payload)
-    configuration.snapshot_json = configuration_payload
-    db.add(configuration)
 
     applicability_payload = {
         "programme_revision_id": programme_revision.id,
