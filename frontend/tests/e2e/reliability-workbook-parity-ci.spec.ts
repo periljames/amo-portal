@@ -2,18 +2,21 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.use({ trace: "retain-on-failure", screenshot: "only-on-failure" });
 
-const DATASETS = ["AU", "AI", "PM", "OOS", "RM", "SM", "STRUCTURES", "RECURRING", "ECTM"] as const;
+const DATASETS = ["AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "STRUCTURES", "RECURRING", "ECTM", "ADD"] as const;
 
 const fields: Record<string, Array<Record<string, unknown>>> = {
   AU: [{ key: "flight_hours", label: "Aircraft flight hours", data_type: "decimal", required: true, unit: "FH", options: [] }],
   AI: [{ key: "incident_number", label: "Incident number", data_type: "text", required: true, options: [] }],
+  FI: [{ key: "interruption_type", label: "Interruption type", data_type: "select", required: true, options: ["TECHNICAL_DELAY", "TECHNICAL_CANCELLATION"] }],
   PM: [{ key: "defect_description", label: "Defect / report", data_type: "textarea", required: true, options: [] }],
   OOS: [{ key: "start_at", label: "Out-of-service start", data_type: "datetime", required: true, options: [] }],
   RM: [{ key: "off_part_number", label: "Removed part number", data_type: "text", required: true, options: [] }],
   SM: [{ key: "workpack_reference", label: "Workpack reference", data_type: "text", required: true, options: [] }],
+  SR: [{ key: "shop_visit_reference", label: "Shop visit reference", data_type: "text", required: true, options: [] }],
   STRUCTURES: [{ key: "damage_reference", label: "Damage reference", data_type: "text", required: true, options: [] }],
   RECURRING: [{ key: "repeat_key", label: "Controlled repeat key", data_type: "text", required: true, options: [] }],
   ECTM: [{ key: "trend_status", label: "Trend status", data_type: "select", required: true, options: ["NORMAL", "WATCH", "ALERT"] }],
+  ADD: [{ key: "deferral_type", label: "Deferral type", data_type: "select", required: true, options: ["MEL", "CDL"] }],
 };
 
 function catalog() {
@@ -22,13 +25,16 @@ function catalog() {
     name: {
       AU: "Aircraft utilisation",
       AI: "Aircraft incidents",
+      FI: "Flight interruptions",
       PM: "Pilot and maintenance reports",
       OOS: "Aircraft out of service",
       RM: "Component removals",
       SM: "Scheduled maintenance findings",
+      SR: "Shop reports",
       STRUCTURES: "Aircraft structures",
       RECURRING: "Recurring defects",
       ECTM: "Engine condition and trend monitoring",
+      ADD: "Deferred defects / MEL / CDL",
     }[code],
     workbook_sheet_names: [code],
     description: `${code} representative tenant source register`,
