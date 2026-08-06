@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, String, Text, Time, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -11,6 +13,14 @@ from amodb.database import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _json_list(value: str | None) -> list[Any]:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
 
 
 class QMSPlannerScheduleMetadata(Base):
@@ -58,6 +68,14 @@ class QMSPlannerScheduleMetadata(Base):
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    @property
+    def attendee_user_ids(self) -> list[str]:
+        return [str(item) for item in _json_list(self.attendee_user_ids_json) if item]
+
+    @property
+    def external_attendees(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in _json_list(self.external_attendees_json) if isinstance(item, dict)]
 
     __table_args__ = (
         UniqueConstraint("amo_id", "schedule_id", name="uq_qms_planner_metadata_schedule"),
