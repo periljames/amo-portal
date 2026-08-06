@@ -3,8 +3,9 @@ import re
 
 
 def replace_once(source: str, old: str, new: str, label: str) -> str:
-    if source.count(old) != 1:
-        raise SystemExit(f"expected one {label}; found {source.count(old)}")
+    count = source.count(old)
+    if count != 1:
+        raise SystemExit(f"expected one {label}; found {count}")
     return source.replace(old, new)
 
 
@@ -61,14 +62,18 @@ def ensure_fixture_component_kind(
     return "".join(result)
 
 
-services_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/services.py")
+services_path = Path(
+    "backend/amodb/apps/aircraft_architecture/daily_utilisation/services.py"
+)
 services = services_path.read_text()
 classification_role_pattern = re.compile(
-    r"(classification\s*=\s*Classification\(\s*)role=(roles\.get\(component\.component_id\)\s+or\s+classify_component\()",
+    r"(classification\s*=\s*Classification\(\s*)"
+    r"role=(roles\.get\(component\.component_id\)\s+or\s+classify_component\()",
     re.MULTILINE,
 )
 classification_target_pattern = re.compile(
-    r"classification\s*=\s*Classification\(\s*target_type=roles\.get\(component\.component_id\)\s+or\s+classify_component\(",
+    r"classification\s*=\s*Classification\(\s*"
+    r"target_type=roles\.get\(component\.component_id\)\s+or\s+classify_component\(",
     re.MULTILINE,
 )
 services, classification_count = classification_role_pattern.subn(
@@ -79,51 +84,20 @@ services, classification_count = classification_role_pattern.subn(
 if classification_count == 0:
     target_count = len(classification_target_pattern.findall(services))
     if target_count == 1:
-        pass
+        print("classification keyword is already corrected")
     elif target_count == 0 and "Classification" not in services and "classify_component" not in services:
         print("classification keyword correction is not applicable to this reviewed bundle")
     else:
-        lines = services.splitlines()
-        contexts = []
-        for index, line in enumerate(lines):
-            if "Classification" in line or "classify_component" in line:
-                start = max(0, index - 4)
-                end = min(len(lines), index + 10)
-                contexts.append(
-                    f"lines {start + 1}-{end}:\n"
-                    + "\n".join(f"{line_number + 1}: {lines[line_number]}" for line_number in range(start, end))
-                )
-        detail = "\n---\n".join(contexts[:8]) or "no Classification/classify_component context found"
         raise SystemExit(
-            f"ambiguous Classification correction state: target_count={target_count}\n" + detail
+            f"ambiguous Classification correction state: target_count={target_count}"
         )
 services_path.write_text(services)
 
 
-migration_path = Path(
-    "backend/amodb/alembic/versions/aircraft_arch_20260805_daily_utilisation.py"
+test_path = Path(
+    "backend/amodb/apps/aircraft_architecture/daily_utilisation/"
+    "tests/test_posting_integration.py"
 )
-migration = migration_path.read_text()
-payload_hash_pattern = re.compile(
-    r'(sa\.Column\(\s*["\']payload_hash["\']\s*,\s*)sa\.String\(\)(\s*,)',
-    re.MULTILINE,
-)
-migration, payload_hash_count = payload_hash_pattern.subn(
-    r"\1sa.String(length=64)\2",
-    migration,
-    count=1,
-)
-if payload_hash_count == 0:
-    corrected_payload_hash_pattern = re.compile(
-        r'sa\.Column\(\s*["\']payload_hash["\']\s*,\s*sa\.String\(\s*(?:length\s*=\s*)?64\s*\)',
-        re.MULTILINE,
-    )
-    if len(corrected_payload_hash_pattern.findall(migration)) != 1:
-        raise SystemExit("expected exactly one bounded payload_hash column")
-migration_path.write_text(migration)
-
-
-test_path = Path("backend/amodb/apps/aircraft_architecture/daily_utilisation/tests/test_posting_integration.py")
 source = test_path.read_text()
 source = replace_once(
     source,
@@ -175,37 +149,54 @@ def _new_session():
     assert session.get_bind().dialect.name == "postgresql"
     return session
 '''
-source = replace_once(source, anchor, block + anchor, "integration-test insertion anchor")
-if source.count("WriteSessionLocal()") != 2:
-    raise SystemExit(f"expected two integration session constructors; found {source.count('WriteSessionLocal()')}")
+source = replace_once(
+    source,
+    anchor,
+    block + anchor,
+    "integration-test insertion anchor",
+)
+constructor_count = source.count("WriteSessionLocal()")
+if constructor_count != 2:
+    raise SystemExit(
+        f"expected two integration session constructors; found {constructor_count}"
+    )
 source = source.replace("WriteSessionLocal()", "_new_session()")
 source = ensure_fixture_component_kind(source, "ENG", "ENGINE")
 source = ensure_fixture_component_kind(source, "PROP", "PROPELLER")
 test_path.write_text(source)
 
+
 architecture_path = Path(".github/workflows/aircraft-architecture-ci.yml")
 architecture = architecture_path.read_text()
-db_line = "      DATABASE_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
+db_line = (
+    "      DATABASE_URL: "
+    "postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
+)
 db_block = (
     db_line
-    + "      DATABASE_WRITE_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
-    + "      POSTGRES_INTEGRATION_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
+    + "      DATABASE_WRITE_URL: "
+    "postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
+    + "      POSTGRES_INTEGRATION_URL: "
+    "postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test\n"
 )
 architecture_path.write_text(
     replace_once(architecture, db_line, db_block, "architecture database URL")
 )
+
 
 reliability_path = Path(".github/workflows/reliability-module-ci.yml")
 reliability = reliability_path.read_text()
 reliability = replace_once(
     reliability,
     "        if: github.event_name == 'pull_request'\n",
-    "        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'agent/reliability-')\n",
+    "        if: github.event_name == 'pull_request' "
+    "&& startsWith(github.head_ref, 'agent/reliability-')\n",
     "Reliability-only diff condition",
 )
 
 head_pattern = re.compile(
-    r"^      - name: Verify one Alembic head\n.*?(?=^      - name: Upgrade clean PostgreSQL schema)",
+    r"^      - name: Verify one Alembic head\n.*?"
+    r"(?=^      - name: Upgrade clean PostgreSQL schema)",
     re.MULTILINE | re.DOTALL,
 )
 head_replacement = '''      - name: Verify one Alembic head with Reliability lineage
@@ -228,7 +219,8 @@ if count != 1:
     raise SystemExit("expected one Reliability Alembic head block")
 
 revision_pattern = re.compile(
-    r"^      - name: Verify Alembic revision and capacity\n.*?(?=^      - name: Run PostgreSQL append-only calculation regression)",
+    r"^      - name: Verify Alembic revision and capacity\n.*?"
+    r"(?=^      - name: Run PostgreSQL append-only calculation regression)",
     re.MULTILINE | re.DOTALL,
 )
 revision_replacement = '''      - name: Verify Alembic revision and capacity
@@ -259,7 +251,11 @@ revision_replacement = '''      - name: Verify Alembic revision and capacity
           PY_INNER
 
 '''
-reliability, count = revision_pattern.subn(revision_replacement, reliability, count=1)
+reliability, count = revision_pattern.subn(
+    revision_replacement,
+    reliability,
+    count=1,
+)
 if count != 1:
     raise SystemExit("expected one Reliability revision verification block")
 reliability_path.write_text(reliability)
