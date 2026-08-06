@@ -1,0 +1,525 @@
+.reliability-analytics__section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--surface-color, Canvas) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.reliability-analytics__section-nav a,
+.reliability-analytics__formula-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.reliability-analytics__section-nav a:hover,
+.reliability-analytics__section-nav a:focus-visible,
+.reliability-analytics__formula-links a:hover,
+.reliability-analytics__formula-links a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.reliability-analytics__graph-workspace,
+.reliability-formula-library,
+.reliability-formula-admin {
+  scroll-margin-top: 5rem;
+  margin-top: 1.25rem;
+}
+
+.reliability-analytics__graph-heading,
+.reliability-formula-library__heading,
+.reliability-formula-admin__heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.reliability-analytics__graph-heading h2,
+.reliability-formula-library__heading h2,
+.reliability-formula-admin__heading h2 {
+  margin: 0.15rem 0 0.25rem;
+}
+
+.reliability-analytics__graph-heading p,
+.reliability-formula-library__heading p,
+.reliability-formula-admin__heading p {
+  margin: 0;
+  max-width: 72rem;
+}
+
+.reliability-analytics__chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.reliability-analytics__formula-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+}
+
+.reliability-analytics__formula-links a {
+  min-height: 1.65rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+}
+
+.reliability-analytics__chart-card:fullscreen {
+  box-sizing: border-box;
+  overflow: auto;
+  width: 100vw;
+  height: 100vh;
+  padding: 1.25rem;
+  border-radius: 0;
+  background: var(--surface-color, Canvas);
+  color: var(--text-color, CanvasText);
+}
+
+.reliability-analytics__chart-card:fullscreen .reliability-analytics__chart {
+  min-height: min(70vh, 760px);
+}
+
+.reliability-analytics__chart-table {
+  overflow: auto;
+  max-height: 26rem;
+  margin-top: 0.8rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.65rem;
+}
+
+.reliability-analytics__chart-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.77rem;
+}
+
+.reliability-analytics__chart-table th,
+.reliability-analytics__chart-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border-color, rgba(120, 130, 145, 0.2));
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reliability-analytics__chart-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-transform: capitalize;
+  background: var(--surface-color, Canvas);
+}
+
+.reliability-analytics__series-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  margin: 0.6rem 0;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.65rem;
+}
+
+.reliability-analytics__series-control legend {
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.reliability-analytics__series-control label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+}
+
+.reliability-formula-library,
+.reliability-formula-admin {
+  padding: 1rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-color, Canvas) 96%, currentColor 4%);
+}
+
+.reliability-formula-library__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.reliability-formula-library__filters label {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 12rem;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.reliability-formula-library__filters input,
+.reliability-formula-library__filters select {
+  min-height: 2.35rem;
+}
+
+.reliability-formula-library__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.82rem;
+}
+
+.reliability-formula-library__summary strong {
+  font-size: 1.35rem;
+}
+
+.reliability-formula-library__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 31rem), 1fr));
+  gap: 0.85rem;
+}
+
+.reliability-formula {
+  scroll-margin-top: 5rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.85rem;
+  background: var(--surface-color, Canvas);
+}
+
+.reliability-formula:target {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.reliability-formula__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.reliability-formula__header h3 {
+  margin: 0.3rem 0 0.15rem;
+  font-size: 1rem;
+}
+
+.reliability-formula__header code {
+  overflow-wrap: anywhere;
+  font-size: 0.7rem;
+}
+
+.reliability-formula__origin {
+  display: inline-flex;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.reliability-formula__origin--programme {
+  border: 1px solid currentColor;
+}
+
+.reliability-formula__math {
+  display: grid;
+  place-items: center;
+  overflow-x: auto;
+  min-height: 7.5rem;
+  margin: 0.85rem 0;
+  padding: 1rem;
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.reliability-formula__math math {
+  font-size: clamp(1.2rem, 2.4vw, 2rem);
+}
+
+.reliability-formula__latex {
+  overflow: auto;
+  margin: 0;
+  padding: 0.65rem;
+  border: 1px dashed var(--border-color, rgba(120, 130, 145, 0.35));
+  border-radius: 0.55rem;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reliability-formula__definition {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.8rem 0;
+}
+
+.reliability-formula__definition div {
+  min-width: 0;
+  padding: 0.55rem;
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.reliability-formula__definition dt {
+  margin-bottom: 0.2rem;
+  font-size: 0.65rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+.reliability-formula__definition dd {
+  margin: 0;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.reliability-formula__method h4 {
+  margin: 0.7rem 0 0.2rem;
+  font-size: 0.75rem;
+}
+
+.reliability-formula__method p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.reliability-formula__details {
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--border-color, rgba(120, 130, 145, 0.22));
+}
+
+.reliability-formula__details summary {
+  padding: 0.55rem 0 0;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.reliability-formula__details pre {
+  overflow: auto;
+  max-height: 18rem;
+  padding: 0.6rem;
+  border-radius: 0.55rem;
+  font-size: 0.7rem;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.reliability-formula__lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+}
+
+.reliability-formula__lists ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+}
+
+.reliability-formula__lists code {
+  overflow-wrap: anywhere;
+}
+
+.reliability-formula-admin__message {
+  margin-bottom: 0.8rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid currentColor;
+  border-radius: 0.65rem;
+  font-size: 0.82rem;
+}
+
+.reliability-formula-admin__forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.reliability-formula-admin__form {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.8rem;
+  background: var(--surface-color, Canvas);
+}
+
+.reliability-formula-admin__form:first-child {
+  grid-row: span 2;
+}
+
+.reliability-formula-admin__form h3,
+.reliability-formula-admin__register h3 {
+  margin: 0;
+}
+
+.reliability-formula-admin__form label {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.reliability-formula-admin__form input,
+.reliability-formula-admin__form select,
+.reliability-formula-admin__form textarea {
+  width: 100%;
+  min-height: 2.35rem;
+  box-sizing: border-box;
+}
+
+.reliability-formula-admin__form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.reliability-formula-admin__events {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.28));
+  border-radius: 0.65rem;
+}
+
+.reliability-formula-admin__events legend {
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.reliability-formula-admin__events label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.reliability-formula-admin__events input {
+  width: auto;
+  min-height: auto;
+}
+
+.reliability-formula-admin__register {
+  margin-top: 1rem;
+}
+
+.reliability-formula-admin__register .reliability-v2__table-wrap {
+  margin-top: 0.55rem;
+}
+
+.reliability-formula-admin__register table p {
+  max-width: 28rem;
+  margin: 0.25rem 0 0;
+  white-space: normal;
+}
+
+.reliability-formula-admin__register table small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.reliability-formula-admin__register details pre {
+  max-width: 36rem;
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1080px) {
+  .reliability-formula-admin__forms {
+    grid-template-columns: 1fr;
+  }
+
+  .reliability-formula-admin__form:first-child {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .reliability-analytics__graph-heading,
+  .reliability-formula-library__heading,
+  .reliability-formula-admin__heading,
+  .reliability-formula__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reliability-formula-library__filters,
+  .reliability-formula-library__filters label {
+    width: 100%;
+  }
+
+  .reliability-formula__definition,
+  .reliability-formula__lists,
+  .reliability-formula-admin__form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reliability-formula-admin__events {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reliability-analytics__chart-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media print {
+  .reliability-analytics__section-nav,
+  .reliability-analytics__chart-actions,
+  .reliability-formula-library__filters,
+  .reliability-formula-admin__forms,
+  .reliability-formula-admin__heading > button,
+  .reliability-analytics__series-control {
+    display: none !important;
+  }
+
+  .reliability-formula-library,
+  .reliability-formula-admin,
+  .reliability-formula,
+  .reliability-analytics__chart-card {
+    break-inside: avoid;
+    border-color: #777;
+    background: #fff;
+    color: #000;
+  }
+
+  .reliability-formula-library__grid {
+    grid-template-columns: 1fr;
+  }
+}
