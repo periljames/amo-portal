@@ -9,9 +9,17 @@ import {
 import type { CalculationFormula } from "./reliabilityAnalyticsTypes";
 import "./ReliabilityCalculationEvidence.css";
 
+type FormulaSnapshot = CalculationFormula & {
+  snapshot_provenance?: {
+    mode?: string;
+    source?: string;
+    migration?: string;
+  };
+};
+
 type PersistedCalculationRun = ReliabilityCalculationRun & {
   revision: number;
-  formula_snapshot_json?: CalculationFormula;
+  formula_snapshot_json?: FormulaSnapshot;
   formula_snapshot_hash?: string;
 };
 
@@ -63,6 +71,7 @@ export function ReliabilityCalculationEvidence(): React.ReactElement {
   const selectedRun = runs.find((run) => run.id === selectedRunId) || null;
   const selectedMetric = selectedRun ? metrics.find((metric) => metric.id === selectedRun.metric_definition_id) || null : null;
   const snapshot = selectedRun?.formula_snapshot_json;
+  const reconstructed = snapshot?.snapshot_provenance?.mode === "MIGRATION_BACKFILL";
   const formulaHashMatches = useMemo(() => {
     if (!selectedRun?.formula_snapshot_hash || !selectedRun.source_lineage_json) return null;
     const lineageHash = selectedRun.source_lineage_json.formula_snapshot_hash;
@@ -75,7 +84,7 @@ export function ReliabilityCalculationEvidence(): React.ReactElement {
         <div>
           <p className="reliability-v2__eyebrow">Immutable evidence</p>
           <h2 id="reliability-calculation-evidence-heading">Calculation formula snapshots</h2>
-          <p>Each execution retains the exact equation, units, methodology, expression tree and snapshot hash used for that result.</p>
+          <p>New executions retain the exact equation used. Historical rows migrated from the earlier schema are explicitly identified as controlled reconstructions from their metric definition and recorded formula version.</p>
         </div>
         <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}>Refresh evidence</button>
       </div>
@@ -91,14 +100,16 @@ export function ReliabilityCalculationEvidence(): React.ReactElement {
               <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
                 {runs.map((run) => {
                   const metric = metrics.find((item) => item.id === run.metric_definition_id);
-                  return <option value={run.id} key={run.id}>{metric?.code || run.metric_definition_id} · {run.period_end} · r{run.revision}</option>;
+                  const mode = run.formula_snapshot_json?.snapshot_provenance?.mode === "MIGRATION_BACKFILL" ? " · reconstructed" : "";
+                  return <option value={run.id} key={run.id}>{metric?.code || run.metric_definition_id} · {run.period_end} · r{run.revision}{mode}</option>;
                 })}
               </select>
             </label>
             <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Run</th><th>Period</th><th>Scope</th><th>Value</th><th>Formula</th><th>Snapshot hash</th></tr></thead><tbody>
               {runs.map((run) => {
                 const metric = metrics.find((item) => item.id === run.metric_definition_id);
-                return <tr key={run.id} className={run.id === selectedRunId ? "is-selected" : ""} onClick={() => setSelectedRunId(run.id)}><td><button type="button" className="reliability-calculation-evidence__row-button" onClick={() => setSelectedRunId(run.id)}><strong>{metric?.code || run.metric_definition_id}</strong><small>{displayDate(run.created_at)}</small></button></td><td>{run.period_start} – {run.period_end}<small>Revision {run.revision}</small></td><td>{run.scope_type}<small>{run.scope_id}</small></td><td>{run.value ?? "—"}<small>{run.status}</small></td><td>v{run.formula_version}<small>{run.formula_snapshot_json?.unit || metric?.formula_unit || "—"}</small></td><td><code>{run.formula_snapshot_hash?.slice(0, 18) || "Missing"}</code></td></tr>;
+                const historical = run.formula_snapshot_json?.snapshot_provenance?.mode === "MIGRATION_BACKFILL";
+                return <tr key={run.id} className={run.id === selectedRunId ? "is-selected" : ""} onClick={() => setSelectedRunId(run.id)}><td><button type="button" className="reliability-calculation-evidence__row-button" onClick={() => setSelectedRunId(run.id)}><strong>{metric?.code || run.metric_definition_id}</strong><small>{displayDate(run.created_at)}</small></button></td><td>{run.period_start} – {run.period_end}<small>Revision {run.revision}</small></td><td>{run.scope_type}<small>{run.scope_id}</small></td><td>{run.value ?? "—"}<small>{run.status}</small></td><td>v{run.formula_version}<small>{historical ? "Controlled reconstruction" : "Exact execution snapshot"}</small><small>{run.formula_snapshot_json?.unit || metric?.formula_unit || "—"}</small></td><td><code>{run.formula_snapshot_hash?.slice(0, 18) || "Missing"}</code></td></tr>;
               })}
             </tbody></table></div>
           </div>
@@ -107,9 +118,10 @@ export function ReliabilityCalculationEvidence(): React.ReactElement {
             <article className="reliability-calculation-evidence__snapshot">
               <header>
                 <div><p className="reliability-v2__eyebrow">Selected execution</p><h3>{snapshot?.name || selectedMetric?.name || "Calculation formula"}</h3><code>{snapshot?.code || selectedMetric?.code} · v{snapshot?.version || selectedRun.formula_version}</code></div>
-                <span className={`reliability-calculation-evidence__integrity reliability-calculation-evidence__integrity--${formulaHashMatches === false ? "invalid" : "valid"}`}>{formulaHashMatches === false ? "Hash mismatch" : "Snapshot retained"}</span>
+                <span className={`reliability-calculation-evidence__integrity reliability-calculation-evidence__integrity--${formulaHashMatches === false ? "invalid" : reconstructed ? "reconstructed" : "valid"}`}>{formulaHashMatches === false ? "Hash mismatch" : reconstructed ? "Historical reconstruction" : "Exact snapshot retained"}</span>
               </header>
 
+              {reconstructed && <div className="reliability-formula-admin__message" role="note">This run predates formula-snapshot storage. Its equation was reconstructed during migration from the controlled metric definition and the formula version recorded on the run; it is not represented as a contemporaneous snapshot.</div>}
               {snapshot?.mathml ? <div className="reliability-formula__math" dangerouslySetInnerHTML={{ __html: snapshot.mathml }} /> : <div className="reliability-analytics__empty"><strong>No formula snapshot</strong><span>This historical record requires migration backfill.</span></div>}
               <pre className="reliability-formula__latex">{snapshot?.latex || selectedMetric?.formula_latex || "No LaTeX retained"}</pre>
 
