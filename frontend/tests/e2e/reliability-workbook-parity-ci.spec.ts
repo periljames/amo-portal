@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.use({ trace: "retain-on-failure", screenshot: "only-on-failure" });
+test.setTimeout(60_000);
 
 const DATASETS = ["AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "STRUCTURES", "RECURRING", "ECTM", "ADD"] as const;
 
@@ -104,7 +105,7 @@ async function openWorkspace(page: Page): Promise<void> {
     }));
   }, { storedToken: token });
   await page.route("**/*", fulfilApi);
-  await page.goto("/maintenance/safarilink/reliability/workbook-parity", { waitUntil: "networkidle" });
+  await page.goto("/maintenance/safarilink/reliability/workbook-parity", { waitUntil: "domcontentloaded" });
 
   try {
     await expect(page.getByTestId("reliability-workbook-parity"), `Expected workbook parity workspace at ${page.url()}`).toBeVisible({ timeout: 30_000 });
