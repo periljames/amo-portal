@@ -86,20 +86,34 @@ jobs:
           amodb/apps/doc_control/pdf_capability_service.py
           amodb/apps/doc_control/pdf_capability_prewarm.py
           amodb/apps/doc_control/pdf_safe_processing_service.py
-      - name: Run PDF engine and provenance contracts
+      - id: engine
+        name: Run core PDF engine contracts
+        continue-on-error: true
         working-directory: backend
-        run: >-
-          pytest -q --tb=short
-          amodb/apps/doc_control/tests/test_pdf_reader_engine.py
-          amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
-          amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py
-      - name: Run PDF interaction architecture contracts
+        run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_reader_engine.py
+      - id: source
+        name: Run PDF source contracts
+        continue-on-error: true
+        working-directory: backend
+        run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_reader_source_contract.py
+      - id: hardening
+        name: Run final PDF hardening contracts
+        continue-on-error: true
+        working-directory: backend
+        run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_reader_final_hardening.py
+      - id: interaction
+        name: Run PDF interaction architecture contracts
+        continue-on-error: true
         working-directory: backend
         run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_reader_interaction_contract.py
-      - name: Run PDF capability cache contracts
+      - id: capability
+        name: Run PDF capability cache contracts
+        continue-on-error: true
         working-directory: backend
         run: pytest -q --tb=short amodb/apps/doc_control/tests/test_pdf_capability_service.py
-      - name: Run PDF form and route-order contracts
+      - id: forms
+        name: Run PDF form and route-order contracts
+        continue-on-error: true
         working-directory: backend
         run: >-
           pytest -q --tb=short
@@ -118,15 +132,41 @@ jobs:
           --label "Publications Reader frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Run browser PDF engine unit tests
+      - id: unit
+        name: Run browser PDF engine unit tests
+        continue-on-error: true
         working-directory: frontend
         run: >-
           npm exec -- vitest run
           src/pages/manuals/pdfReaderEngine.test.ts
           src/pages/manuals/pdfReaderVirtualization.test.ts
-      - name: Build Publications frontend
+      - id: build
+        name: Build Publications frontend
+        continue-on-error: true
         working-directory: frontend
         run: npm run build
+      - name: Enforce Publications Reader validation
+        if: always()
+        env:
+          ENGINE: ${{ steps.engine.outcome }}
+          SOURCE: ${{ steps.source.outcome }}
+          HARDENING: ${{ steps.hardening.outcome }}
+          INTERACTION: ${{ steps.interaction.outcome }}
+          CAPABILITY: ${{ steps.capability.outcome }}
+          FORMS: ${{ steps.forms.outcome }}
+          UNIT: ${{ steps.unit.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          printf 'engine=%s\nsource=%s\nhardening=%s\ninteraction=%s\ncapability=%s\nforms=%s\nunit=%s\nbuild=%s\n' \
+            "$ENGINE" "$SOURCE" "$HARDENING" "$INTERACTION" "$CAPABILITY" "$FORMS" "$UNIT" "$BUILD"
+          failures=0
+          for result in "$ENGINE" "$SOURCE" "$HARDENING" "$INTERACTION" "$CAPABILITY" "$FORMS" "$UNIT" "$BUILD"; do
+            if [ "$result" != "success" ]; then failures=$((failures + 1)); fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "::error title=Publications Reader validation failed::$failures validation group(s) failed; inspect the named steps above."
+            exit 1
+          fi
 
   tenant-completion:
     name: Tenant shell and department-home completion
