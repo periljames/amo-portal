@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
 
 import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
 import { getPdfReaderPerformanceProfile, type PdfReaderPerformanceProfile } from "../../services/pdfPerformance";
@@ -38,12 +39,16 @@ const READ_ONLY_FALLBACK: PdfReaderCapabilities = {
   can_submit: false,
 };
 
+type ReaderBootstrap = {
+  capabilities: PdfReaderCapabilities;
+  sourceUrl: string;
+  objectUrl: string | null;
+  liveVerified: boolean;
+};
+
 function cachedReadOnly(capabilities: PdfReaderCapabilities): PdfReaderCapabilities {
   return {
     ...capabilities,
-    // A cached fingerprint may accelerate source retrieval, but it must never
-    // authorize a working copy. The live capability response restores the
-    // authoritative checksum before draft admission or form editing begins.
     source_sha256: "",
     has_acroform: false,
     can_fill: false,
@@ -55,16 +60,12 @@ function cachedReadOnly(capabilities: PdfReaderCapabilities): PdfReaderCapabilit
   };
 }
 
-function readOnlyFallback(
-  error: unknown,
-  source?: PdfReaderCapabilities | null,
-): PdfReaderCapabilities {
+function readOnlyFallback(error: unknown, source?: PdfReaderCapabilities | null): PdfReaderCapabilities {
   const detail = error instanceof Error && error.message.trim()
     ? error.message.trim()
     : "PDF form capabilities could not be verified";
   return {
     ...READ_ONLY_FALLBACK,
-    source_sha256: "",
     page_count: source?.page_count || 0,
     reader_pdf_url: source?.reader_pdf_url || null,
     source_has_javascript: source?.source_has_javascript,
@@ -73,26 +74,52 @@ function readOnlyFallback(
   };
 }
 
-function scheduleSourceWarm(
-  profile: PdfReaderPerformanceProfile,
-  task: () => void,
-): () => void {
+function sourceUrlFor(capabilities: PdfReaderCapabilities | null | undefined, fallback: string): string {
+  return String(capabilities?.reader_pdf_url || fallback);
+}
+
+function sameControlledSource(
+  cached: PdfReaderCapabilities,
+  live: PdfReaderCapabilities,
+  fallbackUrl: string,
+): boolean {
+  return cached.source_sha256.toLowerCase() === live.source_sha256.toLowerCase()
+    && sourceUrlFor(cached, fallbackUrl) === sourceUrlFor(live, fallbackUrl);
+}
+
+async function cachedSourceWithin(
+  identity: PdfReaderCoreProps["identity"],
+  sourceSha256: string,
+  sourceUrl: string,
+  timeoutMs: number,
+): Promise<ArrayBuffer | null> {
+  let timer = 0;
+  const timeout = new Promise<null>((resolve) => {
+    timer = window.setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      readCachedPdfSource(identity, sourceSha256, sourceUrl),
+      timeout,
+    ]);
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+}
+
+function scheduleSourceWarm(profile: PdfReaderPerformanceProfile, task: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
-  const twentyMib = 20 * 1024 * 1024;
-  const fourMib = 4 * 1024 * 1024;
-  const delay = profile.rangeChunkSize >= twentyMib
-    ? 80
-    : profile.rangeChunkSize >= fourMib
-      ? 450
-      : 1600;
+  const delay = profile.mode === "burst" ? 1200 : profile.mode === "balanced" ? 2400 : 5000;
   const handle = window.setTimeout(task, delay);
   return () => window.clearTimeout(handle);
 }
 
 /**
- * Paint the immutable PDF immediately. A cached source and cached capability
- * fingerprint may be used for the initial read-only frame, while the live
- * capability request revalidates form permissions without remounting PDF.js.
+ * Resolve one immutable reader source before PDF.js mounts. Cached capability
+ * metadata may accelerate the first frame, but it never authorizes editing.
+ * The live response upgrades permissions only when it confirms the same source
+ * and the same script-disabled reader URL, preventing the destructive
+ * read-only -> sanitized source replacement seen in the production video.
  */
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
@@ -103,139 +130,164 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     manualId: props.identity.manualId,
     revisionId: props.identity.revisionId,
     userId: props.identity.userId,
-  }), [
-    props.identity.manualId,
-    props.identity.revisionId,
-    props.identity.tenant,
-    props.identity.userId,
-  ]);
+  }), [props.identity.manualId, props.identity.revisionId, props.identity.tenant, props.identity.userId]);
   const identityKey = useMemo(() => [
     readerIdentity.tenant.toLowerCase(),
     readerIdentity.manualId,
     readerIdentity.revisionId,
   ].join(":"), [readerIdentity]);
-  const initialCachedCapabilities = useMemo(
+  const cachedCapabilities = useMemo(
     () => suppliedCapabilities || readCachedPdfCapabilities(readerIdentity),
     [readerIdentity, suppliedCapabilities],
   );
-  const mayHydrateSourceCache = useRef(Boolean(initialCachedCapabilities?.source_sha256));
-  const initialCacheFingerprint = useRef(initialCachedCapabilities?.source_sha256 || "");
-  const [resolvedCapabilities, setResolvedCapabilities] = useState<PdfReaderCapabilities>(
-    initialCachedCapabilities ? cachedReadOnly(initialCachedCapabilities) : READ_ONLY_FALLBACK,
-  );
-  const [cachedPdfUrl, setCachedPdfUrl] = useState<string | null>(null);
-  const [sourceCachePending, setSourceCachePending] = useState(Boolean(initialCachedCapabilities?.source_sha256));
+  const bootstrapGeneration = useRef(0);
+  const [bootstrap, setBootstrap] = useState<ReaderBootstrap | null>(null);
 
   useEffect(() => {
-    if (externallyManaged) {
-      const next = suppliedCapabilities || READ_ONLY_FALLBACK;
-      setResolvedCapabilities(next);
-      if (suppliedCapabilities?.source_sha256) cachePdfCapabilities(readerIdentity, suppliedCapabilities);
-      setSourceCachePending(Boolean(suppliedCapabilities?.source_sha256));
-      mayHydrateSourceCache.current = Boolean(suppliedCapabilities?.source_sha256);
-      initialCacheFingerprint.current = suppliedCapabilities?.source_sha256 || "";
-      return;
-    }
-
+    const generation = bootstrapGeneration.current + 1;
+    bootstrapGeneration.current = generation;
     let active = true;
-    getPdfReaderCapabilities(
-      readerIdentity.tenant,
-      readerIdentity.manualId,
-      readerIdentity.revisionId,
-    )
-      .then((capabilities) => {
-        if (!active) return;
-        const previous = initialCachedCapabilities;
-        const sourceChanged = Boolean(
-          previous?.source_sha256
-          && previous.source_sha256 !== capabilities.source_sha256,
-        );
-        if (sourceChanged) {
-          clearCachedPdfCapabilities(readerIdentity);
-          setCachedPdfUrl((current) => {
-            if (current) URL.revokeObjectURL(current);
-            return null;
+    let objectUrl: string | null = null;
+
+    const publish = (value: ReaderBootstrap) => {
+      if (!active || bootstrapGeneration.current !== generation) {
+        if (value.objectUrl) URL.revokeObjectURL(value.objectUrl);
+        return;
+      }
+      objectUrl = value.objectUrl;
+      setBootstrap((current) => {
+        if (current?.objectUrl && current.objectUrl !== value.objectUrl) URL.revokeObjectURL(current.objectUrl);
+        return value;
+      });
+    };
+
+    const start = async () => {
+      if (externallyManaged) {
+        const capabilities = suppliedCapabilities || READ_ONLY_FALLBACK;
+        const sourceUrl = sourceUrlFor(capabilities, props.fileUrl);
+        const bytes = capabilities.source_sha256
+          ? await cachedSourceWithin(readerIdentity, capabilities.source_sha256, sourceUrl, 250)
+          : null;
+        const local = bytes ? URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })) : null;
+        if (capabilities.source_sha256) cachePdfCapabilities(readerIdentity, capabilities);
+        publish({ capabilities, sourceUrl, objectUrl: local, liveVerified: true });
+        return;
+      }
+
+      const livePromise = getPdfReaderCapabilities(
+        readerIdentity.tenant,
+        readerIdentity.manualId,
+        readerIdentity.revisionId,
+      );
+
+      if (!cachedCapabilities?.source_sha256) {
+        try {
+          const live = await livePromise;
+          if (!active) return;
+          cachePdfCapabilities(readerIdentity, live);
+          const sourceUrl = sourceUrlFor(live, props.fileUrl);
+          const bytes = await cachedSourceWithin(readerIdentity, live.source_sha256, sourceUrl, 250);
+          const local = bytes ? URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })) : null;
+          publish({ capabilities: live, sourceUrl, objectUrl: local, liveVerified: true });
+        } catch (error) {
+          publish({
+            capabilities: readOnlyFallback(error),
+            sourceUrl: props.fileUrl,
+            objectUrl: null,
+            liveVerified: false,
           });
-          setSourceCachePending(false);
-          void deleteCachedPdfSource(
-            readerIdentity,
-            previous!.source_sha256,
-            previous!.reader_pdf_url || props.fileUrl,
-          );
         }
-        cachePdfCapabilities(readerIdentity, capabilities);
-        setResolvedCapabilities(capabilities);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setResolvedCapabilities(readOnlyFallback(error, initialCachedCapabilities));
+        return;
+      }
+
+      const cachedSourceUrl = sourceUrlFor(cachedCapabilities, props.fileUrl);
+      const [cachedBytes, quickLive] = await Promise.all([
+        cachedSourceWithin(readerIdentity, cachedCapabilities.source_sha256, cachedSourceUrl, 250),
+        Promise.race([
+          livePromise.then((value) => value as PdfReaderCapabilities | null).catch(() => null),
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
+        ]),
+      ]);
+      if (!active) return;
+
+      const initialCapabilities = quickLive && sameControlledSource(cachedCapabilities, quickLive, props.fileUrl)
+        ? quickLive
+        : cachedReadOnly(cachedCapabilities);
+      if (quickLive) cachePdfCapabilities(readerIdentity, quickLive);
+      const initialSourceUrl = sourceUrlFor(quickLive || cachedCapabilities, props.fileUrl);
+      const local = cachedBytes && initialSourceUrl === cachedSourceUrl
+        ? URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }))
+        : null;
+      publish({
+        capabilities: initialCapabilities,
+        sourceUrl: initialSourceUrl,
+        objectUrl: local,
+        liveVerified: Boolean(quickLive && sameControlledSource(cachedCapabilities, quickLive, props.fileUrl)),
       });
 
+      try {
+        const live = quickLive || await livePromise;
+        if (!active) return;
+        cachePdfCapabilities(readerIdentity, live);
+        if (!sameControlledSource(cachedCapabilities, live, props.fileUrl)) {
+          clearCachedPdfCapabilities(readerIdentity);
+          void deleteCachedPdfSource(
+            readerIdentity,
+            cachedCapabilities.source_sha256,
+            cachedSourceUrl,
+          );
+          setBootstrap((current) => current ? {
+            ...current,
+            capabilities: readOnlyFallback(
+              new Error("The controlled reader source changed while this document was opening; reopen the document to load the verified source"),
+              live,
+            ),
+            liveVerified: false,
+          } : current);
+          return;
+        }
+        setBootstrap((current) => current ? {
+          ...current,
+          capabilities: live,
+          liveVerified: true,
+        } : current);
+      } catch (error) {
+        if (!active) return;
+        setBootstrap((current) => current ? {
+          ...current,
+          capabilities: readOnlyFallback(error, cachedCapabilities),
+          liveVerified: false,
+        } : current);
+      }
+    };
+
+    void start();
     return () => {
       active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [
+    cachedCapabilities,
     externallyManaged,
-    initialCachedCapabilities,
     props.fileUrl,
     readerIdentity,
     suppliedCapabilities,
   ]);
 
-  const readerFileUrl = resolvedCapabilities.reader_pdf_url || props.fileUrl;
-
   useEffect(() => {
-    if (!mayHydrateSourceCache.current) return;
-    const fingerprint = initialCacheFingerprint.current;
-    if (!fingerprint) {
-      setSourceCachePending(false);
-      mayHydrateSourceCache.current = false;
-      return;
-    }
-    let active = true;
-    readCachedPdfSource(readerIdentity, fingerprint, readerFileUrl)
-      .then((bytes) => {
-        if (!active || !bytes) return;
-        const localUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-        setCachedPdfUrl((current) => {
-          if (current) URL.revokeObjectURL(current);
-          return localUrl;
-        });
-      })
-      .finally(() => {
-        if (!active) return;
-        mayHydrateSourceCache.current = false;
-        setSourceCachePending(false);
-      });
-    return () => { active = false; };
-  }, [readerFileUrl, readerIdentity]);
-
-  useEffect(() => () => {
-    if (cachedPdfUrl) URL.revokeObjectURL(cachedPdfUrl);
-  }, [cachedPdfUrl]);
-
-  useEffect(() => {
-    const fingerprint = resolvedCapabilities.source_sha256;
-    if (!fingerprint || cachedPdfUrl || sourceCachePending) return;
+    if (!bootstrap?.liveVerified || !bootstrap.capabilities.source_sha256 || bootstrap.objectUrl) return;
     return scheduleSourceWarm(performanceProfile, () => {
       void warmPdfSourceCache(
         readerIdentity,
-        fingerprint,
-        readerFileUrl,
+        bootstrap.capabilities.source_sha256,
+        bootstrap.sourceUrl,
       );
     });
-  }, [
-    cachedPdfUrl,
-    performanceProfile,
-    readerFileUrl,
-    readerIdentity,
-    resolvedCapabilities.source_sha256,
-    sourceCachePending,
-  ]);
+  }, [bootstrap, performanceProfile, readerIdentity]);
 
-  if (sourceCachePending) {
-    return <section className="pdfv2-reader" data-pdf-source-cache="checking">
-      <div className="pdfv2-loading" role="status">Opening cached document…</div>
+  if (!bootstrap) {
+    return <section className="pdfv2-reader pdfv2-reader--booting" data-pdf-source-state="resolving">
+      <div className="pdfv2-loading" role="status"><LoaderCircle className="is-spinning" size={19} />Preparing controlled document…</div>
     </section>;
   }
 
@@ -243,9 +295,9 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     {...props}
     key={identityKey}
     identity={readerIdentity}
-    fileUrl={cachedPdfUrl || readerFileUrl}
+    fileUrl={bootstrap.objectUrl || bootstrap.sourceUrl}
     originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
-    capabilities={resolvedCapabilities}
+    capabilities={bootstrap.capabilities}
   />;
 }
 
