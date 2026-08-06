@@ -75,7 +75,10 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f"Expected one Alembic head, found {heads}"
           head = heads[0]
-          revisions = {revision.revision for revision in script.walk_revisions(head, "base")}
+          revisions = {
+              revision.revision
+              for revision in script.walk_revisions(base="base", head=head)
+          }
           assert "aircraft_arch_20260806_u5_u6" in revisions, head
           print(f"alembic_head={head}")
           PY
