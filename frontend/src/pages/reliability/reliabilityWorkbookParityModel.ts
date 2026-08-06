@@ -158,7 +158,11 @@ export function defaultReportSections(): ReportSection[] {
 }
 
 export function activeReportSections(sections: ReportSection[]): ReportSection[] {
-  return sections.filter((section) => section.include !== false).map(({ include: _include, ...section }) => section);
+  return sections.filter((section) => section.include !== false).map((section) => {
+    const output: ReportSection = { ...section };
+    delete output.include;
+    return output;
+  });
 }
 
 export function moveSection(sections: ReportSection[], index: number, direction: -1 | 1): ReportSection[] {
