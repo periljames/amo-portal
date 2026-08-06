@@ -128,6 +128,7 @@ export type HrDefaultDayBatchPreview = {
   assignable_count: number;
   already_assigned_count: number;
   ineligible_count: number;
+  selection_token: string;
   capped: boolean;
 };
 
