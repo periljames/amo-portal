@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
-from amodb.apps.workforce import hr_people_directory, hr_schemas, hr_service, models
+from amodb.apps.workforce import (
+    hr_people_directory,
+    hr_schemas,
+    hr_selection_integrity,
+    hr_service,
+    models,
+)
 
 
 def _id() -> str:
@@ -383,6 +389,11 @@ def test_selected_default_pattern_batch_previews_applies_and_rejects_stale_count
             ),
             exclude_user_ids=[],
         )
+        _, selection_token = hr_selection_integrity.resolve_with_token(
+            db,
+            amo_id=seeded["amo_id"],
+            selection=selection,
+        )
 
         preview = hr_people_directory.preview_default_day_pattern_batch(
             db,
@@ -393,6 +404,19 @@ def test_selected_default_pattern_batch_previews_applies_and_rejects_stale_count
         assert preview.eligible_count == 2
         assert preview.assignable_count == 1
         assert preview.already_assigned_count == 1
+        assert len(selection_token) == 64
+
+        changed_selection = hr_schemas.HrPeopleSelection(
+            mode="FILTERED",
+            filters=selection.filters,
+            exclude_user_ids=[seeded["alice"]],
+        )
+        _, changed_token = hr_selection_integrity.resolve_with_token(
+            db,
+            amo_id=seeded["amo_id"],
+            selection=changed_selection,
+        )
+        assert changed_token != selection_token
 
         with pytest.raises(ValueError, match="population changed"):
             hr_people_directory.apply_default_day_pattern_batch(
@@ -402,6 +426,7 @@ def test_selected_default_pattern_batch_previews_applies_and_rejects_stale_count
                 payload=hr_schemas.HrDefaultDayBatchApplyRequest(
                     selection=selection,
                     expected_match_count=1,
+                    expected_selection_token=selection_token,
                 ),
             )
 
@@ -412,6 +437,7 @@ def test_selected_default_pattern_batch_previews_applies_and_rejects_stale_count
             payload=hr_schemas.HrDefaultDayBatchApplyRequest(
                 selection=selection,
                 expected_match_count=2,
+                expected_selection_token=selection_token,
             ),
         )
         assert result.matched_count == 2
