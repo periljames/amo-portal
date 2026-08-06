@@ -1,0 +1,694 @@
+.qms-schedule-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 2vw, 1.75rem);
+  background: color-mix(in srgb, #07111f 72%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.qms-schedule-dialog {
+  width: min(1120px, 100%);
+  max-height: min(940px, calc(100dvh - 2rem));
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid color-mix(in srgb, var(--border-color, #d7dde7) 82%, #6d7f99);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  box-shadow: 0 30px 90px rgba(2, 8, 23, 0.38), 0 4px 20px rgba(15, 23, 42, 0.16);
+  color: var(--text-primary, #172033);
+}
+
+.qms-schedule-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.15rem 1.3rem 1rem;
+  border-bottom: 1px solid var(--border-color, #e2e6ed);
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--primary, #193b65) 10%, transparent), transparent 58%),
+    var(--surface, #fff);
+}
+
+.qms-schedule-dialog__heading {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.qms-schedule-dialog__heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--primary, #254f7f);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.qms-schedule-dialog__heading > strong {
+  font-size: clamp(1.08rem, 2vw, 1.34rem);
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.qms-schedule-dialog__heading > small {
+  max-width: 760px;
+  color: var(--text-muted, #64748b);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.qms-schedule-dialog__header > button {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+}
+
+.qms-schedule-dialog__header > button:hover:not(:disabled) {
+  border-color: var(--border-color, #d6dce5);
+  background: color-mix(in srgb, var(--surface-muted, #f3f5f8) 88%, transparent);
+  color: var(--text-primary, #172033);
+}
+
+.qms-schedule-dialog > form {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.qms-schedule-dialog__error,
+.qms-schedule-dialog__loading {
+  margin: 0.85rem 1.15rem 0;
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.qms-schedule-dialog__error {
+  border: 1px solid color-mix(in srgb, #d44 38%, transparent);
+  background: color-mix(in srgb, #d44 8%, var(--surface, #fff));
+  color: #a32121;
+}
+
+.qms-schedule-dialog__loading {
+  border: 1px solid color-mix(in srgb, var(--primary, #315f91) 24%, transparent);
+  background: color-mix(in srgb, var(--primary, #315f91) 6%, var(--surface, #fff));
+  color: var(--text-secondary, #475569);
+}
+
+.qms-schedule-dialog__body {
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem 1.15rem 1.3rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  overscroll-behavior: contain;
+}
+
+.qms-schedule-section {
+  min-width: 0;
+  align-self: start;
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.95rem;
+  border: 1px solid var(--border-color, #e0e5ec);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--surface, #fff) 97%, var(--surface-muted, #f4f6f9));
+}
+
+.qms-schedule-section--primary,
+.qms-schedule-section--notes {
+  grid-column: 1 / -1;
+}
+
+.qms-schedule-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.qms-schedule-section > header > div {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--primary, #254f7f);
+}
+
+.qms-schedule-section > header span {
+  display: grid;
+  gap: 0.05rem;
+}
+
+.qms-schedule-section > header strong {
+  color: var(--text-primary, #172033);
+  font-size: 0.87rem;
+  line-height: 1.3;
+}
+
+.qms-schedule-section > header small {
+  color: var(--text-muted, #6b778b);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.qms-schedule-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.qms-schedule-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qms-schedule-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.qms-schedule-field {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.3rem;
+}
+
+.qms-schedule-field--wide {
+  grid-column: 1 / -1;
+}
+
+.qms-schedule-field > span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-secondary, #46566c);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.qms-schedule-field > span b {
+  color: #b42318;
+}
+
+.qms-schedule-field > small {
+  color: var(--text-muted, #718096);
+  font-size: 0.67rem;
+  line-height: 1.35;
+}
+
+.qms-schedule-field input,
+.qms-schedule-field select,
+.qms-schedule-field textarea,
+.qms-schedule-external-row input,
+.qms-schedule-people-picker input,
+.qms-schedule-reminder input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-color, #ced5df);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text-primary, #172033);
+  font: inherit;
+  font-size: 0.78rem;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.qms-schedule-field input,
+.qms-schedule-field select,
+.qms-schedule-external-row input,
+.qms-schedule-people-picker input,
+.qms-schedule-reminder input {
+  height: 2.35rem;
+  padding: 0 0.65rem;
+}
+
+.qms-schedule-field textarea {
+  resize: vertical;
+  min-height: 3.8rem;
+  padding: 0.55rem 0.65rem;
+  line-height: 1.45;
+}
+
+.qms-schedule-field input:focus,
+.qms-schedule-field select:focus,
+.qms-schedule-field textarea:focus,
+.qms-schedule-external-row input:focus,
+.qms-schedule-people-picker input:focus,
+.qms-schedule-reminder input:focus {
+  border-color: color-mix(in srgb, var(--primary, #315f91) 72%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary, #315f91) 14%, transparent);
+}
+
+.qms-schedule-automation {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, #1b8a5a 24%, var(--border-color, #dce2ea));
+  border-radius: 10px;
+  background: color-mix(in srgb, #1b8a5a 6%, var(--surface, #fff));
+}
+
+.qms-schedule-automation input,
+.qms-schedule-notification-grid input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1rem;
+  accent-color: var(--primary, #315f91);
+}
+
+.qms-schedule-automation > span,
+.qms-schedule-notification-grid label > span,
+.qms-schedule-dialog__footer > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.qms-schedule-automation strong,
+.qms-schedule-notification-grid strong,
+.qms-schedule-dialog__footer strong {
+  font-size: 0.78rem;
+}
+
+.qms-schedule-automation small,
+.qms-schedule-notification-grid small,
+.qms-schedule-dialog__footer small {
+  color: var(--text-muted, #68778c);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.qms-schedule-attendees {
+  position: relative;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.qms-schedule-attendees__label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  color: var(--primary, #315f91);
+}
+
+.qms-schedule-attendees__label > span {
+  display: grid;
+  gap: 0.05rem;
+}
+
+.qms-schedule-attendees__label strong {
+  color: var(--text-primary, #172033);
+  font-size: 0.75rem;
+}
+
+.qms-schedule-attendees__label small {
+  color: var(--text-muted, #68778c);
+  font-size: 0.66rem;
+}
+
+.qms-schedule-attendees__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.qms-schedule-attendees__chips > span,
+.qms-schedule-attendees__add {
+  min-height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.45rem 0.25rem 0.6rem;
+  border: 1px solid var(--border-color, #d4dbe5);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text-secondary, #475569);
+  font-size: 0.69rem;
+}
+
+.qms-schedule-attendees__chips > span button,
+.qms-schedule-attendees__add {
+  border: 0;
+  cursor: pointer;
+}
+
+.qms-schedule-attendees__chips > span button {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+}
+
+.qms-schedule-attendees__chips > span button:hover,
+.qms-schedule-attendees__add:hover {
+  background: var(--surface-muted, #f1f4f8);
+  color: var(--text-primary, #172033);
+}
+
+.qms-schedule-people-picker {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--border-color, #d2d9e3);
+  border-radius: 11px;
+  background: var(--surface, #fff);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.2);
+}
+
+.qms-schedule-people-picker > label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--border-color, #e2e6ec);
+  color: var(--text-muted, #64748b);
+}
+
+.qms-schedule-people-picker > label input {
+  border: 0;
+  box-shadow: none;
+  height: 2rem;
+}
+
+.qms-schedule-people-picker > div {
+  overflow: auto;
+  padding: 0.35rem;
+}
+
+.qms-schedule-people-picker > div > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0.6rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary, #172033);
+  cursor: pointer;
+  text-align: left;
+}
+
+.qms-schedule-people-picker > div > button:hover {
+  background: var(--surface-muted, #f2f5f8);
+}
+
+.qms-schedule-people-picker > div > button span {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.qms-schedule-people-picker > div > button strong {
+  font-size: 0.73rem;
+}
+
+.qms-schedule-people-picker > div > button small,
+.qms-schedule-people-picker > div > p {
+  color: var(--text-muted, #718096);
+  font-size: 0.64rem;
+}
+
+.qms-schedule-people-picker > div > p {
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.qms-schedule-external-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.qms-schedule-external-group + .qms-schedule-external-group {
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border-color, #d9e0e8);
+}
+
+.qms-schedule-external-group__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qms-schedule-external-group__heading > span {
+  display: grid;
+  gap: 0.05rem;
+}
+
+.qms-schedule-external-group__heading strong {
+  font-size: 0.74rem;
+}
+
+.qms-schedule-external-group__heading small {
+  color: var(--text-muted, #718096);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.qms-schedule-external-group__heading button {
+  min-height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border-color, #d4dbe4);
+  border-radius: 7px;
+  background: var(--surface, #fff);
+  color: var(--primary, #315f91);
+  font-size: 0.67rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qms-schedule-external-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.25fr auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.qms-schedule-external-row--auditee {
+  grid-template-columns: 0.85fr 0.85fr 1.25fr 1fr 0.85fr auto;
+}
+
+.qms-schedule-external-row > button {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #b42318;
+  cursor: pointer;
+}
+
+.qms-schedule-external-row > button:hover {
+  border-color: color-mix(in srgb, #b42318 25%, transparent);
+  background: color-mix(in srgb, #b42318 7%, transparent);
+}
+
+.qms-schedule-external-empty {
+  margin: 0;
+  padding: 0.55rem;
+  border: 1px dashed var(--border-color, #d8dee7);
+  border-radius: 8px;
+  color: var(--text-muted, #718096);
+  font-size: 0.67rem;
+  text-align: center;
+}
+
+.qms-schedule-notification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qms-schedule-notification-grid > label {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, #dde3eb);
+  border-radius: 9px;
+  background: var(--surface, #fff);
+}
+
+.qms-schedule-reminder {
+  align-items: center !important;
+}
+
+.qms-schedule-reminder input {
+  width: 4.2rem;
+  margin-left: auto;
+  text-align: center;
+}
+
+.qms-schedule-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.15rem;
+  border-top: 1px solid var(--border-color, #e1e6ed);
+  background: color-mix(in srgb, var(--surface-muted, #f5f7fa) 72%, var(--surface, #fff));
+}
+
+.qms-schedule-dialog__footer > div:first-child {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--primary, #315f91);
+}
+
+.qms-schedule-dialog__footer > div:first-child > span {
+  display: grid;
+  gap: 0.05rem;
+}
+
+.qms-schedule-dialog__footer > div:last-child {
+  display: flex;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 900px) {
+  .qms-schedule-dialog {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .qms-schedule-dialog__body {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-schedule-section--primary,
+  .qms-schedule-section--notes {
+    grid-column: auto;
+  }
+
+  .qms-schedule-grid--3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qms-schedule-external-row,
+  .qms-schedule-external-row--auditee {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .qms-schedule-dialog-backdrop {
+    padding: 0;
+    align-items: end;
+  }
+
+  .qms-schedule-dialog {
+    width: 100%;
+    height: min(96dvh, 980px);
+    max-height: 96dvh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .qms-schedule-dialog__header {
+    padding: 0.9rem 0.9rem 0.8rem;
+  }
+
+  .qms-schedule-dialog__heading > small {
+    display: none;
+  }
+
+  .qms-schedule-dialog__body {
+    padding: 0.75rem;
+  }
+
+  .qms-schedule-grid--2,
+  .qms-schedule-grid--3,
+  .qms-schedule-notification-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-schedule-field--wide {
+    grid-column: auto;
+  }
+
+  .qms-schedule-external-row,
+  .qms-schedule-external-row--auditee {
+    grid-template-columns: 1fr 1fr;
+    padding: 0.55rem;
+    border: 1px solid var(--border-color, #dde3eb);
+    border-radius: 9px;
+  }
+
+  .qms-schedule-external-row > button {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .qms-schedule-dialog__footer {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .qms-schedule-dialog__footer > div:first-child {
+    display: none;
+  }
+
+  .qms-schedule-dialog__footer > div:last-child {
+    width: 100%;
+  }
+
+  .qms-schedule-dialog__footer > div:last-child > * {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qms-schedule-dialog input,
+  .qms-schedule-dialog select,
+  .qms-schedule-dialog textarea {
+    transition: none;
+  }
+}
+
+html[data-theme="dark"] .qms-schedule-dialog,
+html.dark .qms-schedule-dialog {
+  --surface: #111827;
+  --surface-muted: #182131;
+  --text-primary: #eef3f8;
+  --text-secondary: #c2ccda;
+  --text-muted: #8fa0b5;
+  --border-color: #2d394b;
+  --primary: #7fb4e5;
+}

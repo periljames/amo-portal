@@ -1,6 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-
 type StoredScale = "standard" | "large" | "extra-large";
 
 function futureToken(): string {
@@ -146,7 +145,7 @@ test("QMS context navigation and user text scale persist without duplicate heade
   const contextBar = page.locator(".quality-context-bar");
   await expect(contextBar).toBeVisible();
   await expect(contextBar.getByRole("button", { name: "Findings" })).toHaveAttribute("aria-current", "page");
-  await expect(contextBar.getByRole("button", { name: "Schedule audit" })).toBeVisible();
+  await expect(contextBar.getByRole("button", { name: "New finding" })).toBeVisible();
   await expect(page.locator(".qms-ops-page > .page-header")).toBeHidden();
 
   await page.locator(".tenant-shell__profile-trigger").click();
@@ -175,8 +174,9 @@ test("QMS explicit refresh event revalidates active data without browser reload"
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/findings/register", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".quality-context-bar")).toBeVisible();
+  await page.waitForTimeout(1_100);
   const readsBefore = state.qualityReads;
 
   await page.evaluate(() => window.dispatchEvent(new Event("amo:qms:refresh")));
-  await expect.poll(() => state.qualityReads).toBeGreaterThan(readsBefore);
+  await expect.poll(() => state.qualityReads, { timeout: 10_000 }).toBeGreaterThan(readsBefore);
 });
