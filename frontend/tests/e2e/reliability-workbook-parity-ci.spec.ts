@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+test.use({ trace: "retain-on-failure", screenshot: "only-on-failure" });
+
 const DATASETS = ["AU", "AI", "PM", "OOS", "RM", "SM", "STRUCTURES", "RECURRING", "ECTM"] as const;
 
 const fields: Record<string, Array<Record<string, unknown>>> = {
@@ -75,8 +77,6 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 test.describe("Reliability workbook parity representative-tenant UAT", () => {
-  test.use({ trace: "retain-on-failure", screenshot: "only-on-failure" });
-
   test("wires every workbook register, governance view and controlled report surface", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await openWorkspace(page);
