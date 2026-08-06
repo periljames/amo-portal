@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import Column, Integer, String, Text, event, select
 
 from . import advanced_models as domain
-from .analytics_formulae import _custom_metric_formula
+from .analytics_formulae import _custom_metric_formula, _system_formulae
+from .analytics_types import CalculationFormula
 
 
 _FORMULA_FIELDS = {
@@ -57,6 +58,12 @@ def _snapshot(metric: Any) -> dict[str, Any]:
     if stored_updates:
         generated = generated.model_copy(update=stored_updates)
     return generated.model_dump(mode="json")
+
+
+def build_persisted_formula_catalog(metric_definitions: Iterable[Any]) -> list[CalculationFormula]:
+    formulae = _system_formulae()
+    formulae.extend(CalculationFormula.model_validate(_snapshot(metric)) for metric in metric_definitions)
+    return sorted(formulae, key=lambda row: (row.origin, row.name.lower(), row.code))
 
 
 def _snapshot_hash(snapshot: dict[str, Any]) -> str:
