@@ -7,6 +7,7 @@ import {
   type ReliabilityMetricDefinition,
 } from "../../services/reliability";
 import type { CalculationFormula } from "./reliabilityAnalyticsTypes";
+import "./ReliabilityCalculationEvidence.css";
 
 type PersistedCalculationRun = ReliabilityCalculationRun & {
   formula_snapshot_json?: CalculationFormula;
