@@ -1,4 +1,4 @@
-"""align aircraft usage component total fields with the Fleet model
+"""align aircraft usage fields with the Fleet model
 
 Revision ID: aircraft_arch_20260806_usage_hsi
 Revises: aircraft_arch_20260806_u6_guards
@@ -18,23 +18,25 @@ branch_labels = None
 depends_on = None
 
 
-USAGE_TOTAL_COLUMNS = (
-    "ttshsi_after",
-    "tcsoh_after",
-    "pttsn_after",
-    "pttso_after",
-    "tscoa_after",
+USAGE_COLUMNS = (
+    ("ttshsi_after", sa.Float()),
+    ("tcsoh_after", sa.Float()),
+    ("pttsn_after", sa.Float()),
+    ("pttso_after", sa.Float()),
+    ("tscoa_after", sa.Float()),
+    ("hours_to_mx", sa.Float()),
+    ("days_to_mx", sa.Integer()),
 )
 
 
 def upgrade() -> None:
-    for column_name in USAGE_TOTAL_COLUMNS:
+    for column_name, column_type in USAGE_COLUMNS:
         op.add_column(
             "aircraft_usage",
-            sa.Column(column_name, sa.Float(), nullable=True),
+            sa.Column(column_name, column_type, nullable=True),
         )
 
 
 def downgrade() -> None:
-    for column_name in reversed(USAGE_TOTAL_COLUMNS):
+    for column_name, _column_type in reversed(USAGE_COLUMNS):
         op.drop_column("aircraft_usage", column_name)
