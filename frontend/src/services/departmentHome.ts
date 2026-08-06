@@ -57,19 +57,46 @@ export type DepartmentHomeResponse = {
   source_health: Record<string, "healthy" | "degraded" | "not_configured">;
 };
 
-export function getDepartmentHome(
+function waitForRetry(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const handle = window.setTimeout(resolve, milliseconds);
+    const onAbort = () => {
+      window.clearTimeout(handle);
+      reject(new DOMException("Request was cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * A department route transition can briefly race backend/session readiness.
+ * Retry one transient failure before showing the blocking workspace error; the
+ * cached stale response remains available through apiRequest when appropriate.
+ */
+export async function getDepartmentHome(
   amoCode: string,
   department: string,
   signal?: AbortSignal,
 ): Promise<DepartmentHomeResponse> {
-  return apiRequest<DepartmentHomeResponse>(
-    `/auth/home/${encodeURIComponent(amoCode)}/${encodeURIComponent(department)}`,
-    {
-      timeoutMs: 12_000,
-      cacheTtlMs: 20_000,
-      staleWhileOfflineMs: 20 * 60_000,
-      persistCache: true,
-      signal,
-    },
-  );
+  const path = `/auth/home/${encodeURIComponent(amoCode)}/${encodeURIComponent(department)}`;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await apiRequest<DepartmentHomeResponse>(path, {
+        timeoutMs: 12_000,
+        cacheTtlMs: 20_000,
+        staleWhileOfflineMs: 20 * 60_000,
+        persistCache: true,
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      lastError = error;
+      if (attempt === 0) await waitForRetry(350, signal);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Department home could not be loaded.");
 }
