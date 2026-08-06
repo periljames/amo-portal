@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2 } from "lucide-react";
+import { useParams } from "react-router-dom";
 import QmsPlannerPageV2 from "./QmsPlannerPageV2";
+import QmsPlannerScheduleDialog from "./QmsPlannerScheduleDialog";
 import { plannerClockAt } from "./qmsPlannerClock";
 
 const PLANNER_TIMEZONE = "Africa/Nairobi";
@@ -12,6 +15,12 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+
+type DirectCreateState = {
+  date: string;
+  time: string;
+  title: string;
+};
 
 function isRendered(element: HTMLElement): boolean {
   if (!element.isConnected || element.closest("[aria-hidden='true']")) return false;
@@ -199,22 +208,78 @@ function usePlannerDialogFocusManagement(): void {
   }, []);
 }
 
+function useDirectScheduleBridge(
+  enabled: boolean,
+  onOpen: (draft: DirectCreateState) => void,
+): void {
+  const handledDialogRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const bridge = () => {
+      const dialog = document.querySelector<HTMLElement>(".qms-planner-create-modal");
+      if (!dialog || handledDialogRef.current === dialog) return;
+      handledDialogRef.current = dialog;
+      const fields = Array.from(dialog.querySelectorAll<HTMLInputElement>("input"));
+      const title = fields.find((field) => !field.type || field.type === "text")?.value || "";
+      const date = fields.find((field) => field.type === "date")?.value || "";
+      const time = fields.find((field) => field.type === "time")?.value || "09:00";
+      onOpen({ date, time, title });
+      dialog.querySelector<HTMLButtonElement>("button[aria-label='Close quick schedule']")?.click();
+    };
+
+    const observer = new MutationObserver(bridge);
+    observer.observe(document.body, { childList: true, subtree: true });
+    bridge();
+    return () => observer.disconnect();
+  }, [enabled, onOpen]);
+}
+
 export default function QmsPlannerLivePage(): React.ReactElement {
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode: string }>();
   const [clockInstant, setClockInstant] = useState(() => new Date());
+  const [plannerRevision, setPlannerRevision] = useState(0);
+  const [directCreate, setDirectCreate] = useState<DirectCreateState | null>(null);
+  const [creationNotice, setCreationNotice] = useState<string | null>(null);
   usePlannerDialogFocusManagement();
+  useDirectScheduleBridge(!directCreate, (draft) => setDirectCreate(draft));
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!creationNotice) return;
+    const timer = window.setTimeout(() => setCreationNotice(null), 4800);
+    return () => window.clearTimeout(timer);
+  }, [creationNotice]);
+
   const plannerClock = useMemo(
     () => plannerClockAt(clockInstant, PLANNER_TIMEZONE),
     [clockInstant],
   );
 
-  // Ordinary timer ticks rerender the existing planner so its current-time marker
-  // advances. The key changes only at an EAT date rollover, refreshing Today-based
-  // memoized state without resetting the workspace every minute.
-  return <QmsPlannerPageV2 key={plannerClock.dateKey} />;
+  return (
+    <>
+      <QmsPlannerPageV2 key={`${plannerClock.dateKey}:${plannerRevision}`} />
+      <QmsPlannerScheduleDialog
+        amoCode={amoCode}
+        open={Boolean(directCreate)}
+        initialDate={directCreate?.date || plannerClock.dateKey}
+        initialTime={directCreate?.time || "09:00"}
+        initialTitle={directCreate?.title || ""}
+        onClose={() => setDirectCreate(null)}
+        onCreated={(schedule) => {
+          setDirectCreate(null);
+          setPlannerRevision((current) => current + 1);
+          setCreationNotice(
+            `${schedule.title} was created for ${schedule.next_due_date}. ${schedule.notifications_queued} notification action${schedule.notifications_queued === 1 ? "" : "s"} queued.`,
+          );
+        }}
+      />
+      {creationNotice ? <div className="qms-planner-toast qms-planner-toast--success" role="status"><CheckCircle2 size={16} /><span>{creationNotice}</span></div> : null}
+    </>
+  );
 }
