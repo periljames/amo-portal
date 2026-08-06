@@ -2,8 +2,8 @@
   --pdfv3-border: color-mix(in srgb, var(--text-primary, #0f172a) 16%, transparent);
   --pdfv3-stage: color-mix(in srgb, var(--bg-base, #eef2f7) 90%, #64748b 10%);
   --pdfv3-surface: var(--surface-elevated, #fff);
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
   height: calc(100dvh - var(--tenant-topbar-height, 50px) - 84px);
@@ -231,6 +231,7 @@
 
 .pdfv3-viewport {
   position: relative;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -414,4 +415,25 @@
   .is-spinning {
     animation: none;
   }
+}
+
+/* Keep one document command surface and never cover controlled page content. */
+.publication-reader-page:has(.pdfv3-reader) .publication-metadata,
+.publication-reader-page:has(.pdfv3-reader) .publication-document-header__actions > button:has(.lucide-download),
+.publication-reader-page:has(.pdfv3-reader) .publication-document-header__actions > button:has(.lucide-printer),
+.publication-reader-page:has(.pdfv3-reader) .publication-floating-header > strong,
+.publication-reader-page:has(.pdfv3-reader) .publication-floating-header > span,
+.publication-reader-page:has(.pdfv3-reader) .publication-to-top {
+  display: none !important;
+}
+
+.publication-reader-page:has(.pdfv3-reader) .publication-reader-workspace {
+  min-height: 0;
+}
+
+.publication-reader-page:has(.pdfv3-reader) .publication-document-canvas,
+.publication-reader-page:has(.pdfv3-reader) .publication-native-pdf,
+.publication-reader-page:has(.pdfv3-reader) .publication-linked-layout {
+  min-height: 0;
+  height: 100%;
 }
