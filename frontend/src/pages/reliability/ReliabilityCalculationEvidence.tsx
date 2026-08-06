@@ -10,6 +10,7 @@ import type { CalculationFormula } from "./reliabilityAnalyticsTypes";
 import "./ReliabilityCalculationEvidence.css";
 
 type PersistedCalculationRun = ReliabilityCalculationRun & {
+  revision: number;
   formula_snapshot_json?: CalculationFormula;
   formula_snapshot_hash?: string;
 };
