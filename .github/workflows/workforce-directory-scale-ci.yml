@@ -5,6 +5,8 @@ name: Workforce Directory Scale CI
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "backend/amodb/apps/workforce/**"
+      - "backend/amodb/alembic/versions/workforce_20260806_bulk_operations.py"
+      - "backend/amodb/apps/rostering/application_router.py"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/workforceHr.ts"
       - "frontend/src/types/workforceHr.ts"
@@ -20,7 +22,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Workforce PostgreSQL directory
+    name: Workforce PostgreSQL directory and bulk operations
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -30,13 +32,10 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: amodb_workforce_directory
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres -d amodb_workforce_directory"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       APP_ENV: test
       SECRET_KEY: workforce-directory-scale-ci-secret
@@ -47,8 +46,7 @@ jobs:
       QUALITY_SCHEMA_STRICT: "0"
     steps:
       - uses: actions/checkout@v6
-        with:
-          show-progress: false
+        with: { show-progress: false }
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -59,54 +57,50 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Compile Workforce backend
         working-directory: backend
-        run: >-
-          python -m compileall -q
-          amodb/apps/workforce/hr_people_directory.py
-          amodb/apps/workforce/hr_people_facets.py
-          amodb/apps/workforce/hr_selection_integrity.py
-          amodb/apps/workforce/hr_router.py
-          amodb/apps/workforce/hr_schemas.py
-          amodb/apps/workforce/work_pattern_assignment_locking.py
+        run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering/application_router.py
       - name: Configure mappers and verify routes
         working-directory: backend
         run: |
           python - <<'PY'
           from sqlalchemy.orm import configure_mappers
           from amodb.main import app
-
           configure_mappers()
           paths = {route.path for route in app.routes}
           required = {
               "/workforce/hr/people",
               "/workforce/hr/people/facets",
               "/workforce/hr/people/default-day-pattern/preview",
-              "/workforce/hr/people/default-day-pattern/apply",
               "/workforce/hr/people/export",
-              "/workforce/hr/default-day-pattern",
+              "/workforce/hr/people/contracts/preview",
+              "/workforce/hr/bulk-operations/contracts",
+              "/workforce/hr/bulk-operations/default-day-pattern",
+              "/workforce/hr/bulk-operations/{operation_id}",
+              "/workforce/hr/bulk-operations/{operation_id}/items",
+              "/workforce/hr/bulk-operations/{operation_id}/failures.csv",
+              "/workforce/hr/bulk-operations/{operation_id}/retry",
+              "/workforce/hr/bulk-operations/{operation_id}/resume",
           }
-          missing = required - paths
-          assert not missing, missing
-          print("Workforce directory routes and mappers verified")
+          assert not (required - paths), required - paths
           PY
       - name: Upgrade clean PostgreSQL schema
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Run Workforce directory and PostgreSQL lock regressions
+      - name: Run Workforce scale, lock and bulk regressions
         working-directory: backend
         run: >-
           pytest -q
           amodb/apps/workforce/tests/test_default_day_pattern_postgres_locking.py
           amodb/apps/workforce/tests/test_hr_people_directory.py
           amodb/apps/workforce/tests/test_hr_people_directory_scale.py
+          amodb/apps/workforce/tests/test_bulk_operations.py
 
   frontend:
-    name: Workforce directory frontend
+    name: Workforce directory and batch setup frontend
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-        with:
-          show-progress: false
+        with: { show-progress: false }
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -115,19 +109,20 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
-      - name: Run Workforce directory contracts
+      - name: Run Workforce workspace contracts
         working-directory: frontend
         run: npm exec -- vitest run src/pages/rostering/workforcePeopleDirectory.test.ts
       - name: Typecheck and build production frontend
         working-directory: frontend
         run: npm run build
-      - name: Lint Workforce directory surfaces
+      - name: Lint Workforce workspace surfaces
         working-directory: frontend
         run: >-
           npm exec -- eslint
           src/pages/rostering/WorkforceRosteringPagesV2.tsx
           src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx
           src/pages/rostering/components/WorkforcePeopleDirectory.tsx
+          src/pages/rostering/components/WorkforceBulkSetupPanel.tsx
           src/pages/rostering/components/WorkforceOperationsWorkspace.tsx
           src/services/workforceHr.ts
           src/types/workforceHr.ts

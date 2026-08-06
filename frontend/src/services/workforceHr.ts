@@ -1,5 +1,11 @@
 import { apiBlob, apiJson, downloadBlob, jsonBody, queryString } from "./typedApi";
 import type {
+  HrBulkOperation,
+  HrBulkOperationItemsPage,
+  HrBulkOperationsPage,
+  HrContractBatchPreview,
+  HrContractDefaults,
+  HrContractOverride,
   HrDashboard,
   HrDefaultDayBatchPreview,
   HrDefaultDayBatchResult,
@@ -13,15 +19,11 @@ import type {
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
 export type WorkforceHrPatternAssignmentCreate = {
-  user_id: string;
-  work_pattern_id: string;
-  effective_from: string;
-  effective_to?: string | null;
-  cycle_anchor_date: string;
+  user_id: string; work_pattern_id: string; effective_from: string;
+  effective_to?: string | null; cycle_anchor_date: string;
 };
 
 const defaultDayPreviewTokens = new Map<string, string>();
-
 function selectionKey(selection: HrPeopleSelection): string {
   const userIds = [...(selection.user_ids || [])].sort();
   const excludedIds = [...(selection.exclude_user_ids || [])].sort();
@@ -37,120 +39,119 @@ export function getWorkforceHrDashboard(peopleLimit = 50): Promise<HrDashboard> 
     offline: { cacheTtlMs: 60_000 },
   });
 }
-
-export function listWorkforceHrPeople(params: HrPeopleFilters & {
-  page?: number;
-  page_size?: number;
-} = {}): Promise<HrPeoplePage> {
-  return apiJson(`/workforce/hr/people${queryString(params)}`, {
-    offline: { cacheTtlMs: 60_000 },
-  });
+export function listWorkforceHrPeople(params: HrPeopleFilters & { page?: number; page_size?: number } = {}): Promise<HrPeoplePage> {
+  return apiJson(`/workforce/hr/people${queryString(params)}`, { offline: { cacheTtlMs: 60_000 } });
 }
-
 export function getWorkforceHrPeopleFacets(): Promise<HrPeopleFacets> {
-  return apiJson("/workforce/hr/people/facets", {
-    offline: { cacheTtlMs: 5 * 60_000 },
-  });
+  return apiJson("/workforce/hr/people/facets", { offline: { cacheTtlMs: 5 * 60_000 } });
 }
-
-export async function previewWorkforceHrDefaultDayBatch(
-  selection: HrPeopleSelection,
-): Promise<HrDefaultDayBatchPreview> {
-  const result = await apiJson<HrDefaultDayBatchPreview>(
-    "/workforce/hr/people/default-day-pattern/preview",
-    {
-      method: "POST",
-      body: jsonBody(selection),
-    },
-  );
+export async function previewWorkforceHrDefaultDayBatch(selection: HrPeopleSelection): Promise<HrDefaultDayBatchPreview> {
+  const result = await apiJson<HrDefaultDayBatchPreview>("/workforce/hr/people/default-day-pattern/preview", {
+    method: "POST", body: jsonBody(selection),
+  });
   defaultDayPreviewTokens.set(selectionKey(selection), result.selection_token);
   return result;
 }
-
 export async function applyWorkforceHrDefaultDayBatch(
-  selection: HrPeopleSelection,
-  expectedMatchCount: number,
-  expectedSelectionToken?: string,
+  selection: HrPeopleSelection, expectedMatchCount: number, expectedSelectionToken?: string,
 ): Promise<HrDefaultDayBatchResult> {
   const key = selectionKey(selection);
   const token = expectedSelectionToken || defaultDayPreviewTokens.get(key);
-  if (!token) {
-    throw new Error("Preview this exact employee selection before applying the default work pattern.");
-  }
-  const result = await apiJson<HrDefaultDayBatchResult>(
-    "/workforce/hr/people/default-day-pattern/apply",
-    {
-      method: "POST",
-      body: jsonBody({
-        selection,
-        expected_match_count: expectedMatchCount,
-        expected_selection_token: token,
-      }),
-    },
-  );
+  if (!token) throw new Error("Preview this exact employee selection before applying the default work pattern.");
+  const result = await apiJson<HrDefaultDayBatchResult>("/workforce/hr/people/default-day-pattern/apply", {
+    method: "POST",
+    body: jsonBody({ selection, expected_match_count: expectedMatchCount, expected_selection_token: token }),
+  });
   defaultDayPreviewTokens.delete(key);
   return result;
 }
-
 export async function exportWorkforceHrPeople(selection: HrPeopleSelection): Promise<void> {
   const result = await apiBlob("/workforce/hr/people/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: jsonBody(selection),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: jsonBody(selection),
   });
   downloadBlob(result.blob, result.filename || "workforce-people.csv");
 }
-
 export function bootstrapWorkforceHrDefaultDayPattern(): Promise<HrDefaultDayBootstrap> {
   return apiJson("/workforce/hr/default-day-pattern", { method: "POST" });
 }
-
 export function listWorkforceHrPatterns(includeInactive = false): Promise<WorkPatternRead[]> {
   return apiJson(`/workforce/hr/work-patterns${queryString({ include_inactive: includeInactive })}`, {
     offline: { cacheTtlMs: 5 * 60_000 },
   });
 }
-
-export function assignWorkforceHrPattern(
-  payload: WorkforceHrPatternAssignmentCreate,
-): Promise<WorkPatternAssignmentRead> {
-  return apiJson("/workforce/hr/work-pattern-assignments", {
-    method: "POST",
-    body: jsonBody(payload),
-  });
+export function assignWorkforceHrPattern(payload: WorkforceHrPatternAssignmentCreate): Promise<WorkPatternAssignmentRead> {
+  return apiJson("/workforce/hr/work-pattern-assignments", { method: "POST", body: jsonBody(payload) });
 }
 
 export type WorkforceHrOvertimeCreate = {
-  user_id?: string | null;
-  roster_assignment_id?: string | null;
-  starts_at: string;
-  ends_at: string;
-  requested_minutes?: number | null;
-  reason: string;
+  user_id?: string | null; roster_assignment_id?: string | null; starts_at: string; ends_at: string;
+  requested_minutes?: number | null; reason: string;
 };
-
-export type WorkforceHrOvertimeDecision = {
-  stage: "SUPERVISOR" | "HR";
-  decision: "APPROVED" | "REJECTED";
-  comment: string;
-};
-
+export type WorkforceHrOvertimeDecision = { stage: "SUPERVISOR" | "HR"; decision: "APPROVED" | "REJECTED"; comment: string };
 export function listWorkforceHrOvertime(pendingOnly = true): Promise<HrOvertimeRequest[]> {
   return apiJson(`/workforce/hr/overtime-requests${queryString({ pending_only: pendingOnly })}`, {
     offline: { cacheTtlMs: 30_000 },
   });
 }
-
 export function createWorkforceHrOvertime(payload: WorkforceHrOvertimeCreate): Promise<HrOvertimeRequest> {
   return apiJson("/workforce/hr/overtime-requests", { method: "POST", body: jsonBody(payload) });
 }
-
-export function decideWorkforceHrOvertime(
-  requestId: string,
-  payload: WorkforceHrOvertimeDecision,
-): Promise<HrOvertimeRequest> {
+export function decideWorkforceHrOvertime(requestId: string, payload: WorkforceHrOvertimeDecision): Promise<HrOvertimeRequest> {
   return apiJson(`/workforce/hr/overtime-requests/${encodeURIComponent(requestId)}/decision`, {
-    method: "POST",
-    body: jsonBody(payload),
+    method: "POST", body: jsonBody(payload),
   });
+}
+
+export type HrContractBatchPayload = {
+  selection: HrPeopleSelection;
+  defaults: HrContractDefaults;
+  overrides?: HrContractOverride[];
+  preview_limit?: number;
+};
+export function previewWorkforceHrContractBatch(payload: HrContractBatchPayload): Promise<HrContractBatchPreview> {
+  return apiJson("/workforce/hr/people/contracts/preview", { method: "POST", body: jsonBody(payload) });
+}
+export function submitWorkforceHrContractBatch(
+  payload: HrContractBatchPayload & { expected_match_count: number; expected_selection_token: string },
+  idempotencyKey: string,
+): Promise<HrBulkOperation> {
+  return apiJson("/workforce/hr/bulk-operations/contracts", {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: jsonBody(payload),
+  });
+}
+export function submitWorkforceHrDefaultDayOperation(
+  selection: HrPeopleSelection, expectedMatchCount: number, expectedSelectionToken: string, idempotencyKey: string,
+): Promise<HrBulkOperation> {
+  return apiJson("/workforce/hr/bulk-operations/default-day-pattern", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: jsonBody({ selection, expected_match_count: expectedMatchCount, expected_selection_token: expectedSelectionToken }),
+  });
+}
+export function getWorkforceHrBulkOperation(operationId: string): Promise<HrBulkOperation> {
+  return apiJson(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}`, {
+    offline: { cacheTtlMs: 0 },
+  });
+}
+export function listWorkforceHrBulkOperations(params: { page?: number; page_size?: number; status?: string; operation_type?: string } = {}): Promise<HrBulkOperationsPage> {
+  return apiJson(`/workforce/hr/bulk-operations${queryString(params)}`, { offline: { cacheTtlMs: 10_000 } });
+}
+export function listWorkforceHrBulkOperationItems(
+  operationId: string, params: { page?: number; page_size?: number; status?: string } = {},
+): Promise<HrBulkOperationItemsPage> {
+  return apiJson(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}/items${queryString(params)}`, {
+    offline: { cacheTtlMs: 5_000 },
+  });
+}
+export function retryWorkforceHrBulkOperation(operationId: string, idempotencyKey: string): Promise<HrBulkOperation> {
+  return apiJson(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}/retry`, {
+    method: "POST", body: jsonBody({ idempotency_key: idempotencyKey }),
+  });
+}
+export function resumeWorkforceHrBulkOperation(operationId: string): Promise<HrBulkOperation> {
+  return apiJson(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}/resume`, { method: "POST" });
+}
+export async function downloadWorkforceHrBulkFailures(operationId: string): Promise<void> {
+  const result = await apiBlob(`/workforce/hr/bulk-operations/${encodeURIComponent(operationId)}/failures.csv`);
+  downloadBlob(result.blob, result.filename || `workforce-bulk-${operationId}-failures.csv`);
 }
