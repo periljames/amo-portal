@@ -30,11 +30,13 @@ def upgrade() -> None:
         sa.Column("source_id", sa.String(length=64), nullable=True),
         sa.Column("source_schedule_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("occurrence_date", sa.Date(), nullable=True),
+        sa.Column("end_date", sa.Date(), nullable=True),
         sa.Column("start_time", sa.Time(), nullable=True),
         sa.Column("end_time", sa.Time(), nullable=True),
         sa.Column("timezone_name", sa.String(length=64), nullable=False, server_default="Africa/Nairobi"),
         sa.Column("location", sa.String(length=255), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("responsible_user_id", sa.String(length=36), nullable=True),
         sa.Column("attendee_user_ids_json", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("external_attendees_json", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("notify_attendees", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -67,11 +69,16 @@ def upgrade() -> None:
             "lifecycle_status IN ('ACTIVE','SUSPENDED','CANCELLED','COMPLETED')",
             name="ck_qms_planner_metadata_lifecycle",
         ),
+        sa.CheckConstraint(
+            "end_date IS NULL OR occurrence_date IS NULL OR end_date >= occurrence_date",
+            name="ck_qms_planner_metadata_date_order",
+        ),
         sa.CheckConstraint("version >= 1", name="ck_qms_planner_metadata_version"),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["schedule_id"], ["qms_audit_schedules.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["source_schedule_id"], ["qms_audit_schedules.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["responsible_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["suspended_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
@@ -93,6 +100,8 @@ def upgrade() -> None:
     op.create_index("ix_qms_planner_schedule_metadata_source_id", "qms_planner_schedule_metadata", ["source_id"])
     op.create_index("ix_qms_planner_schedule_metadata_source_schedule_id", "qms_planner_schedule_metadata", ["source_schedule_id"])
     op.create_index("ix_qms_planner_schedule_metadata_occurrence_date", "qms_planner_schedule_metadata", ["occurrence_date"])
+    op.create_index("ix_qms_planner_schedule_metadata_end_date", "qms_planner_schedule_metadata", ["end_date"])
+    op.create_index("ix_qms_planner_schedule_metadata_responsible_user_id", "qms_planner_schedule_metadata", ["responsible_user_id"])
     op.create_index("ix_qms_planner_schedule_metadata_lifecycle_status", "qms_planner_schedule_metadata", ["lifecycle_status"])
     op.create_index(
         "ix_qms_planner_metadata_amo_occurrence",
@@ -116,6 +125,8 @@ def downgrade() -> None:
     op.drop_index("ix_qms_planner_metadata_amo_lifecycle", table_name="qms_planner_schedule_metadata")
     op.drop_index("ix_qms_planner_metadata_amo_occurrence", table_name="qms_planner_schedule_metadata")
     op.drop_index("ix_qms_planner_schedule_metadata_lifecycle_status", table_name="qms_planner_schedule_metadata")
+    op.drop_index("ix_qms_planner_schedule_metadata_responsible_user_id", table_name="qms_planner_schedule_metadata")
+    op.drop_index("ix_qms_planner_schedule_metadata_end_date", table_name="qms_planner_schedule_metadata")
     op.drop_index("ix_qms_planner_schedule_metadata_occurrence_date", table_name="qms_planner_schedule_metadata")
     op.drop_index("ix_qms_planner_schedule_metadata_source_schedule_id", table_name="qms_planner_schedule_metadata")
     op.drop_index("ix_qms_planner_schedule_metadata_source_id", table_name="qms_planner_schedule_metadata")
