@@ -281,6 +281,7 @@ def publish_revision(
     locked = (
         db.query(models.AircraftContentPackRevision)
         .filter(models.AircraftContentPackRevision.id == revision.id)
+        .populate_existing()
         .with_for_update(of=models.AircraftContentPackRevision)
         .one()
     )
