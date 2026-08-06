@@ -32,7 +32,8 @@ function selectionKey(selection: HrPeopleSelection): string {
 }
 
 export function getWorkforceHrDashboard(peopleLimit = 50): Promise<HrDashboard> {
-  return apiJson(`/workforce/hr/dashboard${queryString({ people_limit: peopleLimit })}`, {
+  const boundedPeopleLimit = Math.max(1, Math.min(200, Math.trunc(peopleLimit)));
+  return apiJson(`/workforce/hr/dashboard${queryString({ people_limit: boundedPeopleLimit })}`, {
     offline: { cacheTtlMs: 60_000 },
   });
 }
