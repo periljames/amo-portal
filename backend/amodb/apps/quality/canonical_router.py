@@ -37,7 +37,12 @@ def _is_generic_catchall(route_item) -> bool:
 
 
 def _capture_extension_routes(api_router: APIRouter, extension_router: APIRouter):
-    """Clone extension routes with the destination router's public prefix."""
+    """Clone extension routes without copying router lifecycle handlers.
+
+    ``include_router`` also propagates startup and shutdown callbacks. The
+    planner worker is owned by the deployed ASGI application, so composition
+    restores the destination lifecycle lists immediately after route cloning.
+    """
 
     extension_endpoints = {
         _route_endpoint(route_item)
@@ -51,6 +56,8 @@ def _capture_extension_routes(api_router: APIRouter, extension_router: APIRouter
     ]
 
     existing_route_ids = {id(route_item) for route_item in api_router.routes}
+    startup_handlers = list(api_router.on_startup)
+    shutdown_handlers = list(api_router.on_shutdown)
     api_router.include_router(extension_router)
     extension_routes = [
         route_item
@@ -62,6 +69,8 @@ def _capture_extension_routes(api_router: APIRouter, extension_router: APIRouter
         for route_item in api_router.routes
         if id(route_item) in existing_route_ids
     ]
+    api_router.on_startup[:] = startup_handlers
+    api_router.on_shutdown[:] = shutdown_handlers
     return extension_routes
 
 
