@@ -6,10 +6,20 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import hr_schemas, models
+from . import governance_schemas, models
 
 
-OperationType = Literal["CREATE_CONTRACTS", "ASSIGN_DEFAULT_DAY_PATTERN"]
+OperationType = Literal[
+    "CREATE_CONTRACTS",
+    "ASSIGN_DEFAULT_DAY_PATTERN",
+    "ASSIGN_ORGANIZATION",
+    "ASSIGN_POSITION",
+    "ASSIGN_BASES",
+    "ASSIGN_SUPERVISOR",
+    "UPDATE_GROUPS",
+    "UPDATE_CONTRACT_SETTINGS",
+    "SCHEDULE_OFFBOARDING",
+]
 OperationStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED"]
 ItemStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "SKIPPED", "FAILED"]
 
@@ -66,7 +76,7 @@ class ContractOverride(BulkSchema):
 
 
 class ContractBatchPreviewRequest(BulkSchema):
-    selection: hr_schemas.HrPeopleSelection
+    selection: governance_schemas.GovernedPeopleSelection
     defaults: ContractDefaults
     overrides: list[ContractOverride] = Field(default_factory=list, max_length=10000)
     preview_limit: int = Field(default=250, ge=1, le=1000)
@@ -109,9 +119,12 @@ class ContractBatchSubmitRequest(ContractBatchPreviewRequest):
 
 
 class DefaultPatternBatchSubmitRequest(BulkSchema):
-    selection: hr_schemas.HrPeopleSelection
+    selection: governance_schemas.GovernedPeopleSelection
     expected_match_count: int = Field(ge=1, le=10000)
     expected_selection_token: str = Field(min_length=16, max_length=128)
+
+
+PersonnelMutationRequest = governance_schemas.PersonnelMutationRequest
 
 
 class BulkOperationRead(BulkSchema):
