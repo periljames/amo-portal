@@ -9,59 +9,6 @@ def replace_once(source: str, old: str, new: str, label: str) -> str:
     return source.replace(old, new)
 
 
-def ensure_fixture_component_kind(
-    source: str,
-    position_prefix: str,
-    component_kind: str,
-) -> str:
-    pattern = re.compile(
-        rf'(?m)^(?P<indent>[ \t]*)position="(?P<position>{re.escape(position_prefix)}-\d+)",'
-    )
-    matches = list(pattern.finditer(source))
-    if not matches:
-        raise SystemExit(
-            f"expected at least one {component_kind} fixture position with prefix {position_prefix}"
-        )
-
-    result: list[str] = []
-    cursor = 0
-    inserted = 0
-    accepted = 0
-    for match in matches:
-        constructor_start = source.rfind("FleetComponent(", 0, match.start())
-        if constructor_start < 0:
-            raise SystemExit(
-                f"could not locate FleetComponent constructor for {match.group('position')}"
-            )
-        constructor_prefix = source[constructor_start:match.start()]
-        existing = re.search(
-            r'(?m)^\s*component_kind\s*=\s*["\'](?P<kind>[A-Z_]+)["\']\s*,',
-            constructor_prefix,
-        )
-
-        result.append(source[cursor:match.start()])
-        if existing:
-            if existing.group("kind") != component_kind:
-                raise SystemExit(
-                    f"fixture {match.group('position')} has component_kind="
-                    f"{existing.group('kind')}, expected {component_kind}"
-                )
-            accepted += 1
-        else:
-            result.append(
-                f'{match.group("indent")}component_kind="{component_kind}",\n'
-            )
-            inserted += 1
-        result.append(source[match.start():match.end()])
-        cursor = match.end()
-
-    result.append(source[cursor:])
-    print(
-        f"{component_kind} fixture roles: inserted={inserted}; already_correct={accepted}"
-    )
-    return "".join(result)
-
-
 services_path = Path(
     "backend/amodb/apps/aircraft_architecture/daily_utilisation/services.py"
 )
@@ -161,8 +108,6 @@ if constructor_count != 2:
         f"expected two integration session constructors; found {constructor_count}"
     )
 source = source.replace("WriteSessionLocal()", "_new_session()")
-source = ensure_fixture_component_kind(source, "ENG", "ENGINE")
-source = ensure_fixture_component_kind(source, "PROP", "PROPELLER")
 test_path.write_text(source)
 
 
