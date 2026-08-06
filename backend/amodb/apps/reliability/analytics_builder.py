@@ -22,6 +22,7 @@ from .analytics_component_charts import _component_reliability
 from .analytics_component_extended import _oil_consumption_points, _removal_age_distribution, _shop_visit_trend
 from .analytics_deferrals import _deferral_charts
 from .analytics_event_charts import _aircraft_performance, _ata_pareto, _event_mix, _route_delay, _station_delay, _time_series
+from .analytics_formulae import build_formula_catalog
 from .analytics_fracas import _fracas_action_charts, _fracas_charts
 from .analytics_health import _data_quality_points, _engine_metric_options, _engine_status_points, _filter_options, _source_health_points
 from .analytics_metrics import _summary_metrics
@@ -198,6 +199,10 @@ def build_dashboard(
             advanced_models.ReliabilityDataQualityIssue.resolved_at >= _start(period_start),
         ),
     ).all()
+    metric_definitions = db.query(advanced_models.ReliabilityMetricDefinition).filter(
+        advanced_models.ReliabilityMetricDefinition.amo_id == amo_id,
+        advanced_models.ReliabilityMetricDefinition.active.is_(True),
+    ).order_by(advanced_models.ReliabilityMetricDefinition.code.asc()).limit(500).all()
 
     (
         deferral_status,
@@ -251,6 +256,7 @@ def build_dashboard(
             engine_statuses=engine_statuses,
             engine_metrics=engine_metrics,
         ),
+        formulae=build_formula_catalog(metric_definitions),
         summary=_summary_metrics(
             current_events=current_events,
             previous_events=previous_events,
