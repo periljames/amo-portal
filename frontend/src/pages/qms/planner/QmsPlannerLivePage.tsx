@@ -85,6 +85,7 @@ function usePlannerDialogFocusManagement(): void {
   const openDialogsRef = useRef(new Map<HTMLElement, HTMLElement | null>());
 
   useEffect(() => {
+    const openDialogs = openDialogsRef.current;
     const currentDialogs = (): HTMLElement[] => Array.from(
       document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
     ).filter(isRendered);
@@ -140,10 +141,10 @@ function usePlannerDialogFocusManagement(): void {
       const currentDialogSet = new Set(dialogs);
 
       dialogs.forEach((dialog) => {
-        if (openDialogsRef.current.has(dialog)) return;
+        if (openDialogs.has(dialog)) return;
         const intended = intendedTriggerRef.current;
         const outside = lastOutsideFocusRef.current;
-        openDialogsRef.current.set(
+        openDialogs.set(
           dialog,
           firstFocusable(intended, outside, fallbackTrigger(dialog)),
         );
@@ -159,10 +160,11 @@ function usePlannerDialogFocusManagement(): void {
       });
 
       const removedTriggers: HTMLElement[] = [];
-      for (const [dialog, trigger] of openDialogsRef.current) {
+      for (const [dialog, trigger] of openDialogs) {
         if (currentDialogSet.has(dialog)) continue;
-        openDialogsRef.current.delete(dialog);
-        if (isFocusable(trigger)) removedTriggers.push(trigger);
+        openDialogs.delete(dialog);
+        const restoreTarget = firstFocusable(trigger, fallbackTrigger(dialog));
+        if (restoreTarget) removedTriggers.push(restoreTarget);
       }
 
       const restoreTarget = removedTriggers[0] || null;
@@ -183,7 +185,7 @@ function usePlannerDialogFocusManagement(): void {
       document.removeEventListener("focusin", rememberOutsideFocus, true);
       document.removeEventListener("pointerdown", rememberPointerTrigger, true);
       document.removeEventListener("keydown", manageDialogKeyboard, true);
-      openDialogsRef.current.clear();
+      openDialogs.clear();
     };
   }, []);
 }
