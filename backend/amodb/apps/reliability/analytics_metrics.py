@@ -1,16 +1,30 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 
 from . import advanced_models, models, operational_sources
 from .analytics_common import (
-    CLOSED_ACTION_STATES, DELAY_EVENT_TYPES, DISPATCH_EVENT_TYPES, REPEAT_EVENT_TYPES,
-    SHOP_EVENT_TYPES, UNSCHEDULED_REMOVAL_TYPES, OPEN_DEFERRAL_STATES, UTC,
-    _bucket_key, _delta, _enum_value, _metric_status, _ratio,
-    _safe_float, _event_totals, _utilisation_totals,
+    CLOSED_ACTION_STATES, OPEN_DEFERRAL_STATES, UTC,
+    _delta, _enum_value, _metric_status, _ratio,
+    _event_totals, _utilisation_totals,
 )
-from .analytics_types import ChartPoint, DashboardMetric
+from .analytics_types import DashboardMetric
+
+
+FORMULA_CODES = {
+    "dispatch_reliability_pct": "dispatch_reliability_pct",
+    "event_rate_per_100_fh": "event_rate_per_100_fh",
+    "average_delay_minutes": "average_delay_minutes",
+    "removal_rate_per_1000_fc": "removal_rate_per_1000_fc",
+    "mtbur_fleet_hours": "fleet_exposure_per_unscheduled_removal",
+    "nff_rate_pct": "nff_rate_pct",
+    "repeat_deferral_groups": "repeat_deferral_groups",
+    "average_deferral_closure_days": "average_deferral_closure_days",
+    "action_completion_pct": "fracas_action_completion_pct",
+    "effectiveness_pass_pct": "effectiveness_pass_pct",
+}
+
 
 def _summary_metrics(
     *,
@@ -60,7 +74,10 @@ def _summary_metrics(
     engine_shifts = [row for row in engine_statuses if _enum_value(row.current_status) == "Trend Shift"]
     open_dq = [row for row in data_quality_issues if row.status not in {"RESOLVED", "CLOSED"}]
     approved_reviews = [row for row in effectiveness_reviews if row.approved_at is not None]
-    successful_reviews = [row for row in approved_reviews if str(row.outcome).upper() in {"PASS", "PASSED", "EFFECTIVE", "SUCCESSFUL"}]
+    successful_reviews = [
+        row for row in approved_reviews
+        if str(row.outcome).upper() in {"PASS", "PASSED", "EFFECTIVE", "SUCCESSFUL"}
+    ]
     effectiveness_pass = _ratio(len(successful_reviews), len(approved_reviews), 100)
     closed_deferrals = [row for row in deferrals if row.closed_at and row.applied_at]
     closure_durations = []
@@ -68,17 +85,26 @@ def _summary_metrics(
         applied = row.applied_at if row.applied_at.tzinfo else row.applied_at.replace(tzinfo=UTC)
         closed = row.closed_at if row.closed_at.tzinfo else row.closed_at.replace(tzinfo=UTC)
         closure_durations.append(max((closed - applied).total_seconds() / 86400, 0))
-    average_deferral_closure = round(sum(closure_durations) / len(closure_durations), 3) if closure_durations else None
+    average_deferral_closure = (
+        round(sum(closure_durations) / len(closure_durations), 3)
+        if closure_durations else None
+    )
     extension_count = sum(len(list(row.extension_history_json or [])) for row in deferrals)
     repeat_deferral_groups = Counter(
         (row.aircraft_serial_number or "UNALLOCATED", row.item_reference or "UNALLOCATED")
         for row in deferrals
     )
     repeat_deferral_count = sum(1 for count in repeat_deferral_groups.values() if count > 1)
-    completed_actions = [row for row in fracas_actions if _enum_value(row.status) in {"DONE", "VERIFIED"}]
+    completed_actions = [
+        row for row in fracas_actions if _enum_value(row.status) in {"DONE", "VERIFIED"}
+    ]
     action_completion = _ratio(len(completed_actions), len(fracas_actions), 100)
-    removal_rate_per_1000_fc = _ratio(current["unscheduled_removals"], current_exposure["flight_cycles"], 1000)
-    previous_removal_rate_per_1000_fc = _ratio(previous["unscheduled_removals"], previous_exposure["flight_cycles"], 1000)
+    removal_rate_per_1000_fc = _ratio(
+        current["unscheduled_removals"], current_exposure["flight_cycles"], 1000
+    )
+    previous_removal_rate_per_1000_fc = _ratio(
+        previous["unscheduled_removals"], previous_exposure["flight_cycles"], 1000
+    )
 
     definitions = [
         ("dispatch_reliability_pct", "Dispatch reliability", dispatch_reliability, previous_dispatch_reliability, "%", current_exposure["flight_cycles"], "Technical dispatch interruptions normalised by recorded flight cycles.", {"dimension": "event_type", "key": "DISPATCH_INTERRUPTIONS"}),
@@ -115,6 +141,7 @@ def _summary_metrics(
                 status=_metric_status(code, value),  # type: ignore[arg-type]
                 denominator=denominator,
                 detail=detail,
+                formula_code=FORMULA_CODES.get(code),
                 drilldown=drilldown,
             )
         )
