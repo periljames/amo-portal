@@ -1,0 +1,28 @@
+{
+  "tenant": "fixture-amo",
+  "documents": [
+    {"id": "procedure-1", "code": "QWI-001", "title": "Controlled Tool Calibration", "type": "PROCEDURE"},
+    {"id": "form-1", "code": "QF-001", "title": "Calibration Request", "type": "FORM"},
+    {"id": "form-2", "code": "QF-002", "title": "Calibration Status Label", "type": "FORM"}
+  ],
+  "responsibilities": [
+    {"manual_id": "procedure-1", "type": "RESPONSIBLE_DEPARTMENT", "assignee": "QUALITY", "source": "INHERITED", "status": "CONFIRMED"},
+    {"manual_id": "procedure-1", "type": "DOCUMENT_OWNER", "assignee": "quality-officer-1", "source": "MANUAL", "status": "CONFIRMED", "effective_from": "2026-08-01", "effective_to": "2026-12-31"}
+  ],
+  "relationships": [
+    {"source": "procedure-1", "type": "HAS_FORM", "target": "form-1", "source_kind": "MANUAL", "status": "CONFIRMED"},
+    {"source": "procedure-1", "type": "HAS_FORM", "target": "form-2", "source_kind": "EXTRACTED", "status": "MATCH_PROPOSED", "page": 8},
+    {"source": "form-1", "type": "GENERATES_RECORD", "target": "calibration-record-series", "source_kind": "MANUAL", "status": "CONFIRMED"},
+    {"source": "procedure-1", "type": "LINKED_REGULATION", "target": "KCAR-145.40", "source_kind": "EXTRACTED", "status": "REJECTED", "page": 3}
+  ],
+  "expected_ui_states": [
+    "confirmed manual relationship",
+    "detected relationship pending review",
+    "rejected detection",
+    "inherited department responsibility",
+    "effective named owner override",
+    "related form opens",
+    "source page opens",
+    "cross-tenant access denied"
+  ]
+}

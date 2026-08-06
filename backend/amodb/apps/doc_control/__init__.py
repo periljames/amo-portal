@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import sitecustomize  # noqa: F401  # process-gated Alembic compatibility hook
 
+# Ensure normalized governance tables participate in SQLAlchemy/Alembic metadata
+# without eagerly importing the HTTP routing graph.
+from . import governance_models as _governance_models  # noqa: F401
+
 
 def __getattr__(name: str):
     if name == "router":

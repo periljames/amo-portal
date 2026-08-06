@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
 
-export { default as DocControlDashboardPage } from "./documentControl/DocumentControlDashboardPage";
-export { default as DocControlLibraryPage } from "./documentControl/DocumentControlLibraryPage";
+export { default as DocControlDashboardPage } from "./documentControl/DocumentGovernanceDashboardPage";
+export { default as DocControlLibraryPage } from "./documentControl/DocumentGovernanceLibraryPage";
 export { default as DocControlDocumentDetailPage } from "./documentControl/DocumentControlRecordEntryPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordsPage } from "./documentControl/DocumentControlRecordsPage";
