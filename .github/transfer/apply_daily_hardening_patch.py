@@ -101,7 +101,7 @@ services_path.write_text(services)
 
 
 migration_path = Path(
-    "backend/amodb/alembic/versions/20260805_016_aircraft_daily_utilisation.py"
+    "backend/amodb/alembic/versions/aircraft_arch_20260805_daily_utilisation.py"
 )
 migration = migration_path.read_text()
 payload_hash_pattern = re.compile(
