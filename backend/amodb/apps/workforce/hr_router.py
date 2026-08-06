@@ -1,13 +1,21 @@
 """Canonical Workforce and HR workspace endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
-from . import hr_schemas, hr_service, permissions, schemas, services
+from . import (
+    hr_people_directory,
+    hr_schemas,
+    hr_selection_integrity,
+    hr_service,
+    permissions,
+    schemas,
+    services,
+)
 
 router = APIRouter(prefix="/workforce/hr", tags=["workforce-hr"])
 
@@ -29,9 +37,59 @@ def _error(detail: str, *, code: str, status_code: int = status.HTTP_400_BAD_REQ
     )
 
 
+def _people_filters(
+    *,
+    search: str | None,
+    department_id: str | None,
+    role: str | None,
+    position_title: str | None,
+    contract_type: str | None,
+    employment_status: str | None,
+    base_station_id: str | None,
+    group_id: str | None,
+    readiness_state: str | None,
+    contract_state: str | None,
+    pattern_state: str | None,
+    expires_within_days: int | None,
+    sort_by: str,
+    sort_dir: str,
+) -> hr_schemas.HrPeopleFilterInput:
+    try:
+        return hr_schemas.HrPeopleFilterInput(
+            search=search,
+            department_id=department_id,
+            role=role,
+            position_title=position_title,
+            contract_type=contract_type,
+            employment_status=employment_status,
+            base_station_id=base_station_id,
+            group_id=group_id,
+            readiness_state=readiness_state,
+            contract_state=contract_state,
+            pattern_state=pattern_state,
+            expires_within_days=expires_within_days,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+    except ValueError as exc:
+        raise _error(
+            "One or more Workforce directory filters are invalid.",
+            code="HR_PEOPLE_FILTER_INVALID",
+        ) from exc
+
+
+def _require_default_pattern_permissions(db: Session, user: account_models.User) -> None:
+    for permission in (
+        permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
+        permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
+        permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
+    ):
+        permissions.require_permission(db, user=user, permission=permission)
+
+
 @router.get("/dashboard", response_model=hr_schemas.HrDashboardResponse)
 def hr_dashboard(
-    people_limit: int = Query(default=200, ge=1, le=500),
+    people_limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -51,8 +109,21 @@ def hr_dashboard(
 @router.get("/people", response_model=hr_schemas.HrPeoplePage)
 def hr_people(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=100, ge=1, le=200),
+    page_size: int = Query(default=25, ge=1, le=200),
     search: str | None = Query(default=None, max_length=200),
+    department_id: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    position_title: str | None = Query(default=None, max_length=255),
+    contract_type: str | None = Query(default=None),
+    employment_status: str | None = Query(default=None),
+    base_station_id: str | None = Query(default=None),
+    group_id: str | None = Query(default=None),
+    readiness_state: str | None = Query(default=None),
+    contract_state: str | None = Query(default=None),
+    pattern_state: str | None = Query(default=None),
+    expires_within_days: int | None = Query(default=None, ge=1, le=365),
+    sort_by: str = Query(default="name"),
+    sort_dir: str = Query(default="asc"),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -61,12 +132,139 @@ def hr_people(
         user=current_user,
         permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
     )
-    return hr_service.list_people_page_v2(
+    filters = _people_filters(
+        search=search,
+        department_id=department_id,
+        role=role,
+        position_title=position_title,
+        contract_type=contract_type,
+        employment_status=employment_status,
+        base_station_id=base_station_id,
+        group_id=group_id,
+        readiness_state=readiness_state,
+        contract_state=contract_state,
+        pattern_state=pattern_state,
+        expires_within_days=expires_within_days,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
+    return hr_people_directory.list_people_page(
         db,
         amo_id=_amo(current_user),
         page=page,
         page_size=page_size,
-        search=search,
+        filters=filters,
+    )
+
+
+@router.get("/people/facets", response_model=hr_schemas.HrPeopleFacets)
+def hr_people_facets(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    permissions.require_permission(
+        db,
+        user=current_user,
+        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+    )
+    return hr_people_directory.list_people_facets(db, amo_id=_amo(current_user))
+
+
+@router.post(
+    "/people/default-day-pattern/preview",
+    response_model=hr_schemas.HrDefaultDayBatchPreview,
+)
+def hr_preview_default_day_pattern_batch(
+    selection: hr_schemas.HrPeopleSelection,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_default_pattern_permissions(db, current_user)
+    amo_id = _amo(current_user)
+    try:
+        _, selection_token = hr_selection_integrity.resolve_with_token(
+            db,
+            amo_id=amo_id,
+            selection=selection,
+        )
+        result = hr_people_directory.preview_default_day_pattern_batch(
+            db,
+            amo_id=amo_id,
+            selection=selection,
+        )
+        return result.model_copy(update={"selection_token": selection_token})
+    except ValueError as exc:
+        raise _error(str(exc), code="HR_DEFAULT_DAY_BATCH_PREVIEW_INVALID") from exc
+
+
+@router.post(
+    "/people/default-day-pattern/apply",
+    response_model=hr_schemas.HrDefaultDayBatchResult,
+)
+def hr_apply_default_day_pattern_batch(
+    payload: hr_schemas.HrDefaultDayBatchApplyRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_default_pattern_permissions(db, current_user)
+    amo_id = _amo(current_user)
+    try:
+        selected_ids, selection_token = hr_selection_integrity.resolve_with_token(
+            db,
+            amo_id=amo_id,
+            selection=payload.selection,
+        )
+        if len(selected_ids) != payload.expected_match_count:
+            raise ValueError(
+                "The filtered population count changed after preview. Review the updated selection before applying the pattern."
+            )
+        if selection_token != payload.expected_selection_token:
+            raise ValueError(
+                "The selected employees changed after preview. Review the updated selection before applying the pattern."
+            )
+        result = hr_people_directory.apply_default_day_pattern_batch(
+            db,
+            amo_id=amo_id,
+            actor_user_id=current_user.id,
+            payload=payload,
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise _error(
+            str(exc),
+            code="HR_DEFAULT_DAY_BATCH_APPLY_INVALID",
+            status_code=status.HTTP_409_CONFLICT,
+        ) from exc
+
+
+@router.post("/people/export")
+def hr_export_people(
+    selection: hr_schemas.HrPeopleSelection,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    permissions.require_permission(
+        db,
+        user=current_user,
+        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+    )
+    try:
+        content = hr_people_directory.export_people_csv(
+            db,
+            amo_id=_amo(current_user),
+            selection=selection,
+        )
+    except ValueError as exc:
+        raise _error(str(exc), code="HR_PEOPLE_EXPORT_INVALID") from exc
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename=workforce-people.csv",
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -75,12 +273,8 @@ def hr_bootstrap_default_day_pattern(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    for permission in (
-        permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
-        permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
-        permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
-    ):
-        permissions.require_permission(db, user=current_user, permission=permission)
+    """Backward-compatible tenant-wide bootstrap used by existing clients."""
+    _require_default_pattern_permissions(db, current_user)
     try:
         result = hr_service.bootstrap_default_day_pattern(
             db, amo_id=_amo(current_user), actor_user_id=current_user.id
@@ -120,9 +314,6 @@ def hr_create_work_pattern_assignment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    # Employee assignment is a Workforce record. Pattern template design remains
-    # controlled by roster.manage_patterns; HR contract controllers can assign
-    # an approved template to an employee with effective dates.
     permissions.require_permission(
         db,
         user=current_user,
@@ -222,4 +413,8 @@ def hr_decide_overtime_request(
         return hr_service.serialize_overtime(row)
     except ValueError as exc:
         db.rollback()
-        raise _error(str(exc), code="HR_OVERTIME_DECISION_INVALID", status_code=status.HTTP_409_CONFLICT) from exc
+        raise _error(
+            str(exc),
+            code="HR_OVERTIME_DECISION_INVALID",
+            status_code=status.HTTP_409_CONFLICT,
+        ) from exc

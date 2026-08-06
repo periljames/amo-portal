@@ -1,0 +1,217 @@
+name: Workforce Directory Scale CI
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/workforce/**"
+      - "backend/amodb/alembic/versions/workforce_20260806_*.py"
+      - "backend/amodb/apps/rostering/application_router.py"
+      - "frontend/src/pages/rostering/**"
+      - "frontend/src/services/workforceHr.ts"
+      - "frontend/src/types/workforceHr.ts"
+      - "frontend/tests/e2e/workforce-governance-scale.spec.ts"
+      - "deploy/saas/docker-compose.yml"
+      - ".github/workflows/workforce-directory-scale-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workforce-directory-scale-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Workforce PostgreSQL directory and bulk operations
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_workforce_directory
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_workforce_directory"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: workforce-directory-scale-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_workforce_directory
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_workforce_directory
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_workforce_directory
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with: { show-progress: false }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile Workforce backend
+        working-directory: backend
+        run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering/application_router.py
+      - name: Configure mappers and verify routes
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from sqlalchemy.orm import configure_mappers
+          from amodb.main import app
+          configure_mappers()
+          paths = {route.path for route in app.routes}
+          required = {
+              "/workforce/hr/people",
+              "/workforce/hr/people/facets",
+              "/workforce/hr/people/governed",
+              "/workforce/hr/people/governed/facets",
+              "/workforce/hr/people/governed/selection-preview",
+              "/workforce/hr/supervisors",
+              "/workforce/hr/organization-units",
+              "/workforce/hr/job-families",
+              "/workforce/hr/grades",
+              "/workforce/hr/positions",
+              "/workforce/hr/people/default-day-pattern/preview",
+              "/workforce/hr/people/export",
+              "/workforce/hr/people/contracts/preview",
+              "/workforce/hr/bulk-operations/contracts",
+              "/workforce/hr/bulk-operations/default-day-pattern",
+              "/workforce/hr/bulk-operations/personnel",
+              "/workforce/hr/bulk-operations/{operation_id}",
+              "/workforce/hr/bulk-operations/{operation_id}/items",
+              "/workforce/hr/bulk-operations/{operation_id}/failures.csv",
+              "/workforce/hr/bulk-operations/{operation_id}/retry",
+              "/workforce/hr/bulk-operations/{operation_id}/resume",
+          }
+          assert not (required - paths), required - paths
+          PY
+      - name: Upgrade clean PostgreSQL schema
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Run Workforce scale, governance, lock and bulk regressions
+        working-directory: backend
+        run: >-
+          pytest -q
+          amodb/apps/workforce/tests/test_default_day_pattern_postgres_locking.py
+          amodb/apps/workforce/tests/test_hr_people_directory.py
+          amodb/apps/workforce/tests/test_hr_people_directory_scale.py
+          amodb/apps/workforce/tests/test_workforce_governance.py
+          amodb/apps/workforce/tests/test_bulk_operations.py
+      - name: Smoke standalone Workforce worker
+        working-directory: backend
+        run: python -m amodb.apps.workforce.worker_main --once
+      - name: Validate Workforce production service
+        env:
+          DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
+          CORS_ALLOWED_ORIGINS: https://portal.example.invalid
+          MQTT_BROKER_INTERNAL_URL: mqtt://broker.example.invalid:1883
+          MQTT_BROKER_WS_URL: wss://broker.example.invalid/mqtt
+          REALTIME_BROKER_WEBHOOK_SECRET: ci-broker-webhook-secret-more-than-32-characters
+          REALTIME_GATEWAY_USERNAME: amo-gateway
+          REALTIME_GATEWAY_PASSWORD: ci-gateway-password-more-than-24-characters
+        run: docker compose -f deploy/saas/docker-compose.yml config
+
+  frontend:
+    name: Workforce directory and batch setup frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with: { show-progress: false }
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run Workforce workspace contracts
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/rostering/workforcePeopleDirectory.test.ts
+      - name: Typecheck Workforce changes and build production bundle
+        working-directory: frontend
+        run: |
+          cat > tsconfig.workforce-ci.json <<'JSON'
+          {
+            "extends": "./tsconfig.app.json",
+            "compilerOptions": { "noEmit": true },
+            "include": [
+              "src/pages/rostering/components/WorkforceBulkSetupPanel.tsx",
+              "src/pages/rostering/components/WorkforceGovernancePanel.tsx",
+              "src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx",
+              "src/services/workforceHr.ts",
+              "src/types/workforceHr.ts"
+            ]
+          }
+          JSON
+          npm exec -- tsc -p tsconfig.workforce-ci.json
+          npm exec -- vite build
+      - name: Lint Workforce workspace surfaces
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/pages/rostering/WorkforceRosteringPagesV2.tsx
+          src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx
+          src/pages/rostering/components/WorkforcePeopleDirectory.tsx
+          src/pages/rostering/components/WorkforceBulkSetupPanel.tsx
+          src/pages/rostering/components/WorkforceGovernancePanel.tsx
+          src/pages/rostering/components/WorkforceOperationsWorkspace.tsx
+          src/services/workforceHr.ts
+          src/types/workforceHr.ts
+
+  browser-scale:
+    name: Workforce 10,000-person Chromium acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with: { show-progress: false }
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Install Chromium
+        working-directory: frontend
+        run: npm exec -- playwright install --with-deps chromium
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Start production preview
+        working-directory: frontend
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/workforce-preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/workforce-preview.log
+          exit 1
+      - name: Run bounded 10,000-person acceptance
+        working-directory: frontend
+        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: workforce-browser-scale-diagnostics
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            /tmp/workforce-preview.log
+          if-no-files-found: ignore
+          retention-days: 7
