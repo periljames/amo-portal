@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+from threading import Thread
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_indexer import index_revision_background
+from amodb.apps.doc_control.pdf_capability_prewarm import warm_existing_pdf_revision_capabilities
 from amodb.apps.doc_control.pdf_capability_service import warm_pdf_revision_capabilities
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -13,6 +17,22 @@ from . import router_legacy as legacy
 
 
 router = APIRouter(prefix="/manuals", tags=["Manual Upload RBAC"])
+
+
+@router.on_event("startup")
+def prewarm_existing_pdf_reader_sources() -> None:
+    if os.getenv("PDF_CAPABILITY_PREWARM_ON_STARTUP", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    try:
+        limit = int(os.getenv("PDF_CAPABILITY_PREWARM_LIMIT", "100") or "100")
+    except ValueError:
+        limit = 100
+    Thread(
+        target=warm_existing_pdf_revision_capabilities,
+        kwargs={"limit": limit},
+        name="pdf-capability-prewarm",
+        daemon=True,
+    ).start()
 
 
 def _require_upload_scope(
