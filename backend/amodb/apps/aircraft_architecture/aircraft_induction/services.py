@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,6 +58,22 @@ def require_human_induction_authority(user: account_models.User) -> str:
 
 def _request_payload(payload: schemas.AircraftInductionCreate) -> dict[str, Any]:
     return payload.model_dump(mode="json")
+
+
+def _lock_idempotency_key(
+    db: Session,
+    *,
+    amo_id: str,
+    idempotency_key: str,
+) -> None:
+    """Serialize identical induction requests for the duration of the transaction."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": f"aircraft-induction:{amo_id}:{idempotency_key}"},
+    )
 
 
 def _load_type_revision(
@@ -216,6 +233,11 @@ def induct_aircraft(
     amo_id = require_human_induction_authority(user)
     request_payload = _request_payload(payload)
     request_hash = _canonical_hash(request_payload)
+    _lock_idempotency_key(
+        db,
+        amo_id=amo_id,
+        idempotency_key=payload.idempotency_key,
+    )
 
     existing = (
         db.query(models.AircraftInduction)
