@@ -62,6 +62,8 @@ jobs:
         run: >-
           python -m compileall -q
           amodb/apps/workforce/hr_people_directory.py
+          amodb/apps/workforce/hr_people_facets.py
+          amodb/apps/workforce/hr_selection_integrity.py
           amodb/apps/workforce/hr_router.py
           amodb/apps/workforce/hr_schemas.py
           amodb/apps/workforce/work_pattern_assignment_locking.py
@@ -126,5 +128,6 @@ jobs:
           src/pages/rostering/WorkforceRosteringPagesV2.tsx
           src/pages/rostering/components/WorkforceHrWorkspaceV2.tsx
           src/pages/rostering/components/WorkforcePeopleDirectory.tsx
+          src/pages/rostering/components/WorkforceOperationsWorkspace.tsx
           src/services/workforceHr.ts
           src/types/workforceHr.ts
