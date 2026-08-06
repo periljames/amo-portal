@@ -1,17 +1,18 @@
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardCheck, Layers3, UsersRound } from "lucide-react";
+import { Building2, ClipboardCheck, Layers3, UsersRound } from "lucide-react";
 
 import { getWorkforceHrDashboard } from "../../../services/workforceHr";
 import { errorMessage } from "../rosterUi";
 import { RosterLoading } from "./RosterShell";
 import { WorkforceBulkSetupPanel } from "./WorkforceBulkSetupPanel";
+import { WorkforceGovernancePanel } from "./WorkforceGovernancePanel";
 import { WorkforcePeopleDirectory } from "./WorkforcePeopleDirectory";
 
 const LazyWorkforceOperations = lazy(() => import("./WorkforceOperationsWorkspace")
   .then((module) => ({ default: module.WorkforceOperationsWorkspace })));
 
-type WorkspaceSection = "people" | "bulk" | "operations";
+type WorkspaceSection = "people" | "governance" | "bulk" | "operations";
 
 export function WorkforceHrWorkspaceV2() {
   const [section, setSection] = useState<WorkspaceSection>("people");
@@ -31,6 +32,7 @@ export function WorkforceHrWorkspaceV2() {
     <div className="hr-workspace-v2">
       <nav className="hr-workspace__nav" aria-label="Workforce workspace sections">
         <button type="button" className={section === "people" ? "is-active" : ""} onClick={() => setSection("people")}><UsersRound size={15} /> People & contracts</button>
+        <button type="button" className={section === "governance" ? "is-active" : ""} onClick={() => setSection("governance")}><Building2 size={15} /> Organization & roles</button>
         <button type="button" className={section === "bulk" ? "is-active" : ""} onClick={() => setSection("bulk")}><Layers3 size={15} /> Batch setup</button>
         <button type="button" className={section === "operations" ? "is-active" : ""} onClick={() => setSection("operations")}><ClipboardCheck size={15} /> Leave, time & patterns</button>
       </nav>
@@ -40,6 +42,10 @@ export function WorkforceHrWorkspaceV2() {
           canManageContracts={dashboard.can_manage_contracts}
           canInitializeDefaults={dashboard.can_initialize_default_day_pattern}
         />
+      ) : null}
+
+      {section === "governance" ? (
+        <WorkforceGovernancePanel canManage={dashboard.can_manage_contracts} />
       ) : null}
 
       {section === "bulk" ? (
