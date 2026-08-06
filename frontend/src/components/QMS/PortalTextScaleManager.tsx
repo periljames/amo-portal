@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ALargeSmall, Check } from "lucide-react";
 
-import { getCachedUser } from "../../services/auth";
+import { getCachedUser, isAuthenticated } from "../../services/auth";
 import {
   getPortalPreferences,
   updatePortalPreferences,
@@ -81,6 +81,10 @@ const PortalTextScaleManager: React.FC = () => {
   }, [storageKey]);
 
   useEffect(() => {
+    if (!user || !isAuthenticated()) {
+      setSyncState("local");
+      return;
+    }
     let cancelled = false;
     void getPortalPreferences()
       .then((preferences) => {
@@ -96,7 +100,7 @@ const PortalTextScaleManager: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, user]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -142,6 +146,10 @@ const PortalTextScaleManager: React.FC = () => {
     setScale(next);
     applyScale(next);
     window.localStorage.setItem(storageKey, next);
+    if (!user || !isAuthenticated()) {
+      setSyncState("local");
+      return;
+    }
     setSyncState("saving");
     void updatePortalPreferences({ text_scale: next })
       .then((preferences) => {
@@ -162,7 +170,13 @@ const PortalTextScaleManager: React.FC = () => {
         <ALargeSmall size={17} aria-hidden="true" />
         <span>
           <strong>Text size</strong>
-          <small>{syncState === "saving" ? "Saving…" : syncState === "local" ? "Saved on this device" : "Saved for your account"}</small>
+          <small>
+            {syncState === "saving"
+              ? "Saving…"
+              : syncState === "local"
+                ? "Saved on this device"
+                : "Saved for your account"}
+          </small>
         </span>
       </div>
       <div className="tenant-shell__text-scale-options" role="radiogroup" aria-label="Portal text size">
