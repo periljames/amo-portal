@@ -5,10 +5,18 @@ import ReliabilityAnalyticsWorkspace from "./ReliabilityAnalyticsWorkspace";
 import ReliabilityWorkbookParityWorkspace from "./ReliabilityWorkbookParityWorkspace";
 import ReliabilityWorkspaceLegacy from "./ReliabilityWorkspaceLegacy";
 
+const WORKBOOK_PARITY_ROUTES = new Set([
+  "workbook-parity",
+  "workbook-registers",
+  "statistical-alerts",
+  "workbook-mapping",
+  "workbook-reports",
+]);
+
 function reliabilitySurface(pathname: string): "analytics" | "parity" | "legacy" {
   const parts = pathname.split("/reliability")[1]?.split("/").filter(Boolean) || [];
   if (parts.length === 0 || parts[0] === "workbench") return "analytics";
-  if (parts[0] === "workbook-parity") return "parity";
+  if (WORKBOOK_PARITY_ROUTES.has(parts[0])) return "parity";
   return "legacy";
 }
 
