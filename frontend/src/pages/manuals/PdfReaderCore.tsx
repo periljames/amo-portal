@@ -75,9 +75,9 @@ function wait(milliseconds: number): Promise<null> {
 }
 
 /**
- * Resolve the immutable source before PDF.js mounts. Cached capability metadata
- * may select the already-sanitized source URL, but only the live capability
- * response can authorize form execution or local draft custody.
+ * Resolve one immutable source before PDF.js mounts. Cached metadata can select
+ * the same source quickly, but it never authorizes forms or draft custody until
+ * the live checksum and permission response succeeds.
  */
 export default function PdfReaderCore(props: PdfReaderCoreProps) {
   const suppliedCapabilities = props.capabilities;
@@ -104,7 +104,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   );
   const [readerFileUrl, setReaderFileUrl] = useState<string | null>(null);
   const [readerKey, setReaderKey] = useState("");
-  const [preparationError, setPreparationError] = useState("");
   const objectUrlRef = useRef<string | null>(null);
   const sourceMountedRef = useRef(false);
   const generationRef = useRef(0);
@@ -134,9 +133,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         readCachedPdfSource(identity, fingerprint, remoteUrl),
         wait(CACHE_LOOKUP_BUDGET_MS),
       ]);
-      if (!cachedBytes) {
-        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
-      }
+      if (!cachedBytes) return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
 
       const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
       revokeObjectUrl();
@@ -159,8 +156,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     };
 
     const run = async () => {
-      setPreparationError("");
-
       if (externallyManaged) {
         const resolved = suppliedCapabilities || READ_ONLY_FALLBACK;
         setCapabilities(resolved);
@@ -171,9 +166,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
 
       const cached = cachedCapabilities;
       if (cached) {
-        // The cached source identity selects the same immutable reader bytes
-        // immediately. It remains read-only until the live response confirms
-        // the current checksum and permissions.
         await mount(cached, true);
         if (!active || generationRef.current !== generation) return;
         setCapabilities(cachedReadOnly(cached));
@@ -208,35 +200,24 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         setCapabilities(live);
 
         if (!cached || sourceChanged || sourceUrlChanged || !sourceMountedRef.current) {
-          // First visits wait for this authoritative result, so PDF.js still
-          // mounts once. A reload is permitted only if an immutable source
-          // changed or cached metadata selected a different derivative.
           await mount(live, true);
         }
 
         const finalRemoteUrl = live.reader_pdf_url || props.fileUrl;
         window.setTimeout(() => {
           if (!active || generationRef.current !== generation) return;
-          void warmPdfSourceCache(
-            identity,
-            live.source_sha256,
-            finalRemoteUrl,
-          );
+          void warmPdfSourceCache(identity, live.source_sha256, finalRemoteUrl);
         }, profile.mode === "constrained" ? 1_500 : 120);
       } catch (error) {
         if (!active || generationRef.current !== generation) return;
         const fallback = readOnlyFallback(error, cached);
         setCapabilities(fallback);
-        setPreparationError(fallback.unsupported_reason || "");
         if (!sourceMountedRef.current) await mount(fallback, false);
       }
     };
 
     void run();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [
     cachedCapabilities,
     externallyManaged,
@@ -261,19 +242,14 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   }
 
   return (
-    <>
-      {preparationError ? (
-        <div className="pdfv3-error" role="alert">{preparationError}</div>
-      ) : null}
-      <PdfReaderCoreV3
-        {...props}
-        key={readerKey}
-        identity={identity}
-        fileUrl={readerFileUrl}
-        originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
-        capabilities={capabilities}
-      />
-    </>
+    <PdfReaderCoreV3
+      {...props}
+      key={readerKey}
+      identity={identity}
+      fileUrl={readerFileUrl}
+      originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}
+      capabilities={capabilities}
+    />
   );
 }
 
