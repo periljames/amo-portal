@@ -7,8 +7,9 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from amodb.apps.reliability import advanced_models, advanced_schemas
-from amodb.apps.reliability.analytics_formulae import _system_formulae, _custom_metric_formula
 from amodb.apps.reliability.formula_hardening import (
+    _governed_metric_formula,
+    _governed_system_formulae,
     _populate_metric_formula,
     _snapshot,
     _snapshot_hash,
@@ -41,27 +42,59 @@ def _metric(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_system_formulae_are_structured_not_linear_unicode_only():
-    formulae = {formula.code: formula for formula in _system_formulae()}
+def test_system_formulae_are_structured_and_match_guarded_dispatch_calculation():
+    formulae = {formula.code: formula for formula in _governed_system_formulae()}
     dispatch = formulae["dispatch_reliability_pct"]
 
     assert "\\frac" in dispatch.latex
+    assert "\\max" in dispatch.latex
     assert "<math" in dispatch.mathml
     assert "<mfrac>" in dispatch.mathml
     assert dispatch.expression["op"] == "multiply"
+    assert dispatch.expression["left"]["numerator"]["op"] == "maximum"
     assert dispatch.denominator_policy
     assert dispatch.source_fields
 
 
-def test_programme_metric_formula_has_latex_mathml_and_expression_tree():
-    formula = _custom_metric_formula(_metric())
+def test_programme_rate_formula_has_latex_mathml_and_expression_tree():
+    formula = _governed_metric_formula(_metric())
 
     assert formula.code == "programme.DEFECT_RATE_100FH"
     assert formula.version == "3"
     assert "\\frac" in formula.latex
     assert "<mfrac>" in formula.mathml
     assert formula.expression["op"] == "multiply"
-    assert formula.unit == "per 100 FH"
+    assert formula.expression["left"]["denominator"] == {"op": "exposure", "type": "FH"}
+    assert formula.unit == "events / 100 FH"
+
+
+def test_percent_formula_uses_all_reliability_events_as_execution_denominator():
+    formula = _governed_metric_formula(_metric(method="PERCENT", denominator_type="FC"))
+
+    assert formula.unit == "%"
+    assert formula.expression["left"]["numerator"]["event_types"] == ["DEFECT", "REPEAT_DEFECT"]
+    assert formula.expression["left"]["denominator"] == {"op": "count", "event_types": []}
+    assert "all Reliability events" in (formula.denominator_label or "")
+
+
+def test_nff_formula_matches_execution_event_contract():
+    formula = _governed_metric_formula(
+        _metric(method="NFF_RATE", numerator_event_types=["DEFECT"], denominator_type="FH")
+    )
+
+    assert formula.unit == "%"
+    assert formula.expression["left"]["numerator"]["event_types"] == ["NO_FAULT_FOUND"]
+    assert formula.expression["left"]["denominator"]["event_types"] == ["UNSCHEDULED_REMOVAL"]
+    assert formula.denominator_label == "Unscheduled-removal events"
+
+
+def test_mtbur_formula_reverses_exposure_and_event_count():
+    formula = _governed_metric_formula(_metric(method="MTBUR", denominator_type="FH"))
+
+    assert formula.expression["op"] == "divide"
+    assert formula.expression["numerator"] == {"op": "exposure", "type": "FH"}
+    assert formula.expression["denominator"]["op"] == "count"
+    assert formula.unit == "FH / event"
 
 
 def test_persisted_metric_values_override_regenerated_display_values():
@@ -86,18 +119,30 @@ def test_persisted_metric_values_override_regenerated_display_values():
     assert len(_snapshot_hash(snapshot)) == 64
 
 
-def test_metric_insert_hook_populates_all_formula_storage_fields():
+def test_metric_insert_and_update_hooks_regenerate_formula_storage_fields():
     metric = _metric()
     _populate_metric_formula(None, None, metric)
 
     assert metric.formula_latex
     assert "<math" in metric.formula_mathml
     assert metric.formula_expression_json
-    assert metric.formula_unit == "per 100 FH"
+    assert metric.formula_unit == "events / 100 FH"
     assert metric.formula_precision == 3
     assert metric.formula_rounding_mode == "HALF_UP"
     assert metric.denominator_policy
     assert metric.formula_source_fields_json
+
+    metric.method = "COUNT"
+    metric.denominator_type = "NONE"
+    metric.formula_version = "4"
+    _populate_metric_formula(None, None, metric)
+
+    assert "\\frac" not in metric.formula_latex
+    assert metric.formula_expression_json == {
+        "op": "count",
+        "event_types": ["DEFECT", "REPEAT_DEFECT"],
+    }
+    assert metric.formula_unit == "count"
 
 
 def test_formula_catalog_uses_persisted_programme_formulae():
