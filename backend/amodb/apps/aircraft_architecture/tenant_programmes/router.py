@@ -48,8 +48,12 @@ def _require_draft(revision: models.TenantProgrammeRevision) -> None:
         raise HTTPException(status_code=409, detail="Published, superseded and withdrawn AMP revisions are immutable")
 
 
-def _recompute_hash(revision: models.TenantProgrammeRevision) -> None:
+def _recompute_hash(db: Session, revision: models.TenantProgrammeRevision) -> None:
+    """Hash the authoritative persisted draft, never a stale relationship cache."""
+    db.flush()
+    db.expire(revision, ["tasks"])
     revision.content_hash = services.recompute_revision_hash(revision)
+    db.add(revision)
 
 
 @router.get("", response_model=list[schemas.ProgrammeRead])
@@ -152,9 +156,11 @@ def aircraft_defaults(
         }
         for row in published
     ]
-    state = "RESOLVED" if len(programme_candidates) == 1 and resolution["state"] in {"RESOLVED", "CONFIRM_DERIVED_SERIES"} else "AMBIGUOUS" if len(programme_candidates) > 1 else "NO_TENANT_AMP"
+    exact_oem = resolution["state"] == "RESOLVED"
+    state = "RESOLVED" if len(programme_candidates) == 1 and exact_oem else "AMBIGUOUS" if len(programme_candidates) > 1 else "NO_TENANT_AMP"
     return {
         "state": state,
+        "requires_series_confirmation": resolution["state"] == "CONFIRM_DERIVED_SERIES",
         "oem": resolution,
         "programme_candidates": programme_candidates,
         "selected_programme_revision_id": programme_candidates[0]["revision_id"] if state == "RESOLVED" else None,
@@ -304,8 +310,7 @@ def create_revision_from_oem(
                 },
             )
         )
-    db.flush()
-    _recompute_hash(revision)
+    _recompute_hash(db, revision)
     db.commit()
     db.refresh(revision)
     return _revision(db, revision.id, user)
@@ -359,8 +364,7 @@ def update_task_decision(
         task.approval_reference = payload.approval_reference
     task.source_task_hash = overlay.task_source_hash(oem)
     db.add(task)
-    db.flush()
-    _recompute_hash(revision)
+    _recompute_hash(db, revision)
     db.commit()
     db.refresh(task)
     return task
@@ -397,9 +401,7 @@ def add_operator_task(
         metadata_json=payload.metadata_json,
     )
     db.add(row)
-    db.flush()
-    revision.tasks.append(row) if row not in revision.tasks else None
-    _recompute_hash(revision)
+    _recompute_hash(db, revision)
     db.commit()
     db.refresh(row)
     return row
@@ -420,9 +422,7 @@ def delete_operator_task(
     if task.decision != "ADD" or task.source_content_task_id:
         raise HTTPException(status_code=409, detail="OEM-derived requirements cannot be deleted; use INHERIT or TIGHTEN")
     db.delete(task)
-    db.flush()
-    revision.tasks = [row for row in revision.tasks if row.id != task_id]
-    _recompute_hash(revision)
+    _recompute_hash(db, revision)
     db.commit()
     return Response(status_code=204)
 
@@ -434,7 +434,7 @@ def validate_revision(
     user: account_models.User = Depends(require_roles(*PROGRAMME_WRITE_ROLES)),
 ):
     revision = _revision(db, revision_id, user)
-    _recompute_hash(revision)
+    _recompute_hash(db, revision)
     result = overlay.validate_revision(db, revision)
     baseline = result.pop("baseline", None)
     if not baseline or not baseline.content_hash:
@@ -501,6 +501,7 @@ def publish_revision(
 
     revision.status = "PUBLISHED"
     revision.source_currentness_at_approval = "OEM_BASELINE_CURRENT"
+    revision.approval_reference = payload.approval_reference
     revision.published_by_user_id = user.id
     revision.published_at = datetime.now(timezone.utc)
     revision.programme.approval_reference = payload.approval_reference
