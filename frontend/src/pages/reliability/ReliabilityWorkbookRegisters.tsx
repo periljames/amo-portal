@@ -131,10 +131,17 @@ export function ReliabilityWorkbookRegisters({ catalog, selectedDataset, onDatas
   };
 
   const applyLifecycle = async (record: WorkbookRecord, action: "approve" | "close") => {
+    const rationale = actionNote.trim();
+    if (rationale.length < 2) {
+      setError("Enter an approval or closure rationale of at least 2 characters before changing controlled status.");
+      return;
+    }
+    const verb = action === "approve" ? "Approve" : "Close";
+    if (!window.confirm(`${verb} ${record.record_number}? This controlled lifecycle action will be retained with your rationale.`)) return;
     setSaving(true);
     setError(null);
     try {
-      const updated = await transitionWorkbookRecord(record.id, action, actionNote.trim());
+      const updated = await transitionWorkbookRecord(record.id, action, rationale);
       setNotice(`${updated.record_number} is now ${updated.status.toLowerCase()}.`);
       setActionNote("");
       await loadRecords();
@@ -238,7 +245,7 @@ export function ReliabilityWorkbookRegisters({ catalog, selectedDataset, onDatas
           <button type="button" className="btn btn-secondary" onClick={() => { setFilters(emptyFilters); setAppliedFilters(emptyFilters); setOffset(0); }}>Reset</button>
         </div>
 
-        <div className="rel-wp__lifecycle-note"><label>Approval or closure note<input value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder="Optional controlled rationale" /></label></div>
+        <div className="rel-wp__lifecycle-note"><label>Approval or closure rationale *<input minLength={2} value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder="Required before approval or closure" /><small>At least 2 characters. The rationale is retained with the controlled lifecycle action.</small></label></div>
         <div className="rel-wp__table-wrap">
           <table className="rel-wp__table">
             <thead><tr><th>Record</th><th>Date</th><th>Aircraft</th><th>ATA</th><th>Status</th><th>Title</th><th>Derived</th><th>Control</th></tr></thead>
