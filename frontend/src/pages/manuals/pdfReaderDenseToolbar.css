@@ -195,8 +195,9 @@
   font-size: 0.7rem;
 }
 
-.publication-reader-page .publication-document-header__actions button:has(.lucide-download),
-.publication-reader-page .publication-document-header__actions button:has(.lucide-printer) {
+/* Print/download are duplicated only while the integrated PDF toolbar is mounted. */
+.publication-reader-page--dense-pdf-reader .publication-document-header__actions button:has(.lucide-download),
+.publication-reader-page--dense-pdf-reader .publication-document-header__actions button:has(.lucide-printer) {
   display: none !important;
 }
 
