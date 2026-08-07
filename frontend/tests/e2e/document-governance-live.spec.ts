@@ -26,9 +26,18 @@ async function signIn(page: Page): Promise<void> {
     await continueButton.click();
   }
 
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  // The password visibility control intentionally contains the word Password
+  // in its accessible name. Target the stable input id so strict-mode browser
+  // acceptance cannot accidentally match that adjacent control.
+  await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+}
+
+function futureLocalDateTime(hours = 2): string {
+  const target = new Date(Date.now() + hours * 60 * 60 * 1000);
+  const local = new Date(target.getTime() - target.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 test.describe("Document Control governed workflow", () => {
@@ -39,16 +48,30 @@ test.describe("Document Control governed workflow", () => {
     await signIn(page);
   });
 
-  test("dashboard queues open a URL-backed bounded library", async ({ page }) => {
+  test("dashboard queues open a URL-backed bounded company library", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control`);
     await expect(page.getByTestId("document-governance-dashboard")).toBeVisible();
     const queue = page.getByRole("button", { name: /Ownership requiring confirmation/i });
     await expect(queue).toBeVisible();
     await queue.click();
     await expect(page).toHaveURL(/\/document-control\/library\?.*unresolved_ownership=true/);
-    await expect(page.getByTestId("document-governance-library")).toBeVisible();
+    await expect(page.getByTestId("integrated-document-library")).toBeVisible();
+    await expect(page.getByText("Governance queue")).toBeVisible();
     await expect(page.getByRole("table")).toBeVisible();
     await expect(page.getByText("DMS-CI-MOM")).toBeVisible();
+  });
+
+  test("company library exposes document shelves and the full hierarchy entry point", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    for (const shelf of ["Policies", "Manuals", "Procedures", "Work instructions", "Forms", "Checklists", "Registers", "External data"]) {
+      await expect(library.getByRole("button", { name: new RegExp(shelf, "i") })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
+    await page.getByRole("button", { name: /Full tree/i }).click();
+    await expect(page).toHaveURL(/\/document-control\/structure/);
+    await expect(page.getByTestId("documentation-tree")).toBeVisible({ timeout: 30_000 });
   });
 
   test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
@@ -69,5 +92,50 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
     await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-error,.pdfv3-document-error")).toHaveCount(0);
+  });
+
+  test("physical library registers, labels, checks out and returns one numbered copy", async ({ page }) => {
+    const copyNumber = `CI-${Date.now().toString(36).toUpperCase()}`;
+    const homeLocation = "Quality Library · Cabinet Q1 · Shelf 2";
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/controlled-copies`);
+    await expect(page.getByTestId("physical-document-library")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: /Register copy/i }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Register physical controlled copy" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Controlled document").selectOption(DOCUMENT_ID);
+    await dialog.getByLabel("Copy number").fill(copyNumber);
+    await dialog.getByLabel("Home shelf / controlled location").fill(homeLocation);
+    await dialog.getByRole("button", { name: "Register on shelf", exact: true }).click();
+
+    const row = page.getByRole("row").filter({ hasText: copyNumber });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toContainText("Document Control shelf");
+    await row.getByRole("button", { name: /Open \/ scan/i }).click();
+
+    const scan = page.getByTestId("physical-copy-scan");
+    await expect(scan).toBeVisible({ timeout: 30_000 });
+    await expect(scan).toContainText(homeLocation);
+    await expect(scan).toContainText(copyNumber);
+
+    const labelDownload = page.waitForEvent("download");
+    await scan.getByRole("button", { name: /Print QR label/i }).click();
+    const download = await labelDownload;
+    expect(download.suggestedFilename()).toContain(copyNumber);
+    expect(download.suggestedFilename().toLowerCase()).toContain("qr");
+
+    await scan.getByLabel("Return due").fill(futureLocalDateTime());
+    await scan.getByLabel(/I accept custody of this numbered controlled copy/i).check();
+    await scan.getByRole("button", { name: /Check out to me/i }).click();
+    await expect(scan).toContainText("ISSUED", { timeout: 30_000 });
+    await expect(scan).toContainText("Document Controller CI");
+    await expect(scan.getByText("Custody history")).toBeVisible();
+
+    await scan.getByLabel("Return to shelf / location").fill(homeLocation);
+    await scan.getByRole("button", { name: /Sign in \/ return/i }).click();
+    await expect(scan).toContainText("RETURNED", { timeout: 30_000 });
+    await expect(scan).toContainText("Document Control shelf");
+    await expect(scan).toContainText("CHECK IN");
   });
 });
