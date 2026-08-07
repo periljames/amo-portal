@@ -19,7 +19,7 @@ const SECTIONS: Array<{ id: WorkspaceSection; label: string; description: string
   { id: "registers", label: "Source registers", description: "Sixteen controlled Reliability datasets with lifecycle and provenance", route: "workbook-registers" },
   { id: "alerts", label: "Statistical alerts", description: "Exact limits, exposure quality and retained analytical evidence", route: "statistical-alerts" },
   { id: "mapping", label: "Mapping & imports", description: "Canonical CSV, workbook intake, field parity and validation", route: "workbook-mapping" },
-  { id: "reports", label: "Reports", description: "Daily-to-quarter management packs, layouts, links and retained outputs", route: "workbook-reports" },
+  { id: "reports", label: "Report layouts", description: "Daily-to-quarter management packs, layouts, links and retained outputs", route: "workbook-reports" },
 ];
 
 function sectionFromPath(pathname: string): WorkspaceSection {
