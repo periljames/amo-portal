@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -279,7 +280,7 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
                     type="button"
                     key={item.id}
                     className={item.id === activeOutline?.id ? "active" : ""}
-                    style={{ "--pdfv5-level": Math.max(0, item.level - 1) } as React.CSSProperties}
+                    style={{ "--pdfv5-level": Math.max(0, item.level - 1) } as CSSProperties}
                     onClick={() => ownNavigate(item.page)}
                     title={`${item.title} · page ${item.page}`}
                   >
