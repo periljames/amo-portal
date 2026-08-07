@@ -7,7 +7,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
-from . import backend_assembly, models, schemas
+from . import backend_assembly, governance, models, schemas
 
 
 router = APIRouter(
@@ -31,8 +31,9 @@ def preview_oem_baseline_assembly(
     pack_id: str,
     payload: backend_assembly.OemBaselineAssemblyCreate,
     db: Session = Depends(get_db),
-    _: account_models.User = Depends(get_current_active_user),
+    user: account_models.User = Depends(get_current_active_user),
 ):
+    governance.require_source_contributor(user)
     preview, _, _, _, _ = backend_assembly.preview_assembly(
         db,
         pack=_pack(db, pack_id),
