@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from amodb.apps.aircraft_architecture.content_packs import models as content_models
 from amodb.apps.aircraft_architecture.tenant_programmes import overlay_router, router, schemas
 
-from .test_amp_overlay_postgresql import _controlled_fixture, _suffix, sessions
+from .test_amp_overlay_postgresql import _controlled_fixture, _suffix, engine, sessions  # noqa: F401
 
 
 def test_oem_source_change_blocks_amp_validation(sessions):
