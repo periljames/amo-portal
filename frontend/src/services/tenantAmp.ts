@@ -124,13 +124,14 @@ export type AmpValidation = {
   blocking_count: number;
   warning_count: number;
   issues: ValidationIssue[];
-  summary: Record<string, number>;
+  summary: Record<string, unknown>;
   validation_run_id: string | null;
 };
 
 export type AircraftDefaults = {
-  state: "RESOLVED" | "AMBIGUOUS" | "NO_TENANT_AMP";
+  state: "RESOLVED" | "AMBIGUOUS" | "NO_TENANT_AMP" | "SERIES_CONFIRMATION_REQUIRED";
   oem: BaselineResolution;
+  requires_series_confirmation: boolean;
   programme_candidates: Array<{
     programme_id: string;
     programme_code: string;
@@ -139,8 +140,18 @@ export type AircraftDefaults = {
     revision_code: string;
     base_content_pack_revision_id: string | null;
     content_hash: string | null;
+    approval_reference: string | null;
+    source_currentness_at_approval: string | null;
+    task_counts: Record<string, number>;
   }>;
   selected_programme_revision_id: string | null;
+  selected_oem_baseline_revision_id: string | null;
+  prefill: {
+    type_revision_id: string;
+    programme_revision_id: string;
+    series: string | null;
+    oem_baseline_revision_id: string | null;
+  } | null;
 };
 
 function headers(): Headers {
@@ -197,7 +208,7 @@ export const resolveBaseline = (aircraftTypeRevisionId: string) =>
   request<BaselineResolution>(`/architecture/programmes/baseline-resolution?aircraft_type_revision_id=${encodeURIComponent(aircraftTypeRevisionId)}`);
 
 export const resolveAircraftDefaults = (aircraftTypeRevisionId: string) =>
-  request<AircraftDefaults>(`/architecture/programmes/aircraft-defaults?aircraft_type_revision_id=${encodeURIComponent(aircraftTypeRevisionId)}`);
+  request<AircraftDefaults>(`/architecture/programmes/aircraft-setup-defaults?aircraft_type_revision_id=${encodeURIComponent(aircraftTypeRevisionId)}`);
 
 export const createAmpDraftFromOem = (
   programmeId: string,
