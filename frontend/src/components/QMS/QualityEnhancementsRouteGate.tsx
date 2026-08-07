@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from "react";
 import { useLocation } from "react-router-dom";
 
+import { ModalTopLayerGuard } from "../shared/ModalTopLayerGuard";
+
 const QualityEnhancementsHost = lazy(
   () => import("./QualityEnhancementsHost"),
 );
@@ -8,13 +10,18 @@ const QualityEnhancementsHost = lazy(
 const QualityEnhancementsRouteGate: React.FC = () => {
   const location = useLocation();
   const relevant = /^\/car-invite\/?$/i.test(location.pathname)
-    || /^\/maintenance\/[^/]+\/(?:quality|qms)(?:\/|$)/i.test(location.pathname)
-    || /^\/maintenance\/[^/]+\/[^/]+\/qms(?:\/|$)/i.test(location.pathname);
-  if (!relevant) return null;
+    || /^\/maintenance\/[^/]+(?:\/|$)/i.test(location.pathname)
+    || /^\/platform(?:\/|$)/i.test(location.pathname);
+
   return (
-    <Suspense fallback={null}>
-      <QualityEnhancementsHost />
-    </Suspense>
+    <>
+      <ModalTopLayerGuard />
+      {relevant ? (
+        <Suspense fallback={null}>
+          <QualityEnhancementsHost />
+        </Suspense>
+      ) : null}
+    </>
   );
 };
 
