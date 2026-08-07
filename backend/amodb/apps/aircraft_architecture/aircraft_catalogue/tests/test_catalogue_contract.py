@@ -8,7 +8,13 @@ from amodb.apps.aircraft_architecture.aircraft_catalogue import services
 
 def _revision(positions, components, sources):
     return SimpleNamespace(
-        template=SimpleNamespace(code="DHC8-315"),
+        template=SimpleNamespace(
+            code="DHC8-315",
+            manufacturer="De Havilland Canada",
+            model="DHC-8-315",
+            variant="315",
+            series="300",
+        ),
         revision_code="REV-1",
         effective_date="2026-08-05",
         configuration_schema_json={"engines": 2},
@@ -27,6 +33,14 @@ def test_revision_hash_is_order_independent():
     b = services.compute_revision_hash(_revision([p2, p1], [], [source]))
     assert a == b
     assert len(a) == 64
+
+
+def test_revision_hash_changes_when_controlled_series_changes():
+    base = _revision([], [], [])
+    first = services.compute_revision_hash(base)
+    base.template.series = "200"
+    second = services.compute_revision_hash(base)
+    assert first != second
 
 
 def test_published_revision_is_immutable():
