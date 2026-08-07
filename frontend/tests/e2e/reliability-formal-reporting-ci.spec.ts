@@ -227,7 +227,7 @@ async function authenticate(page: Page): Promise<void> {
       id: "quality-user", amo_id: "uat-amo", department_id: "uat-rel", staff_code: "REL-QM", email: "quality@example.invalid",
       first_name: "Quality", last_name: "Manager", full_name: "Quality Manager", role: "QUALITY_MANAGER", position_title: "Quality Manager",
       phone: null, regulatory_authority: "KCAA", licence_number: null, licence_state_or_country: null, licence_expires_on: null,
-      is_active: true, is_superuser: true, is_amo_admin: false, must_change_password: false, last_login_at: null, last_login_ip: null,
+      is_active: true, is_superuser: false, is_amo_admin: false, must_change_password: false, last_login_at: null, last_login_ip: null,
       created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
     }));
   }, { storedToken: token });
