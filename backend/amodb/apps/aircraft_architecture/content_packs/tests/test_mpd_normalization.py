@@ -47,4 +47,4 @@ def test_parse_opportunity_without_fabricating_numeric_limit():
 
 def test_ambiguous_interval_fails_closed():
     with pytest.raises(IntervalParseError):
-        parse_interval_text("At suitable maintenance opportunity after inspection")
+        parse_interval_text("Perform as required based on condition")
