@@ -10,12 +10,20 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.aircraft_architecture.aircraft_catalogue import models as catalogue_models
+from amodb.apps.aircraft_architecture.content_packs import governance as content_governance
 from amodb.apps.aircraft_architecture.content_packs import models as content_models
 
 from . import models
 
 
 MANDATORY_AUTHORITY_MARKERS = {"ALI", "CMR", "AWL", "AIRWORTHINESS LIMITATION", "LIFE LIMIT"}
+BLOCKING_CURRENTNESS_STATES = {
+    "NO_CURRENT_REVISION",
+    "TEMPORARY_REVISION_REVIEW_REQUIRED",
+    "CANDIDATE_REVIEW_REQUIRED",
+    "SOURCE_CHANGE_DETECTED",
+    "SOURCE_CHECK_REQUIRED",
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -130,6 +138,10 @@ def resolve_oem_baseline(
             continue
         published = [row for row in pack.revisions if row.status == "PUBLISHED"]
         for revision in published:
+            # Tenant AMPs must inherit a governed OEM baseline, not a generic
+            # content pack that happens to have a similar family/series label.
+            if not any(source.publication_revision_id for source in revision.sources):
+                continue
             matches.append(
                 {
                     "pack_id": pack.id,
@@ -241,17 +253,30 @@ def _is_mandatory(task: content_models.AircraftContentPackTask) -> bool:
     return False
 
 
-def baseline_currentness_issues(
+def baseline_currentness_snapshot(
     db: Session,
     baseline: content_models.AircraftContentPackRevision,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], str]:
     issues: list[dict[str, Any]] = []
     linked_base_ids = {source.publication_revision_id for source in baseline.sources if source.publication_revision_id}
     linked_tr_ids = {source.temporary_revision_id for source in baseline.sources if source.temporary_revision_id}
+    if not linked_base_ids:
+        return (
+            [{
+                "severity": "BLOCK",
+                "code": "OEM_REGISTRY_LINEAGE_REQUIRED",
+                "message": "Tenant AMP baselines must be linked to a controlled OEM publication revision",
+            }],
+            "UNCONTROLLED",
+        )
+
+    publication_states: list[str] = []
+    checked_publications: set[str] = set()
     for revision_id in linked_base_ids:
         revision = db.get(content_models.AircraftOemPublicationRevision, revision_id)
         if not revision:
             issues.append({"severity": "BLOCK", "code": "OEM_SOURCE_MISSING", "message": "OEM source revision record is missing"})
+            publication_states.append("NO_CURRENT_REVISION")
             continue
         if revision.status != "CURRENT":
             issues.append(
@@ -261,7 +286,31 @@ def baseline_currentness_issues(
                     "message": f"OEM publication revision {revision.revision_code} is {revision.status}; select the current OEM baseline",
                 }
             )
-            continue
+        publication = revision.publication
+        if publication.id not in checked_publications:
+            checked_publications.add(publication.id)
+            currentness = content_governance.governed_publication_currentness(db, publication=publication)
+            publication_states.append(currentness.currentness_status)
+            if currentness.currentness_status in BLOCKING_CURRENTNESS_STATES:
+                issues.append(
+                    {
+                        "severity": "BLOCK",
+                        "code": "OEM_CURRENTNESS_REVIEW_REQUIRED",
+                        "message": (
+                            f"OEM publication {publication.publication_code} is {currentness.currentness_status.replace('_', ' ').lower()}; "
+                            "the source must be reviewed before an AMP revision can be published"
+                        ),
+                    }
+                )
+            elif currentness.currentness_status == "TEMPORARY_REVISION_ACTIVE":
+                issues.append(
+                    {
+                        "severity": "INFO",
+                        "code": "OEM_ACTIVE_TR_INCLUDED",
+                        "message": f"OEM publication {publication.publication_code} has active Temporary Revision control; all active TRs must remain represented in the baseline",
+                    }
+                )
+
         active_trs = (
             db.query(content_models.AircraftOemTemporaryRevision)
             .filter(
@@ -279,7 +328,21 @@ def baseline_currentness_issues(
                     "message": f"Active OEM Temporary Revision {tr.temporary_revision_code} is not incorporated in this baseline",
                 }
             )
-    return issues
+
+    if any(state in BLOCKING_CURRENTNESS_STATES for state in publication_states):
+        snapshot = "REVIEW_REQUIRED"
+    elif "TEMPORARY_REVISION_ACTIVE" in publication_states:
+        snapshot = "TEMPORARY_REVISION_ACTIVE"
+    else:
+        snapshot = "CURRENT"
+    return issues, snapshot
+
+
+def baseline_currentness_issues(
+    db: Session,
+    baseline: content_models.AircraftContentPackRevision,
+) -> list[dict[str, Any]]:
+    return baseline_currentness_snapshot(db, baseline)[0]
 
 
 def validate_revision(
@@ -298,7 +361,8 @@ def validate_revision(
             "baseline": baseline,
         }
 
-    issues.extend(baseline_currentness_issues(db, baseline))
+    currentness_issues, currentness_snapshot = baseline_currentness_snapshot(db, baseline)
+    issues.extend(currentness_issues)
     oem_tasks = {task.id: task for task in baseline.tasks}
     tenant_by_source: dict[str, list[models.TenantProgrammeTask]] = {}
     additions = 0
@@ -363,6 +427,7 @@ def validate_revision(
             "inherited_count": inherited,
             "tightened_count": tightened,
             "operator_added_count": additions,
+            "oem_currentness_at_validation": currentness_snapshot,
         },
         "baseline": baseline,
     }
