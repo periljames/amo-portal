@@ -43,9 +43,24 @@
 .rel-wp[data-guided-mode='true'] .rel-wp__guided-tip { display: block; }
 .rel-wp[data-guided-mode='false'] .rel-wp__guided-tip { display: none; }
 .rel-wp__guided-tip { margin: 0 0 .75rem; padding: .55rem .7rem; border-left: 3px solid var(--brand-accent, #315b8a); background: var(--surface-muted, #eef3f8); color: var(--text-secondary, #596579); font-size: .72rem; line-height: 1.4; }
+.rel-wp__quick-ranges { display: flex; flex-wrap: wrap; gap: .4rem; padding: .55rem 0; }
+.rel-wp__quick-ranges button { border: 1px solid var(--border-color, #cfd7e1); background: var(--surface, #fff); color: inherit; padding: .38rem .58rem; font: inherit; font-size: .72rem; cursor: pointer; }
+.rel-wp__quick-ranges button:hover { background: var(--surface-muted, #eef3f8); }
+.rel-wp__domain-selector { display: grid; gap: .6rem; }
+.rel-wp__domain-selector-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: .35rem .55rem; }
+.rel-wp__domain-selector-grid .rel-wp__checkbox { min-height: 2rem; padding: .3rem .45rem; border: 1px solid var(--border-color, #e0e6ed); background: var(--surface-muted, #f7f9fb); }
+.rel-wp__management-preview { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #d9e0e8); }
+.rel-wp__management-preview code { max-width: 42rem; overflow-wrap: anywhere; font-size: .7rem; }
+.rel-wp__management-preview iframe { width: 100%; min-height: 48rem; border: 1px solid var(--border-color, #cfd7e1); background: #fff; }
+.rel-wp__source-provenance > span { margin-left: .35rem; color: var(--text-secondary, #596579); font-size: .75rem; }
+@media (max-width: 1100px) {
+  .rel-wp__domain-selector-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 @media (max-width: 720px) {
   .rel-wp__preference-bar { position: static; }
   .rel-wp__shortcut-grid { left: 0; right: auto; }
+  .rel-wp__domain-selector-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rel-wp__management-preview iframe { min-height: 36rem; }
 }
 @media print {
   .rel-wp__preference-bar,
