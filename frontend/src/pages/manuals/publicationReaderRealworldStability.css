@@ -1,0 +1,337 @@
+/* Real-world reader consolidation and stability layer.
+ * Scope is intentionally limited to the publication reader route.
+ */
+
+body.publication-reader-route-active .publication-floating-header,
+body.publication-reader-route-active .publication-document-tabs,
+body.publication-reader-route-active .publication-control-banner,
+body.publication-reader-route-active .publication-reader-controls,
+body.publication-reader-route-active .documentation-assistant-launcher {
+  display: none !important;
+}
+
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader {
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-document-header {
+  position: relative;
+  z-index: 22;
+  flex: 0 0 auto;
+  display: grid !important;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  grid-template-areas: "identity tabs actions";
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  min-height: 50px;
+  padding: 0.35rem 0.65rem !important;
+  border-bottom: 1px solid var(--publication-border);
+}
+
+body.publication-reader-route-active .publication-document-header__title {
+  grid-area: identity;
+  min-width: 0;
+}
+
+body.publication-reader-route-active .publication-document-header__title > div {
+  min-width: 0;
+}
+
+body.publication-reader-route-active .publication-document-header__title h1 {
+  max-width: none !important;
+  overflow: hidden;
+  margin: 0;
+  font-size: clamp(0.92rem, 1.05vw, 1.05rem) !important;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.publication-reader-route-active .publication-document-header__title p,
+body.publication-reader-route-active .publication-control-status,
+body.publication-reader-route-active .publication-cache-state {
+  display: none !important;
+}
+
+body.publication-reader-route-active .publication-document-header__title span {
+  margin: 0.12rem 0 0 !important;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.65rem !important;
+  line-height: 1.1;
+}
+
+body.publication-reader-route-active .publication-document-header__actions {
+  grid-area: actions;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+body.publication-reader-route-active .publication-document-header__actions button {
+  min-height: 30px !important;
+  padding: 0.25rem 0.48rem !important;
+  font-size: 0.68rem !important;
+}
+
+.publication-header-tabs-bridge {
+  grid-area: tabs;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.08rem;
+  min-width: 0;
+  padding: 0.12rem;
+  border: 1px solid color-mix(in srgb, var(--publication-border) 78%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface-soft, #f8fafc) 64%, transparent);
+}
+
+.publication-header-tabs-bridge button {
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  padding: 0.22rem 0.42rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  font: 680 0.66rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.publication-header-tabs-bridge button:hover {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, transparent);
+  color: var(--text-primary, #0f172a);
+}
+
+.publication-header-tabs-bridge button.active {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 13%, var(--surface-elevated, #fff));
+  color: var(--text-primary, #0f172a);
+  box-shadow: inset 0 -2px 0 var(--accent-primary, #2563eb);
+}
+
+.publication-header-tabs-bridge button:focus-visible {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+/* The route itself owns the remaining viewport. Do not subtract historical
+ * floating-header/tab rows after those rows have been consolidated. */
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-reader-workspace {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-document-canvas,
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-linked-layout,
+body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-native-pdf {
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+/* Prevent both the browser and stale virtual geometry from trying to preserve
+ * an obsolete anchor while rapid manual scrolling or zoom remeasurement occurs. */
+body.publication-reader-route-active .pdfv3-viewport,
+body.publication-reader-route-active .pdfv3-virtual-canvas,
+body.publication-reader-route-active .pdfv3-virtual-row {
+  overflow-anchor: none;
+}
+
+body.publication-reader-route-active .pdfv3-viewport {
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* Scale the uncontrolled overlay from the PDF page itself, not from the browser
+ * viewport. This keeps the mark proportional at every reader zoom level. */
+body.publication-reader-route-active .pdfv3-page {
+  container-type: inline-size;
+}
+
+body.publication-reader-route-active .pdfv3-watermark {
+  inset: 50% auto auto 50% !important;
+  width: 88%;
+  transform: translate(-50%, -50%) rotate(-28deg) !important;
+  font-size: clamp(1.05rem, 8cqw, 5.4rem) !important;
+  line-height: 0.96;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* Route-scoped AI entry point: the assistant no longer floats over a manual. */
+.publication-assistant-topbar {
+  position: relative;
+  isolation: isolate;
+}
+
+.publication-assistant-topbar__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.publication-assistant-topbar__glyph svg:last-child {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  color: var(--accent-primary, #2563eb);
+  stroke-width: 2.4;
+}
+
+.publication-assistant-topbar.is-active {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 13%, var(--surface-elevated, #fff));
+  color: var(--text-primary, #0f172a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary, #2563eb) 48%, transparent);
+}
+
+/* The open assistant is glass, not an opaque black slab. Explicit light/dark
+ * values avoid token fallback inversions on the publication route. */
+body.publication-reader-route-active .documentation-assistant.is-floating {
+  border-left-color: color-mix(in srgb, var(--border-subtle, #94a3b8) 68%, transparent) !important;
+  background: rgba(15, 23, 42, 0.78) !important;
+  color: #f8fafc !important;
+  box-shadow: -16px 0 44px rgba(2, 6, 23, 0.22) !important;
+  opacity: 0.86;
+  backdrop-filter: blur(22px) saturate(128%);
+  -webkit-backdrop-filter: blur(22px) saturate(128%);
+  transition: opacity 150ms ease, background-color 150ms ease, box-shadow 150ms ease !important;
+  --assistant-muted: #cbd5e1;
+  --assistant-border: rgba(148, 163, 184, 0.46);
+}
+
+body.publication-reader-route-active .documentation-assistant.is-floating:hover,
+body.publication-reader-route-active .documentation-assistant.is-floating:focus-within,
+body.publication-reader-route-active .documentation-assistant.is-floating[data-resizing="true"] {
+  opacity: 1;
+}
+
+body.publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__header,
+body.publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__answer,
+body.publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__sources article,
+body.publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__modes button,
+body.publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__query input {
+  background: rgba(15, 23, 42, 0.68) !important;
+  color: #f8fafc !important;
+}
+
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating {
+  border-left-color: rgba(100, 116, 139, 0.34) !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  color: #0f172a !important;
+  box-shadow: -16px 0 42px rgba(15, 23, 42, 0.14) !important;
+  --assistant-muted: #475569;
+  --assistant-border: rgba(100, 116, 139, 0.34);
+}
+
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__header,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__answer,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__sources article,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__modes button,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__query input {
+  background: rgba(255, 255, 255, 0.76) !important;
+  color: #0f172a !important;
+}
+
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__source-title > span,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__source-snippet,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__header p,
+body[data-color-scheme="light"].publication-reader-route-active .documentation-assistant.is-floating .documentation-assistant__authority-note {
+  color: #475569 !important;
+}
+
+@media (max-width: 1240px) {
+  body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-document-header {
+    grid-template-columns: minmax(220px, 1fr) auto;
+    grid-template-areas:
+      "identity actions"
+      "tabs tabs";
+    min-height: 78px;
+    gap: 0.28rem 0.5rem;
+  }
+
+  .publication-header-tabs-bridge {
+    justify-self: stretch;
+  }
+}
+
+@media (max-width: 760px) {
+  body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-document-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 74px;
+    padding: 0.3rem 0.4rem !important;
+  }
+
+  body.publication-reader-route-active .publication-document-header__actions button:not(.publication-acknowledgement-action) {
+    min-width: 32px;
+    padding-inline: 0.38rem !important;
+  }
+
+  .publication-header-tabs-bridge {
+    max-width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .publication-header-tabs-bridge::-webkit-scrollbar {
+    display: none;
+  }
+
+  .publication-header-tabs-bridge button {
+    min-height: 34px;
+    flex: 0 0 auto;
+  }
+
+  body.publication-reader-route-active .documentation-assistant.is-floating {
+    top: var(--tenant-topbar-height, 50px) !important;
+    width: min(94vw, 520px) !important;
+    min-width: 0 !important;
+    max-width: 94vw !important;
+  }
+}
+
+@media (max-width: 480px) {
+  body.publication-reader-route-active .publication-reader-page--dense-pdf-reader .publication-document-header {
+    grid-template-areas:
+      "identity actions"
+      "tabs tabs";
+  }
+
+  body.publication-reader-route-active .publication-document-header__title span {
+    max-width: 68vw;
+    overflow: hidden;
+    display: block !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .publication-header-tabs-bridge button span {
+    display: none;
+  }
+
+  .publication-header-tabs-bridge button {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  body.publication-reader-route-active .documentation-assistant.is-floating {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    opacity: 0.94;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.publication-reader-route-active .documentation-assistant.is-floating {
+    transition: none !important;
+  }
+}
