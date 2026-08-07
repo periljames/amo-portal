@@ -38,7 +38,9 @@ ASSIGNMENT_ID = "00000000-0000-4000-8000-000000000484"
 
 AMO_CODE = "DMSGATE"
 AMO_SLUG = "dmsgate"
-ADMIN_EMAIL = "dms-gate@example.invalid"
+# example.com is reserved by RFC 2606 for documentation/testing and passes the
+# application's standards-compliant email validator unlike the invalid TLD.
+ADMIN_EMAIL = "dms-gate@example.com"
 ADMIN_PASSWORD = "DmsGate!2026-Local"
 
 
