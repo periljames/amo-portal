@@ -256,9 +256,48 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
         priority=quality_models.CARPriority.HIGH,
         requested_by_user_id=user_a.id,
         assigned_to_user_id=None,
-        due_date=None,
+        due_date=date(2020, 1, 1),
         target_closure_date=None,
         finding_id=findings[0].id,
+    )
+    second_car = quality_service.create_car(
+        db_session,
+        amo_id=amo_a.id,
+        program=quality_models.CARProgram.QUALITY,
+        title="Restore calibration identification",
+        summary="Replace the missing calibration label",
+        priority=quality_models.CARPriority.MEDIUM,
+        requested_by_user_id=user_a.id,
+        assigned_to_user_id=None,
+        due_date=None,
+        target_closure_date=None,
+        finding_id=findings[1].id,
+    )
+    third_car = quality_service.create_car(
+        db_session,
+        amo_id=amo_a.id,
+        program=quality_models.CARProgram.QUALITY,
+        title="Remove superseded procedure",
+        summary="Replace the controlled copy",
+        priority=quality_models.CARPriority.MEDIUM,
+        requested_by_user_id=user_a.id,
+        assigned_to_user_id=None,
+        due_date=None,
+        target_closure_date=None,
+        finding_id=findings[2].id,
+    )
+    quality_service.create_car(
+        db_session,
+        amo_id=amo_b.id,
+        program=quality_models.CARProgram.QUALITY,
+        title="Other tenant corrective action",
+        summary="Must never appear in tenant A results",
+        priority=quality_models.CARPriority.MEDIUM,
+        requested_by_user_id=None,
+        assigned_to_user_id=None,
+        due_date=None,
+        target_closure_date=None,
+        finding_id=other_tenant_finding.id,
     )
     db_session.commit()
 
@@ -272,8 +311,8 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
     assert first_page.total == 3
     assert len(first_page.rows) == 1
     assert first_page.has_more is True
-    assert first_page.car_linked_findings == 1
-    assert first_page.open_car_count == 1
+    assert first_page.car_linked_findings == 3
+    assert first_page.open_car_count == 3
     assert first_page.rows[0].audit.amo_id == amo_a.id
 
     car_only = register_pagination.get_audit_register_paged(
@@ -284,9 +323,8 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
         db=db_session,
         current_user=user_a,
     )
-    assert car_only.total == 1
-    assert car_only.rows[0].finding.id == findings[0].id
-    assert car_only.rows[0].linked_cars[0].id == car.id
+    assert car_only.total == 3
+    assert {row.finding.id for row in car_only.rows} == {finding.id for finding in findings}
 
     searched = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
@@ -298,3 +336,63 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
     )
     assert searched.total == 1
     assert searched.rows[0].finding.id == findings[0].id
+
+    car_page = register_pagination.get_car_register_paged(
+        program=quality_models.CARProgram.QUALITY,
+        scope="all",
+        search=None,
+        assigned_to_user_id=None,
+        due_soon_days=30,
+        limit=1,
+        offset=0,
+        db=db_session,
+        current_user=user_a,
+    )
+    assert car_page.total == 3
+    assert len(car_page.items) == 1
+    assert car_page.has_more is True
+    assert car_page.summary.total == 3
+    assert car_page.summary.overdue == 1
+
+    exact_car = register_pagination.get_car_register_paged(
+        program=quality_models.CARProgram.QUALITY,
+        scope="all",
+        car_id=second_car.id,
+        search=None,
+        assigned_to_user_id=None,
+        due_soon_days=30,
+        limit=25,
+        offset=0,
+        db=db_session,
+        current_user=user_a,
+    )
+    assert exact_car.total == 1
+    assert exact_car.items[0].id == second_car.id
+
+    overdue = register_pagination.get_car_register_paged(
+        program=quality_models.CARProgram.QUALITY,
+        scope="overdue",
+        search=None,
+        assigned_to_user_id=None,
+        due_soon_days=30,
+        limit=25,
+        offset=0,
+        db=db_session,
+        current_user=user_a,
+    )
+    assert overdue.total == 1
+    assert overdue.items[0].id == car.id
+
+    car_search = register_pagination.get_car_register_paged(
+        program=quality_models.CARProgram.QUALITY,
+        scope="all",
+        search=third_car.car_number,
+        assigned_to_user_id=None,
+        due_soon_days=30,
+        limit=25,
+        offset=0,
+        db=db_session,
+        current_user=user_a,
+    )
+    assert car_search.total == 1
+    assert car_search.items[0].id == third_car.id
