@@ -11,6 +11,9 @@ from amodb.apps.accounts import models as account_models
 from . import saas_models, saas_services
 
 
+_INSTALLED = False
+
+
 def _tenant_ids(db: Session, mode: str) -> list[str]:
     query = db.query(account_models.AMO.id)
     if mode == "REAL":
@@ -43,25 +46,26 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
     now = saas_services.utcnow()
     since = now - timedelta(days=30)
 
+    empty = {
+        "data_mode": mode,
+        "outstanding_ar_by_currency": {},
+        "overdue_ar_by_currency": {},
+        "overdue_invoice_count_by_currency": {},
+        "invoiced_30d_by_currency": {},
+        "collected_30d_by_currency": {},
+        "failed_payment_jobs_30d": 0,
+        "provider_statuses": {},
+        "metric_quality": {
+            "ar_and_collection_metrics": "AUTHORITATIVE_PORTAL_SUBLEDGER",
+            "cross_currency_aggregation": "PROHIBITED",
+            "mrr_arr": "LEGACY_LICENSE_MODEL_NOT_AUTHORITATIVE_FOR_MULTI_CURRENCY",
+            "logo_churn": "NOT_IMPLEMENTED",
+            "net_revenue_retention": "NOT_IMPLEMENTED",
+            "gross_revenue_retention": "NOT_IMPLEMENTED",
+        },
+    }
     if not tenant_ids:
-        return {
-            "data_mode": mode,
-            "outstanding_ar_by_currency": {},
-            "overdue_ar_by_currency": {},
-            "overdue_invoice_count_by_currency": {},
-            "invoiced_30d_by_currency": {},
-            "collected_30d_by_currency": {},
-            "failed_payment_jobs_30d": 0,
-            "provider_statuses": {},
-            "metric_quality": {
-                "ar_and_collection_metrics": "AUTHORITATIVE_PORTAL_SUBLEDGER",
-                "cross_currency_aggregation": "PROHIBITED",
-                "mrr_arr": "LEGACY_LICENSE_MODEL_NOT_AUTHORITATIVE_FOR_MULTI_CURRENCY",
-                "logo_churn": "NOT_IMPLEMENTED",
-                "net_revenue_retention": "NOT_IMPLEMENTED",
-                "gross_revenue_retention": "NOT_IMPLEMENTED",
-            },
-        }
+        return empty
 
     base = db.query(account_models.BillingInvoice).filter(account_models.BillingInvoice.amo_id.in_(tenant_ids))
     outstanding = _currency_sums(
@@ -121,7 +125,7 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
         if item.get("category") in {"BILLING", "PAYMENTS", "ACCOUNTING", "TAX"}
     }
     return {
-        "data_mode": mode,
+        **empty,
         "outstanding_ar_by_currency": outstanding,
         "overdue_ar_by_currency": overdue,
         "overdue_invoice_count_by_currency": overdue_counts,
@@ -129,12 +133,15 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
         "collected_30d_by_currency": collected,
         "failed_payment_jobs_30d": failed_jobs,
         "provider_statuses": provider_statuses,
-        "metric_quality": {
-            "ar_and_collection_metrics": "AUTHORITATIVE_PORTAL_SUBLEDGER",
-            "cross_currency_aggregation": "PROHIBITED",
-            "mrr_arr": "LEGACY_LICENSE_MODEL_NOT_AUTHORITATIVE_FOR_MULTI_CURRENCY",
-            "logo_churn": "NOT_IMPLEMENTED",
-            "net_revenue_retention": "NOT_IMPLEMENTED",
-            "gross_revenue_retention": "NOT_IMPLEMENTED",
-        },
     }
+
+
+def install_accounting_summary_policy() -> None:
+    """Make currency-safe subledger metrics authoritative across old/new pages."""
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    from . import commercial_services
+
+    commercial_services.commercial_summary = subledger_summary
+    _INSTALLED = True
