@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from amodb.apps.accounts import models as account_models
 
+from . import commercial_services
 from . import models as platform_models
 from . import saas_models
 from . import services as platform_services
-from . import commercial_services
 
 
 _INSTALLED = False
@@ -52,6 +52,21 @@ def _is_conflict(*, administrative_active: bool, commercial_status: str) -> bool
     }
 
 
+def _counts_by_tenant(db: Session, tenant_ids: list[str], status: account_models.ModuleSubscriptionStatus) -> dict[str, int]:
+    return {
+        str(amo_id): int(count or 0)
+        for amo_id, count in (
+            db.query(account_models.ModuleSubscription.amo_id, func.count(account_models.ModuleSubscription.id))
+            .filter(
+                account_models.ModuleSubscription.amo_id.in_(tenant_ids),
+                account_models.ModuleSubscription.status == status,
+            )
+            .group_by(account_models.ModuleSubscription.amo_id)
+            .all()
+        )
+    }
+
+
 def list_tenants_authoritative(
     db: Session,
     *,
@@ -61,12 +76,7 @@ def list_tenants_authoritative(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Bounded tenant register with separate administrative/commercial truth.
-
-    ``AMO.is_active`` remains the deliberate platform suspension flag. Billing,
-    module and provider state is reported independently so an old admin flag can
-    never masquerade as a cancelled subscription.
-    """
+    """Return a bounded register with administrative and commercial state separated."""
     mode = str(data_mode or "REAL").strip().upper()
     if mode not in {"REAL", "DEMO", "ALL"}:
         mode = "REAL"
@@ -91,15 +101,16 @@ def list_tenants_authoritative(
 
     total = int(query.count())
     bounded_limit = max(1, min(int(limit), 200))
+    bounded_offset = max(0, int(offset))
     rows = (
         query.order_by(account_models.AMO.created_at.desc(), account_models.AMO.id.desc())
-        .offset(max(0, int(offset)))
+        .offset(bounded_offset)
         .limit(bounded_limit)
         .all()
     )
-    tenant_ids = [row.id for row in rows]
+    tenant_ids = [str(row.id) for row in rows]
     if not tenant_ids:
-        return {"items": [], "total": total, "limit": bounded_limit, "offset": max(0, int(offset)), "data_mode": mode}
+        return {"items": [], "total": total, "limit": bounded_limit, "offset": bounded_offset, "data_mode": mode}
 
     user_stats = {
         str(amo_id): {"count": int(count or 0), "last_login_at": last_login}
@@ -118,6 +129,7 @@ def list_tenants_authoritative(
     latest_licenses: dict[str, account_models.TenantLicense] = {}
     license_rows = (
         db.query(account_models.TenantLicense)
+        .options(joinedload(account_models.TenantLicense.catalog_sku))
         .filter(account_models.TenantLicense.amo_id.in_(tenant_ids))
         .order_by(
             account_models.TenantLicense.amo_id.asc(),
@@ -129,37 +141,15 @@ def list_tenants_authoritative(
     for license_row in license_rows:
         latest_licenses.setdefault(str(license_row.amo_id), license_row)
 
-    module_stats: dict[str, dict[str, int]] = {
-        str(amo_id): {"enabled": int(enabled or 0), "trial": int(trial or 0)}
-        for amo_id, enabled, trial in (
-            db.query(
-                account_models.ModuleSubscription.amo_id,
-                func.sum(
-                    func.case(
-                        (account_models.ModuleSubscription.status == account_models.ModuleSubscriptionStatus.ENABLED, 1),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    func.case(
-                        (account_models.ModuleSubscription.status == account_models.ModuleSubscriptionStatus.TRIAL, 1),
-                        else_=0,
-                    )
-                ),
-            )
-            .filter(account_models.ModuleSubscription.amo_id.in_(tenant_ids))
-            .group_by(account_models.ModuleSubscription.amo_id)
-            .all()
-        )
-    }
+    enabled_counts = _counts_by_tenant(db, tenant_ids, account_models.ModuleSubscriptionStatus.ENABLED)
+    trial_counts = _counts_by_tenant(db, tenant_ids, account_models.ModuleSubscriptionStatus.TRIAL)
 
-    provider_by_tenant: dict[str, dict[str, str]] = {str(tenant_id): {} for tenant_id in tenant_ids}
-    provider_rows = (
+    provider_by_tenant: dict[str, dict[str, str]] = {tenant_id: {} for tenant_id in tenant_ids}
+    for provider_row in (
         db.query(saas_models.SaaSBillingAccount)
         .filter(saas_models.SaaSBillingAccount.tenant_id.in_(tenant_ids))
         .all()
-    )
-    for provider_row in provider_rows:
+    ):
         provider_by_tenant.setdefault(str(provider_row.tenant_id), {})[str(provider_row.provider)] = str(provider_row.status or "UNKNOWN").upper()
 
     items: list[dict[str, Any]] = []
@@ -167,12 +157,13 @@ def list_tenants_authoritative(
         tenant_id = str(amo.id)
         license_row = latest_licenses.get(tenant_id)
         license_status = _enum_value(getattr(license_row, "status", None))
-        module = module_stats.get(tenant_id, {"enabled": 0, "trial": 0})
+        enabled = enabled_counts.get(tenant_id, 0)
+        trial = trial_counts.get(tenant_id, 0)
         providers = provider_by_tenant.get(tenant_id, {})
         commercial_status = _commercial_state(
             license_status=license_status,
-            module_enabled=module["enabled"],
-            module_trial=module["trial"],
+            module_enabled=enabled,
+            module_trial=trial,
             provider_statuses=providers,
         )
         conflict = _is_conflict(administrative_active=bool(amo.is_active), commercial_status=commercial_status)
@@ -200,8 +191,8 @@ def list_tenants_authoritative(
                 "plan_code": getattr(sku, "code", None),
                 "license_status": license_status,
                 "is_read_only": bool(getattr(license_row, "is_read_only", False)) if license_row else False,
-                "enabled_module_count": module["enabled"],
-                "trial_module_count": module["trial"],
+                "enabled_module_count": enabled,
+                "trial_module_count": trial,
                 "provider_statuses": providers,
                 "user_count": users["count"],
                 "last_user_login_at": users["last_login_at"],
@@ -209,7 +200,7 @@ def list_tenants_authoritative(
                 "updated_at": amo.updated_at,
             }
         )
-    return {"items": items, "total": total, "limit": bounded_limit, "offset": max(0, int(offset)), "data_mode": mode}
+    return {"items": items, "total": total, "limit": bounded_limit, "offset": bounded_offset, "data_mode": mode}
 
 
 def tenant_lifecycle_evidence(db: Session, *, tenant_id: str) -> dict[str, Any]:
@@ -232,11 +223,7 @@ def tenant_lifecycle_evidence(db: Session, *, tenant_id: str) -> dict[str, Any]:
         )
         .all()
     )
-    accounts = (
-        db.query(saas_models.SaaSBillingAccount)
-        .filter(saas_models.SaaSBillingAccount.tenant_id == tenant_id)
-        .all()
-    )
+    accounts = db.query(saas_models.SaaSBillingAccount).filter(saas_models.SaaSBillingAccount.tenant_id == tenant_id).all()
     license_status = _enum_value(getattr(latest_license, "status", None))
     enabled = sum(1 for row in modules if row.status == account_models.ModuleSubscriptionStatus.ENABLED)
     trial = sum(1 for row in modules if row.status == account_models.ModuleSubscriptionStatus.TRIAL)
@@ -247,12 +234,11 @@ def tenant_lifecycle_evidence(db: Session, *, tenant_id: str) -> dict[str, Any]:
         module_trial=trial,
         provider_statuses=providers,
     )
-    conflict = _is_conflict(administrative_active=bool(amo.is_active), commercial_status=commercial_status)
     return {
         "tenant_id": tenant_id,
         "administrative_status": "ACTIVE" if amo.is_active else "SUSPENDED",
         "commercial_status": commercial_status,
-        "status_conflict": conflict,
+        "status_conflict": _is_conflict(administrative_active=bool(amo.is_active), commercial_status=commercial_status),
         "license_status": license_status,
         "enabled_modules": [row.module_code for row in modules if row.status == account_models.ModuleSubscriptionStatus.ENABLED],
         "trial_modules": [row.module_code for row in modules if row.status == account_models.ModuleSubscriptionStatus.TRIAL],
@@ -268,16 +254,15 @@ def reconcile_tenant_status(
     reason: str,
     apply: bool,
 ) -> dict[str, Any]:
-    evidence = tenant_lifecycle_evidence(db, tenant_id=tenant_id)
     if not str(reason or "").strip():
         raise ValueError("A reconciliation reason is required")
-    changed = False
+    evidence = tenant_lifecycle_evidence(db, tenant_id=tenant_id)
     amo = db.get(account_models.AMO, tenant_id)
     assert amo is not None
     previous = bool(amo.is_active)
-    if apply and evidence["status_conflict"]:
+    changed = bool(apply and evidence["status_conflict"])
+    if changed:
         amo.is_active = True
-        changed = True
     db.add(
         platform_models.PlatformAuditLog(
             actor_user_id=actor_user_id,
