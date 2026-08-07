@@ -132,6 +132,7 @@ class RevisionRead(ORMModel):
     source_reference: str
     source_revision: str
     source_currentness_at_approval: str | None
+    approval_reference: str | None
     content_hash: str | None
     change_summary: str | None
     created_at: datetime
