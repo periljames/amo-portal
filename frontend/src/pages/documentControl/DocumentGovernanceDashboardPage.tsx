@@ -3,7 +3,8 @@ import { AlertTriangle, ArrowRight, FileSearch, FolderTree, Link2, RefreshCw, Sh
 import { useNavigate } from "react-router-dom";
 
 import { getGovernanceDashboard, startGovernanceBackfill, type GovernanceDashboard } from "../../services/documentGovernance";
-import DocumentControlShell, { DocumentControlError, DocumentControlLoading, useDocumentControlRoute } from "./DocumentControlShell";
+import DocumentControlShell, { DocumentControlError, DocumentControlLoading } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentGovernance.css";
 
 const ICONS: Record<string, typeof ShieldCheck> = {
