@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import UUID
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.quality import models as quality_models
@@ -26,7 +27,39 @@ def _user(db_session, *, amo_id: str) -> account_models.User:
     return user
 
 
-def _car(db_session, *, amo_id: str, requested_by_user_id: str, title: str):
+def _finding(db_session, *, amo_id: str) -> quality_models.QMSAuditFinding:
+    audit = quality_models.QMSAudit(
+        amo_id=amo_id,
+        domain=quality_models.QMSDomain.AMO,
+        kind=quality_models.QMSAuditKind.INTERNAL,
+        audit_ref="QAR/QUEUE/26/001",
+        title="Returned CAR queue audit",
+    )
+    db_session.add(audit)
+    db_session.commit()
+
+    finding = quality_models.QMSAuditFinding(
+        amo_id=amo_id,
+        audit_id=audit.id,
+        finding_ref="QAR/QUEUE/26/001-F-001",
+        finding_type=quality_models.QMSFindingType.NON_CONFORMITY,
+        severity=quality_models.QMSFindingSeverity.MINOR,
+        level=quality_models.FindingLevel.LEVEL_3,
+        description="Controlled finding used to exercise CAR queue lifecycle semantics.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+    return finding
+
+
+def _car(
+    db_session,
+    *,
+    amo_id: str,
+    requested_by_user_id: str,
+    finding_id: UUID,
+    title: str,
+):
     car = quality_service.create_car(
         db_session,
         amo_id=amo_id,
@@ -38,10 +71,10 @@ def _car(db_session, *, amo_id: str, requested_by_user_id: str, title: str):
         assigned_to_user_id=None,
         due_date=None,
         target_closure_date=None,
-        finding_id=None,
+        finding_id=finding_id,
     )
     car.status = quality_models.CARStatus.IN_PROGRESS
-    car.submitted_at = datetime.utcnow()
+    car.submitted_at = datetime.now(timezone.utc)
     db_session.commit()
     return car
 
@@ -55,11 +88,13 @@ def test_returned_car_stays_in_awaiting_auditee_queue(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo_id=amo.id)
+    finding = _finding(db_session, amo_id=amo.id)
 
     root_cause_return = _car(
         db_session,
         amo_id=amo.id,
         requested_by_user_id=user.id,
+        finding_id=finding.id,
         title="Root cause returned",
     )
     root_cause_return.root_cause_status = "REJECTED"
@@ -68,6 +103,7 @@ def test_returned_car_stays_in_awaiting_auditee_queue(db_session):
         db_session,
         amo_id=amo.id,
         requested_by_user_id=user.id,
+        finding_id=finding.id,
         title="Evidence requested",
     )
     evidence_return.capa_status = "NEEDS_EVIDENCE"
@@ -76,6 +112,7 @@ def test_returned_car_stays_in_awaiting_auditee_queue(db_session):
         db_session,
         amo_id=amo.id,
         requested_by_user_id=user.id,
+        finding_id=finding.id,
         title="Already submitted",
     )
     accepted_submission.root_cause_status = "ACCEPTED"
