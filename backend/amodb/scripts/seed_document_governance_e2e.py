@@ -27,6 +27,7 @@ from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.database import WriteSessionLocal  # noqa: E402
 from amodb.security import get_password_hash  # noqa: E402
 
+DEPARTMENT_ID = "00000000-0000-4000-8000-000000000476"
 AMO_ID = "00000000-0000-4000-8000-000000000477"
 USER_ID = "00000000-0000-4000-8000-000000000478"
 TENANT_ID = "00000000-0000-4000-8000-000000000479"
@@ -62,9 +63,26 @@ def seed() -> None:
         db.add(amo)
         db.flush()
 
+        # The route boundary intentionally requires a normal tenant user to have
+        # an assigned department unless an Admin Profile session is actively
+        # elevated. Seed a real Document Control department so browser acceptance
+        # proves the production access path rather than bypassing that guard.
+        department = account_models.Department(
+            id=DEPARTMENT_ID,
+            amo_id=amo.id,
+            code="document-control",
+            name="Document Control",
+            default_route=f"/maintenance/{AMO_SLUG}/document-control",
+            is_active=True,
+            sort_order=40,
+        )
+        db.add(department)
+        db.flush()
+
         user = account_models.User(
             id=USER_ID,
             amo_id=amo.id,
+            department_id=department.id,
             staff_code="DMS-CI-001",
             email=ADMIN_EMAIL,
             first_name="Document",
