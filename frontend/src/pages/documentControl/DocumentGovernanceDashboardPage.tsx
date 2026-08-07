@@ -14,6 +14,17 @@ const ICONS: Record<string, typeof ShieldCheck> = {
   superseded: AlertTriangle,
 };
 
+// Keep the dashboard-to-library handoff explicit. These are public URL-backed
+// work-queue contracts consumed by the integrated company library and should not
+// depend on a backend label or implementation detail changing over time.
+const LIBRARY_QUEUE_FILTERS: Record<string, Record<string, string>> = {
+  ownership: { unresolved_ownership: "true" },
+  relationships: { unresolved_relationships: "true" },
+  indexing: { indexing_status: "FAILED" },
+  structure: { structure_status: "ORPHANED" },
+  superseded: { superseded_referenced: "true" },
+};
+
 export default function DocumentGovernanceDashboardPage() {
   const navigate = useNavigate();
   const { tenant, basePath } = useDocumentControlRoute();
@@ -65,7 +76,10 @@ export default function DocumentGovernanceDashboardPage() {
           <section className="dgov-queue-grid" aria-label="Actionable governance queues">
             {data.queues.map((queue) => {
               const Icon = ICONS[queue.id] || AlertTriangle;
-              const params = new URLSearchParams(queue.filter);
+              const params = new URLSearchParams({
+                ...queue.filter,
+                ...(LIBRARY_QUEUE_FILTERS[queue.id] || {}),
+              });
               return (
                 <button key={queue.id} type="button" className="dgov-queue" onClick={() => navigate(`${basePath}/library?${params.toString()}`)}>
                   <span className="dgov-queue__icon"><Icon size={19} /></span>
