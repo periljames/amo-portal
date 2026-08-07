@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
+from datetime import date, timedelta
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import Depends, Query
@@ -14,7 +15,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .enums import QMSDomain
-from .router import router
+from .router import _decorate_car_register_items, router
 from .schemas import CAROut, QMSAuditOut, QMSAuditRegisterRowOut, QMSFindingOut
 
 
@@ -26,6 +27,22 @@ class QMSAuditRegisterPageOut(BaseModel):
     has_more: bool = False
     car_linked_findings: int = 0
     open_car_count: int = 0
+
+
+class QMSCarRegisterSummaryOut(BaseModel):
+    total: int = 0
+    open: int = 0
+    overdue: int = 0
+    in_review: int = 0
+
+
+class QMSCarRegisterPageOut(BaseModel):
+    items: list[CAROut] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 25
+    offset: int = 0
+    has_more: bool = False
+    summary: QMSCarRegisterSummaryOut = Field(default_factory=QMSCarRegisterSummaryOut)
 
 
 def _normalise_search(value: Optional[str]) -> Optional[str]:
@@ -50,12 +67,7 @@ def get_audit_register_paged(
     db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> QMSAuditRegisterPageOut:
-    """Return a bounded tenant-scoped closeout register page.
-
-    The legacy ``/audits/register`` route remains available for compatibility.
-    Search and column filters are evaluated in the database so the browser never
-    needs the tenant's complete finding/CAR population to render this workspace.
-    """
+    """Return a bounded tenant-scoped closeout register page."""
 
     amo_id = str(current_user.amo_id or "").strip()
     if not amo_id:
@@ -88,13 +100,7 @@ def get_audit_register_paged(
         matching_car_exists = (
             db.query(Car.id)
             .filter(Car.finding_id == Finding.id)
-            .filter(
-                or_(
-                    Car.car_number.ilike(like),
-                    Car.title.ilike(like),
-                    Car.summary.ilike(like),
-                )
-            )
+            .filter(or_(Car.car_number.ilike(like), Car.title.ilike(like), Car.summary.ilike(like)))
             .exists()
         )
         query = query.filter(
@@ -155,6 +161,7 @@ def get_audit_register_paged(
         db.query(func.count(Car.id))
         .filter(Car.finding_id.in_(filtered_id_query))
         .filter(Car.status != models.CARStatus.CLOSED)
+        .filter(Car.status != models.CARStatus.CANCELLED)
         .scalar()
         or 0
     )
@@ -196,4 +203,151 @@ def get_audit_register_paged(
         has_more=offset + len(rows) < total,
         car_linked_findings=car_linked_findings,
         open_car_count=open_car_count,
+    )
+
+
+CarRegisterScope = Literal[
+    "all",
+    "active",
+    "overdue",
+    "due_soon",
+    "awaiting_auditee",
+    "awaiting_quality_review",
+    "awaiting_effectiveness_review",
+    "closed",
+]
+
+
+@router.get("/cars/register/paged", response_model=QMSCarRegisterPageOut)
+def get_car_register_paged(
+    program: Optional[models.CARProgram] = None,
+    status_: Optional[models.CARStatus] = None,
+    scope: CarRegisterScope = "all",
+    car_id: Optional[UUID] = None,
+    assigned_to_user_id: Optional[str] = Query(default=None, max_length=36),
+    audit_id: Optional[UUID] = None,
+    search: Optional[str] = Query(default=None, max_length=160),
+    due_soon_days: int = Query(default=30, ge=1, le=90),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_read_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+) -> QMSCarRegisterPageOut:
+    """Return a bounded CAR register page with server-side workflow scopes."""
+
+    amo_id = str(current_user.amo_id or "").strip()
+    if not amo_id:
+        return QMSCarRegisterPageOut(limit=limit, offset=offset)
+
+    Car = models.CorrectiveActionRequest
+    Finding = models.QMSAuditFinding
+    Audit = models.QMSAudit
+    today = date.today()
+    active_statuses = [
+        models.CARStatus.DRAFT,
+        models.CARStatus.OPEN,
+        models.CARStatus.IN_PROGRESS,
+        models.CARStatus.PENDING_VERIFICATION,
+        models.CARStatus.ESCALATED,
+    ]
+
+    base_scope = db.query(Car).filter(Car.amo_id == amo_id)
+    if program is not None:
+        base_scope = base_scope.filter(Car.program == program)
+
+    summary_total = int(base_scope.order_by(None).count())
+    summary_open = int(base_scope.filter(Car.status.in_(active_statuses)).order_by(None).count())
+    summary_overdue = int(
+        base_scope.filter(Car.status.in_(active_statuses), Car.due_date.isnot(None), Car.due_date < today)
+        .order_by(None)
+        .count()
+    )
+    summary_review = int(
+        base_scope.filter(
+            or_(
+                Car.status == models.CARStatus.PENDING_VERIFICATION,
+                Car.root_cause_status == "SUBMITTED",
+                Car.capa_status == "SUBMITTED",
+            )
+        )
+        .order_by(None)
+        .count()
+    )
+
+    query = (
+        base_scope.outerjoin(Finding, Finding.id == Car.finding_id)
+        .outerjoin(Audit, Audit.id == Finding.audit_id)
+    )
+
+    if status_ is not None:
+        query = query.filter(Car.status == status_)
+    if car_id is not None:
+        query = query.filter(Car.id == car_id)
+    if assigned_to_user_id:
+        query = query.filter(Car.assigned_to_user_id == assigned_to_user_id)
+    if audit_id is not None:
+        query = query.filter(Finding.audit_id == audit_id)
+
+    if scope == "active":
+        query = query.filter(Car.status.in_(active_statuses))
+    elif scope == "overdue":
+        query = query.filter(Car.status.in_(active_statuses), Car.due_date.isnot(None), Car.due_date < today)
+    elif scope == "due_soon":
+        query = query.filter(
+            Car.status.in_(active_statuses),
+            Car.due_date.isnot(None),
+            Car.due_date >= today,
+            Car.due_date <= today + timedelta(days=due_soon_days),
+        )
+    elif scope == "awaiting_auditee":
+        query = query.filter(
+            Car.status.in_([models.CARStatus.OPEN, models.CARStatus.IN_PROGRESS, models.CARStatus.ESCALATED]),
+            Car.submitted_at.is_(None),
+        )
+    elif scope == "awaiting_quality_review":
+        query = query.filter(or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED"))
+    elif scope == "awaiting_effectiveness_review":
+        query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION)
+    elif scope == "closed":
+        query = query.filter(Car.status == models.CARStatus.CLOSED)
+
+    search_value = _normalise_search(search)
+    if search_value:
+        like = f"%{search_value}%"
+        query = query.filter(
+            or_(
+                Car.car_number.ilike(like),
+                Car.title.ilike(like),
+                Car.summary.ilike(like),
+                cast(Car.status, String).ilike(like),
+                cast(Car.priority, String).ilike(like),
+                Car.submitted_by_name.ilike(like),
+                Finding.finding_ref.ilike(like),
+                Finding.description.ilike(like),
+                Audit.audit_ref.ilike(like),
+                Audit.title.ilike(like),
+            )
+        )
+
+    total = int(query.order_by(None).count())
+    items = (
+        query.order_by(Car.created_at.desc(), Car.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    decorated = _decorate_car_register_items(db, items)
+
+    return QMSCarRegisterPageOut(
+        items=[CAROut.model_validate(item) for item in decorated],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(decorated) < total,
+        summary=QMSCarRegisterSummaryOut(
+            total=summary_total,
+            open=summary_open,
+            overdue=summary_overdue,
+            in_review=summary_review,
+        ),
     )
