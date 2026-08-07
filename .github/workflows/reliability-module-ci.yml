@@ -144,9 +144,9 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          assert head == 'rel_20260807_main_merge', head
+          assert head == 'rel_20260807_formal_reporting', head
           ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
-          for required in ('rel_20260805_ops_exact_counts', 'rel_20260806_reference_integrity', 'merge_20260807_qms_planner_aircraft'):
+          for required in ('rel_20260807_main_merge', 'rel_20260805_ops_exact_counts', 'rel_20260806_reference_integrity', 'merge_20260807_qms_planner_aircraft'):
               assert required in ancestry, f'{required} is not an ancestor of {head}'
           print(f'alembic_head={head}')
           PY
@@ -175,6 +175,46 @@ jobs:
           assert width is not None and width >= 128, width
           assert version == expected, (version, expected)
           print(f'alembic_version={version}; capacity={width}')
+          PY
+
+      - name: Verify formal Reliability Programme schema
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          expected_tables = {
+              'reliability_regulatory_profiles',
+              'reliability_regulatory_requirements',
+              'reliability_formal_reports',
+              'reliability_formal_report_sections',
+              'reliability_formal_requirement_assessments',
+              'reliability_formal_report_sources',
+              'reliability_formal_approvals',
+              'reliability_formal_lifecycle_events',
+              'reliability_formal_completeness_overrides',
+              'reliability_amp_recommendations',
+              'reliability_reporting_schedule',
+              'reliability_formal_distributions',
+          }
+          expected_triggers = {
+              'trg_rel_formal_report_guard',
+              'trg_rel_formal_section_guard',
+              'trg_rel_formal_req_guard',
+              'trg_rel_formal_source_guard',
+              'trg_rel_formal_override_guard',
+              'trg_rel_formal_approval_append',
+              'trg_rel_formal_lifecycle_append',
+          }
+          engine = create_engine(os.environ['DATABASE_URL'])
+          with engine.connect() as connection:
+              tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public'" )).scalars())
+              triggers = set(connection.execute(text("SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema='public'" )).scalars())
+          missing_tables = expected_tables - tables
+          missing_triggers = expected_triggers - triggers
+          assert not missing_tables, f'Missing formal Reliability tables: {sorted(missing_tables)}'
+          assert not missing_triggers, f'Missing formal Reliability immutability/audit triggers: {sorted(missing_triggers)}'
+          print('formal Reliability Programme schema verification passed')
           PY
 
       - name: Verify formula, workbook and exactness schema
