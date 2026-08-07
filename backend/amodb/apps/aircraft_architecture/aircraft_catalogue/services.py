@@ -261,7 +261,11 @@ def publish_revision(
             models.AircraftTypeTemplateRevision.template_id == revision.template_id,
             models.AircraftTypeTemplateRevision.status == "PUBLISHED",
         )
-        .with_for_update()
+        # AircraftTypeTemplateRevision has eager joined relationships. PostgreSQL
+        # rejects an unqualified FOR UPDATE when that query contains nullable
+        # outer-join targets. Lock only the revision rows that control the
+        # publication transition.
+        .with_for_update(of=models.AircraftTypeTemplateRevision)
         .all()
     )
     for previous in currently_published:
