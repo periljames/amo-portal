@@ -228,6 +228,7 @@ def _controlled_fixture(db, suffix: str):
         publication_revision_id=publication_revision.id,
         document_locator=publication_revision.storage_locator,
     )
+    series_200_effectivity = {"path": "aircraft.series", "op": "eq", "value": "200"}
     tasks = [
         content_schemas.ContentTaskCreate(
             task_code=f"{suffix}-A",
@@ -237,7 +238,7 @@ def _controlled_fixture(db, suffix: str):
             task_type="INSP",
             intervals_json=_interval("600", "12"),
             raw_interval_text="600 FH OR 12 MO",
-            effectivity_expression_json={"schema": "EFFECTIVITY_V1", "all": []},
+            effectivity_expression_json=series_200_effectivity,
             raw_effectivity_text="ALL SERIES 200",
             source_requirements_json=[{"authority": "MRB"}],
             source_reference=source.reference,
@@ -252,7 +253,7 @@ def _controlled_fixture(db, suffix: str):
             task_type="INSP",
             intervals_json=_interval("1200", "24"),
             raw_interval_text="1200 FH OR 24 MO",
-            effectivity_expression_json={"schema": "EFFECTIVITY_V1", "all": []},
+            effectivity_expression_json=series_200_effectivity,
             raw_effectivity_text="ALL SERIES 200",
             source_requirements_json=[{"authority": "ALI"}],
             source_reference=source.reference,
