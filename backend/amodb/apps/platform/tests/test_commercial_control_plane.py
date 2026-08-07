@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from amodb.apps.platform import commercial_integrations, commercial_policy, saas_providers
+from amodb.apps.accounts import models as account_models
+from amodb.apps.platform import (
+    commercial_access_policy,
+    commercial_integrations,
+    commercial_policy,
+    saas_providers,
+)
 
 
 def test_commercial_provider_catalog_is_registered() -> None:
@@ -15,6 +22,9 @@ def test_commercial_provider_catalog_is_registered() -> None:
     assert "quickbooks_online" in catalog
     assert catalog["paystack"]["category"] == "PAYMENTS"
     assert catalog["quickbooks_online"]["category"] == "ACCOUNTING"
+    # OAuth refresh/access tokens are written by the callback and must never be
+    # typed or overwritten through the super-admin integration secret form.
+    assert catalog["quickbooks_online"]["secret_fields"] == ["client_secret"]
 
 
 def test_paystack_signature_is_hmac_sha512_of_raw_body() -> None:
@@ -77,3 +87,51 @@ def test_past_due_is_not_mislabeled_as_disconnected() -> None:
         module_trial=0,
         provider_statuses={"stripe": "PAST_DUE"},
     ) == "PAST_DUE"
+
+
+def test_access_projection_keeps_expired_trial_in_grace_without_payment_method() -> None:
+    now = datetime.now(timezone.utc)
+    license = account_models.TenantLicense(
+        id="lic-access-projection",
+        amo_id="tenant-access-projection",
+        sku_id="sku-access-projection",
+        term=account_models.BillingTerm.MONTHLY,
+        status=account_models.LicenseStatus.TRIALING,
+        trial_started_at=now - timedelta(days=15),
+        trial_ends_at=now - timedelta(hours=1),
+        current_period_start=now - timedelta(days=15),
+        current_period_end=now - timedelta(hours=1),
+        is_read_only=False,
+    )
+    projection = commercial_access_policy._project_subscription(
+        license,
+        now=now,
+        has_payment_method=False,
+        has_overdue_invoice=False,
+    )
+    assert projection.status == account_models.LicenseStatus.EXPIRED
+    assert projection.is_read_only is False
+    assert projection.trial_grace_expires_at is not None
+    assert projection.trial_grace_expires_at > now
+
+
+def test_access_projection_locks_overdue_active_subscription() -> None:
+    now = datetime.now(timezone.utc)
+    license = account_models.TenantLicense(
+        id="lic-overdue-projection",
+        amo_id="tenant-overdue-projection",
+        sku_id="sku-overdue-projection",
+        term=account_models.BillingTerm.ANNUAL,
+        status=account_models.LicenseStatus.ACTIVE,
+        current_period_start=now - timedelta(days=10),
+        current_period_end=now + timedelta(days=355),
+        is_read_only=False,
+    )
+    projection = commercial_access_policy._project_subscription(
+        license,
+        now=now,
+        has_payment_method=True,
+        has_overdue_invoice=True,
+    )
+    assert projection.status == account_models.LicenseStatus.ACTIVE
+    assert projection.is_read_only is True
