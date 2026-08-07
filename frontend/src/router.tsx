@@ -84,9 +84,10 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
 
   if (route.module.id === "calendar" || route.module.id === "evidence-vault" || route.module.id === "aerodoc") return false;
   if (route.module.id === "audits") return ["program", "programme", "checklists", "reports", "templates"].includes(view);
-  if (route.module.id === "cars") return [
-    "register", "new", "overdue", "due-soon", "awaiting-auditee", "awaiting-quality-review", "awaiting-effectiveness-review", "closed",
-  ].includes(view);
+  // CAR/CAPA has a governed specialist owner in PortalRouteSurface. Keeping it
+  // out of this generic register shortcut prevents list/new/queue routes from
+  // bypassing assignment, auditee response, evidence and Quality review controls.
+  if (route.module.id === "cars") return false;
   return route.module.componentType === "canonical";
 }
 
