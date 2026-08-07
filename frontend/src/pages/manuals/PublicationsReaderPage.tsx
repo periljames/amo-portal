@@ -45,6 +45,7 @@ import {
 } from "../../services/publications";
 import PublicationPdfLayoutViewer, { type PdfOutlineItem } from "./PublicationPdfLayoutViewer";
 import PublicationGovernancePanel from "./PublicationGovernancePanel";
+import { listReaderAnnotations, type ReaderAnnotation } from "../../services/readerGovernance";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
 import "./publicationReaderGovernance.css";
@@ -217,6 +218,7 @@ export default function PublicationsReaderPage() {
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [governanceOpen, setGovernanceOpen] = useState(() => Boolean(searchParams.get("annotation")));
+  const [readerAnnotations, setReaderAnnotations] = useState<ReaderAnnotation[]>([]);
   const [nativeOutline, setNativeOutline] = useState<PdfOutlineItem[]>([]);
   const [hasAcroForm, setHasAcroForm] = useState(false);
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
@@ -507,6 +509,15 @@ export default function PublicationsReaderPage() {
     setSearchParams(next, { replace: false });
   };
 
+  useEffect(() => {
+    if (!tenant || !manualId || !revId) return;
+    let active = true;
+    listReaderAnnotations(tenant, manualId, revId)
+      .then((value) => { if (active) setReaderAnnotations(value.items); })
+      .catch(() => { if (active) setReaderAnnotations([]); });
+    return () => { active = false; };
+  }, [manualId, revId, tenant]);
+
   const toggleSaved = () => {
     if (!tenant || !manualId || !revId) return;
     const next = !saved;
@@ -739,6 +750,8 @@ export default function PublicationsReaderPage() {
                       onPageChange={onPdfPageChange}
                       onZoomChange={onZoomChange}
                       onAcroFormDetected={setHasAcroForm}
+                      governedAnnotations={readerAnnotations}
+                      onGovernedAnnotationClick={() => setGovernanceOpen(true)}
                       onOutlineReady={(items) => { setNativeOutline(items); const active = outlineForPage(items, currentPdfPage); if (active) setActiveOutlineKey(active.id); }}
                     /> : <div className="publication-empty-reader"><h2>Original layout unavailable</h2><p>The source PDF could not be resolved.</p></div>
                   ) : (
@@ -773,6 +786,7 @@ export default function PublicationsReaderPage() {
             currentPage={currentPdfPage}
             activeSectionId={activeSectionId}
             viewMode={viewMode}
+            onAnnotationsChanged={setReaderAnnotations}
           />
           <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>
           {mobileNavigationOpen ? <button type="button" className="publication-navigation-backdrop" onClick={() => setMobileNavigationOpen(false)} aria-label="Close navigation overlay" /> : null}

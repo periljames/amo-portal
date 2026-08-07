@@ -152,3 +152,8 @@
 .publication-governance-linked-evidence { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.2fr); gap: 0.45rem; }
 .publication-governance-linked-evidence select { border: 1px solid #d0d5dd; border-radius: 7px; background: var(--surface, #fff); color: inherit; padding: 0.55rem 0.65rem; font: inherit; }
 @media (max-width: 520px) { .publication-governance-linked-evidence { grid-template-columns: 1fr; } }
+
+.publication-governed-annotation-mark { position: absolute; z-index: 8; border: 0; border-radius: 2px; background: rgb(250 204 21 / 34%); box-shadow: inset 0 0 0 1px rgb(161 98 7 / 18%); cursor: pointer; mix-blend-mode: multiply; }
+.publication-governed-annotation-mark.is-evidence, .publication-governed-annotation-mark.is-finding { background: rgb(56 189 248 / 24%); box-shadow: inset 0 0 0 1px rgb(3 105 161 / 24%); }
+.publication-governed-annotation-mark:focus-visible, .publication-governed-annotation-pin:focus-visible { outline: 2px solid #175cd3; outline-offset: 2px; }
+.publication-governed-annotation-pin { position: absolute; right: 10px; z-index: 9; width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; background: #175cd3; box-shadow: 0 1px 4px rgb(16 24 40 / 25%); cursor: pointer; }

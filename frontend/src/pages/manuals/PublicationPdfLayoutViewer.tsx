@@ -44,6 +44,14 @@ type PublicationPdfLayoutViewerProps = {
   onZoomChange?: (zoomPercent: number) => void;
   onAcroFormDetected?: (hasAcroForm: boolean) => void;
   onOutlineReady?: (items: PdfOutlineItem[]) => void;
+  governedAnnotations?: Array<{
+    id: string;
+    annotation_type: string;
+    color: string;
+    note_text?: string | null;
+    location?: { page_number?: number | null; normalized_rects?: Array<Record<string, number>> } | null;
+  }>;
+  onGovernedAnnotationClick?: (annotationId: string) => void;
 };
 
 type SourceIdentity = {
@@ -131,6 +139,8 @@ export default function PublicationPdfLayoutViewer({
   onZoomChange,
   onAcroFormDetected,
   onOutlineReady,
+  governedAnnotations = [],
+  onGovernedAnnotationClick,
 }: PublicationPdfLayoutViewerProps) {
   const identity = useMemo(() => sourceIdentity(fileUrl), [fileUrl]);
   const readerRootRef = useRef<HTMLDivElement | null>(null);
@@ -321,6 +331,15 @@ export default function PublicationPdfLayoutViewer({
       (reference) => reference.id === (activeReferenceId || selectedReferenceId),
     ) || null;
   const currentReferences = referencesByPage.get(currentPage) || [];
+  const annotationsByPage = useMemo(() => {
+    const grouped = new Map<number, typeof governedAnnotations>();
+    for (const annotation of governedAnnotations) {
+      const page = Number(annotation.location?.page_number || 0);
+      if (!page) continue;
+      grouped.set(page, [...(grouped.get(page) || []), annotation]);
+    }
+    return grouped;
+  }, [governedAnnotations]);
 
   const openReference = (reference: DocumentationReference) => {
     if (!reference.target) return;
@@ -474,6 +493,36 @@ export default function PublicationPdfLayoutViewer({
                     onClick={() => openReference(reference)}
                   />
                 );
+              })}
+              {(annotationsByPage.get(pageNumber) || []).flatMap((annotation, annotationIndex) => {
+                const rects = annotation.location?.normalized_rects || [];
+                if (!rects.length) {
+                  return [<button
+                    type="button"
+                    key={`annotation-${annotation.id}`}
+                    className="publication-governed-annotation-pin"
+                    style={{ top: `${10 + annotationIndex * 30}px` }}
+                    title={annotation.note_text || annotation.annotation_type.replaceAll("_", " ")}
+                    aria-label={`Open ${annotation.annotation_type.replaceAll("_", " ")} annotation`}
+                    onClick={() => onGovernedAnnotationClick?.(annotation.id)}
+                  />];
+                }
+                return rects.map((rect, rectIndex) => (
+                  <button
+                    type="button"
+                    key={`annotation-${annotation.id}-${rectIndex}`}
+                    className={`publication-governed-annotation-mark is-${annotation.annotation_type.toLowerCase()}`}
+                    style={{
+                      left: `${Math.max(0, Math.min(1, Number(rect.x) || 0)) * 100}%`,
+                      top: `${Math.max(0, Math.min(1, Number(rect.y) || 0)) * 100}%`,
+                      width: `${Math.max(0.004, Math.min(1, Number(rect.width) || 0.004)) * 100}%`,
+                      height: `${Math.max(0.006, Math.min(1, Number(rect.height) || 0.006)) * 100}%`,
+                    }}
+                    title={annotation.note_text || annotation.annotation_type.replaceAll("_", " ")}
+                    aria-label={`Open ${annotation.annotation_type.replaceAll("_", " ")} annotation`}
+                    onClick={() => onGovernedAnnotationClick?.(annotation.id)}
+                  />
+                ));
               })}
             </>
           )}

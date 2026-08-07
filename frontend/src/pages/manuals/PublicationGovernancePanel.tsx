@@ -64,6 +64,37 @@ function selectedSemanticLocation(): { section_id?: string; exact_quote?: string
   return { section_id: section.dataset.sectionId, exact_quote: text.slice(0, 4000) };
 }
 
+function selectedPdfLocation(): { page_number?: number; exact_quote?: string; normalized_rects?: Array<Record<string, number>> } {
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() || "";
+  if (!selection?.rangeCount || !text) return {};
+  const range = selection.getRangeAt(0);
+  const element = (range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement) as Element | null;
+  const page = element?.closest<HTMLElement>(".pdfv3-page[data-page-number]");
+  const surface = page?.querySelector<HTMLElement>(".pdfv3-page-surface");
+  const pageNumber = Number(page?.dataset.pageNumber || 0);
+  if (!page || !surface || !Number.isInteger(pageNumber) || pageNumber < 1) return {};
+  const bounds = surface.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return {};
+  const normalized_rects = [...range.getClientRects()].map((rect) => {
+    const left = Math.max(bounds.left, rect.left);
+    const top = Math.max(bounds.top, rect.top);
+    const right = Math.min(bounds.right, rect.right);
+    const bottom = Math.min(bounds.bottom, rect.bottom);
+    if (right <= left || bottom <= top) return null;
+    return {
+      x: Math.max(0, Math.min(1, (left - bounds.left) / bounds.width)),
+      y: Math.max(0, Math.min(1, (top - bounds.top) / bounds.height)),
+      width: Math.max(0, Math.min(1, (right - left) / bounds.width)),
+      height: Math.max(0, Math.min(1, (bottom - top) / bounds.height)),
+    };
+  }).filter((rect): rect is Record<string, number> => Boolean(rect && rect.width > 0 && rect.height > 0));
+  if (!normalized_rects.length) return {};
+  return { page_number: pageNumber, exact_quote: text.slice(0, 4000), normalized_rects };
+}
+
 export default function PublicationGovernancePanel({
   open,
   onClose,
@@ -73,6 +104,7 @@ export default function PublicationGovernancePanel({
   currentPage,
   activeSectionId,
   viewMode,
+  onAnnotationsChanged,
 }: {
   open: boolean;
   onClose: () => void;
@@ -82,6 +114,7 @@ export default function PublicationGovernancePanel({
   currentPage: number;
   activeSectionId?: string;
   viewMode: "layout" | "text";
+  onAnnotationsChanged?: (items: ReaderAnnotation[]) => void;
 }) {
   const [tab, setTab] = useState<Tab>("annotations");
   const [manifest, setManifest] = useState<ReaderManifest | null>(null);
@@ -116,7 +149,8 @@ export default function PublicationGovernancePanel({
   const loadAnnotations = useCallback(async () => {
     const value = await listReaderAnnotations(tenant, manualId, revisionId);
     setAnnotations(value.items);
-  }, [manualId, revisionId, tenant]);
+    onAnnotationsChanged?.(value.items);
+  }, [manualId, onAnnotationsChanged, revisionId, tenant]);
 
   const loadEvidence = useCallback(async () => {
     const [value, stored] = await Promise.all([
@@ -159,10 +193,14 @@ export default function PublicationGovernancePanel({
     setBusy(true);
     setError("");
     try {
-      const selected = viewMode === "text" ? selectedSemanticLocation() : {};
+      const selected = viewMode === "text" ? selectedSemanticLocation() : selectedPdfLocation();
+      if (annotationType === "HIGHLIGHT" && !selected.exact_quote) {
+        setError("Select text in the document before creating a highlight.");
+        return;
+      }
       const semanticSection = selected.section_id || (viewMode === "text" ? activeSectionId : undefined);
-      const pageNumber = viewMode === "layout" ? currentPage : undefined;
-      const effectiveType = annotationType === "HIGHLIGHT" && !selected.exact_quote ? "NOTE" : annotationType;
+      const pageNumber = selected.page_number || (viewMode === "layout" ? currentPage : undefined);
+      const effectiveType = annotationType;
       await createReaderAnnotation(tenant, manualId, revisionId, {
         expected_source_sha256: manifest.source_sha256,
         annotation_type: effectiveType,
@@ -177,7 +215,7 @@ export default function PublicationGovernancePanel({
           page_number: pageNumber,
           section_id: semanticSection,
           exact_quote: selected.exact_quote,
-          normalized_rects: [],
+          normalized_rects: selected.normalized_rects || [],
           adapter_name: pageNumber ? "PDF_CANONICAL_PAGE" : "SEMANTIC_SECTION_BLOCK",
           adapter_version: "1",
         },
@@ -308,7 +346,7 @@ export default function PublicationGovernancePanel({
               <div>
                 <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("NOTE")}><MessageSquareText size={14} /> Note</button>
                 <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("BOOKMARK")}><BookmarkPlus size={14} /> Bookmark</button>
-                {viewMode === "text" ? <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button> : null}
+                <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button>
                 {manifest?.capabilities.control ? <button type="button" disabled={busy || !manifest?.capabilities.annotations || !linkedType || !linkedId.trim()} onClick={() => void createAnnotation("EVIDENCE")}><ClipboardCheck size={14} /> Link QMS evidence</button> : null}
               </div>
             </section>
