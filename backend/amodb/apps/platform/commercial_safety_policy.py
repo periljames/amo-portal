@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -69,7 +70,6 @@ def install_commercial_safety_policy() -> None:
     )
 
     original_capacity = commercial_services.capacity_readiness
-    original_mpesa_callback = commercial_services._process_mpesa_callback
     original_enqueue_quickbooks = commercial_services.enqueue_quickbooks_sync
 
     def strict_capacity_readiness(db: Session) -> dict[str, Any]:
@@ -153,12 +153,96 @@ def install_commercial_safety_policy() -> None:
         )
 
     def guarded_mpesa_callback(db: Session, job) -> dict[str, Any]:
-        callback = dict((job.payload_json or {}).get("callback") or {})
+        """Confirm a successful Daraja callback even if provider health is stale.
+
+        The callback token and CheckoutRequestID were already checked at ingress.
+        A success is still cross-checked using Daraja's server-side STK query and
+        invoice amount before settlement. DISABLED credentials remain blocked.
+        """
+        payload = dict(job.payload_json or {})
+        tenant_id = str(job.tenant_id or "")
+        invoice = commercial_services._invoice(
+            db,
+            str(payload.get("invoice_id") or ""),
+            tenant_id=tenant_id,
+            lock=True,
+        )
+        account = commercial_services._billing_account(
+            db,
+            tenant_id=tenant_id,
+            provider="mpesa_daraja",
+            lock=True,
+        )
+        if account is None:
+            raise ValueError("M-PESA billing account is missing")
+        metadata = dict(account.metadata_json or {})
+        checkout_request_id = str(payload.get("checkout_request_id") or "")
+        if checkout_request_id != str(metadata.get("checkout_request_id") or ""):
+            raise ValueError("M-PESA callback does not match the pending checkout")
+
+        callback = payload.get("callback") or {}
         body = callback.get("Body") or {}
         stk = body.get("stkCallback") if isinstance(body, dict) else None
         if not isinstance(stk, dict) or "ResultCode" not in stk:
             raise ValueError("M-PESA callback is missing ResultCode")
-        return original_mpesa_callback(db, job)
+        callback_code = int(stk["ResultCode"])
+        if callback_code != 0:
+            account.status = "PAYMENT_FAILED"
+            metadata.update(
+                {
+                    "last_result_code": callback_code,
+                    "last_result_desc": stk.get("ResultDesc"),
+                }
+            )
+            account.metadata_json = metadata
+            db.flush()
+            return {
+                "paid": False,
+                "result_code": callback_code,
+                "result_desc": stk.get("ResultDesc"),
+            }
+
+        credential = saas_services.get_provider_credential(
+            db,
+            provider="mpesa_daraja",
+            tenant_id=tenant_id,
+        )
+        if credential is None:
+            raise ValueError("M-PESA Daraja is not configured")
+        credential_status = str(credential.status or "").strip().upper()
+        if credential_status in {"DISABLED", "NOT_CONFIGURED"}:
+            raise PermissionError("M-PESA settlement rejected because the provider is disabled")
+        verification = commercial_integrations.mpesa_query_stk(
+            secret=saas_services.provider_secrets(credential),
+            config=credential.config_json or {},
+            checkout_request_id=checkout_request_id,
+        )
+        verified = verification.get("data") or {}
+        if not isinstance(verified, dict) or str(verified.get("ResultCode") or "") != "0":
+            raise ValueError(
+                "M-PESA server-side STK query does not confirm successful settlement"
+            )
+        callback_items = commercial_services._mpesa_callback_items(stk)
+        receipt = str(callback_items.get("MpesaReceiptNumber") or "").strip()
+        if not receipt:
+            raise ValueError("Successful M-PESA callback is missing MpesaReceiptNumber")
+        paid_amount_kes = Decimal(str(callback_items.get("Amount") or "0"))
+        verified_amount_cents = int(
+            (paid_amount_kes * Decimal("100")).quantize(Decimal("1"))
+        )
+        paid = commercial_services.mark_invoice_paid(
+            db,
+            invoice_id=invoice.id,
+            provider="mpesa_daraja",
+            provider_reference=receipt,
+            actor_user_id=job.created_by,
+            verified_amount_cents=verified_amount_cents,
+            verified_currency="KES",
+            reason=(
+                "M-PESA STK settlement confirmed by callback and server-side query"
+            ),
+        )
+        return {"paid": True, "receipt": receipt, "invoice": paid}
 
     def guarded_quickbooks_sync(
         db: Session,
