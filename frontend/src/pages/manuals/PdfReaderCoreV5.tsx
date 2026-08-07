@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Files, ListTree, LoaderCircle, Search } from "lucide-react";
+import { Files, ListTree, LoaderCircle, Search, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import {
@@ -25,6 +25,8 @@ import PdfReaderCoreV4, {
 import "./pdfReaderNavigatorV5.css";
 
 type NavigatorTab = "contents" | "pages" | "search";
+
+const MOBILE_NAV_QUERY = "(max-width: 760px)";
 
 type ReaderNavigationItem = PdfReaderOutlineItem & {
   source: "PDF" | "INDEX";
@@ -79,12 +81,17 @@ function activeOutlineItem(
   ));
 }
 
+function initialNavigationOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  return !window.matchMedia(MOBILE_NAV_QUERY).matches;
+}
+
 export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const pageListRef = useRef<HTMLDivElement | null>(null);
   const tokenRef = useRef(Date.now());
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(initialNavigationOpen);
   const [tab, setTab] = useState<NavigatorTab>("contents");
   const [nativeOutline, setNativeOutline] = useState<ReaderNavigationItem[]>([]);
   const [fallbackOutline, setFallbackOutline] = useState<ReaderNavigationItem[]>([]);
@@ -120,11 +127,17 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
     overscan: 3,
   });
 
+  const closeMobileNavigation = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia(MOBILE_NAV_QUERY).matches) setSidebarOpen(false);
+  }, []);
+
   const ownNavigate = useCallback((page: number) => {
     if (!Number.isInteger(page) || page < 1) return;
     tokenRef.current = Math.max(Date.now(), tokenRef.current + 1);
     setInternalNavigation({ page, token: tokenRef.current });
-  }, []);
+    closeMobileNavigation();
+  }, [closeMobileNavigation]);
 
   const effectiveNavigation = useMemo(() => {
     const external = props.navigationRequest;
@@ -139,6 +152,26 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
     page.classList.add("publication-reader-page--dense-pdf-reader");
     return () => page.classList.remove("publication-reader-page--dense-pdf-reader");
   }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_NAV_QUERY);
+    const handleViewportChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setSidebarOpen(false);
+    };
+    media.addEventListener("change", handleViewportChange);
+    return () => media.removeEventListener("change", handleViewportChange);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !window.matchMedia(MOBILE_NAV_QUERY).matches) return;
+      event.preventDefault();
+      setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen]);
 
   useEffect(() => {
     const { tenant, manualId, revisionId } = props.identity;
@@ -221,49 +254,69 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   return (
     <div
       ref={rootRef}
-      className={`pdfv5-shell${sidebarOpen ? "" : " is-navigation-collapsed"}`}
+      className={`pdfv5-shell${sidebarOpen ? "" : " is-navigation-collapsed"}${sidebarOpen && tab === "search" ? " is-search-panel-open" : ""}`}
       onClickCapture={captureToolbarClick}
       onKeyDownCapture={captureSearchShortcut}
     >
       {sidebarOpen ? (
+        <button
+          type="button"
+          className="pdfv5-mobile-scrim"
+          aria-label="Close document navigation"
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
+
+      {sidebarOpen ? (
         <aside className="pdfv5-navigator" aria-label="Document navigation">
-          <div className="pdfv5-tabs" role="tablist" aria-label="Reader navigation modes">
+          <div className="pdfv5-navigator-head">
+            <div className="pdfv5-tabs" role="tablist" aria-label="Reader navigation modes">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "contents"}
+                className={tab === "contents" ? "active" : ""}
+                onClick={() => setTab("contents")}
+              >
+                <ListTree size={15} />
+                <span>Contents</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "pages"}
+                className={tab === "pages" ? "active" : ""}
+                onClick={() => setTab("pages")}
+              >
+                <Files size={15} />
+                <span>Pages</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "search"}
+                className={tab === "search" ? "active" : ""}
+                onClick={openSearch}
+              >
+                <Search size={15} />
+                <span>Search</span>
+              </button>
+            </div>
             <button
               type="button"
-              role="tab"
-              aria-selected={tab === "contents"}
-              className={tab === "contents" ? "active" : ""}
-              onClick={() => setTab("contents")}
+              className="pdfv5-mobile-close"
+              aria-label="Close document navigation"
+              title="Close document navigation"
+              onClick={() => setSidebarOpen(false)}
             >
-              <ListTree size={14} />
-              <span>Contents</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "pages"}
-              className={tab === "pages" ? "active" : ""}
-              onClick={() => setTab("pages")}
-            >
-              <Files size={14} />
-              <span>Pages</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "search"}
-              className={tab === "search" ? "active" : ""}
-              onClick={openSearch}
-            >
-              <Search size={14} />
-              <span>Search</span>
+              <X size={18} />
             </button>
           </div>
 
           {tab === "contents" ? (
             <div className="pdfv5-contents">
               <label className="pdfv5-filter">
-                <Search size={14} />
+                <Search size={15} />
                 <input
                   value={tocFilter}
                   onChange={(event) => setTocFilter(event.target.value)}
@@ -345,7 +398,7 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
                 }}
               >
                 <label>
-                  <Search size={14} />
+                  <Search size={15} />
                   <input
                     ref={searchInputRef}
                     value={query}
@@ -355,7 +408,7 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
                   />
                 </label>
                 <button type="submit" disabled={searchBusy || query.trim().length < 2}>
-                  {searchBusy ? <LoaderCircle className="is-spinning" size={14} /> : "Find"}
+                  {searchBusy ? <LoaderCircle className="is-spinning" size={15} /> : "Find"}
                 </button>
               </form>
               {searchError ? <p className="pdfv5-search-error">{searchError}</p> : null}
