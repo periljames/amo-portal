@@ -54,9 +54,17 @@ def _exercise_formal_publication_controls(connection) -> None:
     approval_id = "00000000-0000-7000-8000-000000000206"
     lifecycle_id = "00000000-0000-7000-8000-000000000207"
 
-    # Isolate trigger behaviour from unrelated fixture/FK requirements while still
-    # preserving NOT NULL/check/unique constraints. Origin mode is restored before
-    # every attempted mutation so the production guards are what decide the result.
+    # Keep the formal report's tenant parent valid when origin-mode FK checks run
+    # during the allowed lifecycle update below. The remaining retained-history
+    # rows are inserted with user/audit triggers disabled only for fixture setup.
+    connection.execute(text("""
+        INSERT INTO amos (
+            id, amo_code, name, login_slug, is_demo, is_active, created_at, updated_at
+        ) VALUES (
+            :amo_id, 'RELPGUAT201', 'Reliability PostgreSQL UAT AMO',
+            'rel-pg-uat-201', false, true, NOW(), NOW()
+        )
+    """), {"amo_id": amo_id})
     connection.execute(text("SET LOCAL session_replication_role = replica"))
     connection.execute(text("""
         INSERT INTO reliability_regulatory_profiles (
