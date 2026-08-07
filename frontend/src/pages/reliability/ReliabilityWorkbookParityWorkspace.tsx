@@ -3,7 +3,9 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { listWorkbookCatalog } from "./reliabilityWorkbookParityApi";
+import { ReliabilityManagementReports } from "./ReliabilityManagementReports";
 import { ReliabilityMappingParity, ReliabilityStatisticalAlerts } from "./ReliabilityWorkbookGovernance";
+import { ReliabilityStructuredCsvImport } from "./ReliabilityStructuredCsvImport";
 import { ReliabilityWorkbookImports } from "./ReliabilityWorkbookImports";
 import { ReliabilityWorkbookRegisters } from "./ReliabilityWorkbookRegisters";
 import { ReliabilityWorkbookReports } from "./ReliabilityWorkbookReports";
@@ -16,8 +18,8 @@ import "./ReliabilityWorkbenchControls.css";
 const SECTIONS: Array<{ id: WorkspaceSection; label: string; description: string; route: string }> = [
   { id: "registers", label: "Source registers", description: "Sixteen controlled Reliability datasets with lifecycle and provenance", route: "workbook-registers" },
   { id: "alerts", label: "Statistical alerts", description: "Exact limits, exposure quality and retained analytical evidence", route: "statistical-alerts" },
-  { id: "mapping", label: "Mapping & imports", description: "Profile contracts, field parity and governed workbook intake", route: "workbook-mapping" },
-  { id: "reports", label: "Report layouts", description: "Versioned programme layouts, preview and immutable retained outputs", route: "workbook-reports" },
+  { id: "mapping", label: "Mapping & imports", description: "Canonical CSV, workbook intake, field parity and validation", route: "workbook-mapping" },
+  { id: "reports", label: "Reports", description: "Daily-to-quarter management packs, layouts, links and retained outputs", route: "workbook-reports" },
 ];
 
 function sectionFromPath(pathname: string): WorkspaceSection {
@@ -70,7 +72,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
           <div>
             <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
             <h1>Reliability programme workbench</h1>
-            <p>Spreadsheet-familiar working views with governed source records, reviewed imports, exact statistical calculations and immutable retained reports.</p>
+            <p>Enter once, validate once and reuse the approved evidence for daily analysis, management reporting, controlled exports and later regulatory programme reviews.</p>
           </div>
           <div className="rel-wp__header-actions">
             <Link className="btn btn-secondary" to={basePath}>Analytics dashboard</Link>
@@ -80,7 +82,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
         </header>
 
         <WorkbenchPreferenceBar />
-        <p className="rel-wp__guided-tip">Use compact view for workbook-style review. Ctrl/Cmd-click rows to select several, right-click any table row for safe copy/export and column actions, and use arrow keys to move between cells.</p>
+        <p className="rel-wp__guided-tip">Use compact view for spreadsheet-style review. Ctrl/Cmd-click rows to select several, right-click any table row for safe copy/export and column actions, and use arrow keys to move between cells.</p>
 
         <nav className="rel-wp__tabs" aria-label="Workbook parity workspaces">
           {SECTIONS.map((item) => <button key={item.id} type="button" className={section === item.id ? "is-active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => selectSection(item)}>
@@ -93,8 +95,8 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
         {!loading && !error && <>
           {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}
           {section === "alerts" && <ReliabilityStatisticalAlerts catalog={catalog} />}
-          {section === "mapping" && <div className="rel-wp__stack"><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
-          {section === "reports" && <ReliabilityWorkbookReports />}
+          {section === "mapping" && <div className="rel-wp__stack"><ReliabilityStructuredCsvImport catalog={catalog} /><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
+          {section === "reports" && <div className="rel-wp__stack"><ReliabilityManagementReports /><ReliabilityWorkbookReports /></div>}
         </>}
       </main>
     </DepartmentLayout>
