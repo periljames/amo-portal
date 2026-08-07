@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
+import { spreadsheetSafeText } from "./ReliabilityWorkbenchUtils";
+
 export type WorkbenchDensity = "compact" | "comfortable";
 
 type Preferences = {
@@ -39,11 +41,6 @@ function loadPreferences(): Preferences {
   } catch {
     return DEFAULTS;
   }
-}
-
-export function spreadsheetSafeText(value: unknown): string {
-  const text = value == null ? "" : String(value);
-  return /^[\t\r ]*[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
 function rowMatrix(rows: HTMLTableRowElement[]): string[][] {
@@ -246,7 +243,7 @@ export function ReliabilityWorkbenchProvider({ children }: { children: React.Rea
   </WorkbenchContext.Provider>;
 }
 
-export function useReliabilityWorkbench(): ContextValue {
+function useReliabilityWorkbench(): ContextValue {
   const value = useContext(WorkbenchContext);
   if (!value) throw new Error("Reliability workbench controls require ReliabilityWorkbenchProvider.");
   return value;
