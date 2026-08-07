@@ -38,6 +38,9 @@ CONTENT_NODE_TYPES = {
     "REGISTER",
     "EXTERNAL_DOCUMENT",
 }
+UNRESOLVED_ASSIGNMENTS = {"DETECTED", "UNRESOLVED", "MATCH_PROPOSED", "CONFLICT"}
+UNRESOLVED_RELATIONSHIPS = {"DETECTED", "UNRESOLVED", "MATCH_PROPOSED", "CONFLICT"}
+UNRESOLVED_REFERENCES = {"UNRESOLVED", "AMBIGUOUS", "BROKEN", "OUTDATED", "AUTO_RESOLVED"}
 
 
 def _user_labels(db: Session, ids: set[str]) -> dict[str, dict]:
@@ -94,6 +97,15 @@ def list_visible_documents(
     document_class: str | None = None,
     status: str | None = None,
     node_type: str | None = Query(default=None, max_length=48),
+    owner_user_id: str | None = Query(default=None, max_length=36),
+    department_id: str | None = Query(default=None, max_length=36),
+    indexing_status: str | None = Query(default=None, max_length=32),
+    unresolved_ownership: bool = False,
+    unresolved_relationships: bool = False,
+    structure_status: str | None = Query(default=None, max_length=32),
+    superseded_referenced: bool = False,
+    sort: str = Query(default="code", pattern="^(code|title|type|status)$"),
+    direction: str = Query(default="asc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -103,8 +115,9 @@ def list_visible_documents(
 
     The response keeps reader/controller separation but adds hierarchy identity,
     physical-copy availability and, for controllers, governed relationships,
-    module integrations, generated records and external-data currency. Category
-    filtering happens before pagination so the counts remain truthful.
+    module integrations, generated records and external-data currency. Existing
+    governance work-queue filters are preserved so the richer library does not
+    break controller remediation routes.
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     controller = is_control_user(current_user)
@@ -151,8 +164,63 @@ def list_visible_documents(
                 km.DocumentationNode.node_type == requested,
                 km.DocumentationNode.status == "ACTIVE",
             )))
+    if owner_user_id or department_id or unresolved_ownership:
+        responsibility_conditions = [
+            gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
+            gm.DocumentResponsibilityAssignment.manual_id == manual_models.Manual.id,
+            gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER", "RESPONSIBLE_DEPARTMENT"]),
+        ]
+        if owner_user_id:
+            responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_user_id == owner_user_id)
+        if department_id:
+            responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_department_id == department_id)
+        if unresolved_ownership:
+            responsibility_conditions.append(gm.DocumentResponsibilityAssignment.confirmation_status.in_(UNRESOLVED_ASSIGNMENTS))
+        query = query.filter(exists().where(and_(*responsibility_conditions)))
+    if indexing_status:
+        query = query.filter(exists().where(and_(
+            km.DocumentationIndexJob.tenant_id == tenant.amo_id,
+            km.DocumentationIndexJob.manual_id == manual_models.Manual.id,
+            km.DocumentationIndexJob.status == indexing_status.strip().upper(),
+        )))
+    if unresolved_relationships:
+        unresolved_reference = exists().where(and_(
+            km.DocumentationReference.tenant_id == tenant.amo_id,
+            km.DocumentationReference.source_manual_id == manual_models.Manual.id,
+            km.DocumentationReference.status.in_(UNRESOLVED_REFERENCES),
+        ))
+        unresolved_relationship = exists().where(and_(
+            gm.DocumentGovernedRelationship.tenant_id == tenant.amo_id,
+            gm.DocumentGovernedRelationship.source_manual_id == manual_models.Manual.id,
+            gm.DocumentGovernedRelationship.resolution_status.in_(UNRESOLVED_RELATIONSHIPS),
+        ))
+        query = query.filter(or_(unresolved_reference, unresolved_relationship))
+    if str(structure_status or "").upper() == "ORPHANED":
+        query = query.filter(exists().where(and_(
+            km.DocumentationNode.tenant_id == tenant.amo_id,
+            km.DocumentationNode.manual_id == manual_models.Manual.id,
+            km.DocumentationNode.parent_id.is_(None),
+            km.DocumentationNode.node_type != "ROOT",
+        )))
+    if superseded_referenced:
+        target_revision = manual_models.ManualRevision.__table__.alias("library_target_revision")
+        query = query.filter(exists().where(and_(
+            km.DocumentationReference.tenant_id == tenant.amo_id,
+            km.DocumentationReference.source_manual_id == manual_models.Manual.id,
+            km.DocumentationReference.status == "VERIFIED",
+            km.DocumentationReference.target_revision_id == target_revision.c.id,
+            target_revision.c.status_enum == manual_models.ManualRevisionStatus.SUPERSEDED,
+        )))
 
-    candidates = query.order_by(manual_models.Manual.code.asc()).all()
+    sort_map = {
+        "code": manual_models.Manual.code,
+        "title": manual_models.Manual.title,
+        "type": manual_models.Manual.manual_type,
+        "status": manual_models.Manual.status,
+    }
+    sort_column = sort_map[sort]
+    ordering = sort_column.desc() if direction == "desc" else sort_column.asc()
+    candidates = query.order_by(ordering, manual_models.Manual.id.asc()).all()
     visible = [
         (manual, profile)
         for manual, profile in candidates
