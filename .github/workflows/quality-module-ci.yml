@@ -145,6 +145,7 @@ jobs:
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
           amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_register_pagination.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
           amodb/apps/quality/tests/test_excellence_contract.py
