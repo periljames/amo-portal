@@ -124,8 +124,9 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "getPdfReaderPerformanceProfile" in service
     assert "rangeChunkSize: performance.rangeChunkSize" in service
     assert "512 * KIB" in performance
-    assert "20 * MIB" in performance
-    assert "50 * MIB" in performance
+    assert "8 * MIB" in performance
+    assert "24 * MIB" in performance
+    assert "maxDevicePixelRatio: 1.25" in performance
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
@@ -140,6 +141,33 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "pointer-events: none" in styles
     assert "content-visibility: auto" not in styles
     assert 'renderMode="none"' not in core
+
+
+def test_real_world_reader_releases_stale_navigation_and_scales_watermark() -> None:
+    shell = _frontend("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    stability = _frontend("frontend/src/pages/manuals/publicationReaderRealworldStability.css")
+    chrome = _frontend("frontend/src/pages/manuals/PublicationReaderChromeBridge.tsx")
+    manual_page = _frontend("frontend/src/pages/manuals/ManualReaderPage.tsx")
+    assisted_navigation = _frontend("frontend/src/pages/manuals/PublicationAssistedNavigationBridge.tsx")
+
+    assert "releaseProgrammaticNavigation" in shell
+    assert "releasedExternalToken" in shell
+    assert "clearReaderHash" in shell
+    assert "onWheelCapture" in shell
+    assert "onTouchStartCapture" in shell
+    assert "scheduleScaleStabilization" in shell
+    assert "SCALE_SETTLE_MS" in shell
+    assert "overflow-anchor: none" in stability
+    assert "container-type: inline-size" in stability
+    assert "8cqw" in stability
+    assert ".publication-floating-header" in stability
+    assert ".publication-document-tabs" in stability
+    assert ".documentation-assistant-launcher" in stability
+    assert "tenant-shell__topbar-actions" in chrome
+    assert "createPortal" in chrome
+    assert "PublicationReaderChromeBridge" in manual_page
+    assert ".pdfv3-page[data-page-number=" in assisted_navigation
+    assert 'behavior: "auto"' in assisted_navigation
 
 
 def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None:
