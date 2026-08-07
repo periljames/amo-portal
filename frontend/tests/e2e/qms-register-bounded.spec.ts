@@ -137,8 +137,8 @@ function seedSession(storedToken: string) {
   }));
 }
 
-function isTenantApi(url: URL): boolean {
-  return url.pathname.startsWith("/api/maintenance/");
+function isBackendApi(url: URL): boolean {
+  return url.origin === "http://127.0.0.1:8080" || url.pathname.startsWith("/api/maintenance/");
 }
 
 async function fulfilShellRequest(route: Route, url: URL): Promise<boolean> {
@@ -196,7 +196,7 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (await fulfilShellRequest(route, url)) return;
-    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/register/paged")) {
+    if (isBackendApi(url) && url.pathname.endsWith("/quality/audits/register/paged")) {
       pagedRegisterRequests += 1;
       expect(url.searchParams.get("limit")).toBe("25");
       expect(url.searchParams.get("offset")).toBe("0");
@@ -214,11 +214,11 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
         }),
       });
     }
-    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/register")) {
+    if (isBackendApi(url) && url.pathname.endsWith("/quality/audits/register")) {
       legacyRegisterRequests += 1;
       return route.fulfill({ status: 500, body: "legacy register should not be called" });
     }
-    if (isTenantApi(url) && /\/quality\/audits\/[^/]+\/findings$/.test(url.pathname)) {
+    if (isBackendApi(url) && /\/quality\/audits\/[^/]+\/findings$/.test(url.pathname)) {
       legacyFindingRequests += 1;
       return route.fulfill({ status: 500, body: "per-audit finding fan-out should not be called" });
     }
@@ -227,7 +227,7 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
 
   await page.goto("/maintenance/demo/quality/audits/register", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Closeout register" })).toBeVisible({ timeout: 30_000 });
-  expect(pagedRegisterRequests).toBe(1);
+  await expect.poll(() => pagedRegisterRequests, { timeout: 10_000 }).toBe(1);
   expect(legacyRegisterRequests).toBe(0);
   expect(legacyFindingRequests).toBe(0);
 });
@@ -242,7 +242,7 @@ test("evidence vault search uses one bounded canonical register request", async 
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (await fulfilShellRequest(route, url)) return;
-    if (isTenantApi(url) && url.pathname.endsWith("/quality/evidence-vault/search")) {
+    if (isBackendApi(url) && url.pathname.endsWith("/quality/evidence-vault/search")) {
       boundedEvidenceRequests += 1;
       expect(url.searchParams.get("limit")).toBe("30");
       expect(url.searchParams.get("offset")).toBe("0");
@@ -271,15 +271,15 @@ test("evidence vault search uses one bounded canonical register request", async 
         }),
       });
     }
-    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/findings")) {
+    if (isBackendApi(url) && url.pathname.endsWith("/quality/audits/findings")) {
       legacyBulkFindingRequests += 1;
       return route.fulfill({ status: 500, body: "legacy bulk findings should not be called" });
     }
-    if (isTenantApi(url) && url.pathname.endsWith("/quality/cars/attachments/bulk")) {
+    if (isBackendApi(url) && url.pathname.endsWith("/quality/cars/attachments/bulk")) {
       legacyBulkAttachmentRequests += 1;
       return route.fulfill({ status: 500, body: "legacy bulk attachments should not be called" });
     }
-    if (isTenantApi(url) && /\/quality\/cars\/[^/]+\/attachments$/.test(url.pathname)) {
+    if (isBackendApi(url) && /\/quality\/cars\/[^/]+\/attachments$/.test(url.pathname)) {
       legacyPerCarAttachmentRequests += 1;
       return route.fulfill({ status: 500, body: "per-CAR attachment fan-out should not be called" });
     }
@@ -289,7 +289,7 @@ test("evidence vault search uses one bounded canonical register request", async 
   await page.goto("/maintenance/demo/quality/evidence-vault/search", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Evidence Vault" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Audit closeout evidence", { exact: true })).toBeVisible();
-  expect(boundedEvidenceRequests).toBe(1);
+  await expect.poll(() => boundedEvidenceRequests, { timeout: 10_000 }).toBe(1);
   expect(legacyBulkFindingRequests).toBe(0);
   expect(legacyBulkAttachmentRequests).toBe(0);
   expect(legacyPerCarAttachmentRequests).toBe(0);
