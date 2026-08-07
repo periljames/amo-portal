@@ -2,12 +2,12 @@ import { authHeaders, endSession } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 export type CommercialSummary = {
-  currency: string;
-  outstanding_ar_cents: number;
-  overdue_ar_cents: number;
-  overdue_invoice_count: number;
-  invoiced_30d_cents: number;
-  collected_30d_cents: number;
+  data_mode: string;
+  outstanding_ar_by_currency: Record<string, number>;
+  overdue_ar_by_currency: Record<string, number>;
+  overdue_invoice_count_by_currency: Record<string, number>;
+  invoiced_30d_by_currency: Record<string, number>;
+  collected_30d_by_currency: Record<string, number>;
   failed_payment_jobs_30d: number;
   provider_statuses: Record<string, string>;
   metric_quality: Record<string, string>;
