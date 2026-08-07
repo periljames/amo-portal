@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
 import { getPdfReaderPerformanceProfile } from "../../services/pdfPerformance";
-import PdfReaderCoreV3, {
+import PdfReaderCoreV4, {
   type PdfReaderCoreProps,
   type PdfReaderNavigationRequest,
   type PdfReaderOutlineItem,
@@ -242,7 +242,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   }
 
   return (
-    <PdfReaderCoreV3
+    <PdfReaderCoreV4
       {...props}
       key={readerKey}
       identity={identity}
