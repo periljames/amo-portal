@@ -139,3 +139,59 @@ def test_returned_car_stays_in_awaiting_auditee_queue(db_session):
     assert evidence_return.id in returned_ids
     assert accepted_submission.id not in returned_ids
     assert result.total == 2
+
+
+def test_foreign_tenant_car_link_does_not_enter_audit_register(db_session):
+    tenant = account_models.AMO(
+        amo_code="AMO-ISO-A",
+        name="Isolation A",
+        login_slug="isolation-a",
+    )
+    foreign_tenant = account_models.AMO(
+        amo_code="AMO-ISO-B",
+        name="Isolation B",
+        login_slug="isolation-b",
+    )
+    db_session.add_all([tenant, foreign_tenant])
+    db_session.commit()
+
+    user = _user(db_session, amo_id=tenant.id)
+    finding = _finding(db_session, amo_id=tenant.id)
+    foreign_car = quality_service.create_car(
+        db_session,
+        amo_id=foreign_tenant.id,
+        program=quality_models.CARProgram.QUALITY,
+        title="Foreign tenant CAR",
+        summary="Deliberately corrupted cross-tenant relationship for read-isolation testing.",
+        priority=quality_models.CARPriority.HIGH,
+        requested_by_user_id=user.id,
+        assigned_to_user_id=None,
+        due_date=None,
+        target_closure_date=None,
+        finding_id=finding.id,
+    )
+    db_session.commit()
+
+    car_only = register_pagination.get_audit_register_paged(
+        domain=quality_models.QMSDomain.AMO,
+        only_with_cars=True,
+        limit=25,
+        offset=0,
+        db=db_session,
+        current_user=user,
+    )
+    assert car_only.total == 0
+    assert car_only.rows == []
+    assert car_only.car_linked_findings == 0
+    assert car_only.open_car_count == 0
+
+    searched = register_pagination.get_audit_register_paged(
+        domain=quality_models.QMSDomain.AMO,
+        search=foreign_car.car_number,
+        limit=25,
+        offset=0,
+        db=db_session,
+        current_user=user,
+    )
+    assert searched.total == 0
+    assert searched.rows == []
