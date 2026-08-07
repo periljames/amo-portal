@@ -32,6 +32,11 @@ Q400_MPD_SUPPORT_SHEETS = {
     "appendix t",
     "appendix u",
 }
+LEGACY_EMP_FILENAME_SERIES = {
+    "81mplm": ("100", "DHC8_100_EMP_V1", "DHC8_100_MPD_SOURCE_INTAKE"),
+    "82mplm": ("200", "DHC8_200_EMP_V1", "DHC8_200_MPD_SOURCE_INTAKE"),
+    "83mplm": ("300", "DHC8_300_EMP_V1", "DHC8_300_MPD_SOURCE_INTAKE"),
+}
 
 
 def _cell_value(value: Any) -> Any:
@@ -71,7 +76,11 @@ def _normalise_sheet_name(value: str) -> str:
     return " ".join(value.strip().lower().split())
 
 
-def detect_profile(sheet_names: list[str]) -> tuple[str, str, str | None, list[str]]:
+def detect_profile(
+    sheet_names: list[str],
+    *,
+    filename: str | None = None,
+) -> tuple[str, str, str | None, list[str]]:
     normalised = {_normalise_sheet_name(name) for name in sheet_names}
     warnings: list[str] = []
     q400_core = Q400_MPD_CORE_SHEETS & normalised
@@ -86,13 +95,21 @@ def detect_profile(sheet_names: list[str]) -> tuple[str, str, str | None, list[s
         return "DHC8_400_MPD_V1", "HIGH", "DHC8_400_MPD_SOURCE_INTAKE", warnings
 
     joined = " | ".join(sorted(normalised))
-    if "work packages" in joined and (
+    legacy_emp = "work packages" in joined and (
         "cross reference" in joined or "l-check" in joined or "out of phase" in joined
-    ):
+    )
+    if legacy_emp:
+        stem = Path(filename or "").stem.lower().replace(" ", "").replace("_", "")
+        for marker, (series, profile, pack_code) in LEGACY_EMP_FILENAME_SERIES.items():
+            if stem.startswith(marker):
+                warnings.append(
+                    f"Legacy DHC-8 Series {series} equalized-maintenance workbook profile inferred from the known OEM MPLM filename. The controlled publication metadata and PDF/manual revision must confirm series and revision before materialization."
+                )
+                return profile, "MEDIUM", pack_code, warnings
         warnings.append(
-            "Legacy DHC-8 equalized-maintenance workbook detected. Series identity must be selected from the controlled publication record before materialization."
+            "Legacy DHC-8 equalized-maintenance workbook detected, but series identity was not proven. It remains preview-only until the controlled publication record identifies the series."
         )
-        return "DHC8_EMP_LEGACY_V1", "MEDIUM", None, warnings
+        return "DHC8_EMP_LEGACY_V1", "LOW", None, warnings
 
     warnings.append(
         "No governed OEM workbook profile matched. The workbook may be previewed, but it must not materialize engineering content until an approved mapping profile exists."
@@ -208,7 +225,10 @@ def preview_oem_workbook(
     else:
         workbook_kind, sheets = _preview_xlsx(content)
 
-    profile, confidence, pack_code, warnings = detect_profile([sheet.name for sheet in sheets])
+    profile, confidence, pack_code, warnings = detect_profile(
+        [sheet.name for sheet in sheets],
+        filename=filename,
+    )
     hidden = [sheet.name for sheet in sheets if sheet.state != "VISIBLE"]
     if hidden:
         warnings.append(
@@ -244,6 +264,7 @@ def preview_oem_workbook(
                 }
                 for sheet in sheets
             ],
-            "materialization_allowed": profile != "UNMAPPED",
+            "materialization_allowed": pack_code is not None,
+            "series_confirmation_required": profile.startswith("DHC8_") and confidence != "HIGH",
         },
     )
