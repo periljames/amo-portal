@@ -14,6 +14,7 @@ from .resend_email_policy import install_resend_email_provider
 from .commercial_integrations import install_commercial_integrations
 from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
+from .commercial_access_policy import install_billing_access_hot_path
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -39,6 +40,9 @@ install_accounting_summary_policy()
 # Strict callback, accounting-currency and load-proof boundaries are layered on
 # the adapters before API routes capture the shared commercial functions.
 install_commercial_safety_policy()
+# Keep the tenant access-status request path bounded at scale and prevent default
+# ORM eager loaders from fetching entitlements/ledger/usage data it never uses.
+install_billing_access_hot_path()
 # Separate administrative tenant state from commercial billing connectivity and
 # replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
