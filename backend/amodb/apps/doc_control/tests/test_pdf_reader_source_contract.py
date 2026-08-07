@@ -25,7 +25,8 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
 
 
 def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
+    baseline = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     publication = _read(
         "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
@@ -36,13 +37,15 @@ def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     assert "orderedVirtualItems.map" in core
     assert "<PdfDocument" in core
     assert "<PdfPage" in core
-    assert "PdfReaderCoreV3" in bridge
+    assert "PdfReaderCoreV4" in bridge
+    assert 'from "./PdfReaderCoreV4"' in bridge
+    assert "useVirtualizer" in baseline
     assert "PdfReaderCore" in publication
     assert "PdfReaderCore" in linked
 
 
 def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     store = _read("frontend/src/pages/manuals/pdfWorkingCopyStore.ts")
     capabilities = _read("frontend/src/services/pdfReader.ts")
@@ -65,7 +68,7 @@ def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
 def test_pdfjs_runtime_assets_and_security_options_remain_packaged() -> None:
     config = _read("frontend/src/pages/manuals/pdfReaderConfig.ts")
     vite = _read("frontend/vite.config.ts")
-    core = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
 
     assert "useWasm: true" in config
     assert "wasmUrl:" in config
@@ -78,6 +81,46 @@ def test_pdfjs_runtime_assets_and_security_options_remain_packaged() -> None:
     assert "enableScripting: false" in config
     assert "enableXfa: false" in config
     assert "PDFScriptingManager" not in core
+
+
+def test_dense_reader_keeps_governed_toolbar_contract() -> None:
+    core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
+    style = _read("frontend/src/pages/manuals/pdfReaderDenseToolbar.css")
+    workflow = _read(".github/workflows/publications-reader-ci.yml")
+
+    for icon in (
+        "PanelLeft",
+        "Search",
+        "ArrowUp",
+        "ArrowDown",
+        "Bookmark",
+        "Printer",
+        "Download",
+        "Maximize2",
+        "ChevronsRight",
+    ):
+        assert icon in core
+    for scale in (
+        "Automatic Zoom",
+        "Actual Size",
+        "Page Fit",
+        "Page Width",
+        "50",
+        "75",
+        "100",
+        "125",
+        "150",
+        "200",
+        "300",
+        "400",
+    ):
+        assert scale in core or scale in _read(
+            "frontend/src/pages/manuals/pdfReaderToolbarModel.ts"
+        )
+    assert "Open File" not in core
+    assert "publication-control-status" in style
+    assert "publication-reader-controls > button" in style
+    assert "pdfReaderToolbarModel.test.ts" in workflow
 
 
 def test_server_processing_reopens_outputs_and_rejects_unsafe_pdfs() -> None:
@@ -147,4 +190,5 @@ def test_reader_ci_covers_backend_contracts_and_frontend_build() -> None:
     assert _runs_reader_backend_contracts(document_control)
     for workflow in (publications, document_control):
         assert "pdfReaderEngine.test.ts" in workflow
+        assert "pdfReaderToolbarModel.test.ts" in workflow
         assert "npm run build" in workflow
