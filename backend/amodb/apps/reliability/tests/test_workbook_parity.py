@@ -10,7 +10,7 @@ from amodb.apps.reliability import workbook_parity
 from amodb.apps.reliability import workbook_parity_defaults
 from amodb.apps.reliability import workbook_parity_statistics
 
-EXPECTED_DATASETS = {"AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "STRUCTURES", "RECURRING", "ECTM", "ADD"}
+EXPECTED_DATASETS = {"AU", "AI", "FI", "PM", "OOS", "RM", "SM", "SR", "SB", "CS", "AS", "UR", "STRUCTURES", "RECURRING", "ECTM", "ADD"}
 
 
 def test_catalog_covers_every_required_workbook_register():
