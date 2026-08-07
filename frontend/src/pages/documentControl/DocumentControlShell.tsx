@@ -412,3 +412,5 @@ export function DocumentControlSection({
     </section>
   );
 }
+
+export { useDocumentControlRoute } from "./documentControlRoute";
