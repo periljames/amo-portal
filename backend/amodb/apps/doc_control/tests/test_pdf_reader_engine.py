@@ -388,11 +388,11 @@ def test_signature_required_profiles_disable_flatten_and_submit(monkeypatch: pyt
     assert "validated digital signature" in capabilities["unsupported_reason"]
 
 
-def test_reader_routes_are_registered_before_legacy_routes() -> None:
+def test_authoritative_reader_routes_are_registered_before_legacy_routes() -> None:
     from amodb.main import app
 
     expected = {
-        "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/pdf-capabilities": "amodb.apps.manuals.pdf_reader_router",
+        "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/pdf-capabilities": "amodb.apps.manuals.pdf_reader_precomputed_router",
         "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/flatten.pdf": "amodb.apps.manuals.pdf_reader_router",
         "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/submit-record": "amodb.apps.manuals.pdf_reader_router",
         "/manuals/t/{tenant_slug}/linked-resources/{reference_id}/submit": "amodb.apps.manuals.knowledge_reader_access_router",

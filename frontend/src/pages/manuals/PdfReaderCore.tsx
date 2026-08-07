@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getPdfReaderCapabilities, type PdfReaderCapabilities } from "../../services/pdfReader";
 import { getPdfReaderPerformanceProfile } from "../../services/pdfPerformance";
-import PdfReaderCoreV3, {
+import PdfReaderCoreV5, {
   type PdfReaderCoreProps,
   type PdfReaderNavigationRequest,
   type PdfReaderOutlineItem,
-} from "./PdfReaderCoreV3";
+} from "./PdfReaderCoreV5";
 import {
   cachePdfCapabilities,
   clearCachedPdfCapabilities,
@@ -17,6 +17,7 @@ import {
   readCachedPdfSource,
   warmPdfSourceCache,
 } from "./pdfSourceCache";
+import "./pdfReaderThemeAdaptive.css";
 
 const CACHE_LOOKUP_BUDGET_MS = 140;
 
@@ -242,7 +243,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   }
 
   return (
-    <PdfReaderCoreV3
+    <PdfReaderCoreV5
       {...props}
       key={readerKey}
       identity={identity}
