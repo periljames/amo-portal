@@ -17,6 +17,7 @@ import {
   readCachedPdfSource,
   warmPdfSourceCache,
 } from "./pdfSourceCache";
+import "./pdfReaderThemeAdaptive.css";
 
 const CACHE_LOOKUP_BUDGET_MS = 140;
 
