@@ -112,14 +112,20 @@ def test_progressive_reader_routes_precede_legacy_routes() -> None:
         assert matching[0].endpoint.__module__ == expected_module
 
 
-def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
+def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() -> None:
     service = _frontend("frontend/src/services/publications.ts")
+    performance = _frontend("frontend/src/services/pdfPerformance.ts")
     reader_page = _frontend("frontend/src/pages/manuals/PublicationsReaderPage.tsx")
     bridge = _frontend("frontend/src/pages/manuals/PdfReaderCore.tsx")
-    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
-    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV2.css")
+    shell = _frontend("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
+    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV3.css")
 
-    assert "rangeChunkSize: 512 * 1024" in service
+    assert "getPdfReaderPerformanceProfile" in service
+    assert "rangeChunkSize: performance.rangeChunkSize" in service
+    assert "512 * KIB" in performance
+    assert "20 * MIB" in performance
+    assert "50 * MIB" in performance
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
@@ -127,7 +133,9 @@ def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
     assert 'renderMode="canvas"' in core
     assert "renderForms={safeForm}" in core
     assert "getFieldObjects" in core
-    assert "PdfReaderCoreV2" in bridge
+    assert "PdfReaderCoreV5" in bridge
+    assert "PdfReaderCoreV4" in shell
+    assert "<PdfDocument" not in shell
     assert "UNCONTROLLED DRAFT" in core
     assert "pointer-events: none" in styles
     assert "content-visibility: auto" not in styles
@@ -137,49 +145,57 @@ def test_frontend_uses_range_streaming_and_non_destructive_watermark() -> None:
 def test_pdf_readers_keep_loading_inputs_stable_after_document_success() -> None:
     config = _frontend("frontend/src/pages/manuals/pdfReaderConfig.ts")
     bridge = _frontend("frontend/src/pages/manuals/PdfReaderCore.tsx")
-    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    shell = _frontend("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
     viewer = _frontend("frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx")
     linked_panel = _frontend("frontend/src/pages/manuals/LinkedDocumentationPanel.tsx")
 
     assert "export const PDF_DOCUMENT_OPTIONS = Object.freeze" in config
     assert "options={PDF_DOCUMENT_OPTIONS}" in core
     assert "options={{ isEvalSupported" not in core
+    assert "<PdfDocument" not in shell
     assert "<PdfDocument" not in viewer
     assert "<PdfDocument" not in linked_panel
     assert "PdfReaderCore" in viewer
     assert "PdfReaderCore" in linked_panel
-    assert "PdfReaderCoreV2" in bridge
+    assert "PdfReaderCoreV5" in bridge
+    assert "PdfReaderCoreV4" in shell
     assert "const loadDocument = useCallback" in core
     assert "onLoadSuccess={loadDocument}" in core
     assert "onLoadSuccess={async" not in core
     assert "onLoadError=" in core
 
 
-def test_progress_refresh_does_not_clear_an_already_loaded_pdf() -> None:
-    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+def test_progress_refresh_does_not_clear_an_already_loaded_virtualized_pdf() -> None:
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
 
     assert "setPageCount(0)" not in core
-    assert "setRendered(nearbyPages(restored, count))" in core
     assert "const restored = clampPdfValue(initialPage, 1, count)" in core
     assert "setPageCount(count)" in core
     assert "setCurrentPage(restored)" in core
+    assert "setHotIndexes([restored - 1])" in core
+    assert "useVirtualizer" in core
 
 
-def test_reader_renders_visible_pages_instead_of_blank_virtual_pages() -> None:
-    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
-    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV2.css")
+def test_reader_renders_only_virtualized_visible_and_hot_pages() -> None:
+    shell = _frontend("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
+    styles = _frontend("frontend/src/pages/manuals/pdfReaderEngineV3.css")
 
-    assert "nearbyPages(page, pageCount)" in core
-    assert "rendered.has(page)" in core
+    assert "useVirtualizer" in core
+    assert "orderedVirtualItems.map" in core
+    assert "rangeExtractor" in core
+    assert "hotIndexes" in core
+    assert "useVirtualizer" in shell
+    assert "pdfv5-page-virtualizer" in shell
     assert 'renderMode="canvas"' in core
     assert 'renderMode="none"' not in core
     assert "content-visibility" not in styles
-    assert "opacity: 1 !important" in styles
-    assert "visibility: visible !important" in styles
+    assert ".pdfv3-page.is-ready .pdfv3-page-surface" in styles
 
 
 def test_reader_exposes_exactly_three_download_outputs() -> None:
-    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV2.tsx")
+    core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
 
     assert core.count("Original PDF") == 1
     assert core.count("Editable PDF") == 1

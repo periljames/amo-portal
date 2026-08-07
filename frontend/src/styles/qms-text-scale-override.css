@@ -1,0 +1,18 @@
+/* QMS operational navigation must remain legible at every user-selected text scale. */
+html[data-portal-text-scale="standard"] .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="standard"] .tenant-nav__branch--level-1 .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="standard"] .tenant-nav__branch--level-2 .tenant-nav__link > span:last-child {
+  font-size: max(0.84rem, 13.5px) !important;
+}
+
+html[data-portal-text-scale="large"] .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="large"] .tenant-nav__branch--level-1 .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="large"] .tenant-nav__branch--level-2 .tenant-nav__link > span:last-child {
+  font-size: max(0.84rem, 14px) !important;
+}
+
+html[data-portal-text-scale="extra-large"] .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="extra-large"] .tenant-nav__branch--level-1 .tenant-nav__link > span:last-child,
+html[data-portal-text-scale="extra-large"] .tenant-nav__branch--level-2 .tenant-nav__link > span:last-child {
+  font-size: max(0.84rem, 15px) !important;
+}

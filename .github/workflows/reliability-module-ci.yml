@@ -4,11 +4,17 @@ on:
   pull_request:
     paths:
       - '.github/workflows/reliability-module-ci.yml'
+      - '.github/workflows/reliability-hotfix-finalizer.yml'
+      - '.github/workflows/reliability-hotfix-pr-finalizer.yml'
+      - '.github/workflows/reliability-hotfix-scheduled.yml'
+      - '.github/workflows/reliability-review-finalize-v2.yml'
+      - '.github/workflows/reliability-review-fixes.yml'
       - 'backend/amodb/alembic/env.py'
       - 'backend/amodb/alembic/versions/qms_vernum_128.py'
       - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
       - 'backend/amodb/apps/reliability/**'
+      - 'backend/scripts/apply_reliability_review_fixes.py'
       - 'backend/amodb/main.py'
       - 'docs/reliability/**'
       - 'frontend/src/app/PortalRouteSurface.tsx'
@@ -16,7 +22,6 @@ on:
       - 'frontend/src/app/portalRouteManifest.test.ts'
       - 'frontend/src/app/routePreload.ts'
       - 'frontend/src/pages/ReliabilityReportsPage.tsx'
-      - 'frontend/src/pages/manuals/PdfReaderCoreV3.tsx'
       - 'frontend/src/pages/reliability/**'
       - 'frontend/src/portalRoutes.tsx'
       - 'frontend/src/services/reliability.ts'
@@ -41,7 +46,8 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: reliability_ci
-        ports: ['5432:5432']
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd="pg_isready -U postgres -d reliability_ci"
           --health-interval=10s
@@ -59,8 +65,10 @@ jobs:
       WRITE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reliability_ci
     steps:
       - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }
-      - name: Enforce scoped diff
+        with:
+          fetch-depth: 0
+
+      - name: Enforce Reliability-only diff when Reliability is owned by the PR
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
@@ -69,21 +77,52 @@ jobs:
           git fetch origin "${{ github.event.pull_request.base.ref }}"
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
-          ALLOWED='^(\.github/workflows/reliability-module-ci\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/manuals/PdfReaderCoreV3\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+
+          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          if ! grep -E "$ACTIVATOR" /tmp/reliability-files.txt >/dev/null; then
+            echo 'No Reliability-owned implementation changed; shared composition changes do not activate the Reliability-only scope guard.'
+            exit 0
+          fi
+
+          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
-            echo 'Unexpected files in Reliability PR:'
+            echo 'Unexpected files in Reliability-owned PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
             exit 1
           fi
+
+      - name: Verify recovery machinery is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .github/workflows/reliability-hotfix-finalizer.yml
+          test ! -e .github/workflows/reliability-hotfix-pr-finalizer.yml
+          test ! -e .github/workflows/reliability-hotfix-scheduled.yml
+          test ! -e .github/workflows/reliability-review-finalize-v2.yml
+          test ! -e .github/workflows/reliability-review-fixes.yml
+          test ! -e backend/scripts/apply_reliability_review_fixes.py
+          test ! -e docs/reliability/.review-fix-trigger
+          test ! -e docs/reliability/.review-fix-trigger-v2
+          test ! -e docs/reliability/.hotfix-trigger
+          if git grep -n -E 'apply_reliability_review_fixes|review-fix-trigger|hotfix-trigger|Reliability Hotfix Scheduled|Reliability Review Finalizer' -- \
+            .github/workflows docs/reliability backend/scripts \
+            ':(exclude).github/workflows/reliability-module-ci.yml'; then
+            echo 'Temporary Reliability recovery reference remains.'
+            exit 1
+          fi
+
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements.txt
+
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
       - name: Compile Reliability backend
         run: python -m compileall -q backend/amodb/apps/reliability
+
       - name: Import application and configure mappers
         run: |
           python - <<'PY'
@@ -92,15 +131,52 @@ jobs:
           configure_mappers()
           print('application import and mapper configuration passed')
           PY
-      - name: Verify one current Alembic head
+
+      - name: Verify one Alembic head and merged ancestry
         shell: bash
         run: |
           set -euo pipefail
-          python -m alembic -c backend/amodb/alembic.ini heads | tee /tmp/alembic-heads.txt
-          test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
-          grep -q 'rel_20260806_reference_integrity' /tmp/alembic-heads.txt
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config('backend/amodb/alembic.ini'))
+          heads = script.get_heads()
+          assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
+          head = heads[0]
+          assert head == 'rel_20260807_main_merge', head
+          ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
+          for required in ('rel_20260805_ops_exact_counts', 'rel_20260806_reference_integrity', 'merge_20260807_qms_planner_aircraft'):
+              assert required in ancestry, f'{required} is not an ancestor of {head}'
+          print(f'alembic_head={head}')
+          PY
+
       - name: Upgrade clean PostgreSQL schema
-        run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
+        run: python -m alembic -c backend/amodb/alembic.ini upgrade head
+
+      - name: Verify Alembic revision and capacity
+        run: |
+          python - <<'PY'
+          import os
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy import create_engine, text
+
+          expected = ScriptDirectory.from_config(Config('backend/amodb/alembic.ini')).get_current_head()
+          engine = create_engine(os.environ['DATABASE_URL'])
+          with engine.connect() as connection:
+              width = connection.execute(text("""
+                  SELECT character_maximum_length
+                  FROM information_schema.columns
+                  WHERE table_name = 'alembic_version'
+                    AND column_name = 'version_num'
+              """)).scalar_one()
+              version = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+          assert width is not None and width >= 128, width
+          assert version == expected, (version, expected)
+          print(f'alembic_version={version}; capacity={width}')
+          PY
+
       - name: Verify formula, workbook and exactness schema
         run: |
           python - <<'PY'
@@ -112,8 +188,6 @@ jobs:
           expected_workbook_tables = {'reliability_workbook_records', 'reliability_workbook_field_mappings', 'reliability_statistical_alert_results', 'reliability_report_layouts', 'reliability_workbook_report_snapshots', 'reliability_workbook_import_batches', 'reliability_workbook_import_row_results'}
           engine = create_engine(os.environ['DATABASE_URL'])
           with engine.connect() as connection:
-              width = connection.execute(text("SELECT character_maximum_length FROM information_schema.columns WHERE table_name='alembic_version' AND column_name='version_num'")).scalar_one()
-              versions = list(connection.execute(text('SELECT version_num FROM alembic_version ORDER BY version_num')).scalars())
               metric_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_metric_definitions'")).scalars())
               run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_calculation_runs'")).scalars())
               constraints = set(connection.execute(text("SELECT conname FROM pg_constraint WHERE conrelid IN ('reliability_metric_definitions'::regclass,'reliability_calculation_runs'::regclass)")).scalars())
@@ -126,8 +200,6 @@ jobs:
                   ORDER BY table_name, column_name
               """)).mappings())
           failures = []
-          if width is None or width < 128: failures.append(f'Alembic version capacity is {width}; expected at least 128.')
-          if versions != ['rel_20260806_reference_integrity']: failures.append(f'Alembic version rows are {versions}.')
           if expected_metric_columns - metric_columns: failures.append(f'Missing metric columns: {sorted(expected_metric_columns - metric_columns)}.')
           if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
           if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
@@ -138,12 +210,16 @@ jobs:
               print('\n'.join(failures)); sys.exit(1)
           print('formula, workbook and exactness schema verification passed')
           PY
+
       - name: Run PostgreSQL append-only calculation regression
         run: python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
+
       - name: Run PostgreSQL operational-source integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_operational_sources_regression.py
+
       - name: Run PostgreSQL workbook-reference integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_workbook_reference_integrity_regression.py
+
       - name: Run Reliability tests
         run: pytest -q backend/amodb/apps/reliability/tests
 
