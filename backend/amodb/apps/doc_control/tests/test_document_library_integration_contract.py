@@ -57,6 +57,7 @@ def test_physical_controlled_copy_is_a_reusable_circulation_record() -> None:
     assert 'action: Literal["CHECK_OUT", "CHECK_IN", "VERIFY_LOCATION"]' in source
     assert 'Custody acknowledgement is required before check-out' in source
     assert 'A future return due date is required' in source
+    assert 'not _future(payload.due_back_at)' in source
     assert 'event_type = "CHECK_OUT"' in source
     assert 'event_type = "CHECK_IN"' in source
     assert 'event_type = "LOCATION_VERIFIED"' in source
@@ -71,7 +72,12 @@ def test_qr_label_is_an_identifier_not_an_authorization_bypass() -> None:
     assert 'current_user: account_models.User = Depends(get_current_active_user)' in source
     assert 'require_manual_access(current_user, profile)' in source
     assert 'holder_visible' in source
-    assert 'events": [_event_payload(event) for event in events] if controller or own_copy else []' in source
+    assert 'row.holder_user_id if controller or own_copy else None' in source
+    assert 'row.holder_name if controller or own_copy else None' in source
+    assert 'event_payloads = []' in source
+    assert 'def _reader_event_payload' in source
+    assert '"from_holder_user_id": None' in source
+    assert '"to_holder_user_id": None' in source
     assert 'QR is an identifier, not an access credential.' in source
     assert 'Login is required.' in source
     assert '@router.get("/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf")' in source
