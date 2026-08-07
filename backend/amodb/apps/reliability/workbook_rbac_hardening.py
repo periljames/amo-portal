@@ -1,9 +1,9 @@
 """Fail-closed role gates for controlled Reliability workbook operations.
 
-The workbook-parity routes were recovered in several modules and are registered
-onto the shared Reliability router.  This module applies one explicit policy
-matrix after registration so write/approval/configuration actions cannot fall
-back to the weaker "any active tenant user" contract.
+The workbook-parity routes are registered by several modules. This module
+applies one explicit policy matrix after registration so write, approval,
+correction, analysis and configuration actions cannot fall back to the weaker
+"any active tenant user" contract.
 """
 from __future__ import annotations
 
@@ -43,13 +43,14 @@ ANALYSIS_GUARD = require_roles(
     AccountRole.AUDITOR,
 )
 
-# Import endpoints retain their existing stricter data-governance guard inside
-# workbook_parity_imports/workbook_reference_import.  The matrix below covers
-# workbook operations that otherwise depended only on get_current_active_user.
+# Import endpoints retain their own data-governance guards inside the import
+# modules. The matrix below protects workbook operations that otherwise depend
+# only on get_current_active_user.
 POLICY: dict[tuple[str, str], Callable] = {
     ("POST", "/reliability/workbook-parity/records"): ENTRY_GUARD,
     ("POST", "/reliability/workbook-parity/records/{record_id}/approve"): APPROVAL_GUARD,
     ("POST", "/reliability/workbook-parity/records/{record_id}/close"): APPROVAL_GUARD,
+    ("POST", "/reliability/workbook-parity/records/{record_id}/supersede"): APPROVAL_GUARD,
     ("POST", "/reliability/workbook-parity/mappings"): CONFIGURATION_GUARD,
     ("POST", "/reliability/workbook-parity/mappings/seed-defaults"): CONFIGURATION_GUARD,
     ("POST", "/reliability/workbook-parity/report-layouts/seed"): CONFIGURATION_GUARD,
