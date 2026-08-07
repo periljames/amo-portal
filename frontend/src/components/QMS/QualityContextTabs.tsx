@@ -235,7 +235,7 @@ const QualityContextTabs: React.FC = () => {
       : moduleSegment === "findings"
         ? { label: "New finding", path: `${route.basePath}/findings/new`, icon: Plus }
         : moduleSegment === "cars"
-          ? { label: "New CAR", path: `${route.basePath}/cars/new`, icon: Plus }
+          ? { label: "Create CAR", path: `${route.basePath}/cars/new`, icon: Plus }
           : { label: "Schedule audit", path: `${route.basePath}/audits/plan?view=calendar&create=1`, icon: Plus };
 
   const PrimaryIcon = primaryAction.icon;
