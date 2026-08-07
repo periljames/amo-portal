@@ -237,10 +237,32 @@ def validate_copy_event(row: dm.DocumentControlledCopy, payload: schemas.Control
     if event_type == "RECALL" and not reason:
         raise HTTPException(status_code=409, detail="A controlled-copy recall requires a reason")
     if event_type == "TRANSFER":
-        if not payload.to_holder_user_id and not str(payload.to_location or "").strip():
+        requested_location = str(payload.to_location or "").strip()
+        if not payload.to_holder_user_id and not requested_location:
             raise HTTPException(status_code=422, detail="A transfer requires a holder or controlled location")
-    if event_type == "LOCATION_CHANGE" and not str(payload.to_location or "").strip():
-        raise HTTPException(status_code=422, detail="A location change requires the new controlled location")
+        current_location = str(row.location_text or "").strip()
+        target_holder = payload.to_holder_user_id if payload.to_holder_user_id is not None else row.holder_user_id
+        target_location = requested_location or current_location
+        if str(target_holder or "") == str(row.holder_user_id or "") and target_location == current_location:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTROLLED_COPY_NOOP",
+                    "message": "A controlled-copy transfer must change the holder or controlled location.",
+                },
+            )
+    if event_type == "LOCATION_CHANGE":
+        requested_location = str(payload.to_location or "").strip()
+        if not requested_location:
+            raise HTTPException(status_code=422, detail="A location change requires the new controlled location")
+        if requested_location == str(row.location_text or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTROLLED_COPY_NOOP",
+                    "message": "A controlled-copy location change must specify a different controlled location.",
+                },
+            )
 
 
 @router.post("/t/{tenant_slug}/controlled-copies", include_in_schema=False)
