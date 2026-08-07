@@ -188,6 +188,10 @@ export function createEvidenceSnapshot(tenant: string, manualId: string, revisio
   return request(revisionPath(tenant, manualId, revisionId, "/evidence/snapshots"), { method: "POST" });
 }
 
+export function getEvidenceSnapshot(tenant: string, manualId: string, revisionId: string, snapshotId: string): Promise<Record<string, unknown>> {
+  return request(revisionPath(tenant, manualId, revisionId, `/evidence/snapshots/${encodeURIComponent(snapshotId)}`));
+}
+
 export function compareReaderRevisions(tenant: string, manualId: string, sourceRevisionId: string, targetRevisionId: string): Promise<ReaderComparison> {
   const params = new URLSearchParams({ source_revision_id: sourceRevisionId, target_revision_id: targetRevisionId });
   return request(`${base(tenant)}/documents/${encodeURIComponent(manualId)}/compare?${params.toString()}`);

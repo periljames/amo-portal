@@ -4,6 +4,7 @@ import {
   BookmarkPlus,
   Check,
   ClipboardCheck,
+  Download,
   FileDiff,
   FileKey2,
   Highlighter,
@@ -22,6 +23,7 @@ import {
   createEvidenceSnapshot,
   createReaderAnnotation,
   decideAnnotationMigration,
+  getEvidenceSnapshot,
   getReaderEvidence,
   getReaderManifest,
   listAnnotationMigrations,
@@ -91,6 +93,8 @@ export default function PublicationGovernancePanel({
   const [sourceRevisionId, setSourceRevisionId] = useState("");
   const [note, setNote] = useState("");
   const [tags, setTags] = useState("");
+  const [linkedType, setLinkedType] = useState("");
+  const [linkedId, setLinkedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -147,7 +151,7 @@ export default function PublicationGovernancePanel({
     void loader().catch((caught) => setError(caught instanceof Error ? caught.message : "Reader governance could not be loaded."));
   }, [loadAnnotations, loadCompare, loadEvidence, open, tab]);
 
-  const createAnnotation = async (annotationType: "NOTE" | "BOOKMARK" | "HIGHLIGHT") => {
+  const createAnnotation = async (annotationType: "NOTE" | "BOOKMARK" | "HIGHLIGHT" | "EVIDENCE") => {
     if (!manifest?.source_sha256) {
       setError("This revision has no immutable source checksum, so governed annotations are disabled.");
       return;
@@ -166,6 +170,8 @@ export default function PublicationGovernancePanel({
         visibility: "PRIVATE",
         note_text: note.trim() || (effectiveType === "BOOKMARK" ? `Bookmark page ${currentPage}` : null),
         tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+        linked_entity_type: annotationType === "EVIDENCE" ? linkedType : undefined,
+        linked_entity_id: annotationType === "EVIDENCE" ? linkedId.trim() : undefined,
         location: {
           location_type: selected.exact_quote ? "TEXT_SELECTION" : semanticSection ? "SECTION" : "PAGE",
           page_number: pageNumber,
@@ -178,6 +184,7 @@ export default function PublicationGovernancePanel({
       });
       setNote("");
       setTags("");
+      if (annotationType === "EVIDENCE") { setLinkedType(""); setLinkedId(""); }
       await loadAnnotations();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Annotation could not be created.");
@@ -193,6 +200,27 @@ export default function PublicationGovernancePanel({
       await loadAnnotations();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Annotation could not be archived.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadSnapshot = async (snapshotId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await getEvidenceSnapshot(tenant, manualId, revisionId, snapshotId);
+      const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `document-evidence-${manualId}-${revisionId}-${snapshotId}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Evidence snapshot could not be exported.");
     } finally {
       setBusy(false);
     }
@@ -268,10 +296,20 @@ export default function PublicationGovernancePanel({
             <section className="publication-governance-compose">
               <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a revision-bound note or select text in accessible-text mode before highlighting…" rows={3} />
               <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Tags, comma separated" />
+              {manifest?.capabilities.control ? <div className="publication-governance-linked-evidence">
+                <select value={linkedType} onChange={(event) => setLinkedType(event.target.value)} aria-label="Linked QMS record type">
+                  <option value="">No QMS link</option>
+                  <option value="QMS_AUDIT">QMS audit</option>
+                  <option value="QMS_FINDING">Audit finding</option>
+                  <option value="QMS_CORRECTIVE_ACTION">Corrective action</option>
+                </select>
+                <input value={linkedId} onChange={(event) => setLinkedId(event.target.value)} placeholder="QMS record UUID" disabled={!linkedType} />
+              </div> : null}
               <div>
                 <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("NOTE")}><MessageSquareText size={14} /> Note</button>
                 <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("BOOKMARK")}><BookmarkPlus size={14} /> Bookmark</button>
                 {viewMode === "text" ? <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button> : null}
+                {manifest?.capabilities.control ? <button type="button" disabled={busy || !manifest?.capabilities.annotations || !linkedType || !linkedId.trim()} onClick={() => void createAnnotation("EVIDENCE")}><ClipboardCheck size={14} /> Link QMS evidence</button> : null}
               </div>
             </section>
             <section className="publication-governance-list">
@@ -302,12 +340,13 @@ export default function PublicationGovernancePanel({
                 <div><dt>Relationships</dt><dd>{counter(evidence?.relationship_summary)}</dd></div>
                 <div><dt>Annotations</dt><dd>{evidence?.annotations.count ?? 0}</dd></div>
                 <div><dt>Audit events</dt><dd>{evidence?.audit_history.length ?? 0}</dd></div>
+                <div><dt>Reader adapter</dt><dd>{manifest?.renderer || "—"} · {manifest?.location_adapter || "—"}</dd></div>
               </dl>
               {evidence?.capabilities.snapshot ? <button type="button" disabled={busy} onClick={() => void createSnapshot()}><FileKey2 size={14} /> Create immutable evidence snapshot</button> : null}
             </section>
             <section className="publication-governance-list">
               <header><strong>Stored snapshots</strong><span>{snapshots.length}</span></header>
-              {snapshots.length ? snapshots.map((snapshot, index) => <article key={String(snapshot.id || index)}><strong>{String(snapshot.snapshot_sha256 || "")}</strong><small>{formatDate(String(snapshot.created_at || ""))} · source {String(snapshot.source_sha256 || "not recorded")}</small></article>) : <p className="publication-governance-empty">No immutable evidence snapshot has been created for this revision.</p>}
+              {snapshots.length ? snapshots.map((snapshot, index) => <article key={String(snapshot.id || index)}><strong>{String(snapshot.snapshot_sha256 || "")}</strong><small>{formatDate(String(snapshot.created_at || ""))} · source {String(snapshot.source_sha256 || "not recorded")}</small><div className="publication-governance-list__actions"><button type="button" disabled={busy || !snapshot.id} onClick={() => void downloadSnapshot(String(snapshot.id))}><Download size={13} /> Download verified JSON</button></div></article>) : <p className="publication-governance-empty">No immutable evidence snapshot has been created for this revision.</p>}
             </section>
           </>
         ) : null}

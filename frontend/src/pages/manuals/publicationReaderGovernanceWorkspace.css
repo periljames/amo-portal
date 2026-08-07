@@ -148,3 +148,7 @@
   .publication-governance-tabs button { font-size: 0.75rem; }
   .publication-governance-evidence-card dl div { grid-template-columns: 90px 1fr; }
 }
+
+.publication-governance-linked-evidence { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.2fr); gap: 0.45rem; }
+.publication-governance-linked-evidence select { border: 1px solid #d0d5dd; border-radius: 7px; background: var(--surface, #fff); color: inherit; padding: 0.55rem 0.65rem; font: inherit; }
+@media (max-width: 520px) { .publication-governance-linked-evidence { grid-template-columns: 1fr; } }
