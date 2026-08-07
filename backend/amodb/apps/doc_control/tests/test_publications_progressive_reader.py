@@ -125,7 +125,7 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "rangeChunkSize: performance.rangeChunkSize" in service
     assert "512 * KIB" in performance
     assert "8 * MIB" in performance
-    assert "24 * MIB" in performance
+    assert "16 * MIB" in performance
     assert "maxDevicePixelRatio: 1.25" in performance
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
@@ -165,6 +165,7 @@ def test_real_world_reader_releases_stale_navigation_and_scales_watermark() -> N
     assert ".documentation-assistant-launcher" in stability
     assert "tenant-shell__topbar-actions" in chrome
     assert "createPortal" in chrome
+    assert "enforceOriginalLayout" in chrome
     assert "PublicationReaderChromeBridge" in manual_page
     assert ".pdfv3-page[data-page-number=" in assisted_navigation
     assert 'behavior: "auto"' in assisted_navigation
