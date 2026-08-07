@@ -74,11 +74,21 @@ export function ReliabilityManagementReports(): React.ReactElement {
     let active = true;
     setLoading(true);
     setError(null);
-    void readHtml(snapshotId).then((html) => {
+    void readHtml(snapshotId).then((reportHtml) => {
       if (!active) return;
-      setPreviewHtml(html);
+      setPreviewHtml(reportHtml);
       setSnapshot((currentSnapshot) => currentSnapshot?.id === snapshotId ? currentSnapshot : {
-        id: snapshotId, layout_code: "RETAINED", layout_name: "Retained Reliability report", period_start: "", period_end: "", aircraft: [], sha256_hash: "", generated_at: "", view_url: `${ROOT}/reports/${snapshotId}/view`, pdf_url: `${ROOT}/reports/${snapshotId}/pdf`, data_url: `${ROOT}/reports/${snapshotId}/data",
+        id: snapshotId,
+        layout_code: "RETAINED",
+        layout_name: "Retained Reliability report",
+        period_start: "",
+        period_end: "",
+        aircraft: [],
+        sha256_hash: "",
+        generated_at: "",
+        view_url: `${ROOT}/reports/${snapshotId}/view`,
+        pdf_url: `${ROOT}/reports/${snapshotId}/pdf`,
+        data_url: `${ROOT}/reports/${snapshotId}/data`,
       });
     }).catch((caught: unknown) => {
       if (active) setError(caught instanceof Error ? caught.message : "The retained management report could not be opened.");
@@ -114,8 +124,7 @@ export function ReliabilityManagementReports(): React.ReactElement {
       });
       setSnapshot(result);
       setPreviewHtml(await readHtml(result.id));
-      const target = `/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${result.id}`;
-      navigate(target, { replace: true });
+      navigate(`/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${result.id}`, { replace: true });
       setNotice(`Snapshot ${result.id} was retained. Opening this link later reads the same retained report rather than recalculating it.`);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "The management report could not be generated.");
