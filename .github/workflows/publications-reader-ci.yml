@@ -110,7 +110,10 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run browser PDF engine unit tests
         working-directory: frontend
-        run: npm exec -- vitest run src/pages/manuals/pdfReaderEngine.test.ts
+        run: >-
+          npm exec -- vitest run
+          src/pages/manuals/pdfReaderEngine.test.ts
+          src/pages/manuals/pdfReaderToolbarModel.test.ts
       - name: Build Publications frontend
         working-directory: frontend
         run: npm run build
@@ -124,8 +127,8 @@ jobs:
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: tenant-completion-secret
       QUALITY_SCHEMA_STRICT: "0"
       PYTHONPATH: backend

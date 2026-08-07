@@ -110,7 +110,7 @@ def _javascript_object_xrefs(document: Any) -> set[int]:
 
 
 def _remove_script_references(document: Any) -> None:
-    """Remove only executable PDF actions; keep pages, links, fields and images intact."""
+    """Remove executable PDF actions while preserving their owning pages and fields."""
 
     catalog = int(document.pdf_catalog())
     names_kind, names_value = document.xref_get_key(catalog, "Names")
@@ -124,16 +124,23 @@ def _remove_script_references(document: Any) -> None:
         if document.xref_get_key(catalog, key)[0] != "null":
             document.xref_set_key(catalog, key, "null")
 
-    scripted_xrefs = _javascript_object_xrefs(document)
+    # Capture the original scripted targets so indirect /A references can be
+    # severed. Do not blank this original set: a field/widget can itself contain
+    # an inline /AA JavaScript dictionary and deleting that xref deletes the
+    # controlled AcroForm field. First remove the executable references from
+    # their owners, then rescan. Only action objects that still contain script
+    # after the owner references are cleared are safe to orphan and blank.
+    scripted_targets = _javascript_object_xrefs(document)
     for xref in range(1, document.xref_length()):
         if document.xref_get_key(xref, "AA")[0] != "null":
             document.xref_set_key(xref, "AA", "null")
         action_kind, action_value = document.xref_get_key(xref, "A")
         if action_kind == "xref":
             match = _PDF_REF_PATTERN.search(str(action_value or ""))
-            if match and int(match.group(1)) in scripted_xrefs:
+            if match and int(match.group(1)) in scripted_targets:
                 document.xref_set_key(xref, "A", "null")
-    for xref in scripted_xrefs:
+
+    for xref in _javascript_object_xrefs(document):
         document.update_object(xref, "<< >>")
 
 

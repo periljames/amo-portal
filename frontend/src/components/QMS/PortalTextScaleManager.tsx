@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ALargeSmall, Check } from "lucide-react";
 
@@ -16,6 +16,10 @@ type ScaleOption = {
   sample: string;
   description: string;
   multiplier: number;
+};
+
+type PortalTextScalePreferenceScopeProps = {
+  storageKey: string;
 };
 
 const SCALE_OPTIONS: readonly ScaleOption[] = [
@@ -51,9 +55,9 @@ function preferenceStorageKey(): string {
   return `amo_portal_text_scale:${user?.id || "anonymous"}:${user?.amo_id || "platform"}`;
 }
 
-function readStoredScale(): PortalTextScale {
+function readStoredScale(storageKey: string): PortalTextScale {
   if (typeof window === "undefined") return "standard";
-  const value = window.localStorage.getItem(preferenceStorageKey());
+  const value = window.localStorage.getItem(storageKey);
   return isTextScale(value) ? value : "standard";
 }
 
@@ -66,19 +70,14 @@ function applyScale(scale: PortalTextScale): void {
   document.body.style.setProperty("--portal-text-scale", String(option.multiplier));
 }
 
-const PortalTextScaleManager: React.FC = () => {
-  const user = getCachedUser();
-  const identity = `${user?.id || "anonymous"}:${user?.amo_id || "platform"}`;
-  const storageKey = useMemo(() => preferenceStorageKey(), [identity]);
-  const [scale, setScale] = useState<PortalTextScale>(readStoredScale);
+const PortalTextScalePreferenceScope: React.FC<PortalTextScalePreferenceScopeProps> = ({ storageKey }) => {
+  const [scale, setScale] = useState<PortalTextScale>(() => readStoredScale(storageKey));
   const [mountTarget, setMountTarget] = useState<HTMLElement | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "local">("idle");
 
   useEffect(() => {
-    const stored = readStoredScale();
-    setScale(stored);
-    applyScale(stored);
-  }, [storageKey]);
+    applyScale(scale);
+  }, [scale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +86,6 @@ const PortalTextScaleManager: React.FC = () => {
         if (cancelled || !isTextScale(preferences.text_scale)) return;
         window.localStorage.setItem(storageKey, preferences.text_scale);
         setScale(preferences.text_scale);
-        applyScale(preferences.text_scale);
         setSyncState("saved");
       })
       .catch(() => {
@@ -102,7 +100,6 @@ const PortalTextScaleManager: React.FC = () => {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== storageKey || !isTextScale(event.newValue)) return;
       setScale(event.newValue);
-      applyScale(event.newValue);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -140,7 +137,6 @@ const PortalTextScaleManager: React.FC = () => {
 
   const chooseScale = (next: PortalTextScale) => {
     setScale(next);
-    applyScale(next);
     window.localStorage.setItem(storageKey, next);
     setSyncState("saving");
     void updatePortalPreferences({ text_scale: next })
@@ -148,7 +144,6 @@ const PortalTextScaleManager: React.FC = () => {
         const confirmed = isTextScale(preferences.text_scale) ? preferences.text_scale : next;
         window.localStorage.setItem(storageKey, confirmed);
         setScale(confirmed);
-        applyScale(confirmed);
         setSyncState("saved");
       })
       .catch(() => setSyncState("local"));
@@ -185,6 +180,11 @@ const PortalTextScaleManager: React.FC = () => {
     </section>,
     mountTarget,
   );
+};
+
+const PortalTextScaleManager: React.FC = () => {
+  const storageKey = preferenceStorageKey();
+  return <PortalTextScalePreferenceScope key={storageKey} storageKey={storageKey} />;
 };
 
 export default PortalTextScaleManager;

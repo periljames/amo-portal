@@ -6,6 +6,7 @@ import { RefreshCcw, ShieldAlert } from "lucide-react";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
+import "../../styles/qms-text-scale-override.css";
 
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
@@ -111,7 +112,7 @@ const QualityEnhancementsHost: React.FC = () => {
     return <CarInviteResponsiveStyleLoader />;
   }
 
-  const auditEnhancement = route?.activeTab === "checklist" ? (
+  const auditEnhancement = route && route.activeTab === "checklist" ? (
     <Suspense fallback={null}>
       <QualityChecklistPdfFormEditorHost />
     </Suspense>

@@ -196,7 +196,8 @@ describe("Quality checklist, workflow integrity and public CAR UI contracts", ()
     expect(mainSource).not.toContain("QualityChecklistPdfFormEditorHost");
     expect(routeGateSource).toContain('import("./QualityEnhancementsHost")');
     expect(routeGateSource).toContain("/car-invite");
-    expect(routeGateSource).toContain("quality");
+    expect(routeGateSource).toContain("<ModalTopLayerGuard />");
+    expect(routeGateSource).not.toContain("QualityChecklistPdfFormEditorHost");
     expect(enhancementsHostSource).toContain('route.activeTab === "checklist"');
     expect(enhancementsHostSource).toContain('import("./QualityChecklistPdfFormEditorHost")');
   });

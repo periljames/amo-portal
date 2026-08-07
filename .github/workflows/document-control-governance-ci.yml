@@ -32,6 +32,7 @@ name: Document Control Governance CI
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
       - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/tests/e2e/document-governance-live.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
   workflow_dispatch:
 
@@ -44,7 +45,7 @@ concurrency:
 
 jobs:
   backend-postgres:
-    name: PostgreSQL migration, routes and Document Control tests
+    name: PostgreSQL migration, routes, security and Document Control tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -66,6 +67,7 @@ jobs:
       DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control
       DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control
       QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
     defaults:
       run:
         working-directory: backend
@@ -91,11 +93,13 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_merge_20260807_heads"], heads
+          assert heads == ["docgov_merge_20260807_qms"], heads
           assert script.get_revision("docgov_20260806_governance") is not None
           assert script.get_revision("docgov_merge_20260807") is not None
           assert script.get_revision("docgov_20260807_reader_governance") is not None
           assert script.get_revision("docgov_merge_20260807_heads") is not None
+          assert script.get_revision("merge_20260807_qms_planner_aircraft") is not None
+          assert script.get_revision("docgov_merge_20260807_qms") is not None
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade heads
@@ -118,7 +122,7 @@ jobs:
           missing = required - paths
           assert not missing, missing
           PY
-      - name: Run Document Control governance and reader tests
+      - name: Run Document Control governance, reader and security tests
         run: pytest -q amodb/apps/doc_control/tests
 
   frontend:
@@ -157,3 +161,55 @@ jobs:
           src/pages/manuals/PublicationGovernancePanel.tsx
       - name: Build production frontend
         run: npm run build
+
+  authenticated-browser:
+    name: Authenticated DMS governance and reader acceptance
+    needs: [backend-postgres, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
+      E2E_AMO_CODE: ${{ vars.E2E_AMO_CODE || 'safarilink' }}
+      E2E_AMO_ADMIN_EMAIL: ${{ secrets.E2E_AMO_ADMIN_EMAIL }}
+      E2E_AMO_ADMIN_PASSWORD: ${{ secrets.E2E_AMO_ADMIN_PASSWORD }}
+      E2E_DOCUMENT_GOVERNANCE_ID: ${{ secrets.E2E_DOCUMENT_GOVERNANCE_ID }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Require live authenticated acceptance configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in E2E_BASE_URL E2E_AMO_ADMIN_EMAIL E2E_AMO_ADMIN_PASSWORD E2E_DOCUMENT_GOVERNANCE_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is required for the authenticated Document Control merge gate"
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - name: Install frontend dependencies
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run authenticated Document Control governance acceptance
+        run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
+      - name: Upload Playwright evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-governance-playwright
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore

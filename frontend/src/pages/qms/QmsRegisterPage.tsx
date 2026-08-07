@@ -159,8 +159,13 @@ const QmsRegisterPage: React.FC = () => {
   }, [context, controlledNew, limit, offset, query, status]);
 
   useEffect(() => {
-    void load();
-    return () => abortRef.current?.abort(new DOMException("Quality register unmounted", "AbortError"));
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      abortRef.current?.abort(new DOMException("Quality register unmounted", "AbortError"));
+    };
   }, [load]);
 
   const rows = data?.items || [];

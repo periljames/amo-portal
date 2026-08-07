@@ -36,8 +36,8 @@ jobs:
       ALLOW_SQLITE_FOR_TESTS: "1"
       SECRET_KEY: document-control-ci-secret-key-not-for-production
       JWT_SECRET_KEY: document-control-ci-jwt-secret-not-for-production
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
       QUALITY_SCHEMA_STRICT: "0"
       PYTHONPATH: backend
     steps:
@@ -90,7 +90,10 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run browser PDF reader regressions
         working-directory: frontend
-        run: npm exec -- vitest run src/pages/manuals/pdfReaderEngine.test.ts
+        run: >-
+          npm exec -- vitest run
+          src/pages/manuals/pdfReaderEngine.test.ts
+          src/pages/manuals/pdfReaderToolbarModel.test.ts
       - name: Typecheck and build Document Control frontend
         working-directory: frontend
         run: npm run build

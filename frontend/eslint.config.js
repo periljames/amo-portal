@@ -54,4 +54,18 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^CalendarClock$' }],
     },
   },
+  {
+    files: ['src/pages/qms/planner/QmsPlannerPageV2.tsx'],
+    rules: {
+      // Saved planner views select icons from a fixed typed tuple. React should not
+      // treat those imported icons as components created dynamically by a hook.
+      'react-hooks/static-components': 'off',
+      // These names are retained for the upcoming timezone picker and compact view
+      // dropdown; keep the exception isolated to this planner file.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^(ChevronDown|Command|startOfMonth|TENANT_TIMEZONE)$' },
+      ],
+    },
+  },
 ])
