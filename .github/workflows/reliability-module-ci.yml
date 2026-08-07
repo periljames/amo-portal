@@ -26,6 +26,7 @@ on:
       - 'frontend/src/portalRoutes.tsx'
       - 'frontend/src/services/reliability.ts'
       - 'frontend/src/styles/reliability-v2.css'
+      - 'frontend/tests/e2e/reliability-workbook-parity-ci.spec.ts'
   workflow_dispatch:
 
 permissions:
@@ -77,13 +78,13 @@ jobs:
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
 
-          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
+          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
           if ! grep -E "$ACTIVATOR" /tmp/reliability-files.txt >/dev/null; then
             echo 'No Reliability-owned implementation changed; shared composition changes do not activate the Reliability-only scope guard.'
             exit 0
           fi
 
-          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css)$'
+          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability-owned PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
@@ -131,7 +132,7 @@ jobs:
           print('application import and mapper configuration passed')
           PY
 
-      - name: Verify one Alembic head and Reliability ancestry
+      - name: Verify one Alembic head and merged ancestry
         shell: bash
         run: |
           set -euo pipefail
@@ -143,11 +144,10 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          ancestry = {
-              revision.revision
-              for revision in script.walk_revisions(base='base', head=head)
-          }
-          assert 'rel_20260805_ops_exact_counts' in ancestry, f'Reliability head is not an ancestor of {head}'
+          assert head == 'rel_20260807_main_merge', head
+          ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
+          for required in ('rel_20260805_ops_exact_counts', 'rel_20260806_reference_integrity', 'merge_20260807_qms_planner_aircraft'):
+              assert required in ancestry, f'{required} is not an ancestor of {head}'
           print(f'alembic_head={head}')
           PY
 
@@ -177,14 +177,54 @@ jobs:
           print(f'alembic_version={version}; capacity={width}')
           PY
 
+      - name: Verify formula, workbook and exactness schema
+        run: |
+          python - <<'PY'
+          import os, sys
+          from sqlalchemy import create_engine, text
+          expected_metric_columns = {'formula_latex', 'formula_mathml', 'formula_expression_json', 'formula_unit', 'formula_precision', 'formula_rounding_mode', 'denominator_policy', 'formula_source_fields_json'}
+          expected_run_columns = {'formula_snapshot_json', 'formula_snapshot_hash'}
+          expected_constraints = {'ck_reliability_metric_formula_latex_present', 'ck_reliability_metric_formula_mathml_present', 'ck_reliability_formula_snapshot_hash_format'}
+          expected_workbook_tables = {'reliability_workbook_records', 'reliability_workbook_field_mappings', 'reliability_statistical_alert_results', 'reliability_report_layouts', 'reliability_workbook_report_snapshots', 'reliability_workbook_import_batches', 'reliability_workbook_import_row_results'}
+          engine = create_engine(os.environ['DATABASE_URL'])
+          with engine.connect() as connection:
+              metric_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_metric_definitions'")).scalars())
+              run_columns = set(connection.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reliability_calculation_runs'")).scalars())
+              constraints = set(connection.execute(text("SELECT conname FROM pg_constraint WHERE conrelid IN ('reliability_metric_definitions'::regclass,'reliability_calculation_runs'::regclass)")).scalars())
+              workbook_tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'reliability_%'")).scalars())
+              retained_legacy_columns = list(connection.execute(text("""
+                  SELECT table_name, column_name, data_type
+                  FROM information_schema.columns
+                  WHERE (table_name='reliability_defect_trends' AND column_name IN ('utilisation_hours','utilisation_cycles','defect_rate_per_100_fh'))
+                     OR (table_name='reliability_kpis' AND column_name IN ('value','numerator','denominator'))
+                  ORDER BY table_name, column_name
+              """)).mappings())
+          failures = []
+          if expected_metric_columns - metric_columns: failures.append(f'Missing metric columns: {sorted(expected_metric_columns - metric_columns)}.')
+          if expected_run_columns - run_columns: failures.append(f'Missing snapshot columns: {sorted(expected_run_columns - run_columns)}.')
+          if expected_constraints - constraints: failures.append(f'Missing constraints: {sorted(expected_constraints - constraints)}.')
+          if expected_workbook_tables - workbook_tables: failures.append(f'Missing workbook tables: {sorted(expected_workbook_tables - workbook_tables)}.')
+          non_numeric = [dict(row) for row in retained_legacy_columns if row['data_type'] != 'numeric']
+          if non_numeric: failures.append(f'Retained legacy Reliability analytical columns are not fixed-point numeric: {non_numeric}.')
+          if failures:
+              print('\n'.join(failures)); sys.exit(1)
+          print('formula, workbook and exactness schema verification passed')
+          PY
+
       - name: Run PostgreSQL append-only calculation regression
         run: python backend/amodb/apps/reliability/tests/postgresql_append_only_regression.py
 
       - name: Run PostgreSQL operational-source integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_operational_sources_regression.py
 
-      - name: Run Reliability tests
-        run: pytest -q backend/amodb/apps/reliability/tests
+      - name: Run PostgreSQL workbook-reference integrity regression
+        run: python backend/amodb/apps/reliability/tests/postgresql_workbook_reference_integrity_regression.py
+
+      - name: Run Reliability operational reporting tests
+        run: pytest -q -rA backend/amodb/apps/reliability/tests/test_structured_daily_reporting.py
+
+      - name: Run existing Reliability tests
+        run: pytest -q -rA backend/amodb/apps/reliability/tests --ignore=backend/amodb/apps/reliability/tests/test_structured_daily_reporting.py
 
   reliability-frontend:
     runs-on: ubuntu-24.04
@@ -201,9 +241,29 @@ jobs:
       - name: Run tenant-shell route contracts
         working-directory: frontend
         run: npm run test:tenant-shell
+      - name: Run workbook parity model tests
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/reliability/reliabilityWorkbookParityModel.test.ts
       - name: Lint Reliability-owned frontend
         working-directory: frontend
-        run: npm exec -- eslint src/pages/reliability/*.tsx src/services/reliability.ts
+        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
+      - name: Install Chromium for representative-tenant UAT
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run representative-tenant browser UAT
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 > /tmp/reliability-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173 >/dev/null
+          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts
