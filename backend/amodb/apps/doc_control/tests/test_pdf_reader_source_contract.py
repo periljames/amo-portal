@@ -158,10 +158,10 @@ def test_pdfium_import_and_dependency_are_confined() -> None:
         text = path.read_text(encoding="utf-8")
         if re.search(r"(?:import|from)\s+pypdfium2", text):
             imports.append(path.relative_to(ROOT).as_posix())
-    assert imports == [
+    assert sorted(imports) == sorted([
         "backend/amodb/apps/doc_control/pdf_capability_service.py",
         "backend/amodb/apps/doc_control/pdfium_service.py",
-    ]
+    ])
 
 
 def test_reader_routes_precede_compatibility_routes() -> None:
