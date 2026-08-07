@@ -21,8 +21,10 @@ function appScroller(): HTMLElement | null {
 function scrollPrecisely(element: HTMLElement): void {
   const readerViewport = element.closest<HTMLElement>(".pdfv3-viewport");
   if (readerViewport) {
-    const top = Math.max(0, element.offsetTop - 14);
-    readerViewport.scrollTo({ top, behavior: "auto" });
+    const viewportRect = readerViewport.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    const top = readerViewport.scrollTop + elementRect.top - viewportRect.top - 14;
+    readerViewport.scrollTo({ top: Math.max(0, top), behavior: "auto" });
     return;
   }
 
