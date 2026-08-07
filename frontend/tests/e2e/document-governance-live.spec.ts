@@ -27,11 +27,13 @@ test.describe("Document Control governed workflow", () => {
   test("dashboard queues open a URL-backed bounded library", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control`);
     await expect(page.getByTestId("document-governance-dashboard")).toBeVisible();
-    const queue = page.getByRole("button", { name: /Ownership requirirg confirmation/i });
+    const queue = page.getByRole("button", { name: /Ownership requiring confirmation/i });
+    await expect(queue).toBeVisible();
     await queue.click();
     await expect(page).toHaveURL(/\/document-control\/library\?.*unresolved_ownership=true/);
     await expect(page.getByTestId("document-governance-library")).toBeVisible();
     await expect(page.getByRole("table")).toBeVisible();
+    await expect(page.getByText("DMS-CI-MOM")).toBeVisible();
   });
 
   test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {

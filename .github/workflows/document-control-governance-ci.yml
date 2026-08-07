@@ -6,6 +6,7 @@ name: Document Control Governance CI
     paths:
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
+      - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
@@ -23,6 +24,7 @@ name: Document Control Governance CI
     paths:
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
+      - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
@@ -83,7 +85,7 @@ jobs:
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Compile governed Document Control backend
-        run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py
+        run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py amodb/scripts/seed_document_governance_e2e.py
       - name: Verify one Alembic head
         run: |
           python - <<'PY'
@@ -166,44 +168,91 @@ jobs:
     name: Authenticated DMS governance and reader acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_document_control_browser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_document_control_browser"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      APP_ENV: test
+      SECRET_KEY: document-control-governance-browser-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
       E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
-      E2E_AMO_CODE: ${{ vars.E2E_AMO_CODE || 'safarilink' }}
-      E2E_AMO_ADMIN_EMAIL: ${{ secrets.E2E_AMO_ADMIN_EMAIL }}
-      E2E_AMO_ADMIN_PASSWORD: ${{ secrets.E2E_AMO_ADMIN_PASSWORD }}
-      E2E_DOCUMENT_GOVERNANCE_ID: ${{ secrets.E2E_DOCUMENT_GOVERNANCE_ID }}
-    defaults:
-      run:
-        working-directory: frontend
+      E2E_AMO_CODE: dmsgate
+      E2E_AMO_ADMIN_EMAIL: dms-gate@example.invalid
+      E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
+      E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
     steps:
       - uses: actions/checkout@v6
         with:
           show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Require live authenticated acceptance configuration
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Upgrade disposable browser database
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Seed authenticated governed document fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start backend and frontend
         shell: bash
         run: |
           set -euo pipefail
-          missing=0
-          for name in E2E_BASE_URL E2E_AMO_ADMIN_EMAIL E2E_AMO_ADMIN_PASSWORD E2E_DOCUMENT_GOVERNANCE_ID; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::$name is required for the authenticated Document Control merge gate"
-              missing=1
-            fi
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/dms-backend.log 2>&1 & echo $! > /tmp/dms-backend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-backend.log; exit 1; fi
+            sleep 1
           done
-          exit "$missing"
-      - name: Install frontend dependencies
-        run: npm ci --prefer-offline --no-audit --fund=false
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Run authenticated Document Control governance acceptance
+          (cd frontend && nohup npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
+            sleep 1
+          done
+      - name: Run real-login Document Control governance acceptance
+        working-directory: frontend
         run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
+      - name: Dump server logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo '--- backend ---'
+          cat /tmp/dms-backend.log 2>/dev/null || true
+          echo '--- frontend ---'
+          cat /tmp/dms-frontend.log 2>/dev/null || true
       - name: Upload Playwright evidence on failure
         if: failure()
         uses: actions/upload-artifact@v6
@@ -213,3 +262,9 @@ jobs:
             frontend/test-results
             frontend/playwright-report
           if-no-files-found: ignore
+      - name: Stop acceptance servers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/dms-frontend.pid ]; then kill "$(cat /tmp/dms-frontend.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/dms-backend.pid ]; then kill "$(cat /tmp/dms-backend.pid)" 2>/dev/null || true; fi
