@@ -41,6 +41,24 @@ export type IntegratedLibraryResponse = {
   pagination: { page: number; per_page: number; total: number; returned: number };
 };
 
+export type IntegratedLibraryFilters = {
+  q?: string;
+  nodeType?: string;
+  documentClass?: string;
+  status?: string;
+  ownerUserId?: string;
+  departmentId?: string;
+  indexingStatus?: string;
+  unresolvedOwnership?: boolean;
+  unresolvedRelationships?: boolean;
+  structureStatus?: string;
+  supersededReferenced?: boolean;
+  sort?: "code" | "title" | "type" | "status";
+  direction?: "asc" | "desc";
+  page?: number;
+  perPage?: number;
+};
+
 export type PhysicalCopyRegisterItem = ControlledCopy & {
   document: { id: string; code: string; title: string; manual_type: string };
   revision: { id: string; issue_number?: string | null; revision_number: string; status: string };
@@ -129,13 +147,22 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function listIntegratedLibrary(
   tenant: string,
-  filters: { q?: string; nodeType?: string; documentClass?: string; status?: string; page?: number; perPage?: number } = {},
+  filters: IntegratedLibraryFilters = {},
 ): Promise<IntegratedLibraryResponse> {
   return api(`${workspacePath(tenant, "/documents")}${queryString({
     q: filters.q,
     node_type: filters.nodeType,
     document_class: filters.documentClass,
     status: filters.status,
+    owner_user_id: filters.ownerUserId,
+    department_id: filters.departmentId,
+    indexing_status: filters.indexingStatus,
+    unresolved_ownership: filters.unresolvedOwnership,
+    unresolved_relationships: filters.unresolvedRelationships,
+    structure_status: filters.structureStatus,
+    superseded_referenced: filters.supersededReferenced,
+    sort: filters.sort || "code",
+    direction: filters.direction || "asc",
     page: filters.page || 1,
     per_page: filters.perPage || 50,
   })}`);
