@@ -69,7 +69,10 @@ def _exercise_formal_publication_controls(connection) -> None:
             :profile_id, :amo_id, 'OPERATOR', 'uat-1', 'Formal trigger fixture',
             'OPERATOR', 'TEST', 'ACTIVE', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
             '{}'::jsonb, '[]'::jsonb, '[12]'::jsonb, '{}'::jsonb, '{}'::jsonb,
-            '{"approval_roles":["QUALITY_MANAGER"],"separation_of_duties":false}'::jsonb,
+            jsonb_build_object(
+                'approval_roles', jsonb_build_array('QUALITY_MANAGER'),
+                'separation_of_duties', false
+            ),
             '{}'::jsonb, '[]'::jsonb, false, NOW(), NOW()
         )
     """), {"profile_id": profile_id, "amo_id": amo_id})
