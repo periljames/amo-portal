@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 
 const auditRows = Array.from({ length: 5 }, (_, index) => ({
   id: `audit-${index + 1}`,
@@ -110,42 +110,81 @@ function seedSession(storedToken: string) {
   localStorage.setItem("amo_slug", "demo");
   localStorage.setItem("amo_department", "quality");
   localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
-  localStorage.setItem(
-    "amo_current_user",
-    JSON.stringify({
-      id: "user-1",
-      amo_id: "amo-1",
-      department_id: null,
-      staff_code: "QUAL01",
-      email: "quality@example.com",
-      first_name: "Quality",
-      last_name: "Manager",
-      full_name: "Quality Manager",
-      role: "QUALITY_MANAGER",
-      position_title: "Quality Manager",
-      phone: null,
-      regulatory_authority: null,
-      licence_number: null,
-      licence_state_or_country: null,
-      licence_expires_on: null,
-      is_active: true,
-      is_superuser: false,
-      is_amo_admin: true,
-      must_change_password: false,
-      last_login_at: null,
-      last_login_ip: null,
-      created_at: "2026-03-19T00:00:00Z",
-      updated_at: "2026-03-19T00:00:00Z",
-    }),
-  );
+  localStorage.setItem("amo_current_user", JSON.stringify({
+    id: "user-1",
+    amo_id: "amo-1",
+    department_id: null,
+    staff_code: "QUAL01",
+    email: "quality@example.com",
+    first_name: "Quality",
+    last_name: "Manager",
+    full_name: "Quality Manager",
+    role: "QUALITY_MANAGER",
+    position_title: "Quality Manager",
+    phone: null,
+    regulatory_authority: null,
+    licence_number: null,
+    licence_state_or_country: null,
+    licence_expires_on: null,
+    is_active: true,
+    is_superuser: false,
+    is_amo_admin: true,
+    must_change_password: false,
+    last_login_at: null,
+    last_login_ip: null,
+    created_at: "2026-03-19T00:00:00Z",
+    updated_at: "2026-03-19T00:00:00Z",
+  }));
 }
 
 function isTenantApi(url: URL): boolean {
   return url.pathname.startsWith("/api/maintenance/");
 }
 
-async function fulfilShellRequest(route: Parameters<Parameters<typeof test>[1]>[0]["page"]["route"] extends never ? never : never) {
-  void route;
+async function fulfilShellRequest(route: Route, url: URL): Promise<boolean> {
+  if (url.pathname === "/auth/portal-preferences/" || url.pathname === "/auth/portal-preferences") {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        user_id: "user-1",
+        amo_id: "amo-1",
+        text_scale: "standard",
+        density: "comfortable",
+        motion: "system",
+        color_scheme: "light",
+        accent: "tenant",
+        version: 1,
+        updated_at: "2026-03-19T00:00:00Z",
+      }),
+    });
+    return true;
+  }
+  if (url.pathname.includes("/accounts/admin/admin-profile/")) {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
+    return true;
+  }
+  if (url.pathname === "/accounts/onboarding/status" || url.pathname === "/accounts/onboarding/status/") {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
+    return true;
+  }
+  if (url.pathname === "/billing/entitlements" || url.pathname === "/billing/entitlements/") {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
+    return true;
+  }
+  if (url.pathname === "/time" || url.pathname === "/time/") {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
+    return true;
+  }
+  if (url.pathname === "/healthz") {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    return true;
+  }
+  if (url.pathname.includes("/amo-assets/logo")) {
+    await route.fulfill({ status: 404, body: "" });
+    return true;
+  }
+  return false;
 }
 
 test("audit register uses the paged closeout contract without per-audit fan-out", async ({ page }) => {
@@ -156,17 +195,7 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
   await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/auth/portal-preferences/" || url.pathname === "/auth/portal-preferences") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        user_id: "user-1", amo_id: "amo-1", text_scale: "standard", density: "comfortable", motion: "system",
-        color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-03-19T00:00:00Z",
-      }) });
-    }
-    if (url.pathname.includes("/accounts/admin/admin-profile/")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
-    if (url.pathname === "/accounts/onboarding/status" || url.pathname === "/accounts/onboarding/status/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
-    if (url.pathname === "/billing/entitlements" || url.pathname === "/billing/entitlements/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
-    if (url.pathname === "/time" || url.pathname === "/time/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
-    if (url.pathname === "/healthz") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    if (await fulfilShellRequest(route, url)) return;
     if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/register/paged")) {
       pagedRegisterRequests += 1;
       expect(url.searchParams.get("limit")).toBe("25");
@@ -193,7 +222,6 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
       legacyFindingRequests += 1;
       return route.fulfill({ status: 500, body: "per-audit finding fan-out should not be called" });
     }
-    if (url.pathname.includes("/amo-assets/logo")) return route.fulfill({ status: 404, body: "" });
     return route.continue();
   });
 
@@ -213,17 +241,7 @@ test("evidence vault search uses one bounded canonical register request", async 
   await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/auth/portal-preferences/" || url.pathname === "/auth/portal-preferences") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        user_id: "user-1", amo_id: "amo-1", text_scale: "standard", density: "comfortable", motion: "system",
-        color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-03-19T00:00:00Z",
-      }) });
-    }
-    if (url.pathname.includes("/accounts/admin/admin-profile/")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
-    if (url.pathname === "/accounts/onboarding/status" || url.pathname === "/accounts/onboarding/status/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
-    if (url.pathname === "/billing/entitlements" || url.pathname === "/billing/entitlements/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
-    if (url.pathname === "/time" || url.pathname === "/time/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
-    if (url.pathname === "/healthz") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    if (await fulfilShellRequest(route, url)) return;
     if (isTenantApi(url) && url.pathname.endsWith("/quality/evidence-vault/search")) {
       boundedEvidenceRequests += 1;
       expect(url.searchParams.get("limit")).toBe("30");
@@ -235,15 +253,13 @@ test("evidence vault search uses one bounded canonical register request", async 
           module: "evidence-vault",
           view: "search",
           table: "qms_evidence_records",
-          items: [
-            {
-              id: "evidence-1",
-              reference: "EVD-001",
-              title: "Audit closeout evidence",
-              status: "ACTIVE",
-              created_at: "2026-03-19T00:00:00Z",
-            },
-          ],
+          items: [{
+            id: "evidence-1",
+            reference: "EVD-001",
+            title: "Audit closeout evidence",
+            status: "ACTIVE",
+            created_at: "2026-03-19T00:00:00Z",
+          }],
           columns: ["reference", "title", "status", "created_at"],
           limit: 30,
           offset: 0,
@@ -267,7 +283,6 @@ test("evidence vault search uses one bounded canonical register request", async 
       legacyPerCarAttachmentRequests += 1;
       return route.fulfill({ status: 500, body: "per-CAR attachment fan-out should not be called" });
     }
-    if (url.pathname.includes("/amo-assets/logo")) return route.fulfill({ status: 404, body: "" });
     return route.continue();
   });
 
