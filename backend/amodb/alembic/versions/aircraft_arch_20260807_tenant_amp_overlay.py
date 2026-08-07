@@ -44,6 +44,10 @@ def upgrade() -> None:
         "tenant_maintenance_programme_revisions",
         sa.Column("source_currentness_at_approval", sa.String(40), nullable=True),
     )
+    op.add_column(
+        "tenant_maintenance_programme_revisions",
+        sa.Column("approval_reference", sa.String(160), nullable=True),
+    )
     op.create_index(
         "ix_tenant_programme_revision_oem_baseline",
         "tenant_maintenance_programme_revisions",
@@ -146,6 +150,7 @@ def upgrade() -> None:
                        OR NEW.source_reference IS DISTINCT FROM OLD.source_reference
                        OR NEW.source_revision IS DISTINCT FROM OLD.source_revision
                        OR NEW.source_checksum_sha256 IS DISTINCT FROM OLD.source_checksum_sha256
+                       OR NEW.approval_reference IS DISTINCT FROM OLD.approval_reference
                        OR NEW.content_hash IS DISTINCT FROM OLD.content_hash THEN
                         RAISE EXCEPTION 'published tenant programme identity/content is immutable';
                     END IF;
@@ -199,6 +204,7 @@ def downgrade() -> None:
     op.drop_column("tenant_maintenance_programme_tasks", "source_content_task_id")
 
     op.drop_index("ix_tenant_programme_revision_oem_baseline", table_name="tenant_maintenance_programme_revisions")
+    op.drop_column("tenant_maintenance_programme_revisions", "approval_reference")
     op.drop_column("tenant_maintenance_programme_revisions", "source_currentness_at_approval")
     op.drop_column("tenant_maintenance_programme_revisions", "base_content_pack_revision_id")
 
