@@ -1,0 +1,113 @@
+name: PR 477 reader annotation overlays
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-reader-annotation-overlay.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Add exact PDF selection and in-page annotation rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          panel = Path('frontend/src/pages/manuals/PublicationGovernancePanel.tsx')
+          source = panel.read_text(encoding='utf-8')
+          semantic = '''function selectedSemanticLocation(): { section_id?: string; exact_quote?: string } {\n  const selection = window.getSelection();\n  const text = selection?.toString().trim() || "";\n  if (!selection?.rangeCount || !text) return {};\n  const range = selection.getRangeAt(0);\n  const element = (range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE\n    ? range.commonAncestorContainer\n    : range.commonAncestorContainer.parentElement) as Element | null;\n  const section = element?.closest<HTMLElement>(".publication-html-section[data-section-id]");\n  if (!section) return {};\n  return { section_id: section.dataset.sectionId, exact_quote: text.slice(0, 4000) };\n}\n'''
+          if source.count(semantic) != 1:
+              raise SystemExit('Semantic selection helper changed')
+          pdf = semantic + '''\nfunction selectedPdfLocation(): { page_number?: number; exact_quote?: string; normalized_rects?: Array<Record<string, number>> } {\n  const selection = window.getSelection();\n  const text = selection?.toString().trim() || "";\n  if (!selection?.rangeCount || !text) return {};\n  const range = selection.getRangeAt(0);\n  const element = (range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE\n    ? range.commonAncestorContainer\n    : range.commonAncestorContainer.parentElement) as Element | null;\n  const page = element?.closest<HTMLElement>(".pdfv3-page[data-page-number]");\n  const surface = page?.querySelector<HTMLElement>(".pdfv3-page-surface");\n  const pageNumber = Number(page?.dataset.pageNumber || 0);\n  if (!page || !surface || !Number.isInteger(pageNumber) || pageNumber < 1) return {};\n  const bounds = surface.getBoundingClientRect();\n  if (bounds.width <= 0 || bounds.height <= 0) return {};\n  const normalized_rects = [...range.getClientRects()].map((rect) => {\n    const left = Math.max(bounds.left, rect.left);\n    const top = Math.max(bounds.top, rect.top);\n    const right = Math.min(bounds.right, rect.right);\n    const bottom = Math.min(bounds.bottom, rect.bottom);\n    if (right <= left || bottom <= top) return null;\n    return {\n      x: Math.max(0, Math.min(1, (left - bounds.left) / bounds.width)),\n      y: Math.max(0, Math.min(1, (top - bounds.top) / bounds.height)),\n      width: Math.max(0, Math.min(1, (right - left) / bounds.width)),\n      height: Math.max(0, Math.min(1, (bottom - top) / bounds.height)),\n    };\n  }).filter((rect): rect is Record<string, number> => Boolean(rect && rect.width > 0 && rect.height > 0));\n  if (!normalized_rects.length) return {};\n  return { page_number: pageNumber, exact_quote: text.slice(0, 4000), normalized_rects };\n}\n'''
+          source = source.replace(semantic, pdf)
+          source = source.replace('  viewMode,\n}: {', '  viewMode,\n  onAnnotationsChanged,\n}: {')
+          source = source.replace('  viewMode: "layout" | "text";\n}) {', '  viewMode: "layout" | "text";\n  onAnnotationsChanged?: (items: ReaderAnnotation[]) => void;\n}) {')
+          old = '    const value = await listReaderAnnotations(tenant, manualId, revisionId);\n    setAnnotations(value.items);\n'
+          new = '    const value = await listReaderAnnotations(tenant, manualId, revisionId);\n    setAnnotations(value.items);\n    onAnnotationsChanged?.(value.items);\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation load marker changed')
+          source = source.replace(old, new)
+          source = source.replace('  }, [manualId, revisionId, tenant]);\n\n  const loadEvidence', '  }, [manualId, onAnnotationsChanged, revisionId, tenant]);\n\n  const loadEvidence', 1)
+          old = '      const selected = viewMode === "text" ? selectedSemanticLocation() : {};\n      const semanticSection = selected.section_id || (viewMode === "text" ? activeSectionId : undefined);\n      const pageNumber = viewMode === "layout" ? currentPage : undefined;\n      const effectiveType = annotationType === "HIGHLIGHT" && !selected.exact_quote ? "NOTE" : annotationType;\n'
+          new = '      const selected = viewMode === "text" ? selectedSemanticLocation() : selectedPdfLocation();\n      if (annotationType === "HIGHLIGHT" && !selected.exact_quote) {\n        setError("Select text in the document before creating a highlight.");\n        return;\n      }\n      const semanticSection = selected.section_id || (viewMode === "text" ? activeSectionId : undefined);\n      const pageNumber = selected.page_number || (viewMode === "layout" ? currentPage : undefined);\n      const effectiveType = annotationType;\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation selection marker changed')
+          source = source.replace(old, new)
+          old = '          exact_quote: selected.exact_quote,\n          normalized_rects: [],\n'
+          new = '          exact_quote: selected.exact_quote,\n          normalized_rects: selected.normalized_rects || [],\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation rect marker changed')
+          source = source.replace(old, new)
+          old = '{viewMode === "text" ? <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button> : null}'
+          new = '<button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button>'
+          if source.count(old) != 1:
+              raise SystemExit('Highlight button marker changed')
+          source = source.replace(old, new)
+          panel.write_text(source, encoding='utf-8')
+
+          viewer = Path('frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx')
+          source = viewer.read_text(encoding='utf-8')
+          source = source.replace('  onOutlineReady?: (items: PdfOutlineItem[]) => void;\n};', '''  onOutlineReady?: (items: PdfOutlineItem[]) => void;\n  governedAnnotations?: Array<{\n    id: string;\n    annotation_type: string;\n    color: string;\n    note_text?: string | null;\n    location?: { page_number?: number | null; normalized_rects?: Array<Record<string, number>> } | null;\n  }>;\n  onGovernedAnnotationClick?: (annotationId: string) => void;\n};''')
+          source = source.replace('  onOutlineReady,\n}: PublicationPdfLayoutViewerProps) {', '  onOutlineReady,\n  governedAnnotations = [],\n  onGovernedAnnotationClick,\n}: PublicationPdfLayoutViewerProps) {')
+          marker = '  const currentReferences = referencesByPage.get(currentPage) || [];\n'
+          addition = marker + '  const annotationsByPage = useMemo(() => {\n    const grouped = new Map<number, typeof governedAnnotations>();\n    for (const annotation of governedAnnotations) {\n      const page = Number(annotation.location?.page_number || 0);\n      if (!page) continue;\n      grouped.set(page, [...(grouped.get(page) || []), annotation]);\n    }\n    return grouped;\n  }, [governedAnnotations]);\n'
+          if source.count(marker) != 1:
+              raise SystemExit('Viewer current references marker changed')
+          source = source.replace(marker, addition)
+          old = '''              {(referencesByPage.get(pageNumber) || []).map((reference) => {\n                const style = hotspotStyle(reference);\n                if (!style || !reference.target) return null;\n                return (\n                  <button\n                    type="button"\n                    key={reference.id}\n                    className={[\n                      "publication-reference-hotspot",\n                      (activeReferenceId || selectedReferenceId) === reference.id\n                        ? "active"\n                        : "",\n                    ].filter(Boolean).join(" ")}\n                    style={style}\n                    aria-label={`${reference.raw_token}: open ${reference.target.code}`}\n                    onClick={() => openReference(reference)}\n                  />\n                );\n              })}\n'''
+          new = old + '''              {(annotationsByPage.get(pageNumber) || []).flatMap((annotation, annotationIndex) => {\n                const rects = annotation.location?.normalized_rects || [];\n                if (!rects.length) {\n                  return [<button\n                    type="button"\n                    key={`annotation-${annotation.id}`}\n                    className="publication-governed-annotation-pin"\n                    style={{ top: `${10 + annotationIndex * 30}px` }}\n                    title={annotation.note_text || annotation.annotation_type.replaceAll("_", " ")}\n                    aria-label={`Open ${annotation.annotation_type.replaceAll("_", " ")} annotation`}\n                    onClick={() => onGovernedAnnotationClick?.(annotation.id)}\n                  />];\n                }\n                return rects.map((rect, rectIndex) => (\n                  <button\n                    type="button"\n                    key={`annotation-${annotation.id}-${rectIndex}`}\n                    className={`publication-governed-annotation-mark is-${annotation.annotation_type.toLowerCase()}`}\n                    style={{\n                      left: `${Math.max(0, Math.min(1, Number(rect.x) || 0)) * 100}%`,\n                      top: `${Math.max(0, Math.min(1, Number(rect.y) || 0)) * 100}%`,\n                      width: `${Math.max(0.004, Math.min(1, Number(rect.width) || 0.004)) * 100}%`,\n                      height: `${Math.max(0.006, Math.min(1, Number(rect.height) || 0.006)) * 100}%`,\n                    }}\n                    title={annotation.note_text || annotation.annotation_type.replaceAll("_", " ")}\n                    aria-label={`Open ${annotation.annotation_type.replaceAll("_", " ")} annotation`}\n                    onClick={() => onGovernedAnnotationClick?.(annotation.id)}\n                  />\n                ));\n              })}\n'''
+          if source.count(old) != 1:
+              raise SystemExit('Viewer overlay marker changed')
+          source = source.replace(old, new)
+          viewer.write_text(source, encoding='utf-8')
+
+          page = Path('frontend/src/pages/manuals/PublicationsReaderPage.tsx')
+          source = page.read_text(encoding='utf-8')
+          marker = 'import PublicationGovernancePanel from "./PublicationGovernancePanel";\n'
+          if source.count(marker) != 1:
+              raise SystemExit('Reader governance panel import marker changed')
+          source = source.replace(marker, marker + 'import { listReaderAnnotations, type ReaderAnnotation } from "../../services/readerGovernance";\n')
+          marker = '  const [governanceOpen, setGovernanceOpen] = useState(() => Boolean(searchParams.get("annotation")));\n'
+          if source.count(marker) != 1:
+              raise SystemExit('Reader governance state marker changed')
+          source = source.replace(marker, marker + '  const [readerAnnotations, setReaderAnnotations] = useState<ReaderAnnotation[]>([]);\n')
+          effect_marker = '  const toggleSaved = () => {\n'
+          effect = '''  useEffect(() => {\n    if (!tenant || !manualId || !revId) return;\n    let active = true;\n    listReaderAnnotations(tenant, manualId, revId)\n      .then((value) => { if (active) setReaderAnnotations(value.items); })\n      .catch(() => { if (active) setReaderAnnotations([]); });\n    return () => { active = false; };\n  }, [manualId, revId, tenant]);\n\n'''
+          if source.count(effect_marker) != 1:
+              raise SystemExit('Reader saved marker changed')
+          source = source.replace(effect_marker, effect + effect_marker)
+          old = '                      onAcroFormDetected={setHasAcroForm}\n                      onOutlineReady={(items) => { setNativeOutline(items); const active = outlineForPage(items, currentPdfPage); if (active) setActiveOutlineKey(active.id); }}\n'
+          new = '                      onAcroFormDetected={setHasAcroForm}\n                      governedAnnotations={readerAnnotations}\n                      onGovernedAnnotationClick={() => setGovernanceOpen(true)}\n                      onOutlineReady={(items) => { setNativeOutline(items); const active = outlineForPage(items, currentPdfPage); if (active) setActiveOutlineKey(active.id); }}\n'
+          if source.count(old) != 1:
+              raise SystemExit('Reader viewer prop marker changed')
+          source = source.replace(old, new)
+          old = '            activeSectionId={activeSectionId}\n            viewMode={viewMode}\n'
+          new = '            activeSectionId={activeSectionId}\n            viewMode={viewMode}\n            onAnnotationsChanged={setReaderAnnotations}\n'
+          if source.count(old) != 1:
+              raise SystemExit('Reader panel prop marker changed')
+          source = source.replace(old, new)
+          page.write_text(source, encoding='utf-8')
+
+          css = Path('frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css')
+          source = css.read_text(encoding='utf-8')
+          source += '''\n.publication-governed-annotation-mark { position: absolute; z-index: 8; border: 0; border-radius: 2px; background: rgb(250 204 21 / 34%); box-shadow: inset 0 0 0 1px rgb(161 98 7 / 18%); cursor: pointer; mix-blend-mode: multiply; }\n.publication-governed-annotation-mark.is-evidence, .publication-governed-annotation-mark.is-finding { background: rgb(56 189 248 / 24%); box-shadow: inset 0 0 0 1px rgb(3 105 161 / 24%); }\n.publication-governed-annotation-mark:focus-visible, .publication-governed-annotation-pin:focus-visible { outline: 2px solid #175cd3; outline-offset: 2px; }\n.publication-governed-annotation-pin { position: absolute; right: 10px; z-index: 9; width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; background: #175cd3; box-shadow: 0 1px 4px rgb(16 24 40 / 25%); cursor: pointer; }\n'''
+          css.write_text(source, encoding='utf-8')
+          PY
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr477-reader-annotation-overlay.yml
+          git add frontend/src/pages/manuals/PublicationGovernancePanel.tsx frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx frontend/src/pages/manuals/PublicationsReaderPage.tsx frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css
+          git commit -m "feat(document-control): render governed reader annotations in document"
+          git push origin HEAD:agent/dms-reader-governance-completion
