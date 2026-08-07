@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session, noload
 
 from amodb.apps.accounts import models as account_models
@@ -27,12 +27,7 @@ def _access_license(
     amo_id: str,
     now: datetime,
 ) -> account_models.TenantLicense | None:
-    """Resolve the best billing record in one bounded query.
-
-    Active/trialing wins. An expired trial still inside grace is next. Otherwise
-    retain the most recent historical record so the caller can report CANCELLED /
-    TRIAL_EXPIRED instead of incorrectly returning NO_SUBSCRIPTION.
-    """
+    """Resolve the best billing record in one bounded query."""
     active_priority = case(
         (
             account_models.TenantLicense.status.in_(
@@ -146,9 +141,7 @@ def optimized_billing_access_status(
         or 0
     )
 
-    # Query 3: the earliest overdue invoice and the total overdue count in one
-    # windowed query, instead of first()+count() and then repeating both checks
-    # inside subscription projection.
+    # Query 3: the earliest overdue invoice and total overdue count in one query.
     overdue = (
         db.query(
             account_models.BillingInvoice.id.label("invoice_id"),
@@ -232,9 +225,91 @@ def optimized_billing_access_status(
     )
 
 
+def optimized_resolve_entitlements(
+    db: Session,
+    *,
+    amo_id: str,
+    as_of: datetime | None = None,
+) -> dict[str, account_schemas.ResolvedEntitlement]:
+    """Resolve only entitlements attached to licences that can grant access now.
+
+    The previous implementation joined entitlements for every historical licence
+    ever issued to the tenant and discarded inactive licences in Python. That
+    makes lookup cost grow with customer age. This query keeps one SQL round trip
+    while excluding cancelled/expired historical licence rows at the database.
+    """
+    now = as_of or datetime.now(timezone.utc)
+    license = account_models.TenantLicense
+    entitlement = account_models.LicenseEntitlement
+
+    active_period = and_(
+        license.status.in_([account_models.LicenseStatus.ACTIVE, account_models.LicenseStatus.TRIALING]),
+        or_(license.current_period_start.is_(None), license.current_period_start <= now),
+        or_(license.current_period_end.is_(None), license.current_period_end >= now),
+        or_(
+            license.status != account_models.LicenseStatus.TRIALING,
+            license.trial_ends_at.is_(None),
+            license.trial_ends_at >= now,
+        ),
+    )
+    grace_period = and_(
+        license.status == account_models.LicenseStatus.EXPIRED,
+        license.trial_grace_expires_at.isnot(None),
+        license.trial_grace_expires_at >= now,
+        license.is_read_only.is_(False),
+    )
+
+    rows = (
+        db.query(
+            entitlement.key,
+            entitlement.limit,
+            entitlement.is_unlimited,
+            license.id.label("license_id"),
+            license.term,
+            license.status,
+        )
+        .join(license, entitlement.license_id == license.id)
+        .filter(
+            license.amo_id == amo_id,
+            or_(active_period, grace_period),
+        )
+        .all()
+    )
+
+    resolved: dict[str, account_schemas.ResolvedEntitlement] = {}
+    for row in rows:
+        key = str(row.key)
+        if bool(row.is_unlimited):
+            resolved[key] = account_schemas.ResolvedEntitlement(
+                key=key,
+                is_unlimited=True,
+                limit=None,
+                source_license_id=row.license_id,
+                license_term=row.term,
+                license_status=row.status,
+            )
+            continue
+        candidate_limit = int(row.limit or 0)
+        existing = resolved.get(key)
+        if existing is None or (
+            not existing.is_unlimited
+            and int(existing.limit or 0) < candidate_limit
+        ):
+            resolved[key] = account_schemas.ResolvedEntitlement(
+                key=key,
+                is_unlimited=False,
+                limit=candidate_limit,
+                source_license_id=row.license_id,
+                license_term=row.term,
+                license_status=row.status,
+            )
+    return resolved
+
+
 def install_billing_access_hot_path() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
     account_services.get_billing_access_status = optimized_billing_access_status
+    account_services.resolve_entitlements = optimized_resolve_entitlements
     _INSTALLED = True
