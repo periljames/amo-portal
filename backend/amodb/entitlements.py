@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -23,22 +23,29 @@ from .security import get_current_active_user
 
 
 def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optional[bool]:
+    # (amo_id, module_code) is unique, so sorting every module-gated request is
+    # unnecessary. Keep this as a single indexed point lookup.
     subscription = (
         db.query(account_models.ModuleSubscription)
         .filter(
             account_models.ModuleSubscription.amo_id == amo_id,
             account_models.ModuleSubscription.module_code == module_key,
         )
-        .order_by(account_models.ModuleSubscription.updated_at.desc())
         .first()
     )
     if not subscription:
         return None
 
-    now = datetime.utcnow()
-    if subscription.effective_from and now < subscription.effective_from:
+    now = datetime.now(timezone.utc)
+    effective_from = subscription.effective_from
+    effective_to = subscription.effective_to
+    if effective_from and effective_from.tzinfo is None:
+        effective_from = effective_from.replace(tzinfo=timezone.utc)
+    if effective_to and effective_to.tzinfo is None:
+        effective_to = effective_to.replace(tzinfo=timezone.utc)
+    if effective_from and now < effective_from:
         return False
-    if subscription.effective_to and now > subscription.effective_to:
+    if effective_to and now > effective_to:
         return False
     return subscription.status in {
         account_models.ModuleSubscriptionStatus.ENABLED,
@@ -47,35 +54,19 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
 
 
 def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
-    """
-    Return True if the AMO has an active entitlement for the given module.
-
-    Unlimited entitlements always pass. Numeric entitlements require a
-    positive limit; 0 / None are treated as not entitled.
-    """
-
+    """Return True if the AMO has an active entitlement for the given module."""
     entitlements = account_services.resolve_entitlements(db, amo_id=amo_id)
     entitlement = entitlements.get(module_key)
 
     if entitlement is None:
         return False
-
     if entitlement.is_unlimited:
         return True
-
     return entitlement.limit is not None and entitlement.limit > 0
 
 
 def require_module(module_key: str) -> Callable[[account_models.User, Session], account_models.User]:
-    """
-    FastAPI dependency that blocks access when a module is not entitled.
-
-    Usage:
-        router = APIRouter(
-            prefix="/quality",
-            dependencies=[Depends(require_module("quality"))],
-        )
-    """
+    """FastAPI dependency that blocks access when a module is not entitled."""
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
@@ -99,24 +90,26 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 detail=access_status.lock_reason or "Billing access is locked for this account.",
             )
 
+        # Explicit module subscription is authoritative when present. Do not run
+        # the legacy entitlement query as well: that historical fallback can scan
+        # license records and was previously executed even when the answer was
+        # already known from the unique ModuleSubscription row.
         subscription_allowed = _has_module_subscription(db, amo_id, module_key)
-        entitlement_allowed = _has_module_entitlement(db, amo_id, module_key)
-
         if subscription_allowed is False:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Module '{module_key}' is not enabled for this account.",
             )
-
-        if subscription_allowed is not None and subscription_allowed:
+        if subscription_allowed is True:
             return current_user
 
-        if not entitlement_allowed:
+        # Backwards-compatible fallback for tenants still licensed exclusively
+        # through LicenseEntitlement records.
+        if not _has_module_entitlement(db, amo_id, module_key):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Module '{module_key}' is not enabled for this account.",
             )
-
         return current_user
 
     return dependency
