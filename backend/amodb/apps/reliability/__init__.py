@@ -24,6 +24,7 @@ from . import workbook_parity_statistics  # noqa: E402,F401
 from . import workbook_analysis_integrity  # noqa: E402,F401
 from . import workbook_revision_hardening  # noqa: E402,F401
 from . import management_reporting  # noqa: E402,F401
+from . import management_reporting_enrichment  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 
 workpack_integration.register(router)
@@ -42,5 +43,6 @@ structured_csv_import.register(router)
 workbook_analysis_integrity.register(router)
 workbook_parity_statistics.register(router)
 workbook_revision_hardening.register(router)
+management_reporting_enrichment.apply(management_reporting)
 management_reporting.register(router)
 workbook_rbac_hardening.apply(router)
