@@ -101,23 +101,24 @@ function createMockApi() {
     const path = url.pathname;
     const method = route.request().method();
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-
-    if (url.origin === "http://127.0.0.1:4173") {
-      if (path === "/api/realtime/presence" && method === "POST") return json({ state: "online" });
-      await route.continue();
-      return;
-    }
-
-    if (url.origin !== "http://127.0.0.1:8080") {
-      await route.continue();
-      return;
-    }
-
-    if (path.includes("/accounts/admin/admin-profile/")) return json({ eligible: false, active: false });
-    if (path.endsWith("/auth/onboarding-status")) return json({ is_complete: true, missing: [] });
-
     const root = "/reliability/formal-reporting";
-    if (!path.startsWith(root)) return json({ detail: "Not configured in formal Reliability UAT" }, 404);
+    const isFormalRequest = path.startsWith(root);
+
+    if (!isFormalRequest) {
+      if (url.origin === "http://127.0.0.1:4173") {
+        if (path === "/api/realtime/presence" && method === "POST") return json({ state: "online" });
+        await route.continue();
+        return;
+      }
+      if (url.origin === "http://127.0.0.1:8080") {
+        if (path.includes("/accounts/admin/admin-profile/")) return json({ eligible: false, active: false });
+        if (path.endsWith("/auth/onboarding-status")) return json({ is_complete: true, missing: [] });
+        return json({ detail: "Not configured in formal Reliability UAT" }, 404);
+      }
+      await route.continue();
+      return;
+    }
+
     const suffix = path.slice(root.length);
 
     if (suffix === "/profiles" && method === "GET") return json({ profiles: [profileFixture()] });
