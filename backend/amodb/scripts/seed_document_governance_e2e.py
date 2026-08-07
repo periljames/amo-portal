@@ -9,14 +9,23 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import hashlib
+from pathlib import Path
+import sys
+
+# Executing this file directly sets sys.path[0] to backend/amodb/scripts rather
+# than backend. Make the backend package root explicit so the deterministic CI
+# seed works regardless of the caller's working directory or PYTHONPATH.
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 # Importing the application registers the full model graph before we seed rows.
-from amodb.main import app as _app  # noqa: F401
-from amodb.apps.accounts import models as account_models
-from amodb.apps.doc_control import governance_models
-from amodb.apps.manuals import models as manual_models
-from amodb.database import WriteSessionLocal
-from amodb.security import get_password_hash
+from amodb.main import app as _app  # noqa: F401,E402
+from amodb.apps.accounts import models as account_models  # noqa: E402
+from amodb.apps.doc_control import governance_models  # noqa: E402
+from amodb.apps.manuals import models as manual_models  # noqa: E402
+from amodb.database import WriteSessionLocal  # noqa: E402
+from amodb.security import get_password_hash  # noqa: E402
 
 AMO_ID = "00000000-0000-4000-8000-000000000477"
 USER_ID = "00000000-0000-4000-8000-000000000478"
