@@ -68,6 +68,7 @@ jobs:
           amodb/apps/platform/commercial_accounting.py
           amodb/apps/platform/commercial_policy.py
           amodb/apps/platform/commercial_safety_policy.py
+          amodb/apps/platform/commercial_access_policy.py
           amodb/apps/platform/commercial_router.py
           amodb/jobs/saas_worker_safe.py
           amodb/database.py
