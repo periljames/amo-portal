@@ -2,7 +2,6 @@ export {
   PlanningDashboardPage,
   PlanningForecastPage,
   PlanningAmpPage,
-  PlanningTaskLibraryPage,
   PlanningAdSbPage,
   PlanningWorkPackagesPage,
   PlanningWorkOrdersPage,
@@ -13,6 +12,7 @@ export {
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
 
+export { OemBaselinePage as PlanningTaskLibraryPage } from "./planning/OemBaselinePage";
 export { DailyAircraftUtilisationPage as PlanningUtilisationPage } from "./planning/DailyAircraftUtilisationPage";
 
 export {
