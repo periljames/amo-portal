@@ -29,6 +29,11 @@ type HeaderFilters = {
   car: string;
 };
 
+type PaginationState = {
+  scopeKey: string;
+  page: number;
+};
+
 const EMPTY_FILTERS: HeaderFilters = {
   ref: "",
   finding: "",
@@ -51,7 +56,7 @@ const QualityAuditRegisterPage: React.FC = () => {
   const [debouncedQuickFilter, setDebouncedQuickFilter] = useState("");
   const [debouncedHeaderFilters, setDebouncedHeaderFilters] = useState<HeaderFilters>(EMPTY_FILTERS);
   const [pageSize, setPageSize] = useState<RegisterPageSize>(25);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationState>({ scopeKey: "", page: 1 });
   const { density, setDensity } = useDensityPreference("audit-register", "compact");
 
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -75,9 +80,26 @@ const QualityAuditRegisterPage: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [headerFilters, quickFilter]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [auditId, debouncedHeaderFilters, debouncedQuickFilter, pageSize, tab]);
+  const paginationScopeKey = useMemo(() => JSON.stringify([
+    tab,
+    auditId,
+    debouncedQuickFilter,
+    debouncedHeaderFilters.ref,
+    debouncedHeaderFilters.finding,
+    debouncedHeaderFilters.audit,
+    debouncedHeaderFilters.type,
+    debouncedHeaderFilters.owner,
+    debouncedHeaderFilters.car,
+    pageSize,
+  ]), [auditId, debouncedHeaderFilters, debouncedQuickFilter, pageSize, tab]);
+  const currentPage = pagination.scopeKey === paginationScopeKey ? pagination.page : 1;
+  const setCurrentPage = (nextPage: number | ((page: number) => number)) => {
+    setPagination((current) => {
+      const basePage = current.scopeKey === paginationScopeKey ? current.page : 1;
+      const page = typeof nextPage === "function" ? nextPage(basePage) : nextPage;
+      return { scopeKey: paginationScopeKey, page };
+    });
+  };
 
   const registerQuery = useQuery({
     queryKey: [
@@ -122,10 +144,6 @@ const QualityAuditRegisterPage: React.FC = () => {
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const pageStart = total === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1;
   const pageEnd = total === 0 ? 0 : Math.min(total, (safeCurrentPage - 1) * pageSize + rows.length);
-
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
 
   const loading = registerQuery.isLoading;
   const refreshing = registerQuery.isFetching && !registerQuery.isLoading;
