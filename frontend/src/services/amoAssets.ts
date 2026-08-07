@@ -1,11 +1,12 @@
 // src/services/amoAssets.ts
 
-import { getApiBaseUrl } from "./config";
+import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { authHeaders, getToken, handleAuthFailure } from "./auth";
 import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 
 const AMO_LOGO_CACHE_TTL_MS = 5 * 60 * 1000;
 const AMO_LOGO_FETCH_TIMEOUT_MS = 8000;
+const DEFAULT_DIRECT_DEV_BACKEND = "http://127.0.0.1:8080";
 
 type LogoCacheEntry = {
   blob: Blob | null;
@@ -51,11 +52,16 @@ function isLocalDevSurface(): boolean {
   return ["localhost", "127.0.0.1"].includes(hostname) && ["5173", "4173"].includes(port);
 }
 
+function resolveDirectDevBackend(): string {
+  const configured = import.meta.env.VITE_DIRECT_API_BASE_URL || import.meta.env.VITE_API_DIRECT_BASE_URL;
+  return normaliseBaseUrl(configured || DEFAULT_DIRECT_DEV_BACKEND);
+}
+
 function logoRequestUrls(amoId?: string | null): string[] {
   const path = withAmoId("/accounts/amo-assets/logo", amoId);
   const proxied = `${getApiBaseUrl()}${path}`;
-  const direct = `http://127.0.0.1:8080${path}`;
-  if (isLocalDevSurface()) return direct === proxied ? [proxied] : [direct, proxied];
+  const direct = `${resolveDirectDevBackend()}${path}`;
+  if (isLocalDevSurface()) return direct === proxied ? [proxied] : [proxied, direct];
   return [proxied];
 }
 
@@ -221,35 +227,37 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
     try {
       let lastError: unknown = null;
       for (const url of logoRequestUrls(amoId)) {
+        let res: Response;
         try {
-          const res = await fetch(url, {
+          res = await fetch(url, {
             method: "GET",
             headers: authHeaders(),
             signal: controller.signal,
             cache: "no-store",
           });
-
-          if (res.status === 401) {
-            handleAuthFailure("expired");
-            throw new Error("Session expired. Please sign in again.");
-          }
-
-          if (res.status === 404 || res.status === 204) {
-            return null;
-          }
-
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(text || `Request failed (${res.status})`);
-          }
-
-          const blob = await res.blob();
-          if (!blob || blob.size === 0) return null;
-          return blob;
         } catch (error) {
           lastError = error;
           if (controller.signal.aborted) throw error;
+          continue;
         }
+
+        if (res.status === 401) {
+          handleAuthFailure("expired");
+          throw new Error("Session expired. Please sign in again.");
+        }
+
+        if (res.status === 404 || res.status === 204) {
+          return null;
+        }
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `Request failed (${res.status})`);
+        }
+
+        const blob = await res.blob();
+        if (!blob || blob.size === 0) return null;
+        return blob;
       }
       throw lastError instanceof Error ? lastError : new Error("Unable to load AMO logo.");
     } catch (error) {
