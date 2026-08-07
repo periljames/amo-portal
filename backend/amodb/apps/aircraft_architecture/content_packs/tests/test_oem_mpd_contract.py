@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from amodb.apps.aircraft_architecture.content_packs import schemas, services
+from amodb.apps.aircraft_architecture.effectivity.evaluator import evaluate_expression
 
 
 CHECKSUM = "a" * 64
@@ -38,11 +39,11 @@ def task_with_interval(intervals: dict) -> schemas.ContentTaskCreate:
         raw_interval_text="25000 FC or 12 YR",
         raw_effectivity_text="Pre SB84-32-69 and Pre SB84-32-76",
         effectivity_expression_json={
-            "schema": "EFFECTIVITY_V1",
-            "all": [
-                {"msn": {"from": 4138, "to": 4278}},
-                {"pre_service_bulletin": "84-32-69"},
-                {"pre_service_bulletin": "84-32-76"},
+            "operator": "ALL",
+            "conditions": [
+                {"path": "aircraft.serial_number", "op": "between", "value": [4138, 4278]},
+                {"path": "configuration.sb_84_32_69", "op": "eq", "value": "PRE"},
+                {"path": "configuration.sb_84_32_76", "op": "eq", "value": "PRE"},
             ],
         },
         source_requirements_json=[
@@ -83,6 +84,14 @@ def test_q400_whichever_first_interval_is_preserved():
     )
     assert row.intervals_json["groups"][0]["mode"] == "WHICHEVER_FIRST"
     assert row.intervals_json["groups"][0]["limits"][1] == {"counter": "YR", "value": 12}
+    applicability = evaluate_expression(
+        row.effectivity_expression_json,
+        {
+            "aircraft": {"serial_number": 4200},
+            "configuration": {"sb_84_32_69": "PRE", "sb_84_32_76": "PRE"},
+        },
+    )
+    assert applicability.applicable is True
 
 
 def test_q400_structural_threshold_repeat_cut_in_and_repeat_are_first_class():
