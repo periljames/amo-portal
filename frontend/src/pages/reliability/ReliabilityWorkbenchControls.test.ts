@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { spreadsheetSafeText } from "./ReliabilityWorkbenchControls";
+import { spreadsheetSafeText } from "./ReliabilityWorkbenchUtils";
 
 describe("Reliability spreadsheet workbench safety", () => {
   it("neutralizes spreadsheet formula prefixes in exported or copied text", () => {
