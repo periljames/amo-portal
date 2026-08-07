@@ -67,8 +67,29 @@ def _params(report, start: date, aircraft: list[str]) -> dict[str, Any]:
     }
 
 
+def _aircraft_filter(params: dict[str, Any]) -> tuple[str, bool]:
+    """Return a typed-safe optional aircraft predicate for PostgreSQL.
+
+    SQLAlchemy represents an empty expanding parameter as a synthetic integer
+    subquery. Comparing a varchar aircraft serial to that empty integer subquery
+    fails in PostgreSQL even when the surrounding boolean branch is false. Do
+    not compile the expanding predicate at all when the frozen effectivity is
+    whole-fleet.
+    """
+    use_aircraft = bool(params.get("use_aircraft"))
+    return ("AND aircraft_serial_number IN :aircraft" if use_aircraft else "", use_aircraft)
+
+
+def _prepare(statement_sql: str, *, use_aircraft: bool):
+    statement = text(statement_sql)
+    if use_aircraft:
+        statement = statement.bindparams(bindparam("aircraft", expanding=True))
+    return statement
+
+
 def _utilisation_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any]]:
-    statement = text("""
+    aircraft_filter, use_aircraft = _aircraft_filter(params)
+    statement = _prepare(f"""
         WITH approved_au AS (
           SELECT
             date_trunc('month', event_date)::date AS month,
@@ -80,7 +101,7 @@ def _utilisation_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any
             AND status IN ('APPROVED', 'CLOSED')
             AND event_date BETWEEN :start_date AND :end_date
             AND created_at <= :cutoff
-            AND (NOT :use_aircraft OR aircraft_serial_number IN :aircraft)
+            {aircraft_filter}
         )
         SELECT
           month,
@@ -92,12 +113,13 @@ def _utilisation_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any
         FROM approved_au
         GROUP BY month
         ORDER BY month
-    """).bindparams(bindparam("aircraft", expanding=True))
+    """, use_aircraft=use_aircraft)
     return [dict(row) for row in db.execute(statement, params).mappings().all()]
 
 
 def _event_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any]]:
-    statement = text("""
+    aircraft_filter, use_aircraft = _aircraft_filter(params)
+    statement = _prepare(f"""
         SELECT
           date_trunc('month', occurred_at)::date AS month,
           COUNT(*) AS event_count
@@ -107,15 +129,16 @@ def _event_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any]]:
           AND occurred_at < (CAST(:end_date AS date) + INTERVAL '1 day')
           AND created_at <= :cutoff
           AND validation_status = 'VALID'
-          AND (NOT :use_aircraft OR aircraft_serial_number IN :aircraft)
+          {aircraft_filter}
         GROUP BY month
         ORDER BY month
-    """).bindparams(bindparam("aircraft", expanding=True))
+    """, use_aircraft=use_aircraft)
     return [dict(row) for row in db.execute(statement, params).mappings().all()]
 
 
 def _domain_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any]]:
-    statement = text("""
+    aircraft_filter, use_aircraft = _aircraft_filter(params)
+    statement = _prepare(f"""
         SELECT
           date_trunc('month', event_date)::date AS month,
           dataset_code,
@@ -126,10 +149,10 @@ def _domain_rows(db: Session, params: dict[str, Any]) -> list[dict[str, Any]]:
           AND status IN ('APPROVED', 'CLOSED')
           AND event_date BETWEEN :start_date AND :end_date
           AND created_at <= :cutoff
-          AND (NOT :use_aircraft OR aircraft_serial_number IN :aircraft)
+          {aircraft_filter}
         GROUP BY month, dataset_code
         ORDER BY month, dataset_code
-    """).bindparams(bindparam("aircraft", expanding=True))
+    """, use_aircraft=use_aircraft)
     return [dict(row) for row in db.execute(statement, params).mappings().all()]
 
 
