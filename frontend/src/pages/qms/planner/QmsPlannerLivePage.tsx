@@ -148,15 +148,18 @@ function usePlannerDialogFocusManagement(): void {
     };
 
     const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
+      let restored = false;
       const restore = () => {
-        if (currentDialogs().length) return;
+        if (restored || currentDialogs().length) return;
         const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
-        if (target && document.activeElement !== target) target.focus({ preventScroll: true });
+        if (!target) return;
+        if (document.activeElement !== target) target.focus({ preventScroll: true });
+        restored = document.activeElement === target;
       };
 
       // React can replace the inspector action row more than once while a
-      // reschedule modal closes. Resolve the live fallback on each retry so
-      // focus lands on the current opener rather than a detached button.
+      // reschedule modal closes. Retry only until focus is successfully restored;
+      // once restored, later timers must not steal focus from the user's next action.
       window.requestAnimationFrame(() => {
         restore();
         FOCUS_RESTORE_DELAYS_MS.forEach((delay) => {
@@ -179,7 +182,7 @@ function usePlannerDialogFocusManagement(): void {
         const outside = lastOutsideFocusRef.current;
         openDialogs.set(
           dialog,
-          firstFocusable(intended, outside, fallbackTrigger(dialog)),
+          firstFocusable(intended, fallbackTrigger(dialog), outside),
         );
         intendedTriggerRef.current = null;
 
