@@ -14,6 +14,7 @@ from . import operational_hardening  # noqa: E402,F401
 from . import analytics_dashboard  # noqa: E402,F401
 from . import workbook_parity  # noqa: E402,F401
 from . import workbook_parity_contract_hardening  # noqa: E402,F401
+from . import workbook_daily_contract_hardening  # noqa: E402,F401
 from . import workbook_parity_defaults  # noqa: E402,F401
 from . import workbook_reference_hardening  # noqa: E402,F401
 from . import workbook_authority_hardening  # noqa: E402,F401
