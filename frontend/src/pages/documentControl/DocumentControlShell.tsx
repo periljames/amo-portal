@@ -88,17 +88,17 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
     workspaces: [
       {
         id: "library",
-        label: "Controlled library",
+        label: "Company library",
         path: "/library",
         icon: BookOpen,
-        description: "Search, filter, register, and open the permitted revision.",
+        description: "Policies, manuals, procedures, work instructions, forms and permitted external data.",
       },
       {
         id: "structure",
         label: "Document structure",
         path: "/structure",
         icon: FolderTree,
-        description: "Classification, hierarchy, applicability, and document ownership.",
+        description: "Full hierarchy, classification, applicability, and document ownership.",
       },
       {
         id: "records",
@@ -176,10 +176,10 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
       },
       {
         id: "copies",
-        label: "Controlled copies",
+        label: "Physical library",
         path: "/controlled-copies",
         icon: Copy,
-        description: "Numbered-copy custody, recall, return, and destruction.",
+        description: "Shelf location, QR checkout, named custody, due return, recall and disposition.",
         controlOnly: true,
       },
       {
@@ -204,7 +204,7 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
         label: "QMS and module links",
         path: "/integrations",
         icon: Link2,
-        description: "Trace release blockers to live records in their owning modules.",
+        description: "Trace controlled documents to live records in their owning modules.",
         controlOnly: true,
       },
       {
