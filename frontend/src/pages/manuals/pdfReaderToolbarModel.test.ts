@@ -36,6 +36,8 @@ describe("pdfReaderToolbarModel", () => {
     expect(pdfPageWidth({ ...base, mode: "WIDTH" })).toBe(1000);
     expect(pdfPageWidth({ ...base, mode: "ACTUAL" })).toBe(600);
     expect(pdfPageWidth({ ...base, mode: "CUSTOM", zoom: 200 })).toBe(1200);
-    expect(pdfPageWidth({ ...base, mode: "AUTO" })).toBe(600);
+    // Automatic zoom preserves actual size only when the whole page fits;
+    // this 600 x 840 page must therefore fall back to the 500px page-fit size.
+    expect(pdfPageWidth({ ...base, mode: "AUTO" })).toBe(500);
   });
 });
