@@ -28,6 +28,10 @@ class WorkbookDatasetCode(str, Enum):
     RM = "RM"
     SM = "SM"
     SR = "SR"
+    SB = "SB"
+    CS = "CS"
+    AS = "AS"
+    UR = "UR"
     STRUCTURES = "STRUCTURES"
     RECURRING = "RECURRING"
     ECTM = "ECTM"
@@ -52,6 +56,11 @@ class StatisticalAlertRequest(wp.StatisticalAlertRequest):
     @model_validator(mode="after")
     def validate_extended_contract(self):
         return super().validate_contract()
+
+
+def _dataset_code(value: Any) -> WorkbookDatasetCode:
+    """Normalise string or cross-module enum values into this contract enum."""
+    return WorkbookDatasetCode(getattr(value, "value", value))
 
 
 def _new_dataset(
@@ -187,7 +196,7 @@ def _extend_normalisation() -> None:
 
     def normalise(dataset: DatasetDefinition, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         normalised, derived = original(dataset, payload)
-        code = WorkbookDatasetCode(dataset.code)
+        code = _dataset_code(dataset.code)
         if code == WorkbookDatasetCode.FI:
             departures = Decimal(str(normalised.get("departures") or 0))
             dispatch_successes = normalised.get("dispatch_successes")
@@ -258,7 +267,7 @@ def _extend_canonical_mapping() -> None:
     original = wp._event_type_for
 
     def event_type_for(record: wp.ReliabilityWorkbookRecord):
-        code = WorkbookDatasetCode(record.dataset_code)
+        code = _dataset_code(record.dataset_code)
         if code == WorkbookDatasetCode.FI:
             mapping = {
                 "TECHNICAL_DELAY": reliability_models.ReliabilityEventTypeEnum.TECHNICAL_DELAY,
