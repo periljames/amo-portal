@@ -90,26 +90,33 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Compile governed Document Control backend
         run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py amodb/scripts/seed_document_governance_e2e.py
-      - name: Verify one Alembic head
+      - name: Verify one Alembic head and merged ancestry
         run: |
           python - <<'PY'
           from alembic.config import Config
           from alembic.script import ScriptDirectory
+
           config = Config("amodb/alembic.ini")
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_20260807_qms_audit_runtime"], heads
-          assert script.get_revision("docgov_20260806_governance") is not None
-          assert script.get_revision("docgov_merge_20260807") is not None
-          assert script.get_revision("docgov_20260807_reader_governance") is not None
-          assert script.get_revision("docgov_merge_20260807_heads") is not None
-          assert script.get_revision("merge_20260807_qms_planner_aircraft") is not None
-          assert script.get_revision("docgov_merge_20260807_qms") is not None
-          assert script.get_revision("docgov_20260807_qms_audit_runtime") is not None
+          assert heads == ["docgov_rel_20260807_merge"], heads
+          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+          required = {
+              "docgov_20260806_governance",
+              "docgov_merge_20260807",
+              "docgov_20260807_reader_governance",
+              "docgov_merge_20260807_heads",
+              "merge_20260807_qms_planner_aircraft",
+              "docgov_merge_20260807_qms",
+              "docgov_20260807_qms_audit_runtime",
+              "rel_20260807_main_merge",
+          }
+          missing = required - ancestry
+          assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
           PY
       - name: Upgrade clean PostgreSQL schema
-        run: alembic -c amodb/alembic.ini upgrade heads
+        run: alembic -c amodb/alembic.ini upgrade head
       - name: Configure mappers and verify governed reader and physical-library routes
         run: |
           python - <<'PY'
@@ -167,6 +174,7 @@ jobs:
           src/services/documentGovernance.ts
           src/services/readerGovernance.ts
           src/pages/DocControlPages.tsx
+          src/pages/documentControl/documentControlRoute.ts
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
           src/pages/documentControl/DocumentGovernanceRecordPage.tsx
           src/pages/documentControl/DocumentLibraryHubPage.tsx
@@ -230,7 +238,7 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Upgrade disposable browser database
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade heads
+        run: alembic -c amodb/alembic.ini upgrade head
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py
