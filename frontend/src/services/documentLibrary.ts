@@ -100,6 +100,15 @@ function queryString(values: Record<string, string | number | boolean | undefine
   return value ? `?${value}` : "";
 }
 
+function serverUtcDate(value?: string | null): string | null | undefined {
+  if (!value) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  // Existing Document Control date columns use UTC-naive service timestamps.
+  // Preserve the actual instant while avoiding aware/naive comparison failures.
+  return parsed.toISOString().replace(/Z$/, "");
+}
+
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(authHeaders());
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
@@ -159,7 +168,10 @@ export function registerPhysicalCopy(
     metadata?: Record<string, unknown>;
   },
 ): Promise<ControlledCopy> {
-  return api(workspacePath(tenant, "/controlled-copies"), { method: "POST", body: JSON.stringify(payload) });
+  return api(workspacePath(tenant, "/controlled-copies"), {
+    method: "POST",
+    body: JSON.stringify({ ...payload, due_back_at: serverUtcDate(payload.due_back_at) }),
+  });
 }
 
 export function scanPhysicalCopy(tenant: string, copyId: string): Promise<ControlledCopyScan> {
@@ -180,7 +192,7 @@ export function circulatePhysicalCopy(
 ): Promise<ControlledCopyScan> {
   return api(workspacePath(tenant, `/controlled-copies/${encodeURIComponent(copyId)}/circulation`), {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, due_back_at: serverUtcDate(payload.due_back_at) }),
   });
 }
 
