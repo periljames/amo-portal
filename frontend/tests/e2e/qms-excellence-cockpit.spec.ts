@@ -1,6 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
@@ -38,9 +37,154 @@ function controlRecord(approvalStatus: "PENDING_APPROVAL" | "APPROVED" = "PENDIN
   };
 }
 
+function operationalDashboard() {
+  return {
+    contract: "qms-operational-dashboard.v2",
+    tenant: { amo_code: "tenant-a", amo_id: "amo-a" },
+    as_of: "2026-08-07T07:30:00Z",
+    action_queue: [
+      {
+        id: "overdue-cars",
+        label: "Overdue corrective actions",
+        count: 2,
+        oldest_age_days: 18,
+        owner_status: "assigned",
+        next_action: "Review containment and closure plan",
+        route: "/maintenance/tenant-a/quality/cars/overdue",
+        tone: "danger",
+        priority: 100,
+        regulatory_consequence: "corrective_action_overdue",
+      },
+      {
+        id: "audit-due",
+        label: "Audits due within 30 days",
+        count: 3,
+        oldest_age_days: 0,
+        owner_status: "audit_programme",
+        next_action: "Confirm audit plan",
+        route: "/maintenance/tenant-a/quality/audits/schedule",
+        tone: "warning",
+        priority: 70,
+        regulatory_consequence: "planned_surveillance_due",
+      },
+    ],
+    my_work: [
+      {
+        id: "work-1",
+        title: "Review CAR QMS-CAR-026",
+        severity: "MAJOR",
+        created_at: "2026-08-07T06:30:00Z",
+        route: "/maintenance/tenant-a/quality/cars/register",
+      },
+    ],
+    upcoming_obligations: [
+      {
+        id: "obligation-1",
+        module: "audits",
+        entity_type: "audit",
+        entity_id: "audit-1",
+        title: "Base maintenance audit",
+        date: "2026-08-20",
+        event_type: "AUDIT_DUE",
+        link: "/maintenance/tenant-a/quality/audits/schedule",
+        due_state: "upcoming",
+        actionable: true,
+        subtitle: "Nairobi base",
+      },
+    ],
+    performance_kpis: [
+      {
+        id: "capa-on-time",
+        label: "CAR closure on time",
+        current: 86,
+        target: 95,
+        previous: 82,
+        direction: "improving",
+        unit: "%",
+        route: "/maintenance/tenant-a/quality/reports/executive-dashboard",
+        data_status: "available",
+      },
+    ],
+    aging_buckets: {},
+    unassigned_counts: {},
+    severity_breakdown: {},
+    period_comparisons: { status: "available", note: "Current and previous periods available." },
+    data_freshness: { generated_at: "2026-08-07T07:30:00Z", counter_source: "live", counter_as_of: "2026-08-07T07:30:00Z" },
+    source_health: { status: "healthy", error_count: 0, errors_by_source: {}, errors: [] },
+    counters: { overdue_cars: 2, audits_due_30: 3 },
+    trace_id: "qms-dashboard-v2-test",
+    elapsed_ms: 18,
+  };
+}
+
+function assuranceOverview() {
+  return {
+    tenant: { amo_code: "tenant-a", amo_id: "amo-a" },
+    as_of: "2026-08-04T04:00:00Z",
+    readiness: {
+      score: 78,
+      band: "WATCH",
+      dimensions: [
+        { id: "audit_programme", label: "Audit Programme", score: 82, weight: 0.15 },
+        { id: "capa_discipline", label: "Capa Discipline", score: 68, weight: 0.15 },
+        { id: "finding_control", label: "Finding Control", score: 76, weight: 0.08 },
+        { id: "document_currency", label: "Document Currency", score: 90, weight: 0.08 },
+        { id: "competence", label: "Competence", score: 80, weight: 0.08 },
+        { id: "supplier_calibration", label: "Supplier Calibration", score: 74, weight: 0.1 },
+        { id: "risk_change", label: "Risk Change", score: 72, weight: 0.1 },
+        { id: "continuous_controls", label: "Continuous Controls", score: 70, weight: 0.16 },
+        { id: "external_commitments", label: "External Commitments", score: 85, weight: 0.05 },
+        { id: "management_review", label: "Management Review", score: 88, weight: 0.05 },
+      ],
+      method: "cross_module_continuous_assurance_v2",
+      disclaimer: "Readiness is a transparent operational indicator, not a regulatory compliance declaration.",
+    },
+    metrics: {
+      overdue_audits: 1,
+      audits_due_30: 3,
+      open_cars: 5,
+      overdue_cars: 2,
+      cars_due_30: 2,
+      open_findings: 4,
+      active_documents: 26,
+      draft_documents: 2,
+      expired_training: 1,
+      expired_supplier_approvals: 1,
+      supplier_approvals_due_30: 2,
+      overdue_calibrations: 1,
+      calibrations_due_30: 2,
+      out_of_tolerance: 0,
+      critical_risks: 1,
+      pending_changes: 2,
+      open_regulator_findings: 1,
+      overdue_review_actions: 1,
+      active_controls: 8,
+      controls_due: 2,
+      verified_controls: 6,
+      invalid_evidence: 1,
+      pending_assurance_events: 1,
+      proposed_insights: 2,
+    },
+    priority_queue: [
+      { id: "overdue-cars", label: "Overdue corrective actions", count: 2, severity: "CRITICAL", why: "Closure dates have passed while CAR records remain open.", path: "/maintenance/tenant-a/quality/cars/overdue" },
+      { id: "regulator-findings", label: "Open regulator findings", count: 1, severity: "CRITICAL", why: "Authority findings remain open.", path: "/maintenance/tenant-a/quality/external-interface/regulator-findings" },
+    ],
+    forecast: { commitments_due_30_days: 11, band: "ELEVATED", explanation: "Audit, CAR, control-test, supplier-approval and calibration commitments falling within 30 days." },
+    capabilities: [
+      { id: "control-twin", label: "Approved control twin", description: "Versioned controls.", path: "/maintenance/tenant-a/quality?hub=controls" },
+      { id: "evidence-graph", label: "Validated evidence graph", description: "Tenant-validated evidence.", path: "/maintenance/tenant-a/quality?hub=evidence" },
+      { id: "management-pack", label: "Management-review pack", description: "Decision-ready inputs.", path: "/maintenance/tenant-a/quality/management-review/dashboard" },
+      { id: "human-intelligence", label: "Human-governed intelligence", description: "Advisory recommendations.", path: "/maintenance/tenant-a/quality?hub=intelligence" },
+    ],
+    source_coverage: { available: 17, warnings: 0 },
+    warnings: [],
+  };
+}
+
 async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
   const token = futureToken();
   let approvalStatus: "PENDING_APPROVAL" | "APPROVED" = "PENDING_APPROVAL";
+
   await page.addInitScript(({ storedToken, storedRole }) => {
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
@@ -104,72 +248,13 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
       return;
     }
 
+    if (path.endsWith("/quality/dashboard-v2")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(operationalDashboard()) });
+      return;
+    }
+
     if (path.endsWith("/quality/excellence/overview/full")) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          tenant: { amo_code: "tenant-a", amo_id: "amo-a" },
-          as_of: "2026-08-04T04:00:00Z",
-          readiness: {
-            score: 78,
-            band: "WATCH",
-            dimensions: [
-              { id: "audit_programme", label: "Audit Programme", score: 82, weight: 0.15 },
-              { id: "capa_discipline", label: "Capa Discipline", score: 68, weight: 0.15 },
-              { id: "finding_control", label: "Finding Control", score: 76, weight: 0.08 },
-              { id: "document_currency", label: "Document Currency", score: 90, weight: 0.08 },
-              { id: "competence", label: "Competence", score: 80, weight: 0.08 },
-              { id: "supplier_calibration", label: "Supplier Calibration", score: 74, weight: 0.1 },
-              { id: "risk_change", label: "Risk Change", score: 72, weight: 0.1 },
-              { id: "continuous_controls", label: "Continuous Controls", score: 70, weight: 0.16 },
-              { id: "external_commitments", label: "External Commitments", score: 85, weight: 0.05 },
-              { id: "management_review", label: "Management Review", score: 88, weight: 0.05 },
-            ],
-            method: "cross_module_continuous_assurance_v2",
-            disclaimer: "Readiness is a transparent operational indicator, not a regulatory compliance declaration.",
-          },
-          metrics: {
-            overdue_audits: 1,
-            audits_due_30: 3,
-            open_cars: 5,
-            overdue_cars: 2,
-            cars_due_30: 2,
-            open_findings: 4,
-            active_documents: 26,
-            draft_documents: 2,
-            expired_training: 1,
-            expired_supplier_approvals: 1,
-            supplier_approvals_due_30: 2,
-            overdue_calibrations: 1,
-            calibrations_due_30: 2,
-            out_of_tolerance: 0,
-            critical_risks: 1,
-            pending_changes: 2,
-            open_regulator_findings: 1,
-            overdue_review_actions: 1,
-            active_controls: 8,
-            controls_due: 2,
-            verified_controls: 6,
-            invalid_evidence: 1,
-            pending_assurance_events: 1,
-            proposed_insights: 2,
-          },
-          priority_queue: [
-            { id: "overdue-cars", label: "Overdue corrective actions", count: 2, severity: "CRITICAL", why: "Closure dates have passed while CAR records remain open.", path: "/maintenance/tenant-a/quality/cars/overdue" },
-            { id: "regulator-findings", label: "Open regulator findings", count: 1, severity: "CRITICAL", why: "Authority findings remain open.", path: "/maintenance/tenant-a/quality/external-interface/regulator-findings" },
-          ],
-          forecast: { commitments_due_30_days: 11, band: "ELEVATED", explanation: "Audit, CAR, control-test, supplier-approval and calibration commitments falling within 30 days." },
-          capabilities: [
-            { id: "control-twin", label: "Approved control twin", description: "Versioned controls.", path: "/maintenance/tenant-a/quality?hub=controls" },
-            { id: "evidence-graph", label: "Validated evidence graph", description: "Tenant-validated evidence.", path: "/maintenance/tenant-a/quality?hub=evidence" },
-            { id: "management-pack", label: "Management-review pack", description: "Decision-ready inputs.", path: "/maintenance/tenant-a/quality/management-review/dashboard" },
-            { id: "human-intelligence", label: "Human-governed intelligence", description: "Advisory recommendations.", path: "/maintenance/tenant-a/quality?hub=intelligence" },
-          ],
-          source_coverage: { available: 17, warnings: 0 },
-          warnings: [],
-        }),
-      });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(assuranceOverview()) });
       return;
     }
 
@@ -246,7 +331,11 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
 
     if (path.endsWith("/quality/excellence/events")) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }], total: 1 }) });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }], total: 1 }),
+      });
       return;
     }
 
@@ -303,18 +392,31 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
-test("QMS root directly renders the cross-module assurance control centre", async ({ page }) => {
+test("QMS root prioritises operational work and progressively exposes analytics", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 950 });
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality", { waitUntil: "domcontentloaded" });
 
-  const cockpit = page.locator(".qew-page");
-  await expect(cockpit).toBeVisible();
-  await expect(cockpit.getByRole("heading", { name: "Quality Control Centre" })).toBeVisible();
-  await expect(cockpit.getByLabel(/Operational readiness 78 percent/)).toBeVisible();
-  await expect(cockpit.getByText("Overdue corrective actions", { exact: true }).first()).toBeVisible();
-  await expect(cockpit.getByText("Expired supplier approvals")).toBeVisible();
-  await expect(cockpit.getByText("Overdue calibration")).toBeVisible();
+  const controlCentre = page.locator(".qms-control-centre");
+  await expect(controlCentre).toBeVisible();
+  await expect(controlCentre.getByRole("heading", { name: "Control Centre" })).toBeVisible();
+  await expect(controlCentre.getByText("Intervention required", { exact: true }).first()).toBeVisible();
+  await expect(controlCentre.getByRole("heading", { name: "Needs action" })).toBeVisible();
+  await expect(controlCentre.getByText("Overdue corrective actions", { exact: true })).toBeVisible();
+  await expect(controlCentre.getByRole("heading", { name: "My work" })).toBeVisible();
+  await expect(controlCentre.getByText("Review CAR QMS-CAR-026")).toBeVisible();
+
+  const forwardView = controlCentre.locator("details.qms-control-centre__disclosure");
+  await expect(forwardView).not.toHaveAttribute("open", "");
+  await forwardView.getByText("Forward view and performance", { exact: true }).click();
+  await expect(forwardView).toHaveAttribute("open", "");
+  await expect(forwardView.getByText("Base maintenance audit")).toBeVisible();
+  await expect(forwardView.getByText("CAR closure on time")).toBeVisible();
+
+  await controlCentre.getByRole("link", { name: "Controls" }).click();
+  await expect(page).toHaveURL(/\?hub=controls$/);
+  await expect(page.locator(".qew-page")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Versioned control library" })).toBeVisible();
   await expect(page.locator("html")).not.toHaveClass(/quality-excellence-active/);
 });
 
