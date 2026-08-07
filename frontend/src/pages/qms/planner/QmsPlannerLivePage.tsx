@@ -110,13 +110,29 @@ function usePlannerDialogFocusManagement(): void {
       if (scheduledRestoreDialogs.has(dialog)) return;
       scheduledRestoreDialogs.add(dialog);
 
-      let restored = false;
+      let restoredOnce = false;
+      let cancelled = false;
       const restore = () => {
-        if (restored || currentDialogs().length) return;
+        if (cancelled || currentDialogs().length) return;
         const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
         if (!target) return;
-        if (document.activeElement !== target) target.focus({ preventScroll: true });
-        restored = document.activeElement === target;
+
+        const active = document.activeElement as HTMLElement | null;
+        const activeIsMeaningfulOther = Boolean(
+          restoredOnce
+            && active
+            && active !== target
+            && active !== document.body
+            && active !== document.documentElement
+            && isFocusable(active),
+        );
+        if (activeIsMeaningfulOther) {
+          cancelled = true;
+          return;
+        }
+
+        if (active !== target) target.focus({ preventScroll: true });
+        if (document.activeElement === target) restoredOnce = true;
       };
 
       window.requestAnimationFrame(() => {
