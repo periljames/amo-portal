@@ -124,7 +124,7 @@ export type AmpValidation = {
   blocking_count: number;
   warning_count: number;
   issues: ValidationIssue[];
-  summary: Record<string, unknown>;
+  summary: Record<string, number | string | boolean | null>;
   validation_run_id: string | null;
 };
 
