@@ -1,3 +1,4 @@
+/* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
 import type { ReactNode } from "react";
 import {
   Archive,
@@ -10,7 +11,6 @@ import {
   Database,
   FileClock,
   FileCog,
-  FileDiff,
   FileSearch,
   FolderTree,
   Gauge,
@@ -20,10 +20,11 @@ import {
   Settings,
   Send,
 } from "lucide-react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
 import "./documentControlLibraryExperience.css";
@@ -88,17 +89,17 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
     workspaces: [
       {
         id: "library",
-        label: "Controlled library",
+        label: "Company library",
         path: "/library",
         icon: BookOpen,
-        description: "Search, filter, register, and open the permitted revision.",
+        description: "Policies, manuals, procedures, work instructions, forms and permitted external data.",
       },
       {
         id: "structure",
         label: "Document structure",
         path: "/structure",
         icon: FolderTree,
-        description: "Classification, hierarchy, applicability, and document ownership.",
+        description: "Full hierarchy, classification, applicability, and document ownership.",
       },
       {
         id: "records",
@@ -176,10 +177,10 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
       },
       {
         id: "copies",
-        label: "Controlled copies",
+        label: "Physical library",
         path: "/controlled-copies",
         icon: Copy,
-        description: "Numbered-copy custody, recall, return, and destruction.",
+        description: "Shelf location, QR checkout, named custody, due return, recall and disposition.",
         controlOnly: true,
       },
       {
@@ -204,7 +205,7 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
         label: "QMS and module links",
         path: "/integrations",
         icon: Link2,
-        description: "Trace release blockers to live records in their owning modules.",
+        description: "Trace controlled documents to live records in their owning modules.",
         controlOnly: true,
       },
       {
@@ -234,26 +235,6 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
     ],
   },
 ];
-
-export function useDocumentControlRoute() {
-  const params = useParams<{
-    amoCode?: string;
-    department?: string;
-    docId?: string;
-    draftId?: string;
-    proposalId?: string;
-    trId?: string;
-    eventId?: string;
-  }>();
-  const amoCode = params.amoCode || "";
-  return {
-    ...params,
-    amoCode,
-    tenant: amoCode.toLowerCase(),
-    basePath: `/maintenance/${amoCode}/document-control`,
-    readerBasePath: `/maintenance/${amoCode}/publications`,
-  };
-}
 
 function workspaceForPath(pathname: string): DocumentControlWorkspaceId {
   if (pathname.includes("/records")) return "records";
@@ -433,7 +414,4 @@ export function DocumentControlSection({
   );
 }
 
-export const DocumentControlIcons = {
-  BookOpen,
-  FileDiff,
-};
+export { useDocumentControlRoute } from "./documentControlRoute";
