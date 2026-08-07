@@ -28,8 +28,8 @@ import DocumentControlShell, {
   DocumentControlError,
   DocumentControlLoading,
   DocumentControlStatus,
-  useDocumentControlRoute,
 } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 
 type ControllerMetrics = DocumentControlDashboard["metrics"] & {
   control_profiles_missing?: number;

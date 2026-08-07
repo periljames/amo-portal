@@ -1,0 +1,317 @@
+name: Document Control Governance CI
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/doc_control/**"
+      - "backend/amodb/jobs/document_governance_backfill.py"
+      - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/alembic/versions/docgov_*.py"
+      - "frontend/src/router.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/app/TenantRouteBoundary.tsx"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/utils/departmentAccess.ts"
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
+      - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
+      - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/config.ts"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentGovernance.ts"
+      - "frontend/src/services/documentGovernance.test.ts"
+      - "frontend/src/services/readerGovernance.ts"
+      - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/vite.config.ts"
+      - "frontend/tests/e2e/document-governance-live.spec.ts"
+      - ".github/workflows/document-control-governance-ci.yml"
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - "backend/amodb/apps/doc_control/**"
+      - "backend/amodb/jobs/document_governance_backfill.py"
+      - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/alembic/versions/docgov_*.py"
+      - "frontend/src/router.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/app/TenantRouteBoundary.tsx"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/utils/departmentAccess.ts"
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
+      - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
+      - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/config.ts"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentGovernance.ts"
+      - "frontend/src/services/documentGovernance.test.ts"
+      - "frontend/src/services/readerGovernance.ts"
+      - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/vite.config.ts"
+      - "frontend/tests/e2e/document-governance-live.spec.ts"
+      - ".github/workflows/document-control-governance-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: document-control-governance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-postgres:
+    name: PostgreSQL migration, routes, security and Document Control tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_document_control
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_document_control"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: document-control-governance-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control
+      QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile governed Document Control backend
+        run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py amodb/scripts/seed_document_governance_e2e.py
+      - name: Verify one Alembic head and merged ancestry
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          config = Config("amodb/alembic.ini")
+          script = ScriptDirectory.from_config(config)
+          heads = script.get_heads()
+          print("Alembic heads:", heads)
+          assert heads == ["docgov_rel_20260807_merge"], heads
+          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+          required = {
+              "docgov_20260806_governance",
+              "docgov_merge_20260807",
+              "docgov_20260807_reader_governance",
+              "docgov_merge_20260807_heads",
+              "merge_20260807_qms_planner_aircraft",
+              "docgov_merge_20260807_qms",
+              "docgov_20260807_qms_audit_runtime",
+              "rel_20260807_main_merge",
+          }
+          missing = required - ancestry
+          assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
+          PY
+      - name: Upgrade clean PostgreSQL schema
+        run: alembic -c amodb/alembic.ini upgrade head
+      - name: Configure mappers and verify governed reader and physical-library routes
+        run: |
+          python - <<'PY'
+          from sqlalchemy.orm import configure_mappers
+          from amodb.main import app
+          configure_mappers()
+          paths = {route.path for route in app.routes}
+          required = {
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/manifest",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/annotations",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/compare",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/prepare",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/{migration_id}",
+              "/doc-control/workspace/t/{tenant_slug}/physical-copies",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/scan",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/circulation",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf",
+          }
+          missing = required - paths
+          assert not missing, missing
+          PY
+      - name: Run Document Control governance, library, reader and security tests
+        run: pytest -q amodb/apps/doc_control/tests
+
+  frontend:
+    name: Governed library and reader typecheck, build and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run reader governance service and architecture contracts
+        run: >-
+          npm exec -- vitest run
+          src/services/documentGovernance.test.ts
+          src/services/readerGovernance.test.ts
+          src/pages/manuals/PublicationGovernancePanel.contract.test.ts
+      - name: Lint changed Document Control and reader surfaces
+        run: >-
+          npm exec -- eslint
+          src/services/apiClient.ts
+          src/services/documentLibrary.ts
+          src/services/documentGovernance.ts
+          src/services/readerGovernance.ts
+          src/pages/DocControlPages.tsx
+          src/pages/documentControl/documentControlRoute.ts
+          src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DocumentGovernanceRecordPage.tsx
+          src/pages/documentControl/DocumentLibraryHubPage.tsx
+          src/pages/documentControl/DocumentLibraryCopiesPage.tsx
+          src/pages/documentControl/DocumentControlShell.tsx
+          src/pages/manuals/PublicationsReaderPage.tsx
+          src/pages/manuals/PublicationGovernancePanel.tsx
+          tests/e2e/document-governance-live.spec.ts
+      - name: Build production frontend
+        run: npm run build
+
+  authenticated-browser:
+    name: Authenticated DMS library, governance, physical custody and reader acceptance
+    needs: [backend-postgres, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_document_control_browser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_document_control_browser"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: document-control-governance-browser-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_control_browser
+      QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
+      E2E_AMO_CODE: dmsgate
+      E2E_AMO_ADMIN_EMAIL: dms-gate@example.com
+      E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
+      E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Upgrade disposable browser database
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade head
+      - name: Seed authenticated governed document fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start backend and frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/dms-backend.log 2>&1 & echo $! > /tmp/dms-backend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-backend.log; exit 1; fi
+            sleep 1
+          done
+          sleep 2
+          if grep -Eq "UndefinedColumn|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
+            echo "::error::Backend startup reported an ORM/schema integration failure"
+            cat /tmp/dms-backend.log
+            exit 1
+          fi
+          (cd frontend && nohup npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
+            sleep 1
+          done
+      - name: Run real-login Document Control library, governance and custody acceptance
+        working-directory: frontend
+        run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
+      - name: Dump server logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo '--- backend ---'
+          cat /tmp/dms-backend.log 2>/dev/null || true
+          echo '--- frontend ---'
+          cat /tmp/dms-frontend.log 2>/dev/null || true
+      - name: Upload Playwright evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-governance-playwright
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+      - name: Stop acceptance servers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/dms-frontend.pid ]; then kill "$(cat /tmp/dms-frontend.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/dms-backend.pid ]; then kill "$(cat /tmp/dms-backend.pid)" 2>/dev/null || true; fi

@@ -5,7 +5,8 @@ import DocumentControlDistributionActions from "./DocumentControlDistributionAct
 import DocumentControlLifecycleActions, { type LifecycleView } from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
-import { DocumentControlSection, useDocumentControlRoute } from "./DocumentControlShell";
+import { DocumentControlSection } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 
 type ActiveView =
   | "overview"
