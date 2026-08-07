@@ -68,10 +68,6 @@ async function fulfilApi(route: Route): Promise<void> {
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
   if (url.origin === "http://127.0.0.1:4173") {
-    // Vite preview is a static server. Portal-shell presence is a best-effort
-    // mutation that normally reaches the API/proxy in production; without this
-    // fixture it receives a Vite 500 and the global fetch-error bridge correctly
-    // raises a persistent system toast that obscures the Reliability UAT.
     if (path === "/api/realtime/presence" && route.request().method() === "POST") {
       return json({ state: "online" });
     }
@@ -247,8 +243,8 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
 
     await page.getByRole("button", { name: /Report layouts/ }).click();
     await expect(page.getByRole("heading", { name: "Report layouts" })).toBeVisible();
-    await expect(page.getByText("Cessna 208B Reliability Programme Report")).toBeVisible();
-    await expect(page.getByText("DHC8 Reliability Programme Report")).toBeVisible();
+    await expect(page.getByRole("button", { name: /C208B-RP Cessna 208B Reliability Programme Report/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /DHC8-RP DHC8 Reliability Programme Report/ })).toBeVisible();
 
     const widths = await page.evaluate(() => ({
       viewport: window.innerWidth,
