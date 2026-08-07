@@ -1,0 +1,115 @@
+name: PR 477 source finalization
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-source-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Finalize reader governance source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > backend/amodb/alembic/versions/docgov_merge_20260807_heads.py <<'PY'
+          """Merge governed reader with the current aircraft architecture migration line.
+
+          Revision ID: docgov_merge_20260807_heads
+          Revises: docgov_20260807_reader_governance, aircraft_arch_20260806_usage_hsi
+          Create Date: 2026-08-07
+          """
+          from __future__ import annotations
+
+          from typing import Sequence, Union
+
+          revision: str = "docgov_merge_20260807_heads"
+          down_revision: Union[str, Sequence[str], None] = (
+              "docgov_20260807_reader_governance",
+              "aircraft_arch_20260806_usage_hsi",
+          )
+          branch_labels = None
+          depends_on = None
+
+
+          def upgrade() -> None:
+              pass
+
+
+          def downgrade() -> None:
+              pass
+          PY
+          python - <<'PY'
+          from pathlib import Path
+
+          reader = Path('frontend/src/pages/manuals/PublicationsReaderPage.tsx')
+          source = reader.read_text(encoding='utf-8')
+          if source.count('  ChevronLeft,\n') == 1:
+              source = source.replace('  ChevronLeft,\n', '')
+          elif 'ChevronLeft' in source:
+              raise SystemExit('Unexpected ChevronLeft usage; inspect before patching')
+          reader.write_text(source, encoding='utf-8')
+
+          router = Path('backend/amodb/apps/doc_control/reader_governance_router.py')
+          source = router.read_text(encoding='utf-8')
+          old = 'from .reader_governance_evidence import evidence_payload, reader_manifest, stable_json_sha\n'
+          new = 'from .reader_governance_evidence import evidence_payload, evidence_state_for_hash, reader_manifest, stable_json_sha\nfrom .reader_link_validation import validate_qms_link\n'
+          if source.count(old) != 1:
+              raise SystemExit('Reader governance evidence import marker changed')
+          source = source.replace(old, new)
+          old = '    location = _ensure_location(db, tenant=tenant, manual=manual, revision=revision, payload=payload.location.model_dump())\n    row = gm.DocumentAnnotation(\n'
+          new = '    linked = validate_qms_link(db, tenant_id=tenant.amo_id, entity_type=payload.linked_entity_type, entity_id=payload.linked_entity_id)\n    location = _ensure_location(db, tenant=tenant, manual=manual, revision=revision, payload=payload.location.model_dump())\n    row = gm.DocumentAnnotation(\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation location marker changed')
+          source = source.replace(old, new)
+          old = '        linked_entity_type=payload.linked_entity_type,\n        linked_entity_id=payload.linked_entity_id,\n'
+          new = '        linked_entity_type=linked["entity_type"] if linked else None,\n        linked_entity_id=linked["entity_id"] if linked else None,\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation linked entity marker changed')
+          source = source.replace(old, new)
+          old = '    _audit(db, tenant, current_user, request, "documentation.annotation.created", "document_annotation", row.id, {"manual_id": manual.id, "revision_id": revision.id, "type": annotation_type, "visibility": visibility, "location_id": location.id})\n'
+          new = '    _audit(db, tenant, current_user, request, "documentation.annotation.created", "document_annotation", row.id, {"manual_id": manual.id, "revision_id": revision.id, "type": annotation_type, "visibility": visibility, "location_id": location.id, "linked_entity": linked})\n'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation audit marker changed')
+          source = source.replace(old, new)
+          old = '    digest = stable_json_sha(payload)\n'
+          new = '    digest = stable_json_sha(evidence_state_for_hash(payload))\n'
+          if source.count(old) != 1:
+              raise SystemExit('Evidence snapshot hash marker changed')
+          source = source.replace(old, new)
+          marker = '@router.post("/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots")\n'
+          if source.count(marker) != 1:
+              raise SystemExit('Snapshot create route marker changed')
+          detail = '''@router.get("/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}")\ndef get_evidence_snapshot(tenant_slug: str, manual_id: str, revision_id: str, snapshot_id: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):\n    require_control_user(current_user)\n    tenant, _manual, _revision = _context(db, tenant_slug, manual_id, revision_id, current_user)\n    row = db.query(DocumentEvidenceSnapshot).filter(DocumentEvidenceSnapshot.id == snapshot_id, DocumentEvidenceSnapshot.tenant_id == tenant.amo_id, DocumentEvidenceSnapshot.manual_id == manual_id, DocumentEvidenceSnapshot.revision_id == revision_id).first()\n    if not row:\n        raise HTTPException(status_code=404, detail="Evidence snapshot not found")\n    payload = dict(row.payload_json or {})\n    recomputed = stable_json_sha(evidence_state_for_hash(payload))\n    return {"id": row.id, "snapshot_sha256": row.snapshot_sha256, "source_sha256": row.source_sha256, "schema_version": row.schema_version, "created_by_user_id": row.created_by_user_id, "created_at": row.created_at.isoformat() if row.created_at else None, "integrity_valid": recomputed == row.snapshot_sha256, "recomputed_sha256": recomputed, "payload": payload}\n\n\n'''
+          source = source.replace(marker, detail + marker)
+          router.write_text(source, encoding='utf-8')
+
+          test = Path('backend/amodb/apps/doc_control/tests/test_reader_governance_contract.py')
+          source = test.read_text(encoding='utf-8')
+          route_marker = '        "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots",\n'
+          if source.count(route_marker) != 1:
+              raise SystemExit('Snapshot contract marker changed')
+          source = source.replace(route_marker, route_marker + '        "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}",\n')
+          migration_marker = '    assert \'down_revision: Union[str, Sequence[str], None] = "docgov_merge_20260807"\' in reader\n'
+          if source.count(migration_marker) != 1:
+              raise SystemExit('Migration contract marker changed')
+          source = source.replace(migration_marker, migration_marker + '    heads = Path("amodb/alembic/versions/docgov_merge_20260807_heads.py").read_text(encoding="utf-8")\n    assert \'"docgov_20260807_reader_governance"\' in heads\n    assert \'"aircraft_arch_20260806_usage_hsi"\' in heads\n')
+          test.write_text(source, encoding='utf-8')
+          PY
+          python -m compileall -q backend/amodb/apps/doc_control backend/amodb/alembic/versions/docgov_merge_20260807_heads.py
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr477-source-finalize.yml
+          git add backend/amodb/alembic/versions/docgov_merge_20260807_heads.py backend/amodb/apps/doc_control/reader_governance_router.py backend/amodb/apps/doc_control/tests/test_reader_governance_contract.py frontend/src/pages/manuals/PublicationsReaderPage.tsx
+          git commit -m "feat(document-control): finalize governed reader evidence controls"
+          git push origin HEAD:agent/dms-reader-governance-completion
