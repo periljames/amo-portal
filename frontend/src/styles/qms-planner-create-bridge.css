@@ -1,4 +1,0 @@
-.qms-modern-planner .qms-planner-modal-backdrop:has(.qms-planner-create-modal) {
-  visibility: hidden;
-  pointer-events: none;
-}
