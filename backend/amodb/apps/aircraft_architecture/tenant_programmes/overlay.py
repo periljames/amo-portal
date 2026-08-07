@@ -77,9 +77,6 @@ def derive_series(template: catalogue_models.AircraftTypeTemplate) -> tuple[str 
     if "Q400" in text:
         return "400", "DERIVED", "Q400 model identity"
 
-    # Dash 8 model numbers are deterministic within the supported family: -1xx,
-    # -2xx, -3xx and -4xx map to Series 100/200/300/400. The derivation is only
-    # used when the controlled catalogue has not yet stored an explicit series.
     compact = re.sub(r"\s+", "", text)
     match = re.search(r"(?:DHC-?8|DH8)[-/]?([1-4]\d{2})", compact)
     if not match:
@@ -116,6 +113,7 @@ def resolve_oem_baseline(
         db.query(catalogue_models.AircraftTypeTemplateRevision)
         .options(selectinload(catalogue_models.AircraftTypeTemplateRevision.template).selectinload(catalogue_models.AircraftTypeTemplate.family))
         .filter(catalogue_models.AircraftTypeTemplateRevision.id == aircraft_type_revision_id)
+        .populate_existing()
         .first()
     )
     if not type_revision:
@@ -124,36 +122,38 @@ def resolve_oem_baseline(
         raise HTTPException(status_code=409, detail="Aircraft type revision must be published before programme resolution")
 
     series, confidence, reason = derive_series(type_revision.template)
-    packs = (
-        db.query(content_models.AircraftContentPack)
-        .options(selectinload(content_models.AircraftContentPack.revisions))
-        .filter(content_models.AircraftContentPack.status == "ACTIVE")
+    revision_rows = (
+        db.query(content_models.AircraftContentPackRevision)
+        .join(content_models.AircraftContentPack)
+        .options(selectinload(content_models.AircraftContentPackRevision.sources))
+        .filter(
+            content_models.AircraftContentPack.status == "ACTIVE",
+            content_models.AircraftContentPackRevision.status == "PUBLISHED",
+        )
+        .populate_existing()
         .all()
     )
     matches: list[dict[str, Any]] = []
-    for pack in packs:
+    for revision in revision_rows:
+        pack = revision.pack
         if not _family_matches(pack, type_revision.template):
             continue
         if series and _normalized(pack.series) != _normalized(series):
             continue
-        published = [row for row in pack.revisions if row.status == "PUBLISHED"]
-        for revision in published:
-            # Tenant AMPs must inherit a governed OEM baseline, not a generic
-            # content pack that happens to have a similar family/series label.
-            if not any(source.publication_revision_id for source in revision.sources):
-                continue
-            matches.append(
-                {
-                    "pack_id": pack.id,
-                    "pack_code": pack.code,
-                    "manufacturer": pack.manufacturer,
-                    "family": pack.family,
-                    "series": pack.series,
-                    "revision_id": revision.id,
-                    "revision_code": revision.revision_code,
-                    "content_hash": revision.content_hash,
-                }
-            )
+        if not any(source.publication_revision_id for source in revision.sources):
+            continue
+        matches.append(
+            {
+                "pack_id": pack.id,
+                "pack_code": pack.code,
+                "manufacturer": pack.manufacturer,
+                "family": pack.family,
+                "series": pack.series,
+                "revision_id": revision.id,
+                "revision_code": revision.revision_code,
+                "content_hash": revision.content_hash,
+            }
+        )
 
     state = "RESOLVED" if len(matches) == 1 and series else "AMBIGUOUS" if len(matches) > 1 else "UNRESOLVED"
     if len(matches) == 1 and confidence == "DERIVED":
@@ -188,12 +188,6 @@ def _limit_key(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def compare_interval_strictness(oem: dict[str, Any], amp: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Return whether AMP is equal/more restrictive and deterministic reasons.
-
-    A TIGHTEN decision preserves the OEM phase/mode/counter structure. This is
-    intentionally conservative: changing WHICHEVER_FIRST/ALL_DUE semantics or
-    removing a clock is not treated as a harmless numeric edit.
-    """
     reasons: list[str] = []
     try:
         oem_groups = _interval_groups(oem)
