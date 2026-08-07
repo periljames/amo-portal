@@ -40,6 +40,7 @@ type CarFormState = {
   priority: CARPriority;
   due_date: string;
   target_closure_date: string;
+  assigned_department_id: string;
   assigned_to_user_id: string;
   finding_id: string;
 };
@@ -56,6 +57,16 @@ type AttachmentPreview = {
   attachment: CARAttachmentOut;
   url: string;
   contentType: string;
+};
+
+type AssigneeFieldsProps = {
+  assignees: CARAssignee[];
+  departmentId: string;
+  assignedUserId: string;
+  search: string;
+  onDepartmentChange: (departmentId: string) => void;
+  onAssignedUserChange: (userId: string) => void;
+  onSearchChange: (search: string) => void;
 };
 
 const PROGRAM_OPTIONS: Array<{ value: CARProgram; label: string }> = [
@@ -94,6 +105,7 @@ const EMPTY_FORM: CarFormState = {
   priority: "MEDIUM",
   due_date: "",
   target_closure_date: "",
+  assigned_department_id: "",
   assigned_to_user_id: "",
   finding_id: "",
 };
@@ -163,6 +175,78 @@ function scopeLabel(scope: QmsCarRegisterScope): string {
   return labels[scope];
 }
 
+const AssigneeFields: React.FC<AssigneeFieldsProps> = ({
+  assignees,
+  departmentId,
+  assignedUserId,
+  search,
+  onDepartmentChange,
+  onAssignedUserChange,
+  onSearchChange,
+}) => {
+  const departments = useMemo(() => {
+    const values = new Map<string, string>();
+    assignees.forEach((assignee) => {
+      if (assignee.department_id && assignee.department_name) {
+        values.set(assignee.department_id, assignee.department_name);
+      }
+    });
+    return Array.from(values.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [assignees]);
+
+  const filteredAssignees = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return assignees.filter((assignee) => {
+      if (departmentId && assignee.department_id !== departmentId) return false;
+      if (!needle) return true;
+      return [assignee.full_name, assignee.email, assignee.staff_code, assignee.department_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(needle));
+    });
+  }, [assignees, departmentId, search]);
+
+  return (
+    <>
+      <label>Responsible department
+        <select
+          className="input"
+          value={departmentId}
+          onChange={(event) => onDepartmentChange(event.target.value)}
+        >
+          <option value="">All departments</option>
+          {departments.map((department) => (
+            <option key={department.id} value={department.id}>{department.name}</option>
+          ))}
+        </select>
+      </label>
+      <label>Find responsible person
+        <input
+          className="input"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Name, staff code, email, or department"
+        />
+      </label>
+      <label>Responsible person
+        <select
+          className="input"
+          value={assignedUserId}
+          onChange={(event) => onAssignedUserChange(event.target.value)}
+        >
+          <option value="">Unassigned</option>
+          {filteredAssignees.map((assignee) => (
+            <option key={assignee.id} value={assignee.id}>
+              {assignee.full_name}{assignee.department_name ? ` · ${assignee.department_name}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+};
+
 const QualityCarsPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -181,11 +265,15 @@ const QualityCarsPage: React.FC = () => {
 
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
   const [statusFilter, setStatusFilter] = useState<CarStatusFilter>("ALL");
+  const [ownerFilter, setOwnerFilter] = useState("");
   const [registerSearch, setRegisterSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [pageSize, setPageSize] = useState<CarPageSize>(25);
   const [currentPage, setCurrentPage] = useState(1);
   const [showCreateForm, setShowCreateForm] = useState(routeRequestsCreate);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [createAssigneeSearch, setCreateAssigneeSearch] = useState("");
+  const [editAssigneeSearch, setEditAssigneeSearch] = useState("");
   const [form, setForm] = useState<CarFormState>(() => ({
     ...EMPTY_FORM,
     finding_id: searchParams.get("findingId") ?? "",
@@ -221,7 +309,7 @@ const QualityCarsPage: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, directCarId, pageSize, programFilter, routeRequestedScope, statusFilter]);
+  }, [debouncedSearch, directCarId, ownerFilter, pageSize, programFilter, routeRequestedScope, statusFilter]);
 
   useEffect(() => {
     if (routeRequestsCreate) setShowCreateForm(true);
@@ -246,20 +334,22 @@ const QualityCarsPage: React.FC = () => {
     queryKey: [
       "qms-car-register-paged",
       amoSlug,
-      programFilter,
+      directCarId ? "any-program" : programFilter,
       effectiveScope,
       exactStatus ?? "",
       directCarId,
+      ownerFilter,
       debouncedSearch,
       dueSoonDays,
       pageSize,
       currentPage,
     ],
     queryFn: ({ signal }) => qmsGetCarRegisterPage({
-      program: programFilter,
+      program: directCarId ? undefined : programFilter,
       status: exactStatus,
       scope: effectiveScope,
       carId: directCarId || undefined,
+      assignedToUserId: directCarId ? undefined : ownerFilter || undefined,
       search: directCarId ? undefined : debouncedSearch || undefined,
       dueSoonDays,
       limit: directCarId ? 1 : pageSize,
@@ -295,20 +385,31 @@ const QualityCarsPage: React.FC = () => {
     return lookup;
   }, [assignees]);
 
+  const selectedCreateAssignee = form.assigned_to_user_id
+    ? assigneeLookup.get(form.assigned_to_user_id)
+    : undefined;
+
   const refreshRegister = async () => {
     await queryClient.invalidateQueries({ queryKey: ["qms-car-register-paged"] });
   };
 
   const closeCreate = () => {
+    setPreviewOpen(false);
     setShowCreateForm(false);
+    setCreateAssigneeSearch("");
     if (routeRequestsCreate) navigate(`/maintenance/${amoSlug}/quality/cars/register`);
   };
 
-  const handleCreate = async () => {
+  const requestCreatePreview = () => {
     if (!form.title.trim() || !form.summary.trim() || !form.finding_id.trim()) {
       setLocalError("Title, summary, and linked finding ID are required.");
       return;
     }
+    setLocalError(null);
+    setPreviewOpen(true);
+  };
+
+  const handleConfirmCreate = async () => {
     setCreateBusy(true);
     setLocalError(null);
     try {
@@ -324,6 +425,8 @@ const QualityCarsPage: React.FC = () => {
         evidence_required: true,
       });
       setForm({ ...EMPTY_FORM, program: form.program });
+      setCreateAssigneeSearch("");
+      setPreviewOpen(false);
       setShowCreateForm(false);
       await refreshRegister();
       pushToast({ title: "Corrective action created", message: created.car_number, variant: "info" });
@@ -336,7 +439,9 @@ const QualityCarsPage: React.FC = () => {
   };
 
   const openEdit = (car: CAROut) => {
+    const assignee = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id) : undefined;
     setEditingCar(car);
+    setEditAssigneeSearch("");
     setEditForm({
       title: car.title,
       summary: car.summary,
@@ -344,6 +449,7 @@ const QualityCarsPage: React.FC = () => {
       priority: car.priority,
       due_date: car.due_date ?? "",
       target_closure_date: car.target_closure_date ?? "",
+      assigned_department_id: assignee?.department_id ?? "",
       assigned_to_user_id: car.assigned_to_user_id ?? "",
       finding_id: car.finding_id ?? "",
     });
@@ -368,6 +474,7 @@ const QualityCarsPage: React.FC = () => {
       });
       setEditingCar(null);
       setEditForm(null);
+      setEditAssigneeSearch("");
       await refreshRegister();
       pushToast({ title: "Corrective action updated", message: editingCar.car_number, variant: "info" });
     } catch (error) {
@@ -531,6 +638,7 @@ const QualityCarsPage: React.FC = () => {
 
   const clearRouteScope = () => {
     setStatusFilter("ALL");
+    setOwnerFilter("");
     navigate(`/maintenance/${amoSlug}/quality/cars/register`);
   };
 
@@ -614,11 +722,20 @@ const QualityCarsPage: React.FC = () => {
                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
+            <label>
+              <span className="text-muted">Responsible</span>
+              <select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
+                <option value="">All owners</option>
+                {assignees.map((assignee) => (
+                  <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>
+                ))}
+              </select>
+            </label>
             <label className="audit-search" aria-label="Search corrective actions">
               <input
                 value={registerSearch}
                 onChange={(event) => setRegisterSearch(event.target.value)}
-                placeholder="Search CAR, audit, finding, owner, status, summary"
+                placeholder="Search CAR, audit, finding, status, or summary"
               />
             </label>
             <label>
@@ -775,7 +892,7 @@ const QualityCarsPage: React.FC = () => {
 
       {!canManageCars ? (
         <div className="card card--info" style={{ marginTop: 12 }}>
-          <p style={{ margin: 0 }}>Management changes remain limited to Quality Managers, AMO Admins, and superusers.</p>
+          <p style={{ margin: 0 }}>Updates remain available to assigned users through the governed CAR controls; management actions remain limited to Quality Managers, AMO Admins, and superusers.</p>
         </div>
       ) : null}
 
@@ -786,7 +903,7 @@ const QualityCarsPage: React.FC = () => {
               <div>
                 <p className="upsell-modal__eyebrow">Governed workflow</p>
                 <h3 className="upsell-modal__title">Create corrective action</h3>
-                <p className="upsell-modal__subtitle">Link the CAR to its authoritative finding before issuing it.</p>
+                <p className="upsell-modal__subtitle">Link the CAR to its authoritative finding and confirm the issue details before creation.</p>
               </div>
               <button type="button" className="upsell-modal__close" onClick={closeCreate}>✕</button>
             </div>
@@ -804,12 +921,18 @@ const QualityCarsPage: React.FC = () => {
               <label>Finding ID
                 <input className="input" value={form.finding_id} onChange={(event) => setForm((current) => ({ ...current, finding_id: event.target.value }))} placeholder="Authoritative finding UUID" />
               </label>
-              <label>Responsible person
-                <select className="input" value={form.assigned_to_user_id} onChange={(event) => setForm((current) => ({ ...current, assigned_to_user_id: event.target.value }))}>
-                  <option value="">Unassigned</option>
-                  {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}{assignee.department_name ? ` · ${assignee.department_name}` : ""}</option>)}
-                </select>
-              </label>
+              <AssigneeFields
+                assignees={assignees}
+                departmentId={form.assigned_department_id}
+                assignedUserId={form.assigned_to_user_id}
+                search={createAssigneeSearch}
+                onDepartmentChange={(departmentId) => {
+                  setForm((current) => ({ ...current, assigned_department_id: departmentId, assigned_to_user_id: "" }));
+                  setCreateAssigneeSearch("");
+                }}
+                onAssignedUserChange={(userId) => setForm((current) => ({ ...current, assigned_to_user_id: userId }))}
+                onSearchChange={setCreateAssigneeSearch}
+              />
               <label>Due date
                 <input className="input" type="date" value={form.due_date} onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))} />
               </label>
@@ -825,8 +948,42 @@ const QualityCarsPage: React.FC = () => {
             </label>
             <div className="upsell-modal__actions">
               <button type="button" className="secondary-chip-btn" onClick={closeCreate} disabled={createBusy}>Cancel</button>
-              <button type="button" className="primary-chip-btn" onClick={() => void handleCreate()} disabled={createBusy || !canManageCars}>
-                {createBusy ? "Creating…" : "Create CAR"}
+              <button type="button" className="primary-chip-btn" onClick={requestCreatePreview} disabled={createBusy || !canManageCars}>
+                Review & create
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {previewOpen ? (
+        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true" aria-label="Confirm corrective action details">
+          <div className="upsell-modal">
+            <div className="upsell-modal__header">
+              <div>
+                <p className="upsell-modal__eyebrow">Preview</p>
+                <h3 className="upsell-modal__title">Confirm corrective action details</h3>
+                <p className="upsell-modal__subtitle">Confirm the controlled issue information before the CAR is created.</p>
+              </div>
+              <button type="button" className="upsell-modal__close" onClick={() => setPreviewOpen(false)} disabled={createBusy}>✕</button>
+            </div>
+            <dl className="qms-detail-grid">
+              <div><dt>Finding</dt><dd>{form.finding_id}</dd></div>
+              <div><dt>Programme</dt><dd>{humanize(form.program)}</dd></div>
+              <div><dt>Priority</dt><dd>{humanize(form.priority)}</dd></div>
+              <div><dt>Responsible</dt><dd>{selectedCreateAssignee?.full_name || "Unassigned"}</dd></div>
+              <div><dt>Department</dt><dd>{selectedCreateAssignee?.department_name || "Unassigned"}</dd></div>
+              <div><dt>Due</dt><dd>{dateOnly(form.due_date)}</dd></div>
+              <div><dt>Target closure</dt><dd>{dateOnly(form.target_closure_date)}</dd></div>
+            </dl>
+            <div className="qms-card">
+              <strong>{form.title}</strong>
+              <p>{form.summary}</p>
+            </div>
+            <div className="upsell-modal__actions">
+              <button type="button" className="secondary-chip-btn" onClick={() => setPreviewOpen(false)} disabled={createBusy}>Go back</button>
+              <button type="button" className="primary-chip-btn" onClick={() => void handleConfirmCreate()} disabled={createBusy}>
+                {createBusy ? "Creating…" : "Confirm & create"}
               </button>
             </div>
           </div>
@@ -841,7 +998,7 @@ const QualityCarsPage: React.FC = () => {
                 <p className="upsell-modal__eyebrow">{editingCar.car_number}</p>
                 <h3 className="upsell-modal__title">Edit corrective action</h3>
               </div>
-              <button type="button" className="upsell-modal__close" onClick={() => { setEditingCar(null); setEditForm(null); }}>✕</button>
+              <button type="button" className="upsell-modal__close" onClick={() => { setEditingCar(null); setEditForm(null); setEditAssigneeSearch(""); }}>✕</button>
             </div>
             <label>Title
               <input className="input" value={editForm.title} onChange={(event) => setEditForm((current) => current ? ({ ...current, title: event.target.value }) : current)} />
@@ -855,12 +1012,18 @@ const QualityCarsPage: React.FC = () => {
                   {PRIORITY_OPTIONS.map((priority) => <option key={priority} value={priority}>{humanize(priority)}</option>)}
                 </select>
               </label>
-              <label>Responsible person
-                <select className="input" value={editForm.assigned_to_user_id} onChange={(event) => setEditForm((current) => current ? ({ ...current, assigned_to_user_id: event.target.value }) : current)}>
-                  <option value="">Unassigned</option>
-                  {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
-                </select>
-              </label>
+              <AssigneeFields
+                assignees={assignees}
+                departmentId={editForm.assigned_department_id}
+                assignedUserId={editForm.assigned_to_user_id}
+                search={editAssigneeSearch}
+                onDepartmentChange={(departmentId) => {
+                  setEditForm((current) => current ? ({ ...current, assigned_department_id: departmentId, assigned_to_user_id: "" }) : current);
+                  setEditAssigneeSearch("");
+                }}
+                onAssignedUserChange={(userId) => setEditForm((current) => current ? ({ ...current, assigned_to_user_id: userId }) : current)}
+                onSearchChange={setEditAssigneeSearch}
+              />
               <label>Due date
                 <input className="input" type="date" value={editForm.due_date} onChange={(event) => setEditForm((current) => current ? ({ ...current, due_date: event.target.value }) : current)} />
               </label>
@@ -869,7 +1032,7 @@ const QualityCarsPage: React.FC = () => {
               </label>
             </div>
             <div className="upsell-modal__actions">
-              <button type="button" className="secondary-chip-btn" onClick={() => { setEditingCar(null); setEditForm(null); }} disabled={editBusy}>Cancel</button>
+              <button type="button" className="secondary-chip-btn" onClick={() => { setEditingCar(null); setEditForm(null); setEditAssigneeSearch(""); }} disabled={editBusy}>Cancel</button>
               <button type="button" className="primary-chip-btn" onClick={() => void handleEditSave()} disabled={editBusy}>
                 {editBusy ? "Saving…" : "Save changes"}
               </button>
