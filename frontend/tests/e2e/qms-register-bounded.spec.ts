@@ -104,8 +104,8 @@ function futureToken(): string {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
 }
 
-function seedSession() {
-  localStorage.setItem("amo_portal_token", futureToken());
+function seedSession(storedToken: string) {
+  localStorage.setItem("amo_portal_token", storedToken);
   localStorage.setItem("amo_code", "demo");
   localStorage.setItem("amo_slug", "demo");
   localStorage.setItem("amo_department", "quality");
@@ -145,7 +145,7 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
   let legacyRegisterRequests = 0;
   let legacyFindingRequests = 0;
 
-  await page.addInitScript(seedSession);
+  await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/accounts/onboarding/status") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
@@ -195,7 +195,7 @@ test("evidence vault search uses one bounded canonical register request", async 
   let legacyBulkAttachmentRequests = 0;
   let legacyPerCarAttachmentRequests = 0;
 
-  await page.addInitScript(seedSession);
+  await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/accounts/onboarding/status") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
