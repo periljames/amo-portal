@@ -48,7 +48,7 @@ describe("reader governance API client", () => {
   });
 
   it("prepares and reviews annotation migration through explicit human actions", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({}));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => response({}));
     await prepareAnnotationMigrations("tenant", "manual-1", "rev-old", "rev-new");
     await decideAnnotationMigration("tenant", "manual-1", "migration-1", "ACCEPT", "Confirmed against target content.");
     expect(fetchMock).toHaveBeenCalledTimes(2);
