@@ -146,6 +146,7 @@ async function prepare(page: Page, state: TestState): Promise<void> {
             full_name: "Amina Ali",
             email: "amina@tenant-a.test",
             staff_code: "ENG-001",
+            role: "ENGINEER",
             department_id: "dept-eng",
             department_code: "ENG",
             department_name: "Engineering",
@@ -155,6 +156,7 @@ async function prepare(page: Page, state: TestState): Promise<void> {
             full_name: "Brian Kilonzo",
             email: "brian@tenant-a.test",
             staff_code: "STO-002",
+            role: "STORES",
             department_id: "dept-stores",
             department_code: "STO",
             department_name: "Stores",
@@ -223,6 +225,7 @@ async function prepare(page: Page, state: TestState): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await page.route("**/quality/cars/assignees**", fulfil);
 }
 
 function testState(): TestState {
@@ -314,6 +317,7 @@ test("CAR register stays bounded and preserves governed assignee and creation co
     .locator(".audit-workspace__toolbar-row label")
     .filter({ hasText: "Responsible" })
     .locator("select");
+  await expect(ownerFilter.locator('option[value="auditee-a"]')).toHaveCount(1, { timeout: 15_000 });
   await ownerFilter.selectOption("auditee-a");
   await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("assigned_to_user_id=auditee-a");
 
