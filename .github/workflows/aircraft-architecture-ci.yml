@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/aircraft-induction-architecture
+      - agent/oem-mpd-source-governance
   pull_request:
     paths:
       - "backend/amodb/apps/aircraft_architecture/**"
@@ -11,11 +12,15 @@ on:
       - "backend/amodb/alembic_helpers/**"
       - "backend/amodb/alembic/versions/aircraft_arch_*.py"
       - "backend/amodb/main.py"
+      - "backend/requirements.txt"
       - "frontend/src/pages/planning/DailyAircraftUtilisationPage.tsx"
+      - "frontend/src/pages/planning/OemBaselinePage.tsx"
       - "frontend/src/pages/PlanningProductionPages.tsx"
       - "frontend/src/services/dailyUtilisation.ts"
       - "frontend/src/services/dailyUtilisation.test.ts"
+      - "frontend/src/services/oemMpd.ts"
       - "frontend/src/styles/daily-utilisation.css"
+      - "frontend/src/styles/oem-mpd-baseline.css"
       - "frontend/tests/e2e/aircraft-daily-utilisation.spec.ts"
       - "frontend/playwright.aircraft-architecture.config.ts"
       - "frontend/package.json"
@@ -85,6 +90,7 @@ jobs:
               for revision in script.walk_revisions(base="base", head=head)
           }
           assert "aircraft_arch_20260806_u5_u6" in revisions, head
+          assert "aircraft_arch_20260807_oem_mpd" in revisions, head
           print(f"alembic_head={head}")
           PY
       - name: Upgrade clean PostgreSQL database
@@ -151,7 +157,9 @@ jobs:
           npx eslint
           src/services/dailyUtilisation.ts
           src/services/dailyUtilisation.test.ts
+          src/services/oemMpd.ts
           src/pages/planning/DailyAircraftUtilisationPage.tsx
+          src/pages/planning/OemBaselinePage.tsx
           tests/e2e/aircraft-daily-utilisation.spec.ts
           playwright.aircraft-architecture.config.ts
       - name: Run architecture frontend unit tests
