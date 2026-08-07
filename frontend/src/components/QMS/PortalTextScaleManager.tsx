@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ALargeSmall, Check } from "lucide-react";
 
@@ -67,14 +67,18 @@ function applyScale(scale: PortalTextScale): void {
 }
 
 const PortalTextScaleManager: React.FC = () => {
-  const storageKey = preferenceStorageKey();
+  const user = getCachedUser();
+  const identity = `${user?.id || "anonymous"}:${user?.amo_id || "platform"}`;
+  const storageKey = useMemo(() => preferenceStorageKey(), [identity]);
   const [scale, setScale] = useState<PortalTextScale>(readStoredScale);
   const [mountTarget, setMountTarget] = useState<HTMLElement | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "local">("idle");
 
   useEffect(() => {
-    applyScale(scale);
-  }, [scale]);
+    const stored = readStoredScale();
+    setScale(stored);
+    applyScale(stored);
+  }, [storageKey]);
 
   useEffect(() => {
     let cancelled = false;
