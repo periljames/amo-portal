@@ -310,7 +310,11 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   expect(state.carRegisterUrls.at(-1)).toContain("limit=25");
   expect(state.carRegisterUrls.at(-1)).not.toContain("limit=1000");
 
-  await page.getByLabel("Responsible", { exact: true }).selectOption("auditee-a");
+  const ownerFilter = page
+    .locator(".audit-workspace__toolbar-row label")
+    .filter({ hasText: "Responsible" })
+    .locator("select");
+  await ownerFilter.selectOption("auditee-a");
   await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("assigned_to_user_id=auditee-a");
 
   await page.getByRole("button", { name: "New CAR" }).click();
