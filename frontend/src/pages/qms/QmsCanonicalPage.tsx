@@ -1,17 +1,35 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
+import QualityCarsPage from "../QualityCarsPage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
+import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
 
 /**
- * Keep the canonical QMS route stable while allowing the calendar to evolve as a
- * dedicated planning product. Non-calendar routes continue to use the established
- * canonical page; /quality/calendar/* is handled by the Quality Operations Planner.
+ * Canonical compatibility dispatcher.
+ *
+ * Active list workspaces should have one owner. Calendar belongs to the planner,
+ * evidence-vault list views use the bounded register workspace, CAR routes stay
+ * on the established specialist CAR workflow, and remaining legacy/detail paths
+ * stay on the compatibility surface until their specialist replacement is wired.
  */
 export default function QmsCanonicalPage(): React.ReactElement {
   const location = useLocation();
-  const isPlannerRoute = /\/quality\/calendar(?:\/|$)/i.test(location.pathname)
-    || /\/qms\/calendar(?:\/|$)/i.test(location.pathname);
+  const pathname = location.pathname.toLowerCase();
 
-  return isPlannerRoute ? <QmsPlannerLivePage /> : <QmsCanonicalLegacyPage />;
+  // CAR/CAPA has a governed specialist workspace with creation, assignment,
+  // auditee response, evidence, Quality review and closeout controls. Never let
+  // a CAR route fall through to the generic canonical register reader.
+  if (pathname.includes("/quality/cars") || pathname.includes("/qms/cars")) {
+    return <QualityCarsPage />;
+  }
+
+  if (pathname.includes("/quality/calendar") || pathname.includes("/qms/calendar")) {
+    return <QmsPlannerLivePage />;
+  }
+
+  const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
+  if (isEvidenceRegister) return <QmsRegisterPage />;
+
+  return <QmsCanonicalLegacyPage />;
 }
