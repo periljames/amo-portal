@@ -45,6 +45,38 @@ def test_company_library_exposes_real_document_categories_and_connected_state() 
     assert 'Read' in frontend
 
 
+def test_richer_library_preserves_governance_work_queue_filters_and_sorting() -> None:
+    backend = _source("backend/amodb/apps/doc_control/workspace_library_router.py")
+    service = _source("frontend/src/services/documentLibrary.ts")
+    frontend = _source("frontend/src/pages/documentControl/DocumentLibraryHubPage.tsx")
+    dashboard = _source("frontend/src/pages/documentControl/DocumentGovernanceDashboardPage.tsx")
+
+    for token in (
+        "owner_user_id",
+        "department_id",
+        "indexing_status",
+        "unresolved_ownership",
+        "unresolved_relationships",
+        "structure_status",
+        "superseded_referenced",
+    ):
+        assert token in backend
+        assert token in service
+        assert token in frontend
+    assert 'sort: str = Query(default="code"' in backend
+    assert 'direction: str = Query(default="asc"' in backend
+    assert 'sort: filters.sort || "code"' in service
+    assert 'direction: filters.direction || "asc"' in service
+    assert 'Governance queue' in frontend
+    assert 'Clear queue filter' in frontend
+    assert 'Sort company library' in frontend
+    assert 'unresolved_ownership' in dashboard
+    assert 'unresolved_relationships' in dashboard
+    assert 'indexing_status' in dashboard
+    assert 'structure_status' in dashboard
+    assert 'superseded_referenced' in dashboard
+
+
 def test_physical_controlled_copy_is_a_reusable_circulation_record() -> None:
     source = _source("backend/amodb/apps/doc_control/workspace_copy_router.py")
 
@@ -62,6 +94,7 @@ def test_physical_controlled_copy_is_a_reusable_circulation_record() -> None:
     assert 'event_type = "CHECK_IN"' in source
     assert 'event_type = "LOCATION_VERIFIED"' in source
     assert '"method": "PORTAL_QR_SCAN"' in source
+    assert '"code": "CONTROLLED_COPY_NOOP"' in source
 
 
 def test_qr_label_is_an_identifier_not_an_authorization_bypass() -> None:
