@@ -40,6 +40,13 @@ import {
 
 type Tab = "annotations" | "evidence" | "compare";
 
+type SelectedLocation = {
+  section_id?: string;
+  page_number?: number;
+  exact_quote?: string;
+  normalized_rects?: Array<{ x: number; y: number; width: number; height: number }>;
+};
+
 function formatDate(value?: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -51,7 +58,7 @@ function counter(value?: Record<string, number> | null): string {
   return Object.entries(value).map(([key, count]) => `${key.replaceAll("_", " ")}: ${count}`).join(" · ");
 }
 
-function selectedSemanticLocation(): { section_id?: string; exact_quote?: string } {
+function selectedSemanticLocation(): SelectedLocation {
   const selection = window.getSelection();
   const text = selection?.toString().trim() || "";
   if (!selection?.rangeCount || !text) return {};
@@ -64,7 +71,7 @@ function selectedSemanticLocation(): { section_id?: string; exact_quote?: string
   return { section_id: section.dataset.sectionId, exact_quote: text.slice(0, 4000) };
 }
 
-function selectedPdfLocation(): { page_number?: number; exact_quote?: string; normalized_rects?: Array<Record<string, number>> } {
+function selectedPdfLocation(): SelectedLocation {
   const selection = window.getSelection();
   const text = selection?.toString().trim() || "";
   if (!selection?.rangeCount || !text) return {};
@@ -78,19 +85,20 @@ function selectedPdfLocation(): { page_number?: number; exact_quote?: string; no
   if (!page || !surface || !Number.isInteger(pageNumber) || pageNumber < 1) return {};
   const bounds = surface.getBoundingClientRect();
   if (bounds.width <= 0 || bounds.height <= 0) return {};
-  const normalized_rects = [...range.getClientRects()].map((rect) => {
+  const normalized_rects: NonNullable<SelectedLocation["normalized_rects"]> = [];
+  for (const rect of range.getClientRects()) {
     const left = Math.max(bounds.left, rect.left);
     const top = Math.max(bounds.top, rect.top);
     const right = Math.min(bounds.right, rect.right);
     const bottom = Math.min(bounds.bottom, rect.bottom);
-    if (right <= left || bottom <= top) return null;
-    return {
+    if (right <= left || bottom <= top) continue;
+    normalized_rects.push({
       x: Math.max(0, Math.min(1, (left - bounds.left) / bounds.width)),
       y: Math.max(0, Math.min(1, (top - bounds.top) / bounds.height)),
       width: Math.max(0, Math.min(1, (right - left) / bounds.width)),
       height: Math.max(0, Math.min(1, (bottom - top) / bounds.height)),
-    };
-  }).filter((rect): rect is Record<string, number> => Boolean(rect && rect.width > 0 && rect.height > 0));
+    });
+  }
   if (!normalized_rects.length) return {};
   return { page_number: pageNumber, exact_quote: text.slice(0, 4000), normalized_rects };
 }
