@@ -175,7 +175,7 @@ def urllib_quote(value: str) -> str:
     return quote(value, safe="")
 
 
-@router.post("/webhooks/paystack", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/webhooks/paystack", status_code=status.HTTP_200_OK)
 async def paystack_webhook(
     request: Request,
     paystack_signature: str = Header("", alias="x-paystack-signature"),
@@ -191,7 +191,7 @@ async def paystack_webhook(
         _bad(exc)
 
 
-@router.post("/webhooks/mpesa", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/webhooks/mpesa", status_code=status.HTTP_200_OK)
 async def mpesa_callback(
     request: Request,
     tenant_id: str = Query(...),
