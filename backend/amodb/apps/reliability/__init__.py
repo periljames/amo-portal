@@ -18,10 +18,12 @@ from . import workbook_parity_defaults  # noqa: E402,F401
 from . import workbook_reference_hardening  # noqa: E402,F401
 from . import workbook_authority_hardening  # noqa: E402,F401
 from . import workbook_parity_imports  # noqa: E402,F401
+from . import structured_csv_import  # noqa: E402,F401
 from . import workbook_reference_import  # noqa: E402,F401
 from . import workbook_parity_statistics  # noqa: E402,F401
 from . import workbook_analysis_integrity  # noqa: E402,F401
 from . import workbook_revision_hardening  # noqa: E402,F401
+from . import management_reporting  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 
 workpack_integration.register(router)
@@ -36,7 +38,9 @@ workbook_parity_defaults.register(router)
 # reference and source-audit contracts are authoritative.
 workbook_reference_import.register(router)
 workbook_parity_imports.register(router)
+structured_csv_import.register(router)
 workbook_analysis_integrity.register(router)
 workbook_parity_statistics.register(router)
 workbook_revision_hardening.register(router)
+management_reporting.register(router)
 workbook_rbac_hardening.apply(router)
