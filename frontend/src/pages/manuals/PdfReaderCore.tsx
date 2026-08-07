@@ -6,7 +6,7 @@ import PdfReaderCoreV3, {
   type PdfReaderCoreProps,
   type PdfReaderNavigationRequest,
   type PdfReaderOutlineItem,
-} from "./PdfReaderCoreV3";
+} from "./PdfReaderCoreV4";
 import {
   cachePdfCapabilities,
   clearCachedPdfCapabilities,
