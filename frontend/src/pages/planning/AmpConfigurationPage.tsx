@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
@@ -127,7 +127,6 @@ const AmpConfigurationPage: React.FC = () => {
 
   const selectedProgramme = programmes.find((item) => item.id === selectedProgrammeId) || null;
   const selectedRevision = programmeRevisions.find((item) => item.id === selectedRevisionId) || null;
-  const selectedType = types.find((item) => item.id === selectedTemplateId) || null;
   const publishedTypeRevisions = typeRevisions.filter((item) => item.status === "PUBLISHED");
 
   const loadSetup = useCallback(async () => {
@@ -135,11 +134,11 @@ const AmpConfigurationPage: React.FC = () => {
       const [programmeRows, typeRows] = await Promise.all([listTenantProgrammes(), listAircraftTypes()]);
       setProgrammes(programmeRows);
       setTypes(typeRows);
-      if (!selectedProgrammeId && programmeRows.length) setSelectedProgrammeId(programmeRows[0].id);
+      setSelectedProgrammeId((current) => current || programmeRows[0]?.id || "");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "AMP configuration data could not be loaded.");
     }
-  }, [selectedProgrammeId]);
+  }, []);
 
   useEffect(() => { void loadSetup(); }, [loadSetup]);
 
