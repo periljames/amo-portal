@@ -57,7 +57,7 @@ function reportFixture(id: string, number: string, periodType: "HALF_YEAR" | "AN
     completeness: { passed: false, checks: [], blocking_failures: ["MANDATORY_SECTIONS", "REQUIREMENT:req-1", "HTML_HASH", "PDF_HASH"], override_count: 0 },
     sections: [{
       id: `${id}-section-1`, code: "executive_assessment", sequence: 1, title: "Executive assessment", required: true,
-      status: "DRAFT" as const,
+      status: "DRAFT" as "DRAFT" | "READY" | "WITHHELD" | "NOT_APPLICABLE",
       computed_data: {
         event_rate_per_100_fh: { value: null, quality: "WITHHELD_NO_FLIGHT_HOURS", denominator: 0 },
         long_term_history: { configured_windows: [12, 24, 36] },
@@ -66,7 +66,7 @@ function reportFixture(id: string, number: string, periodType: "HALF_YEAR" | "AN
     }],
     requirements: [{
       id: `${id}-assessment-1`, requirement_id: "req-1", section_code: "executive_assessment", applicable: true,
-      status: "GAP" as const,
+      status: "GAP" as "SATISFIED" | "NOT_APPLICABLE" | "WITHHELD" | "GAP" | "SUPERSEDED",
       requirement: {
         requirement_key: "KCAA-CURRENT-REGULATORY-MAPPING", authority: "KCAA", source_reference: "KCARs 2025",
         paragraph_reference: "Operator applicability", controlled_summary: "Current controlling KCAA basis must be evidenced before publication.", obligation_status: "MANDATORY",
@@ -161,7 +161,7 @@ function createMockApi() {
     }
     if (action.startsWith("/requirements/") && method === "PUT") {
       const body = route.request().postDataJSON() as { status: "SATISFIED" | "NOT_APPLICABLE" | "WITHHELD" | "GAP" | "SUPERSEDED"; reviewer_note?: string | null; source_refs?: Array<Record<string, unknown>> };
-      row.requirements[0].status = body.status as "GAP";
+      row.requirements[0].status = body.status;
       row.requirements[0].reviewer_note = body.reviewer_note || null;
       row.requirements[0].source_refs = body.source_refs || [];
       return json(clone(row));
@@ -325,9 +325,12 @@ test.describe("Formal Reliability Programme publication", () => {
     await expect(page.getByText("SUPERSEDED", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Review requirement" })).toBeDisabled();
 
+    const retained = await page.goto("http://127.0.0.1:8080/reliability/formal-reporting/reports/negative-1/view", { waitUntil: "domcontentloaded" });
+    expect(retained?.status()).toBe(200);
+    await expect(page.locator("body")).toContainText("SUPERSEDED — retained historical revision");
+
     api.setCrossTenantFailure(true);
-    await page.evaluate(() => localStorage.setItem("amo_formal_cross_tenant_probe", "other-tenant"));
-    const response = await page.request.get("http://127.0.0.1:8080/reliability/formal-reporting/reports/other-tenant", { headers: { Authorization: `Bearer ${futureToken()}` } });
-    expect(response.status()).toBe(404);
+    const crossTenant = await page.goto("http://127.0.0.1:8080/reliability/formal-reporting/reports/other-tenant", { waitUntil: "domcontentloaded" });
+    expect(crossTenant?.status()).toBe(404);
   });
 });
