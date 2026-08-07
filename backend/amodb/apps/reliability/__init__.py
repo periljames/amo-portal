@@ -2,6 +2,7 @@
 
 from . import models  # noqa: E402,F401
 from . import advanced_models  # noqa: E402,F401
+from . import formal_reporting_models  # noqa: E402,F401
 from . import formula_hardening  # noqa: E402,F401
 from . import analytics_threshold_hardening  # noqa: E402,F401
 from . import advanced_schemas  # noqa: E402,F401
@@ -26,6 +27,7 @@ from . import workbook_analysis_integrity  # noqa: E402,F401
 from . import workbook_revision_hardening  # noqa: E402,F401
 from . import management_reporting  # noqa: E402,F401
 from . import management_reporting_enrichment  # noqa: E402,F401
+from . import formal_reporting  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 
 workpack_integration.register(router)
@@ -46,4 +48,5 @@ workbook_parity_statistics.register(router)
 workbook_revision_hardening.register(router)
 management_reporting_enrichment.apply(management_reporting)
 management_reporting.register(router)
+formal_reporting.register(router)
 workbook_rbac_hardening.apply(router)
