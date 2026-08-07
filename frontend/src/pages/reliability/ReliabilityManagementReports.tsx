@@ -22,9 +22,31 @@ type ManagementSnapshot = {
   data_url: string;
 };
 
+type SnapshotData = {
+  id: number;
+  layout_code: string;
+  layout_name: string;
+  period_start: string;
+  period_end: string;
+  aircraft: string[];
+  sha256_hash: string;
+  generated_at: string;
+};
+
+const DOMAIN_PRESETS: Array<{ label: string; codes: WorkbookDatasetCode[] }> = [
+  { label: "Full programme", codes: [...DATASET_ORDER] },
+  { label: "Utilisation & operations", codes: ["AU", "AI", "FI", "PM", "OOS", "ADD"] },
+  { label: "Maintenance & recurring", codes: ["PM", "SM", "STRUCTURES", "RECURRING", "ADD"] },
+  { label: "Components & shop", codes: ["RM", "SR", "UR"] },
+  { label: "Engineering & configuration", codes: ["SB", "AS", "STRUCTURES", "ECTM"] },
+  { label: "Cost & performance", codes: ["CS", "AU", "FI", "OOS", "RM"] },
+];
+
 function iso(value: Date): string { return value.toISOString().slice(0, 10); }
 function startOfMonth(value: Date): Date { return new Date(value.getFullYear(), value.getMonth(), 1); }
 function endOfMonth(value: Date): Date { return new Date(value.getFullYear(), value.getMonth() + 1, 0); }
+function startOfWeek(value: Date): Date { const result = new Date(value); const offset = (result.getDay() + 6) % 7; result.setDate(result.getDate() - offset); return result; }
+function endOfWeek(value: Date): Date { const result = startOfWeek(value); result.setDate(result.getDate() + 6); return result; }
 function today(): string { return iso(new Date()); }
 function daysAgo(days: number): string { const value = new Date(); value.setDate(value.getDate() - Math.max(0, days - 1)); return iso(value); }
 
@@ -33,6 +55,9 @@ async function renderManagementReport(payload: Record<string, unknown>): Promise
 }
 async function readHtml(id: number): Promise<string> {
   return apiRequest<string>(`${ROOT}/reports/${id}/view`, { headers: { Accept: "text/html" }, cacheTtlMs: 0 });
+}
+async function readSnapshotData(id: number): Promise<SnapshotData> {
+  return apiRequest<SnapshotData>(`${ROOT}/reports/${id}/data`, { cacheTtlMs: 0 });
 }
 async function downloadPdf(id: number, filename: string): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}${ROOT}/reports/${id}/pdf`, { headers: authHeaders({ Accept: "application/pdf" }) });
@@ -74,18 +99,11 @@ export function ReliabilityManagementReports(): React.ReactElement {
     let active = true;
     setLoading(true);
     setError(null);
-    void readHtml(snapshotId).then((reportHtml) => {
+    void Promise.all([readHtml(snapshotId), readSnapshotData(snapshotId)]).then(([reportHtml, meta]) => {
       if (!active) return;
       setPreviewHtml(reportHtml);
-      setSnapshot((currentSnapshot) => currentSnapshot?.id === snapshotId ? currentSnapshot : {
-        id: snapshotId,
-        layout_code: "RETAINED",
-        layout_name: "Retained Reliability report",
-        period_start: "",
-        period_end: "",
-        aircraft: [],
-        sha256_hash: "",
-        generated_at: "",
+      setSnapshot({
+        ...meta,
         view_url: `${ROOT}/reports/${snapshotId}/view`,
         pdf_url: `${ROOT}/reports/${snapshotId}/pdf`,
         data_url: `${ROOT}/reports/${snapshotId}/data`,
@@ -104,6 +122,16 @@ export function ReliabilityManagementReports(): React.ReactElement {
   const quarter = (number: 1 | 2 | 3 | 4) => {
     const startMonth = (number - 1) * 3;
     setRange(new Date(reportYear, startMonth, 1), new Date(reportYear, startMonth + 3, 0), "MONTH");
+  };
+  const thisQuarter = () => {
+    const startMonth = Math.floor(current.getMonth() / 3) * 3;
+    setRange(new Date(current.getFullYear(), startMonth, 1), current, "MONTH");
+  };
+  const previousQuarter = () => {
+    const currentStartMonth = Math.floor(current.getMonth() / 3) * 3;
+    const start = new Date(current.getFullYear(), currentStartMonth - 3, 1);
+    const end = new Date(current.getFullYear(), currentStartMonth, 0);
+    setRange(start, end, "MONTH");
   };
 
   const generate = async (event: React.FormEvent) => {
@@ -164,13 +192,21 @@ export function ReliabilityManagementReports(): React.ReactElement {
       </div>
       <div className="rel-wp__quick-ranges" aria-label="Management report quick periods">
         <button type="button" onClick={() => setRange(new Date(), new Date(), "DAY")}>Today</button>
+        <button type="button" onClick={() => setRange(startOfWeek(current), current, "DAY")}>This week</button>
+        <button type="button" onClick={() => { const start = startOfWeek(current); start.setDate(start.getDate() - 7); setRange(start, endOfWeek(start), "DAY"); }}>Previous week</button>
         <button type="button" onClick={() => setRange(new Date(daysAgo(7)), new Date(), "DAY")}>Last 7 days</button>
         <button type="button" onClick={() => setRange(new Date(daysAgo(30)), new Date(), "WEEK")}>Last 30 days</button>
         <button type="button" onClick={() => setRange(startOfMonth(current), current, "DAY")}>This month</button>
         <button type="button" onClick={() => { const previous = new Date(current.getFullYear(), current.getMonth() - 1, 1); setRange(previous, endOfMonth(previous), "WEEK"); }}>Previous month</button>
+        <button type="button" onClick={thisQuarter}>This quarter</button>
+        <button type="button" onClick={previousQuarter}>Previous quarter</button>
         <button type="button" onClick={() => setRange(new Date(current.getFullYear(), 0, 1), current, "MONTH")}>YTD</button>
         <button type="button" onClick={() => quarter(1)}>Q1</button><button type="button" onClick={() => quarter(2)}>Q2</button><button type="button" onClick={() => quarter(3)}>Q3</button><button type="button" onClick={() => quarter(4)}>Q4</button>
       </div>
+      <fieldset>
+        <legend>Report content preset</legend>
+        <div className="rel-wp__quick-ranges">{DOMAIN_PRESETS.map((preset) => <button type="button" key={preset.label} onClick={() => setDomains(preset.codes)}>{preset.label}</button>)}</div>
+      </fieldset>
       <fieldset>
         <legend>Controlled domains included</legend>
         <div className="rel-wp__domain-selector">
