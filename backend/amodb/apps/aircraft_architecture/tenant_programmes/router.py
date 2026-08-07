@@ -494,13 +494,15 @@ def publish_revision(
     current = db.query(models.TenantProgrammeRevision).filter(
         models.TenantProgrammeRevision.programme_id == revision.programme_id,
         models.TenantProgrammeRevision.status == "PUBLISHED",
-    ).with_for_update().all()
+    ).with_for_update(of=models.TenantProgrammeRevision).all()
     for previous in current:
         previous.status = "SUPERSEDED"
         db.add(previous)
 
     revision.status = "PUBLISHED"
-    revision.source_currentness_at_approval = "OEM_BASELINE_CURRENT"
+    revision.source_currentness_at_approval = str(
+        validation_result.get("summary", {}).get("oem_currentness_at_validation") or "UNKNOWN"
+    )
     revision.approval_reference = payload.approval_reference
     revision.published_by_user_id = user.id
     revision.published_at = datetime.now(timezone.utc)
