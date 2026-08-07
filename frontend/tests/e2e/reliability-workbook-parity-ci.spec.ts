@@ -63,14 +63,21 @@ function catalog() {
 
 async function fulfilApi(route: Route): Promise<void> {
   const url = new URL(route.request().url());
-  if (url.origin === "http://127.0.0.1:4173") {
-    await route.continue();
-    return;
-  }
-
   const path = url.pathname;
   const json = (body: unknown, status = 200) =>
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+  if (url.origin === "http://127.0.0.1:4173") {
+    // Vite preview is a static server. Portal-shell presence is a best-effort
+    // mutation that normally reaches the API/proxy in production; without this
+    // fixture it receives a Vite 500 and the global fetch-error bridge correctly
+    // raises a persistent system toast that obscures the Reliability UAT.
+    if (path === "/api/realtime/presence" && route.request().method() === "POST") {
+      return json({ state: "online" });
+    }
+    await route.continue();
+    return;
+  }
 
   if (path.includes("/reliability/workbook-parity")) {
     if (path.endsWith("/catalog")) return json(catalog());
