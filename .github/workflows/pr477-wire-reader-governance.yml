@@ -1,0 +1,75 @@
+name: PR 477 wire reader governance
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-wire-reader-governance.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Wire governance drawer without changing PDF navigation ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          reader = Path('frontend/src/pages/manuals/PublicationsReaderPage.tsx')
+          source = reader.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  '  Search,\n  TriangleAlert,',
+                  '  Search,\n  ShieldCheck,\n  TriangleAlert,',
+              ),
+              (
+                  'import PublicationPdfLayoutViewer, { type PdfOutlineItem } from "./PublicationPdfLayoutViewer";\n',
+                  'import PublicationPdfLayoutViewer, { type PdfOutlineItem } from "./PublicationPdfLayoutViewer";\nimport PublicationGovernancePanel from "./PublicationGovernancePanel";\n',
+              ),
+              (
+                  '  const [copied, setCopied] = useState(false);\n',
+                  '  const [copied, setCopied] = useState(false);\n  const [governanceOpen, setGovernanceOpen] = useState(() => Boolean(searchParams.get("annotation")));\n',
+              ),
+              (
+                  '  const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;\n',
+                  '  const activeSectionId = sections.find((section) => section.anchor_slug === activeSection)?.id;\n  const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;\n',
+              ),
+              (
+                  '              <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>\n              <button type="button" onClick={() => navigate(`/maintenance/${amoCode || tenant}/document-control/change-proposals?publication=${encodeURIComponent(manualId || "")}&revision=${encodeURIComponent(revId || "")}`)}>Report problem</button>',
+                  '              <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>\n              <button type="button" className={governanceOpen ? "active" : ""} onClick={() => setGovernanceOpen(true)}><ShieldCheck size={16} /> Governance</button>\n              <button type="button" onClick={() => navigate(`/maintenance/${amoCode || tenant}/document-control/change-proposals?publication=${encodeURIComponent(manualId || "")}&revision=${encodeURIComponent(revId || "")}`)}>Report problem</button>',
+              ),
+              (
+                  '          <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>',
+                  '          <PublicationGovernancePanel\n            open={governanceOpen}\n            onClose={() => setGovernanceOpen(false)}\n            tenant={tenant}\n            manualId={manualId || ""}\n            revisionId={revId || ""}\n            currentPage={currentPdfPage}\n            activeSectionId={activeSectionId}\n            viewMode={viewMode}\n          />\n          <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>',
+              ),
+          ]
+          for old, new in replacements:
+              if source.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one reader marker: {old[:80]!r}; found {source.count(old)}')
+              source = source.replace(old, new)
+          reader.write_text(source, encoding='utf-8')
+
+          panel = Path('frontend/src/pages/manuals/PublicationGovernancePanel.tsx')
+          content = panel.read_text(encoding='utf-8')
+          marker = '} from "lucide-react";\n\n'
+          if content.count(marker) != 1:
+              raise SystemExit('Governance panel import marker changed')
+          content = content.replace(marker, marker + 'import "./publicationReaderGovernanceWorkspace.css";\n\n')
+          panel.write_text(content, encoding='utf-8')
+          PY
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr477-wire-reader-governance.yml
+          git add frontend/src/pages/manuals/PublicationsReaderPage.tsx frontend/src/pages/manuals/PublicationGovernancePanel.tsx
+          git commit -m "feat(document-control): integrate reader governance drawer"
+          git push origin HEAD:agent/dms-reader-governance-completion
