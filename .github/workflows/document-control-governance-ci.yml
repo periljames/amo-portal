@@ -216,7 +216,7 @@ jobs:
       E2E_BASE_URL: http://127.0.0.1:4173
       E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
       E2E_AMO_CODE: dmsgate
-      E2E_AMO_ADMIN_EMAIL: dms-gate@example.invalid
+      E2E_AMO_ADMIN_EMAIL: dms-gate@example.com
       E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
       E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
     steps:
