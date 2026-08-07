@@ -35,17 +35,14 @@ def _replace_provider_definition(
 def install_commercial_safety_policy() -> None:
     """Apply commercial safety gates without widening the legacy billing API.
 
-    This installer is intentionally small and additive. It keeps provider tokens
-    out of manual admin forms, refuses unproven scale claims, validates settlement
-    callbacks independently of outbound health alarms, and prevents QuickBooks
-    from silently posting a portal invoice in a different accounting currency.
+    Inbound settlement is authenticated against provider evidence independently
+    of the last outbound health probe. Explicit provider disablement still blocks
+    all payment work.
     """
     global _INSTALLED
     if _INSTALLED:
         return
 
-    # OAuth access/refresh tokens are stored programmatically after Intuit's
-    # callback. Superadmins should only ever type the app client secret.
     _replace_provider_definition(
         saas_providers.ProviderDefinition(
             commercial_integrations.QUICKBOOKS_CODE,
@@ -75,11 +72,27 @@ def install_commercial_safety_policy() -> None:
     def strict_capacity_readiness(db: Session) -> dict[str, Any]:
         result = dict(original_capacity(db))
         checks = dict(result.get("checks") or {})
-        # A 1,000-concurrent-tenant claim is allowed only when every declared
-        # production control is present AND an actual qualifying load run was
-        # retained. No configuration subset can turn the badge green.
         result["status"] = "VERIFIED" if checks and all(checks.values()) else "NOT_YET_PROVEN"
         return result
+
+    def _settlement_credential(
+        db: Session,
+        *,
+        provider: str,
+        tenant_id: str,
+        label: str,
+    ):
+        credential = saas_services.get_provider_credential(
+            db,
+            provider=provider,
+            tenant_id=tenant_id,
+        )
+        if credential is None:
+            raise ValueError(f"{label} is not configured")
+        provider_status = str(credential.status or "").strip().upper()
+        if provider_status in {"DISABLED", "NOT_CONFIGURED"}:
+            raise PermissionError(f"{label} settlement rejected because the provider is disabled")
+        return credential
 
     def guarded_paystack_webhook(
         db: Session,
@@ -87,13 +100,6 @@ def install_commercial_safety_policy() -> None:
         raw_payload: bytes,
         signature: str,
     ):
-        """Authenticate inbound settlement independently of outbound health state.
-
-        A temporary health-check failure must not make us discard a legitimate
-        signed payment callback. Explicitly DISABLED credentials still reject all
-        callbacks. The worker subsequently re-verifies the transaction with
-        Paystack before any invoice/module mutation.
-        """
         payload = json.loads(raw_payload.decode("utf-8"))
         event_type = str(payload.get("event") or "").strip().lower()
         data = payload.get("data") or {}
@@ -117,16 +123,12 @@ def install_commercial_safety_policy() -> None:
         )
         if invoice is None:
             raise ValueError("Paystack callback invoice does not belong to the declared tenant")
-        credential = saas_services.get_provider_credential(
+        credential = _settlement_credential(
             db,
             provider=commercial_integrations.PAYSTACK_CODE,
             tenant_id=tenant_id,
+            label="Paystack",
         )
-        if credential is None:
-            raise ValueError("Paystack is not configured")
-        credential_status = str(credential.status or "").strip().upper()
-        if credential_status in {"DISABLED", "NOT_CONFIGURED"}:
-            raise PermissionError("Paystack callback rejected because the provider is disabled")
         secret = saas_services.provider_secrets(credential)
         if not commercial_integrations.verify_paystack_signature(
             raw_payload,
@@ -152,13 +154,63 @@ def install_commercial_safety_policy() -> None:
             priority=5,
         )
 
-    def guarded_mpesa_callback(db: Session, job) -> dict[str, Any]:
-        """Confirm a successful Daraja callback even if provider health is stale.
+    def guarded_paystack_settlement(db: Session, job) -> dict[str, Any]:
+        payload = dict(job.payload_json or {})
+        event_type = str(payload.get("event_type") or "").strip().lower()
+        reference = str(payload.get("reference") or "").strip()
+        tenant_id = str(job.tenant_id or "")
+        invoice = commercial_services._invoice(
+            db,
+            str(payload.get("invoice_id") or ""),
+            tenant_id=tenant_id,
+            lock=True,
+        )
+        credential = db.get(
+            saas_services.models.SaaSProviderCredential,
+            str(payload.get("credential_id") or ""),
+        ) if hasattr(saas_services, "models") else None
+        if credential is None:
+            credential = _settlement_credential(
+                db,
+                provider=commercial_integrations.PAYSTACK_CODE,
+                tenant_id=tenant_id,
+                label="Paystack",
+            )
+        else:
+            status = str(credential.status or "").strip().upper()
+            if status in {"DISABLED", "NOT_CONFIGURED"}:
+                raise PermissionError("Paystack settlement rejected because the provider is disabled")
+        if event_type != "charge.success":
+            return {"ignored": True, "event_type": event_type, "reference": reference}
+        verification = commercial_integrations.paystack_verify_transaction(
+            secret=saas_services.provider_secrets(credential),
+            config=credential.config_json or {},
+            reference=reference,
+        )
+        data = verification.get("data") or {}
+        if not isinstance(data, dict) or str(data.get("status") or "").lower() != "success":
+            raise ValueError("Paystack transaction is not verified as successful")
+        metadata = commercial_services._metadata_dict(data.get("metadata"))
+        if (
+            str(metadata.get("tenant_id") or "") != invoice.amo_id
+            or str(metadata.get("portal_invoice_id") or "") != invoice.id
+        ):
+            raise ValueError(
+                "Paystack verified transaction metadata does not match the portal invoice"
+            )
+        paid = commercial_services.mark_invoice_paid(
+            db,
+            invoice_id=invoice.id,
+            provider=commercial_integrations.PAYSTACK_CODE,
+            provider_reference=reference,
+            actor_user_id=job.created_by,
+            verified_amount_cents=int(data.get("amount") or 0),
+            verified_currency=str(data.get("currency") or ""),
+            reason="Paystack transaction verified server-side",
+        )
+        return {"verified": True, "reference": reference, "invoice": paid}
 
-        The callback token and CheckoutRequestID were already checked at ingress.
-        A success is still cross-checked using Daraja's server-side STK query and
-        invoice amount before settlement. DISABLED credentials remain blocked.
-        """
+    def guarded_mpesa_callback(db: Session, job) -> dict[str, Any]:
         payload = dict(job.payload_json or {})
         tenant_id = str(job.tenant_id or "")
         invoice = commercial_services._invoice(
@@ -202,16 +254,12 @@ def install_commercial_safety_policy() -> None:
                 "result_desc": stk.get("ResultDesc"),
             }
 
-        credential = saas_services.get_provider_credential(
+        credential = _settlement_credential(
             db,
             provider="mpesa_daraja",
             tenant_id=tenant_id,
+            label="M-PESA Daraja",
         )
-        if credential is None:
-            raise ValueError("M-PESA Daraja is not configured")
-        credential_status = str(credential.status or "").strip().upper()
-        if credential_status in {"DISABLED", "NOT_CONFIGURED"}:
-            raise PermissionError("M-PESA settlement rejected because the provider is disabled")
         verification = commercial_integrations.mpesa_query_stk(
             secret=saas_services.provider_secrets(credential),
             config=credential.config_json or {},
@@ -281,6 +329,7 @@ def install_commercial_safety_policy() -> None:
 
     commercial_services.capacity_readiness = strict_capacity_readiness
     commercial_services.record_paystack_webhook = guarded_paystack_webhook
+    commercial_services._process_paystack_webhook = guarded_paystack_settlement
     commercial_services._process_mpesa_callback = guarded_mpesa_callback
     commercial_services.enqueue_quickbooks_sync = guarded_quickbooks_sync
     _INSTALLED = True
