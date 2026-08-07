@@ -55,8 +55,9 @@ def upgrade() -> None:
         "status IN ('CANDIDATE','ACTIVE','INCORPORATED','SUPERSEDED','WITHDRAWN','REPLACED','REJECTED')",
     )
 
-    # Database-level single-current guards prevent races or direct SQL from
-    # creating competing authoritative baselines.
+    # These indexes are replaced by transaction-deferred constraint triggers in
+    # the immediately following migration. They still protect installations
+    # that stop at this revision.
     op.create_index(
         "uq_aircraft_oem_publication_one_current",
         "aircraft_oem_publication_revisions",
@@ -217,11 +218,12 @@ def upgrade() -> None:
         ["intake_id", "identity_key"],
     )
 
-    # Published content is append-only. A DRAFT is the only state in which
-    # source/task/resource child rows can be inserted, corrected, or removed.
+    # U6 already owns content-pack immutability triggers. This migration layers
+    # stricter OEM-backend guards under unique names so it never replaces or
+    # collides with the earlier safety controls.
     op.execute(
         """
-        CREATE OR REPLACE FUNCTION aircraft_guard_content_pack_child()
+        CREATE OR REPLACE FUNCTION aircraft_guard_oem_backend_content_pack_child()
         RETURNS trigger AS $$
         DECLARE
             old_status text;
@@ -254,15 +256,15 @@ def upgrade() -> None:
     for table in CONTENT_CHILD_TABLES:
         op.execute(
             f"""
-            CREATE TRIGGER trg_{table}_controlled
+            CREATE TRIGGER trg_{table}_oem_backend_controlled
             BEFORE INSERT OR UPDATE OR DELETE ON {table}
-            FOR EACH ROW EXECUTE FUNCTION aircraft_guard_content_pack_child();
+            FOR EACH ROW EXECUTE FUNCTION aircraft_guard_oem_backend_content_pack_child();
             """
         )
 
     op.execute(
         """
-        CREATE OR REPLACE FUNCTION aircraft_guard_content_pack_revision()
+        CREATE OR REPLACE FUNCTION aircraft_guard_oem_backend_content_pack_revision()
         RETURNS trigger AS $$
         BEGIN
             IF TG_OP = 'DELETE' THEN
@@ -286,9 +288,9 @@ def upgrade() -> None:
         END;
         $$ LANGUAGE plpgsql;
 
-        CREATE TRIGGER trg_aircraft_content_pack_revision_controlled
+        CREATE TRIGGER trg_aircraft_content_pack_revision_oem_backend_controlled
         BEFORE UPDATE OR DELETE ON aircraft_content_pack_revisions
-        FOR EACH ROW EXECUTE FUNCTION aircraft_guard_content_pack_revision();
+        FOR EACH ROW EXECUTE FUNCTION aircraft_guard_oem_backend_content_pack_revision();
         """
     )
 
@@ -457,12 +459,14 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_publication_revision()")
     op.execute(
-        "DROP TRIGGER IF EXISTS trg_aircraft_content_pack_revision_controlled ON aircraft_content_pack_revisions"
+        "DROP TRIGGER IF EXISTS trg_aircraft_content_pack_revision_oem_backend_controlled ON aircraft_content_pack_revisions"
     )
-    op.execute("DROP FUNCTION IF EXISTS aircraft_guard_content_pack_revision()")
+    op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_backend_content_pack_revision()")
     for table in CONTENT_CHILD_TABLES:
-        op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_controlled ON {table}")
-    op.execute("DROP FUNCTION IF EXISTS aircraft_guard_content_pack_child()")
+        op.execute(
+            f"DROP TRIGGER IF EXISTS trg_{table}_oem_backend_controlled ON {table}"
+        )
+    op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_backend_content_pack_child()")
 
     op.drop_index(
         "ix_aircraft_oem_source_intake_row_identity",
