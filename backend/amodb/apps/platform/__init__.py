@@ -13,6 +13,7 @@ from .saas_provider_network import install_provider_network_hardening
 from .resend_email_policy import install_resend_email_provider
 from .commercial_integrations import install_commercial_integrations
 from .commercial_accounting import install_accounting_summary_policy
+from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -35,6 +36,9 @@ install_resend_email_provider()
 install_commercial_integrations()
 # Never blend amounts from unlike currencies in platform financial metrics.
 install_accounting_summary_policy()
+# Strict callback, accounting-currency and load-proof boundaries are layered on
+# the adapters before API routes capture the shared commercial functions.
+install_commercial_safety_policy()
 # Separate administrative tenant state from commercial billing connectivity and
 # replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
