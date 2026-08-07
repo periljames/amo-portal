@@ -1,0 +1,48 @@
+name: PR 477 fix selection types
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-fix-selection-types.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Correct PDF selection typing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/pages/manuals/PublicationGovernancePanel.tsx')
+          source = path.read_text(encoding='utf-8')
+          marker = 'type Tab = "annotations" | "evidence" | "compare";\n'
+          addition = '''type Tab = "annotations" | "evidence" | "compare";\n\ntype SelectedLocation = {\n  section_id?: string;\n  page_number?: number;\n  exact_quote?: string;\n  normalized_rects?: Array<{ x: number; y: number; width: number; height: number }>;\n};\n'''
+          if source.count(marker) != 1:
+              raise SystemExit('Tab marker changed')
+          source = source.replace(marker, addition)
+          source = source.replace('function selectedSemanticLocation(): { section_id?: string; exact_quote?: string } {', 'function selectedSemanticLocation(): SelectedLocation {')
+          source = source.replace('function selectedPdfLocation(): { page_number?: number; exact_quote?: string; normalized_rects?: Array<Record<string, number>> } {', 'function selectedPdfLocation(): SelectedLocation {')
+          old = '''  const normalized_rects = [...range.getClientRects()].map((rect) => {\n    const left = Math.max(bounds.left, rect.left);\n    const top = Math.max(bounds.top, rect.top);\n    const right = Math.min(bounds.right, rect.right);\n    const bottom = Math.min(bounds.bottom, rect.bottom);\n    if (right <= left || bottom <= top) return null;\n    return {\n      x: Math.max(0, Math.min(1, (left - bounds.left) / bounds.width)),\n      y: Math.max(0, Math.min(1, (top - bounds.top) / bounds.height)),\n      width: Math.max(0, Math.min(1, (right - left) / bounds.width)),\n      height: Math.max(0, Math.min(1, (bottom - top) / bounds.height)),\n    };\n  }).filter((rect): rect is Record<string, number> => Boolean(rect && rect.width > 0 && rect.height > 0));\n'''
+          new = '''  const normalized_rects: NonNullable<SelectedLocation["normalized_rects"]> = [];\n  for (const rect of range.getClientRects()) {\n    const left = Math.max(bounds.left, rect.left);\n    const top = Math.max(bounds.top, rect.top);\n    const right = Math.min(bounds.right, rect.right);\n    const bottom = Math.min(bounds.bottom, rect.bottom);\n    if (right <= left || bottom <= top) continue;\n    normalized_rects.push({\n      x: Math.max(0, Math.min(1, (left - bounds.left) / bounds.width)),\n      y: Math.max(0, Math.min(1, (top - bounds.top) / bounds.height)),\n      width: Math.max(0, Math.min(1, (right - left) / bounds.width)),\n      height: Math.max(0, Math.min(1, (bottom - top) / bounds.height)),\n    });\n  }\n'''
+          if source.count(old) != 1:
+              raise SystemExit('Selection rectangle marker changed')
+          source = source.replace(old, new)
+          path.write_text(source, encoding='utf-8')
+          PY
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr477-fix-selection-types.yml
+          git add frontend/src/pages/manuals/PublicationGovernancePanel.tsx
+          git commit -m "fix(document-control): type governed PDF selections precisely"
+          git push origin HEAD:agent/dms-reader-governance-completion
