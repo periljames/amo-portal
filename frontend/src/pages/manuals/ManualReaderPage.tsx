@@ -2,8 +2,9 @@ import { useParams } from "react-router-dom";
 
 import DocumentationAssistantPanel from "./DocumentationAssistantPanel";
 import PublicationAssistedNavigationBridge from "./PublicationAssistedNavigationBridge";
-import PublicationsReaderPage from "./PublicationsReaderPage";
 import PublicationInlineReferenceController from "./PublicationInlineReferenceController";
+import PublicationReaderChromeBridge from "./PublicationReaderChromeBridge";
+import PublicationsReaderPage from "./PublicationsReaderPage";
 
 export default function ManualReaderPage() {
   const params = useParams<{ amoCode?: string; tenantSlug?: string; manualId?: string; revId?: string }>();
@@ -11,6 +12,7 @@ export default function ManualReaderPage() {
 
   return <>
     <PublicationsReaderPage />
+    <PublicationReaderChromeBridge />
     <PublicationAssistedNavigationBridge />
     <PublicationInlineReferenceController />
     {tenant ? <DocumentationAssistantPanel
