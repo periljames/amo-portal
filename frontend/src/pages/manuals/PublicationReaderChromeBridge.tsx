@@ -72,22 +72,19 @@ export default function PublicationReaderChromeBridge() {
       }
     };
 
-    locate();
+    const synchronizeAssistantAfterClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest(".documentation-assistant, .publication-assistant-topbar")) return;
+      window.requestAnimationFrame(() => setAssistantOpen(assistantIsOpen()));
+    };
 
-    const observer = new MutationObserver(() => {
-      const nextOpen = assistantIsOpen();
-      setAssistantOpen((current) => current === nextOpen ? current : nextOpen);
-      const next = locatePortalTargets();
-      setTargets((current) => (
-        current.header === next.header && current.topbar === next.topbar ? current : next
-      ));
-      enforceOriginalLayout();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    locate();
+    document.addEventListener("click", synchronizeAssistantAfterClick, true);
 
     return () => {
       document.body.classList.remove("publication-reader-route-active");
-      observer.disconnect();
+      document.removeEventListener("click", synchronizeAssistantAfterClick, true);
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
     };
   }, []);
