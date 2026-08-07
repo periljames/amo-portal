@@ -10,7 +10,6 @@ import {
   Database,
   FileClock,
   FileCog,
-  FileDiff,
   FileSearch,
   FolderTree,
   Gauge,
@@ -20,10 +19,11 @@ import {
   Settings,
   Send,
 } from "lucide-react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
 import "./documentControlLibraryExperience.css";
@@ -235,26 +235,6 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
   },
 ];
 
-export function useDocumentControlRoute() {
-  const params = useParams<{
-    amoCode?: string;
-    department?: string;
-    docId?: string;
-    draftId?: string;
-    proposalId?: string;
-    trId?: string;
-    eventId?: string;
-  }>();
-  const amoCode = params.amoCode || "";
-  return {
-    ...params,
-    amoCode,
-    tenant: amoCode.toLowerCase(),
-    basePath: `/maintenance/${amoCode}/document-control`,
-    readerBasePath: `/maintenance/${amoCode}/publications`,
-  };
-}
-
 function workspaceForPath(pathname: string): DocumentControlWorkspaceId {
   if (pathname.includes("/records")) return "records";
   if (pathname.includes("/structure")) return "structure";
@@ -432,8 +412,3 @@ export function DocumentControlSection({
     </section>
   );
 }
-
-export const DocumentControlIcons = {
-  BookOpen,
-  FileDiff,
-};
