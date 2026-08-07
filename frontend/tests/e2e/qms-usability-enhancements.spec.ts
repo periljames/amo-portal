@@ -275,21 +275,32 @@ test("QMS explicit refresh event revalidates active data without browser reload"
 });
 
 test("CAR register stays bounded and preserves governed assignee and creation controls", async ({ page }) => {
+  test.setTimeout(75_000);
   const state = testState();
   const runtimeErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} :: ${request.failure()?.errorText || "failed"}`));
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/cars/register", { waitUntil: "domcontentloaded" });
 
   try {
-    await expect(page.getByRole("heading", { name: "Corrective action register" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Corrective action register" })).toBeVisible({ timeout: 15_000 });
   } catch (error) {
+    const body = page.isClosed() ? "<page closed>" : (await page.locator("body").innerText().catch(() => "<body unavailable>")).slice(0, 4_000);
     console.error("CAR route render diagnostic", {
-      url: page.url(),
+      url: page.isClosed() ? "<page closed>" : page.url(),
       runtimeErrors,
-      body: (await page.locator("body").innerText()).slice(0, 4_000),
+      consoleErrors,
+      failedRequests,
+      carRegisterUrls: state.carRegisterUrls,
+      body,
     });
     throw error;
   }
