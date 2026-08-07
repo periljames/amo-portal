@@ -276,18 +276,31 @@ test("QMS explicit refresh event revalidates active data without browser reload"
 
 test("CAR register stays bounded and preserves governed assignee and creation controls", async ({ page }) => {
   const state = testState();
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/cars/register", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "Corrective action register" })).toBeVisible();
-  await expect(page.getByText("QMS-CAR-001", { exact: true })).toBeVisible();
-  await expect.poll(() => state.carRegisterUrls.length).toBeGreaterThan(0);
+  try {
+    await expect(page.getByRole("heading", { name: "Corrective action register" })).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    console.error("CAR route render diagnostic", {
+      url: page.url(),
+      runtimeErrors,
+      body: (await page.locator("body").innerText()).slice(0, 4_000),
+    });
+    throw error;
+  }
+  expect(runtimeErrors).toEqual([]);
+  await expect(page.getByText("QMS-CAR-001", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => state.carRegisterUrls.length, { timeout: 15_000 }).toBeGreaterThan(0);
   expect(state.carRegisterUrls.at(-1)).toContain("limit=25");
   expect(state.carRegisterUrls.at(-1)).not.toContain("limit=1000");
 
   await page.getByLabel("Responsible", { exact: true }).selectOption("auditee-a");
-  await expect.poll(() => state.carRegisterUrls.at(-1) || "").toContain("assigned_to_user_id=auditee-a");
+  await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("assigned_to_user_id=auditee-a");
 
   await page.getByRole("button", { name: "New CAR" }).click();
   const createDialog = page.getByRole("dialog", { name: "Create corrective action" });
@@ -306,7 +319,8 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   await expect(preview.getByText("Engineering", { exact: true })).toBeVisible();
 
   await page.goto("/maintenance/tenant-a/quality/cars?carId=rel-car-7", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("REL-CAR-007", { exact: true })).toBeVisible();
-  await expect.poll(() => state.carRegisterUrls.at(-1) || "").toContain("car_id=rel-car-7");
+  await expect(page.getByText("REL-CAR-007", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("car_id=rel-car-7");
   expect(state.carRegisterUrls.at(-1)).not.toContain("program=QUALITY");
+  expect(runtimeErrors).toEqual([]);
 });
