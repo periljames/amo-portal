@@ -4,6 +4,7 @@ import { plannerClockAt } from "./qmsPlannerClock";
 
 const PLANNER_TIMEZONE = "Africa/Nairobi";
 const CLOCK_REFRESH_MS = 30_000;
+const FOCUS_RESTORE_DELAYS_MS = [0, 40, 120, 240];
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -87,6 +88,7 @@ function usePlannerDialogFocusManagement(): void {
 
   useEffect(() => {
     const openDialogs = openDialogsRef.current;
+    const pendingFocusTimers = new Set<number>();
     const currentDialogs = (): HTMLElement[] => Array.from(
       document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
     ).filter(isRendered);
@@ -147,16 +149,23 @@ function usePlannerDialogFocusManagement(): void {
 
     const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
       const restore = () => {
+        if (currentDialogs().length) return;
         const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
         if (target && document.activeElement !== target) target.focus({ preventScroll: true });
       };
 
-      // Closing a React-controlled modal can replace or re-render its opener in
-      // the same frame. Resolve the fallback from the live DOM on each attempt
-      // instead of relying on the element captured when the modal opened.
+      // React can replace the inspector action row more than once while a
+      // reschedule modal closes. Resolve the live fallback on each retry so
+      // focus lands on the current opener rather than a detached button.
       window.requestAnimationFrame(() => {
         restore();
-        window.setTimeout(restore, 0);
+        FOCUS_RESTORE_DELAYS_MS.forEach((delay) => {
+          const timer = window.setTimeout(() => {
+            pendingFocusTimers.delete(timer);
+            restore();
+          }, delay);
+          pendingFocusTimers.add(timer);
+        });
       });
     };
 
@@ -191,8 +200,6 @@ function usePlannerDialogFocusManagement(): void {
       }
 
       if (!dialogs.length && removedDialogs.length) {
-        // Only one modal is allowed at a time. If React batches multiple removal
-        // mutations, restore the most recently removed modal's opener.
         const removed = removedDialogs[removedDialogs.length - 1];
         restoreDialogTrigger(removed.dialog, removed.trigger);
       }
@@ -208,6 +215,8 @@ function usePlannerDialogFocusManagement(): void {
       document.removeEventListener("focusin", rememberOutsideFocus, true);
       document.removeEventListener("pointerdown", rememberPointerTrigger, true);
       document.removeEventListener("keydown", manageDialogKeyboard, true);
+      pendingFocusTimers.forEach((timer) => window.clearTimeout(timer));
+      pendingFocusTimers.clear();
       openDialogs.clear();
     };
   }, []);
