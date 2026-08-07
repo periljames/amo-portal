@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "backend/amodb/apps/platform/**"
+      - "backend/amodb/entitlements.py"
       - "backend/amodb/database.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
       - "frontend/src/pages/platform/**"
@@ -69,7 +70,9 @@ jobs:
           amodb/apps/platform/commercial_policy.py
           amodb/apps/platform/commercial_safety_policy.py
           amodb/apps/platform/commercial_access_policy.py
+          amodb/apps/platform/commercial_invoice_policy.py
           amodb/apps/platform/commercial_router.py
+          amodb/entitlements.py
           amodb/jobs/saas_worker_safe.py
           amodb/database.py
       - name: Run commercial provider and lifecycle tests
