@@ -147,16 +147,11 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
             </div>
           </details>
 
-          <section className="qms-control-centre__review-lane" aria-label="Assurance review tools">
+          <section className="qms-control-centre__review-lane" aria-label="Assurance review guidance">
             <div>
               <span>Human-governed assurance</span>
-              <strong>Review evidence and recommendations without turning the dashboard into a second workflow.</strong>
-              <p>Use the control, evidence and intelligence workspaces for analysis. Decisions remain explicit human actions in the governed record.</p>
-            </div>
-            <div>
-              <Link to={`${routes.root}?hub=controls`}><Target size={15} /> Review controls <ArrowRight size={14} /></Link>
-              <Link to={`${routes.root}?hub=evidence`}><GitBranch size={15} /> Trace evidence <ArrowRight size={14} /></Link>
-              <Link to={`${routes.root}?hub=intelligence`}><BrainCircuit size={15} /> Review intelligence <ArrowRight size={14} /></Link>
+              <strong>Use the workspace navigation above to review controls, evidence and recommendations.</strong>
+              <p>AI may rank and explain exposure, but acceptance, approval, verification and closure remain explicit human actions in the governed source record.</p>
             </div>
           </section>
 
