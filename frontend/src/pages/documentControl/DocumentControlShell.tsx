@@ -1,3 +1,4 @@
+/* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
 import type { ReactNode } from "react";
 import {
   Archive,
