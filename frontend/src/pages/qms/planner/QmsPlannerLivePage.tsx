@@ -145,6 +145,21 @@ function usePlannerDialogFocusManagement(): void {
       }
     };
 
+    const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
+      const restore = () => {
+        const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
+        if (target && document.activeElement !== target) target.focus({ preventScroll: true });
+      };
+
+      // Closing a React-controlled modal can replace or re-render its opener in
+      // the same frame. Resolve the fallback from the live DOM on each attempt
+      // instead of relying on the element captured when the modal opened.
+      window.requestAnimationFrame(() => {
+        restore();
+        window.setTimeout(restore, 0);
+      });
+    };
+
     const observer = new MutationObserver(() => {
       const dialogs = currentDialogs();
       const currentDialogSet = new Set(dialogs);
@@ -168,19 +183,18 @@ function usePlannerDialogFocusManagement(): void {
         });
       });
 
-      const removedTriggers: HTMLElement[] = [];
+      const removedDialogs: Array<{ dialog: HTMLElement; trigger: HTMLElement | null }> = [];
       for (const [dialog, trigger] of openDialogs) {
         if (currentDialogSet.has(dialog)) continue;
         openDialogs.delete(dialog);
-        const restoreTarget = firstFocusable(trigger, fallbackTrigger(dialog));
-        if (restoreTarget) removedTriggers.push(restoreTarget);
+        removedDialogs.push({ dialog, trigger });
       }
 
-      const restoreTarget = removedTriggers[0] || null;
-      if (!dialogs.length && restoreTarget) {
-        window.requestAnimationFrame(() => {
-          if (isFocusable(restoreTarget)) restoreTarget.focus({ preventScroll: true });
-        });
+      if (!dialogs.length && removedDialogs.length) {
+        // Only one modal is allowed at a time. If React batches multiple removal
+        // mutations, restore the most recently removed modal's opener.
+        const removed = removedDialogs[removedDialogs.length - 1];
+        restoreDialogTrigger(removed.dialog, removed.trigger);
       }
     });
 
