@@ -72,6 +72,12 @@ class CirculationRequest(BaseModel):
     comments: str | None = Field(default=None, max_length=2000)
 
 
+def _future(value: datetime) -> bool:
+    """Compare API datetimes safely whether clients send an offset or UTC-naive value."""
+    now = datetime.now(value.tzinfo) if value.tzinfo is not None else datetime.utcnow()
+    return value > now
+
+
 def _copy(db: Session, tenant_id: str, copy_id: str) -> dm.DocumentControlledCopy:
     row = (
         db.query(dm.DocumentControlledCopy)
@@ -114,6 +120,22 @@ def _event_payload(row: dm.DocumentControlledCopyEvent) -> dict:
     }
 
 
+def _reader_event_payload(row: dm.DocumentControlledCopyEvent) -> dict:
+    """Expose custody chronology to the present custodian without leaking other staff IDs."""
+    return {
+        "id": row.id,
+        "event_type": row.event_type,
+        "actor_user_id": None,
+        "from_holder_user_id": None,
+        "to_holder_user_id": None,
+        "from_location": row.from_location,
+        "to_location": row.to_location,
+        "reason": row.reason,
+        "evidence": [],
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 def _scan_payload(
     db: Session,
     *,
@@ -133,9 +155,28 @@ def _scan_payload(
         .all()
     )
     holder = _holder_label(db, row) if controller or own_copy else None
+    if controller:
+        event_payloads = [_event_payload(event) for event in events]
+    elif own_copy:
+        event_payloads = [_reader_event_payload(event) for event in events]
+    else:
+        event_payloads = []
     return {
         "copy": {
-            **_copy_payload(row),
+            "id": row.id,
+            "manual_id": row.manual_id,
+            "revision_id": row.revision_id,
+            "copy_number": row.copy_number,
+            "format": row.format,
+            "holder_user_id": row.holder_user_id if controller or own_copy else None,
+            "holder_name": row.holder_name if controller or own_copy else None,
+            "location_text": row.location_text,
+            "status": row.status,
+            "issued_at": row.issued_at.isoformat() if row.issued_at else None,
+            "issued_by_user_id": row.issued_by_user_id if controller else None,
+            "due_back_at": row.due_back_at.isoformat() if row.due_back_at else None,
+            "withdrawn_at": row.withdrawn_at.isoformat() if row.withdrawn_at else None,
+            "metadata": dict(row.metadata_json or {}) if controller else {},
             "home_location_text": _home_location(row),
             "holder_display": holder,
             "holder_visible": bool(controller or own_copy),
@@ -159,7 +200,7 @@ def _scan_payload(
             "status": status_value(revision),
             "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
         },
-        "events": [_event_payload(event) for event in events] if controller or own_copy else [],
+        "events": event_payloads,
         "reader_path": f"/maintenance/{tenant_slug}/publications/{manual.id}/rev/{revision.id}/read",
         "capabilities": {
             "control": controller,
@@ -430,7 +471,7 @@ def circulate_controlled_copy(
             raise HTTPException(status_code=409, detail="This physical copy is not currently available on its controlled shelf")
         if not payload.acknowledgement:
             raise HTTPException(status_code=422, detail="Custody acknowledgement is required before check-out")
-        if not payload.due_back_at or payload.due_back_at <= utcnow():
+        if not payload.due_back_at or not _future(payload.due_back_at):
             raise HTTPException(status_code=422, detail="A future return due date is required")
         target_user_id = payload.holder_user_id if controller and payload.holder_user_id else current_user.id
         holder = active_tenant_users(db, tenant, [target_user_id])[0]
