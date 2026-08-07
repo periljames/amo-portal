@@ -11,6 +11,27 @@ This document separates two concerns deliberately:
 
 The second layer must extend the first. It must not create a second calculation engine or require users to rebuild data in spreadsheets.
 
+## Forward operational acceptance
+
+The forward Reliability workflow is accepted only when an operator can complete normal work without returning to Excel for calculation or report assembly.
+
+The operational acceptance criteria are:
+
+- every one of the 16 controlled Reliability domains can be entered manually or through an unambiguous canonical CSV/TSV template;
+- structured intake validates headers and rows before commit, retains source/row hashes and creates controlled drafts only;
+- shared record fields and dataset payload fields have unique canonical names, so an imported value has one deterministic destination;
+- approved source evidence becomes reusable by the common Reliability analytics engine without duplicate re-entry;
+- users can analyse arbitrary date windows and normal calendar/rolling periods at daily, weekly or monthly resolution;
+- blank aircraft scope produces fleet reporting and selected aircraft scope produces aircraft-specific reporting;
+- the same approved evidence can feed all-domain or selected-domain management reports, with numeric, categorical and derived field analysis appropriate to the selected source domains;
+- management reports retain the selected population, calculations, narrative, warnings and graphs as a fixed snapshot rather than silently recalculating when opened later;
+- an authenticated manager link opens that retained snapshot;
+- the same retained snapshot can be previewed, printed or exported as a controlled server-generated PDF;
+- source/data-quality and denominator limitations remain visible rather than being converted to artificial zeroes or silently omitted;
+- Excel remains available for compatibility and export, but is not required to calculate routine Reliability metrics or assemble daily, weekly, monthly or quarterly management outputs.
+
+Formal half-year/annual authority reporting has additional acceptance gates and is intentionally governed separately below. Passing the forward operational criteria does not by itself declare a report compliant with KCAA/KCAR, EASA or FAA requirements.
+
 ## Current operational contract
 
 Controlled source domains:
