@@ -15,6 +15,7 @@ from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
 from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
+from . import register_pagination as _register_pagination  # noqa: F401,E402
 
 
 def _deduplicate_exact_routes(api_router: APIRouter) -> None:
