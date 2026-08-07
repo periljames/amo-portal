@@ -45,8 +45,10 @@ class QMSCarRegisterPageOut(BaseModel):
     summary: QMSCarRegisterSummaryOut = Field(default_factory=QMSCarRegisterSummaryOut)
 
 
-def _normalise_search(value: Optional[str]) -> Optional[str]:
-    text = (value or "").strip()
+def _normalise_search(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
     return text or None
 
 
@@ -227,7 +229,7 @@ def get_car_register_paged(
     assigned_to_user_id: Optional[str] = Query(default=None, max_length=36),
     audit_id: Optional[UUID] = None,
     search: Optional[str] = Query(default=None, max_length=160),
-    due_soon_days: int = Query(default=30, ge=1, le=90),
+    due_soon_days: int = Query(default=30, ge=0, le=90),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_read_db),
@@ -283,8 +285,9 @@ def get_car_register_paged(
         query = query.filter(Car.status == status_)
     if car_id is not None:
         query = query.filter(Car.id == car_id)
-    if assigned_to_user_id:
-        query = query.filter(Car.assigned_to_user_id == assigned_to_user_id)
+    assigned_value = _normalise_search(assigned_to_user_id)
+    if assigned_value:
+        query = query.filter(Car.assigned_to_user_id == assigned_value)
     if audit_id is not None:
         query = query.filter(Finding.audit_id == audit_id)
 
