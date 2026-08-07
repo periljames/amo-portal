@@ -164,10 +164,12 @@ function usePlannerDialogFocusManagement(): void {
       const topDialog = dialogs[dialogs.length - 1];
 
       if (event.key === "Escape" && topDialog) {
-        restoreDialogTrigger(
-          topDialog,
-          openDialogs.get(topDialog) ?? fallbackTrigger(topDialog),
-        );
+        const rememberedTrigger = openDialogs.get(topDialog) ?? fallbackTrigger(topDialog);
+        const timer = window.setTimeout(() => {
+          pendingFocusTimers.delete(timer);
+          if (!isRendered(topDialog)) restoreDialogTrigger(topDialog, rememberedTrigger);
+        }, 0);
+        pendingFocusTimers.add(timer);
         return;
       }
 
