@@ -90,7 +90,10 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run browser PDF reader regressions
         working-directory: frontend
-        run: npm exec -- vitest run src/pages/manuals/pdfReaderEngine.test.ts
+        run: >-
+          npm exec -- vitest run
+          src/pages/manuals/pdfReaderEngine.test.ts
+          src/pages/manuals/pdfReaderToolbarModel.test.ts
       - name: Typecheck and build Document Control frontend
         working-directory: frontend
         run: npm run build
