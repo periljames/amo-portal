@@ -42,12 +42,16 @@ function browserHints(): {
 
 /**
  * Choose a bounded PDF range/render policy from browser network and memory
- * hints. Large 20-50 MiB range requests delayed the first useful page on real
- * technical manuals, especially when traffic crossed a remote/private link.
- * Smaller ranges let PDF.js reach requested objects earlier while streaming
- * remains enabled. Canvas DPR is also capped below the display DPR so nearby
- * virtual pages do not monopolize decode/paint time; zooming still rerenders at
- * the requested CSS size and print/download always use the authoritative PDF.
+ * hints. Large range requests delayed the first useful page on real technical
+ * manuals, especially across remote/private links. Smaller ranges let PDF.js
+ * reach requested objects earlier while streaming remains enabled.
+ *
+ * Fast network hints must not automatically trigger aggressive page painting:
+ * a technical PDF can contain forms, text layers, vector drawings and large
+ * images even on a powerful client. The V4 renderer uses `mode` to decide how
+ * many neighboring/hot pages stay mounted, so stable networks remain balanced
+ * rather than entering burst mode. This prioritizes the page the user is
+ * actually reading and reduces scroll/zoom contention.
  */
 export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   const { connection, deviceMemory, hardwareConcurrency } = browserHints();
@@ -76,10 +80,10 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
 
   if (modestNetwork || deviceMemory < 4) {
     return {
-      mode: "balanced",
+      mode: "constrained",
       rangeChunkSize: 2 * MIB,
-      renderRadius: 3,
-      hotPageLimit: 8,
+      renderRadius: 2,
+      hotPageLimit: 5,
       prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.15,
     };
@@ -87,12 +91,12 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
 
   if (superStableNetwork) {
     return {
-      mode: "burst",
-      rangeChunkSize: 24 * MIB,
-      renderRadius: 6,
-      hotPageLimit: 16,
+      mode: "balanced",
+      rangeChunkSize: 16 * MIB,
+      renderRadius: 4,
+      hotPageLimit: 10,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.35,
+      maxDevicePixelRatio: 1.3,
     };
   }
 
@@ -100,7 +104,7 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     mode: "balanced",
     rangeChunkSize: 8 * MIB,
     renderRadius: 4,
-    hotPageLimit: 12,
+    hotPageLimit: 10,
     prefetchMarginPx: 0,
     maxDevicePixelRatio: 1.25,
   };
