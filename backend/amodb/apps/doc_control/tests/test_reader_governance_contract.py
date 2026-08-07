@@ -18,6 +18,7 @@ def test_reader_governance_routes_are_version_scoped() -> None:
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/annotations/{annotation_id}",
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence",
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots",
+        "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}",
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/compare",
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/prepare",
         "/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations",
@@ -37,6 +38,9 @@ def test_reader_governance_migration_follows_merged_alembic_head() -> None:
     assert '"docgov_20260806_governance"' in merge
     assert '"merge_20260806_aircraft_workforce"' in merge
     assert 'down_revision: Union[str, Sequence[str], None] = "docgov_merge_20260807"' in reader
+    heads = Path("amodb/alembic/versions/docgov_merge_20260807_heads.py").read_text(encoding="utf-8")
+    assert '"docgov_20260807_reader_governance"' in heads
+    assert '"aircraft_arch_20260806_usage_hsi"' in heads
     assert "document_annotation_migrations" in reader
     assert "document_evidence_snapshots" in reader
 

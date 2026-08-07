@@ -3,7 +3,6 @@ import {
   BadgeCheck,
   Bookmark,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ClipboardCopy,
   Download,

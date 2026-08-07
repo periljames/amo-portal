@@ -18,7 +18,8 @@ from amodb.security import get_current_active_user
 
 from . import governance_models as gm
 from .reader_governance_compare import compare_revisions, migration_proposal
-from .reader_governance_evidence import evidence_payload, reader_manifest, stable_json_sha
+from .reader_governance_evidence import evidence_payload, evidence_state_for_hash, reader_manifest, stable_json_sha
+from .reader_link_validation import validate_qms_link
 from .reader_governance_models import DocumentAnnotationMigration, DocumentEvidenceSnapshot
 from .workspace_service import (
     get_manual,
@@ -257,6 +258,7 @@ def create_annotation(tenant_slug: str, manual_id: str, revision_id: str, payloa
         raise HTTPException(status_code=409, detail="The source revision changed or has no matching checksum; reopen the document before annotating")
     if (visibility != "PRIVATE" or annotation_type in {"EVIDENCE", "FINDING"}) and not is_control_user(current_user):
         raise HTTPException(status_code=403, detail="Shared, controlled-evidence and finding annotations require Document Control privileges")
+    linked = validate_qms_link(db, tenant_id=tenant.amo_id, entity_type=payload.linked_entity_type, entity_id=payload.linked_entity_id)
     location = _ensure_location(db, tenant=tenant, manual=manual, revision=revision, payload=payload.location.model_dump())
     row = gm.DocumentAnnotation(
         tenant_id=tenant.amo_id,
@@ -269,14 +271,14 @@ def create_annotation(tenant_slug: str, manual_id: str, revision_id: str, payloa
         visibility=visibility,
         note_text=payload.note_text,
         tags_json=list(dict.fromkeys(tag.strip() for tag in payload.tags if tag.strip())),
-        linked_entity_type=payload.linked_entity_type,
-        linked_entity_id=payload.linked_entity_id,
+        linked_entity_type=linked["entity_type"] if linked else None,
+        linked_entity_id=linked["entity_id"] if linked else None,
         status="ACTIVE",
         created_by_user_id=current_user.id,
     )
     db.add(row)
     db.flush()
-    _audit(db, tenant, current_user, request, "documentation.annotation.created", "document_annotation", row.id, {"manual_id": manual.id, "revision_id": revision.id, "type": annotation_type, "visibility": visibility, "location_id": location.id})
+    _audit(db, tenant, current_user, request, "documentation.annotation.created", "document_annotation", row.id, {"manual_id": manual.id, "revision_id": revision.id, "type": annotation_type, "visibility": visibility, "location_id": location.id, "linked_entity": linked})
     db.commit()
     return _annotation_dict(db, row, tenant_slug)
 
@@ -330,12 +332,24 @@ def list_evidence_snapshots(tenant_slug: str, manual_id: str, revision_id: str, 
     return [{"id": row.id, "snapshot_sha256": row.snapshot_sha256, "source_sha256": row.source_sha256, "schema_version": row.schema_version, "created_by_user_id": row.created_by_user_id, "created_at": row.created_at.isoformat() if row.created_at else None} for row in rows]
 
 
+@router.get("/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}")
+def get_evidence_snapshot(tenant_slug: str, manual_id: str, revision_id: str, snapshot_id: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    require_control_user(current_user)
+    tenant, _manual, _revision = _context(db, tenant_slug, manual_id, revision_id, current_user)
+    row = db.query(DocumentEvidenceSnapshot).filter(DocumentEvidenceSnapshot.id == snapshot_id, DocumentEvidenceSnapshot.tenant_id == tenant.amo_id, DocumentEvidenceSnapshot.manual_id == manual_id, DocumentEvidenceSnapshot.revision_id == revision_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Evidence snapshot not found")
+    payload = dict(row.payload_json or {})
+    recomputed = stable_json_sha(evidence_state_for_hash(payload))
+    return {"id": row.id, "snapshot_sha256": row.snapshot_sha256, "source_sha256": row.source_sha256, "schema_version": row.schema_version, "created_by_user_id": row.created_by_user_id, "created_at": row.created_at.isoformat() if row.created_at else None, "integrity_valid": recomputed == row.snapshot_sha256, "recomputed_sha256": recomputed, "payload": payload}
+
+
 @router.post("/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots")
 def create_evidence_snapshot(tenant_slug: str, manual_id: str, revision_id: str, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     require_control_user(current_user)
     tenant, manual, revision = _context(db, tenant_slug, manual_id, revision_id, current_user)
     payload = evidence_payload(db, tenant, manual, revision, current_user)
-    digest = stable_json_sha(payload)
+    digest = stable_json_sha(evidence_state_for_hash(payload))
     existing = db.query(DocumentEvidenceSnapshot).filter(DocumentEvidenceSnapshot.tenant_id == tenant.amo_id, DocumentEvidenceSnapshot.snapshot_sha256 == digest).first()
     if existing:
         return {"id": existing.id, "snapshot_sha256": existing.snapshot_sha256, "created_at": existing.created_at.isoformat() if existing.created_at else None, "reused": True}
