@@ -11,13 +11,12 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.aircraft_architecture.aircraft_catalogue import models as catalogue_models
 from amodb.apps.aircraft_architecture.aircraft_catalogue import schemas as catalogue_schemas
 from amodb.apps.aircraft_architecture.aircraft_catalogue import services as catalogue_services
 from amodb.apps.aircraft_architecture.content_packs import models as content_models
 from amodb.apps.aircraft_architecture.content_packs import schemas as content_schemas
 from amodb.apps.aircraft_architecture.content_packs import services as content_services
-from amodb.apps.aircraft_architecture.tenant_programmes import models, router, schemas
+from amodb.apps.aircraft_architecture.tenant_programmes import router, schemas
 
 
 DATABASE_URL = os.environ.get("POSTGRES_INTEGRATION_URL")
@@ -384,7 +383,7 @@ def test_oem_backed_amp_blocks_relaxation_publishes_tightening_and_resolves_airc
         )
         assert published.status == "PUBLISHED"
         assert published.approval_reference == f"KCAA-AMP-{suffix}"
-        assert published.source_currentness_at_approval == "OEM_BASELINE_CURRENT"
+        assert published.source_currentness_at_approval == "CURRENT"
 
         defaults = router.aircraft_defaults(
             fixture["type_revision"].id,
