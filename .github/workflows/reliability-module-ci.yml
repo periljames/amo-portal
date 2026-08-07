@@ -13,6 +13,7 @@ on:
       - 'backend/amodb/alembic/versions/qms_vernum_128.py'
       - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
+      - 'backend/amodb/alembic/versions/docgov_rel_*.py'
       - 'backend/amodb/apps/reliability/**'
       - 'backend/scripts/apply_reliability_review_fixes.py'
       - 'backend/amodb/main.py'
@@ -144,9 +145,15 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          assert head == 'rel_20260807_main_merge', head
+          assert head == 'docgov_rel_20260807_merge', head
           ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
-          for required in ('rel_20260805_ops_exact_counts', 'rel_20260806_reference_integrity', 'merge_20260807_qms_planner_aircraft'):
+          for required in (
+              'rel_20260805_ops_exact_counts',
+              'rel_20260806_reference_integrity',
+              'rel_20260807_main_merge',
+              'merge_20260807_qms_planner_aircraft',
+              'docgov_20260807_qms_audit_runtime',
+          ):
               assert required in ancestry, f'{required} is not an ancestor of {head}'
           print(f'alembic_head={head}')
           PY

@@ -7,7 +7,7 @@ import {
   type DocumentControlDashboard,
   type ReadTargetResponse,
 } from "../../services/documentControl";
-import DocumentControlRecordPage from "./DocumentControlRecordPage";
+import DocumentGovernanceRecordPage from "./DocumentGovernanceRecordPage";
 import DocumentControlShell, {
   DocumentControlError,
   DocumentControlLoading,
@@ -16,7 +16,7 @@ import DocumentControlShell, {
 
 /**
  * Keeps governance records controller-only without making ordinary readers wander
- * through an empty control record. Controllers receive the full unified record;
+ * through an empty control record. Controllers receive the full governed record;
  * readers are sent directly to the immutable revision they are permitted to open.
  */
 export default function DocumentControlRecordEntryPage() {
@@ -51,7 +51,7 @@ export default function DocumentControlRecordEntryPage() {
   if (error) {
     return <DocumentControlShell title="Document unavailable" subtitle="The portal could not resolve a readable revision for this record." canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
   }
-  if (dashboard?.capabilities.control) return <DocumentControlRecordPage />;
+  if (dashboard?.capabilities.control) return <DocumentGovernanceRecordPage />;
   if (target?.revision_id) {
     return <Navigate to={`${readerBasePath}/${docId}/rev/${target.revision_id}/read`} replace />;
   }
