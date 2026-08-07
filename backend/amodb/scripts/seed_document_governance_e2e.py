@@ -1,7 +1,7 @@
 """Seed an ephemeral AMO and governed publication for browser acceptance CI.
 
 This script is intentionally deterministic and is only used against the disposable
-PostgreSQL service created by Document Control Governance CI.  It exercises the
+PostgreSQL service created by Document Control Governance CI. It exercises the
 same password login, tenant scoping, governed library and Publications reader
 routes used in production without depending on production credentials or data.
 """
@@ -106,9 +106,12 @@ def seed() -> None:
             created_at=datetime.now(timezone.utc),
             published_at=datetime.now(timezone.utc),
             immutable_locked=True,
-            source_type_enum=manual_models.ManualSourceType.DOCX,
-            source_filename="document-governance-browser-gate.docx",
-            source_mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            # Mark the authoritative revision as PDF so the browser exercises the
+            # hardened PDF reader. With no source file, the backend deterministically
+            # renders the controlled section/block content into a PDF response.
+            source_type_enum=manual_models.ManualSourceType.PDF,
+            source_filename="document-governance-browser-gate.pdf",
+            source_mime_type="application/pdf",
             source_sha256=source_sha,
             source_page_count=1,
         )
