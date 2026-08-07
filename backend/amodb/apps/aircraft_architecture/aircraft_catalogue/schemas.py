@@ -40,6 +40,7 @@ class TemplateCreate(BaseModel):
     manufacturer: str = Field(min_length=2, max_length=120)
     model: str = Field(min_length=1, max_length=80)
     variant: str | None = Field(default=None, max_length=80)
+    series: str | None = Field(default=None, max_length=80)
     type_certificate: str | None = Field(default=None, max_length=80)
     icao_type_designator: str | None = Field(default=None, max_length=8)
     category: str = Field(min_length=2, max_length=40)
@@ -49,6 +50,11 @@ class TemplateCreate(BaseModel):
     def normalize_code(cls, value: str) -> str:
         return value.strip().upper()
 
+    @field_validator("series")
+    @classmethod
+    def normalize_series(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value and value.strip() else None
+
 
 class TemplateRead(ORMModel):
     id: str
@@ -57,6 +63,7 @@ class TemplateRead(ORMModel):
     manufacturer: str
     model: str
     variant: str | None
+    series: str | None
     type_certificate: str | None
     icao_type_designator: str | None
     category: str
