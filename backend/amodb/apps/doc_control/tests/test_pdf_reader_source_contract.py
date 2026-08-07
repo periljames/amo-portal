@@ -25,6 +25,7 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
 
 
 def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
+    shell = _read("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
     core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
     baseline = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
@@ -37,11 +38,30 @@ def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     assert "orderedVirtualItems.map" in core
     assert "<PdfDocument" in core
     assert "<PdfPage" in core
-    assert "PdfReaderCoreV4" in bridge
-    assert 'from "./PdfReaderCoreV4"' in bridge
+    assert "PdfReaderCoreV4" in shell
+    assert "<PdfDocument" not in shell
+    assert "<PdfPage" not in shell
+    assert "PdfReaderCoreV5" in bridge
+    assert 'from "./PdfReaderCoreV5"' in bridge
     assert "useVirtualizer" in baseline
     assert "PdfReaderCore" in publication
     assert "PdfReaderCore" in linked
+
+
+def test_integrated_reader_owns_contents_pages_and_indexed_search() -> None:
+    shell = _read("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    style = _read("frontend/src/pages/manuals/pdfReaderNavigatorV5.css")
+
+    for label in ("Contents", "Pages", "Search", "Filter contents"):
+        assert label in shell
+    assert "searchPublicationReader" in shell
+    assert "readCachedPublicationBootstrap" in shell
+    assert "useVirtualizer" in shell
+    assert "pdfv5-page-virtualizer" in shell
+    assert "publication-reader-page--dense-pdf-reader" in shell
+    assert "publication-reader-workspace" in style
+    assert "publication-navigation" in style
+    assert "publication-floating-header" in style
 
 
 def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
