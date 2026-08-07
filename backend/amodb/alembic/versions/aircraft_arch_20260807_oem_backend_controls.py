@@ -22,7 +22,6 @@ NOW = sa.text("CURRENT_TIMESTAMP")
 EMPTY_OBJECT = sa.text("'{}'::json")
 EMPTY_LIST = sa.text("'[]'::json")
 
-
 CONTENT_CHILD_TABLES = (
     "aircraft_content_pack_sources",
     "aircraft_content_pack_positions",
@@ -33,9 +32,9 @@ CONTENT_CHILD_TABLES = (
 
 
 def upgrade() -> None:
-    # A submitted Temporary Revision is not effective merely because an AMO
-    # supplied it. Existing unverified ACTIVE rows are moved to CANDIDATE before
-    # the constraint is expanded.
+    # An AMO-submitted Temporary Revision is a candidate until independently
+    # verified by the platform authority. Reclassify any pre-existing unverified
+    # ACTIVE rows before expanding the lifecycle constraint.
     op.drop_constraint(
         "ck_aircraft_oem_temporary_revision_status",
         "aircraft_oem_temporary_revisions",
@@ -53,24 +52,6 @@ def upgrade() -> None:
         "ck_aircraft_oem_temporary_revision_status",
         "aircraft_oem_temporary_revisions",
         "status IN ('CANDIDATE','ACTIVE','INCORPORATED','SUPERSEDED','WITHDRAWN','REPLACED','REJECTED')",
-    )
-
-    # These indexes are replaced by transaction-deferred constraint triggers in
-    # the immediately following migration. They still protect installations
-    # that stop at this revision.
-    op.create_index(
-        "uq_aircraft_oem_publication_one_current",
-        "aircraft_oem_publication_revisions",
-        ["publication_id"],
-        unique=True,
-        postgresql_where=sa.text("status = 'CURRENT'"),
-    )
-    op.create_index(
-        "uq_aircraft_content_pack_one_published",
-        "aircraft_content_pack_revisions",
-        ["pack_id"],
-        unique=True,
-        postgresql_where=sa.text("status = 'PUBLISHED'"),
     )
 
     op.create_table(
@@ -218,36 +199,22 @@ def upgrade() -> None:
         ["intake_id", "identity_key"],
     )
 
-    # U6 already owns content-pack immutability triggers. This migration layers
-    # stricter OEM-backend guards under unique names so it never replaces or
-    # collides with the earlier safety controls.
+    # U6 already owns published content-pack protections. These additional
+    # triggers use unique names and narrow draft writes further without
+    # replacing or colliding with the prior controls.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION aircraft_guard_oem_backend_content_pack_child()
         RETURNS trigger AS $$
-        DECLARE
-            old_status text;
-            new_status text;
+        DECLARE revision_status text;
         BEGIN
-            IF TG_OP IN ('UPDATE','DELETE') THEN
-                SELECT status INTO old_status
-                  FROM aircraft_content_pack_revisions
-                 WHERE id = OLD.revision_id;
-                IF old_status IS DISTINCT FROM 'DRAFT' THEN
-                    RAISE EXCEPTION 'controlled content of a non-draft revision is immutable';
-                END IF;
+            SELECT status INTO revision_status
+              FROM aircraft_content_pack_revisions
+             WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD.revision_id ELSE NEW.revision_id END;
+            IF revision_status IS DISTINCT FROM 'DRAFT' THEN
+                RAISE EXCEPTION 'controlled content may only be changed on a DRAFT revision';
             END IF;
-            IF TG_OP IN ('INSERT','UPDATE') THEN
-                SELECT status INTO new_status
-                  FROM aircraft_content_pack_revisions
-                 WHERE id = NEW.revision_id;
-                IF new_status IS DISTINCT FROM 'DRAFT' THEN
-                    RAISE EXCEPTION 'controlled content may only be written to a draft revision';
-                END IF;
-            END IF;
-            IF TG_OP = 'DELETE' THEN
-                RETURN OLD;
-            END IF;
+            IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -294,8 +261,6 @@ def upgrade() -> None:
         """
     )
 
-    # OEM source identity is immutable after registration; only lifecycle,
-    # verification metadata and append-only decision metadata may change.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION aircraft_guard_oem_publication_revision()
@@ -401,7 +366,7 @@ def upgrade() -> None:
                     RAISE EXCEPTION 'approved OEM source intake identity is immutable';
                 END IF;
             END IF;
-            IF OLD.status = 'MATERIALIZED' AND NEW.status IS DISTINCT FROM 'MATERIALIZED' THEN
+            IF OLD.status = 'MATERIALIZED' AND NEW.status IS DISTINCT FROM OLD.status THEN
                 RAISE EXCEPTION 'materialized OEM source intake is terminal';
             END IF;
             RETURN NEW;
@@ -426,9 +391,7 @@ def upgrade() -> None:
             IF intake_status IN ('APPROVED','MATERIALIZED') THEN
                 RAISE EXCEPTION 'rows of approved/materialized OEM source intake are immutable';
             END IF;
-            IF TG_OP = 'DELETE' THEN
-                RETURN OLD;
-            END IF;
+            IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -449,7 +412,6 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_aircraft_oem_source_intake_controlled ON aircraft_oem_source_intakes"
     )
     op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_source_intake()")
-
     op.execute(
         "DROP TRIGGER IF EXISTS trg_aircraft_oem_temporary_revision_controlled ON aircraft_oem_temporary_revisions"
     )
@@ -463,9 +425,7 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_backend_content_pack_revision()")
     for table in CONTENT_CHILD_TABLES:
-        op.execute(
-            f"DROP TRIGGER IF EXISTS trg_{table}_oem_backend_controlled ON {table}"
-        )
+        op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_oem_backend_controlled ON {table}")
     op.execute("DROP FUNCTION IF EXISTS aircraft_guard_oem_backend_content_pack_child()")
 
     op.drop_index(
@@ -486,15 +446,6 @@ def downgrade() -> None:
         table_name="aircraft_oem_source_intakes",
     )
     op.drop_table("aircraft_oem_source_intakes")
-
-    op.drop_index(
-        "uq_aircraft_content_pack_one_published",
-        table_name="aircraft_content_pack_revisions",
-    )
-    op.drop_index(
-        "uq_aircraft_oem_publication_one_current",
-        table_name="aircraft_oem_publication_revisions",
-    )
 
     op.drop_constraint(
         "ck_aircraft_oem_temporary_revision_status",
