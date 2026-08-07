@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, exists, func, or_
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -17,10 +17,10 @@ from . import governance_models as gm
 from . import knowledge_models as km
 from .governance_service import effective_assignments, serialize_assignment
 from .workspace_service import (
-    can_read_manual,
     is_control_user,
     readable_revision,
     resolve_tenant,
+    role_value,
     serialize_manual,
     serialize_workflow,
 )
@@ -90,6 +90,22 @@ def _physical_summary(rows: list[dm.DocumentControlledCopy]) -> dict[str, dict[s
     return result
 
 
+def _scope_match(scope_column, key: str, expected: str, *, case_insensitive: bool = False):
+    """Return a correlated PostgreSQL JSONB-array membership predicate.
+
+    Access scopes are legacy JSON payloads and are not guaranteed to have
+    normalized role/department case. Expanding the relevant array in SQL keeps
+    permission filtering semantically aligned with ``can_read_manual`` while
+    allowing count/offset/limit to remain database-bounded.
+    """
+    values = func.jsonb_array_elements_text(
+        func.coalesce(scope_column[key], func.jsonb_build_array())
+    ).table_valued("value").alias(f"scope_{key}")
+    candidate = func.upper(values.c.value) if case_insensitive else values.c.value
+    target = expected.upper() if case_insensitive else expected
+    return select(1).select_from(values).where(candidate == target).exists()
+
+
 @router.get("/t/{tenant_slug}/documents", include_in_schema=False)
 def list_visible_documents(
     tenant_slug: str,
@@ -113,11 +129,9 @@ def list_visible_documents(
 ):
     """Return the access-filtered company library, not merely a manual register.
 
-    The response keeps reader/controller separation but adds hierarchy identity,
-    physical-copy availability and, for controllers, governed relationships,
-    module integrations, generated records and external-data currency. Existing
-    governance work-queue filters are preserved so the richer library does not
-    break controller remediation routes.
+    Access predicates, total counting and pagination execute in PostgreSQL before
+    document rows are materialized. This prevents restricted records from
+    influencing disclosed counts and keeps result work bounded for large tenants.
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     controller = is_control_user(current_user)
@@ -212,6 +226,30 @@ def list_visible_documents(
             target_revision.c.status_enum == manual_models.ManualRevisionStatus.SUPERSEDED,
         )))
 
+    if not controller:
+        profile = dm.DocumentControlProfile
+        access_conditions = [
+            profile.id.is_(None),
+            profile.restricted_flag.is_(False),
+            _scope_match(profile.access_scope_json, "user_ids", str(current_user.id)),
+        ]
+        user_role = role_value(current_user)
+        if user_role:
+            access_conditions.append(
+                _scope_match(profile.access_scope_json, "roles", user_role, case_insensitive=True)
+            )
+        department_code = getattr(getattr(current_user, "department", None), "code", None)
+        if department_code:
+            access_conditions.append(
+                _scope_match(
+                    profile.access_scope_json,
+                    "departments",
+                    str(department_code),
+                    case_insensitive=True,
+                )
+            )
+        query = query.filter(or_(*access_conditions))
+
     sort_map = {
         "code": manual_models.Manual.code,
         "title": manual_models.Manual.title,
@@ -220,28 +258,35 @@ def list_visible_documents(
     }
     sort_column = sort_map[sort]
     ordering = sort_column.desc() if direction == "desc" else sort_column.asc()
-    candidates = query.order_by(ordering, manual_models.Manual.id.asc()).all()
-    visible = [
-        (manual, profile)
-        for manual, profile in candidates
-        if can_read_manual(current_user, profile)
-    ]
-    visible_ids = [manual.id for manual, _profile in visible]
 
-    visible_nodes = (
-        db.query(km.DocumentationNode)
+    visible_id_subquery = query.with_entities(
+        manual_models.Manual.id.label("manual_id")
+    ).subquery()
+    facet_counter = dict(
+        db.query(
+            km.DocumentationNode.node_type,
+            func.count(func.distinct(km.DocumentationNode.manual_id)),
+        )
+        .join(
+            visible_id_subquery,
+            visible_id_subquery.c.manual_id == km.DocumentationNode.manual_id,
+        )
         .filter(
             km.DocumentationNode.tenant_id == tenant.amo_id,
-            km.DocumentationNode.manual_id.in_(visible_ids or ["-"]),
             km.DocumentationNode.status == "ACTIVE",
+            km.DocumentationNode.node_type.in_(CONTENT_NODE_TYPES),
         )
+        .group_by(km.DocumentationNode.node_type)
         .all()
     )
-    facet_counter = Counter(row.node_type for row in visible_nodes if row.node_type in CONTENT_NODE_TYPES)
 
-    total = len(visible)
-    start = (page - 1) * per_page
-    selected = visible[start : start + per_page]
+    total = query.count()
+    selected = (
+        query.order_by(ordering, manual_models.Manual.id.asc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
     manuals = [manual for manual, _profile in selected]
     profiles = {manual.id: profile for manual, profile in selected}
     manual_ids = [manual.id for manual in manuals]
@@ -256,11 +301,16 @@ def list_visible_documents(
     for revision in revisions:
         latest_by_manual.setdefault(revision.manual_id, revision)
 
-    nodes = {
-        row.manual_id: row
-        for row in visible_nodes
-        if row.manual_id in set(manual_ids)
-    }
+    visible_nodes = (
+        db.query(km.DocumentationNode)
+        .filter(
+            km.DocumentationNode.tenant_id == tenant.amo_id,
+            km.DocumentationNode.manual_id.in_(manual_ids or ["-"]),
+            km.DocumentationNode.status == "ACTIVE",
+        )
+        .all()
+    )
+    nodes = {row.manual_id: row for row in visible_nodes}
     copies = (
         db.query(dm.DocumentControlledCopy)
         .filter(
@@ -432,7 +482,7 @@ def list_visible_documents(
         "items": items,
         "facets": {
             "node_types": {key: int(facet_counter.get(key, 0)) for key in sorted(CONTENT_NODE_TYPES)},
-            "visible_documents": len(visible_ids),
+            "visible_documents": total,
         },
         "capabilities": {"read": True, "control": controller},
         "pagination": {"page": page, "per_page": per_page, "total": total, "returned": len(items)},
