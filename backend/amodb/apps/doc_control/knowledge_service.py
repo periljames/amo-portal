@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -160,7 +161,10 @@ def _ensure_node(
             .first()
         )
     if not row:
+        node_id = str(uuid.uuid4())
+        node_path, node_depth = _node_path(parent, node_id, code.strip())
         row = km.DocumentationNode(
+            id=node_id,
             tenant_id=tenant_id,
             code=code.strip(),
             normalized_code=normalized,
@@ -168,13 +172,14 @@ def _ensure_node(
             node_type=node_type,
             parent_id=parent.id if parent else None,
             manual_id=manual_id,
+            path=node_path,
+            depth=node_depth,
             order_index=order_index,
             metadata_json=dict(metadata or {}),
             created_by_user_id=actor_id,
         )
         db.add(row)
         db.flush()
-        row.path, row.depth = _node_path(parent, row.id, row.code)
     else:
         row.title = title.strip() or row.title
         if manual_id:
