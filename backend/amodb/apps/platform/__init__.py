@@ -16,6 +16,7 @@ from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_access_policy import install_billing_access_hot_path
 from .commercial_invoice_policy import install_invoice_accounting_policy
+from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -48,6 +49,9 @@ install_billing_access_hot_path()
 # QuickBooks writeback and eTIMS fiscalization. Tax is rounded deterministically
 # and idempotency replays must match the original invoice payload.
 install_invoice_accounting_policy()
+# Resolve the separate SaaS fiscalization record for invoice views/documents so
+# customer-facing status never contradicts the actual eTIMS workflow state.
+install_fiscal_document_policy()
 # Separate administrative tenant state from commercial billing connectivity and
 # replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
