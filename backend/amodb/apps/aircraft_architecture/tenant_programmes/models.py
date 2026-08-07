@@ -79,6 +79,7 @@ class TenantProgrammeRevision(Base):
     source_revision = Column(String(80), nullable=False)
     source_checksum_sha256 = Column(String(64), nullable=True)
     source_currentness_at_approval = Column(String(40), nullable=True)
+    approval_reference = Column(String(160), nullable=True)
     content_hash = Column(String(64), nullable=True)
     change_summary = Column(Text, nullable=True)
     supersedes_revision_id = Column(
