@@ -41,17 +41,13 @@ function browserHints(): {
 }
 
 /**
- * Use browser network and memory hints to choose a bounded rendering policy.
- * Normal office clients receive 20 MiB PDF ranges. A demonstrably stable,
- * high-throughput connection on a capable device receives 50 MiB bursts.
- * Constrained clients retain a progressive path without governing everyone
- * else by the slowest possible network profile.
- *
- * The page observer is also the authority for the toolbar page number and the
- * active Contents row. Its root margin must therefore remain zero. Nearby-page
- * preloading is provided by renderRadius/hotPageLimit after the truly visible
- * page is selected; treating pages thousands of pixels outside the viewport as
- * visible causes the wrong render window to be retained during jumps.
+ * Choose a bounded PDF range/render policy from browser network and memory
+ * hints. Large 20-50 MiB range requests delayed the first useful page on real
+ * technical manuals, especially when traffic crossed a remote/private link.
+ * Smaller ranges let PDF.js reach requested objects earlier while streaming
+ * remains enabled. Canvas DPR is also capped below the display DPR so nearby
+ * virtual pages do not monopolize decode/paint time; zooming still rerenders at
+ * the requested CSS size and print/download always use the authoritative PDF.
  */
 export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
   const { connection, deviceMemory, hardwareConcurrency } = browserHints();
@@ -74,39 +70,39 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
       renderRadius: 2,
       hotPageLimit: 5,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.1,
+      maxDevicePixelRatio: 1,
     };
   }
 
   if (modestNetwork || deviceMemory < 4) {
     return {
       mode: "balanced",
-      rangeChunkSize: 4 * MIB,
-      renderRadius: 4,
-      hotPageLimit: 10,
+      rangeChunkSize: 2 * MIB,
+      renderRadius: 3,
+      hotPageLimit: 8,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.25,
+      maxDevicePixelRatio: 1.15,
     };
   }
 
   if (superStableNetwork) {
     return {
       mode: "burst",
-      rangeChunkSize: 50 * MIB,
-      renderRadius: 8,
-      hotPageLimit: 24,
+      rangeChunkSize: 24 * MIB,
+      renderRadius: 6,
+      hotPageLimit: 16,
       prefetchMarginPx: 0,
-      maxDevicePixelRatio: 1.6,
+      maxDevicePixelRatio: 1.35,
     };
   }
 
   return {
     mode: "balanced",
-    rangeChunkSize: 20 * MIB,
-    renderRadius: 6,
-    hotPageLimit: 18,
+    rangeChunkSize: 8 * MIB,
+    renderRadius: 4,
+    hotPageLimit: 12,
     prefetchMarginPx: 0,
-    maxDevicePixelRatio: 1.45,
+    maxDevicePixelRatio: 1.25,
   };
 }
 
