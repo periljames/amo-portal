@@ -64,6 +64,43 @@ def test_integrated_reader_owns_contents_pages_and_indexed_search() -> None:
     assert "publication-floating-header" in style
 
 
+def test_integrated_reader_is_theme_aware_high_contrast_and_touch_safe() -> None:
+    shell = _read("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
+    toolbar = _read("frontend/src/pages/manuals/pdfReaderDenseToolbar.css")
+    navigator = _read("frontend/src/pages/manuals/pdfReaderNavigatorV5.css")
+    global_style = _read("frontend/src/styles/global.css")
+
+    assert 'body[data-color-scheme="light"]' in global_style
+    assert 'body[data-color-scheme="light"] .pdfv4-reader' in toolbar
+    assert 'body[data-color-scheme="light"] .pdfv5-shell' in navigator
+    for token in (
+        "--pdfv4-toolbar-text",
+        "--pdfv4-toolbar-muted",
+        "--pdfv4-toolbar-disabled",
+        "--pdfv4-focus",
+        "--pdfv5-text",
+        "--pdfv5-muted",
+        "--pdfv5-accent",
+    ):
+        assert token in toolbar or token in navigator
+    assert "stroke-width: 2.15" in toolbar
+    assert "stroke-width: 2.15" in navigator
+    assert "@media (forced-colors: active)" in toolbar
+    assert "@media (forced-colors: active)" in navigator
+    assert "@media (pointer: coarse)" in toolbar
+    assert "@media (pointer: coarse)" in navigator
+    assert "@media (max-width: 1024px)" in toolbar
+    assert "@media (max-width: 760px)" in toolbar
+    assert "@media (max-width: 520px)" in toolbar
+    assert "@media (max-width: 760px)" in navigator
+    assert "MOBILE_NAV_QUERY" in shell
+    assert "initialNavigationOpen" in shell
+    assert "pdfv5-mobile-scrim" in shell
+    assert "pdfv5-mobile-close" in shell
+    assert 'aria-label="Close document navigation"' in shell
+    assert "closeMobileNavigation" in shell
+
+
 def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
     core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
