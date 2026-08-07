@@ -29,6 +29,90 @@ def _revision(db: Session, revision_id: str, user: account_models.User) -> model
     return row
 
 
+@router.get("/aircraft-setup-defaults", response_model=dict)
+def aircraft_setup_defaults(
+    aircraft_type_revision_id: str,
+    db: Session = Depends(get_db),
+    user: account_models.User = Depends(require_roles(*PROGRAMME_READ_ROLES)),
+):
+    """Resolve the OEM baseline and tenant AMP that aircraft induction should prefill.
+
+    The actual induction request still carries the exact selected revision IDs so
+    idempotency and engineering lineage never depend on a mutable default.
+    """
+    resolution = overlay.resolve_oem_baseline(db, aircraft_type_revision_id=aircraft_type_revision_id)
+    candidate_oem_ids = {row["revision_id"] for row in resolution["candidates"]}
+    published = (
+        db.query(models.TenantProgrammeRevision)
+        .join(models.TenantMaintenanceProgramme)
+        .filter(
+            models.TenantMaintenanceProgramme.amo_id == _amo_id(user),
+            models.TenantProgrammeRevision.aircraft_type_revision_id == aircraft_type_revision_id,
+            models.TenantProgrammeRevision.status == "PUBLISHED",
+        )
+        .all()
+    )
+    compatible = [row for row in published if row.base_content_pack_revision_id in candidate_oem_ids]
+    programme_candidates = []
+    for row in compatible:
+        decisions = {"INHERIT": 0, "TIGHTEN": 0, "ADD": 0, "LEGACY": 0}
+        for task in row.tasks:
+            decisions[task.decision] = decisions.get(task.decision, 0) + 1
+        programme_candidates.append(
+            {
+                "programme_id": row.programme_id,
+                "programme_code": row.programme.code,
+                "programme_title": row.programme.title,
+                "revision_id": row.id,
+                "revision_code": row.revision_code,
+                "base_content_pack_revision_id": row.base_content_pack_revision_id,
+                "content_hash": row.content_hash,
+                "approval_reference": row.approval_reference,
+                "source_currentness_at_approval": row.source_currentness_at_approval,
+                "task_counts": decisions,
+            }
+        )
+
+    # A published AMP bound to the uniquely derived OEM candidate is durable
+    # evidence that Planning already confirmed that derived series while creating
+    # the controlled AMP revision. Aircraft setup can therefore prefill it without
+    # asking the same question again.
+    derived_confirmed_by_published_amp = (
+        resolution["state"] == "CONFIRM_DERIVED_SERIES"
+        and len(resolution["candidates"]) == 1
+        and len(programme_candidates) == 1
+    )
+    oem_ready = resolution["state"] == "RESOLVED" or derived_confirmed_by_published_amp
+    if not compatible:
+        state = "NO_TENANT_AMP"
+    elif len(compatible) > 1:
+        state = "AMBIGUOUS"
+    elif oem_ready:
+        state = "RESOLVED"
+    else:
+        state = "SERIES_CONFIRMATION_REQUIRED"
+
+    selected = programme_candidates[0] if state == "RESOLVED" else None
+    return {
+        "state": state,
+        "oem": resolution,
+        "requires_series_confirmation": state == "SERIES_CONFIRMATION_REQUIRED",
+        "programme_candidates": programme_candidates,
+        "selected_programme_revision_id": selected["revision_id"] if selected else None,
+        "selected_oem_baseline_revision_id": selected["base_content_pack_revision_id"] if selected else None,
+        "prefill": (
+            {
+                "type_revision_id": aircraft_type_revision_id,
+                "programme_revision_id": selected["revision_id"],
+                "series": resolution["series"],
+                "oem_baseline_revision_id": selected["base_content_pack_revision_id"],
+            }
+            if selected
+            else None
+        ),
+    }
+
+
 @router.get(
     "/revisions/{revision_id}/comparison",
     response_model=comparison_schemas.AmpComparisonPage,
