@@ -7,15 +7,17 @@ import { ReliabilityMappingParity, ReliabilityStatisticalAlerts } from "./Reliab
 import { ReliabilityWorkbookImports } from "./ReliabilityWorkbookImports";
 import { ReliabilityWorkbookRegisters } from "./ReliabilityWorkbookRegisters";
 import { ReliabilityWorkbookReports } from "./ReliabilityWorkbookReports";
+import { ReliabilityWorkbenchProvider, WorkbenchPreferenceBar } from "./ReliabilityWorkbenchControls";
 import type { WorkbookDatasetCode, WorkbookFieldDefinition, WorkspaceSection } from "./reliabilityWorkbookParityTypes";
 import "../../styles/reliability-v2.css";
 import "./ReliabilityWorkbookParityWorkspace.css";
+import "./ReliabilityWorkbenchControls.css";
 
 const SECTIONS: Array<{ id: WorkspaceSection; label: string; description: string; route: string }> = [
-  { id: "registers", label: "Source registers", description: "Twelve controlled Reliability datasets with lifecycle and provenance", route: "workbook-registers" },
-  { id: "alerts", label: "Statistical alerts", description: "Mean, sample standard deviation, warning and alert limits", route: "statistical-alerts" },
+  { id: "registers", label: "Source registers", description: "Sixteen controlled Reliability datasets with lifecycle and provenance", route: "workbook-registers" },
+  { id: "alerts", label: "Statistical alerts", description: "Exact limits, exposure quality and retained analytical evidence", route: "statistical-alerts" },
   { id: "mapping", label: "Mapping & imports", description: "Profile contracts, field parity and governed workbook intake", route: "workbook-mapping" },
-  { id: "reports", label: "Report layouts", description: "Versioned programme layouts, preview and retained outputs", route: "workbook-reports" },
+  { id: "reports", label: "Report layouts", description: "Versioned programme layouts, preview and immutable retained outputs", route: "workbook-reports" },
 ];
 
 function sectionFromPath(pathname: string): WorkspaceSection {
@@ -61,37 +63,42 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
     navigate(`${basePath}/${item.route}`);
   };
 
-  return <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-    <main className="rel-wp" data-testid="reliability-workbook-parity">
-      <header className="rel-wp__header">
-        <div>
-          <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
-          <h1>Workbook parity control centre</h1>
-          <p>Replace repeated C208B, DHC8 and operator workbook entry with governed registers, reviewed imports, statistical calculations and retained reports.</p>
-        </div>
-        <div className="rel-wp__header-actions">
-          <Link className="btn btn-secondary" to={basePath}>Analytics dashboard</Link>
-          <Link className="btn btn-secondary" to={`${basePath}/operations`}>Operational sources</Link>
-          <Link className="btn btn-secondary" to={`${basePath}/events`}>Canonical events</Link>
-        </div>
-      </header>
+  return <ReliabilityWorkbenchProvider>
+    <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
+      <main className="rel-wp" data-testid="reliability-workbook-parity">
+        <header className="rel-wp__header">
+          <div>
+            <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
+            <h1>Reliability programme workbench</h1>
+            <p>Spreadsheet-familiar working views with governed source records, reviewed imports, exact statistical calculations and immutable retained reports.</p>
+          </div>
+          <div className="rel-wp__header-actions">
+            <Link className="btn btn-secondary" to={basePath}>Analytics dashboard</Link>
+            <Link className="btn btn-secondary" to={`${basePath}/operations`}>Operational sources</Link>
+            <Link className="btn btn-secondary" to={`${basePath}/events`}>Canonical events</Link>
+          </div>
+        </header>
 
-      <nav className="rel-wp__tabs" aria-label="Workbook parity workspaces">
-        {SECTIONS.map((item) => <button key={item.id} type="button" className={section === item.id ? "is-active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => selectSection(item)}>
-          <strong>{item.label}</strong><span>{item.description}</span>
-        </button>)}
-      </nav>
+        <WorkbenchPreferenceBar />
+        <p className="rel-wp__guided-tip">Use compact view for workbook-style review. Ctrl/Cmd-click rows to select several, right-click any table row for safe copy/export and column actions, and use arrow keys to move between cells.</p>
 
-      {loading && <div className="rel-wp__loading" role="status">Loading controlled workbook definitions…</div>}
-      {error && <div className="rel-wp__error" role="alert">{error}</div>}
-      {!loading && !error && <>
-        {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}
-        {section === "alerts" && <ReliabilityStatisticalAlerts catalog={catalog} />}
-        {section === "mapping" && <div className="rel-wp__stack"><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
-        {section === "reports" && <ReliabilityWorkbookReports />}
-      </>}
-    </main>
-  </DepartmentLayout>;
+        <nav className="rel-wp__tabs" aria-label="Workbook parity workspaces">
+          {SECTIONS.map((item) => <button key={item.id} type="button" className={section === item.id ? "is-active" : ""} aria-current={section === item.id ? "page" : undefined} onClick={() => selectSection(item)}>
+            <strong>{item.label}</strong><span>{item.description}</span>
+          </button>)}
+        </nav>
+
+        {loading && <div className="rel-wp__loading" role="status">Loading controlled workbook definitions…</div>}
+        {error && <div className="rel-wp__error" role="alert">{error}</div>}
+        {!loading && !error && <>
+          {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}
+          {section === "alerts" && <ReliabilityStatisticalAlerts catalog={catalog} />}
+          {section === "mapping" && <div className="rel-wp__stack"><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
+          {section === "reports" && <ReliabilityWorkbookReports />}
+        </>}
+      </main>
+    </DepartmentLayout>
+  </ReliabilityWorkbenchProvider>;
 };
 
 export default ReliabilityWorkbookParityWorkspace;
