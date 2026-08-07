@@ -18,6 +18,16 @@ const money = (cents?: number, currency = "USD") => new Intl.NumberFormat(undefi
   currency,
 }).format((cents ?? 0) / 100);
 
+const currencyBuckets = (values?: Record<string, number>) => {
+  const rows = Object.entries(values ?? {}).sort(([left], [right]) => left.localeCompare(right));
+  return rows.length ? rows.map(([currency, cents]) => money(cents, currency)).join(" · ") : "—";
+};
+
+const countBuckets = (values?: Record<string, number>) => {
+  const rows = Object.entries(values ?? {}).sort(([left], [right]) => left.localeCompare(right));
+  return rows.length ? rows.map(([currency, count]) => `${currency} ${count}`).join(" · ") : "No overdue invoices";
+};
+
 export default function PlatformBillingPage() {
   const [invoiceOffset, setInvoiceOffset] = useState(0);
   const [reason, setReason] = useState("Verified platform billing operation");
@@ -171,7 +181,7 @@ export default function PlatformBillingPage() {
   return (
     <PlatformShell
       title="Subscription, Pricing & Billing"
-      subtitle="Invoice-first subscription billing, verified collections, eTIMS fiscalization and external accounting synchronization."
+      subtitle="Invoice-first subscription billing, currency-safe A/R, verified collections, eTIMS fiscalization and external accounting synchronization."
       actions={<button className="platform-btn" onClick={reloadBilling}>Refresh</button>}
     >
       {summary.error ? <ErrorState error={summary.error} retry={summary.reload} /> : null}
@@ -180,10 +190,10 @@ export default function PlatformBillingPage() {
       {notice ? <p><StatusBadge value="PENDING" /> {notice}</p> : null}
 
       <section className="platform-grid">
-        <MetricCard label="MRR" value={money(Number(summaryData.platform_mrr ?? 0))} caption="Legacy license model pending module-price cohort reconciliation" />
-        <MetricCard label="Outstanding A/R" value={money(commercialData?.outstanding_ar_cents ?? 0)} caption={`${commercialData?.overdue_invoice_count ?? 0} overdue invoices`} tone="amber" mark="AR" />
-        <MetricCard label="Collected 30d" value={money(commercialData?.collected_30d_cents ?? 0)} caption="Paid portal invoices" tone="green" mark="CA" />
-        <MetricCard label="Invoiced 30d" value={money(commercialData?.invoiced_30d_cents ?? 0)} caption="Operational billing subledger" tone="blue" mark="IV" />
+        <MetricCard label="Active subscriptions" value={String(summaryData.active_subscriptions ?? 0)} caption={`${summaryData.trial_subscriptions ?? 0} trials`} tone="blue" mark="SU" />
+        <MetricCard label="Outstanding A/R" value={currencyBuckets(commercialData?.outstanding_ar_by_currency)} caption={countBuckets(commercialData?.overdue_invoice_count_by_currency)} tone="amber" mark="AR" />
+        <MetricCard label="Collected 30d" value={currencyBuckets(commercialData?.collected_30d_by_currency)} caption="Paid portal invoices; currencies never blended" tone="green" mark="CA" />
+        <MetricCard label="Invoiced 30d" value={currencyBuckets(commercialData?.invoiced_30d_by_currency)} caption="Operational billing subledger" tone="blue" mark="IV" />
         <MetricCard label="Failed payment jobs" value={String(commercialData?.failed_payment_jobs_30d ?? 0)} caption="Last 30 days" tone={(commercialData?.failed_payment_jobs_30d ?? 0) ? "red" : "green"} mark="FP" />
         <MetricCard label="QuickBooks" value={providerStatuses.quickbooks_online ?? "NOT_CONFIGURED"} caption="External GL/accounting boundary" tone={providerStatuses.quickbooks_online === "HEALTHY" ? "green" : "amber"} mark="QB" />
       </section>
@@ -218,7 +228,7 @@ export default function PlatformBillingPage() {
             <button className="platform-btn primary" onClick={createInvoice}>Create invoice</button>
             <button className="platform-btn" onClick={createStripeCheckout}>Stripe recurring checkout</button>
           </div>
-          <small>Paystack and M-PESA collect an existing portal invoice. Stripe recurring checkout remains provider-led but module access still changes only after verified settlement/subscription events.</small>
+          <small>Paystack and M-PESA collect an existing portal invoice. Stripe recurring checkout remains provider-led, but module access still changes only after verified settlement/subscription events.</small>
         </div>
       </section>
 
