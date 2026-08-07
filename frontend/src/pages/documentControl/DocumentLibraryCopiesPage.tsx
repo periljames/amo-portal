@@ -50,7 +50,7 @@ function statusKind(status: string, overdue = false): "success" | "warning" | "d
 
 export default function DocumentLibraryCopiesPage() {
   const navigate = useNavigate();
-  const { tenant, basePath } = useDocumentControlRoute();
+  const { tenant } = useDocumentControlRoute();
   const [params, setParams] = useSearchParams();
   const scanId = params.get("scan") || "";
   const [data, setData] = useState<PhysicalCopyRegisterResponse | null>(null);
@@ -96,7 +96,10 @@ export default function DocumentLibraryCopiesPage() {
     }
   }, [scanId, tenant]);
 
-  useEffect(() => { scanId ? void loadScan() : void loadRegister(); }, [loadRegister, loadScan, scanId]);
+  useEffect(() => {
+    if (scanId) void loadScan();
+    else void loadRegister();
+  }, [loadRegister, loadScan, scanId]);
 
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
