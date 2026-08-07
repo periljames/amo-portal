@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import String, cast, func, or_
+from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -92,7 +92,11 @@ def get_audit_register_paged(
     if audit_id is not None:
         query = query.filter(Audit.id == audit_id)
 
-    linked_car_exists = db.query(Car.id).filter(Car.finding_id == Finding.id).exists()
+    linked_car_exists = (
+        db.query(Car.id)
+        .filter(Car.amo_id == amo_id, Car.finding_id == Finding.id)
+        .exists()
+    )
     if only_with_cars:
         query = query.filter(linked_car_exists)
 
@@ -101,7 +105,7 @@ def get_audit_register_paged(
         like = f"%{search_value}%"
         matching_car_exists = (
             db.query(Car.id)
-            .filter(Car.finding_id == Finding.id)
+            .filter(Car.amo_id == amo_id, Car.finding_id == Finding.id)
             .filter(or_(Car.car_number.ilike(like), Car.title.ilike(like), Car.summary.ilike(like)))
             .exists()
         )
@@ -143,7 +147,7 @@ def get_audit_register_paged(
         like = f"%{car_value}%"
         matching_car_exists = (
             db.query(Car.id)
-            .filter(Car.finding_id == Finding.id)
+            .filter(Car.amo_id == amo_id, Car.finding_id == Finding.id)
             .filter(or_(Car.car_number.ilike(like), Car.title.ilike(like), Car.summary.ilike(like)))
             .exists()
         )
@@ -155,12 +159,14 @@ def get_audit_register_paged(
     filtered_id_query = db.query(filtered_ids.c.id)
     car_linked_findings = int(
         db.query(func.count(func.distinct(Car.finding_id)))
+        .filter(Car.amo_id == amo_id)
         .filter(Car.finding_id.in_(filtered_id_query))
         .scalar()
         or 0
     )
     open_car_count = int(
         db.query(func.count(Car.id))
+        .filter(Car.amo_id == amo_id)
         .filter(Car.finding_id.in_(filtered_id_query))
         .filter(Car.status != models.CARStatus.CLOSED)
         .filter(Car.status != models.CARStatus.CANCELLED)
@@ -181,7 +187,7 @@ def get_audit_register_paged(
     if finding_ids:
         linked_cars = (
             db.query(Car)
-            .filter(Car.finding_id.in_(finding_ids))
+            .filter(Car.amo_id == amo_id, Car.finding_id.in_(finding_ids))
             .order_by(Car.created_at.asc(), Car.id.asc())
             .all()
         )
@@ -283,8 +289,14 @@ def get_car_register_paged(
     )
 
     query = (
-        base_scope.outerjoin(Finding, Finding.id == Car.finding_id)
-        .outerjoin(Audit, Audit.id == Finding.audit_id)
+        base_scope.outerjoin(
+            Finding,
+            and_(Finding.id == Car.finding_id, Finding.amo_id == amo_id),
+        )
+        .outerjoin(
+            Audit,
+            and_(Audit.id == Finding.audit_id, Audit.amo_id == amo_id, Audit.deleted_at.is_(None)),
+        )
     )
 
     if status_ is not None:
