@@ -4,7 +4,7 @@ import { plannerClockAt } from "./qmsPlannerClock";
 
 const PLANNER_TIMEZONE = "Africa/Nairobi";
 const CLOCK_REFRESH_MS = 30_000;
-const FOCUS_RESTORE_DELAYS_MS = [0, 40, 120, 240];
+const FOCUS_RESTORE_DELAYS_MS = [0, 40, 120, 240, 500, 1000, 1800];
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -89,6 +89,7 @@ function usePlannerDialogFocusManagement(): void {
   useEffect(() => {
     const openDialogs = openDialogsRef.current;
     const pendingFocusTimers = new Set<number>();
+    const scheduledRestoreDialogs = new WeakSet<HTMLElement>();
     const currentDialogs = (): HTMLElement[] => Array.from(
       document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
     ).filter(isRendered);
@@ -105,6 +106,31 @@ function usePlannerDialogFocusManagement(): void {
       if (isFocusable(target) && !target.closest("[role='dialog']")) intendedTriggerRef.current = target;
     };
 
+    const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
+      if (scheduledRestoreDialogs.has(dialog)) return;
+      scheduledRestoreDialogs.add(dialog);
+
+      let restored = false;
+      const restore = () => {
+        if (restored || currentDialogs().length) return;
+        const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
+        if (!target) return;
+        if (document.activeElement !== target) target.focus({ preventScroll: true });
+        restored = document.activeElement === target;
+      };
+
+      window.requestAnimationFrame(() => {
+        restore();
+        FOCUS_RESTORE_DELAYS_MS.forEach((delay) => {
+          const timer = window.setTimeout(() => {
+            pendingFocusTimers.delete(timer);
+            restore();
+          }, delay);
+          pendingFocusTimers.add(timer);
+        });
+      });
+    };
+
     const manageDialogKeyboard = (event: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
       if (
@@ -118,10 +144,18 @@ function usePlannerDialogFocusManagement(): void {
       const trigger = shortcutTrigger(event);
       if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
 
-      if (event.key !== "Tab") return;
       const dialogs = currentDialogs();
       const topDialog = dialogs[dialogs.length - 1];
-      if (!topDialog) return;
+
+      if (event.key === "Escape" && topDialog) {
+        restoreDialogTrigger(
+          topDialog,
+          openDialogs.get(topDialog) ?? fallbackTrigger(topDialog),
+        );
+        return;
+      }
+
+      if (event.key !== "Tab" || !topDialog) return;
 
       const controls = focusableElements(topDialog);
       if (!controls.length) {
@@ -145,31 +179,6 @@ function usePlannerDialogFocusManagement(): void {
         event.preventDefault();
         last.focus({ preventScroll: true });
       }
-    };
-
-    const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
-      let restored = false;
-      const restore = () => {
-        if (restored || currentDialogs().length) return;
-        const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
-        if (!target) return;
-        if (document.activeElement !== target) target.focus({ preventScroll: true });
-        restored = document.activeElement === target;
-      };
-
-      // React can replace the inspector action row more than once while a
-      // reschedule modal closes. Retry only until focus is successfully restored;
-      // once restored, later timers must not steal focus from the user's next action.
-      window.requestAnimationFrame(() => {
-        restore();
-        FOCUS_RESTORE_DELAYS_MS.forEach((delay) => {
-          const timer = window.setTimeout(() => {
-            pendingFocusTimers.delete(timer);
-            restore();
-          }, delay);
-          pendingFocusTimers.add(timer);
-        });
-      });
     };
 
     const observer = new MutationObserver(() => {
