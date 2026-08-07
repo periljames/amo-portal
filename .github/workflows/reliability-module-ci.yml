@@ -220,8 +220,11 @@ jobs:
       - name: Run PostgreSQL workbook-reference integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_workbook_reference_integrity_regression.py
 
-      - name: Run Reliability tests
-        run: pytest -q backend/amodb/apps/reliability/tests
+      - name: Run Reliability operational reporting tests
+        run: pytest -q -rA backend/amodb/apps/reliability/tests/test_structured_daily_reporting.py
+
+      - name: Run existing Reliability tests
+        run: pytest -q -rA backend/amodb/apps/reliability/tests --ignore=backend/amodb/apps/reliability/tests/test_structured_daily_reporting.py
 
   reliability-frontend:
     runs-on: ubuntu-24.04
