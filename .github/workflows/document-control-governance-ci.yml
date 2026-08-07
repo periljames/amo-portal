@@ -91,10 +91,11 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_20260807_reader_governance"], heads
+          assert heads == ["docgov_merge_20260807_heads"], heads
           assert script.get_revision("docgov_20260806_governance") is not None
           assert script.get_revision("docgov_merge_20260807") is not None
           assert script.get_revision("docgov_20260807_reader_governance") is not None
+          assert script.get_revision("docgov_merge_20260807_heads") is not None
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade heads
@@ -109,6 +110,7 @@ jobs:
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/manifest",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/annotations",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence",
+              "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/revisions/{revision_id}/evidence/snapshots/{snapshot_id}",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/compare",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/prepare",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/{migration_id}",
