@@ -18,7 +18,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
-from .database import Base, engine, WriteSessionLocal, close_session_safely, dispose_engines  
+from .database import Base, engine, WriteSessionLocal, close_session_safely, dispose_engines
 from .security import JWT_ALGORITHM, SECRET_KEY
 from .apps.accounts import models as accounts_models
 
@@ -32,7 +32,7 @@ from .apps.aircraft_architecture.router import router as aircraft_architecture_r
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router, public_router as training_public_router
-from .apps.quality import router as quality_router, public_router as quality_public_router  
+from .apps.quality import router as quality_router, public_router as quality_public_router
 from .apps.reliability.router import router as reliability_router
 from .apps.reliability import advanced_scheduler as reliability_scheduler
 from .apps.inventory.router import router as inventory_router
@@ -54,6 +54,10 @@ from .apps.aerodoc_router import router as aerodoc_router
 from .apps.doc_control.router import router as doc_control_router
 from .apps.technical_records.router import router as technical_records_router
 from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
+from .apps.quality.planner_schedule_router import (
+    start_quality_planner_scheduler,
+    stop_quality_planner_scheduler,
+)
 from .apps.platform.router import router as platform_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
@@ -271,6 +275,7 @@ def _schema_preflight() -> None:
     _enforce_schema_head_sync_if_configured()
     realtime_gateway.connect()
     reliability_scheduler.start_reliability_scheduler()
+    start_quality_planner_scheduler()
 
 
 def _run_shutdown_step(name: str, fn: Callable[[], None], timeout_seconds: float) -> None:
@@ -299,6 +304,7 @@ def _flush_usage_metrics_on_shutdown() -> None:
     app.state.is_shutting_down = True
     timeout_seconds = float(os.getenv("AMODB_SHUTDOWN_STEP_TIMEOUT_SEC", "3") or "3")
 
+    _run_shutdown_step("quality-planner-scheduler", stop_quality_planner_scheduler, timeout_seconds)
     _run_shutdown_step("reliability-scheduler", reliability_scheduler.stop_reliability_scheduler, timeout_seconds)
     _run_shutdown_step("realtime-disconnect", realtime_gateway.disconnect, timeout_seconds)
 
@@ -468,7 +474,7 @@ app.include_router(crs_router)
 app.include_router(training_router)
 app.include_router(training_public_router)
 app.include_router(quality_public_router)
-app.include_router(quality_router) 
+app.include_router(quality_router)
 app.include_router(reliability_router)
 app.include_router(inventory_router)
 app.include_router(finance_router)
@@ -488,4 +494,3 @@ app.include_router(technical_records_router)
 app.include_router(canonical_quality_router)
 app.include_router(legacy_qms_router)
 app.include_router(aerodoc_router)
-

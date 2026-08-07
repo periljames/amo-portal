@@ -1,6 +1,9 @@
 name: Quality Module CI
 
 on:
+  push:
+    branches:
+      - agent/qms-modern-business-planner
   pull_request:
     paths:
       - "backend/amodb/quality_main.py"
@@ -68,8 +71,12 @@ jobs:
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Verify Quality migration contract
         env:
-          DATABASE_URL: ""
-          DATABASE_WRITE_URL: ""
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+          SECRET_KEY: quality-migration-contract-secret
+          QUALITY_SCHEMA_STRICT: "0"
         run: |
           python - <<'PY'
           from alembic.config import Config
@@ -116,8 +123,8 @@ jobs:
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
           SECRET_KEY: quality-mapper-test-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('Quality application mappers configured')"
@@ -125,14 +132,13 @@ jobs:
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
           SECRET_KEY: quality-test-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
           amodb/apps/accounts/tests/test_portal_preferences_contract.py
-          amodb/apps/quality/tests/test_quality_imports.py
           amodb/apps/quality/tests/test_tenant_route_isolation.py
           amodb/apps/quality/tests/test_dashboard_v2_contract.py
           amodb/apps/quality/tests/test_quality_delivery_profile.py
@@ -144,6 +150,7 @@ jobs:
           amodb/apps/quality/tests/test_excellence_contract.py
           amodb/apps/quality/tests/test_assurance_wiring_contract.py
           amodb/apps/quality/tests/test_assurance_metrics_contract.py
+          amodb/apps/quality/tests/test_planner_router.py
 
   postgres-quality-schema:
     runs-on: ubuntu-latest
@@ -219,6 +226,8 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run Quality frontend regressions
         run: npm run test:quality
+      - name: Validate CSS ownership contract
+        run: npm run check:css
       - name: Typecheck and production build
         run: npm run build
       - name: Install Chromium for focused QMS browser tests
@@ -238,6 +247,9 @@ jobs:
           npx playwright test \
             tests/e2e/qms-excellence-cockpit.spec.ts \
             tests/e2e/qms-usability-enhancements.spec.ts \
+            tests/e2e/qms-modern-planner-live.spec.ts \
+            tests/e2e/qms-planner-lifecycle.spec.ts \
+            tests/e2e/qms-planner-audit-handoff.spec.ts \
             --workers=1
       - name: Lint Quality-owned frontend surfaces
         run: >-

@@ -542,7 +542,9 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
                 <div className="qew-control-table__actions">
                   {canManage ? <>
                     <button type="button" onClick={() => openDrawer("evidence", control)}><Link2 size={14} /> Evidence</button>
-                    <button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>
+                    {control.approval_status === "APPROVED"
+            ? <button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>
+            : <span className="qew-control-table__test-guard"><LockKeyhole size={13} /> Approve before testing</span>}
                     {control.approval_status === "DRAFT" || control.approval_status === "REJECTED" ? <button type="button" onClick={() => approvalMutation.mutate({ control, status: "PENDING_APPROVAL" })}>Submit</button> : null}
                     {control.approval_status === "PENDING_APPROVAL" ? <button type="button" className="is-primary" onClick={() => approvalMutation.mutate({ control, status: "APPROVED" })}><Check size={14} /> Approve</button> : null}
                   </> : null}
