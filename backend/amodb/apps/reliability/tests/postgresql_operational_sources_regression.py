@@ -94,7 +94,7 @@ def _exercise_formal_publication_controls(connection) -> None:
             '{"source_identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'::jsonb,
             '[{"code":"event_rate_per_100_fh","version":"1.0"}]'::jsonb,
             '{"dashboard":{"summary":[]}}'::jsonb, '{}'::jsonb, '[]'::jsonb,
-            '{}'::jsonb, '{"passed":true}'::jsonb, '<html>retained</html>',
+            '{}'::jsonb, jsonb_build_object('passed', true), '<html>retained</html>',
             'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             '/tmp/retained.pdf',
             'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
