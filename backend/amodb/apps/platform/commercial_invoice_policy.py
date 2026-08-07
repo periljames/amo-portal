@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import html
 import json
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from io import BytesIO
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -234,6 +236,21 @@ def create_manual_invoice_accounting(
     return saas_services.invoice_payload(invoice)
 
 
+def _line_description(invoice: account_models.BillingInvoice) -> str:
+    details = _json_details(invoice.description)
+    if details:
+        module = str(details.get("module_code") or "AMO Portal").replace("_", " ").strip().title()
+        plan = str(details.get("plan_code") or "").strip().upper()
+        term = str(details.get("billing_term") or "").strip().replace("_", " ").title()
+        parts = [module]
+        if plan:
+            parts.append(plan)
+        if term:
+            parts.append(term)
+        return " · ".join(parts)
+    return str(invoice.description or "AMO Portal subscription / service invoice")
+
+
 def build_invoice_view_accounting(invoice: account_models.BillingInvoice) -> dict[str, Any]:
     breakdown = invoice_breakdown(invoice)
     amo = getattr(invoice, "amo", None)
@@ -252,7 +269,7 @@ def build_invoice_view_accounting(invoice: account_models.BillingInvoice) -> dic
         "amount_cents": int(invoice.amount_cents or 0),
         "currency": str(invoice.currency or "USD").upper(),
         "status": invoice.status,
-        "description": invoice.description,
+        "description": _line_description(invoice),
         "issued_at": invoice.issued_at,
         "due_at": invoice.due_at,
         "paid_at": invoice.paid_at,
@@ -261,6 +278,8 @@ def build_invoice_view_accounting(invoice: account_models.BillingInvoice) -> dic
         "subtotal_cents": breakdown["subtotal_cents"],
         "tax_amount_cents": breakdown["tax_amount_cents"],
         "total_cents": breakdown["total_cents"],
+        "tax_rate_bps": breakdown["tax_rate_bps"],
+        "tax_mode": breakdown["tax_mode"],
         "etims_status": fiscal_status,
         "etims_reference": fiscal_reference,
     }
@@ -291,14 +310,10 @@ def fiscal_invoice_payload(
         "tax_rate_bps": breakdown["tax_rate_bps"],
         "tax_mode": breakdown["tax_mode"],
         "total_amount_cents": breakdown["total_cents"],
-        "description": invoice.description,
+        "description": _line_description(invoice),
         "lines": [
             {
-                "description": str(
-                    details.get("module_code")
-                    or details.get("description")
-                    or "AMO Portal subscription/service"
-                ),
+                "description": _line_description(invoice),
                 "quantity": quantity,
                 "unit_amount_cents": unit_amount_cents,
                 "subtotal_cents": breakdown["subtotal_cents"],
@@ -317,13 +332,108 @@ def fiscal_invoice_payload(
     }
 
 
+def _money(cents: int, currency: str) -> str:
+    return f"{Decimal(int(cents)) / Decimal(100):,.2f} {currency}"
+
+
+def render_invoice_html(db: Session, invoice: account_models.BillingInvoice) -> str:
+    from amodb.apps.accounts import router_billing
+
+    ctx = router_billing._build_invoice_context(db, invoice)
+    view = build_invoice_view_accounting(invoice)
+    breakdown = invoice_breakdown(invoice)
+    details = breakdown["details"]
+    currency = str(invoice.currency or "USD").upper()
+    quantity = int(details.get("quantity") or 1)
+    unit_amount = int(details.get("unit_amount_cents") or breakdown["subtotal_cents"])
+    tax_rate = Decimal(breakdown["tax_rate_bps"]) / Decimal(100)
+
+    def esc(value: Any) -> str:
+        return html.escape(str(value if value not in {None, ""} else "—"))
+
+    tax_label = "Tax"
+    if breakdown["tax_rate_bps"]:
+        tax_label = f"Tax ({tax_rate.normalize()}%)"
+    fiscal_reference = view.get("etims_reference") or "—"
+    return f"""<!doctype html>
+<html><head><meta charset=\"utf-8\"><title>{esc(view['invoice_number'])}</title>
+<style>
+body{{font-family:Arial,sans-serif;background:#f6f8fb;color:#172033;margin:0;padding:28px}}.sheet{{max-width:900px;margin:auto;background:white;border:1px solid #dfe5ed;border-radius:14px;overflow:hidden}}header{{display:flex;justify-content:space-between;gap:30px;padding:28px;border-bottom:1px solid #e7ebf0}}h1,h2,p{{margin:0}}h1{{font-size:28px}}.muted{{color:#64748b}}.meta{{text-align:right}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:24px 28px}}.box{{border:1px solid #e3e8ef;border-radius:10px;padding:16px}}table{{width:calc(100% - 56px);margin:0 28px 22px;border-collapse:collapse}}th,td{{padding:12px;border-bottom:1px solid #e7ebf0;text-align:left}}th:last-child,td:last-child{{text-align:right}}tfoot td{{font-weight:700}}.note{{margin:0 28px 28px;padding:14px;background:#f8fafc;border-radius:10px;font-size:13px}}.status{{display:inline-block;padding:5px 9px;border-radius:999px;background:#eef2ff;font-weight:700;font-size:12px}}
+</style></head><body><main class=\"sheet\">
+<header><div><span class=\"status\">{esc(ctx['status_label'])}</span><h1>{esc(view['invoice_number'])}</h1><p class=\"muted\">Issued {esc(ctx['issued_label'])}</p></div><div class=\"meta\"><h2>{esc(ctx['seller_name'])}</h2><p class=\"muted\">{esc(ctx.get('seller_tagline'))}</p></div></header>
+<section class=\"grid\"><div class=\"box\"><strong>Bill to</strong><p>{esc(ctx['buyer_name'])}</p><p class=\"muted\">AMO code: {esc(ctx['buyer_code'])}</p><p class=\"muted\">{esc(ctx['buyer_email'])}</p><p class=\"muted\">{esc(ctx['buyer_phone'])}</p></div><div class=\"box\"><strong>Payment & fiscal status</strong><p class=\"muted\">Due: {esc(ctx['due_label'])}</p><p class=\"muted\">Paid: {esc(ctx['paid_label'])}</p><p class=\"muted\">eTIMS: {esc(view['etims_status'])}</p><p class=\"muted\">Fiscal ref: {esc(fiscal_reference)}</p></div></section>
+<table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Amount</th></tr></thead><tbody><tr><td>{esc(view['description'])}</td><td>{quantity}</td><td>{esc(_money(unit_amount, currency))}</td><td>{esc(_money(breakdown['subtotal_cents'], currency))}</td></tr></tbody><tfoot><tr><td colspan=\"3\">Subtotal</td><td>{esc(_money(breakdown['subtotal_cents'], currency))}</td></tr><tr><td colspan=\"3\">{esc(tax_label)}</td><td>{esc(_money(breakdown['tax_amount_cents'], currency))}</td></tr><tr><td colspan=\"3\">Total</td><td>{esc(_money(breakdown['total_cents'], currency))}</td></tr></tfoot></table>
+<div class=\"note\">{esc(ctx['compliance_note'])}</div></main></body></html>"""
+
+
+def render_invoice_pdf(db: Session, invoice: account_models.BillingInvoice) -> bytes:
+    from amodb.apps.accounts import router_billing
+
+    ctx = router_billing._build_invoice_context(db, invoice)
+    view = build_invoice_view_accounting(invoice)
+    breakdown = invoice_breakdown(invoice)
+    currency = str(invoice.currency or "USD").upper()
+    lines = [
+        str(ctx.get("seller_name") or "AMO Portal"),
+        f"Invoice {view['invoice_number']}",
+        f"Status: {ctx.get('status_label') or '—'}",
+        f"Issued: {ctx.get('issued_label') or '—'}",
+        f"Due: {ctx.get('due_label') or '—'}",
+        f"Bill to: {ctx.get('buyer_name') or '—'} ({ctx.get('buyer_code') or '—'})",
+        f"Description: {view['description']}",
+        f"Subtotal: {_money(breakdown['subtotal_cents'], currency)}",
+        f"Tax: {_money(breakdown['tax_amount_cents'], currency)}",
+        f"Total: {_money(breakdown['total_cents'], currency)}",
+        f"eTIMS: {view['etims_status']}",
+        f"Fiscal reference: {view.get('etims_reference') or '—'}",
+    ]
+
+    def pdf_escape(text: str) -> str:
+        safe = text.encode("latin-1", errors="replace").decode("latin-1")
+        return safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    commands = ["BT /F1 11 Tf 50 760 Td 16 TL"]
+    for index, line in enumerate(lines):
+        commands.append(f"({pdf_escape(line)}) Tj")
+        if index != len(lines) - 1:
+            commands.append("T*")
+    commands.append("ET")
+    content = " ".join(commands).encode("latin-1", errors="replace")
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
+        b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+        b"5 0 obj << /Length " + str(len(content)).encode("ascii") + b" >> stream\n" + content + b"\nendstream endobj",
+    ]
+    pdf = BytesIO()
+    pdf.write(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for obj in objects:
+        offsets.append(pdf.tell())
+        pdf.write(obj + b"\n")
+    xref = pdf.tell()
+    pdf.write(f"xref\n0 {len(objects)+1}\n".encode("ascii"))
+    pdf.write(b"0000000000 65535 f \n")
+    for offset in offsets:
+        pdf.write(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.write(f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode("ascii"))
+    return pdf.getvalue()
+
+
 def install_invoice_accounting_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    from amodb.apps.accounts import router_billing
+
     saas_services.create_manual_invoice = create_manual_invoice_accounting
     account_services.build_invoice_view = build_invoice_view_accounting
     # The certified eTIMS adapter now receives the exact same reconciled monetary
     # breakdown used by invoice documents, exports and QuickBooks writeback.
     saas_side_effects._invoice_payload = fiscal_invoice_payload
+    # Customer-facing invoice documents must never expose the structured JSON
+    # commercial snapshot as the line description.
+    router_billing._render_invoice_html = render_invoice_html
+    router_billing._render_invoice_pdf = render_invoice_pdf
     _INSTALLED = True
