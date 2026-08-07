@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -11,6 +12,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.platform import (
     commercial_access_policy,
     commercial_integrations,
+    commercial_invoice_policy,
     commercial_policy,
     saas_providers,
 )
@@ -135,3 +137,57 @@ def test_access_projection_locks_overdue_active_subscription() -> None:
     )
     assert projection.status == account_models.LicenseStatus.ACTIVE
     assert projection.is_read_only is True
+
+
+def test_tax_rounding_uses_commercial_half_up() -> None:
+    # Python's built-in round() would use banker's rounding here. Billing cents
+    # require a deterministic half-up policy.
+    assert commercial_invoice_policy.tax_cents(1, 5000) == 1
+    assert commercial_invoice_policy.tax_cents(1000, 1600) == 160
+
+
+def test_invoice_breakdown_uses_structured_tax_snapshot() -> None:
+    invoice = account_models.BillingInvoice(
+        id="invoice-tax-breakdown",
+        amo_id="tenant-tax-breakdown",
+        amount_cents=11600,
+        currency="KES",
+        status=account_models.InvoiceStatus.PENDING,
+        idempotency_key="invoice-tax-breakdown",
+        description=json.dumps(
+            {
+                "subtotal_cents": 10000,
+                "tax_rate_bps": 1600,
+                "tax_amount_cents": 1600,
+                "tax_mode": "EXCLUSIVE",
+                "total_cents": 11600,
+            }
+        ),
+    )
+    breakdown = commercial_invoice_policy.invoice_breakdown(invoice)
+    assert breakdown["subtotal_cents"] == 10000
+    assert breakdown["tax_amount_cents"] == 1600
+    assert breakdown["total_cents"] == 11600
+    assert breakdown["tax_rate_bps"] == 1600
+
+
+def test_invoice_breakdown_refuses_unreconciled_snapshot() -> None:
+    invoice = account_models.BillingInvoice(
+        id="invoice-tax-mismatch",
+        amo_id="tenant-tax-mismatch",
+        amount_cents=11600,
+        currency="KES",
+        status=account_models.InvoiceStatus.PENDING,
+        idempotency_key="invoice-tax-mismatch",
+        description=json.dumps(
+            {
+                "subtotal_cents": 10000,
+                "tax_rate_bps": 1600,
+                "tax_amount_cents": 1500,
+                "tax_mode": "EXCLUSIVE",
+                "total_cents": 11500,
+            }
+        ),
+    )
+    with pytest.raises(ValueError, match="does not reconcile"):
+        commercial_invoice_policy.invoice_breakdown(invoice)
