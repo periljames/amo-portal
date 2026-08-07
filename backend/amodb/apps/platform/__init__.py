@@ -15,6 +15,7 @@ from .commercial_integrations import install_commercial_integrations
 from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_access_policy import install_billing_access_hot_path
+from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -43,6 +44,10 @@ install_commercial_safety_policy()
 # Keep the tenant access-status request path bounded at scale and prevent default
 # ORM eager loaders from fetching entitlements/ledger/usage data it never uses.
 install_billing_access_hot_path()
+# One commercial snapshot now drives invoice documents/exports, settlement,
+# QuickBooks writeback and eTIMS fiscalization. Tax is rounded deterministically
+# and idempotency replays must match the original invoice payload.
+install_invoice_accounting_policy()
 # Separate administrative tenant state from commercial billing connectivity and
 # replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
