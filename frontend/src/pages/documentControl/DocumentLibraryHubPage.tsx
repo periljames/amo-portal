@@ -9,6 +9,7 @@ import {
   Copy,
   FileCheck2,
   FileText,
+  FilterX,
   FolderTree,
   Link2,
   Search,
@@ -19,6 +20,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   listIntegratedLibrary,
+  type IntegratedLibraryFilters,
   type IntegratedLibraryItem,
   type IntegratedLibraryResponse,
 } from "../../services/documentLibrary";
@@ -67,6 +69,21 @@ function physicalText(item: IntegratedLibraryItem): string {
   return parts.join(" · ") || `${physical.total} registered`;
 }
 
+function truthy(value: string | null): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function queueLabel(params: URLSearchParams): string | null {
+  if (truthy(params.get("unresolved_ownership"))) return "Ownership requiring confirmation";
+  if (truthy(params.get("unresolved_relationships"))) return "Document relationships requiring review";
+  if (params.get("indexing_status")) return `Indexing status: ${params.get("indexing_status")?.replaceAll("_", " ")}`;
+  if (params.get("structure_status")) return `Structure status: ${params.get("structure_status")?.replaceAll("_", " ")}`;
+  if (truthy(params.get("superseded_referenced"))) return "Superseded documents still referenced";
+  if (params.get("owner_user_id")) return "Filtered by document owner";
+  if (params.get("department_id")) return "Filtered by responsible department";
+  return null;
+}
+
 export default function DocumentLibraryHubPage() {
   const navigate = useNavigate();
   const { tenant, basePath, readerBasePath } = useDocumentControlRoute();
@@ -75,14 +92,25 @@ export default function DocumentLibraryHubPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const filters = useMemo(() => ({
+  const filters = useMemo<IntegratedLibraryFilters>(() => ({
     q: params.get("q") || undefined,
     nodeType: params.get("type") || undefined,
-    documentClass: params.get("class") || undefined,
-    status: params.get("status") || undefined,
+    documentClass: params.get("class") || params.get("control_status") || undefined,
+    status: params.get("status") || params.get("lifecycle_status") || undefined,
+    ownerUserId: params.get("owner_user_id") || undefined,
+    departmentId: params.get("department_id") || undefined,
+    indexingStatus: params.get("indexing_status") || undefined,
+    unresolvedOwnership: truthy(params.get("unresolved_ownership")),
+    unresolvedRelationships: truthy(params.get("unresolved_relationships")),
+    structureStatus: params.get("structure_status") || undefined,
+    supersededReferenced: truthy(params.get("superseded_referenced")),
+    sort: (params.get("sort") as IntegratedLibraryFilters["sort"]) || "code",
+    direction: (params.get("direction") as IntegratedLibraryFilters["direction"]) || "asc",
     page: Math.max(1, Number(params.get("page") || 1)),
     perPage: Math.min(100, Math.max(25, Number(params.get("per_page") || 50))),
   }), [params]);
+
+  const activeQueue = useMemo(() => queueLabel(params), [params]);
 
   const load = useCallback(async () => {
     if (!tenant) return;
@@ -103,6 +131,30 @@ export default function DocumentLibraryHubPage() {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
     if (key !== "page") next.set("page", "1");
+    setParams(next);
+  };
+
+  const updateSort = (value: string) => {
+    const [sort, direction] = value.split(":");
+    const next = new URLSearchParams(params);
+    next.set("sort", sort || "code");
+    next.set("direction", direction || "asc");
+    next.set("page", "1");
+    setParams(next);
+  };
+
+  const clearGovernanceQueue = () => {
+    const next = new URLSearchParams(params);
+    [
+      "unresolved_ownership",
+      "unresolved_relationships",
+      "indexing_status",
+      "structure_status",
+      "superseded_referenced",
+      "owner_user_id",
+      "department_id",
+    ].forEach((key) => next.delete(key));
+    next.set("page", "1");
     setParams(next);
   };
 
@@ -127,6 +179,8 @@ export default function DocumentLibraryHubPage() {
     </>}
   >
     <section className="dlibrary" data-testid="integrated-document-library">
+      {activeQueue ? <div className="dlibrary__queue-filter" role="status"><span><ShieldCheck size={15} /><strong>Governance queue</strong> · {activeQueue}</span><button type="button" onClick={clearGovernanceQueue}><FilterX size={14} /> Clear queue filter</button></div> : null}
+
       <div className="dlibrary__categories" aria-label="Document categories">
         {CATEGORIES.map(([value, label, Icon]) => {
           const active = (filters.nodeType || "") === value;
@@ -139,11 +193,14 @@ export default function DocumentLibraryHubPage() {
 
       <div className="dlibrary__toolbar">
         <label className="dlibrary__search"><Search size={16} /><input value={params.get("q") || ""} onChange={(event) => update("q", event.target.value)} placeholder="Find code, title, source filename, form or work instruction" /></label>
-        <select aria-label="Document control class" value={params.get("class") || ""} onChange={(event) => update("class", event.target.value)}>
+        <select aria-label="Document control class" value={filters.documentClass || ""} onChange={(event) => update("class", event.target.value)}>
           <option value="">Internal + external</option><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External controlled</option><option value="RECORD">Record documents</option>
         </select>
-        <select aria-label="Document lifecycle" value={params.get("status") || ""} onChange={(event) => update("status", event.target.value)}>
+        <select aria-label="Document lifecycle" value={filters.status || ""} onChange={(event) => update("status", event.target.value)}>
           <option value="">All lifecycle states</option><option value="ACTIVE">Active</option><option value="SUPERSEDED">Superseded</option><option value="ARCHIVED">Archived</option>
+        </select>
+        <select aria-label="Sort company library" value={`${filters.sort || "code"}:${filters.direction || "asc"}`} onChange={(event) => updateSort(event.target.value)}>
+          <option value="code:asc">Code A–Z</option><option value="code:desc">Code Z–A</option><option value="title:asc">Title A–Z</option><option value="title:desc">Title Z–A</option><option value="type:asc">Document type</option><option value="status:asc">Lifecycle status</option>
         </select>
       </div>
 
