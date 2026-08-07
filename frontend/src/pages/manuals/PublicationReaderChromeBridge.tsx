@@ -36,6 +36,13 @@ function assistantIsOpen(): boolean {
   return Boolean(document.querySelector(".documentation-assistant.is-floating"));
 }
 
+function enforceOriginalLayout(): void {
+  if (!document.querySelector(".publication-html-document")) return;
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>(".publication-reader-controls button")];
+  const original = buttons.find((button) => /original layout|pdf proof/i.test(button.textContent || ""));
+  original?.click();
+}
+
 export default function PublicationReaderChromeBridge() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [targets, setTargets] = useState<PortalTargets>(() => ({ header: null, topbar: null }));
@@ -58,6 +65,7 @@ export default function PublicationReaderChromeBridge() {
         current.header === next.header && current.topbar === next.topbar ? current : next
       ));
       setAssistantOpen(assistantIsOpen());
+      enforceOriginalLayout();
       attempts += 1;
       if ((!next.header || !next.topbar) && attempts < 90) {
         animationFrame = window.requestAnimationFrame(locate);
@@ -73,6 +81,7 @@ export default function PublicationReaderChromeBridge() {
       setTargets((current) => (
         current.header === next.header && current.topbar === next.topbar ? current : next
       ));
+      enforceOriginalLayout();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
