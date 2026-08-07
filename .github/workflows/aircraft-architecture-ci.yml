@@ -5,6 +5,7 @@ on:
     branches:
       - agent/aircraft-induction-architecture
       - agent/oem-mpd-source-governance
+      - agent/tenant-amp-oem-overlay
   pull_request:
     paths:
       - "backend/amodb/apps/aircraft_architecture/**"
@@ -15,14 +16,18 @@ on:
       - "backend/requirements.txt"
       - "frontend/src/pages/planning/DailyAircraftUtilisationPage.tsx"
       - "frontend/src/pages/planning/OemBaselinePage.tsx"
+      - "frontend/src/pages/planning/AmpConfigurationPage.tsx"
       - "frontend/src/pages/PlanningProductionPages.tsx"
       - "frontend/src/services/dailyUtilisation.ts"
       - "frontend/src/services/dailyUtilisation.test.ts"
       - "frontend/src/services/oemMpd.ts"
+      - "frontend/src/services/tenantAmp.ts"
       - "frontend/src/styles/daily-utilisation.css"
       - "frontend/src/styles/oem-mpd-baseline.css"
       - "frontend/src/styles/oemMpdBaseline.css"
+      - "frontend/src/styles/amp-configuration.css"
       - "frontend/tests/e2e/aircraft-daily-utilisation.spec.ts"
+      - "frontend/tests/e2e/amp-configuration.spec.ts"
       - "frontend/playwright.aircraft-architecture.config.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -92,6 +97,8 @@ jobs:
           }
           assert "aircraft_arch_20260806_u5_u6" in revisions, head
           assert "aircraft_arch_20260807_oem_mpd" in revisions, head
+          assert "aircraft_arch_20260807_oem_backend_json" in revisions, head
+          assert "aircraft_arch_20260807_tenant_amp" in revisions, head
           print(f"alembic_head={head}")
           PY
       - name: Upgrade clean PostgreSQL database
@@ -159,9 +166,12 @@ jobs:
           src/services/dailyUtilisation.ts
           src/services/dailyUtilisation.test.ts
           src/services/oemMpd.ts
+          src/services/tenantAmp.ts
           src/pages/planning/DailyAircraftUtilisationPage.tsx
           src/pages/planning/OemBaselinePage.tsx
+          src/pages/planning/AmpConfigurationPage.tsx
           tests/e2e/aircraft-daily-utilisation.spec.ts
+          tests/e2e/amp-configuration.spec.ts
           playwright.aircraft-architecture.config.ts
       - name: Run architecture frontend unit tests
         run: npm run test:aircraft-architecture
