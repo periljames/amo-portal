@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = "aircraft_arch_20260807_oem_backend_guard"
@@ -19,18 +18,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Partial unique indexes are immediate and can reject a legitimate atomic
-    # transition depending on ORM UPDATE ordering. Replace them with deferred
-    # constraint triggers so the invariant is checked at transaction end.
-    op.drop_index(
-        "uq_aircraft_oem_publication_one_current",
-        table_name="aircraft_oem_publication_revisions",
-    )
-    op.drop_index(
-        "uq_aircraft_content_pack_one_published",
-        table_name="aircraft_content_pack_revisions",
-    )
-
+    # The authoritative uniqueness invariants are transaction-deferred so one
+    # atomic service operation can supersede the old authority and publish/make
+    # current the new authority regardless of ORM UPDATE ordering.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION aircraft_assert_one_current_oem_revision()
@@ -99,18 +89,3 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_aircraft_oem_one_current_deferred ON aircraft_oem_publication_revisions"
     )
     op.execute("DROP FUNCTION IF EXISTS aircraft_assert_one_current_oem_revision()")
-
-    op.create_index(
-        "uq_aircraft_oem_publication_one_current",
-        "aircraft_oem_publication_revisions",
-        ["publication_id"],
-        unique=True,
-        postgresql_where=sa.text("status = 'CURRENT'"),
-    )
-    op.create_index(
-        "uq_aircraft_content_pack_one_published",
-        "aircraft_content_pack_revisions",
-        ["pack_id"],
-        unique=True,
-        postgresql_where=sa.text("status = 'PUBLISHED'"),
-    )
