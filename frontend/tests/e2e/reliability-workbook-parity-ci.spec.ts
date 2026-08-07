@@ -224,8 +224,8 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
 
     await page.getByRole("button", { name: /^OOS\b/ }).click();
     await expect(page.getByRole("heading", { name: "Aircraft out of service" })).toBeVisible();
-    await page.getByLabel("From").fill("2026-07-01");
-    await page.getByLabel("To").fill("2026-07-31");
+    await page.getByLabel("From", { exact: true }).fill("2026-07-01");
+    await page.getByLabel("To", { exact: true }).fill("2026-07-31");
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page.getByText("97.43%")).toBeVisible();
     await expect(page.getByText("6.17 h")).toBeVisible();
