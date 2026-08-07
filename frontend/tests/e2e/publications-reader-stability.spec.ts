@@ -26,9 +26,12 @@ function requiredConfiguration(): string[] {
 async function signIn(page: Page): Promise<void> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
+  const continueButton = page.getByRole("button", { name: "Continue", exact: true });
+  if (await continueButton.count()) {
+    await continueButton.click();
+  }
+  await page.locator("#password").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 }
 

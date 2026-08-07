@@ -71,7 +71,9 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
     await page.getByRole("button", { name: /Full tree/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
-    await expect(page.locator(".dc-structure-tree")).toBeVisible({ timeout: 30_000 });
+    const tree = page.locator(".dc-structure-tree");
+    await expect(tree).toBeVisible({ timeout: 30_000 });
+    await expect(tree.locator(".dc-structure-node").filter({ hasText: "DMS-CI-MOM" })).toBeVisible();
   });
 
   test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
@@ -87,7 +89,9 @@ test.describe("Document Control governed workflow", () => {
 
   test("opening the permitted revision mounts one authoritative reader source", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    await page.getByRole("button", { name: /Read current revision|Read approved working revision|Read uncontrolled copy/i }).click();
+    const readAction = page.getByRole("button", { name: /^Read$/i }).first();
+    await expect(readAction).toBeVisible({ timeout: 30_000 });
+    await readAction.click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
     await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });

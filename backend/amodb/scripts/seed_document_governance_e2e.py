@@ -12,6 +12,9 @@ import hashlib
 from pathlib import Path
 import sys
 
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas as pdf_canvas
+
 # Executing this file directly sets sys.path[0] to backend/amodb/scripts rather
 # than backend. Make the backend package root explicit so the deterministic CI
 # seed works regardless of the caller's working directory or PYTHONPATH.
@@ -23,6 +26,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.doc_control import governance_models  # noqa: E402
+from amodb.apps.doc_control.knowledge_service import reconcile_documentation_hierarchy  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.database import WriteSessionLocal  # noqa: E402
 from amodb.security import get_password_hash  # noqa: E402
@@ -43,9 +47,51 @@ AMO_SLUG = "dmsgate"
 # application's standards-compliant email validator unlike the invalid TLD.
 ADMIN_EMAIL = "dms-gate@example.com"
 ADMIN_PASSWORD = "DmsGate!2026-Local"
+STABILITY_PDF_PATH = Path("/tmp/amo-document-governance-reader-stability.pdf")
+STABILITY_PDF_PAGES = 24
+STABILITY_TARGET = "Stability target"
+STABILITY_TARGET_PAGE = 6
+
+
+def _build_stability_pdf() -> tuple[Path, str]:
+    """Create a bounded real PDF source for scroll/zoom browser acceptance.
+
+    ReportLab's invariant mode keeps metadata stable while the recorded checksum
+    is always calculated from the exact bytes that the reader will stream.
+    """
+    STABILITY_PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    document = pdf_canvas.Canvas(
+        str(STABILITY_PDF_PATH),
+        pagesize=A4,
+        invariant=1,
+        pageCompression=1,
+    )
+    width, height = A4
+    document.setTitle("AMO Portal document governance reader stability fixture")
+    for page_number in range(1, STABILITY_PDF_PAGES + 1):
+        document.setFont("Helvetica-Bold", 16)
+        document.drawString(56, height - 70, "Document Governance Browser Acceptance Manual")
+        document.setFont("Helvetica", 11)
+        document.drawString(56, height - 98, f"Controlled fixture page {page_number} of {STABILITY_PDF_PAGES}")
+        if page_number == STABILITY_TARGET_PAGE:
+            document.bookmarkPage("stability-target")
+            document.addOutlineEntry(STABILITY_TARGET, "stability-target", level=0, closed=False)
+            document.setFont("Helvetica-Bold", 14)
+            document.drawString(56, height - 145, STABILITY_TARGET)
+            document.setFont("Helvetica", 11)
+            document.drawString(56, height - 168, "Manual interaction must permanently release consumed programmatic navigation.")
+        else:
+            document.drawString(56, height - 145, "Controlled publication content for deterministic virtual-reader geometry.")
+        document.setFont("Helvetica", 9)
+        document.drawRightString(width - 56, 42, f"DMS-CI-MOM · Rev 1 · Page {page_number}")
+        document.showPage()
+    document.save()
+    content = STABILITY_PDF_PATH.read_bytes()
+    return STABILITY_PDF_PATH.resolve(), hashlib.sha256(content).hexdigest()
 
 
 def seed() -> None:
+    source_path, source_sha = _build_stability_pdf()
     db = WriteSessionLocal()
     try:
         # This runs against a newly migrated disposable database. Explicit IDs make
@@ -123,7 +169,6 @@ def seed() -> None:
         db.add(manual)
         db.flush()
 
-        source_sha = hashlib.sha256(b"amo-portal-document-governance-browser-gate-v1").hexdigest()
         revision = manual_models.ManualRevision(
             id=REVISION_ID,
             manual_id=manual.id,
@@ -135,14 +180,12 @@ def seed() -> None:
             created_at=datetime.now(timezone.utc),
             published_at=datetime.now(timezone.utc),
             immutable_locked=True,
-            # Mark the authoritative revision as PDF so the browser exercises the
-            # hardened PDF reader. With no source file, the backend deterministically
-            # renders the controlled section/block content into a PDF response.
             source_type_enum=manual_models.ManualSourceType.PDF,
             source_filename="document-governance-browser-gate.pdf",
             source_mime_type="application/pdf",
+            source_storage_path=str(source_path),
             source_sha256=source_sha,
-            source_page_count=1,
+            source_page_count=STABILITY_PDF_PAGES,
         )
         db.add(revision)
         db.flush()
@@ -152,18 +195,18 @@ def seed() -> None:
             id=SECTION_ID,
             revision_id=revision.id,
             order_index=1,
-            heading="Controlled document governance acceptance",
-            anchor_slug="controlled-document-governance-acceptance",
+            heading=STABILITY_TARGET,
+            anchor_slug="stability-target",
             level=1,
-            metadata_json={"source": "ci_seed"},
+            metadata_json={"source": "ci_seed", "page_start": STABILITY_TARGET_PAGE},
         )
         db.add(section)
         db.flush()
 
         text = (
-            "This controlled publication is generated only for the disposable "
-            "Document Control Governance CI environment. It verifies authenticated "
-            "tenant access, governed document routing and authoritative PDF rendering."
+            f"{STABILITY_TARGET}. This controlled publication is generated only for the disposable "
+            "Document Control Governance CI environment. It verifies authenticated tenant access, "
+            "governed document routing, authoritative PDF rendering, and stable manual scroll/zoom control."
         )
         db.add(
             manual_models.ManualBlock(
@@ -197,6 +240,12 @@ def seed() -> None:
                 created_by_user_id=user.id,
             )
         )
+
+        # The public hierarchy GET is intentionally read-only after #477. Persist
+        # the same controlled-information graph that production reconciliation
+        # would create so browser acceptance tests the read boundary, not a hidden
+        # GET-time mutation side effect.
+        reconcile_documentation_hierarchy(db, manual_tenant=tenant, actor_id=user.id)
         db.commit()
     except Exception:
         db.rollback()
@@ -208,6 +257,9 @@ def seed() -> None:
     print(f"E2E_AMO_ADMIN_EMAIL={ADMIN_EMAIL}")
     print(f"E2E_AMO_ADMIN_PASSWORD={ADMIN_PASSWORD}")
     print(f"E2E_DOCUMENT_GOVERNANCE_ID={MANUAL_ID}")
+    print(f"E2E_PUBLICATION_STABILITY_PATH=/maintenance/{AMO_SLUG}/publications/{MANUAL_ID}/rev/{REVISION_ID}/read")
+    print(f"E2E_PUBLICATION_TOC_TARGET={STABILITY_TARGET}")
+    print(f"E2E_PUBLICATION_TOC_TARGET_PAGE={STABILITY_TARGET_PAGE}")
 
 
 if __name__ == "__main__":
