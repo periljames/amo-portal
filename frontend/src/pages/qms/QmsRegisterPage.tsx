@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, RefreshCw, Search, ShieldCheck } from "lucide-react";
-import { Link, Navigate, NavLink, useLocation, useSearchParams } from "react-router-dom";
+import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
@@ -37,8 +37,9 @@ type QmsRegisterResponse = {
   applied_filters?: Record<string, string>;
 };
 
-const PAGE_SIZES = [15, 30, 60, 100] as const;
+const PAGE_SIZES = [15, 30, 50] as const;
 const CONTROLLED_NEW_VIEWS = new Set(["new"]);
+const SEARCH_DEBOUNCE_MS = 350;
 
 function friendlyError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -114,8 +115,16 @@ function routeContext(pathname: string): { amoCode: string; module: QmsModuleRou
   };
 }
 
+function recordRoute(amoCode: string, module: QmsModuleRoute, id: string): string {
+  if (module.id === "evidence-vault") {
+    return `${qmsBasePath(amoCode)}/${module.segment}/${encodeURIComponent(id)}`;
+  }
+  return `${qmsBasePath(amoCode)}/${module.segment}/${encodeURIComponent(id)}/overview`;
+}
+
 const QmsRegisterPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const context = useMemo(() => routeContext(location.pathname), [location.pathname]);
   const [searchParams, setSearchParams] = useSearchParams();
   const abortRef = useRef<AbortController | null>(null);
@@ -130,6 +139,28 @@ const QmsRegisterPage: React.FC = () => {
     : 30;
   const offset = Math.max(0, Number(searchParams.get("offset") || 0));
   const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
+  const [searchDraft, setSearchDraft] = useState(query);
+
+  const updateSearch = useCallback((updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value == null || value === "") next.delete(key);
+      else next.set(key, value);
+    });
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    setSearchDraft(query);
+  }, [query]);
+
+  useEffect(() => {
+    if (searchDraft.trim() === query.trim()) return;
+    const timer = window.setTimeout(() => {
+      updateSearch({ q: searchDraft.trim() || null, offset: null });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [query, searchDraft, updateSearch]);
 
   const load = useCallback(async () => {
     if (!context || controlledNew) return;
@@ -159,11 +190,8 @@ const QmsRegisterPage: React.FC = () => {
   }, [context, controlledNew, limit, offset, query, status]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load();
-    }, 0);
+    void load();
     return () => {
-      window.clearTimeout(timer);
       abortRef.current?.abort(new DOMException("Quality register unmounted", "AbortError"));
     };
   }, [load]);
@@ -178,16 +206,12 @@ const QmsRegisterPage: React.FC = () => {
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   if (!hasQmsRolePermission(module.permission)) return <Navigate to={qmsBasePath(amoCode)} replace />;
 
-  const updateSearch = (updates: Record<string, string | null>) => {
-    const next = new URLSearchParams(searchParams);
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value == null || value === "") next.delete(key);
-      else next.set(key, value);
-    });
-    setSearchParams(next, { replace: true });
-  };
-
-  const page = Math.floor((data?.offset ?? offset) / Math.max(1, data?.limit ?? limit)) + 1;
+  const responseLimit = data?.limit ?? limit;
+  const responseOffset = data?.offset ?? offset;
+  const page = Math.floor(responseOffset / Math.max(1, responseLimit)) + 1;
+  const startRow = rows.length ? responseOffset + 1 : 0;
+  const endRow = responseOffset + rows.length;
+  const hasFilters = Boolean(query || status);
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
@@ -196,7 +220,7 @@ const QmsRegisterPage: React.FC = () => {
           compact
           eyebrow="Quality Management System"
           title={module.label}
-          subtitle={`${viewLabel(view)} workspace. Module navigation remains in the sidebar so the register can use the available width.`}
+          subtitle={`${viewLabel(view)} workspace. Results are server-bounded; open the governed record to investigate or act.`}
           breadcrumbs={[
             { label: "Quality", to: qmsBasePath(amoCode) },
             { label: module.navigationLabel },
@@ -209,22 +233,14 @@ const QmsRegisterPage: React.FC = () => {
           ) : null}
         />
 
-        <nav className="qms-register-views" aria-label={`${module.navigationLabel} views`}>
-          {module.validViews.slice(0, 10).map((candidate) => (
-            <NavLink key={candidate} to={qmsModulePath(amoCode, module.id, candidate)} className={({ isActive }) => isActive ? "is-active" : ""}>
-              {viewLabel(candidate)}
-            </NavLink>
-          ))}
-        </nav>
-
         {controlledNew ? (
           <section className="qms-register-controlled" role="status">
             <ShieldCheck size={22} aria-hidden="true" />
             <div>
               <span>Controlled workflow</span>
-              <h2>Generic quick creation is disabled</h2>
-              <p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership, and approval controls. The portal will not create a governed record from a generic five-field form.</p>
-              <Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Return to {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link>
+              <h2>Creation belongs to the governed source workflow</h2>
+              <p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership and approval controls. This register does not manufacture a reduced duplicate form.</p>
+              <Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Open {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link>
             </div>
           </section>
         ) : (
@@ -232,17 +248,47 @@ const QmsRegisterPage: React.FC = () => {
             <section className="qms-register-workspace" aria-label={`${module.label} ${viewLabel(view)}`}>
               <div className="qms-register-toolbar">
                 <label className="qms-register-search">
+                  <span>Search</span>
                   <Search size={15} aria-hidden="true" />
                   <input
-                    value={query}
-                    onChange={(event) => updateSearch({ q: event.target.value, offset: null })}
+                    value={searchDraft}
+                    onChange={(event) => setSearchDraft(event.target.value)}
                     placeholder={`Search ${module.navigationLabel.toLowerCase()}`}
                     aria-label={`Search ${module.navigationLabel}`}
                   />
                 </label>
-                <label><span>Status</span><select value={status} onChange={(event) => updateSearch({ status: event.target.value, offset: null })}><option value="">All statuses</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label>
-                <label><span>Rows</span><select value={limit} onChange={(event) => updateSearch({ limit: event.target.value, offset: null })}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
-                <span className="qms-register-page-number">Page {page}</span>
+                <label>
+                  <span>View</span>
+                  <select value={view} onChange={(event) => navigate(qmsModulePath(amoCode, module.id, event.target.value))}>
+                    {module.validViews.filter((candidate) => candidate !== "new").map((candidate) => <option key={candidate} value={candidate}>{viewLabel(candidate)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select value={status} onChange={(event) => updateSearch({ status: event.target.value, offset: null })}>
+                    <option value="">All statuses</option>
+                    <option value="OPEN">Open</option>
+                    <option value="IN_PROGRESS">In progress</option>
+                    <option value="PENDING_REVIEW">Pending review</option>
+                    <option value="CLOSED">Closed</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Rows</span>
+                  <select value={limit} onChange={(event) => updateSearch({ limit: event.target.value, offset: null })}>
+                    {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+                  </select>
+                </label>
+                <div className="qms-register-toolbar__state">
+                  <strong>Page {page}</strong>
+                  <small>{rows.length ? `${startRow.toLocaleString()}–${endRow.toLocaleString()}` : "No rows"}{data?.has_more ? " · more available" : ""}</small>
+                </div>
+                {hasFilters ? (
+                  <button type="button" className="qms-register-clear" onClick={() => { setSearchDraft(""); updateSearch({ q: null, status: null, offset: null }); }}>
+                    <X size={14} aria-hidden="true" /> Clear
+                  </button>
+                ) : null}
               </div>
 
               {data?.warning || data?.table_missing || data?.source_errors?.length ? (
@@ -256,7 +302,7 @@ const QmsRegisterPage: React.FC = () => {
               {state === "loading" && !data ? <div className="qms-register-loading" role="status"><RefreshCw size={17} className="is-spinning" /> Loading {module.navigationLabel.toLowerCase()}…</div> : null}
 
               {state !== "loading" && !error && rows.length === 0 ? (
-                <div className="qms-register-empty"><CheckCircle2 size={19} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status, and search filters.</p></div></div>
+                <div className="qms-register-empty"><CheckCircle2 size={19} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status and search filters.</p></div></div>
               ) : null}
 
               {rows.length ? (
@@ -276,7 +322,7 @@ const QmsRegisterPage: React.FC = () => {
                                 </td>
                               );
                             })}
-                            {module.allowRecordDetails ? <td data-label="Action">{rowId(row) ? <Link className="qms-register-open" to={`${qmsBasePath(amoCode)}/${module.segment}/${encodeURIComponent(id)}/overview`}>Open <ArrowRight size={13} /></Link> : "—"}</td> : null}
+                            {module.allowRecordDetails ? <td data-label="Action">{rowId(row) ? <Link className="qms-register-open" to={recordRoute(amoCode, module, id)}>Open <ArrowRight size={13} /></Link> : "—"}</td> : null}
                           </tr>
                         );
                       })}
@@ -286,15 +332,15 @@ const QmsRegisterPage: React.FC = () => {
               ) : null}
 
               <footer className="qms-register-pagination">
-                <button type="button" disabled={offset <= 0 || state === "loading"} onClick={() => updateSearch({ offset: String(Math.max(0, offset - limit)) })}>Previous</button>
-                <span>{rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"} on this page</span>
-                <button type="button" disabled={!data?.has_more || state === "loading"} onClick={() => updateSearch({ offset: String(data?.next_offset ?? offset + limit) })}>Next</button>
+                <button type="button" disabled={responseOffset <= 0 || state === "loading"} onClick={() => updateSearch({ offset: String(Math.max(0, responseOffset - responseLimit)) })}>Previous</button>
+                <span>{rows.length ? `Showing ${startRow.toLocaleString()}–${endRow.toLocaleString()}` : "No results"}{data?.has_more ? " · additional results available" : " · end of results"}</span>
+                <button type="button" disabled={!data?.has_more || state === "loading"} onClick={() => updateSearch({ offset: String(data?.next_offset ?? responseOffset + responseLimit) })}>Next</button>
               </footer>
             </section>
 
             <details className="qms-register-help">
               <summary><HelpCircle size={15} aria-hidden="true" /> Workflow guidance</summary>
-              <div><strong>{module.label}</strong><p>Use this view to find and open governed records. Creation, approval, evidence, verification, and closure remain in their dedicated workflows rather than a generic register form.</p></div>
+              <div><strong>{module.label}</strong><p>Use this workspace to find and open governed records. Creation, approval, evidence, verification and closure stay in their dedicated workflows instead of being duplicated in the register.</p></div>
             </details>
 
             {diagnosticsAuthorized ? (
