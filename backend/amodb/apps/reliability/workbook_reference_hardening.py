@@ -32,7 +32,7 @@ def _catalogue():
     for f in out[WorkbookDatasetCode.FI].fields:
         if f.key in {"reporting_period","departures"}: f.required=False
     have={f.key for f in out[WorkbookDatasetCode.FI].fields}
-    for f in [F("delay_indicator","Delay indicator","boolean"),F("cancellation_indicator","Cancellation indicator","boolean"),F("substitute_aircraft_indicator","Substitute aircraft indicator","boolean"),F("interruption_code","Interruption code"),F("delay_time_minutes","Delay time","integer",unit="min"),F("event_corrective_action","Corrective action","textarea")]:
+    for f in [F("delay_indicator","Delay indicator","boolean"),F("cancellation_indicator","Cancellation indicator","boolean"),F("substitute_aircraft_indicator","Substitute aircraft indicator","boolean"),F("interruption_code","Interruption code"),F("delay_time_minutes","Delay time","integer",unit="min"),F("event_corrective_action","Event corrective action","textarea")]:
         if f.key not in have: out[WorkbookDatasetCode.FI].fields.append(f)
     out[WorkbookDatasetCode.SB]=D(WorkbookDatasetCode.SB,"Service bulletins and modifications",["SB","SERVICE BULLETINS","MODIFICATIONS"],"Controlled SB, AD, STC and modification incorporation evidence",[
         F("implementation_type","Implementation type",req=True),F("accomplishment_date","Accomplishment date","date",True),F("document_type","Document type",req=True),F("document_source","Document source"),F("service_bulletin_number","Service bulletin number"),F("stc_mod_number","STC / modification number"),F("airworthiness_directive_number","Airworthiness directive number"),F("issue_date","Issue date","date"),F("revision","Revision"),F("incorporation_status","Incorporation status",req=True),F("findings","Findings","textarea"),F("labour_hours","Labour hours","decimal",unit="h"),F("material_cost","Material cost","decimal"),F("currency","Currency")])
@@ -52,7 +52,7 @@ def dec(v,label):
 def _normaliser():
     base=wp._normalise_payload
     def normalise(ds,payload):
-        p,d=base(ds,payload); code=WorkbookDatasetCode(ds.code)
+        p,d=base(ds,payload); code=WorkbookDatasetCode(getattr(ds.code,"value",ds.code))
         if code==WorkbookDatasetCode.CS:
             if date.fromisoformat(p["reporting_period_end"])<date.fromisoformat(p["reporting_period_start"]): raise HTTPException(422,"Cost period end cannot precede start.")
             total=sum((dec(p.get(k),k) for k in ("labour_cost","material_cost","other_cost")),Decimal(0)); d["calculated_total_cost"]=f"{total:.2f}"
