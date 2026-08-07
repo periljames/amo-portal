@@ -169,6 +169,7 @@ const QualityContextTabs: React.FC = () => {
   useEffect(() => {
     if (!qualityActive) {
       document.querySelector(".quality-context-bar-host")?.remove();
+      setMountTarget(null);
       return;
     }
 
