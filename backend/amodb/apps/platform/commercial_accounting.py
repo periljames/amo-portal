@@ -48,6 +48,12 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
 
     empty = {
         "data_mode": mode,
+        # Compatibility fields intentionally remain null. Older platform pages
+        # must not turn mixed KES/USD/etc. subledgers into a fictitious USD sum.
+        "outstanding_ar_cents": None,
+        "overdue_ar_cents": None,
+        "invoiced_30d_cents": None,
+        "collected_30d_cents": None,
         "outstanding_ar_by_currency": {},
         "overdue_ar_by_currency": {},
         "overdue_invoice_count_by_currency": {},
@@ -58,6 +64,7 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
         "metric_quality": {
             "ar_and_collection_metrics": "AUTHORITATIVE_PORTAL_SUBLEDGER",
             "cross_currency_aggregation": "PROHIBITED",
+            "legacy_single_currency_fields": "NULL_BY_DESIGN",
             "mrr_arr": "LEGACY_LICENSE_MODEL_NOT_AUTHORITATIVE_FOR_MULTI_CURRENCY",
             "logo_churn": "NOT_IMPLEMENTED",
             "net_revenue_retention": "NOT_IMPLEMENTED",
