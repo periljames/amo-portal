@@ -3,7 +3,8 @@ import { AlertTriangle, ArrowUpDown, BookOpen, ChevronLeft, ChevronRight, Search
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { listGovernanceDocuments, type GovernanceLibraryResponse } from "../../services/documentGovernance";
-import DocumentControlShell, { DocumentControlEmpty, DocumentControlError, DocumentControlLoading, DocumentControlStatus, useDocumentControlRoute } from "./DocumentControlShell";
+import DocumentControlShell, { DocumentControlEmpty, DocumentControlError, DocumentControlLoading, DocumentControlStatus } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentGovernance.css";
 
 function statusKind(status: string): "success" | "warning" | "danger" | "info" | "neutral" {
