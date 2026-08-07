@@ -205,7 +205,7 @@ def test_oem_backend_database_contract_and_immutable_guards(engine):
                 )
             )
         }
-    assert "trg_aircraft_content_pack_revision_controlled" in triggers
+    assert "trg_aircraft_content_pack_revision_oem_backend_controlled" in triggers
     assert "trg_aircraft_content_pack_tasks_controlled" in triggers
     assert "trg_aircraft_oem_publication_revision_controlled" in triggers
     assert "trg_aircraft_oem_temporary_revision_controlled" in triggers
