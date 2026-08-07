@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
 from .governance_router import router as governance_router
+from .reader_governance_router import router as reader_governance_router
 from .knowledge_access_router import workspace_tree_router
 from .knowledge_resolution_router import router as knowledge_resolution_router
 from .router_legacy import router as legacy_router
@@ -51,6 +52,11 @@ router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
 router.include_router(
     governance_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    reader_governance_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
