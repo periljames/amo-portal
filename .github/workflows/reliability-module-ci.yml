@@ -27,6 +27,7 @@ on:
       - 'frontend/src/services/reliability.ts'
       - 'frontend/src/styles/reliability-v2.css'
       - 'frontend/tests/e2e/reliability-workbook-parity-ci.spec.ts'
+      - 'frontend/tests/e2e/reliability-formal-reporting-ci.spec.ts'
   workflow_dispatch:
 
 permissions:
@@ -78,13 +79,13 @@ jobs:
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
 
-          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
           if ! grep -E "$ACTIVATOR" /tmp/reliability-files.txt >/dev/null; then
             echo 'No Reliability-owned implementation changed; shared composition changes do not activate the Reliability-only scope guard.'
             exit 0
           fi
 
-          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability-owned PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
@@ -286,7 +287,7 @@ jobs:
         run: npm exec -- vitest run src/pages/reliability/reliabilityWorkbookParityModel.test.ts
       - name: Lint Reliability-owned frontend
         working-directory: frontend
-        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts
+        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts tests/e2e/reliability-formal-reporting-ci.spec.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
@@ -306,4 +307,4 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:4173 >/dev/null
-          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts
+          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts tests/e2e/reliability-formal-reporting-ci.spec.ts
