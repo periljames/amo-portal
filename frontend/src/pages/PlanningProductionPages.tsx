@@ -1,7 +1,6 @@
 export {
   PlanningDashboardPage,
   PlanningForecastPage,
-  PlanningAmpPage,
   PlanningAdSbPage,
   PlanningWorkPackagesPage,
   PlanningWorkOrdersPage,
@@ -12,6 +11,7 @@ export {
   ComplianceActionsPage,
 } from "./planning/PlanningPhaseOnePages";
 
+export { default as PlanningAmpPage } from "./planning/AmpConfigurationPage";
 export { OemBaselinePage as PlanningTaskLibraryPage } from "./planning/OemBaselinePage";
 export { DailyAircraftUtilisationPage as PlanningUtilisationPage } from "./planning/DailyAircraftUtilisationPage";
 

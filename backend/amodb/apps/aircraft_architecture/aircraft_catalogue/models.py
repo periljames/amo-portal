@@ -52,6 +52,7 @@ class AircraftTypeTemplate(Base):
     __table_args__ = (
         UniqueConstraint("code", name="uq_aircraft_type_template_code"),
         Index("ix_aircraft_type_template_family_status", "family_id", "status"),
+        Index("ix_aircraft_type_template_family_series", "family_id", "series", "status"),
         CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_aircraft_type_template_status"),
     )
 
@@ -61,6 +62,7 @@ class AircraftTypeTemplate(Base):
     manufacturer = Column(String(120), nullable=False)
     model = Column(String(80), nullable=False)
     variant = Column(String(80), nullable=True)
+    series = Column(String(80), nullable=True)
     type_certificate = Column(String(80), nullable=True)
     icao_type_designator = Column(String(8), nullable=True)
     category = Column(String(40), nullable=False)

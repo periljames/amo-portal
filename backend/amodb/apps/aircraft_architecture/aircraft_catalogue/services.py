@@ -18,6 +18,10 @@ def _canonical_json(value: Any) -> str:
 def compute_revision_hash(revision: models.AircraftTypeTemplateRevision) -> str:
     payload = {
         "template_code": revision.template.code,
+        "manufacturer": revision.template.manufacturer,
+        "model": revision.template.model,
+        "variant": revision.template.variant,
+        "series": revision.template.series,
         "revision_code": revision.revision_code,
         "effective_date": revision.effective_date,
         "configuration_schema": revision.configuration_schema_json or {},
@@ -237,6 +241,12 @@ def publish_revision(
 ) -> models.AircraftTypeTemplateRevision:
     revision = _revision(db, revision_id)
     require_draft(revision)
+    # The draft may have been held in the identity map while positions/sources
+    # were added by separate controlled writes. Re-read its children before the
+    # publication gate so provenance/configuration checks are based on database
+    # truth rather than a stale relationship cache.
+    db.flush()
+    db.expire(revision, ["positions", "component_definitions", "sources"])
     if not revision.sources:
         raise HTTPException(status_code=409, detail="A revision cannot be published without source provenance")
     if not revision.positions:
@@ -251,7 +261,11 @@ def publish_revision(
             models.AircraftTypeTemplateRevision.template_id == revision.template_id,
             models.AircraftTypeTemplateRevision.status == "PUBLISHED",
         )
-        .with_for_update()
+        # AircraftTypeTemplateRevision has eager joined relationships. PostgreSQL
+        # rejects an unqualified FOR UPDATE when that query contains nullable
+        # outer-join targets. Lock only the revision rows that control the
+        # publication transition.
+        .with_for_update(of=models.AircraftTypeTemplateRevision)
         .all()
     )
     for previous in currently_published:
