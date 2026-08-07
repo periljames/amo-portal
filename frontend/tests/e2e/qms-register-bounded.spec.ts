@@ -140,6 +140,14 @@ function seedSession(storedToken: string) {
   );
 }
 
+function isTenantApi(url: URL): boolean {
+  return url.pathname.startsWith("/api/maintenance/");
+}
+
+async function fulfilShellRequest(route: Parameters<Parameters<typeof test>[1]>[0]["page"]["route"] extends never ? never : never) {
+  void route;
+}
+
 test("audit register uses the paged closeout contract without per-audit fan-out", async ({ page }) => {
   let pagedRegisterRequests = 0;
   let legacyRegisterRequests = 0;
@@ -148,11 +156,18 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
   await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/accounts/onboarding/status") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
-    if (url.pathname === "/billing/entitlements") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
-    if (url.pathname === "/time") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
+    if (url.pathname === "/auth/portal-preferences/" || url.pathname === "/auth/portal-preferences") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        user_id: "user-1", amo_id: "amo-1", text_scale: "standard", density: "comfortable", motion: "system",
+        color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-03-19T00:00:00Z",
+      }) });
+    }
+    if (url.pathname.includes("/accounts/admin/admin-profile/")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
+    if (url.pathname === "/accounts/onboarding/status" || url.pathname === "/accounts/onboarding/status/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
+    if (url.pathname === "/billing/entitlements" || url.pathname === "/billing/entitlements/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
+    if (url.pathname === "/time" || url.pathname === "/time/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
     if (url.pathname === "/healthz") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
-    if (url.pathname.endsWith("/quality/audits/register/paged")) {
+    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/register/paged")) {
       pagedRegisterRequests += 1;
       expect(url.searchParams.get("limit")).toBe("25");
       expect(url.searchParams.get("offset")).toBe("0");
@@ -170,11 +185,11 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
         }),
       });
     }
-    if (url.pathname.endsWith("/quality/audits/register")) {
+    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/register")) {
       legacyRegisterRequests += 1;
       return route.fulfill({ status: 500, body: "legacy register should not be called" });
     }
-    if (/\/quality\/audits\/[^/]+\/findings$/.test(url.pathname)) {
+    if (isTenantApi(url) && /\/quality\/audits\/[^/]+\/findings$/.test(url.pathname)) {
       legacyFindingRequests += 1;
       return route.fulfill({ status: 500, body: "per-audit finding fan-out should not be called" });
     }
@@ -198,11 +213,18 @@ test("evidence vault search uses one bounded canonical register request", async 
   await page.addInitScript(seedSession, futureToken());
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/accounts/onboarding/status") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
-    if (url.pathname === "/billing/entitlements") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
-    if (url.pathname === "/time") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
+    if (url.pathname === "/auth/portal-preferences/" || url.pathname === "/auth/portal-preferences") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        user_id: "user-1", amo_id: "amo-1", text_scale: "standard", density: "comfortable", motion: "system",
+        color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-03-19T00:00:00Z",
+      }) });
+    }
+    if (url.pathname.includes("/accounts/admin/admin-profile/")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
+    if (url.pathname === "/accounts/onboarding/status" || url.pathname === "/accounts/onboarding/status/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ is_complete: true, missing: [] }) });
+    if (url.pathname === "/billing/entitlements" || url.pathname === "/billing/entitlements/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: ["quality"] }) });
+    if (url.pathname === "/time" || url.pathname === "/time/") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: "2026-03-19T00:00:00Z" }) });
     if (url.pathname === "/healthz") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
-    if (url.pathname.includes("/quality/evidence-vault/search")) {
+    if (isTenantApi(url) && url.pathname.endsWith("/quality/evidence-vault/search")) {
       boundedEvidenceRequests += 1;
       expect(url.searchParams.get("limit")).toBe("30");
       expect(url.searchParams.get("offset")).toBe("0");
@@ -233,15 +255,15 @@ test("evidence vault search uses one bounded canonical register request", async 
         }),
       });
     }
-    if (url.pathname.endsWith("/quality/audits/findings")) {
+    if (isTenantApi(url) && url.pathname.endsWith("/quality/audits/findings")) {
       legacyBulkFindingRequests += 1;
       return route.fulfill({ status: 500, body: "legacy bulk findings should not be called" });
     }
-    if (url.pathname.endsWith("/quality/cars/attachments/bulk")) {
+    if (isTenantApi(url) && url.pathname.endsWith("/quality/cars/attachments/bulk")) {
       legacyBulkAttachmentRequests += 1;
       return route.fulfill({ status: 500, body: "legacy bulk attachments should not be called" });
     }
-    if (/\/quality\/cars\/[^/]+\/attachments$/.test(url.pathname)) {
+    if (isTenantApi(url) && /\/quality\/cars\/[^/]+\/attachments$/.test(url.pathname)) {
       legacyPerCarAttachmentRequests += 1;
       return route.fulfill({ status: 500, body: "per-CAR attachment fan-out should not be called" });
     }
