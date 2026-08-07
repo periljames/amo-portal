@@ -33,13 +33,6 @@ def _normalise_search(value: Optional[str]) -> Optional[str]:
     return text or None
 
 
-def _car_match_exists(search: str):
-    like = f"%{search}%"
-    return (
-        Session.object_session  # type: ignore[attr-defined]
-    )
-
-
 @router.get("/audits/register/paged", response_model=QMSAuditRegisterPageOut)
 def get_audit_register_paged(
     domain: Optional[QMSDomain] = None,
@@ -57,12 +50,11 @@ def get_audit_register_paged(
     db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> QMSAuditRegisterPageOut:
-    """Bounded closeout register query used by the operational Audit Register UI.
+    """Return a bounded tenant-scoped closeout register page.
 
     The legacy ``/audits/register`` route remains available for compatibility.
-    This endpoint keeps the interactive register bounded and applies search and
-    column filters in the database rather than loading the tenant's full finding
-    and CAR population into the browser.
+    Search and column filters are evaluated in the database so the browser never
+    needs the tenant's complete finding/CAR population to render this workspace.
     """
 
     amo_id = str(current_user.amo_id or "").strip()
@@ -187,15 +179,14 @@ def get_audit_register_paged(
         for linked_car in linked_cars:
             cars_by_finding.setdefault(linked_car.finding_id, []).append(linked_car)
 
-    rows: list[QMSAuditRegisterRowOut] = []
-    for finding_row, audit_row in page_records:
-        rows.append(
-            QMSAuditRegisterRowOut(
-                audit=QMSAuditOut.model_validate(audit_row),
-                finding=QMSFindingOut.model_validate(finding_row),
-                linked_cars=[CAROut.model_validate(item) for item in cars_by_finding.get(finding_row.id, [])],
-            )
+    rows = [
+        QMSAuditRegisterRowOut(
+            audit=QMSAuditOut.model_validate(audit_row),
+            finding=QMSFindingOut.model_validate(finding_row),
+            linked_cars=[CAROut.model_validate(item) for item in cars_by_finding.get(finding_row.id, [])],
         )
+        for finding_row, audit_row in page_records
+    ]
 
     return QMSAuditRegisterPageOut(
         rows=rows,
