@@ -36,7 +36,12 @@ def test_company_library_exposes_real_document_categories_and_connected_state() 
     assert '"semantic_relationships"' in backend
     assert '"integrations"' in backend
     assert '"generated_records"' in backend
-    assert 'can_read_manual(current_user, profile)' in backend
+    assert 'query = query.filter(or_(*access_conditions))' in backend
+    assert '_scope_match(profile.access_scope_json, "user_ids"' in backend
+    assert 'total = query.count()' in backend
+    assert '.offset((page - 1) * per_page)' in backend
+    assert '.limit(per_page)' in backend
+    assert 'candidates = query.order_by(' not in backend
     assert 'payload["profile"]["access_scope"]' not in backend
     assert 'node_type: filters.nodeType' in service
     assert 'title="Company document library"' in frontend
