@@ -11,6 +11,8 @@ from .saas_execution_policy import install_saas_execution_policy
 from .saas_fiscalization_policy import install_fiscalization_enqueue_policy
 from .saas_provider_network import install_provider_network_hardening
 from .resend_email_policy import install_resend_email_provider
+from .commercial_integrations import install_commercial_integrations
+from .commercial_policy import install_commercial_control_policy
 from .router import router
 
 # Replace the legacy platform-only Stripe verifier before the webhook route is
@@ -27,6 +29,12 @@ install_saas_execution_policy()
 install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
+# Commercial adapters are installed after network/provider hardening so Paystack,
+# Daraja and QuickBooks inherit the same SSRF and secret-handling boundaries.
+install_commercial_integrations()
+# Separate administrative tenant state from commercial billing connectivity and
+# replace placeholder commercial metrics with auditable subledger-derived values.
+install_commercial_control_policy()
 
 from .console_router import router as console_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
@@ -35,6 +43,7 @@ from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
 from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
+from .commercial_router import router as commercial_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
@@ -46,6 +55,7 @@ router.include_router(platform_saas_router)
 router.include_router(webhook_router)
 router.include_router(support_router)
 router.include_router(integration_router)
+router.include_router(commercial_router)
 router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
