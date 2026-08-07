@@ -252,6 +252,11 @@ def get_car_register_paged(
         models.CARStatus.PENDING_VERIFICATION,
         models.CARStatus.ESCALATED,
     ]
+    auditee_statuses = [
+        models.CARStatus.OPEN,
+        models.CARStatus.IN_PROGRESS,
+        models.CARStatus.ESCALATED,
+    ]
 
     base_scope = db.query(Car).filter(Car.amo_id == amo_id)
     if program is not None:
@@ -265,7 +270,8 @@ def get_car_register_paged(
         .count()
     )
     summary_review = int(
-        base_scope.filter(
+        base_scope.filter(Car.status.in_(active_statuses))
+        .filter(
             or_(
                 Car.status == models.CARStatus.PENDING_VERIFICATION,
                 Car.root_cause_status == "SUBMITTED",
@@ -303,12 +309,17 @@ def get_car_register_paged(
             Car.due_date <= today + timedelta(days=due_soon_days),
         )
     elif scope == "awaiting_auditee":
-        query = query.filter(
-            Car.status.in_([models.CARStatus.OPEN, models.CARStatus.IN_PROGRESS, models.CARStatus.ESCALATED]),
-            Car.submitted_at.is_(None),
+        query = query.filter(Car.status.in_(auditee_statuses)).filter(
+            or_(
+                Car.submitted_at.is_(None),
+                Car.root_cause_status == "REJECTED",
+                Car.capa_status.in_(["REJECTED", "NEEDS_EVIDENCE"]),
+            )
         )
     elif scope == "awaiting_quality_review":
-        query = query.filter(or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED"))
+        query = query.filter(Car.status.in_(active_statuses)).filter(
+            or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED")
+        )
     elif scope == "awaiting_effectiveness_review":
         query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION)
     elif scope == "closed":
