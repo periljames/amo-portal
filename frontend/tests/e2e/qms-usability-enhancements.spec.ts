@@ -326,7 +326,12 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   await expect(createDialog).toBeVisible();
   await createDialog.getByLabel("Responsible department").selectOption("dept-eng");
   await createDialog.getByLabel("Find responsible person").fill("Amina");
-  await createDialog.getByLabel("Responsible person", { exact: true }).selectOption("auditee-a");
+  const responsiblePersonSelect = createDialog
+    .locator("label")
+    .filter({ hasText: /^Responsible person/ })
+    .locator("select");
+  await expect(responsiblePersonSelect.locator('option[value="auditee-a"]')).toHaveCount(1, { timeout: 15_000 });
+  await responsiblePersonSelect.selectOption("auditee-a");
   await createDialog.getByLabel("Finding ID").fill("11111111-1111-1111-1111-111111111111");
   await createDialog.getByLabel("Title").fill("Restore training currency");
   await createDialog.getByLabel("Summary").fill("Update and verify the controlled training record.");
