@@ -30,6 +30,8 @@ from .formal_reporting import (
     _require_role,
     completeness_result,
 )
+from .formal_reporting_charts import chart_manifest, drawing_for_spec, publication_chart_specs, svg_for_spec
+from .formal_reporting_history import build_long_term_history
 from .formal_reporting_models import FormalReportStatus, ReliabilityFormalReport, ReliabilityFormalReportSection
 
 _RENDERABLE = {
@@ -59,6 +61,7 @@ def _metric_map(dashboard: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _section_payloads(report: ReliabilityFormalReport) -> dict[str, dict[str, Any]]:
     dashboard = (report.calculation_snapshots_json or {}).get("dashboard") or {}
+    long_term_history = (report.calculation_snapshots_json or {}).get("long_term_history") or {}
     metrics = _metric_map(dashboard)
     return {
         "document_control": {
@@ -80,6 +83,7 @@ def _section_payloads(report: ReliabilityFormalReport) -> dict[str, dict[str, An
             "flight_hours": metrics.get("flight_hours"),
             "flight_cycles": metrics.get("flight_cycles"),
             "trend": dashboard.get("time_series", []),
+            "long_term_history": long_term_history.get("summaries", []),
         },
         "dispatch_reliability": {
             "metric": metrics.get("dispatch_reliability_pct"),
@@ -93,6 +97,8 @@ def _section_payloads(report: ReliabilityFormalReport) -> dict[str, dict[str, An
             "event_mix": dashboard.get("event_mix", []),
             "station_delay": dashboard.get("station_delay", []),
             "route_delay": dashboard.get("route_delay", []),
+            "ata_pareto": dashboard.get("ata_pareto", []),
+            "aircraft_performance": dashboard.get("aircraft_performance", []),
         },
         "component_reliability": {
             "component_reliability": dashboard.get("component_reliability", []),
@@ -113,6 +119,7 @@ def _section_payloads(report: ReliabilityFormalReport) -> dict[str, dict[str, An
             "time_series": dashboard.get("time_series", []),
             "ata_pareto": dashboard.get("ata_pareto", []),
             "aircraft_performance": dashboard.get("aircraft_performance", []),
+            "long_term_history": long_term_history,
         },
         "fracas": {
             "stages": dashboard.get("fracas_stages", []),
@@ -127,11 +134,13 @@ def _section_payloads(report: ReliabilityFormalReport) -> dict[str, dict[str, An
             "data_quality": dashboard.get("data_quality", []),
             "source_health": dashboard.get("source_health", []),
             "source_population": report.source_population_json,
+            "long_term_source_policy": long_term_history.get("source_policy"),
         },
         "appendices": {
             "source_population": report.source_population_json,
             "formula_revisions": report.formula_revisions_json,
             "regulatory_manifest": report.regulatory_manifest,
+            "publication_chart_manifest": (report.chart_data_json or {}).get("publication_chart_manifest", []),
         },
     }
 
@@ -184,15 +193,15 @@ def _commentary_html(items: list[dict[str, Any]]) -> str:
         return "<p class='empty'>No controlled engineering commentary has been accepted for this section.</p>"
     output = []
     for item in items:
-        text = str(item.get("text") or item.get("comment") or "").strip()
-        if not text:
+        text_value = str(item.get("text") or item.get("comment") or "").strip()
+        if not text_value:
             continue
         kind = str(item.get("kind") or "ENGINEERING_JUDGEMENT").upper()
         evidence = item.get("evidence_refs") or []
         suffix = f" · {len(evidence)} evidence reference(s)" if evidence else ""
         output.append(
             f"<div class='comment'><strong>{html.escape(kind)}</strong>"
-            f"<p>{html.escape(text)}</p><small>{html.escape(suffix.strip(' ·'))}</small></div>"
+            f"<p>{html.escape(text_value)}</p><small>{html.escape(suffix.strip(' ·'))}</small></div>"
         )
     return "".join(output) or "<p class='empty'>No controlled engineering commentary has been accepted for this section.</p>"
 
@@ -208,6 +217,9 @@ def _render_html(report: ReliabilityFormalReport, sections: list[ReliabilityForm
     aircraft = scope.get("aircraft_serial_numbers") or []
     scope_text = ", ".join(aircraft) if aircraft else "Tenant fleet"
     source_hash = (report.source_population_json or {}).get("source_identity_sha256") or "not frozen"
+    chart_groups: dict[str, list[Any]] = {}
+    for spec in publication_chart_specs(report):
+        chart_groups.setdefault(spec.section_code, []).append(spec)
     body: list[str] = []
     for section in sections:
         computed = section.computed_data or {}
@@ -240,6 +252,11 @@ def _render_html(report: ReliabilityFormalReport, sections: list[ReliabilityForm
             )
         else:
             body.append("<p class='empty'>No governed analytical payload is currently mapped to this chapter.</p>")
+        if chart_groups.get(section.section_code):
+            body.append("<div class='chart-grid'>")
+            for spec in chart_groups[section.section_code]:
+                body.append(svg_for_spec(spec))
+            body.append("</div>")
         body.append("<h3>Engineering interpretation</h3>")
         body.append(_commentary_html(section.commentary or []))
         if section.warnings:
@@ -257,11 +274,12 @@ def _render_html(report: ReliabilityFormalReport, sections: list[ReliabilityForm
     section{margin:22px 0;break-inside:auto}.section-head{display:grid;grid-template-columns:32px 1fr auto;gap:8px;align-items:center;border-bottom:1px solid #cfd7e1;padding-bottom:5px}
     .section-head span{font-weight:800;color:#6b7786}.section-head b{font-size:8px;border:1px solid #cfd7e1;padding:3px 6px}
     table{width:100%;border-collapse:collapse;margin:9px 0;font-size:9px}th,td{border:1px solid #d8dee6;padding:5px;text-align:left;vertical-align:top}th{background:#eef2f6}
+    .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:9px;margin:11px 0}.formal-chart{width:100%;height:auto;border:1px solid #d8dee6;background:#fff;padding:4px}.formal-chart text{font-family:Arial,sans-serif;fill:#27333f}
     .comment{border-left:3px solid #536f8d;padding:7px 10px;margin:7px 0;background:#f7f9fb}.comment p{margin:4px 0}.comment small,.empty{color:#667587}
     .warnings{border:1px solid #c9a246;background:#fff9e8;padding:7px;margin:8px 0}.warnings p{margin:3px 0}
     details{margin:8px 0;border:1px solid #d8dee6;padding:7px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:7px;max-height:240px;overflow:auto}
     footer{margin-top:24px;border-top:1px solid #cfd7e1;padding-top:7px;font-family:monospace;font-size:7px;overflow-wrap:anywhere}
-    @media print{body{padding:10mm}.comment,table,.section-head{break-inside:avoid}details pre{max-height:none;overflow:visible}}
+    @media print{body{padding:10mm}.comment,table,.section-head,.formal-chart{break-inside:avoid}details pre{max-height:none;overflow:visible}.chart-grid{grid-template-columns:1fr}}
     """
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(report.title)}</title><style>{css}</style></head>
     <body><header><div class='kicker'>Controlled Reliability Programme Report</div><h1>{html.escape(report.title)}</h1>
@@ -323,6 +341,9 @@ def _render_pdf(report: ReliabilityFormalReport, sections: list[ReliabilityForma
         Spacer(1, 4 * mm),
     ]
     dashboard = (report.calculation_snapshots_json or {}).get("dashboard") or {}
+    chart_groups: dict[str, list[Any]] = {}
+    for spec in publication_chart_specs(report):
+        chart_groups.setdefault(spec.section_code, []).append(spec)
     for index, section in enumerate(sections):
         story.append(Paragraph(f"{section.sequence}. {html.escape(section.title)}", styles["Heading2"]))
         story.append(Paragraph(f"Section status: {html.escape(section.status)}", note))
@@ -351,13 +372,19 @@ def _render_pdf(report: ReliabilityFormalReport, sections: list[ReliabilityForma
                     story.append(Paragraph(f"• {html.escape(str(warning))}", small))
             else:
                 story.append(Paragraph("No dashboard-level warning was retained.", small))
+        for spec in chart_groups.get(section.section_code, []):
+            drawing = drawing_for_spec(spec, width=500, height=245)
+            drawing.hAlign = "CENTER"
+            story.append(Spacer(1, 2 * mm))
+            story.append(drawing)
+            story.append(Spacer(1, 2 * mm))
         commentary = section.commentary or []
         story.append(Paragraph("Engineering interpretation", styles["Heading3"]))
         if commentary:
             for item in commentary:
                 kind = html.escape(str(item.get("kind") or "ENGINEERING_JUDGEMENT"))
-                text = html.escape(str(item.get("text") or item.get("comment") or ""))
-                story.append(Paragraph(f"<b>{kind}</b> — {text}", small))
+                text_value = html.escape(str(item.get("text") or item.get("comment") or ""))
+                story.append(Paragraph(f"<b>{kind}</b> — {text_value}", small))
         else:
             story.append(Paragraph("No controlled engineering commentary has been accepted for this section.", note))
         if index < len(sections) - 1 and (index + 1) % 5 == 0:
@@ -393,6 +420,18 @@ def _write_pdf(report: ReliabilityFormalReport, pdf_bytes: bytes) -> str:
     return str(path)
 
 
+def _ensure_long_term_history(db: Session, report: ReliabilityFormalReport) -> None:
+    calculations = dict(report.calculation_snapshots_json or {})
+    if calculations.get("long_term_history") is not None:
+        return
+    history = build_long_term_history(db, report)
+    calculations["long_term_history"] = history
+    report.calculation_snapshots_json = calculations
+    charts = dict(report.chart_data_json or {})
+    charts["long_term_history"] = history.get("series", [])
+    report.chart_data_json = charts
+
+
 def render_formal_report(db: Session, report: ReliabilityFormalReport) -> ReliabilityFormalReport:
     _require_editable(report)
     if report.status not in _RENDERABLE:
@@ -401,6 +440,11 @@ def render_formal_report(db: Session, report: ReliabilityFormalReport) -> Reliab
         raise HTTPException(status_code=409, detail="Freeze data cutoff and fleet effectivity before rendering.")
     if not (report.calculation_snapshots_json or {}).get("dashboard"):
         raise HTTPException(status_code=409, detail="A governed Reliability calculation snapshot is required before rendering.")
+    _ensure_long_term_history(db, report)
+    specs = publication_chart_specs(report)
+    charts = dict(report.chart_data_json or {})
+    charts["publication_chart_manifest"] = chart_manifest(specs)
+    report.chart_data_json = charts
     _populate_sections(db, report)
     db.flush()
     sections = db.query(ReliabilityFormalReportSection).filter(
