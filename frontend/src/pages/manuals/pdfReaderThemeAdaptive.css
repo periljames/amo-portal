@@ -1,0 +1,236 @@
+/*
+ * Reader-local palettes sit on top of the portal light/dark scheme. The
+ * document page itself remains authoritative; these variables only color the
+ * command chrome, navigator and non-document status surfaces.
+ */
+
+.publication-reader-theme--warm .pdfv4-reader {
+  --pdfv4-toolbar-bg: #292820;
+  --pdfv4-toolbar-edge: #77705e;
+  --pdfv4-toolbar-hover: #403d32;
+  --pdfv4-toolbar-active: #4c4738;
+  --pdfv4-toolbar-text: #fffaf0;
+  --pdfv4-toolbar-muted: #ded6c5;
+  --pdfv4-toolbar-disabled: #b9b19f;
+  --pdfv4-control-bg: #37352c;
+  --pdfv4-control-border: #827a66;
+  --pdfv4-menu-bg: #302f27;
+  --pdfv4-stage: #282721;
+  --pdfv4-focus: #fbbf24;
+}
+
+.publication-reader-theme--warm .pdfv5-shell {
+  --pdfv5-shell-bg: #282721;
+  --pdfv5-panel-bg: #292820;
+  --pdfv5-panel-alt: #343228;
+  --pdfv5-panel-raised: #3b392e;
+  --pdfv5-border: #77705e;
+  --pdfv5-border-soft: #514c3f;
+  --pdfv5-text: #fffaf0;
+  --pdfv5-muted: #ded6c5;
+  --pdfv5-subtle: #b9b19f;
+  --pdfv5-hover: #403d32;
+  --pdfv5-active: #4c4738;
+  --pdfv5-accent: #fbbf24;
+  --pdfv5-input-bg: #37352c;
+  --pdfv5-input-border: #827a66;
+  --pdfv5-page-browser: #24231d;
+  --pdfv5-error: #fecaca;
+  --pdfv5-scroll-thumb: #77705e;
+}
+
+body[data-color-scheme="light"] .publication-reader-theme--warm .pdfv4-reader {
+  --pdfv4-toolbar-bg: #f7f1e3;
+  --pdfv4-toolbar-edge: #b7aa8f;
+  --pdfv4-toolbar-hover: #e9e0cc;
+  --pdfv4-toolbar-active: #ded2b8;
+  --pdfv4-toolbar-text: #2d2a23;
+  --pdfv4-toolbar-muted: #5f5849;
+  --pdfv4-toolbar-disabled: #746d5e;
+  --pdfv4-control-bg: #fffaf0;
+  --pdfv4-control-border: #9f9279;
+  --pdfv4-menu-bg: #fffaf0;
+  --pdfv4-stage: #e9e2d2;
+  --pdfv4-focus: #92400e;
+}
+
+body[data-color-scheme="light"] .publication-reader-theme--warm .pdfv5-shell {
+  --pdfv5-shell-bg: #e9e2d2;
+  --pdfv5-panel-bg: #f7f1e3;
+  --pdfv5-panel-alt: #eee6d5;
+  --pdfv5-panel-raised: #fffaf0;
+  --pdfv5-border: #b7aa8f;
+  --pdfv5-border-soft: #d0c4aa;
+  --pdfv5-text: #2d2a23;
+  --pdfv5-muted: #5f5849;
+  --pdfv5-subtle: #746d5e;
+  --pdfv5-hover: #e9e0cc;
+  --pdfv5-active: #ded2b8;
+  --pdfv5-accent: #92400e;
+  --pdfv5-input-bg: #fffaf0;
+  --pdfv5-input-border: #9f9279;
+  --pdfv5-page-browser: #e9e2d2;
+  --pdfv5-error: #991b1b;
+  --pdfv5-scroll-thumb: #9f9279;
+}
+
+.publication-reader-theme--sepia .pdfv4-reader {
+  --pdfv4-toolbar-bg: #30281f;
+  --pdfv4-toolbar-edge: #89745a;
+  --pdfv4-toolbar-hover: #473a2d;
+  --pdfv4-toolbar-active: #574534;
+  --pdfv4-toolbar-text: #fff8e7;
+  --pdfv4-toolbar-muted: #e4d1aa;
+  --pdfv4-toolbar-disabled: #c0ad88;
+  --pdfv4-control-bg: #413528;
+  --pdfv4-control-border: #927b5f;
+  --pdfv4-menu-bg: #362c22;
+  --pdfv4-stage: #30281f;
+  --pdfv4-focus: #f59e0b;
+}
+
+.publication-reader-theme--sepia .pdfv5-shell {
+  --pdfv5-shell-bg: #30281f;
+  --pdfv5-panel-bg: #2d261e;
+  --pdfv5-panel-alt: #382f24;
+  --pdfv5-panel-raised: #43372a;
+  --pdfv5-border: #89745a;
+  --pdfv5-border-soft: #594a39;
+  --pdfv5-text: #fff8e7;
+  --pdfv5-muted: #e4d1aa;
+  --pdfv5-subtle: #c0ad88;
+  --pdfv5-hover: #473a2d;
+  --pdfv5-active: #574534;
+  --pdfv5-accent: #f59e0b;
+  --pdfv5-input-bg: #413528;
+  --pdfv5-input-border: #927b5f;
+  --pdfv5-page-browser: #282119;
+  --pdfv5-error: #fecaca;
+  --pdfv5-scroll-thumb: #89745a;
+}
+
+body[data-color-scheme="light"] .publication-reader-theme--sepia .pdfv4-reader {
+  --pdfv4-toolbar-bg: #efe0bd;
+  --pdfv4-toolbar-edge: #a58c67;
+  --pdfv4-toolbar-hover: #dfcc9f;
+  --pdfv4-toolbar-active: #d5bd86;
+  --pdfv4-toolbar-text: #34291d;
+  --pdfv4-toolbar-muted: #64543f;
+  --pdfv4-toolbar-disabled: #78654d;
+  --pdfv4-control-bg: #fff6dd;
+  --pdfv4-control-border: #927b5f;
+  --pdfv4-menu-bg: #fff6dd;
+  --pdfv4-stage: #ddd0b3;
+  --pdfv4-focus: #78350f;
+}
+
+body[data-color-scheme="light"] .publication-reader-theme--sepia .pdfv5-shell {
+  --pdfv5-shell-bg: #ddd0b3;
+  --pdfv5-panel-bg: #efe0bd;
+  --pdfv5-panel-alt: #e4d1aa;
+  --pdfv5-panel-raised: #fff6dd;
+  --pdfv5-border: #a58c67;
+  --pdfv5-border-soft: #c9b38c;
+  --pdfv5-text: #34291d;
+  --pdfv5-muted: #64543f;
+  --pdfv5-subtle: #78654d;
+  --pdfv5-hover: #dfcc9f;
+  --pdfv5-active: #d5bd86;
+  --pdfv5-accent: #78350f;
+  --pdfv5-input-bg: #fff6dd;
+  --pdfv5-input-border: #927b5f;
+  --pdfv5-page-browser: #ddd0b3;
+  --pdfv5-error: #991b1b;
+  --pdfv5-scroll-thumb: #927b5f;
+}
+
+.publication-reader-theme--contrast .pdfv4-reader {
+  --pdfv4-toolbar-bg: #000000;
+  --pdfv4-toolbar-edge: #ffffff;
+  --pdfv4-toolbar-hover: #1f1f1f;
+  --pdfv4-toolbar-active: #303030;
+  --pdfv4-toolbar-text: #ffffff;
+  --pdfv4-toolbar-muted: #ffffff;
+  --pdfv4-toolbar-disabled: #d4d4d4;
+  --pdfv4-control-bg: #000000;
+  --pdfv4-control-border: #ffffff;
+  --pdfv4-menu-bg: #000000;
+  --pdfv4-stage: #000000;
+  --pdfv4-focus: #ffff00;
+  color-scheme: dark;
+}
+
+.publication-reader-theme--contrast .pdfv5-shell {
+  --pdfv5-shell-bg: #000000;
+  --pdfv5-panel-bg: #000000;
+  --pdfv5-panel-alt: #000000;
+  --pdfv5-panel-raised: #111111;
+  --pdfv5-border: #ffffff;
+  --pdfv5-border-soft: #bfbfbf;
+  --pdfv5-text: #ffffff;
+  --pdfv5-muted: #ffffff;
+  --pdfv5-subtle: #d4d4d4;
+  --pdfv5-hover: #1f1f1f;
+  --pdfv5-active: #303030;
+  --pdfv5-accent: #ffff00;
+  --pdfv5-input-bg: #000000;
+  --pdfv5-input-border: #ffffff;
+  --pdfv5-page-browser: #000000;
+  --pdfv5-error: #ffb4b4;
+  --pdfv5-scroll-thumb: #ffffff;
+  --pdfv5-scrim: rgba(0, 0, 0, 0.72);
+  color-scheme: dark;
+}
+
+.publication-reader-theme--contrast .pdfv4-reader .pdfv3-toolbar button,
+.publication-reader-theme--contrast .pdfv4-reader .pdfv3-menu summary,
+.publication-reader-theme--contrast .pdfv5-tabs button,
+.publication-reader-theme--contrast .pdfv5-mobile-close {
+  border-color: #ffffff;
+}
+
+/* Status messages also remain readable on the dark reader chrome. */
+.pdfv5-shell .pdfv3-form-state,
+.pdfv5-shell .pdfv3-notice--form,
+.pdfv5-shell .pdfv3-success {
+  border-color: color-mix(in srgb, #4ade80 58%, transparent);
+  background: color-mix(in srgb, #16a34a 20%, var(--pdfv5-panel-bg));
+  color: #dcfce7;
+}
+
+body[data-color-scheme="light"] .pdfv5-shell .pdfv3-form-state,
+body[data-color-scheme="light"] .pdfv5-shell .pdfv3-notice--form,
+body[data-color-scheme="light"] .pdfv5-shell .pdfv3-success,
+body[data-color-scheme="light"] .publication-reader-theme--warm .pdfv5-shell .pdfv3-form-state,
+body[data-color-scheme="light"] .publication-reader-theme--warm .pdfv5-shell .pdfv3-notice--form,
+body[data-color-scheme="light"] .publication-reader-theme--warm .pdfv5-shell .pdfv3-success,
+body[data-color-scheme="light"] .publication-reader-theme--sepia .pdfv5-shell .pdfv3-form-state,
+body[data-color-scheme="light"] .publication-reader-theme--sepia .pdfv5-shell .pdfv3-notice--form,
+body[data-color-scheme="light"] .publication-reader-theme--sepia .pdfv5-shell .pdfv3-success {
+  border-color: #16a34a;
+  background: color-mix(in srgb, #16a34a 10%, var(--pdfv5-panel-bg));
+  color: #14532d;
+}
+
+.publication-reader-theme--contrast .pdfv5-shell .pdfv3-form-state,
+.publication-reader-theme--contrast .pdfv5-shell .pdfv3-notice--form,
+.publication-reader-theme--contrast .pdfv5-shell .pdfv3-success {
+  border-color: #ffffff;
+  background: #000000;
+  color: #ffffff;
+}
+
+@media (prefers-contrast: more) {
+  .pdfv4-reader .pdfv3-toolbar button,
+  .pdfv4-reader .pdfv3-menu summary,
+  .pdfv4-reader .pdfv3-pages input,
+  .pdfv4-scale-select,
+  .pdfv5-tabs button,
+  .pdfv5-filter input,
+  .pdfv5-outline > button.active,
+  .pdfv5-page-row > button.active,
+  .pdfv5-search-panel form label input,
+  .pdfv5-search-panel form button {
+    border-width: 2px;
+  }
+}
