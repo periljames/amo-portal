@@ -7,10 +7,13 @@ from . import services as services
 from . import governance as governance
 from . import backend_hardening as backend_hardening
 from . import backend_ingestion_hardening as backend_ingestion_hardening
+from . import backend_services as backend_services
+from . import backend_materialization_hardening as backend_materialization_hardening
 
 governance.install(services)
 backend_hardening.install(governance, services)
 backend_ingestion_hardening.install()
+backend_materialization_hardening.install(backend_services)
 
 from .router import router
 
