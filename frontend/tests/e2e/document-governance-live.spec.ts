@@ -6,6 +6,13 @@ const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 
+test.use({
+  viewport: { width: 1440, height: 900 },
+  ignoreHTTPSErrors: true,
+  trace: "retain-on-failure",
+  screenshot: "only-on-failure",
+});
+
 async function signIn(page: Page): Promise<void> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
@@ -17,7 +24,6 @@ async function signIn(page: Page): Promise<void> {
 
 test.describe("Document Control governed workflow", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_DOCUMENT_GOVERNANCE=1 to run authenticated DMS governance checks.");
-  test.use({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure" });
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
