@@ -31,6 +31,7 @@ from . import formal_reporting  # noqa: E402,F401
 from . import formal_reporting_render  # noqa: E402,F401
 from . import formal_reporting_governance  # noqa: E402,F401
 from . import formal_reporting_history  # noqa: E402,F401
+from . import formal_reporting_snapshot_guard  # noqa: E402,F401
 from . import formal_reporting_supersession  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 
@@ -52,6 +53,7 @@ workbook_parity_statistics.register(router)
 workbook_revision_hardening.register(router)
 management_reporting_enrichment.apply(management_reporting)
 management_reporting.register(router)
+formal_reporting_snapshot_guard.apply()
 formal_reporting_supersession.apply()
 formal_reporting.register(router)
 formal_reporting_render.register(router)
