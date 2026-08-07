@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from .aircraft_catalogue.router import router as catalogue_router
 from .aircraft_induction.router import router as induction_router
+from .content_packs.backend_admin_router import router as content_pack_backend_admin_router
 from .content_packs.backend_router import router as content_pack_backend_router
 from .content_packs.ingestion_router import router as content_pack_ingestion_router
 from .content_packs.router import router as content_packs_router
@@ -21,4 +22,5 @@ router.include_router(induction_router)
 router.include_router(content_packs_router)
 router.include_router(content_pack_ingestion_router)
 router.include_router(content_pack_backend_router)
+router.include_router(content_pack_backend_admin_router)
 router.include_router(daily_utilisation_router)
