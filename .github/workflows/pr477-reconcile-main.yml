@@ -1,0 +1,60 @@
+name: PR 477 reconcile current main
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-reconcile-main.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Merge current main and preserve one Alembic head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-ff --no-commit origin/main
+          cat > backend/amodb/alembic/versions/docgov_merge_20260807.py <<'PY'
+          """Merge Document Control governance with the aircraft/workforce migration line.
+
+          Revision ID: docgov_merge_20260807
+          Revises: docgov_20260806_governance, merge_20260806_aircraft_workforce
+          Create Date: 2026-08-07
+          """
+          from __future__ import annotations
+
+          from typing import Sequence, Union
+
+          revision: str = "docgov_merge_20260807"
+          down_revision: Union[str, Sequence[str], None] = (
+              "docgov_20260806_governance",
+              "merge_20260806_aircraft_workforce",
+          )
+          branch_labels = None
+          depends_on = None
+
+
+          def upgrade() -> None:
+              pass
+
+
+          def downgrade() -> None:
+              pass
+          PY
+          git rm .github/workflows/pr477-reconcile-main.yml
+          python -m compileall -q backend/amodb/apps/doc_control backend/amodb/jobs/document_governance_backfill.py backend/amodb/alembic/versions/docgov_20260806_governance.py backend/amodb/alembic/versions/docgov_merge_20260807.py
+          git add backend/amodb/alembic/versions/docgov_merge_20260807.py
+          git commit -m "merge(main): reconcile governed Document Control with current main"
+          git push origin HEAD:agent/dms-reader-governance-completion
