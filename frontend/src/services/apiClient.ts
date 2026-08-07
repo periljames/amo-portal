@@ -184,7 +184,7 @@ function buildRequestUrls(path: string): string[] {
   const configuredBase = getApiBaseUrl();
   const primary = `${configuredBase}${cleanPath}`;
   const direct = `${resolveDirectDevBackend()}${cleanPath}`;
-  if (isLocalDevSurface()) return direct === primary ? [primary] : [direct, primary];
+  if (isLocalDevSurface()) return direct === primary ? [primary] : [primary, direct];
   return [primary];
 }
 
@@ -358,7 +358,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
         lastError = error;
         const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
         if (canTryNext) {
-          console.warn("[apiClient] direct request failed; retrying alternate backend route", { path, error });
+          console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
           continue;
         }
         if (staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
