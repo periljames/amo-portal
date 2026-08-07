@@ -199,6 +199,8 @@ function usePlannerDialogFocusManagement(): void {
   }, []);
 }
 
+// Creation stays in QmsPlannerPageV2 and its authoritative module handoffs;
+// this wrapper owns planner clock and dialog lifecycle behavior only.
 export default function QmsPlannerLivePage(): React.ReactElement {
   const [clockInstant, setClockInstant] = useState(() => new Date());
   usePlannerDialogFocusManagement();
