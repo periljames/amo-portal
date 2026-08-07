@@ -1,0 +1,225 @@
+.daily-util-page {
+  display: grid;
+  gap: 18px;
+}
+
+.daily-util-page__header {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.daily-util-page__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.daily-util-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
+}
+
+.daily-util-form-card,
+.daily-util-preview-card,
+.daily-util-history {
+  min-width: 0;
+}
+
+.daily-util-section-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.daily-util-section-heading > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.daily-util-section-heading h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.daily-util-section-heading > div:first-child > span {
+  align-items: center;
+  border: 1px solid var(--border-color, #d9dee7);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.daily-util-section-heading small {
+  color: var(--text-muted, #667085);
+}
+
+.daily-util-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.form-field > span {
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.form-field--wide {
+  grid-column: 1 / -1;
+}
+
+.daily-util-nil {
+  align-items: flex-start;
+  border: 1px solid var(--border-color, #d9dee7);
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+}
+
+.daily-util-nil span {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-util-nil small {
+  color: var(--text-muted, #667085);
+}
+
+.daily-util-baseline {
+  border-top: 1px solid var(--border-color, #d9dee7);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.daily-util-baseline > div {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-util-baseline span,
+.daily-util-baseline small {
+  color: var(--text-muted, #667085);
+  font-size: 0.75rem;
+}
+
+.daily-util-component-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.daily-util-component {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, #e2e7ef);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(170px, 1fr) minmax(145px, auto) auto;
+  padding: 10px 0;
+}
+
+.daily-util-component:last-child {
+  border-bottom: 0;
+}
+
+.daily-util-component__identity,
+.daily-util-component__default {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-util-component small,
+.daily-util-component__default span {
+  color: var(--text-muted, #667085);
+  font-size: 0.72rem;
+}
+
+.daily-util-override-toggle {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+.daily-util-override-fields {
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: 110px 100px minmax(180px, 1fr);
+  padding: 4px 0 8px;
+}
+
+.daily-util-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.daily-util-preview-table td small,
+.daily-util-history td small {
+  color: var(--text-muted, #667085);
+  display: block;
+  margin-top: 2px;
+}
+
+.daily-util-empty {
+  color: var(--text-muted, #667085);
+  padding: 28px 14px;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .daily-util-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .daily-util-page__header,
+  .daily-util-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-util-form-grid,
+  .daily-util-baseline,
+  .daily-util-override-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-util-component {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-util-actions {
+    justify-content: stretch;
+  }
+
+  .daily-util-actions .btn {
+    flex: 1 1 auto;
+  }
+}

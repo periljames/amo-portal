@@ -3,7 +3,7 @@ Fleet data models (aircraft, components, utilisation, maintenance programme).
 
 Scope of this app:
 - Aircraft master data and configuration.
-- Major installed components (engines, propellers, APU, etc.).
+- Major installed components (engines, props, APU, etc.).
 - Aircraft utilisation entries (per techlog / flight).
 - Maintenance programme template items and aircraft-level status.
 
@@ -232,11 +232,14 @@ class Aircraft(Base):
         passive_deletes=True,
     )
 
-    # Maintenance programme status records for this aircraft
+    # Legacy maintenance_statuses was retired by the controlled AMP cutover.
+    # Keep the mapper symbol temporarily for compatibility, but never issue an
+    # implicit query against the decommissioned table. Active planning data is
+    # represented by maintenance_program.AmpAircraftProgramItem.
     maintenance_statuses = relationship(
         "MaintenanceStatus",
         back_populates="aircraft",
-        lazy="selectin",
+        lazy="raise",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )

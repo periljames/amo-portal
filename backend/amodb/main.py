@@ -28,6 +28,7 @@ from .apps.accounts.router_modules_admin import router as accounts_modules_route
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.accounts.router_onboarding import router as accounts_onboarding_router
 from .apps.fleet.router import router as fleet_router
+from .apps.aircraft_architecture.router import router as aircraft_architecture_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router, public_router as training_public_router
@@ -467,6 +468,7 @@ app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(accounts_onboarding_router)
 app.include_router(fleet_router)
+app.include_router(aircraft_architecture_router)
 app.include_router(work_router)
 app.include_router(crs_router)
 app.include_router(training_router)
