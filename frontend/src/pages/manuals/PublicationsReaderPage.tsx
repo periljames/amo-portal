@@ -235,7 +235,7 @@ export default function PublicationsReaderPage() {
   const activeTab: ReaderTab = requestedTab && TAB_VALUES.has(requestedTab) ? requestedTab : "detail";
   const isPublished = Boolean(metadata?.is_published && !payload?.not_published);
   const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
-  const sections = payload?.sections || [];
+  const sections = useMemo(() => payload?.sections ?? [], [payload?.sections]);
   const textAvailable = sections.length > 0 && !metadata?.image_only;
   const layoutAvailable = Boolean(metadata?.rendered_pdf_url);
   const viewerPdfPath = metadata?.source_url || metadata?.rendered_pdf_url || "";
