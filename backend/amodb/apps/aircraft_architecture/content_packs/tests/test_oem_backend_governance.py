@@ -39,7 +39,7 @@ def test_q400_effectivity_normalizer_preserves_msn_and_service_bulletin_conditio
         "label": "MSN",
     }
     assert expression["conditions"][1]["value"] == "PRE"
-    assert expression["conditions"][1]["path"] == "configuration.sb84_32_69"
+    assert expression["conditions"][1]["path"] == "configuration.sb_84_32_69"
 
 
 def test_q400_effectivity_normalizer_is_fail_closed_for_unmapped_wording():
