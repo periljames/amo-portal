@@ -29,8 +29,8 @@ import DocumentControlShell, {
   DocumentControlError,
   DocumentControlLoading,
   DocumentControlStatus,
-  useDocumentControlRoute,
 } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentLibrary.css";
 
 const CATEGORIES = [
