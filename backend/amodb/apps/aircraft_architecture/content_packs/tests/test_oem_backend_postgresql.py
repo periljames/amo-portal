@@ -170,13 +170,21 @@ def test_oem_backend_database_contract_and_immutable_guards(engine):
     tables = set(inspector.get_table_names())
     assert "aircraft_oem_source_intakes" in tables
     assert "aircraft_oem_source_intake_rows" in tables
-    tr_checks = {
-        item["name"]: item.get("sqltext", "")
-        for item in inspector.get_check_constraints("aircraft_oem_temporary_revisions")
-    }
-    assert "CANDIDATE" in tr_checks["ck_aircraft_oem_temporary_revision_status"]
-    assert "REJECTED" in tr_checks["ck_aircraft_oem_temporary_revision_status"]
     with engine.connect() as connection:
+        tr_check_definition = connection.execute(
+            text(
+                """
+                SELECT pg_get_constraintdef(oid)
+                  FROM pg_constraint
+                 WHERE conrelid = 'aircraft_oem_temporary_revisions'::regclass
+                   AND contype = 'c'
+                   AND pg_get_constraintdef(oid) LIKE '%CANDIDATE%'
+                 LIMIT 1
+                """
+            )
+        ).scalar_one()
+        assert "CANDIDATE" in tr_check_definition
+        assert "REJECTED" in tr_check_definition
         triggers = {
             row[0]
             for row in connection.execute(
