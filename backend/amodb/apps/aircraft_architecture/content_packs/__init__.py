@@ -5,8 +5,10 @@
 # as the richer backend governance API rather than leaving a weaker legacy path.
 from . import services as services
 from . import governance as governance
+from . import backend_hardening as backend_hardening
 
 governance.install(services)
+backend_hardening.install(governance, services)
 
 from .router import router
 
