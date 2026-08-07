@@ -74,8 +74,8 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
           <button type="button" className="qms-control-centre__button" onClick={() => void refresh()} disabled={dashboardQuery.isFetching}>
             <RefreshCw size={15} className={dashboardQuery.isFetching ? "is-spinning" : ""} aria-hidden="true" /> Refresh
           </button>
-          <Link className="qms-control-centre__button is-primary" to={`${routes.auditSchedule}?create=1`}>
-            <CalendarPlus size={15} aria-hidden="true" /> Schedule audit
+          <Link className="qms-control-centre__button is-primary" to={routes.auditSchedule}>
+            <CalendarPlus size={15} aria-hidden="true" /> Open audit plan
           </Link>
         </div>
       </header>
