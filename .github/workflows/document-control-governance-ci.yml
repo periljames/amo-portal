@@ -9,9 +9,11 @@ name: Document Control Governance CI
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/DocControlPages.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
+      - "frontend/src/services/documentLibrary.ts"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
@@ -27,9 +29,11 @@ name: Document Control Governance CI
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/DocControlPages.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
+      - "frontend/src/services/documentLibrary.ts"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
@@ -106,7 +110,7 @@ jobs:
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Configure mappers and verify governed reader routes
+      - name: Configure mappers and verify governed reader and physical-library routes
         run: |
           python - <<'PY'
           from sqlalchemy.orm import configure_mappers
@@ -121,15 +125,19 @@ jobs:
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/compare",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/prepare",
               "/doc-control/workspace/t/{tenant_slug}/reader/documents/{manual_id}/annotation-migrations/{migration_id}",
+              "/doc-control/workspace/t/{tenant_slug}/physical-copies",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/scan",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/circulation",
+              "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf",
           }
           missing = required - paths
           assert not missing, missing
           PY
-      - name: Run Document Control governance, reader and security tests
+      - name: Run Document Control governance, library, reader and security tests
         run: pytest -q amodb/apps/doc_control/tests
 
   frontend:
-    name: Governed reader typecheck, build and contracts
+    name: Governed library and reader typecheck, build and contracts
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -152,21 +160,26 @@ jobs:
           src/services/documentGovernance.test.ts
           src/services/readerGovernance.test.ts
           src/pages/manuals/PublicationGovernancePanel.contract.test.ts
-      - name: Lint changed reader governance surfaces
+      - name: Lint changed Document Control and reader surfaces
         run: >-
           npm exec -- eslint
+          src/services/documentLibrary.ts
           src/services/documentGovernance.ts
           src/services/readerGovernance.ts
+          src/pages/DocControlPages.tsx
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
-          src/pages/documentControl/DocumentGovernanceLibraryPage.tsx
           src/pages/documentControl/DocumentGovernanceRecordPage.tsx
+          src/pages/documentControl/DocumentLibraryHubPage.tsx
+          src/pages/documentControl/DocumentLibraryCopiesPage.tsx
+          src/pages/documentControl/DocumentControlShell.tsx
           src/pages/manuals/PublicationsReaderPage.tsx
           src/pages/manuals/PublicationGovernancePanel.tsx
+          tests/e2e/document-governance-live.spec.ts
       - name: Build production frontend
         run: npm run build
 
   authenticated-browser:
-    name: Authenticated DMS governance and reader acceptance
+    name: Authenticated DMS library, governance, physical custody and reader acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -249,7 +262,7 @@ jobs:
             if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
             sleep 1
           done
-      - name: Run real-login Document Control governance acceptance
+      - name: Run real-login Document Control library, governance and custody acceptance
         working-directory: frontend
         run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
       - name: Dump server logs on failure
