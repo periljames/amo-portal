@@ -1,0 +1,85 @@
+name: PR 477 reader evidence UI
+
+on:
+  push:
+    branches:
+      - agent/dms-reader-governance-completion
+    paths:
+      - .github/workflows/pr477-reader-evidence-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dms-reader-governance-completion
+          fetch-depth: 0
+      - name: Add QMS-linked evidence and snapshot export UX
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          service = Path('frontend/src/services/readerGovernance.ts')
+          source = service.read_text(encoding='utf-8')
+          marker = 'export function createEvidenceSnapshot(tenant: string, manualId: string, revisionId: string): Promise<Record<string, unknown>> {\n  return request(revisionPath(tenant, manualId, revisionId, "/evidence/snapshots"), { method: "POST" });\n}\n\n'
+          addition = marker + 'export function getEvidenceSnapshot(tenant: string, manualId: string, revisionId: string, snapshotId: string): Promise<Record<string, unknown>> {\n  return request(revisionPath(tenant, manualId, revisionId, `/evidence/snapshots/${encodeURIComponent(snapshotId)}`));\n}\n\n'
+          if source.count(marker) != 1:
+              raise SystemExit('Evidence snapshot client marker changed')
+          service.write_text(source.replace(marker, addition), encoding='utf-8')
+
+          panel = Path('frontend/src/pages/manuals/PublicationGovernancePanel.tsx')
+          source = panel.read_text(encoding='utf-8')
+          source = source.replace('  FileDiff,\n  FileKey2,', '  Download,\n  FileDiff,\n  FileKey2,')
+          source = source.replace('  getReaderEvidence,\n  getReaderManifest,', '  getEvidenceSnapshot,\n  getReaderEvidence,\n  getReaderManifest,')
+          source = source.replace('  const [tags, setTags] = useState("");\n', '  const [tags, setTags] = useState("");\n  const [linkedType, setLinkedType] = useState("");\n  const [linkedId, setLinkedId] = useState("");\n')
+          source = source.replace('  const createAnnotation = async (annotationType: "NOTE" | "BOOKMARK" | "HIGHLIGHT") => {', '  const createAnnotation = async (annotationType: "NOTE" | "BOOKMARK" | "HIGHLIGHT" | "EVIDENCE") => {')
+          old = '        tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),\n        location: {'
+          new = '        tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),\n        linked_entity_type: annotationType === "EVIDENCE" ? linkedType : undefined,\n        linked_entity_id: annotationType === "EVIDENCE" ? linkedId.trim() : undefined,\n        location: {'
+          if source.count(old) != 1:
+              raise SystemExit('Annotation payload marker changed')
+          source = source.replace(old, new)
+          source = source.replace('      setTags("");\n      await loadAnnotations();', '      setTags("");\n      if (annotationType === "EVIDENCE") { setLinkedType(""); setLinkedId(""); }\n      await loadAnnotations();')
+          marker = '  const createSnapshot = async () => {\n'
+          download = '''  const downloadSnapshot = async (snapshotId: string) => {\n    setBusy(true);\n    setError("");\n    try {\n      const value = await getEvidenceSnapshot(tenant, manualId, revisionId, snapshotId);\n      const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });\n      const url = URL.createObjectURL(blob);\n      const link = document.createElement("a");\n      link.href = url;\n      link.download = `document-evidence-${manualId}-${revisionId}-${snapshotId}.json`;\n      document.body.appendChild(link);\n      link.click();\n      link.remove();\n      URL.revokeObjectURL(url);\n    } catch (caught) {\n      setError(caught instanceof Error ? caught.message : "Evidence snapshot could not be exported.");\n    } finally {\n      setBusy(false);\n    }\n  };\n\n'''
+          if source.count(marker) != 1:
+              raise SystemExit('Create snapshot function marker changed')
+          source = source.replace(marker, download + marker)
+          old = '              <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Tags, comma separated" />\n              <div>\n'
+          new = '''              <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Tags, comma separated" />\n              {manifest?.capabilities.control ? <div className="publication-governance-linked-evidence">\n                <select value={linkedType} onChange={(event) => setLinkedType(event.target.value)} aria-label="Linked QMS record type">\n                  <option value="">No QMS link</option>\n                  <option value="QMS_AUDIT">QMS audit</option>\n                  <option value="QMS_FINDING">Audit finding</option>\n                  <option value="QMS_CORRECTIVE_ACTION">Corrective action</option>\n                </select>\n                <input value={linkedId} onChange={(event) => setLinkedId(event.target.value)} placeholder="QMS record UUID" disabled={!linkedType} />\n              </div> : null}\n              <div>\n'''
+          if source.count(old) != 1:
+              raise SystemExit('Annotation compose marker changed')
+          source = source.replace(old, new)
+          old = '                {viewMode === "text" ? <button type="button" disabled={busy || !manifest?.capabilities.annotations} onClick={() => void createAnnotation("HIGHLIGHT")}><Highlighter size={14} /> Highlight selection</button> : null}\n'
+          new = old + '                {manifest?.capabilities.control ? <button type="button" disabled={busy || !manifest?.capabilities.annotations || !linkedType || !linkedId.trim()} onClick={() => void createAnnotation("EVIDENCE")}><ClipboardCheck size={14} /> Link QMS evidence</button> : null}\n'
+          if source.count(old) != 1:
+              raise SystemExit('Highlight button marker changed')
+          source = source.replace(old, new)
+          old = '                <div><dt>Audit events</dt><dd>{evidence?.audit_history.length ?? 0}</dd></div>\n'
+          new = old + '                <div><dt>Reader adapter</dt><dd>{manifest?.renderer || "—"} · {manifest?.location_adapter || "—"}</dd></div>\n'
+          if source.count(old) != 1:
+              raise SystemExit('Evidence audit row marker changed')
+          source = source.replace(old, new)
+          old = '              {snapshots.length ? snapshots.map((snapshot, index) => <article key={String(snapshot.id || index)}><strong>{String(snapshot.snapshot_sha256 || "")}</strong><small>{formatDate(String(snapshot.created_at || ""))} · source {String(snapshot.source_sha256 || "not recorded")}</small></article>) : <p className="publication-governance-empty">No immutable evidence snapshot has been created for this revision.</p>}\n'
+          new = '              {snapshots.length ? snapshots.map((snapshot, index) => <article key={String(snapshot.id || index)}><strong>{String(snapshot.snapshot_sha256 || "")}</strong><small>{formatDate(String(snapshot.created_at || ""))} · source {String(snapshot.source_sha256 || "not recorded")}</small><div className="publication-governance-list__actions"><button type="button" disabled={busy || !snapshot.id} onClick={() => void downloadSnapshot(String(snapshot.id))}><Download size={13} /> Download verified JSON</button></div></article>) : <p className="publication-governance-empty">No immutable evidence snapshot has been created for this revision.</p>}\n'
+          if source.count(old) != 1:
+              raise SystemExit('Snapshot list marker changed')
+          source = source.replace(old, new)
+          panel.write_text(source, encoding='utf-8')
+
+          css = Path('frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css')
+          source = css.read_text(encoding='utf-8')
+          source += '\n.publication-governance-linked-evidence { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.2fr); gap: 0.45rem; }\n.publication-governance-linked-evidence select { border: 1px solid #d0d5dd; border-radius: 7px; background: var(--surface, #fff); color: inherit; padding: 0.55rem 0.65rem; font: inherit; }\n@media (max-width: 520px) { .publication-governance-linked-evidence { grid-template-columns: 1fr; } }\n'
+          css.write_text(source, encoding='utf-8')
+          PY
+          git config user.name "amo-portal-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr477-reader-evidence-ui.yml
+          git add frontend/src/services/readerGovernance.ts frontend/src/pages/manuals/PublicationGovernancePanel.tsx frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css
+          git commit -m "feat(document-control): complete reader evidence workspace"
+          git push origin HEAD:agent/dms-reader-governance-completion
