@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import os
+from datetime import date, datetime, timezone
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
 
 EXPECTED_TABLES = {
@@ -115,6 +117,34 @@ def main() -> None:
             SELECT action FROM reliability_source_revision_events WHERE id = :id
         """), {"id": revision_id}).scalar_one()
         assert action == "CREATED", action
+
+        # Execute the formal long-term aggregation SQL against the real PostgreSQL
+        # schema with an empty tenant population. This catches PostgreSQL-only SQL,
+        # JSONB, date-truncation and expanding-parameter regressions that SQLite
+        # unit tests cannot exercise.
+        from amodb.apps.reliability.formal_reporting_history import (
+            _domain_rows,
+            _event_rows,
+            _utilisation_rows,
+        )
+
+        session = Session(bind=connection)
+        params = {
+            "amo_id": "00000000-0000-7000-8000-000000000099",
+            "start_date": date(2024, 1, 1),
+            "end_date": date(2026, 12, 31),
+            "cutoff": datetime(2026, 12, 31, 23, 59, tzinfo=timezone.utc),
+            "aircraft": [],
+            "use_aircraft": False,
+        }
+        assert _utilisation_rows(session, params) == []
+        assert _event_rows(session, params) == []
+        assert _domain_rows(session, params) == []
+        params["aircraft"] = ["5Y-TEST"]
+        params["use_aircraft"] = True
+        assert _utilisation_rows(session, params) == []
+        assert _event_rows(session, params) == []
+        assert _domain_rows(session, params) == []
 
     print("PostgreSQL operational-source integrity regression passed")
 
