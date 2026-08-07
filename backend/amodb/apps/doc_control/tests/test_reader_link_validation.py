@@ -30,7 +30,7 @@ class _Db:
 
 
 def test_qms_audit_link_is_tenant_validated_and_canonicalized() -> None:
-    row = quality_models.QMSAudit.__new__(quality_models.QMSAudit)
+    row = quality_models.QMSAudit()
     row.id = uuid.uuid4()
     row.audit_ref = "QAR-MO-26-001"
     row.status = SimpleNamespace(value="CLOSED")
