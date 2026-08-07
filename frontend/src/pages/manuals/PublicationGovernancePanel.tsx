@@ -15,6 +15,8 @@ import {
   XCircle,
 } from "lucide-react";
 
+import "./publicationReaderGovernanceWorkspace.css";
+
 import {
   compareReaderRevisions,
   createEvidenceSnapshot,

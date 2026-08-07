@@ -15,6 +15,7 @@ import {
   PanelLeftOpen,
   Printer,
   Search,
+  ShieldCheck,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -44,6 +45,7 @@ import {
   type PublicationSearchResult,
 } from "../../services/publications";
 import PublicationPdfLayoutViewer, { type PdfOutlineItem } from "./PublicationPdfLayoutViewer";
+import PublicationGovernancePanel from "./PublicationGovernancePanel";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
 import "./publicationReaderGovernance.css";
@@ -215,6 +217,7 @@ export default function PublicationsReaderPage() {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [governanceOpen, setGovernanceOpen] = useState(() => Boolean(searchParams.get("annotation")));
   const [nativeOutline, setNativeOutline] = useState<PdfOutlineItem[]>([]);
   const [hasAcroForm, setHasAcroForm] = useState(false);
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
@@ -665,6 +668,7 @@ export default function PublicationsReaderPage() {
   const activeSectionLabel = viewMode === "layout" && nativeOutline.length
     ? nativeOutline.find((item) => item.id === activeOutlineKey)?.title || `Page ${currentPdfPage}`
     : sections.find((section) => section.anchor_slug === activeSection)?.heading || "Document detail";
+  const activeSectionId = sections.find((section) => section.anchor_slug === activeSection)?.id;
   const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
   const layoutLabel = sourceIsPdf ? "Original layout" : "PDF proof";
   const textLabel = sourceIsPdf ? "Accessible text" : "Readable document";
@@ -687,6 +691,7 @@ export default function PublicationsReaderPage() {
               {isPublished && acknowledgement?.required && acknowledgement.pending ? <button type="button" className="publication-acknowledgement-action" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}><BadgeCheck size={16} /> {acknowledgementBusy ? "Recording…" : "Acknowledge"}</button> : null}
               <button type="button" className="primary" disabled={downloadBusy} onClick={() => void downloadPdf()}><Download size={16} /> {downloadBusy ? "Preparing…" : `Download (${formatFileSize(metadata.rendered_pdf_size_bytes || metadata.source_size_bytes)})`}</button>
               <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>
+              <button type="button" className={governanceOpen ? "active" : ""} onClick={() => setGovernanceOpen(true)}><ShieldCheck size={16} /> Governance</button>
               <button type="button" onClick={() => navigate(`/maintenance/${amoCode || tenant}/document-control/change-proposals?publication=${encodeURIComponent(manualId || "")}&revision=${encodeURIComponent(revId || "")}`)}>Report problem</button>
             </div>
           </header>
@@ -760,6 +765,16 @@ export default function PublicationsReaderPage() {
           {activeTab === "citations" ? <section className="publication-record-panel"><h2>Citations</h2><p>References from other controlled publications, regulations, findings, and records will appear here.</p><div className="publication-record-empty">No citations are currently linked to this revision.</div></section> : null}
           {activeTab === "subsidiary" ? <section className="publication-record-panel"><h2>Subsidiary legislation</h2><p>Linked schedules, notices, directives, forms, and subordinate publications will appear here.</p><div className="publication-record-empty">No subsidiary publication is currently linked to this revision.</div></section> : null}
 
+          <PublicationGovernancePanel
+            open={governanceOpen}
+            onClose={() => setGovernanceOpen(false)}
+            tenant={tenant}
+            manualId={manualId || ""}
+            revisionId={revId || ""}
+            currentPage={currentPdfPage}
+            activeSectionId={activeSectionId}
+            viewMode={viewMode}
+          />
           <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>
           {mobileNavigationOpen ? <button type="button" className="publication-navigation-backdrop" onClick={() => setMobileNavigationOpen(false)} aria-label="Close navigation overlay" /> : null}
         </>
