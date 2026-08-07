@@ -95,13 +95,14 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_merge_20260807_qms"], heads
+          assert heads == ["docgov_20260807_qms_audit_runtime"], heads
           assert script.get_revision("docgov_20260806_governance") is not None
           assert script.get_revision("docgov_merge_20260807") is not None
           assert script.get_revision("docgov_20260807_reader_governance") is not None
           assert script.get_revision("docgov_merge_20260807_heads") is not None
           assert script.get_revision("merge_20260807_qms_planner_aircraft") is not None
           assert script.get_revision("docgov_merge_20260807_qms") is not None
+          assert script.get_revision("docgov_20260807_qms_audit_runtime") is not None
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade heads
@@ -236,6 +237,12 @@ jobs:
             if [ "$attempt" -eq 60 ]; then cat /tmp/dms-backend.log; exit 1; fi
             sleep 1
           done
+          sleep 2
+          if grep -Eq "UndefinedColumn|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
+            echo "::error::Backend startup reported an ORM/schema integration failure"
+            cat /tmp/dms-backend.log
+            exit 1
+          fi
           (cd frontend && nohup npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
