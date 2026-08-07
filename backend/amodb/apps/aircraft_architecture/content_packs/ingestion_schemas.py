@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class WorkbookSheetPreview(BaseModel):
     name: str
+    state: str = "VISIBLE"
     row_count: int
     column_count: int
     sample_rows: list[list[Any]] = Field(default_factory=list)
