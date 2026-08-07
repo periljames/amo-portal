@@ -71,7 +71,7 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
     await page.getByRole("button", { name: /Full tree/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
-    await expect(page.getByTestId("documentation-tree")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".dc-structure-tree")).toBeVisible({ timeout: 30_000 });
   });
 
   test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
