@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.aircraft_architecture.content_packs import models as content_models
 from amodb.database import get_db
-from amodb.security import get_current_active_user
+from amodb.security import require_roles
 
 from . import comparison_schemas, models, overlay
 
 router = APIRouter(prefix="/programmes", tags=["tenant maintenance programme comparison"])
+PROGRAMME_READ_ROLES = ("SUPERUSER", "AMO_ADMIN", "PLANNING_ENGINEER", "QUALITY_MANAGER")
 
 
 def _amo_id(user: account_models.User) -> str:
@@ -40,7 +41,7 @@ def comparison_page(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user: account_models.User = Depends(require_roles(*PROGRAMME_READ_ROLES)),
 ):
     revision = _revision(db, revision_id, user)
     query = (
