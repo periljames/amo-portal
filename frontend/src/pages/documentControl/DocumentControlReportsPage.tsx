@@ -17,7 +17,7 @@ import "./documentLibrary.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
 
-export function csvCell(value: unknown): string {
+function csvCell(value: unknown): string {
   const text = String(value ?? "");
   const safe = /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
   return `"${safe.replaceAll('"', '""')}"`;
