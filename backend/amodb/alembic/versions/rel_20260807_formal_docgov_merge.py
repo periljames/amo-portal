@@ -62,14 +62,23 @@ DECLARE
   parent_report_id text;
   parent_published timestamptz;
 BEGIN
-  parent_report_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.report_id ELSE NEW.report_id END;
+  IF TG_OP = 'DELETE' THEN
+    parent_report_id := OLD.report_id;
+  ELSE
+    parent_report_id := NEW.report_id;
+  END IF;
+
   SELECT published_at INTO parent_published
     FROM reliability_formal_reports
     WHERE id = parent_report_id;
   IF parent_published IS NOT NULL THEN
     RAISE EXCEPTION 'published Reliability formal report child evidence is immutable';
   END IF;
-  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 """
