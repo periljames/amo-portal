@@ -1,6 +1,6 @@
 """Add deterministic Quality signals and AMO approval impact graph.
 
-Revision ID: quality_260808_intelligence_graph
+Revision ID: quality_260808_intel_graph
 Revises: quality_260808_assurance_cases
 Create Date: 2026-08-08
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "quality_260808_intelligence_graph"
+revision = "quality_260808_intel_graph"
 down_revision = "quality_260808_assurance_cases"
 branch_labels = None
 depends_on = None
