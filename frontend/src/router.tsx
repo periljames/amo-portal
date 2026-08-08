@@ -13,6 +13,7 @@ import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
+const QmsAuditProgrammeSchedulePage = lazy(() => import("./pages/qms/QmsAuditProgrammeSchedulePage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
@@ -219,6 +220,14 @@ function QmsNotFoundRouteSurface() {
   );
 }
 
+function QmsAuditProgrammeScheduleRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading audit programme scheduler…</div></div>}>
+      <WorkspaceRequireAuth><QmsAuditProgrammeSchedulePage /></WorkspaceRequireAuth>
+    </Suspense>
+  );
+}
+
 function ProcurementRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Procurement & Supply Chain…</div></div>}>
@@ -300,6 +309,7 @@ export const AppRouter: React.FC = () => {
   if (qmsRoute.kind === "legacy" && qmsRoute.canonicalTarget) {
     return <Navigate to={`${qmsRoute.canonicalTarget}${location.search}${location.hash}`} replace state={location.state} />;
   }
+  if (isSupportedAuditProgrammeSchedulePath(location.pathname)) return <QmsAuditProgrammeScheduleRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
   if (
