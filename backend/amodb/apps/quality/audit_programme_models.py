@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
 )
 from sqlalchemy.orm import relationship
 
@@ -137,10 +138,16 @@ class QualityAuditUniverseItem(Base):
 
 
 class QualityAuditProgrammeItem(Base):
-    """One governed surveillance requirement inside a programme revision."""
+    """One governed surveillance requirement inside a programme revision.
+
+    ``schedule_id`` is assigned only when the authoritative Quality planner
+    creates the schedule. A unique schedule link prevents one schedule from
+    silently satisfying multiple governed programme requirements.
+    """
 
     __tablename__ = "quality_audit_programme_items"
     __table_args__ = (
+        UniqueConstraint("schedule_id", name="uq_quality_audit_programme_item_schedule"),
         CheckConstraint(
             "audit_type IN ('INTERNAL','DEPARTMENTAL','TECHNICAL','WORK_PACK','SUPPLIER','CONTRACTED_FUNCTION',"
             "'FACILITY','PERSONNEL','PRODUCT','PROCESS','REGULATORY','SPECIAL','REACTIVE','FOLLOW_UP')",
@@ -158,12 +165,14 @@ class QualityAuditProgrammeItem(Base):
         Index("ix_quality_audit_programme_items_period", "amo_id", "programme_id", "target_start", "state"),
         Index("ix_quality_audit_programme_items_universe", "amo_id", "universe_item_id", "state"),
         Index("ix_quality_audit_programme_items_type", "amo_id", "audit_type", "state"),
+        Index("ix_quality_audit_programme_items_schedule", "amo_id", "schedule_id", "state"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
     programme_id = Column(String(36), ForeignKey("quality_audit_programmes.id", ondelete="CASCADE"), nullable=False)
     universe_item_id = Column(String(36), ForeignKey("quality_audit_universe_items.id", ondelete="RESTRICT"), nullable=False)
+    schedule_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audit_schedules.id", ondelete="SET NULL"), nullable=True)
     audit_type = Column(String(32), nullable=False)
     title = Column(String(255), nullable=False)
     purpose = Column(Text, nullable=True)
@@ -178,6 +187,8 @@ class QualityAuditProgrammeItem(Base):
     prioritization_basis = Column(JSON, nullable=False, default=list)
     deferral_reason = Column(Text, nullable=True)
     cancellation_reason = Column(Text, nullable=True)
+    scheduled_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -194,7 +205,7 @@ class QualityAuditProgrammeEvent(Base):
     __table_args__ = (
         CheckConstraint(
             "event_type IN ('CREATED','UPDATED','SUBMITTED_FOR_REVIEW','RETURNED_TO_DRAFT','APPROVED','ACTIVATED',"
-            "'AMENDMENT_CREATED','SUPERSEDED','CLOSED','ITEM_ADDED','ITEM_UPDATED')",
+            "'AMENDMENT_CREATED','SUPERSEDED','CLOSED','ITEM_ADDED','ITEM_UPDATED','ITEM_SCHEDULED')",
             name="ck_quality_audit_programme_event_type",
         ),
         Index("ix_quality_audit_programme_events", "amo_id", "programme_id", "created_at"),
