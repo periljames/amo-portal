@@ -217,7 +217,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     defaults:
       run:
         working-directory: frontend
@@ -245,28 +245,40 @@ jobs:
         run: npm run build
       - name: Install Chromium for focused QMS browser tests
         run: npx playwright install --with-deps chromium
-      - name: Run direct-root and usability browser regressions
+      - name: Start QMS preview server
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-preview.log 2>&1 &
-          PREVIEW_PID=$!
-          trap 'kill "$PREVIEW_PID" || true' EXIT
+          echo $! > /tmp/qms-preview.pid
           for attempt in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:4173 >/dev/null; then
-              break
+              exit 0
             fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:4173 >/dev/null
-          npx playwright test \
-            tests/e2e/qms-excellence-cockpit.spec.ts \
-            tests/e2e/qms-usability-enhancements.spec.ts \
-            tests/e2e/qms-missions.spec.ts \
-            tests/e2e/qms-register-bounded.spec.ts \
-            tests/e2e/qms-modern-planner-live.spec.ts \
-            tests/e2e/qms-planner-lifecycle.spec.ts \
-            tests/e2e/qms-planner-audit-handoff.spec.ts \
-            --workers=1
+          cat /tmp/qms-preview.log
+          exit 1
+      - name: Browser - assurance Control Room and governed control hub
+        run: npx playwright test tests/e2e/qms-excellence-cockpit.spec.ts --workers=1
+      - name: Browser - Quality navigation, refresh and CAR usability
+        if: always()
+        run: npx playwright test tests/e2e/qms-usability-enhancements.spec.ts --workers=1
+      - name: Browser - governed Missions
+        if: always()
+        run: npx playwright test tests/e2e/qms-missions.spec.ts --workers=1
+      - name: Browser - bounded generic registers
+        if: always()
+        run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
+      - name: Browser - modern Planner
+        if: always()
+        run: npx playwright test tests/e2e/qms-modern-planner-live.spec.ts --workers=1
+      - name: Browser - Planner lifecycle
+        if: always()
+        run: npx playwright test tests/e2e/qms-planner-lifecycle.spec.ts --workers=1
+      - name: Browser - Planner audit handoff
+        if: always()
+        run: npx playwright test tests/e2e/qms-planner-audit-handoff.spec.ts --workers=1
       - name: Lint Quality-owned frontend surfaces
+        if: always()
         run: >-
           npm exec -- eslint
           src/services/qmsAuditHubActions.ts
