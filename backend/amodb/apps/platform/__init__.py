@@ -17,6 +17,7 @@ from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_access_policy import install_billing_access_hot_path
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
+from .module_activation_policy import install_module_activation_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -52,6 +53,9 @@ install_invoice_accounting_policy()
 # Resolve the separate SaaS fiscalization record for invoice views/documents so
 # customer-facing status never contradicts the actual eTIMS workflow state.
 install_fiscal_document_policy()
+# Verified settlement activates the commercial parent and every enforceable child
+# capability in a bundle for a finite paid service period.
+install_module_activation_policy()
 # Separate administrative tenant state from commercial billing connectivity and
 # replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
@@ -64,6 +68,7 @@ from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
 from .commercial_router import router as commercial_router  # noqa: E402
+from .module_commerce_router import router as module_commerce_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
@@ -73,6 +78,7 @@ router.include_router(webhook_router)
 router.include_router(support_router)
 router.include_router(integration_router)
 router.include_router(commercial_router)
+router.include_router(module_commerce_router)
 router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
