@@ -66,6 +66,7 @@ const AdminBillingPage: React.FC = () => {
   const isSuperuser = !!user?.is_superuser;
   const canSubscribe = !isSuperuser && (!!user?.is_amo_admin || role === "AMO_ADMIN" || role === "FINANCE_MANAGER");
   const canPay = canSubscribe || (!isSuperuser && role === "ACCOUNTS_OFFICER");
+  const canViewBillingDetails = canPay;
 
   const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const stateFrom = (location.state as { from?: string } | null)?.from;
@@ -96,17 +97,21 @@ const AdminBillingPage: React.FC = () => {
     quiet ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const [accessResult, invoiceResult, catalogResult] = await Promise.allSettled([
-        fetchBillingAccessStatus(),
+      const accessResult = await fetchBillingAccessStatus();
+      setAccess(accessResult);
+
+      if (!canViewBillingDetails) {
+        setInvoices([]);
+        setCatalog(null);
+        return;
+      }
+
+      const [invoiceResult, catalogResult] = await Promise.all([
         fetchInvoices(),
-        isSuperuser ? Promise.resolve(null) : fetchSelfServiceModuleCatalog(),
+        fetchSelfServiceModuleCatalog(),
       ]);
-      if (accessResult.status === "fulfilled") setAccess(accessResult.value);
-      else throw accessResult.reason;
-      if (invoiceResult.status === "fulfilled") setInvoices(invoiceResult.value);
-      else throw invoiceResult.reason;
-      if (catalogResult.status === "fulfilled") setCatalog(catalogResult.value);
-      else throw catalogResult.reason;
+      setInvoices(invoiceResult);
+      setCatalog(catalogResult);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -115,7 +120,7 @@ const AdminBillingPage: React.FC = () => {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [canViewBillingDetails]);
 
   const pendingInvoices = useMemo(
     () => invoices.filter((invoice) => String(invoice.status).toUpperCase() === "PENDING"),
@@ -139,13 +144,10 @@ const AdminBillingPage: React.FC = () => {
     () => (catalog?.items || []).filter((item) => !item.is_active_for_tenant),
     [catalog],
   );
-  const rootContracts = useMemo(
-    () => activeModules.filter((item) => item.is_root_contract),
-    [activeModules],
-  );
   const paymentRequired = Boolean(access && !access.has_access && access.redirect_to_billing);
 
   const downloadInvoice = async (invoice: Invoice) => {
+    if (!canViewBillingDetails) return;
     setError(null);
     try {
       saveDownloadedFile(await fetchInvoiceDocument(invoice.id, "pdf"));
@@ -278,7 +280,7 @@ const AdminBillingPage: React.FC = () => {
       <div className="admin-page admin-billing">
         <PageHeader
           title="Billing & subscriptions"
-          subtitle="Settle invoices, review protected payment status, and manage the modules licensed to this AMO."
+          subtitle="Resolve account billing status and, for authorised finance roles, manage invoices and subscribed modules."
           actions={
             <Button type="button" size="sm" variant="secondary" disabled={refreshing} onClick={() => void load(true)}>
               {refreshing ? "Refreshing…" : "Refresh"}
@@ -288,7 +290,7 @@ const AdminBillingPage: React.FC = () => {
 
         {paymentRequired && (
           <InlineAlert tone="danger" title="Payment required to restore platform access">
-            <span>{access?.lock_reason || "This account has an overdue billing obligation."} Billing and invoice records remain reachable so an authorised user can cure the account.</span>
+            <span>{access?.lock_reason || "This account has an overdue billing obligation."} An AMO administrator or authorised finance user can settle the account from this page.</span>
           </InlineAlert>
         )}
         {error && <InlineAlert tone="danger" title="Billing action failed"><span>{error}</span></InlineAlert>}
@@ -296,47 +298,54 @@ const AdminBillingPage: React.FC = () => {
 
         <div className="admin-summary-strip">
           <div className="admin-summary-item"><span className="admin-summary-item__label">Access</span><span className="admin-summary-item__value">{access?.access_state || (loading ? "Loading…" : "Unknown")}</span></div>
-          <div className="admin-summary-item"><span className="admin-summary-item__label">Subscribed modules</span><span className="admin-summary-item__value">{activeModules.length}</span></div>
-          <div className="admin-summary-item"><span className="admin-summary-item__label">Open invoices</span><span className="admin-summary-item__value">{pendingInvoices.length}</span></div>
-          <div className="admin-summary-item"><span className="admin-summary-item__label">Outstanding</span><span className="admin-summary-item__value">{outstandingByCurrency.length ? outstandingByCurrency.map(([currency, cents]) => money(cents, currency)).join(" · ") : "None"}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Commercial details</span><span className="admin-summary-item__value">{canViewBillingDetails ? "Authorised" : "Restricted"}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Open invoices</span><span className="admin-summary-item__value">{canViewBillingDetails ? pendingInvoices.length : "—"}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Outstanding</span><span className="admin-summary-item__value">{canViewBillingDetails ? (outstandingByCurrency.length ? outstandingByCurrency.map(([currency, cents]) => money(cents, currency)).join(" · ") : "None") : "Restricted"}</span></div>
         </div>
 
         <div className="admin-page__grid">
-          <Panel title={paymentRequired ? "Settle outstanding billing" : "Invoices & payments"} subtitle="Only verified provider settlement changes invoice or access state.">
-            {loading && <p className="admin-muted">Loading billing records…</p>}
-            {!loading && invoices.length === 0 && <p className="admin-muted">No invoices have been issued to this AMO.</p>}
-            {!loading && invoices.length > 0 && (
-              <Table>
-                <thead><tr><th>Invoice</th><th>For</th><th>Status</th><th>Due</th><th>Total</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id} style={access?.actionable_invoice_id === invoice.id ? { fontWeight: 700 } : undefined}>
-                      <td>{invoice.invoice_number || invoice.id.slice(-8).toUpperCase()}</td>
-                      <td>{invoiceLabel(invoice)}</td>
-                      <td>{invoice.status}</td>
-                      <td>{dateLabel(invoice.due_at)}</td>
-                      <td>{money(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
-                      <td><div className="page-section__actions">
-                        <Button type="button" size="sm" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/invoices/${invoice.id}`)}>View</Button>
-                        <Button type="button" size="sm" variant="secondary" onClick={() => void downloadInvoice(invoice)}>PDF</Button>
-                        {String(invoice.status).toUpperCase() === "PENDING" && canPay && <Button type="button" size="sm" onClick={() => setPaymentInvoiceId(invoice.id)}>Pay</Button>}
-                      </div></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )}
+          {canViewBillingDetails ? (
+            <Panel title={paymentRequired ? "Settle outstanding billing" : "Invoices & payments"} subtitle="Only verified provider settlement changes invoice or access state.">
+              {loading && <p className="admin-muted">Loading billing records…</p>}
+              {!loading && invoices.length === 0 && <p className="admin-muted">No invoices have been issued to this AMO.</p>}
+              {!loading && invoices.length > 0 && (
+                <Table>
+                  <thead><tr><th>Invoice</th><th>For</th><th>Status</th><th>Due</th><th>Total</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {invoices.map((invoice) => (
+                      <tr key={invoice.id} style={access?.actionable_invoice_id === invoice.id ? { fontWeight: 700 } : undefined}>
+                        <td>{invoice.invoice_number || invoice.id.slice(-8).toUpperCase()}</td>
+                        <td>{invoiceLabel(invoice)}</td>
+                        <td>{invoice.status}</td>
+                        <td>{dateLabel(invoice.due_at)}</td>
+                        <td>{money(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
+                        <td><div className="page-section__actions">
+                          <Button type="button" size="sm" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/invoices/${invoice.id}`)}>View</Button>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => void downloadInvoice(invoice)}>PDF</Button>
+                          {String(invoice.status).toUpperCase() === "PENDING" && canPay && <Button type="button" size="sm" onClick={() => setPaymentInvoiceId(invoice.id)}>Pay</Button>}
+                        </div></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )}
 
-            {paymentInvoiceId && pendingInvoices.some((row) => row.id === paymentInvoiceId) && (
-              <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border-color, #d8dde6)" }}>
-                <h3 style={{ marginTop: 0 }}>Process payment</h3>
-                <p className="admin-muted">Card/bank entry is handled on the payment provider's hosted checkout. AMO Portal never asks for or stores a card number, CVV/CVC, PIN, magnetic-stripe data or bank authentication secret.</p>
-                <div className="form-row"><label htmlFor="billing-provider">Payment method</label><select id="billing-provider" value={provider} onChange={(event) => setProvider(event.target.value as PaymentProvider)}><option value="paystack">Paystack — hosted card/bank checkout</option><option value="mpesa_daraja">M-PESA — STK Push</option></select></div>
-                {provider === "mpesa_daraja" && <div className="form-row"><label htmlFor="billing-phone">M-PESA mobile number</label><input id="billing-phone" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="07XX XXX XXX" inputMode="tel" autoComplete="tel" /></div>}
-                <div className="form-actions"><Button type="button" disabled={paying} onClick={() => void payInvoice(paymentInvoiceId)}>{paying ? "Starting payment…" : `Continue with ${providerLabel(provider)}`}</Button><Button type="button" variant="ghost" disabled={paying} onClick={() => setPaymentInvoiceId(null)}>Cancel</Button></div>
-              </div>
-            )}
-          </Panel>
+              {paymentInvoiceId && pendingInvoices.some((row) => row.id === paymentInvoiceId) && (
+                <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border-color, #d8dde6)" }}>
+                  <h3 style={{ marginTop: 0 }}>Process payment</h3>
+                  <p className="admin-muted">Card/bank entry is handled on the payment provider's hosted checkout. AMO Portal never asks for or stores a card number, CVV/CVC, PIN, magnetic-stripe data or bank authentication secret.</p>
+                  <div className="form-row"><label htmlFor="billing-provider">Payment method</label><select id="billing-provider" value={provider} onChange={(event) => setProvider(event.target.value as PaymentProvider)}><option value="paystack">Paystack — hosted card/bank checkout</option><option value="mpesa_daraja">M-PESA — STK Push</option></select></div>
+                  {provider === "mpesa_daraja" && <div className="form-row"><label htmlFor="billing-phone">M-PESA mobile number</label><input id="billing-phone" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="07XX XXX XXX" inputMode="tel" autoComplete="tel" /></div>}
+                  <div className="form-actions"><Button type="button" disabled={paying} onClick={() => void payInvoice(paymentInvoiceId)}>{paying ? "Starting payment…" : `Continue with ${providerLabel(provider)}`}</Button><Button type="button" variant="ghost" disabled={paying} onClick={() => setPaymentInvoiceId(null)}>Cancel</Button></div>
+                </div>
+              )}
+            </Panel>
+          ) : (
+            <Panel title="Billing action is restricted" subtitle="Commercial records are protected by tenant billing roles.">
+              <p className="admin-muted">You can see whether the AMO account is locked, but invoice values, payment references, negotiated prices and recurring contract terms are visible only to the AMO Administrator, Finance Manager or Accounts Officer.</p>
+              {paymentRequired && <InlineAlert tone="warning" title="Contact an authorised billing user"><span>Ask your AMO Administrator, Finance Manager or Accounts Officer to settle the outstanding account. Your operational records remain preserved while access is restricted.</span></InlineAlert>}
+            </Panel>
+          )}
 
           <div className="admin-page__side">
             <Panel title="Account status" compact>
@@ -345,15 +354,15 @@ const AdminBillingPage: React.FC = () => {
               {returnTo && access?.has_access && <Button type="button" size="sm" onClick={() => navigate(returnTo, { replace: true })}>Return to workspace</Button>}
             </Panel>
             <Panel title="Payment data protection" compact>
-              <p className="admin-muted">Hosted Paystack/Stripe checkout and M-PESA STK keep sensitive authentication data away from AMO Portal. The portal retains only the invoice, opaque provider/transaction references, settlement evidence and provider-supplied masked metadata where operationally necessary.</p>
+              <p className="admin-muted">Hosted Paystack/Stripe checkout and M-PESA STK keep sensitive authentication data away from AMO Portal. The portal retains only the invoice, opaque provider/transaction references and minimized settlement evidence required for reconciliation.</p>
             </Panel>
             <Panel title="Payment authority" compact>
-              <p className="admin-muted">{canSubscribe ? "You may accept or cancel recurring module contracts for this AMO." : canPay ? "You may settle existing invoices but cannot bind the AMO to a new recurring contract." : "Billing is visible for transparency; an authorised AMO or finance administrator must make changes."}</p>
+              <p className="admin-muted">{canSubscribe ? "You may accept or cancel recurring module contracts for this AMO." : canPay ? "You may settle existing invoices but cannot bind the AMO to a new recurring contract." : "Commercial details are restricted. Contact an AMO administrator or finance billing user."}</p>
             </Panel>
           </div>
         </div>
 
-        {!isSuperuser && (
+        {canViewBillingDetails && !isSuperuser && (
           <>
             <div style={{ height: 18 }} />
             <Panel title="Subscribed modules" subtitle="Capabilities currently enabled for this AMO and their paid service periods.">
@@ -399,7 +408,7 @@ const AdminBillingPage: React.FC = () => {
           </>
         )}
 
-        {checkout && catalog?.terms && (
+        {checkout && catalog?.terms && canSubscribe && (
           <>
             <div style={{ height: 18 }} />
             <Panel title={`Confirm ${checkout.module.name}`} subtitle="Review the full commercial terms before creating the invoice.">
@@ -416,7 +425,7 @@ const AdminBillingPage: React.FC = () => {
           </>
         )}
 
-        {cancelModule && (
+        {cancelModule && canSubscribe && (
           <>
             <div style={{ height: 18 }} />
             <Panel title={`Cancel ${cancelModule.name} at period end`} subtitle="This stops future renewal; it does not erase records or cut off an already-paid period.">
