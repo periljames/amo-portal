@@ -34,7 +34,8 @@ function pathSegments(pathname: string): string[] {
 function commercialModuleForPath(parts: string[]): string | null {
   const section = String(parts[2] || "").toLowerCase();
   if (!section || section === "admin" || section === "onboarding" || section === "login") return null;
-  if (["quality", "document-control", "documents", "publications", "manuals"].includes(section)) return "quality";
+  if (section === "quality") return "quality";
+  if (["document-control", "documents", "publications", "manuals"].includes(section)) return "document_control";
   if (["training", "competence"].includes(section)) return "training";
   if (["fleet", "aircraft", "components"].includes(section)) return "fleet";
   if (["planning", "production", "maintenance", "work", "work-orders", "technical-records", "maintenance-program"].includes(section)) return "work";
@@ -42,8 +43,6 @@ function commercialModuleForPath(parts: string[]): string | null {
   if (["finance", "accounting"].includes(section)) return "finance";
   if (["stores", "inventory"].includes(section)) return "inventory";
   if (section === "procurement") return "procurement";
-  // Safety, workshops, rostering and other platform-included/non-commercial
-  // surfaces are intentionally not inferred into a paid product here.
   return null;
 }
 
@@ -105,8 +104,6 @@ function BillingAccessBoundary({ amoCode, children }: { amoCode: string; childre
 
     void check()
       .catch(() => {
-        // A transient status-read failure must not become its own outage. API
-        // entitlement dependencies remain authoritative server-side.
         if (active) setRedirect(null);
       })
       .finally(() => {
