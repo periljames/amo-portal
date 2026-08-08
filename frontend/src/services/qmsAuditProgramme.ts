@@ -4,6 +4,7 @@ export type AuditProgrammeStatus = "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "ACTI
 export type AuditRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AuditUniverseEntityType = "DEPARTMENT" | "FACILITY" | "STATION" | "SUPPLIER" | "CONTRACTOR" | "PROCESS" | "CAPABILITY" | "APPROVAL_RATING" | "AIRCRAFT_TYPE" | "PERSONNEL_GROUP" | "OTHER";
 export type AuditProgrammeItemState = "PLANNED" | "SCHEDULED" | "COMPLETED" | "DEFERRED" | "CANCELLED" | "FOLLOW_UP_REQUIRED";
+export type AuditScheduleFrequency = "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "BI_ANNUAL" | "ANNUAL";
 
 export type AuditUniverseItem = {
   id: string;
@@ -83,6 +84,96 @@ export type AuditProgramme = {
 export type AuditProgrammeList = { items: AuditProgramme[]; total: number; limit: number; offset: number; has_more: boolean };
 export type AuditUniverseList = { items: AuditUniverseItem[]; total: number; limit: number; offset: number; has_more: boolean };
 
+export type AuditProgrammeScheduleLink = {
+  programme_item_id: string;
+  state: AuditProgrammeItemState;
+  schedule_id?: string | null;
+  scheduled_by_user_id?: string | null;
+  scheduled_at?: string | null;
+  schedule_title?: string | null;
+  next_due_date?: string | null;
+  frequency?: AuditScheduleFrequency | null;
+  lifecycle_status?: string | null;
+  version?: number | null;
+};
+
+export type PlannerScheduleOption = { id: string; code: string; name: string; party_level: string; default_kind: string };
+export type PlannerPersonOption = { id: string; full_name: string; email?: string | null; role?: string | null; department_name?: string | null };
+export type PlannerScheduleOptions = {
+  timezone_name: string;
+  frequencies: AuditScheduleFrequency[];
+  kinds: string[];
+  supported_source_types: string[];
+  unsupported_source_types: Record<string, string>;
+  scopes: PlannerScheduleOption[];
+  people: PlannerPersonOption[];
+};
+
+export type PlannerConflict = {
+  subject_type: string;
+  subject_id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  location?: string | null;
+  conflicting_user_ids: string[];
+  reason: string;
+};
+
+export type ProgrammeScheduleCreate = {
+  title: string;
+  domain?: string;
+  kind?: string;
+  audit_scope_id?: string;
+  audit_scope_code?: string;
+  frequency: AuditScheduleFrequency;
+  next_due_date: string;
+  start_time?: string;
+  end_time?: string;
+  duration_days?: number;
+  timezone_name?: string;
+  location?: string;
+  scope?: string;
+  criteria?: string;
+  notes?: string;
+  auditee?: string;
+  auditee_email?: string;
+  auditee_user_id?: string;
+  lead_auditor_user_id?: string;
+  observer_auditor_user_id?: string;
+  assistant_auditor_user_id?: string;
+  attendee_user_ids?: string[];
+  notify_auditors?: boolean;
+  notify_auditees?: boolean;
+  notify_attendees?: boolean;
+  reminder_interval_days?: number;
+  automation_active?: boolean;
+  allow_conflicts?: boolean;
+  conflict_override_reason?: string;
+};
+
+export type PlannerAuditSchedule = {
+  id: string;
+  amo_id: string;
+  title: string;
+  domain: string;
+  kind: string;
+  audit_scope_id?: string | null;
+  audit_scope_code?: string | null;
+  frequency: AuditScheduleFrequency;
+  next_due_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_days: number;
+  timezone_name: string;
+  location?: string | null;
+  lifecycle_status: string;
+  version: number;
+  conflicts: PlannerConflict[];
+};
+
 function jsonOptions(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
@@ -130,4 +221,24 @@ export function addAuditProgrammeItem(amoCode: string, programmeId: string, payl
   prioritization_basis: Array<Record<string, unknown>>;
 }): Promise<AuditProgrammeItem> {
   return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items`), jsonOptions("POST", payload));
+}
+
+export function listAuditProgrammeScheduleLinks(amoCode: string, programmeId: string, signal?: AbortSignal): Promise<{ items: AuditProgrammeScheduleLink[] }> {
+  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/schedule-links`), { timeoutMs: 15_000, cacheTtlMs: 3_000, signal });
+}
+
+export function getPlannerScheduleOptions(amoCode: string, signal?: AbortSignal): Promise<PlannerScheduleOptions> {
+  return apiRequest(qmsPath(amoCode, "/integrations/calendar/schedule-options"), { timeoutMs: 15_000, cacheTtlMs: 10_000, signal });
+}
+
+export function scheduleAuditProgrammeItem(
+  amoCode: string,
+  programmeId: string,
+  itemId: string,
+  payload: ProgrammeScheduleCreate,
+): Promise<PlannerAuditSchedule> {
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}/schedule`),
+    jsonOptions("POST", payload),
+  );
 }
