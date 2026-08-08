@@ -77,7 +77,7 @@ function workspaceDefinition(amoCode: string, workspace: WorkspaceId): Workspace
       principle: "Audits, findings, CARs, suppliers, tooling and external commitments keep their authoritative workflows. Assurance is the decision layer that connects them.",
       nextCapability: "The Assurance Case engine will connect signals to evidence, investigations, causal analysis, corrective actions and effectiveness tests without auto-approving root causes or closures.",
       lenses: [
-        { title: "Audits & surveillance", description: "Programme, plan, execute and close governed audits and targeted surveillance.", path: `${quality}/audits/dashboard`, icon: ClipboardCheck, eyebrow: "Specialist workflow" },
+        { title: "Audit operations", description: "Programme, plan, execute and close governed audits and targeted surveillance.", path: `${quality}/audits/dashboard`, icon: ClipboardCheck, eyebrow: "Specialist workflow" },
         { title: "Findings & corrective action", description: "Move from observed non-conformity through governed CAR/CAPA response, review and effectiveness.", path: `${quality}/cars/register`, icon: ShieldCheck },
         { title: "Supplier assurance", description: "Review supplier approval and Quality exposure while Procurement and Stores retain transactional ownership.", path: `${quality}/suppliers/approved-list`, icon: PackageCheck },
         { title: "Tooling exposure", description: "Review calibration exceptions and out-of-tolerance exposure without making Quality the tooling data owner.", path: `${quality}/equipment-calibration/overdue`, icon: Wrench },
