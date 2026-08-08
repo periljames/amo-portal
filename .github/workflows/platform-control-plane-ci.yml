@@ -5,7 +5,10 @@ on:
     paths:
       - "backend/amodb/apps/platform/**"
       - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/platform_ops_worker_main.py"
+      - "backend/amodb/observability.py"
       - "backend/amodb/database.py"
+      - "backend/amodb/alembic/versions/**"
       - "backend/requirements.txt"
       - "docker-compose.prod.yml"
       - "ops/load/**"
@@ -18,7 +21,10 @@ on:
     paths:
       - "backend/amodb/apps/platform/**"
       - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/platform_ops_worker_main.py"
+      - "backend/amodb/observability.py"
       - "backend/amodb/database.py"
+      - "backend/amodb/alembic/versions/**"
       - "docker-compose.prod.yml"
       - "ops/load/**"
       - ".github/workflows/platform-control-plane-ci.yml"
@@ -29,7 +35,7 @@ permissions:
 jobs:
   broker-and-scale-contracts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
@@ -49,7 +55,11 @@ jobs:
           python -m py_compile \
             backend/amodb/apps/platform/ops_broker.py \
             backend/amodb/apps/platform/ops_console_router.py \
+            backend/amodb/apps/platform/ops_gateway.py \
+            backend/amodb/apps/platform/ops_logic.py \
+            backend/amodb/apps/platform/ops_worker.py \
             backend/amodb/platform_ops_main.py \
+            backend/amodb/observability.py \
             backend/amodb/database.py
       - name: Prove browser fan-out does not multiply refresh work
         run: pytest -q backend/amodb/apps/platform/tests/test_ops_broker.py
@@ -76,12 +86,92 @@ jobs:
           assert isinstance(write_engine.pool, NullPool), type(write_engine.pool)
           assert read_engine is write_engine
           PY
+      - name: Validate 1,000-distinct-tenant load harness contract
+        run: |
+          test -f ops/load/k6_1000_tenants.js
+          grep -q "tenants.length < 1000" ops/load/k6_1000_tenants.js
+          grep -q 'target: 1000' ops/load/k6_1000_tenants.js
+          grep -q 'http_req_failed' ops/load/k6_1000_tenants.js
+          grep -q 'p(95)<750' ops/load/k6_1000_tenants.js
       - name: Validate production compose model
         run: |
           touch .env
           docker compose -f docker-compose.prod.yml config >/tmp/platform-compose.yml
           grep -q "platform-ops-gateway:" /tmp/platform-compose.yml
-          if grep -A40 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
+          if grep -A45 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
             echo "Platform ops gateway must not be published on a wildcard host address" >&2
             exit 1
           fi
+      - name: Build production frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  clean-postgres-and-failure-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amo
+          POSTGRES_PASSWORD: amo_ci_password
+          POSTGRES_DB: amodb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amo -d amodb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      DATABASE_WRITE_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      DATABASE_READ_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      SECRET_KEY: "ci-only-platform-postgres-key"
+      PLATFORM_PROMETHEUS_URL: "http://127.0.0.1:59999"
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:59998"
+      OTEL_EXPORT_TIMEOUT_SEC: "0.5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Report authoritative Alembic heads
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini heads --verbose
+      - name: Upgrade a clean PostgreSQL database to every head
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Start gateway with Prometheus and OTLP deliberately unavailable
+        working-directory: backend
+        run: |
+          python -m uvicorn amodb.platform_ops_main:app --host 127.0.0.1 --port 8090 >/tmp/platform-ops-gateway.log 2>&1 &
+          echo $! >/tmp/platform-ops-gateway.pid
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8090/healthz >/tmp/platform-health.json; then
+              cat /tmp/platform-health.json
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/platform-ops-gateway.pid)" 2>/dev/null; then
+              cat /tmp/platform-ops-gateway.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/platform-ops-gateway.log
+          exit 1
+      - name: Prove telemetry outages did not kill the gateway
+        run: |
+          kill -0 "$(cat /tmp/platform-ops-gateway.pid)"
+          curl -fsS http://127.0.0.1:8090/healthz
+      - name: Show gateway logs
+        if: always()
+        run: cat /tmp/platform-ops-gateway.log 2>/dev/null || true
