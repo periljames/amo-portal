@@ -45,8 +45,12 @@ def test_company_library_exposes_real_document_categories_and_connected_state() 
     assert 'payload["profile"]["access_scope"]' not in backend
     assert 'node_type: filters.nodeType' in service
     assert 'title="Company document library"' in frontend
-    assert 'Physical library' in frontend
-    assert 'Full tree' in frontend
+    # Physical custody and hierarchy remain visible capabilities without forcing
+    # either backend concept to remain a permanent top-level DMS navigation item.
+    assert 'item.library.physical' in frontend
+    assert 'physicalText(item)' in frontend
+    assert 'physical.overdue' in frontend
+    assert 'Browse hierarchy' in frontend
     assert 'Read' in frontend
 
 
