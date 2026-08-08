@@ -7,7 +7,7 @@ import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCock
 import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
 import QmsWorkspaceBridgePage from "./QmsWorkspaceBridgePage";
-import type { QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
+import { QMS_WORKSPACES, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
 
 function decodeSegment(value: string | undefined): string {
   if (!value) return "";
@@ -36,20 +36,29 @@ function requestedWorkspace(search: string): QmsWorkspaceId {
   return "control-room";
 }
 
+function workspacePermission(workspace: QmsWorkspaceId): string {
+  return QMS_WORKSPACES.find((definition) => definition.id === workspace)?.permission || "qms.dashboard.view";
+}
+
 const QmsOverviewPage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();
   const location = useLocation();
   const amoCode = params.amoCode || amoCodeFromPath(location.pathname) || "UNKNOWN";
   const hub = assuranceHub(location.search);
   const workspace = requestedWorkspace(location.search);
+  const qualityRoot = `/maintenance/${encodeURIComponent(amoCode)}/quality`;
 
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   if (!hasQmsRolePermission("qms.dashboard.view")) {
     return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}`} replace />;
   }
 
+  if (!hub && !hasQmsRolePermission(workspacePermission(workspace))) {
+    return <Navigate to={qualityRoot} replace />;
+  }
+
   if (workspace === "planner") {
-    return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/month`} replace />;
+    return <Navigate to={`${qualityRoot}/calendar/month`} replace />;
   }
 
   return (
