@@ -56,8 +56,8 @@ jobs:
       DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_commercial_ci
       DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_commercial_ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -95,20 +95,23 @@ jobs:
       - name: Upgrade disposable commercial PostgreSQL schema
         working-directory: backend
         run: python -m alembic -c amodb/alembic.ini upgrade heads
-      - name: Run commercial provider, module and payment-safety tests
+      - name: Run established commercial control contracts
         working-directory: backend
-        run: >-
-          pytest -q
-          amodb/apps/platform/tests/test_commercial_control_plane.py
-          amodb/apps/platform/tests/test_module_commerce_security.py
+        run: pytest -q amodb/apps/platform/tests/test_commercial_control_plane.py
+      - name: Run module and payment security contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "not paid_legacy_period_requires_invoice_and_verified_settlement"
+      - name: Prove paid renewal requires verified settlement
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_requires_invoice_and_verified_settlement"
 
   frontend-platform:
     name: Frontend platform build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -128,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify gate does not fake tenant concurrency
         shell: bash
         run: |
