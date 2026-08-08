@@ -9,6 +9,7 @@ const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
+const recordActionsBase = readFileSync(new URL("./DocumentControlRecordActionsBase.tsx", import.meta.url), "utf-8");
 const changesPortfolio = readFileSync(new URL("./DocumentControlChangesPortfolioPage.tsx", import.meta.url), "utf-8");
 const changesService = readFileSync(new URL("../../services/documentControlPortfolios.ts", import.meta.url), "utf-8");
 const distributionPortfolio = readFileSync(new URL("./DocumentControlDistributionPortfolioPage.tsx", import.meta.url), "utf-8");
@@ -78,8 +79,10 @@ describe("DMS frontend operating-model contract", () => {
     expect(libraryPage).toContain("Select a document for the change request");
     expect(libraryPage).toContain("Select for change");
     expect(libraryPage).toContain('navigate(`${basePath}/library/${item.id}?tab=changes`)');
-    expect(recordActions).toContain("<ChangeRequestForm");
-    expect(recordActions).toContain("createDocumentChangeRequest");
+    expect(recordActions).toContain('activeView === "changes"');
+    expect(recordActions).toContain('activeView="changes"');
+    expect(recordActionsBase).toContain("function ChangeRequestForm");
+    expect(recordActionsBase).toContain("createDocumentChangeRequest");
   });
 
   it("routes canonical Distribution to the bounded custody portfolio", () => {
