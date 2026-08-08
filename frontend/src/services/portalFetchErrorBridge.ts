@@ -3,6 +3,9 @@ import { reportPortalError, reportUploadError, type PortalErrorTarget } from "./
 const INSTALL_FLAG = "__amoPortalFetchErrorBridgeInstalled";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const ACTION_CONTEXT_MS = 30_000;
+const SILENT_BACKGROUND_MUTATION_PATHS = new Set([
+  "/api/realtime/presence",
+]);
 
 type GuardedWindow = Window & {
   __amoPortalFetchErrorBridgeInstalled?: boolean;
@@ -31,6 +34,15 @@ function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+function isSilentBackgroundMutation(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return SILENT_BACKGROUND_MUTATION_PATHS.has(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function isAbort(error: unknown): boolean {
@@ -114,9 +126,9 @@ export function installPortalFetchErrorBridge(): () => void {
     const method = requestMethod(input, init);
     const headers = requestHeaders(input, init);
     const mutation = MUTATION_METHODS.has(method);
-    const silent = headers.get("X-AMO-Silent-Error") === "1";
     const upload = isUpload(init, headers);
     const url = requestUrl(input);
+    const silent = headers.get("X-AMO-Silent-Error") === "1" || isSilentBackgroundMutation(url);
 
     try {
       const response = await originalFetch(input, init);
