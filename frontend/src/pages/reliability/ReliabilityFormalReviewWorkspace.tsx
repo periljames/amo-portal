@@ -2,17 +2,17 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import {
   createFormalReport,
-  formalReportPdfUrl,
-  formalReportViewUrl,
   freezeFormalReport,
   getFormalReport,
   listFormalProfiles,
   listFormalReports,
+  openFormalReportArtifact,
   renderFormalReport,
   runFormalCompleteness,
   transitionFormalReport,
   updateFormalRequirement,
   updateFormalSection,
+  type FormalArtifactKind,
   type FormalCompleteness,
   type FormalPeriodType,
   type FormalProfile,
@@ -335,6 +335,16 @@ const ReliabilityFormalReviewWorkspace: React.FC = () => {
     );
   }
 
+  async function onOpenArtifact(kind: FormalArtifactKind) {
+    if (!report) return;
+    await perform(
+      kind === "pdf" ? "Retained PDF opened with authenticated access." : "Retained report opened with authenticated access.",
+      async () => {
+        await openFormalReportArtifact(report.id, kind);
+      }
+    );
+  }
+
   if (loading) {
     return <div className="rfw-loading" role="status">Loading controlled Reliability reporting…</div>;
   }
@@ -454,8 +464,8 @@ const ReliabilityFormalReviewWorkspace: React.FC = () => {
                   <button type="button" onClick={() => void perform("Formal HTML/PDF regenerated from the frozen snapshot.", () => renderFormalReport(report.id))} disabled={busy}>Generate retained report</button>
                 )}
                 <button type="button" onClick={onCompleteness} disabled={busy}>Run completeness</button>
-                {report.html_sha256 && <a href={formalReportViewUrl(report.id)} target="_blank" rel="noreferrer">Open retained view</a>}
-                {report.pdf_sha256 && <a href={formalReportPdfUrl(report.id)} target="_blank" rel="noreferrer">Open PDF</a>}
+                {report.html_sha256 && <button type="button" onClick={() => void onOpenArtifact("view")} disabled={busy}>Open retained view</button>}
+                {report.pdf_sha256 && <button type="button" onClick={() => void onOpenArtifact("pdf")} disabled={busy}>Open PDF</button>}
                 {NEXT_STATUS[report.status] && (
                   <button type="button" className="rfw-primary" onClick={onTransition} disabled={busy}>{NEXT_LABEL[report.status]}</button>
                 )}
