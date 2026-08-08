@@ -210,7 +210,7 @@ test.describe("Publications reader integrated real-world stability", () => {
     await openContentsTarget(page);
 
     const manuallyReachedPage = await scrollUntilPageChanges(page, 1, TOC_TARGET_PAGE);
-    const scale = page.getByLabel("Zoom");
+    const scale = page.getByLabel("Zoom", { exact: true });
     for (const value of ["WIDTH", "PAGE", "ACTUAL", "125", "AUTO"]) {
       await scale.selectOption(value);
       await expect(page.locator(".pdfv3-page.is-current.is-ready")).toBeVisible({ timeout: RENDER_MS });
