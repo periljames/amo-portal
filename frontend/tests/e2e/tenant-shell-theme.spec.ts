@@ -36,19 +36,40 @@ async function seedSession(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const user = {
       id: "tenant-shell-e2e-user",
+      amo_id: "amo-e2e",
+      department_id: "planning-department-e2e",
+      staff_code: "PLN-E2E",
       email: "planner@example.com",
-      full_name: "Planning Engineer",
       first_name: "Planning",
       last_name: "Engineer",
+      full_name: "Planning Engineer",
       role: "PLANNING_ENGINEER",
+      position_title: "Planning Engineer",
+      phone: null,
+      regulatory_authority: null,
+      licence_number: null,
+      licence_state_or_country: null,
+      licence_expires_on: null,
+      is_active: true,
       is_superuser: false,
       is_amo_admin: false,
-      amo_id: "amo-e2e",
-      department: "planning",
+      must_change_password: false,
+      last_login_at: null,
+      last_login_ip: null,
+      created_at: "2026-08-08T00:00:00Z",
+      updated_at: "2026-08-08T00:00:00Z",
     };
-    window.localStorage.setItem("amo_access_token", "tenant-shell-e2e-token");
-    window.localStorage.setItem("amo_user", JSON.stringify(user));
-    window.localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true }));
+
+    // Keep this fixture aligned with services/auth.ts rather than inventing a
+    // separate test-only guard bypass. The opaque token has no exp claim, which
+    // is accepted by isAuthenticated while all backend calls remain mocked.
+    window.localStorage.setItem("amo_portal_token", "tenant-shell-e2e-token");
+    window.localStorage.setItem("amo_current_user", JSON.stringify(user));
+    window.localStorage.setItem("amo_code", "DEMO");
+    window.localStorage.setItem("amo_slug", "demo");
+    window.localStorage.setItem("amo_department", "planning");
+    window.localStorage.setItem("amodb_active_amo_id", "amo-e2e");
+    window.sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
   });
 }
 
