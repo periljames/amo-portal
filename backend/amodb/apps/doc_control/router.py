@@ -18,6 +18,7 @@ from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
 from .workspace_copy_router import router as workspace_copy_router
 from .workspace_dashboard_router import router as workspace_dashboard_router
+from .workspace_distribution_portfolio_router import router as workspace_distribution_portfolio_router
 from .workspace_distribution_router import router as workspace_distribution_router
 from .workspace_external_router import router as workspace_external_router
 from .workspace_integration_router import router as workspace_integration_router
@@ -50,6 +51,7 @@ router.include_router(legacy_router)
 # because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_portfolio_router, prefix="/doc-control")
+router.include_router(workspace_distribution_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
 router.include_router(
