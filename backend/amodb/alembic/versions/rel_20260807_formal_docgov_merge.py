@@ -56,16 +56,50 @@ $$ LANGUAGE plpgsql;
 """
 
 
+_CHILD_GUARD = r"""
+CREATE OR REPLACE FUNCTION rel_formal_child_guard() RETURNS trigger AS $$
+DECLARE
+  parent_report_id text;
+  parent_published timestamptz;
+BEGIN
+  parent_report_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.report_id ELSE NEW.report_id END;
+  SELECT published_at INTO parent_published
+    FROM reliability_formal_reports
+    WHERE id = parent_report_id;
+  IF parent_published IS NOT NULL THEN
+    RAISE EXCEPTION 'published Reliability formal report child evidence is immutable';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+
+_CHILD_TRIGGERS = (
+    ("reliability_formal_report_sections", "trg_rel_formal_section_guard"),
+    ("reliability_formal_requirement_assessments", "trg_rel_formal_req_guard"),
+    ("reliability_formal_report_sources", "trg_rel_formal_source_guard"),
+    ("reliability_formal_completeness_overrides", "trg_rel_formal_override_guard"),
+)
+
+
 def upgrade() -> None:
-    # The join is schema-neutral except for tightening the formal publication
-    # guard discovered by the executable PostgreSQL immutability regression.
+    # The join is schema-neutral except for tightening formal publication
+    # immutability discovered by executable PostgreSQL regressions/review.
     # Lifecycle-only state metadata (SUPERSEDED/WITHDRAWN and timestamps) remains
     # mutable so controlled supersession/withdrawal can be recorded without
     # rewriting the retained report identity/content.
     op.execute(_REPORT_GUARD)
+    op.execute(_CHILD_GUARD)
+    for table, trigger in _CHILD_TRIGGERS:
+        op.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
+        op.execute(
+            f"CREATE TRIGGER {trigger} BEFORE INSERT OR UPDATE OR DELETE ON {table} "
+            "FOR EACH ROW EXECUTE FUNCTION rel_formal_child_guard();"
+        )
 
 
 def downgrade() -> None:
     # Downgrading the merge marker does not remove the underlying formal-report
-    # schema. Its parent revision owns the original guard definition.
+    # schema. Its parent revision owns the original guard definitions.
     pass
