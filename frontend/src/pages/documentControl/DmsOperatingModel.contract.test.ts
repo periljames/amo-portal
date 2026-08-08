@@ -35,27 +35,28 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain("DocumentationAssistantPanel");
   });
 
-  it("keeps canonical URLs and compatibility URLs addressable", () => {
+  it("keeps canonical and specialist compatibility URLs addressable while converging legacy lists", () => {
     for (const route of [
       "/maintenance/:amoCode/document-control/changes",
       "/maintenance/:amoCode/document-control/distribution",
       "/maintenance/:amoCode/document-control/compliance",
       "/maintenance/:amoCode/document-control/reports",
       "/maintenance/:amoCode/document-control/administration",
+      "/maintenance/:amoCode/document-control/controlled-copies",
+      "/maintenance/:amoCode/document-control/structure",
+      "/maintenance/:amoCode/document-control/records",
     ]) expect(router).toContain(`path="${route}"`);
 
-    for (const compatibilityRoute of [
-      "/maintenance/:amoCode/document-control/drafts",
-      "/maintenance/:amoCode/document-control/change-proposals",
-      "/maintenance/:amoCode/document-control/tr",
-      "/maintenance/:amoCode/document-control/distribution/:eventId",
-      "/maintenance/:amoCode/document-control/reviews",
-      "/maintenance/:amoCode/document-control/controlled-copies",
-      "/maintenance/:amoCode/document-control/external-sources",
-      "/maintenance/:amoCode/document-control/integrations",
-      "/maintenance/:amoCode/document-control/registers",
-      "/maintenance/:amoCode/document-control/settings",
-    ]) expect(router).toContain(`path="${compatibilityRoute}"`);
+    expect(pageExports).toContain('suffix="/changes" view="in-review"');
+    expect(pageExports).toContain('suffix="/changes" view="requests"');
+    expect(pageExports).toContain('suffix="/changes" view="authority"');
+    expect(pageExports).toContain('suffix="/changes" view="temporary-revisions"');
+    expect(pageExports).toContain('suffix="/compliance" view="reviews"');
+    expect(pageExports).toContain('suffix="/compliance" view="external-sources"');
+    expect(pageExports).toContain('suffix="/compliance" view="relationships"');
+    expect(pageExports).toContain('query.set("status", "ARCHIVED")');
+    expect(pageExports).toContain('suffix="/reports"');
+    expect(pageExports).toContain('suffix="/administration"');
   });
 
   it("routes canonical Changes to a bounded paginated portfolio", () => {
@@ -77,7 +78,8 @@ describe("DMS frontend operating-model contract", () => {
   });
 
   it("routes canonical Compliance to the bounded assurance portfolio", () => {
-    expect(pageExports).toContain('DocControlReviewsPage } from "./documentControl/DocumentControlCompliancePortfolioPage"');
+    expect(pageExports).toContain("function DocControlReviewsPage()");
+    expect(pageExports).toContain("<CompliancePage />");
     expect(complianceService).toContain("compliance-portfolio");
     expect(complianceService).toContain("per_page");
     expect(compliancePortfolio).toContain('data-testid="document-control-compliance"');
@@ -86,11 +88,14 @@ describe("DMS frontend operating-model contract", () => {
     for (const label of ["Periodic Reviews", "External Technical Data", "Relationship Review", "Applicability", "Superseded References"]) expect(compliancePortfolio).toContain(`label: "${label}"`);
   });
 
-  it("routes Reports to a bounded evidence portfolio and Administration to the low-frequency control hub", () => {
-    expect(pageExports).toContain('DocControlRegistersPage } from "./documentControl/DocumentControlReportsPage"');
-    expect(pageExports).toContain('DocControlSettingsPage } from "./documentControl/DocumentControlAdministrationPage"');
+  it("routes Reports to bounded evidence and Administration to the low-frequency control hub", () => {
+    expect(pageExports).toContain("function DocControlRegistersPage()");
+    expect(pageExports).toContain("<ReportsPage />");
+    expect(pageExports).toContain("function DocControlSettingsPage()");
+    expect(pageExports).toContain("<AdministrationPage />");
     expect(reportsService).toContain("reports-portfolio");
     expect(reportsService).toContain("per_page");
+    expect(reportsService).toContain("authHeaders()");
     expect(reportsPage).toContain('data-testid="document-control-reports"');
     expect(reportsPage).toContain("Export current page CSV");
     expect(administrationPage).toContain('data-testid="document-control-administration"');
