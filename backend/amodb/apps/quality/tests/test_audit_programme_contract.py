@@ -3,11 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.audit_programme_queue_router import router as audit_programme_queue_router
 from amodb.apps.quality.audit_programme_router import (
     ProgrammeCreate,
     ProgrammeItemCreate,
@@ -52,6 +55,21 @@ def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
     }.issubset(methods)
 
 
+def test_programme_queue_is_bounded_and_static_before_generic_quality_catchall() -> None:
+    methods = _route_methods(audit_programme_queue_router)
+    assert ("/audit-programmes/planner/queue", "GET") in methods
+
+    for router, prefix in (
+        (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
+        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
+    ):
+        queue_path = f"{prefix}/audit-programmes/planner/queue"
+        matches = _matching(router, queue_path, "GET")
+        assert len(matches) == 1
+        assert matches[0].endpoint.__name__ == "list_programme_scheduling_queue"
+        assert router.routes.index(matches[0]) < _catchall_index(router)
+
+
 def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> None:
     methods = _route_methods(audit_programme_schedule_router)
     assert {
@@ -85,6 +103,14 @@ def test_audit_programme_routes_are_promoted_before_generic_quality_catchall() -
         assert len(universe) == 1
         assert universe[0].endpoint.__name__ == "list_universe"
         assert router.routes.index(universe[0]) < _catchall_index(router)
+
+
+def test_audit_programme_schedule_lineage_migration_extends_single_chain() -> None:
+    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+    revision = script.get_revision("quality_260808_prog_schedule")
+    assert revision is not None
+    assert revision.down_revision == "quality_260808_audit_programme"
+    assert len(revision.revision) <= 32
 
 
 def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
