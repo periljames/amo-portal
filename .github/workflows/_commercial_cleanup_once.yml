@@ -20,62 +20,177 @@ jobs:
           ref: agent/platform-commercial-scale-hardening
           fetch-depth: 0
 
-      - name: Transform stale source code
+      - name: Consolidate policy wrappers into canonical source
         shell: bash
         run: |
           set -euxo pipefail
           python - <<'PY'
           from pathlib import Path
+          import ast
 
-          def swap(path: str, old: str, new: str) -> None:
-              p = Path(path)
-              text = p.read_text(encoding="utf-8")
-              if old in text:
-                  p.write_text(text.replace(old, new), encoding="utf-8")
+          def replace_function(text: str, name: str, replacement: str) -> str:
+              tree = ast.parse(text)
+              node = next((n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name), None)
+              if node is None:
+                  raise SystemExit(f"Function {name} not found")
+              lines = text.splitlines(True)
+              new_lines = lines[: node.lineno - 1] + [replacement.rstrip() + "\n\n"] + lines[node.end_lineno :]
+              return "".join(new_lines)
 
-          swap("backend/amodb/apps/accounts/router_billing.py", "from . import billing_auth, models, schemas, services", "from . import billing_access, billing_auth, models, schemas, services")
-          swap("backend/amodb/apps/accounts/router_billing.py", "return services.get_billing_access_status(db, amo_id=current_user.amo_id)", "return billing_access.get_billing_access_status(db, amo_id=current_user.amo_id)")
-          swap("backend/amodb/apps/accounts/router_billing.py", "return list(services.resolve_entitlements(db, amo_id=current_user.amo_id).values())", "return list(billing_access.resolve_entitlements(db, amo_id=current_user.amo_id).values())")
+          def extract_function(path: str, name: str) -> str:
+              text = Path(path).read_text(encoding="utf-8")
+              tree = ast.parse(text)
+              node = next((n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name), None)
+              if node is None:
+                  raise SystemExit(f"Function {name} not found in {path}")
+              lines = text.splitlines(True)
+              return "".join(lines[node.lineno - 1 : node.end_lineno]).rstrip()
 
-          swap("backend/amodb/entitlements.py", "from amodb.apps.accounts import services as account_services", "from amodb.apps.accounts import billing_access")
-          swap("backend/amodb/entitlements.py", "account_services.resolve_entitlements(db, amo_id=amo_id)", "billing_access.resolve_entitlements(db, amo_id=amo_id)")
-          swap("backend/amodb/entitlements.py", "account_services.get_billing_access_status(db, amo_id=amo_id)", "billing_access.get_billing_access_status(db, amo_id=amo_id)")
+          # Paystack + M-PESA callback handling belongs directly to commercial_services.
+          commercial = Path("backend/amodb/apps/platform/commercial_services.py")
+          text = commercial.read_text(encoding="utf-8")
+          paystack = extract_function("backend/amodb/apps/platform/payment_data_policy.py", "_safe_paystack_webhook")
+          paystack = paystack.replace("def _safe_paystack_webhook(", "def record_paystack_webhook(", 1)
+          text = replace_function(text, "record_paystack_webhook", paystack)
 
-          swap("backend/amodb/apps/platform/module_access_router.py", "from amodb.apps.accounts import services as account_services", "from amodb.apps.accounts import billing_access")
-          swap("backend/amodb/apps/platform/module_access_router.py", "account_services.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)", "billing_access.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)")
+          settlement = extract_function("backend/amodb/apps/platform/payment_transport_policy.py", "_settlement_credential")
+          if "def _settlement_credential(" not in text:
+              marker = "def record_mpesa_callback("
+              index = text.index(marker)
+              text = text[:index] + settlement + "\n\n\n" + text[index:]
+          mpesa_record = extract_function("backend/amodb/apps/platform/payment_transport_policy.py", "minimized_mpesa_callback")
+          mpesa_record = mpesa_record.replace("def minimized_mpesa_callback(", "def record_mpesa_callback(", 1)
+          text = replace_function(text, "record_mpesa_callback", mpesa_record)
+          mpesa_process = extract_function("backend/amodb/apps/platform/payment_transport_policy.py", "process_minimized_mpesa_callback")
+          mpesa_process = mpesa_process.replace("def process_minimized_mpesa_callback(", "def _process_mpesa_callback(", 1)
+          text = replace_function(text, "_process_mpesa_callback", mpesa_process)
 
-          swap("backend/amodb/apps/platform/tests/test_module_access_scope.py", "from amodb.apps.platform import commercial_access_scope_policy, module_access_router", "from amodb.apps.accounts import billing_access\nfrom amodb.apps.platform import module_access_router")
-          swap("backend/amodb/apps/platform/tests/test_module_access_scope.py", "commercial_access_scope_policy.scoped_billing_access_status", "billing_access.get_billing_access_status")
+          # Verified settlement activation belongs directly to commercial_services.
+          if "from . import commercial_integrations as integrations\n" in text and "from . import module_commerce\n" not in text:
+              text = text.replace(
+                  "from . import commercial_integrations as integrations\n",
+                  "from . import commercial_integrations as integrations\nfrom . import module_commerce\n",
+              )
+          activation_path = "backend/amodb/apps/platform/module_activation_policy.py"
+          helper_map = {
+              "_details": "_activation_details",
+              "_period_delta": "_activation_period_delta",
+              "_metadata": "_activation_metadata",
+              "_restore_legacy_base_license": "_restore_base_license",
+          }
+          helpers = []
+          for source_name, target_name in helper_map.items():
+              src = extract_function(activation_path, source_name)
+              src = src.replace(f"def {source_name}(", f"def {target_name}(", 1)
+              src = src.replace("_period_delta(", "_activation_period_delta(")
+              src = src.replace("_metadata(", "_activation_metadata(")
+              src = src.replace("LEGACY_BASE_RENEWAL", "BASE_RENEWAL")
+              src = src.replace("Legacy renewal", "Base renewal")
+              src = src.replace("legacy renewal", "base renewal")
+              helpers.append(src)
+          activation = extract_function(activation_path, "enable_paid_module_contract")
+          activation = activation.replace("def enable_paid_module_contract(", "def _enable_paid_module(", 1)
+          activation = activation.replace("_details(", "_activation_details(")
+          activation = activation.replace("_restore_legacy_base_license(", "_restore_base_license(")
+          activation = activation.replace("_period_delta(", "_activation_period_delta(")
+          activation = activation.replace("_metadata(", "_activation_metadata(")
+          marker = "def _enable_paid_module("
+          start = text.index(marker)
+          if "def _activation_details(" not in text:
+              text = text[:start] + "\n\n".join(helpers) + "\n\n\n" + text[start:]
+          text = replace_function(text, "_enable_paid_module", activation)
+          commercial.write_text(text, encoding="utf-8")
 
+          # Paystack/M-PESA transport validation belongs in the provider adapter itself.
+          integrations = Path("backend/amodb/apps/platform/commercial_integrations.py")
+          text = integrations.read_text(encoding="utf-8")
+          if "import os\n" not in text:
+              text = text.replace("import json\n", "import json\nimport os\n")
+          for helper in ("_production_runtime", "_require_secure_callback", "_trusted_hosted_redirect"):
+              if f"def {helper}(" not in text:
+                  src = extract_function("backend/amodb/apps/platform/payment_transport_policy.py", helper)
+                  marker = "def paystack_initialize_transaction("
+                  text = text.replace(marker, src + "\n\n\n" + marker, 1)
+          text = text.replace(
+              '    if callback_url:\n        body["callback_url"] = saas_providers._safe_url(callback_url, allowed_schemes=("https", "http"))\n',
+              '    if callback_url:\n        _require_secure_callback(callback_url, label="Paystack callback_url")\n        body["callback_url"] = saas_providers._safe_url(callback_url, allowed_schemes=("https", "http"))\n',
+          )
+          text = text.replace(
+              '        "authorization_url": str(data.get("authorization_url")),\n',
+              '        "authorization_url": _trusted_hosted_redirect(\n            str(data.get("authorization_url")),\n            provider="Paystack",\n            allowed_hosts={"checkout.paystack.com", "standard.paystack.co"},\n        ),\n',
+          )
+          text = text.replace(
+              '    body = {\n        "BusinessShortCode": shortcode,\n',
+              '    _require_secure_callback(callback_url, label="M-PESA callback_url")\n    body = {\n        "BusinessShortCode": shortcode,\n',
+              1,
+          )
+          integrations.write_text(text, encoding="utf-8")
+
+          # Stripe URL validation belongs directly to the Stripe provider adapter.
+          stripe = Path("backend/amodb/apps/platform/saas_providers.py")
+          text = stripe.read_text(encoding="utf-8")
+          if "import os\n" not in text:
+              text = text.replace("import json\n", "import json\nimport os\n")
+          for helper in ("_production_runtime", "_require_secure_callback", "_trusted_hosted_redirect"):
+              if f"def {helper}(" not in text:
+                  src = extract_function("backend/amodb/apps/platform/payment_transport_policy.py", helper)
+                  marker = "def create_stripe_checkout_session("
+                  text = text.replace(marker, src + "\n\n\n" + marker, 1)
+          text = text.replace(
+              '    _safe_url(success_url, allowed_schemes=("https", "http"))\n    _safe_url(cancel_url, allowed_schemes=("https", "http"))\n',
+              '    _require_secure_callback(success_url, label="Stripe success_url")\n    _require_secure_callback(cancel_url, label="Stripe cancel_url")\n    _safe_url(success_url, allowed_schemes=("https", "http"))\n    _safe_url(cancel_url, allowed_schemes=("https", "http"))\n',
+          )
+          old_return = '''    return {\n        "provider": "stripe",\n        "session_id": response.get("id"),\n        "checkout_url": response.get("url"),\n        "customer": response.get("customer"),\n        "subscription": response.get("subscription"),\n        "latency_ms": elapsed,\n    }'''
+          new_return = '''    checkout_url = str(response.get("url") or "").strip()\n    trusted_checkout_url = None\n    if checkout_url:\n        parsed = urllib.parse.urlsplit(checkout_url)\n        host = (parsed.hostname or "").lower()\n        allowed = host == "checkout.stripe.com" or host.endswith(".checkout.stripe.com")\n        if parsed.scheme.lower() != "https" or not allowed or parsed.username or parsed.password:\n            raise RuntimeError("Stripe returned an untrusted hosted checkout URL")\n        trusted_checkout_url = urllib.parse.urlunsplit(parsed)\n    return {\n        "provider": "stripe",\n        "session_id": response.get("id"),\n        "checkout_url": trusted_checkout_url,\n        "customer": response.get("customer"),\n        "subscription": response.get("subscription"),\n        "latency_ms": elapsed,\n    }'''
+          if old_return in text:
+              text = text.replace(old_return, new_return, 1)
+          stripe.write_text(text, encoding="utf-8")
+
+          # Price-only tenant offers are marked at creation in the canonical catalog service.
+          commerce = Path("backend/amodb/apps/platform/module_commerce.py")
+          text = commerce.read_text(encoding="utf-8")
+          text = text.replace(
+              "    if row is None:\n        row = account_models.ModuleSubscription(\n",
+              "    created_offer_placeholder = row is None\n    if row is None:\n        row = account_models.ModuleSubscription(\n",
+              1,
+          )
+          text = text.replace(
+              '    metadata = _decode_metadata(row)\n    terms = {\n',
+              '    metadata = _decode_metadata(row)\n    if created_offer_placeholder:\n        metadata["commercial_offer_only"] = True\n    terms = {\n',
+              1,
+          )
+          commerce.write_text(text, encoding="utf-8")
+
+          # Startup no longer installs policy monkeypatches.
           init = Path("backend/amodb/apps/platform/__init__.py")
           text = init.read_text(encoding="utf-8")
           for line in (
-              "from .commercial_access_policy import install_billing_access_hot_path\n",
-              "from .commercial_access_scope_policy import install_commercial_access_scope_policy\n",
-              "install_billing_access_hot_path()\n",
-              "install_commercial_access_scope_policy()\n",
+              "from .module_activation_policy import install_module_activation_policy\n",
+              "from .module_offer_policy import install_module_offer_policy\n",
+              "from .payment_data_policy import install_payment_data_policy\n",
+              "from .payment_transport_policy import install_payment_transport_policy\n",
+              "install_payment_data_policy()\n",
+              "install_payment_transport_policy()\n",
+              "install_module_offer_policy()\n",
+              "install_module_activation_policy()\n",
           ):
               text = text.replace(line, "")
           init.write_text(text, encoding="utf-8")
 
-          routes = Path("frontend/src/portalRoutes.tsx")
-          text = routes.read_text(encoding="utf-8")
-          text = "".join(line for line in text.splitlines(True) if "UpsellPage" not in line)
-          routes.write_text(text, encoding="utf-8")
-
           for stale in (
-              "frontend/src/pages/UpsellPage.tsx",
-              "backend/amodb/apps/platform/commercial_access_policy.py",
-              "backend/amodb/apps/platform/commercial_access_scope_policy.py",
+              "backend/amodb/apps/platform/payment_data_policy.py",
+              "backend/amodb/apps/platform/payment_transport_policy.py",
+              "backend/amodb/apps/platform/module_activation_policy.py",
+              "backend/amodb/apps/platform/module_offer_policy.py",
           ):
               path = Path(stale)
               if path.exists():
                   path.unlink()
           PY
-          git status --short
           git diff --check
+          git status --short
 
-      - name: Commit source cleanup
+      - name: Commit source consolidation
         shell: bash
         run: |
           set -euxo pipefail
@@ -84,10 +199,10 @@ jobs:
           git add backend frontend
           git diff --cached --check
           if ! git diff --cached --quiet; then
-            git commit -m "refactor(commercial): remove runtime access compatibility layers"
+            git commit -m "refactor(commercial): fold payment and activation policies into canonical services"
           fi
 
-      - name: Push source cleanup
+      - name: Push source consolidation
         shell: bash
         run: |
           set -euxo pipefail
