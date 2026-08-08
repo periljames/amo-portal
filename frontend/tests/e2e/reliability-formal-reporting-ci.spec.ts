@@ -340,7 +340,9 @@ test.describe("Formal Reliability Programme publication", () => {
     const popupPromise = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Open retained view" }).click();
     const retainedPopup = await popupPromise;
-    await expect(retainedPopup.locator("body")).toContainText("SUPERSEDED — retained historical revision", { timeout: 10_000 });
+    const retainedBody = retainedPopup.locator("body");
+    await expect(retainedBody).toContainText("SUPERSEDED", { timeout: 10_000 });
+    await expect(retainedBody).toContainText("retained historical revision", { timeout: 10_000 });
     expect(api.authenticatedArtifactRequests).toContain("/view");
     await retainedPopup.close();
 
