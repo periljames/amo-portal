@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { commercialApi } from "../../services/commercialControl";
 import {
   platformApi,
+  type PlatformTenant,
   type TenantModuleSubscription,
 } from "../../services/platformControl";
 import {
@@ -21,6 +23,17 @@ type ModuleDraft = {
   module_code: string;
   status: string;
   plan_code: string;
+};
+
+type TenantLifecycleRow = PlatformTenant & {
+  administrative_status?: string;
+  commercial_status?: string;
+  status_conflict?: boolean;
+  status_conflict_reason?: string | null;
+  enabled_module_count?: number;
+  trial_module_count?: number;
+  provider_statuses?: Record<string, string>;
+  last_user_login_at?: string | null;
 };
 
 type TenantDetailView = {
@@ -79,6 +92,9 @@ export default function PlatformTenantsPage() {
     return Array.from(rows.values()).sort((left, right) => left.module_code.localeCompare(right.module_code));
   }, [moduleOverrides, modules.data?.items]);
 
+  const lifecycleRows = (tenants.data?.items ?? []) as TenantLifecycleRow[];
+  const conflictCount = lifecycleRows.filter((tenant) => tenant.status_conflict).length;
+  const selectedLifecycle = lifecycleRows.find((tenant) => tenant.id === selected) ?? null;
   const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
@@ -124,6 +140,11 @@ export default function PlatformTenantsPage() {
     `Tenant ${action} action completed.`,
   );
 
+  const reconcileTenant = (id: string) => execute(
+    () => commercialApi.reconcileTenant(id, true, reason),
+    "Tenant administrative state reconciled to verified commercial evidence.",
+  );
+
   const saveModules = () => {
     if (!selected) return;
     return execute(
@@ -146,7 +167,7 @@ export default function PlatformTenantsPage() {
   return (
     <PlatformShell
       title="Tenants & Institutions"
-      subtitle="Provision and inspect AMOs, control access, module subscriptions, support sessions, assets, provider setup and billing state."
+      subtitle="Administrative state and commercial connectivity are independent. Conflicts are surfaced explicitly and reconciled through audited actions."
       actions={<button className="platform-btn" onClick={() => { tenants.reload(); detail.reload(); modules.reload(); }}>Refresh workspace</button>}
     >
       {tenants.error ? <ErrorState error={tenants.error} retry={tenants.reload} /> : null}
@@ -155,25 +176,28 @@ export default function PlatformTenantsPage() {
 
       <section className="platform-grid">
         <MetricCard label="Tenants" value={tenantTotal} caption={`${dataMode} data mode`} tone="blue" mark="TI" />
-        <MetricCard label="Current page" value={`${tenantTotal ? offset + 1 : 0}-${Math.min(offset + PAGE_SIZE, tenantTotal)}`} tone="purple" mark="PG" />
+        <MetricCard label="Lifecycle conflicts" value={conflictCount} caption="Current page; review before changing access" tone={conflictCount ? "amber" : "green"} mark="LC" />
         <MetricCard label="Selected tenant" value={selected ? "Open" : "None"} tone={selected ? "green" : "amber"} mark="SE" />
         <MetricCard label="Enabled modules" value={selected ? enabledCount : "-"} tone="green" mark="MO" />
       </section>
 
       <section className="platform-two">
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Tenant register</h2><p>Search and select a tenant to open its operational controls.</p></div><StatusBadge value={`${tenantTotal} TOTAL`} /></div>
+          <div className="platform-section-title"><div><h2>Tenant register</h2><p>Administrative access is shown separately from billing/module connectivity.</p></div><StatusBadge value={`${tenantTotal} TOTAL`} /></div>
           <div className="platform-toolbar">
             <input placeholder="Search tenants" value={q} onChange={(event) => updateTenantQuery(event.target.value)} />
-            <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}><option value="">All states</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
+            <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}><option value="">All admin states</option><option value="active">Admin active</option><option value="inactive">Admin suspended</option></select>
             <select value={dataMode} onChange={(event) => { setDataMode(event.target.value); setOffset(0); }}><option value="REAL">Real tenants</option><option value="DEMO">Demo tenants</option><option value="ALL">All data</option></select>
           </div>
-          {tenants.data?.items?.length ? (
-            <DataTable><thead><tr><th>Tenant</th><th>Plan</th><th>Status</th><th>Users</th><th>Actions</th></tr></thead><tbody>{tenants.data.items.map((tenant) => (
+          {lifecycleRows.length ? (
+            <DataTable><thead><tr><th>Tenant</th><th>Plan</th><th>Administrative</th><th>Commercial</th><th>Users</th><th>Actions</th></tr></thead><tbody>{lifecycleRows.map((tenant) => (
               <tr key={tenant.id}>
-                <td><button className="platform-btn" onClick={() => selectTenant(tenant.id)}>{tenant.name}</button><br /><small>{tenant.amo_code} · {tenant.login_slug}</small></td>
-                <td>{tenant.plan_code || "-"}</td><td><StatusBadge value={tenant.is_read_only ? "LOCKED" : tenant.status} /></td><td>{tenant.user_count ?? 0}</td>
-                <td><div className="platform-actions"><button className="platform-btn" onClick={() => tenantAction(tenant.id, "reactivate")}>Reactivate</button><button className="platform-btn" onClick={() => tenantAction(tenant.id, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => tenantAction(tenant.id, "suspend")}>Suspend</button></div></td>
+                <td><button className="platform-btn" onClick={() => selectTenant(tenant.id)}>{tenant.name}</button><br /><small>{tenant.amo_code} · {tenant.login_slug}</small>{tenant.status_conflict ? <><br /><small>{tenant.status_conflict_reason}</small></> : null}</td>
+                <td>{tenant.plan_code || "-"}</td>
+                <td><StatusBadge value={tenant.is_read_only ? "LOCKED" : tenant.administrative_status || tenant.status} /></td>
+                <td><StatusBadge value={tenant.commercial_status || tenant.license_status || "UNCONNECTED"} /><br /><small>{tenant.enabled_module_count ?? 0} enabled · {tenant.trial_module_count ?? 0} trial</small></td>
+                <td>{tenant.user_count ?? 0}{tenant.last_user_login_at ? <><br /><small>Last login {new Date(tenant.last_user_login_at).toLocaleString()}</small></> : null}</td>
+                <td><div className="platform-actions">{tenant.status_conflict ? <button className="platform-btn primary" onClick={() => reconcileTenant(tenant.id)}>Reconcile</button> : null}<button className="platform-btn" onClick={() => tenantAction(tenant.id, "reactivate")}>Reactivate</button><button className="platform-btn" onClick={() => tenantAction(tenant.id, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => tenantAction(tenant.id, "suspend")}>Suspend</button></div></td>
               </tr>
             ))}</tbody></DataTable>
           ) : <EmptyState label="No tenants match the current filters." />}
@@ -181,22 +205,22 @@ export default function PlatformTenantsPage() {
         </div>
 
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Provision tenant</h2><p>Create the AMO and its initial owner through an audited platform action.</p></div></div>
+          <div className="platform-section-title"><div><h2>Provision tenant</h2><p>Create the AMO and initial owner through an audited platform action.</p></div></div>
           <div className="platform-form"><input placeholder="Tenant name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><input placeholder="AMO code" value={form.amo_code} onChange={(event) => setForm({ ...form, amo_code: event.target.value })} /><input placeholder="Login slug" value={form.login_slug} onChange={(event) => setForm({ ...form, login_slug: event.target.value })} /><input placeholder="Owner email" value={form.owner_email} onChange={(event) => setForm({ ...form, owner_email: event.target.value })} /><textarea placeholder="Reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /><button className="platform-btn primary" onClick={() => execute(() => platformApi.createTenant(form), "Tenant provisioned.")}>Provision new tenant</button></div>
         </div>
       </section>
 
       <section className="platform-two">
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Tenant control</h2><p>Time-boxed support access and high-impact tenant state controls.</p></div></div>
-          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p><p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>{integrationSetupPath ? <Link className="platform-btn primary" to={integrationSetupPath}>Open integrations & pipeline</Link> : null}<button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button><button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button></div><details><summary>Advanced tenant record</summary><pre className="platform-json">{JSON.stringify(selectedDetail, null, 2)}</pre></details></> : <EmptyState label="Select a tenant to inspect details." />}
+          <div className="platform-section-title"><div><h2>Tenant control</h2><p>Billing does not override intentional administrative suspension.</p></div></div>
+          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p>{selectedLifecycle ? <p><StatusBadge value={selectedLifecycle.administrative_status} /> <StatusBadge value={selectedLifecycle.commercial_status} /> {selectedLifecycle.status_conflict ? <StatusBadge value="STATUS_CONFLICT" /> : null}</p> : null}<p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>{integrationSetupPath ? <Link className="platform-btn primary" to={integrationSetupPath}>Open integrations & pipeline</Link> : null}{selectedLifecycle?.status_conflict && selected ? <button className="platform-btn primary" onClick={() => reconcileTenant(selected)}>Reconcile lifecycle</button> : null}<button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button><button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button></div><details><summary>Advanced tenant record</summary><pre className="platform-json">{JSON.stringify(selectedDetail, null, 2)}</pre></details></> : <EmptyState label="Select a tenant to inspect details." />}
         </div>
 
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Module subscription control</h2><p>Tenant-scoped module state synchronized with billing and entitlement enforcement.</p></div></div>
+          <div className="platform-section-title"><div><h2>Module subscription control</h2><p>Tenant-scoped module state synchronized with verified payment and entitlement enforcement.</p></div></div>
           {!selected ? <EmptyState label="Select a tenant before editing modules." /> : null}
           {selected && modules.error ? <ErrorState error={modules.error} retry={modules.reload} /> : null}
-          {selected ? <><div className="platform-toolbar"><input placeholder="Add module code" value={newModule} onChange={(event) => setNewModule(event.target.value)} /><button className="platform-btn" onClick={addModuleDraft}>Add module</button></div>{moduleDrafts.length ? <DataTable><thead><tr><th>Module</th><th>Plan</th><th>Status</th></tr></thead><tbody>{moduleDrafts.map((module) => <tr key={module.module_code}><td>{module.module_code}</td><td><input value={module.plan_code} onChange={(event) => updateModuleDraft({ ...module, plan_code: event.target.value.toUpperCase() })} /></td><td><select value={module.status} onChange={(event) => updateModuleDraft({ ...module, status: event.target.value })}><option value="ENABLED">Enabled</option><option value="TRIAL">Trial</option><option value="SUSPENDED">Suspended</option><option value="DISABLED">Disabled</option></select></td></tr>)}</tbody></DataTable> : <EmptyState label="No module subscriptions exist. Add the first module above." />}<button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save module subscriptions</button><p><small>Module changes are tenant-scoped and audited. Billing webhooks can also suspend or enable subscribed modules.</small></p></> : null}
+          {selected ? <><div className="platform-toolbar"><input placeholder="Add module code" value={newModule} onChange={(event) => setNewModule(event.target.value)} /><button className="platform-btn" onClick={addModuleDraft}>Add module</button></div>{moduleDrafts.length ? <DataTable><thead><tr><th>Module</th><th>Plan</th><th>Status</th></tr></thead><tbody>{moduleDrafts.map((module) => <tr key={module.module_code}><td>{module.module_code}</td><td><input value={module.plan_code} onChange={(event) => updateModuleDraft({ ...module, plan_code: event.target.value.toUpperCase() })} /></td><td><select value={module.status} onChange={(event) => updateModuleDraft({ ...module, status: event.target.value })}><option value="ENABLED">Enabled</option><option value="TRIAL">Trial</option><option value="SUSPENDED">Suspended</option><option value="DISABLED">Disabled</option></select></td></tr>)}</tbody></DataTable> : <EmptyState label="No module subscriptions exist. Add the first module above." />}<button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save module subscriptions</button><p><small>Manual module changes are audited. Provider callbacks cannot directly activate modules; verified settlement does.</small></p></> : null}
         </div>
       </section>
     </PlatformShell>

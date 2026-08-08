@@ -1,7 +1,9 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import { isAuthenticated } from "../services/auth";
+import { getCachedUser, isAuthenticated } from "../services/auth";
+import { fetchBillingAccessStatus } from "../services/billing";
+import { fetchTenantModuleAccess } from "../services/moduleCommerce";
 import PortalRoutes from "../portalRoutes";
 
 const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
@@ -29,12 +31,101 @@ function pathSegments(pathname: string): string[] {
   });
 }
 
+function commercialModuleForPath(parts: string[]): string | null {
+  const section = String(parts[2] || "").toLowerCase();
+  if (!section || section === "admin" || section === "onboarding" || section === "login") return null;
+  if (section === "quality") return "quality";
+  if (["document-control", "documents", "publications", "manuals"].includes(section)) return "document_control";
+  if (["training", "competence"].includes(section)) return "training";
+  if (["fleet", "aircraft", "components"].includes(section)) return "fleet";
+  if (["planning", "production", "maintenance", "work", "work-orders", "technical-records", "maintenance-program"].includes(section)) return "work";
+  if (["reliability", "ehm"].includes(section)) return "reliability";
+  if (["finance", "accounting"].includes(section)) return "finance";
+  if (["stores", "inventory"].includes(section)) return "inventory";
+  if (section === "procurement") return "procurement";
+  return null;
+}
+
 function LoadingRoute({ label }: { label: string }): React.ReactElement {
   return (
     <div className="page-loading" role="status" aria-live="polite">
       <div className="page-loading__card">Loading {label}…</div>
     </div>
   );
+}
+
+type BillingRedirect = {
+  reason: "payment_required" | "module_payment_required" | "module_required";
+  moduleCode?: string | null;
+};
+
+function BillingAccessBoundary({ amoCode, children }: { amoCode: string; children: React.ReactElement }) {
+  const location = useLocation();
+  const currentUser = getCachedUser();
+  const [checking, setChecking] = useState(false);
+  const [redirect, setRedirect] = useState<BillingRedirect | null>(null);
+  const parts = useMemo(() => pathSegments(location.pathname), [location.pathname]);
+  const tenantSection = parts.slice(2).join("/");
+  const commercialModule = useMemo(() => commercialModuleForPath(parts), [parts]);
+  const isBillingCurePath = tenantSection.startsWith("admin/billing") || tenantSection.startsWith("admin/invoices");
+  const isAuthOrOnboarding = tenantSection === "login" || tenantSection.startsWith("onboarding/");
+  const shouldCheck = isAuthenticated()
+    && !currentUser?.is_superuser
+    && !isBillingCurePath
+    && !isAuthOrOnboarding;
+
+  useEffect(() => {
+    if (!shouldCheck) {
+      setChecking(false);
+      setRedirect(null);
+      return;
+    }
+    let active = true;
+    setChecking(true);
+    setRedirect(null);
+
+    const check = async () => {
+      const account = await fetchBillingAccessStatus();
+      if (!active) return;
+      if (account.redirect_to_billing && !account.has_access) {
+        setRedirect({ reason: "payment_required" });
+        return;
+      }
+      if (!commercialModule) return;
+      const moduleAccess = await fetchTenantModuleAccess(commercialModule);
+      if (!active || moduleAccess.has_access || !moduleAccess.redirect_to_billing) return;
+      setRedirect({
+        reason: moduleAccess.access_state === "MODULE_PAYMENT_REQUIRED"
+          ? "module_payment_required"
+          : "module_required",
+        moduleCode: commercialModule,
+      });
+    };
+
+    void check()
+      .catch(() => {
+        if (active) setRedirect(null);
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => { active = false; };
+  }, [commercialModule, location.pathname, shouldCheck]);
+
+  if (checking) return <LoadingRoute label="account access" />;
+  if (redirect) {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    const query = new URLSearchParams({ reason: redirect.reason, returnTo });
+    if (redirect.moduleCode) query.set("module", redirect.moduleCode);
+    return (
+      <Navigate
+        to={`/maintenance/${encodeURIComponent(amoCode)}/admin/billing?${query.toString()}`}
+        replace
+        state={{ from: returnTo }}
+      />
+    );
+  }
+  return children;
 }
 
 function AuthenticatedSurface({
@@ -49,7 +140,11 @@ function AuthenticatedSurface({
   if (!isAuthenticated()) {
     return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/login`} replace />;
   }
-  return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
+  return (
+    <BillingAccessBoundary amoCode={amoCode}>
+      <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>
+    </BillingAccessBoundary>
+  );
 }
 
 export const AppRouter: React.FC = () => {
@@ -88,7 +183,6 @@ export const AppRouter: React.FC = () => {
     );
   }
 
-
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {
       dashboard: <EhmDashboardPage />,
@@ -112,7 +206,11 @@ export const AppRouter: React.FC = () => {
     }
   }
 
-  return <PortalRoutes />;
+  return (
+    <BillingAccessBoundary amoCode={amoCode}>
+      <PortalRoutes />
+    </BillingAccessBoundary>
+  );
 };
 
 export default AppRouter;

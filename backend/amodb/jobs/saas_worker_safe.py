@@ -14,6 +14,7 @@ from sqlalchemy import text
 from amodb.apps.accounts import models as account_models
 from amodb.apps.tasks import services as task_services
 from amodb.apps.platform import (
+    commercial_services,
     saas_lease,
     saas_models as models,
     saas_queue,
@@ -48,6 +49,11 @@ def _mark_webhook_failure(db, job: models.SaaSJob, exc: Exception) -> None:
 
 
 def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
+    if job.job_type in commercial_services.COMMERCIAL_JOB_TYPES:
+        return commercial_services.process_job(db, job)
+    if job.job_type == "PLATFORM_COMMAND_JOB":
+        from amodb.apps.platform import services as platform_services
+        return platform_services.process_command_queue_job(db, job)
     if job.job_type == "ETIMS_FISCALIZE_INVOICE":
         return saas_side_effects.process_etims_fiscalization(db, job=job)
     if job.job_type == "AI_SUPPORT_REPLY":
@@ -76,7 +82,7 @@ def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, 
         jobs = saas_queue.claim_jobs(
             db,
             worker_id=worker_id,
-            queue_names=("billing", "integrations", "fiscalization", "ai", "default"),
+            queue_names=("billing", "integrations", "fiscalization", "ai", "platform", "default"),
             batch_size=batch_size,
             lease_seconds=lease_seconds,
         )

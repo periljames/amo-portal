@@ -279,19 +279,6 @@ def _directory_metrics(db: Session, *, amo_id: str) -> schemas.AdminUserDirector
     )
 
 
-def _remove_legacy_route() -> None:
-    router.routes[:] = [
-        route
-        for route in router.routes
-        if not (
-            getattr(route, "path", None) == "/accounts/admin/user-directory"
-            and "GET" in (getattr(route, "methods", None) or set())
-        )
-    ]
-
-
-_remove_legacy_route()
-
 
 @router.get(
     "/user-directory",

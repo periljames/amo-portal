@@ -1,0 +1,34 @@
+name: One-time commercial service consolidation
+
+on:
+  push:
+    branches: [agent/platform-commercial-scale-hardening]
+    paths:
+      - ".github/workflows/_runtime_cleanup_once.yml"
+      - "ops/cleanup_commercial_overlays_once.py"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/platform-commercial-scale-hardening
+          fetch-depth: 0
+      - name: Consolidate commercial overlays
+        run: python ops/cleanup_commercial_overlays_once.py
+      - name: Compile and verify
+        run: |
+          python -m compileall -q backend/amodb
+          git diff --check
+      - name: Commit and push source cleanup
+        run: |
+          git config user.name "amo-portal-ci"
+          git config user.email "amo-portal-ci@users.noreply.github.com"
+          git add backend
+          git diff --cached --check
+          git commit -m "refactor(commercial): remove remaining commercial service overlays"
+          git push origin HEAD:agent/platform-commercial-scale-hardening

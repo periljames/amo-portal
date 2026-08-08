@@ -15,7 +15,7 @@ from . import models, schemas, services
 router = APIRouter(
     prefix="",
     tags=["inventory"],
-    dependencies=[Depends(require_module("finance_inventory"))],
+    dependencies=[Depends(require_module("inventory"))],
 )
 
 INVENTORY_WRITE_ROLES = [

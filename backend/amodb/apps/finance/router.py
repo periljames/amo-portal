@@ -15,7 +15,7 @@ from . import schemas, services
 router = APIRouter(
     prefix="",
     tags=["finance", "accounting"],
-    dependencies=[Depends(require_module("finance_inventory"))],
+    dependencies=[Depends(require_module("finance"))],
 )
 
 FINANCE_WRITE_ROLES = [

@@ -1,0 +1,159 @@
+name: Platform Commercial CI
+
+on:
+  push:
+    branches:
+      - agent/platform-commercial-scale-hardening
+  pull_request:
+    paths:
+      - "backend/amodb/apps/platform/**"
+      - "backend/amodb/apps/accounts/router_billing.py"
+      - "backend/amodb/entitlements.py"
+      - "backend/amodb/database.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/jobs/billing_maintenance.py"
+      - "frontend/src/pages/platform/**"
+      - "frontend/src/pages/AdminBillingPage.tsx"
+      - "frontend/src/pages/SubscriptionManagementPage.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/services/commercialControl.ts"
+      - "frontend/src/services/moduleCommerce.ts"
+      - "frontend/src/services/platformControl.ts"
+      - "ops/load/**"
+      - ".github/workflows/platform-commercial-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-commercial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-commercial:
+    name: Backend commercial contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_commercial_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_commercial_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: platform-commercial-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_commercial_ci
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_commercial_ci
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_commercial_ci
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Compile commercial backend surface
+        working-directory: backend
+        run: >-
+          python -m compileall -q
+          amodb/apps/platform/commercial_integrations.py
+          amodb/apps/platform/commercial_services.py
+          amodb/apps/platform/commercial_accounting.py
+          amodb/apps/platform/commercial_policy.py
+          amodb/apps/platform/commercial_safety_policy.py
+          amodb/apps/platform/commercial_access_policy.py
+          amodb/apps/platform/commercial_access_scope_policy.py
+          amodb/apps/platform/commercial_invoice_policy.py
+          amodb/apps/platform/commercial_fiscal_document_policy.py
+          amodb/apps/platform/commercial_router.py
+          amodb/apps/platform/module_commerce.py
+          amodb/apps/platform/module_commerce_router.py
+          amodb/apps/platform/module_subscription_router.py
+          amodb/apps/platform/module_payment_status_router.py
+          amodb/apps/platform/module_access_router.py
+          amodb/apps/platform/module_activation_policy.py
+          amodb/apps/platform/module_renewals.py
+          amodb/apps/platform/module_offer_policy.py
+          amodb/apps/platform/module_catalog_runtime_policy.py
+          amodb/apps/platform/payment_data_policy.py
+          amodb/apps/platform/payment_transport_policy.py
+          amodb/apps/platform/billing_privacy_policy.py
+          amodb/apps/platform/saas_webhooks.py
+          amodb/entitlements.py
+          amodb/jobs/saas_worker_safe.py
+          amodb/jobs/billing_maintenance.py
+          amodb/database.py
+      - name: Upgrade disposable commercial PostgreSQL schema
+        working-directory: backend
+        run: python -m alembic -c amodb/alembic.ini upgrade heads
+      - name: Run established commercial control contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_commercial_control_plane.py
+      - name: Run module and payment security contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "not paid_legacy_period_creates_renewal_invoice_and_locks and not verified_legacy_renewal_settlement_reactivates_license"
+      - name: Run tenant billing privacy contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_billing_privacy.py
+      - name: Run module/account payment scope contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_access_scope.py
+      - name: Run tenant offer tamper-resistance contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_offer_security.py
+      - name: Prove elapsed paid period creates renewal obligation and lock
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_creates_renewal_invoice_and_locks"
+      - name: Prove verified renewal settlement reactivates access
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "verified_legacy_renewal_settlement_reactivates_license"
+
+  frontend-platform:
+    name: Frontend platform build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Run platform unit contracts
+        working-directory: frontend
+        run: npm run test:platform
+
+  load-harness-contract:
+    name: 1k load harness contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify gate does not fake tenant concurrency
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'tenants.length < 1000' ops/load/k6_1000_tenants.js
+          grep -F 'target: 1000' ops/load/k6_1000_tenants.js
+          grep -F 'LOAD_TEST_1000_VERIFIED' ops/load/README.md
+          grep -F 'http_req_failed' ops/load/k6_1000_tenants.js

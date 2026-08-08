@@ -1,87 +1,116 @@
-"""
-Module entitlement helpers.
-
-These helpers centralise the logic for checking whether a request can
-access a given module (Quality, Fleet, Work, etc.) based on resolved
-license entitlements for the tenant (AMO).
-"""
+"""Canonical module entitlement checks for tenant requests."""
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Callable, Optional
-
-from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts import services as account_services
+from amodb.apps.accounts import billing_access, models as account_models
 
 from .database import get_read_db
 from .security import get_current_active_user
 
 
+def _normalize_module_key(module_key: str) -> str:
+    return str(module_key or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _row_metadata(row: account_models.ModuleSubscription) -> dict:
+    if not row.metadata_json:
+        return {}
+    try:
+        value = json.loads(row.metadata_json)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _offer_only(row: account_models.ModuleSubscription) -> bool:
+    return bool(_row_metadata(row).get("commercial_offer_only"))
+
+
+def _row_is_current(row: account_models.ModuleSubscription, now: datetime) -> bool:
+    effective_from = row.effective_from
+    effective_to = row.effective_to
+    if effective_from and effective_from.tzinfo is None:
+        effective_from = effective_from.replace(tzinfo=timezone.utc)
+    if effective_to and effective_to.tzinfo is None:
+        effective_to = effective_to.replace(tzinfo=timezone.utc)
+    if effective_from and now < effective_from:
+        return False
+    if effective_to and now > effective_to:
+        return False
+    return True
+
+
 def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optional[bool]:
-    subscription = (
+    code = _normalize_module_key(module_key)
+    row = (
         db.query(account_models.ModuleSubscription)
         .filter(
             account_models.ModuleSubscription.amo_id == amo_id,
-            account_models.ModuleSubscription.module_code == module_key,
+            account_models.ModuleSubscription.module_code == code,
         )
-        .order_by(account_models.ModuleSubscription.updated_at.desc())
         .first()
     )
-    if not subscription:
+    if row is None or _offer_only(row):
         return None
-
-    now = datetime.utcnow()
-    if subscription.effective_from and now < subscription.effective_from:
+    if not _row_is_current(row, datetime.now(timezone.utc)):
         return False
-    if subscription.effective_to and now > subscription.effective_to:
-        return False
-    return subscription.status in {
+    return row.status in {
         account_models.ModuleSubscriptionStatus.ENABLED,
         account_models.ModuleSubscriptionStatus.TRIAL,
     }
 
 
-def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
-    """
-    Return True if the AMO has an active entitlement for the given module.
-
-    Unlimited entitlements always pass. Numeric entitlements require a
-    positive limit; 0 / None are treated as not entitled.
-    """
-
-    entitlements = account_services.resolve_entitlements(db, amo_id=amo_id)
-    entitlement = entitlements.get(module_key)
-
+def _has_base_contract_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
+    entitlement = billing_access.resolve_entitlements(db, amo_id=amo_id).get(
+        _normalize_module_key(module_key)
+    )
     if entitlement is None:
         return False
-
     if entitlement.is_unlimited:
         return True
-
     return entitlement.limit is not None and entitlement.limit > 0
 
 
-def require_module(module_key: str) -> Callable[[account_models.User, Session], account_models.User]:
-    """
-    FastAPI dependency that blocks access when a module is not entitled.
+def _raise_module_payment_required_if_due(
+    db: Session,
+    *,
+    amo_id: str,
+    module_key: str,
+) -> None:
+    from amodb.apps.platform.module_access_router import _payment_due_for_module
 
-    Usage:
-        router = APIRouter(
-            prefix="/quality",
-            dependencies=[Depends(require_module("quality"))],
+    if _payment_due_for_module(
+        db,
+        tenant_id=amo_id,
+        module_code=_normalize_module_key(module_key),
+        now=datetime.now(timezone.utc),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "MODULE_PAYMENT_REQUIRED",
+                "message": f"Module '{module_key}' requires renewal payment.",
+                "module_code": _normalize_module_key(module_key),
+                "redirect_to_billing": True,
+            },
         )
-    """
+
+
+def require_module(module_key: str) -> Callable[[account_models.User, Session], account_models.User]:
+    """FastAPI dependency enforcing one canonical commercial module key."""
+    code = _normalize_module_key(module_key)
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_read_db),
     ) -> account_models.User:
-        # Global superusers can always access modules for diagnostics/support.
         if getattr(current_user, "is_superuser", False):
             return current_user
 
@@ -92,31 +121,48 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 detail="No AMO selected for the current session.",
             )
 
-        access_status = account_services.get_billing_access_status(db, amo_id=amo_id)
+        access_status = billing_access.get_billing_access_status(db, amo_id=amo_id)
         if not access_status.has_access:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=access_status.lock_reason or "Billing access is locked for this account.",
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "BILLING_ACCESS_REQUIRED",
+                    "message": access_status.lock_reason or "Billing access is locked for this account.",
+                    "access_state": access_status.access_state,
+                    "redirect_to_billing": True,
+                    "actionable_invoice_id": access_status.actionable_invoice_id,
+                },
             )
 
-        subscription_allowed = _has_module_subscription(db, amo_id, module_key)
-        entitlement_allowed = _has_module_entitlement(db, amo_id, module_key)
-
+        subscription_allowed = _has_module_subscription(db, amo_id, code)
+        if subscription_allowed is True:
+            return current_user
         if subscription_allowed is False:
+            _raise_module_payment_required_if_due(db, amo_id=amo_id, module_key=code)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Module '{module_key}' is not enabled for this account.",
+                detail={
+                    "code": "MODULE_NOT_SUBSCRIBED",
+                    "message": f"Module '{code}' is not enabled for this account.",
+                    "module_code": code,
+                    "upgrade_available": True,
+                    "redirect_to_billing": True,
+                },
             )
 
-        if subscription_allowed is not None and subscription_allowed:
+        if _has_base_contract_entitlement(db, amo_id, code):
             return current_user
 
-        if not entitlement_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Module '{module_key}' is not enabled for this account.",
-            )
-
-        return current_user
+        _raise_module_payment_required_if_due(db, amo_id=amo_id, module_key=code)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "MODULE_NOT_SUBSCRIBED",
+                "message": f"Module '{code}' is not enabled for this account.",
+                "module_code": code,
+                "upgrade_available": True,
+                "redirect_to_billing": True,
+            },
+        )
 
     return dependency

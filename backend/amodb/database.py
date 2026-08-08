@@ -4,7 +4,8 @@ Database configuration for AMOdb.
 
 Key goals:
 - Separate read and write engines (ready for replicas later).
-- Sensible connection pooling for 24/7 uptime.
+- Sensible direct connection pooling for small/medium deployments.
+- External-pooler mode for horizontally scaled API/worker fleets.
 - Backwards compatibility: `engine`, `SessionLocal` and `get_db` still work.
 """
 
@@ -13,6 +14,7 @@ import logging
 
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 # -------------------------------------------------------------------
 # CONFIG FROM ENV
@@ -26,8 +28,10 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 #   DATABASE_READ_URL   (if you add a replica)
 #   otherwise defaults to WRITE URL
 #
-# Example value:
-#   postgresql+psycopg2://amodb_app:password@192.168.5.55:5432/amodb
+# SCALE:
+#   DB_EXTERNAL_POOLER=true when the DSN points at PgBouncer/a managed DB proxy.
+#   In that mode SQLAlchemy does not create an independent pool per API/worker
+#   process; the external pooler owns the connection budget.
 # -------------------------------------------------------------------
 
 WRITE_DB_URL = os.getenv("DATABASE_WRITE_URL") or os.getenv("DATABASE_URL")
@@ -39,6 +43,12 @@ if not WRITE_DB_URL:
         "postgresql+psycopg2://amodb_app:StrongPass!@192.168.5.55:5432/amodb"
     )
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _sqlite_allowed_for_tests(url: str) -> bool:
@@ -53,14 +63,17 @@ if WRITE_DB_URL.startswith("sqlite") and not _sqlite_allowed_for_tests(WRITE_DB_
         "For isolated tests only, set APP_ENV=test and ALLOW_SQLITE_FOR_TESTS=1."
     )
 
-# Pool tuning – tuned for low-latency, small-to-medium AMO deployments.
+EXTERNAL_POOLER = _env_bool("DB_EXTERNAL_POOLER", False)
+
+# Direct-pool tuning. Do not increase this blindly when scaling process count;
+# use PgBouncer or a managed database proxy and DB_EXTERNAL_POOLER=true instead.
 POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
 MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
-POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "5"))          # seconds
-POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE_SEC", "1800"))    # 15 minutes
+POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "5"))
+POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE_SEC", "1800"))
 
 COMMON_ENGINE_KWARGS = {
-    "pool_pre_ping": True,                # detect dead connections
+    "pool_pre_ping": True,
     "pool_size": POOL_SIZE,
     "max_overflow": MAX_OVERFLOW,
     "pool_timeout": POOL_TIMEOUT,
@@ -83,6 +96,15 @@ def _engine_kwargs(url: str) -> dict:
         }
         kwargs["connect_args"] = {"check_same_thread": False}
         return kwargs
+    if EXTERNAL_POOLER:
+        # PgBouncer / managed proxies already multiplex connections. A process-
+        # local QueuePool on top multiplies connection pressure by API+worker
+        # process count and defeats the external connection budget.
+        return {
+            "pool_pre_ping": True,
+            "poolclass": NullPool,
+            "future": True,
+        }
     return COMMON_ENGINE_KWARGS
 
 
@@ -91,8 +113,8 @@ write_engine = create_engine(WRITE_DB_URL, **_engine_kwargs(WRITE_DB_URL))
 
 # Read engine – if READ and WRITE point at the same DSN, reuse the same engine
 # so the app shares one pool instead of opening two independent pools against the
-# same PostgreSQL server. This is important on constrained servers with limited
-# connection slots.
+# same PostgreSQL server. When a read replica is configured, read-heavy platform
+# and tenant endpoints can scale independently from the write primary.
 if READ_DB_URL == WRITE_DB_URL:
     read_engine = write_engine
 else:
@@ -150,14 +172,7 @@ def _is_shutdown_disconnect(exc: BaseException) -> bool:
 
 
 def close_session_safely(db: Session | None) -> None:
-    """Close a SQLAlchemy session without noisy traceback spam during shutdown.
-
-    Ctrl+C, database service restarts, and cancelled ASGI tasks can leave a
-    session holding a DBAPI connection that PostgreSQL has already closed. In
-    that state SQLAlchemy may raise while trying to rollback-on-close. The
-    request is already ending, so the correct behaviour is to discard the
-    broken connection and keep shutdown deterministic.
-    """
+    """Close a SQLAlchemy session without noisy traceback spam during shutdown."""
     if db is None:
         return
     try:
@@ -189,9 +204,7 @@ def dispose_engines() -> None:
 
 
 def get_write_db():
-    """
-    Dependency for endpoints that perform INSERT / UPDATE / DELETE.
-    """
+    """Dependency for endpoints that perform INSERT / UPDATE / DELETE."""
     db = WriteSessionLocal()
     try:
         yield db
@@ -200,13 +213,7 @@ def get_write_db():
 
 
 def get_read_db():
-    """
-    Dependency for read-only endpoints.
-
-    For now this may hit the same server, but your application code
-    is already split. When you add a read replica, you only need to
-    change DATABASE_READ_URL.
-    """
+    """Dependency for read-only endpoints, optionally backed by a replica."""
     db = ReadSessionLocal()
     try:
         yield db
@@ -218,8 +225,6 @@ def get_read_db():
 # BACKWARDS-COMPATIBILITY (existing imports)
 # -------------------------------------------------------------------
 
-# Older code uses `engine`, `SessionLocal` and `get_db`.
-# They now point to the WRITE side.
 engine = write_engine
 SessionLocal = WriteSessionLocal
 get_db = get_write_db

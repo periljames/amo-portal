@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from amodb.entitlements import require_module
+
 # Bind hardened knowledge-graph implementations before route modules copy service
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
@@ -35,7 +37,11 @@ from .workspace_workflow_review_router import router as workspace_workflow_revie
 from .workspace_workflow_router import router as workspace_workflow_router
 
 
-router = APIRouter()
+# Document Control is a complete regulated workspace and therefore has its own
+# commercial entitlement boundary. The entitlement helper preserves a legacy
+# Quality alias so existing Quality customers do not lose access during the
+# commercial split; a new explicit document_control subscription is authoritative.
+router = APIRouter(dependencies=[Depends(require_module("document_control"))])
 router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module

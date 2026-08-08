@@ -24,7 +24,6 @@ from .apps.accounts import models as accounts_models
 
 from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
-from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.accounts.router_onboarding import router as accounts_onboarding_router
 from .apps.fleet.router import router as fleet_router
@@ -464,7 +463,6 @@ app.include_router(platform_router)
 app.include_router(foundations_router)
 app.include_router(rostering_router)
 app.include_router(accounts_admin_router)
-app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(accounts_onboarding_router)
 app.include_router(fleet_router)

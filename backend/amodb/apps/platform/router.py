@@ -454,7 +454,7 @@ def command_approve(job_id: str, payload: dict[str, Any], db: Session = Depends(
     row = db.get(models.PlatformCommandJob, job_id)
     if not row: raise HTTPException(status_code=404, detail="Command job not found")
     row.status = "APPROVED"; row.approved_by_user_id = _actor_id(user); services.add_job_event(db, row, "APPROVED", payload.get("reason") or "Approved")
-    services.execute_command_job(db, row, actor_id=_actor_id(user)); db.commit(); return services.job_payload(row)
+    services.queue_command_job(db, row, actor_id=_actor_id(user)); db.commit(); return services.job_payload(row)
 
 
 @router.post("/commands/{job_id}/cancel")
@@ -468,7 +468,7 @@ def command_cancel(job_id: str, payload: dict[str, Any], db: Session = Depends(g
 def command_retry(job_id: str, payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
     row = db.get(models.PlatformCommandJob, job_id)
     if not row: raise HTTPException(status_code=404, detail="Command job not found")
-    services.execute_command_job(db, row, actor_id=_actor_id(user)); db.commit(); return services.job_payload(row)
+    services.queue_command_job(db, row, actor_id=_actor_id(user)); db.commit(); return services.job_payload(row)
 
 
 @router.post("/diagnostics/run")
