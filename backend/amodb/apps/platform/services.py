@@ -14,7 +14,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.user_id import generate_user_id
 
-from . import diagnostics, metrics, models
+from . import diagnostics, metrics, models, saas_queue
 from .command_registry import catalog as command_catalog, get_definition
 
 
@@ -327,15 +327,30 @@ def create_command_job(db: Session, *, payload: dict[str, Any], actor_id: str) -
     name = str(payload.get("command_name") or "").strip().upper()
     definition = get_definition(name)
     if not definition:
-        job = models.PlatformCommandJob(command_name=name or "UNKNOWN", risk_level="LOW", status="UNSUPPORTED", actor_user_id=actor_id, requested_by_user_id=actor_id, reason=payload.get("reason"), input_json=payload, output_json={"detail": "Unsupported command."})
-        db.add(job); db.commit(); db.refresh(job); return job
+        job = models.PlatformCommandJob(
+            command_name=name or "UNKNOWN",
+            risk_level="LOW",
+            status="UNSUPPORTED",
+            actor_user_id=actor_id,
+            requested_by_user_id=actor_id,
+            reason=payload.get("reason"),
+            input_json=payload,
+            output_json={"detail": "Unsupported command."},
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job
+
     tenant_id = payload.get("tenant_id")
     reason = payload.get("reason")
     if definition.requires_tenant_id and not tenant_id:
         raise ValueError("This command requires tenant_id.")
     if definition.requires_reason and not str(reason or "").strip():
         raise ValueError("A reason is required for this command.")
-    status = "NEEDS_APPROVAL" if definition.requires_approval and not payload.get("approved") else "PENDING"
+
+    needs_approval = definition.requires_approval and not payload.get("approved")
+    status = "NEEDS_APPROVAL" if needs_approval else "PENDING"
     job = models.PlatformCommandJob(
         command_name=definition.command_name,
         risk_level=definition.risk_level,
@@ -350,20 +365,32 @@ def create_command_job(db: Session, *, payload: dict[str, Any], actor_id: str) -
         max_retries=definition.max_retries,
         timeout_seconds=definition.timeout_seconds,
     )
-    db.add(job); db.flush()
+    db.add(job)
+    db.flush()
     add_job_event(db, job, status, "Command job created.")
-    audit(db, actor_user_id=actor_id, action="platform.command.created", tenant_id=tenant_id, entity_type="platform_command_job", entity_id=job.id, reason=reason, details={"command_name": definition.command_name, "risk_level": definition.risk_level})
-    if status == "PENDING" and definition.risk_level in {"LOW", "MEDIUM"}:
-        execute_command_job(db, job, actor_id=actor_id)
-    db.commit(); db.refresh(job)
+    audit(
+        db,
+        actor_user_id=actor_id,
+        action="platform.command.created",
+        tenant_id=tenant_id,
+        entity_type="platform_command_job",
+        entity_id=job.id,
+        reason=reason,
+        details={"command_name": definition.command_name, "risk_level": definition.risk_level, "execution": "durable_queue"},
+    )
+    if not needs_approval:
+        queue_command_job(db, job, actor_id=actor_id)
+    db.commit()
+    db.refresh(job)
     return job
+
 
 
 def add_job_event(db: Session, job: models.PlatformCommandJob, status: str, message: str, data: dict[str, Any] | None = None) -> None:
     db.add(models.PlatformCommandJobEvent(job_id=job.id, status=status, message=message, data_json=data or {}))
 
 
-def execute_command_job(db: Session, job: models.PlatformCommandJob, *, actor_id: str) -> None:
+def _execute_command_action(db: Session, job: models.PlatformCommandJob, *, actor_id: str) -> None:
     job.status = "RUNNING"; job.started_at = now_utc(); job.attempt_count = (job.attempt_count or 0) + 1
     add_job_event(db, job, "RUNNING", "Command execution started.")
     try:
@@ -391,6 +418,46 @@ def execute_command_job(db: Session, job: models.PlatformCommandJob, *, actor_id
         job.output_json = result; job.status = "SUCCEEDED"; job.finished_at = now_utc(); add_job_event(db, job, "SUCCEEDED", "Command completed.", result)
     except Exception as exc:
         job.status = "FAILED"; job.error_code = exc.__class__.__name__; job.error_detail = str(exc)[:2000]; job.finished_at = now_utc(); add_job_event(db, job, "FAILED", job.error_detail)
+
+
+def queue_command_job(db: Session, job: models.PlatformCommandJob, *, actor_id: str) -> None:
+    if job.status in {"QUEUED", "RUNNING", "SUCCEEDED", "CANCELLED"}:
+        return
+    job.status = "QUEUED"
+    add_job_event(db, job, "QUEUED", "Command queued for asynchronous worker execution.")
+    saas_queue.enqueue_job(
+        db,
+        job_type="PLATFORM_COMMAND_JOB",
+        queue_name="platform",
+        tenant_id=job.tenant_id,
+        payload={"command_job_id": job.id, "actor_id": actor_id},
+        idempotency_key=f"command:{job.id}:{int(job.attempt_count or 0)}",
+        correlation_id=job.id,
+        created_by=actor_id,
+        max_attempts=max(1, int(job.max_retries or 0) + 1),
+        priority=20 if job.risk_level in {"HIGH", "CRITICAL"} else 80,
+        commit=False,
+    )
+
+
+def process_command_queue_job(db: Session, queue_job) -> dict[str, Any]:
+    payload = queue_job.payload_json or {}
+    command_job_id = str(payload.get("command_job_id") or "").strip()
+    actor_id = str(payload.get("actor_id") or "").strip()
+    if not command_job_id or not actor_id:
+        raise ValueError("Command queue job is missing command_job_id or actor_id")
+    job = db.get(models.PlatformCommandJob, command_job_id)
+    if job is None:
+        raise ValueError("Platform command job not found")
+    if job.status == "SUCCEEDED":
+        return {"command_job_id": job.id, "status": job.status, "result": job.output_json or {}}
+    if job.status == "CANCELLED":
+        return {"command_job_id": job.id, "status": job.status, "result": {}}
+    _execute_command_action(db, job, actor_id=actor_id)
+    db.flush()
+    if job.status in {"FAILED", "UNSUPPORTED"}:
+        raise RuntimeError(job.error_detail or (job.output_json or {}).get("detail") or f"Command ended with {job.status}")
+    return {"command_job_id": job.id, "status": job.status, "result": job.output_json or {}}
 
 
 def list_jobs(db: Session, *, limit: int = 50, offset: int = 0) -> dict[str, Any]:

@@ -45,7 +45,6 @@ from .module_commerce_router import router as module_commerce_router  # noqa: E4
 from .module_subscription_router import router as module_subscription_router  # noqa: E402
 from .module_payment_status_router import router as module_payment_status_router  # noqa: E402
 from .module_access_router import router as module_access_router  # noqa: E402
-from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
 router.include_router(console_router)
@@ -62,7 +61,6 @@ router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
 
-install_legacy_command_queue()
 install_usage_meter_hardening(router)
 install_platform_metrics_lifecycle(router)
 
