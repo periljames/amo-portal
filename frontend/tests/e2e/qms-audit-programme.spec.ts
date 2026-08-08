@@ -5,6 +5,24 @@ function futureToken(): string {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
 }
 
+function universeItem() {
+  return {
+    id: "universe-1",
+    entity_type: "DEPARTMENT",
+    display_label: "Maintenance Department",
+    source_owner_module: "workforce",
+    source_type: "DEPARTMENT",
+    source_id: "maintenance",
+    source_route: "/maintenance/tenant-a/rostering",
+    risk_classification: "HIGH",
+    regulatory_criticality: "HIGH",
+    surveillance_interval_days: 365,
+    mandatory_surveillance: true,
+    active: true,
+    notes: null,
+  };
+}
+
 function programme(id = "programme-1", status = "APPROVED") {
   return {
     id,
@@ -66,28 +84,11 @@ function programme(id = "programme-1", status = "APPROVED") {
   };
 }
 
-function universeItem() {
-  return {
-    id: "universe-1",
-    entity_type: "DEPARTMENT",
-    display_label: "Maintenance Department",
-    source_owner_module: "workforce",
-    source_type: "DEPARTMENT",
-    source_id: "maintenance",
-    source_route: "/maintenance/tenant-a/rostering",
-    risk_classification: "HIGH",
-    regulatory_criticality: "HIGH",
-    surveillance_interval_days: 365,
-    mandatory_surveillance: true,
-    active: true,
-    notes: null,
-  };
-}
-
 async function prepare(page: Page): Promise<void> {
   const token = futureToken();
   let programmes = [programme()];
   let current = programmes[0];
+  let scheduleAttempts = 0;
 
   await page.addInitScript(({ storedToken }) => {
     localStorage.setItem("amo_portal_token", storedToken);
@@ -134,6 +135,56 @@ async function prepare(page: Page): Promise<void> {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [universeItem()], total: 1, limit: 200, offset: 0, has_more: false }) });
       return;
     }
+    if (path === "/api/maintenance/tenant-a/quality/integrations/calendar/schedule-options") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        timezone_name: "Africa/Nairobi",
+        frequencies: ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"],
+        kinds: ["INTERNAL", "EXTERNAL", "THIRD_PARTY"],
+        supported_source_types: [],
+        unsupported_source_types: {},
+        scopes: [{ id: "scope-internal", code: "INT", name: "Internal quality audit", party_level: "INTERNAL", default_kind: "INTERNAL" }],
+        people: [{ id: "quality-user-a", full_name: "Quality Manager", email: "quality@tenant-a.test", role: "QUALITY_MANAGER", department_name: "Quality" }],
+      }) });
+      return;
+    }
+    const scheduleMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)\/items\/([^/]+)\/schedule$/);
+    if (scheduleMatch && request.method() === "POST") {
+      scheduleAttempts += 1;
+      const payload = request.postDataJSON() as { allow_conflicts?: boolean; conflict_override_reason?: string };
+      if (!payload.allow_conflicts) {
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: {
+          message: "The proposed Quality commitment conflicts with active personnel or location allocations.",
+          conflicts: [{
+            subject_type: "AUDIT_SCHEDULE", subject_id: "existing-1", title: "Hangar surveillance",
+            start_date: "2026-08-15", end_date: "2026-08-15", start_time: "09:00:00", end_time: "10:00:00",
+            location: "Hangar 1", conflicting_user_ids: ["quality-user-a"], reason: "Responsible personnel or attendees overlap.",
+          }],
+        } }) });
+        return;
+      }
+      expect(payload.conflict_override_reason).toContain("operationally separated");
+      const base = programmes.find((entry) => entry.id === scheduleMatch[1]) || current;
+      const scheduled = {
+        ...base,
+        metrics: { ...base.metrics, planned_audit_count: 0, scheduled_audit_count: 1 },
+        items: (base.items || []).map((entry) => entry.id === scheduleMatch[2] ? { ...entry, state: "SCHEDULED" } : entry),
+        events: [...(base.events || []), {
+          id: "event-scheduled", event_type: "ITEM_SCHEDULED",
+          reason: "Programme requirement scheduled in the authoritative Quality Planner after deterministic conflict validation.",
+          before_snapshot: { state: "PLANNED" }, after_snapshot: { state: "SCHEDULED", schedule_id: "schedule-1" },
+          actor_user_id: "quality-user-a", created_at: "2026-08-08T12:20:00Z",
+        }],
+      };
+      programmes = programmes.map((entry) => entry.id === scheduleMatch[1] ? scheduled : entry);
+      current = scheduled;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({
+        id: "schedule-1", amo_id: "amo-a", title: "Maintenance Department Audit", domain: "AMO", kind: "INTERNAL",
+        audit_scope_id: "scope-internal", audit_scope_code: "INT", frequency: "ANNUAL", next_due_date: "2026-08-15",
+        start_time: "09:00:00", end_time: "10:00:00", duration_days: 1, timezone_name: "Africa/Nairobi", location: "Hangar 1",
+        lifecycle_status: "ACTIVE", version: 1, conflicts: [],
+      }) });
+      return;
+    }
     const detailMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)$/);
     if (detailMatch && request.method() === "GET") {
       const found = programmes.find((item) => item.id === detailMatch[1]) || current;
@@ -162,6 +213,8 @@ async function prepare(page: Page): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+
+  await page.exposeFunction("auditProgrammeScheduleAttempts", () => scheduleAttempts);
 }
 
 test("opens governed programme and keeps Audit Universe source lineage visible", async ({ page }) => {
@@ -173,7 +226,8 @@ test("opens governed programme and keeps Audit Universe source lineage visible",
   await expect(page.getByRole("heading", { name: "Audit Universe", exact: true })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
-  await expect(page.getByText("Maintenance Department Audit", { exact: true })).toBeVisible();
+  await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 });
 
 test("creates a draft programme and requires a reason before review transition", async ({ page }) => {
@@ -193,4 +247,26 @@ test("creates a draft programme and requires a reason before review transition",
   await submitReview.click();
   await expect(page.getByText("Under Review", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
+});
+
+test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
+
+  const queue = page.getByRole("region", { name: "Programme scheduling queue" });
+  await queue.getByRole("link", { name: "Maintenance Department Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
+  await expect(page.getByDisplayValue("ANNUAL")).toBeVisible();
+  await expect(page.getByDisplayValue("2026-08-15")).toBeVisible();
+  await page.getByLabel("Location").fill("Hangar 1");
+  await page.getByLabel("Lead auditor").selectOption("quality-user-a");
+  await page.getByRole("button", { name: "Create authoritative schedule" }).click();
+
+  await expect(page.getByRole("region", { name: "Planner conflicts" })).toBeVisible();
+  await expect(page.getByText("Hangar surveillance", { exact: true })).toBeVisible();
+  await page.getByLabel("Conflict override reason").fill("Activities are operationally separated with independent coverage.");
+  await page.getByRole("button", { name: "Create with governed override" }).click();
+
+  await expect(page.getByText("Authoritative schedule created", { exact: false })).toBeVisible();
+  await expect(page.getByText("schedule-1", { exact: false })).toBeVisible();
 });
