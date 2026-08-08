@@ -21,6 +21,7 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
 const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
 const DocControlGeneratedRecordsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordsPage })));
 const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
@@ -217,10 +218,9 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
 
-        {/* Canonical daily-use DMS workspace entry points. During Slice 1 these
-            reuse the proven underlying worklists while the unified portfolios
-            are implemented behind the stable URLs. */}
-        <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
+        {/* Canonical daily-use DMS workspace entry points. Compatibility routes
+            remain separate until replacement workspaces have exact browser evidence. */}
+        <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
