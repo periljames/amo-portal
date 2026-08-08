@@ -4,6 +4,7 @@ import { plannerClockAt } from "./qmsPlannerClock";
 
 const PLANNER_TIMEZONE = "Africa/Nairobi";
 const CLOCK_REFRESH_MS = 30_000;
+const FOCUS_RESTORE_DELAYS_MS = [0, 40, 120, 240, 500, 1000, 1800];
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -87,6 +88,8 @@ function usePlannerDialogFocusManagement(): void {
 
   useEffect(() => {
     const openDialogs = openDialogsRef.current;
+    const pendingFocusTimers = new Set<number>();
+    const scheduledRestoreDialogs = new WeakSet<HTMLElement>();
     const currentDialogs = (): HTMLElement[] => Array.from(
       document.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
     ).filter(isRendered);
@@ -103,6 +106,47 @@ function usePlannerDialogFocusManagement(): void {
       if (isFocusable(target) && !target.closest("[role='dialog']")) intendedTriggerRef.current = target;
     };
 
+    const restoreDialogTrigger = (dialog: HTMLElement, rememberedTrigger: HTMLElement | null) => {
+      if (scheduledRestoreDialogs.has(dialog)) return;
+      scheduledRestoreDialogs.add(dialog);
+
+      let restoredOnce = false;
+      let cancelled = false;
+      const restore = () => {
+        if (cancelled || currentDialogs().length) return;
+        const target = firstFocusable(rememberedTrigger, fallbackTrigger(dialog));
+        if (!target) return;
+
+        const active = document.activeElement as HTMLElement | null;
+        const activeIsMeaningfulOther = Boolean(
+          restoredOnce
+            && active
+            && active !== target
+            && active !== document.body
+            && active !== document.documentElement
+            && isFocusable(active),
+        );
+        if (activeIsMeaningfulOther) {
+          cancelled = true;
+          return;
+        }
+
+        if (active !== target) target.focus({ preventScroll: true });
+        if (document.activeElement === target) restoredOnce = true;
+      };
+
+      window.requestAnimationFrame(() => {
+        restore();
+        FOCUS_RESTORE_DELAYS_MS.forEach((delay) => {
+          const timer = window.setTimeout(() => {
+            pendingFocusTimers.delete(timer);
+            restore();
+          }, delay);
+          pendingFocusTimers.add(timer);
+        });
+      });
+    };
+
     const manageDialogKeyboard = (event: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
       if (
@@ -116,10 +160,20 @@ function usePlannerDialogFocusManagement(): void {
       const trigger = shortcutTrigger(event);
       if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
 
-      if (event.key !== "Tab") return;
       const dialogs = currentDialogs();
       const topDialog = dialogs[dialogs.length - 1];
-      if (!topDialog) return;
+
+      if (event.key === "Escape" && topDialog) {
+        const rememberedTrigger = openDialogs.get(topDialog) ?? fallbackTrigger(topDialog);
+        const timer = window.setTimeout(() => {
+          pendingFocusTimers.delete(timer);
+          if (!isRendered(topDialog)) restoreDialogTrigger(topDialog, rememberedTrigger);
+        }, 0);
+        pendingFocusTimers.add(timer);
+        return;
+      }
+
+      if (event.key !== "Tab" || !topDialog) return;
 
       const controls = focusableElements(topDialog);
       if (!controls.length) {
@@ -155,7 +209,7 @@ function usePlannerDialogFocusManagement(): void {
         const outside = lastOutsideFocusRef.current;
         openDialogs.set(
           dialog,
-          firstFocusable(intended, outside, fallbackTrigger(dialog)),
+          firstFocusable(intended, fallbackTrigger(dialog), outside),
         );
         intendedTriggerRef.current = null;
 
@@ -168,19 +222,16 @@ function usePlannerDialogFocusManagement(): void {
         });
       });
 
-      const removedTriggers: HTMLElement[] = [];
+      const removedDialogs: Array<{ dialog: HTMLElement; trigger: HTMLElement | null }> = [];
       for (const [dialog, trigger] of openDialogs) {
         if (currentDialogSet.has(dialog)) continue;
         openDialogs.delete(dialog);
-        const restoreTarget = firstFocusable(trigger, fallbackTrigger(dialog));
-        if (restoreTarget) removedTriggers.push(restoreTarget);
+        removedDialogs.push({ dialog, trigger });
       }
 
-      const restoreTarget = removedTriggers[0] || null;
-      if (!dialogs.length && restoreTarget) {
-        window.requestAnimationFrame(() => {
-          if (isFocusable(restoreTarget)) restoreTarget.focus({ preventScroll: true });
-        });
+      if (!dialogs.length && removedDialogs.length) {
+        const removed = removedDialogs[removedDialogs.length - 1];
+        restoreDialogTrigger(removed.dialog, removed.trigger);
       }
     });
 
@@ -194,6 +245,8 @@ function usePlannerDialogFocusManagement(): void {
       document.removeEventListener("focusin", rememberOutsideFocus, true);
       document.removeEventListener("pointerdown", rememberPointerTrigger, true);
       document.removeEventListener("keydown", manageDialogKeyboard, true);
+      pendingFocusTimers.forEach((timer) => window.clearTimeout(timer));
+      pendingFocusTimers.clear();
       openDialogs.clear();
     };
   }, []);
