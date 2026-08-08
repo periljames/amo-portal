@@ -10,6 +10,7 @@ from .router import router, public_router  # noqa: F401
 # dependencies are evaluated during application startup.
 from . import excellence_models as _excellence_models  # noqa: F401,E402
 from . import mission_models as _mission_models  # noqa: F401,E402
+from . import audit_programme_models as _audit_programme_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -56,6 +57,7 @@ from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_rou
 from . import mission_router as _mission_router  # noqa: F401,E402
 from . import mission_management_guard_router as _mission_management_guard_router  # noqa: F401,E402
 from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router  # noqa: F401,E402
+from . import audit_programme_router as _audit_programme_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -118,7 +120,22 @@ _canonical_router.legacy_router.include_router(_mission_management_guard_router.
 _canonical_router.router.include_router(_mission_lifecycle_guard_router.router)
 _canonical_router.legacy_router.include_router(_mission_lifecycle_guard_router.router)
 
+# Audit Programmes and the Audit Universe add governed planning primitives around
+# the existing audit schedule/execution engine. They do not create shadow audit,
+# workforce, training, supplier or tooling records.
+_include_once(
+    _canonical_router.router,
+    _audit_programme_router.router,
+    "/api/maintenance/{amo_code}/quality/audit-programmes",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _audit_programme_router.router,
+    "/api/maintenance/{amo_code}/qms/audit-programmes",
+)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
 from . import mission_route_order as _mission_route_order  # noqa: F401,E402
+from . import audit_programme_route_order as _audit_programme_route_order  # noqa: F401,E402
