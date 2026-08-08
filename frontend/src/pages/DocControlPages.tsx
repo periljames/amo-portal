@@ -26,10 +26,3 @@ export {
   DocumentControlWorkflowDetailPage as DocControlDraftDetailPage,
   DocumentControlWorkflowPage as DocControlDraftsPage,
 } from "./documentControl/DocumentControlWorklistPages";
-
-export function LegacyDocControlRedirectPage() {
-  const location = useLocation();
-  const { amoCode = "" } = useParams<{ amoCode?: string }>();
-  const suffix = location.pathname.replace(/^\/doc-control/, "");
-  return <Navigate to={`/maintenance/${amoCode}/document-control${suffix}${location.search}${location.hash}`} replace />;
-}

@@ -92,7 +92,6 @@ function lazyNamed<T extends Record<string, React.ComponentType<any>>>(
 }
 
 const DocControlPages = {
-  LegacyDocControlRedirectPage: lazyNamed(() => import("./pages/DocControlPages"), "LegacyDocControlRedirectPage"),
   DocControlDashboardPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDashboardPage"),
   DocControlLibraryPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlLibraryPage"),
   DocControlDocumentDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDocumentDetailPage"),
@@ -261,53 +260,10 @@ type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
 
-function LegacyTrainingCompetenceRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
-  let suffixParts: string[] = [];
-  if (markerIndex >= 0) {
-    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
-  }
-  const suffix = suffixParts.join("/");
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
 
-function QualityTrainingCompetenceRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
-  let suffixParts: string[] = [];
-  if (markerIndex >= 0) {
-    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
-  }
-  const suffix = suffixParts.join("/");
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
 
-function LegacyQmsRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const qmsIndex = parts.indexOf("qms");
-  const suffix = qmsIndex >= 0 ? parts.slice(qmsIndex + 1).join("/") : "";
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/quality${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
 
-function QmsInboxRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/inbox/assigned-to-me`} replace />;
-}
 
-function QmsProgrammeRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/audits/program`} replace />;
-}
 
 type RequireQmsPermissionProps = {
   permission: string;
@@ -467,7 +423,6 @@ const QualityRootRedirect: React.FC = () => {
   return <Navigate to={`/maintenance/${amoCode}/quality${location.search}`} replace />;
 };
 
-const LegacyEngineeringRedirect: React.FC = () => {
   const location = useLocation();
   const parts = location.pathname.split("/").filter(Boolean);
   const nextParts = parts.map((part) => (part === "engineering" ? "maintenance" : part));
@@ -475,7 +430,6 @@ const LegacyEngineeringRedirect: React.FC = () => {
   return <Navigate to={target} replace />;
 };
 
-const LegacyTechnicalRecordsRedirect: React.FC = () => {
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
   const parts = location.pathname.split("/").filter(Boolean);
@@ -569,8 +523,6 @@ export const AppRouter: React.FC = () => {
       <Suspense fallback={<PageRouteLoading label="Loading portal workspace…" />}>
         <Routes>
 
-      <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
-      <Route path="/doc-control/*" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/document-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/document-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
@@ -898,8 +850,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/maintenance/reports" element={<RequireAuth><RequireFeatureAccess feature="maintenance.reports"><MaintenanceReportsPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/maintenance/settings" element={<RequireAuth><RequireFeatureAccess feature="maintenance.settings"><MaintenanceSettingsPage /></RequireFeatureAccess></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/engineering" element={<LegacyEngineeringRedirect />} />
-      <Route path="/maintenance/:amoCode/engineering/*" element={<LegacyEngineeringRedirect />} />
 
       <Route path="/maintenance/:amoCode/production/records" element={<RequireAuth><RequireFeatureAccess feature="production.records.dashboard"><TechnicalRecordsPages.TechnicalRecordsDashboardPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/production/records/aircraft" element={<RequireAuth><RequireFeatureAccess feature="production.records.aircraft"><TechnicalRecordsPages.AircraftRecordsPage /></RequireFeatureAccess></RequireAuth>} />
@@ -935,8 +885,6 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      <Route path="/maintenance/:amoCode/quality/tasks" element={<RequireAuth><QmsInboxRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/programme" element={<RequireAuth><QmsProgrammeRedirect /></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/documents/reader/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/documents/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
@@ -965,10 +913,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/cars/closed" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/quality/training-competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training-competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training/competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training/competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
 
       {/* Dedicated Training & Competence route surface. Keep these before the generic /quality/* route so training never falls into the canonical Quality table reader. */}
       <Route path="/maintenance/:amoCode/training/competence" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
@@ -1000,12 +944,8 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
 
       {/* Legacy Quality/QMS route surfaces are no longer active. They redirect to the canonical Quality route. */}
-      <Route path="/maintenance/:amoCode/:department/training-competence" element={<RequireAuth><LegacyTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />
 
@@ -1036,8 +976,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
 
 
-      <Route path="/records" element={<LegacyTechnicalRecordsRedirect />} />
-      <Route path="/records/*" element={<LegacyTechnicalRecordsRedirect />} />
 
       {/* Catch-all â†’ login */}
       <Route path="*" element={<Navigate to="/login" replace />} />

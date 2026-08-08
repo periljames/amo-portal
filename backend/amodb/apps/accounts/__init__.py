@@ -21,6 +21,7 @@ from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
 from .auth_session_context import bind_auth_session_to_token_refresh
 from . import router_admin as _router_admin
+from . import router_user_directory as _router_user_directory
 from . import router_public as _router_public
 
 

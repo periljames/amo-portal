@@ -27,7 +27,7 @@ FIRST_PARTY_MODULES: dict[str, dict[str, Any]] = {
         "description": "QMS audits, findings/CAR, assurance planning, quality evidence and governed quality workflows.",
         "kind": "STANDALONE",
         "hard_requires": [],
-        "embedded_capabilities": ["audits", "corrective_actions", "quality_planner", "quality_tasks", "quality_notifications", "document_control_legacy"],
+        "embedded_capabilities": ["audits", "corrective_actions", "quality_planner", "quality_tasks", "quality_notifications"],
         "customer_selectable": True,
         "implemented": True,
     },
@@ -94,9 +94,7 @@ FIRST_PARTY_MODULES: dict[str, dict[str, Any]] = {
         "customer_selectable": True,
         "implemented": True,
     },
-    # Compatibility bundle for tenants licensed before finance/inventory/procurement
-    # were separated. New buyers may still choose it as a suite.
-    "finance_inventory": {
+    "supply_chain_finance_suite": {
         "name": "Supply Chain & Finance Suite",
         "description": "Finance, stores/inventory and procurement as one commercial suite.",
         "kind": "BUNDLE",
@@ -105,7 +103,6 @@ FIRST_PARTY_MODULES: dict[str, dict[str, Any]] = {
         "embedded_capabilities": [],
         "customer_selectable": True,
         "implemented": True,
-        "legacy_compatibility": True,
     },
     "maintenance_suite": {
         "name": "Maintenance Operations Suite",
@@ -123,6 +120,25 @@ FIRST_PARTY_MODULES: dict[str, dict[str, Any]] = {
         "kind": "BUNDLE",
         "hard_requires": [],
         "included_modules": ["quality", "training"],
+        "embedded_capabilities": [],
+        "customer_selectable": True,
+        "implemented": True,
+    },
+    "document_control": {
+        "name": "Document Control & Publications",
+        "description": "Controlled manuals/publications, revisions, LEP, distribution, controlled copies, external sources and governed reader workflows.",
+        "kind": "STANDALONE",
+        "hard_requires": [],
+        "embedded_capabilities": ["controlled_documents", "publications", "revision_control", "temporary_revisions", "lep", "controlled_distribution", "controlled_copies", "external_sources", "document_reviews", "governed_reader"],
+        "customer_selectable": True,
+        "implemented": True,
+    },
+    "compliance_suite": {
+        "name": "Compliance Governance Suite",
+        "description": "Quality & Compliance, Training & Competence and Document Control as one governance package.",
+        "kind": "BUNDLE",
+        "hard_requires": [],
+        "included_modules": ["quality", "training", "document_control"],
         "embedded_capabilities": [],
         "customer_selectable": True,
         "implemented": True,
@@ -270,7 +286,6 @@ def list_module_catalog(db: Session, *, include_inactive: bool = True) -> list[d
             "hard_requires": sorted(normalize_code(value) for value in hard if value),
             "included_modules": sorted(normalize_code(value) for value in included if value),
             "embedded_capabilities": list(base.get("embedded_capabilities") or []),
-            "legacy_compatibility": bool(base.get("legacy_compatibility", False)),
             "commercial_note": base.get("commercial_note"),
             "has_price": code in price_codes,
             "catalog_record_id": base.get("catalog_record_id"),
@@ -475,8 +490,6 @@ def active_module_codes(db: Session, *, tenant_id: str) -> set[str]:
         if end and end < now:
             continue
         result.add(normalize_code(row.module_code))
-        if row.module_code == "finance_inventory":
-            result.update({"finance", "inventory", "procurement"})
     return result
 
 
@@ -687,6 +700,16 @@ def self_service_catalog(db: Session, *, tenant_id: str) -> dict[str, Any]:
                     module_prices = []
         subscription = subscriptions.get(code)
         missing = validate_dependencies(db, tenant_id=tenant_id, module_code=code)
+        metadata = _decode_metadata(subscription)
+        commercial_terms = metadata.get("commercial_terms") if isinstance(metadata.get("commercial_terms"), dict) else {}
+        valid_until = commercial_terms.get("valid_until") if commercial_terms else None
+        offer_expired = bool(commercial_terms and not _offer_is_current(commercial_terms, now=now))
+        effective_from = subscription.effective_from if subscription else None
+        effective_to = subscription.effective_to if subscription else None
+        if effective_from and effective_from.tzinfo is None:
+            effective_from = effective_from.replace(tzinfo=timezone.utc)
+        if effective_to and effective_to.tzinfo is None:
+            effective_to = effective_to.replace(tzinfo=timezone.utc)
         items.append({
             **definition,
             "prices": module_prices,
@@ -694,6 +717,16 @@ def self_service_catalog(db: Session, *, tenant_id: str) -> dict[str, Any]:
             "is_active_for_tenant": code in active,
             "missing_dependencies": missing,
             "can_subscribe": bool(module_prices and not missing and code not in active),
+            "effective_from": effective_from.isoformat() if effective_from else None,
+            "effective_to": effective_to.isoformat() if effective_to else None,
+            "plan_code": subscription.plan_code if subscription else None,
+            "contract_module_code": metadata.get("contract_module_code"),
+            "bundle_parent": metadata.get("bundle_parent"),
+            "auto_renew": bool(metadata.get("auto_renew", False)),
+            "cancel_at_period_end": bool(metadata.get("cancel_at_period_end", False)),
+            "is_root_contract": bool(subscription and not metadata.get("commercial_offer_only") and not metadata.get("bundle_parent") and str(metadata.get("contract_module_code") or subscription.module_code) == str(subscription.module_code)),
+            "tenant_offer_valid_until": valid_until,
+            "tenant_offer_expired": offer_expired,
         })
     return {"items": items, "active_modules": sorted(active)}
 
@@ -874,13 +907,3 @@ def _invoice_view(invoice: account_models.BillingInvoice) -> dict[str, Any]:
         "paid_at": invoice.paid_at,
         "commercial": _safe_invoice_details(invoice.description),
     }
-
-
-def resolve_access_aliases(module_key: str) -> tuple[str, ...]:
-    key = normalize_code(module_key)
-    aliases: dict[str, tuple[str, ...]] = {
-        "finance": ("finance", "finance_inventory"),
-        "inventory": ("inventory", "finance_inventory"),
-        "procurement": ("procurement", "finance_inventory"),
-    }
-    return aliases.get(key, (key,))

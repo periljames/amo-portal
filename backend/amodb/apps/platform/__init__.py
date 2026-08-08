@@ -14,8 +14,6 @@ from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
-from .module_product_boundary_policy import install_module_product_boundary_policy
-from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -31,8 +29,6 @@ install_resend_email_provider()
 install_commercial_integrations()
 install_accounting_summary_policy()
 install_commercial_safety_policy()
-install_module_product_boundary_policy()
-install_module_catalog_runtime_policy()
 install_invoice_accounting_policy()
 install_fiscal_document_policy()
 install_commercial_control_policy()

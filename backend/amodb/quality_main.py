@@ -30,7 +30,6 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from .database import WriteSessionLocal, close_session_safely, dispose_engines
 from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
-from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_onboarding import router as accounts_onboarding_router
 from .apps.bootstrap.router import router as bootstrap_router
 from .apps.training.router import router as training_router, public_router as training_public_router
@@ -259,7 +258,6 @@ def deployment_profile() -> dict[str, object]:
 # Authentication and tenant/module administration.
 app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
-app.include_router(accounts_modules_router)
 app.include_router(accounts_onboarding_router)
 app.include_router(bootstrap_router)
 

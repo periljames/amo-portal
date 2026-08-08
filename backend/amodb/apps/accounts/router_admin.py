@@ -39,24 +39,6 @@ from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
-PLATFORM_MODULE_CATALOG = [
-    {"code": "quality", "label": "Quality", "category": "Quality"},
-    {"code": "training", "label": "Training & Competence", "category": "Quality"},
-    {"code": "manuals", "label": "Controlled Manuals", "category": "Documents"},
-    {"code": "aerodoc_hybrid_dms", "label": "AeroDoc Hybrid DMS", "category": "Documents"},
-    {"code": "maintenance_program", "label": "Maintenance Programme", "category": "Maintenance"},
-    {"code": "work", "label": "Work Orders", "category": "Maintenance"},
-    {"code": "fleet", "label": "Fleet", "category": "Maintenance"},
-    {"code": "reliability", "label": "Reliability", "category": "Continuing Airworthiness"},
-    {"code": "finance_inventory", "label": "Finance & Inventory", "category": "Commercial"},
-    {"code": "production", "label": "Production", "category": "Maintenance"},
-    {"code": "planning", "label": "Planning", "category": "Maintenance"},
-    {"code": "technical_records", "label": "Technical Records", "category": "Records"},
-    {"code": "equipment_calibration", "label": "Equipment & Calibration", "category": "Quality"},
-    {"code": "suppliers", "label": "Suppliers", "category": "Quality"},
-    {"code": "management_review", "label": "Management Review", "category": "Quality"},
-]
-PLATFORM_MODULE_CODES = {item["code"] for item in PLATFORM_MODULE_CATALOG}
 AMO_ASSET_UPLOAD_DIR = Path(os.getenv("AMO_ASSET_UPLOAD_DIR", "uploads/amo_assets")).resolve()
 PLATFORM_ASSET_UPLOAD_DIR = Path(
     os.getenv("PLATFORM_ASSET_UPLOAD_DIR", "uploads/platform_assets")
@@ -68,7 +50,7 @@ AIRCRAFT_DOC_UPLOAD_DIR = Path(
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
-PRESENCE_HEARTBEAT_GRACE_SECONDS = 20
+PRESENCE_HEARTBEAT_GRACE_SECONDS = max(45, int(os.getenv("PRESENCE_HEARTBEAT_GRACE_SECONDS", "90")))
 RECENTLY_ACTIVE_WINDOW_MINUTES = 10
 
 _USER_GROUP_SCHEMA_VERIFIED = False
@@ -136,13 +118,15 @@ def _ensure_user_group_schema(db: Session) -> None:
 
 def _resolve_presence_state(*, raw_state: str, last_seen_at: Optional[datetime], now: datetime) -> tuple[str, bool]:
     normalized_state = str(raw_state or "offline").lower()
-    freshness_cutoff = now - timedelta(seconds=PRESENCE_HEARTBEAT_GRACE_SECONDS)
-    is_fresh = bool(last_seen_at and last_seen_at >= freshness_cutoff)
-    if not is_fresh:
+    current_time = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    last_seen = last_seen_at
+    if last_seen is not None and last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    fresh = bool(last_seen and last_seen >= current_time - timedelta(seconds=PRESENCE_HEARTBEAT_GRACE_SECONDS))
+    if not fresh:
         return "offline", False
-    if normalized_state == "away":
-        return "away", False
-    return "online", normalized_state == "online"
+    return ("away", True) if normalized_state == "away" else ("online", True)
+
 
 
 def _format_role_for_display(role_value: object) -> str:
@@ -157,58 +141,18 @@ def _display_title_for_user(user: models.User) -> str:
     return title if title else _format_role_for_display(user.role)
 
 
-def _presence_display_for_user(
-    *,
-    user: models.User,
-    presence: schemas.UserPresenceRead,
-    availability_status: Optional[str] = None,
-) -> schemas.UserPresenceDisplayRead:
-    if not user.is_active:
-        return schemas.UserPresenceDisplayRead(
-            status_label="Inactive",
-            last_seen_label="Never seen" if not (presence.last_seen_at or user.last_login_at) else "Inactive",
-            last_seen_at=presence.last_seen_at or user.last_login_at,
-            last_seen_at_display=None,
-        )
-
-    if availability_status == "ON_LEAVE":
-        return schemas.UserPresenceDisplayRead(
-            status_label="On leave",
-            last_seen_label="Leave scheduled",
-            last_seen_at=presence.last_seen_at or user.last_login_at,
-            last_seen_at_display=None,
-        )
-
-    if presence.is_online:
-        return schemas.UserPresenceDisplayRead(
-            status_label="Online",
-            last_seen_label="Active now",
-            last_seen_at=presence.last_seen_at,
-            last_seen_at_display=None,
-        )
-
-    if presence.state == "away" and presence.last_seen_at:
-        return schemas.UserPresenceDisplayRead(
-            status_label="Away",
-            last_seen_label="Away now",
-            last_seen_at=presence.last_seen_at,
-            last_seen_at_display=presence.last_seen_at.isoformat() if hasattr(presence.last_seen_at, "isoformat") else str(presence.last_seen_at),
-        )
-
+def _presence_display_for_user(*, user: models.User, presence: schemas.UserPresenceRead, availability_status: Optional[str] = None) -> schemas.UserPresenceDisplayRead:
     last_seen = presence.last_seen_at or user.last_login_at
-    if not last_seen:
-        return schemas.UserPresenceDisplayRead(
-            status_label="Offline",
-            last_seen_label="Never seen",
-            last_seen_at=None,
-            last_seen_at_display=None,
-        )
-    return schemas.UserPresenceDisplayRead(
-        status_label="Offline",
-        last_seen_label="Last seen",
-        last_seen_at=last_seen,
-        last_seen_at_display=last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen),
-    )
+    if not user.is_active:
+        return schemas.UserPresenceDisplayRead(status_label="Inactive", last_seen_label="Never seen" if not last_seen else "Inactive", last_seen_at=last_seen, last_seen_at_display=last_seen.isoformat() if last_seen else None)
+    if availability_status == "ON_LEAVE":
+        return schemas.UserPresenceDisplayRead(status_label="On leave", last_seen_label="Leave scheduled", last_seen_at=last_seen, last_seen_at_display=last_seen.isoformat() if last_seen else None)
+    if presence.is_online and presence.state == "away":
+        return schemas.UserPresenceDisplayRead(status_label="Away", last_seen_label="Connected, idle", last_seen_at=last_seen, last_seen_at_display=last_seen.isoformat() if last_seen else None)
+    if presence.is_online:
+        return schemas.UserPresenceDisplayRead(status_label="Online", last_seen_label="Active now", last_seen_at=last_seen, last_seen_at_display=last_seen.isoformat() if last_seen else None)
+    return schemas.UserPresenceDisplayRead(status_label="Offline", last_seen_label="Never seen" if not last_seen else "Last seen", last_seen_at=last_seen, last_seen_at_display=last_seen.isoformat() if last_seen else None)
+
 
 
 def _jsonable(value):
@@ -4292,108 +4236,6 @@ def _resolve_presence_for_user(
         last_seen_at=user.last_login_at,
         source="login",
     )
-
-
-@router.get(
-    "/user-directory",
-    response_model=schemas.AdminUserDirectoryRead,
-    summary="Dense user directory with presence and HR metrics",
-)
-def get_user_directory_admin(
-    amo_id: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
-    search: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
-    if not target_amo_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AMO context is required.")
-
-    q = (
-        db.query(models.User)
-        .filter(models.User.amo_id == target_amo_id)
-        .order_by(models.User.full_name.asc())
-    )
-    if search and search.strip():
-        s = f"%{search.strip()}%"
-        q = q.filter(
-            or_(
-                models.User.full_name.ilike(s),
-                models.User.email.ilike(s),
-                models.User.staff_code.ilike(s),
-                models.User.position_title.ilike(s),
-            )
-        )
-
-    users = q.offset(skip).limit(min(max(limit, 1), 250)).all()
-    all_users = db.query(models.User).filter(models.User.amo_id == target_amo_id).all()
-
-    department_ids = sorted({u.department_id for u in all_users if u.department_id})
-    departments = {}
-    if department_ids:
-        departments = {
-            str(d.id): d.name
-            for d in db.query(models.Department).filter(models.Department.id.in_(department_ids)).all()
-        }
-
-    presence_map = _presence_map_for_users(db, amo_id=target_amo_id, user_ids=[str(u.id) for u in all_users])
-    availability_map = _latest_availability_map_for_users(db, amo_id=target_amo_id, user_ids=[str(u.id) for u in all_users])
-
-    items = []
-    for user in users:
-        presence = _resolve_presence_for_user(user=user, presence_map=presence_map)
-        availability_status = _current_availability_status(availability_map.get(str(user.id)))
-        presence_display = _presence_display_for_user(user=user, presence=presence, availability_status=availability_status)
-        items.append(
-            schemas.AdminUserDirectoryItem(
-                id=str(user.id),
-                amo_id=str(user.amo_id),
-                department_id=user.department_id,
-                department_name=departments.get(str(user.department_id)) if user.department_id else None,
-                staff_code=user.staff_code,
-                email=user.email,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                full_name=user.full_name,
-                role=user.role,
-                position_title=user.position_title,
-                is_active=user.is_active,
-                is_superuser=user.is_superuser,
-                is_amo_admin=user.is_amo_admin,
-                display_title=_display_title_for_user(user),
-                availability_status=availability_status,
-                last_login_at=user.last_login_at,
-                created_at=user.created_at,
-                updated_at=user.updated_at,
-                presence=presence,
-                presence_display=presence_display,
-            )
-        )
-
-    all_presence = [_resolve_presence_for_user(user=u, presence_map=presence_map) for u in all_users]
-    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECENTLY_ACTIVE_WINDOW_MINUTES)
-    all_online = sum(1 for presence in all_presence if presence.is_online)
-    all_away = sum(1 for presence in all_presence if presence.state == "away")
-    on_leave = sum(1 for u in all_users if _current_availability_status(availability_map.get(str(u.id))) == "ON_LEAVE")
-    all_recently_active = sum(
-        1
-        for presence in all_presence
-        if bool(presence.last_seen_at and presence.last_seen_at >= recent_cutoff)
-    )
-    metrics = schemas.AdminUserDirectoryMetrics(
-        total_users=len(all_users),
-        active_users=sum(1 for u in all_users if u.is_active),
-        inactive_users=sum(1 for u in all_users if not u.is_active),
-        online_users=all_online,
-        away_users=all_away,
-        on_leave_users=on_leave,
-        recently_active_users=all_recently_active,
-        departmentless_users=sum(1 for u in all_users if not u.department_id),
-        managers=sum(1 for u in all_users if u.role in _manager_roles()),
-    )
-    return schemas.AdminUserDirectoryRead(items=items, metrics=metrics)
 
 
 @router.get(
