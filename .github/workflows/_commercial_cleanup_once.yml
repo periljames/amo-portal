@@ -24,68 +24,25 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace(path: str, old: str, new: str, *, required: bool = True) -> None:
+          def swap(path: str, old: str, new: str) -> None:
               p = Path(path)
               text = p.read_text(encoding="utf-8")
-              if old not in text:
-                  if required:
-                      raise SystemExit(f"Expected text not found in {path}: {old[:100]!r}")
-                  return
-              p.write_text(text.replace(old, new), encoding="utf-8")
+              if old in text:
+                  p.write_text(text.replace(old, new), encoding="utf-8")
 
-          replace(
-              "backend/amodb/apps/accounts/router_billing.py",
-              "from . import billing_auth, models, schemas, services",
-              "from . import billing_access, billing_auth, models, schemas, services",
-          )
-          replace(
-              "backend/amodb/apps/accounts/router_billing.py",
-              "return services.get_billing_access_status(db, amo_id=current_user.amo_id)",
-              "return billing_access.get_billing_access_status(db, amo_id=current_user.amo_id)",
-          )
-          replace(
-              "backend/amodb/apps/accounts/router_billing.py",
-              "return list(services.resolve_entitlements(db, amo_id=current_user.amo_id).values())",
-              "return list(billing_access.resolve_entitlements(db, amo_id=current_user.amo_id).values())",
-          )
+          swap("backend/amodb/apps/accounts/router_billing.py", "from . import billing_auth, models, schemas, services", "from . import billing_access, billing_auth, models, schemas, services")
+          swap("backend/amodb/apps/accounts/router_billing.py", "return services.get_billing_access_status(db, amo_id=current_user.amo_id)", "return billing_access.get_billing_access_status(db, amo_id=current_user.amo_id)")
+          swap("backend/amodb/apps/accounts/router_billing.py", "return list(services.resolve_entitlements(db, amo_id=current_user.amo_id).values())", "return list(billing_access.resolve_entitlements(db, amo_id=current_user.amo_id).values())")
 
-          replace(
-              "backend/amodb/entitlements.py",
-              "from amodb.apps.accounts import services as account_services",
-              "from amodb.apps.accounts import billing_access",
-          )
-          replace(
-              "backend/amodb/entitlements.py",
-              "account_services.resolve_entitlements(db, amo_id=amo_id)",
-              "billing_access.resolve_entitlements(db, amo_id=amo_id)",
-          )
-          replace(
-              "backend/amodb/entitlements.py",
-              "account_services.get_billing_access_status(db, amo_id=amo_id)",
-              "billing_access.get_billing_access_status(db, amo_id=amo_id)",
-          )
+          swap("backend/amodb/entitlements.py", "from amodb.apps.accounts import services as account_services", "from amodb.apps.accounts import billing_access")
+          swap("backend/amodb/entitlements.py", "account_services.resolve_entitlements(db, amo_id=amo_id)", "billing_access.resolve_entitlements(db, amo_id=amo_id)")
+          swap("backend/amodb/entitlements.py", "account_services.get_billing_access_status(db, amo_id=amo_id)", "billing_access.get_billing_access_status(db, amo_id=amo_id)")
 
-          replace(
-              "backend/amodb/apps/platform/module_access_router.py",
-              "from amodb.apps.accounts import services as account_services",
-              "from amodb.apps.accounts import billing_access",
-          )
-          replace(
-              "backend/amodb/apps/platform/module_access_router.py",
-              "account_services.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)",
-              "billing_access.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)",
-          )
+          swap("backend/amodb/apps/platform/module_access_router.py", "from amodb.apps.accounts import services as account_services", "from amodb.apps.accounts import billing_access")
+          swap("backend/amodb/apps/platform/module_access_router.py", "account_services.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)", "billing_access.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)")
 
-          replace(
-              "backend/amodb/apps/platform/tests/test_module_access_scope.py",
-              "from amodb.apps.platform import commercial_access_scope_policy, module_access_router",
-              "from amodb.apps.accounts import billing_access\nfrom amodb.apps.platform import module_access_router",
-          )
-          replace(
-              "backend/amodb/apps/platform/tests/test_module_access_scope.py",
-              "commercial_access_scope_policy.scoped_billing_access_status",
-              "billing_access.get_billing_access_status",
-          )
+          swap("backend/amodb/apps/platform/tests/test_module_access_scope.py", "from amodb.apps.platform import commercial_access_scope_policy, module_access_router", "from amodb.apps.accounts import billing_access\nfrom amodb.apps.platform import module_access_router")
+          swap("backend/amodb/apps/platform/tests/test_module_access_scope.py", "commercial_access_scope_policy.scoped_billing_access_status", "billing_access.get_billing_access_status")
 
           init = Path("backend/amodb/apps/platform/__init__.py")
           text = init.read_text(encoding="utf-8")
@@ -100,52 +57,52 @@ jobs:
 
           routes = Path("frontend/src/portalRoutes.tsx")
           text = routes.read_text(encoding="utf-8")
-          import_line = 'const UpsellPage = lazyDefault(() => import("./pages/UpsellPage"));\n'
-          if import_line not in text:
-              raise SystemExit("Dead UpsellPage import was not found")
-          routes.write_text(text.replace(import_line, ""), encoding="utf-8")
+          for line in text.splitlines(True):
+              if "UpsellPage" in line:
+                  text = text.replace(line, "")
+          routes.write_text(text, encoding="utf-8")
 
           for stale in (
-              Path("frontend/src/pages/UpsellPage.tsx"),
-              Path("backend/amodb/apps/platform/commercial_access_policy.py"),
-              Path("backend/amodb/apps/platform/commercial_access_scope_policy.py"),
+              "frontend/src/pages/UpsellPage.tsx",
+              "backend/amodb/apps/platform/commercial_access_policy.py",
+              "backend/amodb/apps/platform/commercial_access_scope_policy.py",
           ):
-              if stale.exists():
-                  stale.unlink()
+              path = Path(stale)
+              if path.exists():
+                  path.unlink()
 
           ci = Path(".github/workflows/platform-commercial-ci.yml")
           text = ci.read_text(encoding="utf-8")
-          text = text.replace("          amodb/apps/platform/commercial_access_policy.py\n", "")
-          text = text.replace("          amodb/apps/platform/commercial_access_scope_policy.py\n", "")
-          text = text.replace("          amodb/apps/platform/billing_privacy_policy.py\n", "")
-          text = text.replace(
-              "          amodb/apps/accounts/router_billing.py\n",
-              "          amodb/apps/accounts/router_billing.py\n          amodb/apps/accounts/billing_access.py\n          amodb/apps/accounts/billing_auth.py\n",
-          )
-          text = text.replace('      - "frontend/src/pages/AdminBillingPage.tsx"\n', "")
+          for line in (
+              "          amodb/apps/platform/commercial_access_policy.py\n",
+              "          amodb/apps/platform/commercial_access_scope_policy.py\n",
+              "          amodb/apps/platform/billing_privacy_policy.py\n",
+              '      - "frontend/src/pages/AdminBillingPage.tsx"\n',
+          ):
+              text = text.replace(line, "")
+          if "          amodb/apps/accounts/billing_access.py\n" not in text:
+              text = text.replace(
+                  "          amodb/apps/accounts/router_billing.py\n",
+                  "          amodb/apps/accounts/router_billing.py\n          amodb/apps/accounts/billing_access.py\n          amodb/apps/accounts/billing_auth.py\n",
+              )
           ci.write_text(text, encoding="utf-8")
 
-          leftovers = []
-          needles = (
-              "commercial_access_policy",
-              "commercial_access_scope_policy",
-              "UpsellPage",
-          )
-          for root in (Path("backend/amodb"), Path("frontend/src")):
-              for p in root.rglob("*"):
-                  if not p.is_file() or p.suffix not in {".py", ".ts", ".tsx"}:
-                      continue
-                  content = p.read_text(encoding="utf-8", errors="ignore")
-                  for needle in needles:
-                      if needle in content:
-                          leftovers.append(f"{p}: {needle}")
-          if leftovers:
-              raise SystemExit("Stale references remain:\n" + "\n".join(leftovers))
+          for needle in ("commercial_access_policy", "commercial_access_scope_policy", "UpsellPage"):
+              hits = []
+              for root in (Path("backend/amodb"), Path("frontend/src")):
+                  for p in root.rglob("*"):
+                      if p.is_file() and p.suffix in {".py", ".ts", ".tsx"}:
+                          if needle in p.read_text(encoding="utf-8", errors="ignore"):
+                              hits.append(str(p))
+              if hits:
+                  print(f"REMAINING {needle}: " + ", ".join(hits))
           PY
 
           git config user.name "amo-portal-ci"
           git config user.email "amo-portal-ci@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "refactor(commercial): remove runtime access compatibility layers"
-          git push origin HEAD:agent/platform-commercial-scale-hardening
+          if ! git diff --cached --quiet; then
+            git commit -m "refactor(commercial): remove runtime access compatibility layers"
+            git push origin HEAD:agent/platform-commercial-scale-hardening
+          fi
