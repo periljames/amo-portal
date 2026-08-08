@@ -282,8 +282,8 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   const queue = page.getByRole("region", { name: "Programme scheduling queue" });
   await queue.getByRole("link", { name: "Maintenance Department Audit" }).click();
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
-  await expect(page.getByDisplayValue("ANNUAL")).toBeVisible();
-  await expect(page.getByDisplayValue("2026-08-15")).toBeVisible();
+  await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
+  await expect(page.getByLabel("Date")).toHaveValue("2026-08-15");
   await page.getByLabel("Location").fill("Hangar 1");
   await page.getByLabel("Lead auditor").selectOption("quality-user-a");
   await page.getByRole("button", { name: "Create authoritative schedule" }).click();
