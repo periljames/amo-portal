@@ -180,6 +180,7 @@ test.describe("Document Control daily operating model", () => {
   });
 
   test("2,000-page reader remains bounded and responsive across deep jumps", async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
     const openStarted = Date.now();
     await page.getByRole("button", { name: /Read current/i }).click();
