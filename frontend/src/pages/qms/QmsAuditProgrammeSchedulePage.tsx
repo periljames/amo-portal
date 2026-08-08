@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CalendarCheck2, CheckCircle2, ShieldAlert } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -40,6 +40,26 @@ function conflictDetail(error: unknown): PlannerConflict[] {
   return Array.isArray(conflicts) ? conflicts as PlannerConflict[] : [];
 }
 
+type ScheduleFormState = {
+  title: string;
+  next_due_date: string;
+  start_time: string;
+  end_time: string;
+  duration_days: string;
+  kind: string;
+  audit_scope_id: string;
+  location: string;
+  scope: string;
+  criteria: string;
+  notes: string;
+  auditee: string;
+  lead_auditor_user_id: string;
+  observer_auditor_user_id: string;
+  assistant_auditor_user_id: string;
+  notify_auditors: boolean;
+  notify_auditees: boolean;
+};
+
 const QmsAuditProgrammeSchedulePage: React.FC = () => {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
   const location = useLocation();
@@ -64,42 +84,37 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
   const item = programme?.items?.find((entry) => entry.id === itemId);
   const expectedFrequency = item ? FREQUENCY_BY_RECURRENCE[item.recurrence] : undefined;
 
-  const [form, setForm] = useState({
-    title: "",
-    next_due_date: "",
+  const formDefaults = useMemo<ScheduleFormState>(() => ({
+    title: item?.title || "",
+    next_due_date: item?.target_start || programme?.period_start || "",
     start_time: "09:00",
     end_time: "10:00",
     duration_days: "1",
     kind: "INTERNAL",
     audit_scope_id: "",
     location: "",
-    scope: "",
-    criteria: "",
+    scope: item?.scope || "",
+    criteria: item ? criteriaText(item.criteria) : "",
     notes: "",
-    auditee: "",
+    auditee: item?.auditable_entity?.display_label || "",
     lead_auditor_user_id: "",
     observer_auditor_user_id: "",
     assistant_auditor_user_id: "",
     notify_auditors: true,
     notify_auditees: true,
-  });
-  const [initializedItem, setInitializedItem] = useState("");
+  }), [item, programme?.period_start]);
+  const [formByItem, setFormByItem] = useState<Record<string, ScheduleFormState>>({});
+  const form = formByItem[itemId] || formDefaults;
+  const setForm = (updater: React.SetStateAction<ScheduleFormState>) => {
+    setFormByItem((currentByItem) => {
+      const current = currentByItem[itemId] || formDefaults;
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return { ...currentByItem, [itemId]: next };
+    });
+  };
   const [conflicts, setConflicts] = useState<PlannerConflict[]>([]);
   const [overrideReason, setOverrideReason] = useState("");
   const [resultScheduleId, setResultScheduleId] = useState("");
-
-  useEffect(() => {
-    if (!item || initializedItem === item.id) return;
-    setForm((current) => ({
-      ...current,
-      title: item.title,
-      next_due_date: item.target_start || programme?.period_start || "",
-      scope: item.scope,
-      criteria: criteriaText(item.criteria),
-      auditee: item.auditable_entity?.display_label || "",
-    }));
-    setInitializedItem(item.id);
-  }, [initializedItem, item, programme?.period_start]);
 
   const scheduleMutation = useMutation({
     mutationFn: (allowConflicts: boolean) => {
