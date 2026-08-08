@@ -1,8 +1,10 @@
 """Platform control-plane package for global and tenant SaaS operations."""
 
-# Import the durable SaaS models before FastAPI startup/Alembic mapper checks so
-# SQLAlchemy registers every control-plane table in the shared metadata.
+# Import durable SaaS and Platform Operations data models before FastAPI
+# startup/Alembic mapper checks so SQLAlchemy registers every control-plane table
+# in the shared metadata.
 from . import saas_models as _saas_models  # noqa: F401
+from . import ops_data_models as _ops_data_models  # noqa: F401
 from . import saas_services as _saas_services
 from . import saas_webhooks as _saas_webhooks
 from .saas_admin_links import install_tenant_admin_links
@@ -32,6 +34,7 @@ install_resend_email_provider()
 # helper functions available for compatibility, but mount only the prepared
 # snapshot broker router. This makes browser fan-out independent of DB polling.
 from .ops_console_router import router as console_router  # noqa: E402
+from .product_analytics import router as product_analytics_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
@@ -42,6 +45,7 @@ from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
 router.include_router(console_router)
+router.include_router(product_analytics_router)
 router.include_router(platform_saas_router)
 router.include_router(webhook_router)
 router.include_router(support_router)
