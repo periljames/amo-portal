@@ -6,6 +6,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from amodb.apps.platform.ops_api_router import router as versioned_ops_router
 from amodb.apps.platform.ops_console_router import broker, router as console_router
 from amodb.apps.platform.ops_gateway import router as operations_router, snapshot_refresher, snapshot_store
 from amodb.database import dispose_engines, read_engine, write_engine
@@ -14,7 +15,7 @@ from amodb.observability import configure_telemetry
 
 app = FastAPI(
     title="AMO Portal Platform Operations Gateway",
-    version="2.1.0",
+    version="2.2.0",
     docs_url=None if os.getenv("APP_ENV", "").lower() in {"prod", "production"} else "/docs",
 )
 
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 app.include_router(console_router, prefix="/platform")
 app.include_router(operations_router)
+app.include_router(versioned_ops_router)
 configure_telemetry(app, service_name=os.getenv("OTEL_PLATFORM_OPS_SERVICE_NAME", "amo-portal-platform-ops"), engines=(write_engine, read_engine))
 
 
