@@ -5,6 +5,10 @@ const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
+const READER_PAGE_CHECKPOINTS = [100, 500, 1000, 1999] as const;
+const MAX_READER_USABLE_MS = 20_000;
+const MAX_READER_JUMP_MS = 15_000;
+const MAX_MOUNTED_PDF_PAGES = 30;
 
 let materialBrowserErrors: string[] = [];
 
@@ -175,16 +179,47 @@ test.describe("Document Control daily operating model", () => {
     await expect(page.getByRole("button", { name: /Read current/i })).toBeVisible();
   });
 
-  test("reader exposes one authoritative PDF source plus Standard, Immersive, Review and Fullscreen controls", async ({ page }) => {
+  test("2,000-page reader remains bounded and responsive across deep jumps", async ({ page }, testInfo) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
+    const openStarted = Date.now();
     await page.getByRole("button", { name: /Read current/i }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
-    await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: MAX_READER_USABLE_MS });
+    const usableMs = Date.now() - openStarted;
+    expect(usableMs).toBeLessThanOrEqual(MAX_READER_USABLE_MS);
+    await expect(page.locator(".pdfv3-pages")).toContainText("of 2000", { timeout: 30_000 });
     await expect(page.locator(".pdfv3-error,.pdfv3-document-error")).toHaveCount(0);
+
     for (const label of ["Standard", "Immersive", "Review changes", "Fullscreen"]) {
       await expect(page.getByRole("button", { name: new RegExp(label, "i") })).toBeVisible();
     }
+
+    const jumpMetrics: Array<{ page: number; elapsed_ms: number; mounted_pages: number }> = [];
+    const pageInput = page.getByLabel("Page number");
+    for (const checkpoint of READER_PAGE_CHECKPOINTS) {
+      const started = Date.now();
+      await pageInput.fill(String(checkpoint));
+      await pageInput.press("Enter");
+      await expect(page.locator(`.pdfv3-page[data-page-number="${checkpoint}"].is-ready`)).toBeVisible({ timeout: MAX_READER_JUMP_MS });
+      const elapsedMs = Date.now() - started;
+      const mountedPages = await page.locator(".pdfv3-page").count();
+      expect(elapsedMs).toBeLessThanOrEqual(MAX_READER_JUMP_MS);
+      expect(mountedPages).toBeLessThanOrEqual(MAX_MOUNTED_PDF_PAGES);
+      jumpMetrics.push({ page: checkpoint, elapsed_ms: elapsedMs, mounted_pages: mountedPages });
+    }
+
+    await testInfo.attach("reader-2000-page-performance.json", {
+      body: Buffer.from(JSON.stringify({
+        pages: 2000,
+        first_usable_ms: usableMs,
+        max_first_usable_ms: MAX_READER_USABLE_MS,
+        max_jump_ms: MAX_READER_JUMP_MS,
+        max_mounted_pages: MAX_MOUNTED_PDF_PAGES,
+        jumps: jumpMetrics,
+      }, null, 2)),
+      contentType: "application/json",
+    });
   });
 
   test("200 percent visual zoom keeps core Home actions reachable and keyboard focus visible", async ({ page }) => {
