@@ -20,6 +20,7 @@ from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
 from .module_offer_policy import install_module_offer_policy
+from .module_product_boundary_policy import install_module_product_boundary_policy
 from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .payment_data_policy import install_payment_data_policy
 from .payment_transport_policy import install_payment_transport_policy
@@ -48,6 +49,9 @@ install_billing_access_hot_path()
 install_payment_data_policy()
 install_commercial_access_scope_policy()
 install_payment_transport_policy()
+# Commercial product boundaries are reconciled with actual entitlement-gated
+# workspaces before any catalog/offer route consumes the first-party registry.
+install_module_product_boundary_policy()
 install_module_catalog_runtime_policy()
 install_invoice_accounting_policy()
 install_fiscal_document_policy()
