@@ -10,8 +10,13 @@ on:
       - "backend/amodb/entitlements.py"
       - "backend/amodb/database.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/jobs/billing_maintenance.py"
       - "frontend/src/pages/platform/**"
+      - "frontend/src/pages/AdminBillingPage.tsx"
+      - "frontend/src/pages/SubscriptionManagementPage.tsx"
+      - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/services/commercialControl.ts"
+      - "frontend/src/services/moduleCommerce.ts"
       - "frontend/src/services/platformControl.ts"
       - "ops/load/**"
       - ".github/workflows/platform-commercial-ci.yml"
@@ -73,12 +78,25 @@ jobs:
           amodb/apps/platform/commercial_invoice_policy.py
           amodb/apps/platform/commercial_fiscal_document_policy.py
           amodb/apps/platform/commercial_router.py
+          amodb/apps/platform/module_commerce.py
+          amodb/apps/platform/module_commerce_router.py
+          amodb/apps/platform/module_subscription_router.py
+          amodb/apps/platform/module_payment_status_router.py
+          amodb/apps/platform/module_activation_policy.py
+          amodb/apps/platform/module_renewals.py
+          amodb/apps/platform/module_offer_policy.py
+          amodb/apps/platform/module_catalog_runtime_policy.py
+          amodb/apps/platform/payment_data_policy.py
           amodb/entitlements.py
           amodb/jobs/saas_worker_safe.py
+          amodb/jobs/billing_maintenance.py
           amodb/database.py
-      - name: Run commercial provider and lifecycle tests
+      - name: Run commercial provider, module and payment-safety tests
         working-directory: backend
-        run: pytest -q amodb/apps/platform/tests/test_commercial_control_plane.py
+        run: >-
+          pytest -q
+          amodb/apps/platform/tests/test_commercial_control_plane.py
+          amodb/apps/platform/tests/test_module_commerce_security.py
 
   frontend-platform:
     name: Frontend platform build
