@@ -57,9 +57,13 @@ jobs:
         run: |
           PYTHONPATH=backend python - <<'PY'
           from amodb.apps.platform import router
-          routes = [r for r in router.routes if getattr(r, "path", "") == "/console/events"]
-          assert len(routes) == 1, routes
-          assert routes[0].endpoint.__module__.endswith("ops_console_router"), routes[0].endpoint.__module__
+          mounted = [
+              (getattr(r, "path", ""), getattr(getattr(r, "endpoint", None), "__module__", ""))
+              for r in router.routes
+          ]
+          routes = [item for item in mounted if item[0].endswith("/console/events")]
+          assert len(routes) == 1, mounted
+          assert routes[0][1].endswith("ops_console_router"), routes[0]
           PY
       - name: Prove external-pooler mode does not create process-local QueuePool
         env:
