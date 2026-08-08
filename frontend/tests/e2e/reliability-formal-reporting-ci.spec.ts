@@ -82,6 +82,7 @@ function clone<T>(value: T): T {
 
 function createMockApi() {
   const reports = new Map<string, MockReport>();
+  const authenticatedArtifactRequests: string[] = [];
   let sequence = 1;
   let denyTransition = false;
   let crossTenantFailure = false;
@@ -197,17 +198,25 @@ function createMockApi() {
       if (body.to_status === "PUBLISHED") row.published_at = "2026-08-07T11:00:00Z";
       return json(clone(row));
     }
-    if (action === "/view" && method === "GET") {
-      const warning = row.status === "SUPERSEDED" ? "SUPERSEDED — retained historical revision" : "CURRENT CONTROLLED REVISION";
-      return route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", headers: { ETag: row.html_sha256 || "" }, body: `<!doctype html><html><body><div>${warning}</div><h1>${row.report_number}</h1><p>${row.html_sha256}</p></body></html>` });
+    if ((action === "/view" || action === "/pdf") && method === "GET") {
+      const authorization = route.request().headers()["authorization"] || "";
+      if (!authorization.startsWith("Bearer ")) {
+        return json({ detail: "Not authenticated" }, 401);
+      }
+      authenticatedArtifactRequests.push(action);
+      if (action === "/view") {
+        const warning = row.status === "SUPERSEDED" ? "SUPERSEDED — retained historical revision" : "CURRENT CONTROLLED REVISION";
+        return route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", headers: { ETag: row.html_sha256 || "" }, body: `<!doctype html><html><body><div>${warning}</div><h1>${row.report_number}</h1><p>${row.html_sha256}</p></body></html>` });
+      }
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.4 mock" });
     }
-    if (action === "/pdf" && method === "GET") return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.4 mock" });
     return json({ detail: "Unknown report action" }, 404);
   }
 
   return {
     handle,
     reports,
+    authenticatedArtifactRequests,
     denyTransitions(value: boolean) { denyTransition = value; },
     setCrossTenantFailure(value: boolean) { crossTenantFailure = value; },
     recordPostCutoffMutation() { postCutoffMutationCount += 1; },
@@ -274,8 +283,8 @@ async function createAndPublish(page: Page, period: "HALF_YEAR" | "ANNUAL", numb
     await page.getByRole("button", { name: label }).click();
   }
   await expect(page.getByText("PUBLISHED", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open retained view" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open PDF" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open retained view" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open PDF" })).toBeVisible();
   return number;
 }
 
@@ -297,7 +306,7 @@ test.describe("Formal Reliability Programme publication", () => {
     }
   });
 
-  test("surfaces mandatory GAP, RBAC, zero-denominator, immutability and tenant controls", async ({ page }) => {
+  test("surfaces mandatory GAP, RBAC, zero-denominator, immutability, authenticated artifacts and tenant controls", async ({ page }) => {
     const api = createMockApi();
     const base = reportFixture("negative-1", "REL-NEGATIVE-UAT", "HALF_YEAR", "2026-01-01", "2026-06-30");
     api.reports.set(base.id, base);
@@ -328,9 +337,12 @@ test.describe("Formal Reliability Programme publication", () => {
     await expect(page.getByText("SUPERSEDED", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Review requirement" })).toBeDisabled();
 
-    const retained = await page.goto("http://127.0.0.1:8080/reliability/formal-reporting/reports/negative-1/view", { waitUntil: "domcontentloaded" });
-    expect(retained?.status()).toBe(200);
-    await expect(page.locator("body")).toContainText("SUPERSEDED — retained historical revision");
+    const popupPromise = page.waitForEvent("popup");
+    await page.getByRole("button", { name: "Open retained view" }).click();
+    const retainedPopup = await popupPromise;
+    await expect(retainedPopup.locator("body")).toContainText("SUPERSEDED — retained historical revision", { timeout: 10_000 });
+    expect(api.authenticatedArtifactRequests).toContain("/view");
+    await retainedPopup.close();
 
     api.setCrossTenantFailure(true);
     const crossTenant = await page.goto("http://127.0.0.1:8080/reliability/formal-reporting/reports/other-tenant", { waitUntil: "domcontentloaded" });
