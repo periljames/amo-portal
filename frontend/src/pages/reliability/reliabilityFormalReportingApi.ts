@@ -33,6 +33,8 @@ export type RequirementAssessmentStatus =
   | "GAP"
   | "SUPERSEDED";
 
+export type FormalArtifactKind = "view" | "pdf";
+
 export type FormalProfile = {
   id: string;
   code: "KCAA" | "EASA" | "FAA" | "OPERATOR" | string;
@@ -148,6 +150,17 @@ function authHeaders(json = false): Record<string, string> {
   };
 }
 
+async function errorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json()) as { detail?: unknown };
+    return typeof payload.detail === "string"
+      ? payload.detail
+      : JSON.stringify(payload.detail || payload);
+  }
+  return (await response.text()) || `Request failed (${response.status})`;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -167,15 +180,28 @@ async function request<T>(
     throw new Error("Session expired. Please sign in again.");
   }
   if (!response.ok) {
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const payload = (await response.json()) as { detail?: unknown };
-      const detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail || payload);
-      throw new Error(detail || `Request failed (${response.status})`);
-    }
-    throw new Error((await response.text()) || `Request failed (${response.status})`);
+    throw new Error(await errorMessage(response));
   }
   return (await response.json()) as T;
+}
+
+async function requestArtifact(reportId: string, kind: FormalArtifactKind): Promise<Blob> {
+  markSessionActivity(`reliability-formal-report-${kind}`);
+  const response = await fetch(`${ROOT}/reports/${encodeURIComponent(reportId)}/${kind}`, {
+    credentials: "include",
+    headers: {
+      ...authHeaders(false),
+      Accept: kind === "pdf" ? "application/pdf" : "text/html",
+    },
+  });
+  if (response.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+  if (!response.ok) {
+    throw new Error(await errorMessage(response));
+  }
+  return response.blob();
 }
 
 export async function listFormalProfiles(): Promise<FormalProfile[]> {
@@ -302,6 +328,30 @@ export async function transitionFormalReport(
   }, "reliability-formal-transition");
 }
 
+export async function openFormalReportArtifact(
+  reportId: string,
+  kind: FormalArtifactKind
+): Promise<void> {
+  // Open synchronously while the click still carries a browser user gesture,
+  // then populate that window only after the authenticated fetch succeeds.
+  const target = window.open("about:blank", "_blank");
+  if (!target) {
+    throw new Error("The browser blocked the report window. Allow pop-ups for this portal and try again.");
+  }
+  target.opener = null;
+  try {
+    const blob = await requestArtifact(reportId, kind);
+    const objectUrl = URL.createObjectURL(blob);
+    target.location.replace(objectUrl);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5 * 60 * 1000);
+  } catch (cause) {
+    target.close();
+    throw cause;
+  }
+}
+
+// Kept for non-interactive references/debugging only. Portal controls must use
+// openFormalReportArtifact so OAuth2 bearer authentication is attached.
 export function formalReportViewUrl(reportId: string): string {
   return `${ROOT}/reports/${encodeURIComponent(reportId)}/view`;
 }
