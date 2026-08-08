@@ -117,20 +117,17 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
   if (tab.queryTab) {
     return pathMatches(current, target) && (params.get("tab") || "war-room") === tab.queryTab;
   }
-  if (tab.queryWorkspace) {
+
+  // Query-backed workspace landings live on /quality during the transition,
+  // but their consolidated workspace must also remain active on governed legacy
+  // deep links such as /audits/*, /cars/*, /risk/* and /change-control/*.
+  if (tab.queryWorkspace && current === target) {
     const requested = params.get("workspace");
-    const legacyHub = params.get("hub");
-    const legacyWorkspace = legacyHub === "intelligence"
-      ? "intelligence"
-      : legacyHub === "controls" || legacyHub === "evidence"
-        ? "assurance"
-        : null;
-    return current === target && (requested || legacyWorkspace) === tab.queryWorkspace;
+    return requested === tab.queryWorkspace;
   }
+
   if (tab.activePrefixes?.some((prefix) => pathMatches(current, prefix))) return true;
-  if (tab.exact) {
-    return current === target && !params.get("workspace") && !params.get("hub");
-  }
+  if (tab.exact) return current === target && !params.get("workspace") && !params.get("hub");
   return pathMatches(current, target);
 }
 
@@ -168,9 +165,7 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
     icon: WORKSPACE_ICONS[workspace.id],
     exact: workspace.id === "control-room",
     queryWorkspace: ["missions", "people", "assurance", "intelligence"].includes(workspace.id) ? workspace.id : undefined,
-    activePrefixes: workspace.id === "control-room" || ["missions", "people", "assurance", "intelligence"].includes(workspace.id)
-      ? undefined
-      : activePrefixes[workspace.id],
+    activePrefixes: workspace.id === "control-room" ? undefined : activePrefixes[workspace.id],
   }));
 }
 
@@ -291,7 +286,7 @@ const QualityContextTabs: React.FC = () => {
         : moduleSegment === "cars"
           ? { label: "Create CAR", path: `${route.basePath}/cars/new`, icon: Plus }
           : moduleSegment === "change-control"
-            ? { label: "New mission", path: `${route.basePath}/change-control/new`, icon: Plus }
+            ? { label: "New mission", path: `${route.basePath}?workspace=missions`, icon: Plus }
             : { label: "My work", path: defaultWorkPath, icon: ListChecks };
 
   const PrimaryIcon = primaryAction.icon;
