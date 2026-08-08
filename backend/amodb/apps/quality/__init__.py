@@ -11,6 +11,7 @@ from .router import router, public_router  # noqa: F401
 from . import excellence_models as _excellence_models  # noqa: F401,E402
 from . import mission_models as _mission_models  # noqa: F401,E402
 from . import audit_programme_models as _audit_programme_models  # noqa: F401,E402
+from . import people_models as _people_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -60,6 +61,7 @@ from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router 
 from . import audit_programme_router as _audit_programme_router  # noqa: F401,E402
 from . import audit_programme_queue_router as _audit_programme_queue_router  # noqa: F401,E402
 from . import audit_programme_schedule_router as _audit_programme_schedule_router  # noqa: F401,E402
+from . import people_router as _people_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -148,6 +150,20 @@ _canonical_router.legacy_router.include_router(_audit_programme_queue_router.rou
 # route family.
 _canonical_router.router.include_router(_audit_programme_schedule_router.router)
 _canonical_router.legacy_router.include_router(_audit_programme_schedule_router.router)
+
+# People & Privileges owns only Quality authorization decisions, hard eligibility
+# and independence declarations. Training, Workforce and Rostering stay the
+# authoritative source of their own records.
+_include_once(
+    _canonical_router.router,
+    _people_router.router,
+    "/api/maintenance/{amo_code}/quality/people",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _people_router.router,
+    "/api/maintenance/{amo_code}/qms/people",
+)
 
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
