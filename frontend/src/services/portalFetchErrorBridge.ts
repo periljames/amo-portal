@@ -5,6 +5,7 @@ const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const ACTION_CONTEXT_MS = 30_000;
 const SILENT_BACKGROUND_MUTATION_PATHS = new Set([
   "/api/realtime/presence",
+  "/api/realtime/token",
 ]);
 
 type GuardedWindow = Window & {
@@ -39,7 +40,7 @@ function requestUrl(input: RequestInfo | URL): string {
 function isSilentBackgroundMutation(url: string): boolean {
   try {
     const parsed = new URL(url, window.location.origin);
-    return SILENT_BACKGROUND_MUTATION_PATHS.has(parsed.pathname);
+    return SILENT_BACKGROUND_MUTATION_PATHS.has(parsed.pathname.replace(/\/+$/, ""));
   } catch {
     return false;
   }
