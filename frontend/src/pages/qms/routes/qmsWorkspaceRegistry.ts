@@ -90,10 +90,24 @@ export function qmsWorkspacePath(amoCode: string, workspace: QmsWorkspaceId): st
   return `/maintenance/${encodeSegment(amoCode)}/quality/${workspace}`;
 }
 
-export function qmsWorkspaceNavigationItems(amoCode: string): Array<QmsWorkspaceDefinition & { path: string }> {
+export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId): string {
+  const base = `/maintenance/${encodeSegment(amoCode)}/quality`;
+  const paths: Record<QmsWorkspaceId, string> = {
+    "control-room": base,
+    planner: `${base}/calendar/month`,
+    missions: `${base}/change-control/register`,
+    people: `/maintenance/${encodeSegment(amoCode)}/training/competence/dashboard`,
+    assurance: `${base}/audits/dashboard`,
+    intelligence: `${base}/reports/executive-dashboard`,
+  };
+  return paths[workspace];
+}
+
+export function qmsWorkspaceNavigationItems(amoCode: string): Array<QmsWorkspaceDefinition & { path: string; canonicalPath: string }> {
   return QMS_WORKSPACES.map((workspace) => ({
     ...workspace,
-    path: qmsWorkspacePath(amoCode, workspace.id),
+    path: qmsWorkspaceEntryPath(amoCode, workspace.id),
+    canonicalPath: qmsWorkspacePath(amoCode, workspace.id),
   }));
 }
 
