@@ -33,6 +33,16 @@ export type CommercialModule = {
   is_active_for_tenant?: boolean;
   missing_dependencies?: string[];
   can_subscribe?: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  plan_code?: string | null;
+  contract_module_code?: string | null;
+  bundle_parent?: string | null;
+  auto_renew?: boolean;
+  cancel_at_period_end?: boolean;
+  is_root_contract?: boolean;
+  tenant_offer_valid_until?: string | null;
+  tenant_offer_expired?: boolean;
 };
 
 export type ModuleCommerceTerms = {
@@ -126,6 +136,17 @@ export async function initiateTenantInvoicePayment(
 export async function fetchTenantPaymentJob(jobId: string): Promise<PaymentJob> {
   return apiGet<PaymentJob>(
     `/platform/commerce/self-service/payment-jobs/${encodeURIComponent(jobId)}`,
+    { headers: authHeaders() },
+  );
+}
+
+export async function cancelTenantModuleSubscription(
+  moduleCode: string,
+  reason: string,
+): Promise<{ module_code: string; status: string; auto_renew: boolean; cancel_at_period_end: boolean; effective_to?: string | null }> {
+  return apiPost(
+    `/platform/commerce/self-service/modules/${encodeURIComponent(moduleCode)}/cancel`,
+    { reason },
     { headers: authHeaders() },
   );
 }
