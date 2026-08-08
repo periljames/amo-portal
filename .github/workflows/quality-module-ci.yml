@@ -90,6 +90,7 @@ jobs:
           assurance_wiring = script.get_revision("quality_260804_assurance_wiring")
           trigger_fix = script.get_revision("quality_260804_trigger_fix")
           missions = script.get_revision("quality_260808_missions")
+          audit_programme = script.get_revision("quality_260808_audit_programme")
 
           assert integrity is not None
           assert integrity.down_revision == "workforce_20260721_complete"
@@ -105,9 +106,11 @@ jobs:
           assert trigger_fix.down_revision == "quality_260804_assurance_wiring"
           assert missions is not None
           assert missions.down_revision == "docgov_rel_20260807_merge"
+          assert audit_programme is not None
+          assert audit_programme.down_revision == "quality_260808_missions"
           assert all(
               len(revision.revision) <= 32
-              for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix, missions)
+              for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix, missions, audit_programme)
           )
           PY
       - name: Compile Quality backend
@@ -123,6 +126,7 @@ jobs:
           amodb/alembic/versions/quality_260804_assurance_wiring.py
           amodb/alembic/versions/quality_260804_trigger_fix.py
           amodb/alembic/versions/quality_260808_missions.py
+          amodb/alembic/versions/quality_260808_audit_programme.py
       - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
@@ -132,6 +136,15 @@ jobs:
           SECRET_KEY: quality-mapper-test-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('Quality application mappers configured')"
+      - name: Run Audit Programme contract
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+          SECRET_KEY: quality-audit-programme-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
       - name: Run Quality workflow and dashboard regressions
         env:
           APP_ENV: test
@@ -214,6 +227,13 @@ jobs:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
           DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
         run: python -m amodb.apps.quality.tests.postgres_mission_probe
+      - name: Run Audit Programme migration and tenant RLS probe
+        env:
+          APP_ENV: test
+          SECRET_KEY: quality-postgres-test-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+        run: python -m amodb.apps.quality.tests.postgres_audit_programme_probe
 
   frontend:
     runs-on: ubuntu-latest
