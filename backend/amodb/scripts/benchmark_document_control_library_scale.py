@@ -92,16 +92,6 @@ def main() -> None:
         searched = _query_library(db=db, user=user, q="DMS-SCALE-09999", page=1, per_page=25)
         search_seconds = perf_counter() - started
 
-        total_expected = existing + SCALE_DOCUMENTS
-        assert first_page["pagination"]["total"] == total_expected, first_page["pagination"]
-        assert first_page["pagination"]["returned"] <= 100, first_page["pagination"]
-        assert len(first_page["items"]) <= 100
-        assert searched["pagination"]["total"] == 1, searched["pagination"]
-        assert searched["pagination"]["returned"] == 1, searched["pagination"]
-        assert searched["items"][0]["code"] == "DMS-SCALE-09999"
-        assert first_page_seconds <= MAX_QUERY_SECONDS, f"10k first page took {first_page_seconds:.3f}s"
-        assert search_seconds <= MAX_QUERY_SECONDS, f"10k exact search took {search_seconds:.3f}s"
-
         evidence = {
             "seeded_scale_documents": SCALE_DOCUMENTS,
             "total_visible_documents": first_page["pagination"]["total"],
@@ -114,6 +104,16 @@ def main() -> None:
         EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
         EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
         print(json.dumps(evidence, indent=2))
+
+        total_expected = existing + SCALE_DOCUMENTS
+        assert first_page["pagination"]["total"] == total_expected, first_page["pagination"]
+        assert first_page["pagination"]["returned"] <= 100, first_page["pagination"]
+        assert len(first_page["items"]) <= 100
+        assert searched["pagination"]["total"] == 1, searched["pagination"]
+        assert searched["pagination"]["returned"] == 1, searched["pagination"]
+        assert searched["items"][0]["code"] == "DMS-SCALE-09999"
+        assert first_page_seconds <= MAX_QUERY_SECONDS, f"10k first page took {first_page_seconds:.3f}s"
+        assert search_seconds <= MAX_QUERY_SECONDS, f"10k exact search took {search_seconds:.3f}s"
     finally:
         db.close()
 
