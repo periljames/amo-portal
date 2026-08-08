@@ -18,6 +18,7 @@ from .commercial_access_policy import install_billing_access_hot_path
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
+from .module_offer_policy import install_module_offer_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -53,6 +54,8 @@ install_invoice_accounting_policy()
 # Resolve the separate SaaS fiscalization record for invoice views/documents so
 # customer-facing status never contradicts the actual eTIMS workflow state.
 install_fiscal_document_policy()
+# Negotiated price placeholders must never override existing bundle entitlement.
+install_module_offer_policy()
 # Verified settlement activates the commercial parent and every enforceable child
 # capability in a bundle for a finite paid service period.
 install_module_activation_policy()
