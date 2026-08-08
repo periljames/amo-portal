@@ -8,8 +8,11 @@ export { default as DocControlChangesPortfolioPage } from "./documentControl/Doc
 export { default as DocControlDistributionPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlDistributionPortfolioPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlCompliancePortfolioPage } from "./documentControl/DocumentControlCompliancePortfolioPage";
+export { default as DocControlReviewsPage } from "./documentControl/DocumentControlCompliancePortfolioPage";
 export { default as DocControlReportsPage } from "./documentControl/DocumentControlReportsPage";
+export { default as DocControlRegistersPage } from "./documentControl/DocumentControlReportsPage";
 export { default as DocControlAdministrationPage } from "./documentControl/DocumentControlAdministrationPage";
+export { default as DocControlSettingsPage } from "./documentControl/DocumentControlAdministrationPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordsPage } from "./documentControl/DocumentControlRecordsPage";
 export { default as DocumentControlCopiesPage } from "./documentControl/DocumentLibraryCopiesPage";
@@ -23,10 +26,7 @@ export {
   DocumentControlExternalSourcesPage,
   DocumentControlIntegrationsPage,
   DocumentControlLEPPage as DocControlLEPPage,
-  DocumentControlRegistersPage as DocControlRegistersPage,
-  DocumentControlReviewPage as DocControlReviewsPage,
   DocumentControlRevisionPackagePage as DocControlRevisionsPage,
-  DocumentControlSettingsPage as DocControlSettingsPage,
   DocumentControlTemporaryRevisionDetailPage as DocControlTRDetailPage,
   DocumentControlTemporaryRevisionPage as DocControlTRPage,
   DocumentControlWorkflowDetailPage as DocControlDraftDetailPage,
