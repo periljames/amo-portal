@@ -242,11 +242,13 @@ async function openReview(page: Page, api: ReturnType<typeof createMockApi>): Pr
 }
 
 async function createAndPublish(page: Page, period: "HALF_YEAR" | "ANNUAL", number: string, start: string, end: string): Promise<string> {
-  await page.getByLabel("Period", { exact: true }).selectOption(period);
-  await page.getByLabel("Start", { exact: true }).fill(start);
-  await page.getByLabel("End", { exact: true }).fill(end);
-  await page.getByLabel("Report number").fill(number);
-  await page.getByRole("button", { name: "Create draft" }).click();
+  const createForm = page.locator(".rfw-create-form");
+  await expect(createForm).toBeVisible();
+  await createForm.locator("select").nth(1).selectOption(period);
+  await createForm.locator("input[type='date']").nth(0).fill(start);
+  await createForm.locator("input[type='date']").nth(1).fill(end);
+  await createForm.locator("input[placeholder='REL-2026-H2']").fill(number);
+  await createForm.getByRole("button", { name: "Create draft" }).click();
   await expect(page.getByText("Draft formal report created.")).toBeVisible();
 
   await page.getByRole("button", { name: "Freeze cutoff & effectivity" }).click();
@@ -309,7 +311,7 @@ test.describe("Formal Reliability Programme publication", () => {
 
     api.denyTransitions(true);
     await page.getByRole("button", { name: "Submit technical review" }).click();
-    await expect(page.getByRole("alert")).toContainText("cannot perform this formal Reliability transition");
+    await expect(page.locator(".rfw-banner.error")).toContainText("cannot perform this formal Reliability transition");
     api.denyTransitions(false);
 
     const frozenHash = (api.reports.get(base.id)?.source_population as { source_identity_sha256?: string }).source_identity_sha256;
