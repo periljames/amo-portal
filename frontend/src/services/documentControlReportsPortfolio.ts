@@ -1,4 +1,5 @@
-import { apiRequest } from "./api";
+import { authHeaders } from "./auth";
+import { getApiBaseUrl } from "./config";
 
 export type ReportRevision = {
   id?: string | null;
@@ -42,18 +43,9 @@ export type ReportsPortfolioResponse = {
   };
 };
 
-function buildQuery(params: Record<string, string | number | undefined>): string {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") search.set(key, String(value));
-  });
-  const value = search.toString();
-  return value ? `?${value}` : "";
-}
-
-export function getReportsPortfolio(
+export async function getReportsPortfolio(
   tenant: string,
-  params: {
+  options: {
     q?: string;
     documentClass?: string;
     lifecycleStatus?: string;
@@ -61,12 +53,29 @@ export function getReportsPortfolio(
     perPage?: number;
   } = {},
 ): Promise<ReportsPortfolioResponse> {
-  const query = buildQuery({
-    q: params.q,
-    document_class: params.documentClass,
-    lifecycle_status: params.lifecycleStatus,
-    page: params.page,
-    per_page: params.perPage,
-  });
-  return apiRequest(`/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-portfolio${query}`);
+  const query = new URLSearchParams();
+  if (options.q) query.set("q", options.q);
+  if (options.documentClass) query.set("document_class", options.documentClass);
+  if (options.lifecycleStatus) query.set("lifecycle_status", options.lifecycleStatus);
+  if (options.page) query.set("page", String(options.page));
+  if (options.perPage) query.set("per_page", String(options.perPage));
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-portfolio${suffix}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) {
+    let message = `The Reports workspace could not be loaded (${response.status}).`;
+    try {
+      const payload = await response.json();
+      message = typeof payload?.detail === "string"
+        ? payload.detail
+        : payload?.detail?.message || message;
+    } catch {
+      // Keep the operational fallback.
+    }
+    throw new Error(message);
+  }
+  return response.json() as Promise<ReportsPortfolioResponse>;
 }
