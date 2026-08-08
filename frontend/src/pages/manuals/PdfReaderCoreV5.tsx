@@ -27,6 +27,7 @@ import "./pdfReaderNavigatorV5.css";
 type NavigatorTab = "contents" | "pages" | "search";
 
 const MOBILE_NAV_QUERY = "(max-width: 760px)";
+const SCALE_SETTLE_MS = 90;
 
 type ReaderNavigationItem = PdfReaderOutlineItem & {
   source: "PDF" | "INDEX";
@@ -86,11 +87,17 @@ function initialNavigationOpen(): boolean {
   return !window.matchMedia(MOBILE_NAV_QUERY).matches;
 }
 
+function clearReaderHash(): void {
+  if (typeof window === "undefined" || !/^#pdf-page-\d+$/i.test(window.location.hash)) return;
+  window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+}
+
 export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const pageListRef = useRef<HTMLDivElement | null>(null);
   const tokenRef = useRef(Date.now());
+  const scaleSettleTimerRef = useRef<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(initialNavigationOpen);
   const [tab, setTab] = useState<NavigatorTab>("contents");
   const [nativeOutline, setNativeOutline] = useState<ReaderNavigationItem[]>([]);
@@ -98,6 +105,7 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   const [tocFilter, setTocFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(Math.max(1, props.initialPage || 1));
   const [internalNavigation, setInternalNavigation] = useState<PdfReaderNavigationRequest | null>(null);
+  const [releasedExternalToken, setReleasedExternalToken] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<PublicationSearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
@@ -139,12 +147,39 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
     closeMobileNavigation();
   }, [closeMobileNavigation]);
 
+  const releaseProgrammaticNavigation = useCallback(() => {
+    if (scaleSettleTimerRef.current !== null) {
+      window.clearTimeout(scaleSettleTimerRef.current);
+      scaleSettleTimerRef.current = null;
+    }
+    setInternalNavigation((current) => current ? null : current);
+    if (props.navigationRequest?.token) setReleasedExternalToken(props.navigationRequest.token);
+    clearReaderHash();
+  }, [props.navigationRequest?.token]);
+
+  const scheduleScaleStabilization = useCallback(() => {
+    if (scaleSettleTimerRef.current !== null) window.clearTimeout(scaleSettleTimerRef.current);
+    if (props.navigationRequest?.token) setReleasedExternalToken(props.navigationRequest.token);
+    setInternalNavigation((current) => current ? null : current);
+    clearReaderHash();
+
+    const pageToKeep = currentPage;
+    scaleSettleTimerRef.current = window.setTimeout(() => {
+      scaleSettleTimerRef.current = null;
+      ownNavigate(pageToKeep);
+    }, SCALE_SETTLE_MS);
+  }, [currentPage, ownNavigate, props.navigationRequest?.token]);
+
+  const activeExternalNavigation = props.navigationRequest?.token === releasedExternalToken
+    ? null
+    : props.navigationRequest;
+
   const effectiveNavigation = useMemo(() => {
-    const external = props.navigationRequest;
+    const external = activeExternalNavigation;
     if (!external) return internalNavigation;
     if (!internalNavigation) return external;
     return external.token >= internalNavigation.token ? external : internalNavigation;
-  }, [internalNavigation, props.navigationRequest]);
+  }, [activeExternalNavigation, internalNavigation]);
 
   useEffect(() => {
     const page = rootRef.current?.closest<HTMLElement>(".publication-reader-page");
@@ -172,6 +207,10 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [sidebarOpen]);
+
+  useEffect(() => () => {
+    if (scaleSettleTimerRef.current !== null) window.clearTimeout(scaleSettleTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const { tenant, manualId, revisionId } = props.identity;
@@ -220,6 +259,10 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
       event.preventDefault();
       event.stopPropagation();
       openSearch();
+      return;
+    }
+    if (label === "Zoom in" || label === "Zoom out") {
+      scheduleScaleStabilization();
     }
   };
 
@@ -228,6 +271,11 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
     event.preventDefault();
     event.stopPropagation();
     openSearch();
+  };
+
+  const releaseIfReaderViewport = (target: EventTarget | null) => {
+    if (!(target instanceof Element) || !target.closest(".pdfv3-viewport")) return;
+    releaseProgrammaticNavigation();
   };
 
   const runIndexedSearch = async (): Promise<void> => {
@@ -257,6 +305,15 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
       className={`pdfv5-shell${sidebarOpen ? "" : " is-navigation-collapsed"}${sidebarOpen && tab === "search" ? " is-search-panel-open" : ""}`}
       onClickCapture={captureToolbarClick}
       onKeyDownCapture={captureSearchShortcut}
+      onWheelCapture={(event) => releaseIfReaderViewport(event.target)}
+      onTouchStartCapture={(event) => releaseIfReaderViewport(event.target)}
+      onPointerDownCapture={(event) => releaseIfReaderViewport(event.target)}
+      onChangeCapture={(event) => {
+        const target = event.target;
+        if (target instanceof HTMLSelectElement && target.classList.contains("pdfv4-scale-select")) {
+          scheduleScaleStabilization();
+        }
+      }}
     >
       {sidebarOpen ? (
         <button

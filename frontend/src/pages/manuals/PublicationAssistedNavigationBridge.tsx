@@ -19,23 +19,32 @@ function appScroller(): HTMLElement | null {
 }
 
 function scrollPrecisely(element: HTMLElement): void {
+  const readerViewport = element.closest<HTMLElement>(".pdfv3-viewport");
+  if (readerViewport) {
+    const viewportRect = readerViewport.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    const top = readerViewport.scrollTop + elementRect.top - viewportRect.top - 14;
+    readerViewport.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+    return;
+  }
+
   const scroller = appScroller();
-  const offset = 108;
+  const offset = 64;
   if (scroller) {
     const scrollerRect = scroller.getBoundingClientRect();
     const elementRect = element.getBoundingClientRect();
     const top = scroller.scrollTop + elementRect.top - scrollerRect.top - offset;
-    scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    scroller.scrollTo({ top: Math.max(0, top), behavior: "auto" });
     return;
   }
-  window.scrollTo({ top: Math.max(0, window.scrollY + element.getBoundingClientRect().top - offset), behavior: "smooth" });
+  window.scrollTo({ top: Math.max(0, window.scrollY + element.getBoundingClientRect().top - offset), behavior: "auto" });
 }
 
 function targetElement(detail: PublicationNavigationDetail): HTMLElement | null {
   const page = Number(detail.pageNumber || 0);
   if (page > 0) {
     const pageElement = document.querySelector<HTMLElement>(
-      `.pdf-engine-page[data-page-number="${page}"], .publication-native-pdf__page[data-page-number="${page}"]`,
+      `.pdfv3-page[data-page-number="${page}"], .pdf-engine-page[data-page-number="${page}"], .publication-native-pdf__page[data-page-number="${page}"]`,
     );
     if (pageElement) return pageElement;
   }

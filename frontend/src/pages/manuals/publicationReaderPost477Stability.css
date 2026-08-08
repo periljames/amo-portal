@@ -1,0 +1,146 @@
+/* Post-#477 publication-reader stability layer.
+ *
+ * This stylesheet deliberately preserves the React-owned document header,
+ * publication tabs, reader controls and assistant lifecycle. It only tightens
+ * the dense PDF presentation and stabilizes browser scroll/zoom behavior.
+ */
+
+.publication-reader-page--dense-pdf-reader {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header {
+  flex: 0 0 auto;
+  min-height: 48px;
+  gap: 0.55rem;
+  padding: 0.34rem 0.62rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__title {
+  min-width: 0;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__title h1 {
+  overflow: hidden;
+  margin: 0;
+  font-size: clamp(0.92rem, 1.05vw, 1.05rem);
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__title > div > p {
+  margin: 0 0 0.08rem;
+  font-size: 0.62rem;
+  line-height: 1.1;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__title > div > span {
+  margin-top: 0.08rem;
+  font-size: 0.64rem;
+  line-height: 1.1;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__actions {
+  gap: 0.28rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-header__actions button {
+  min-height: 30px;
+  padding: 0.25rem 0.48rem;
+  font-size: 0.68rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-tabs {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding-block: 0.16rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-tabs button {
+  min-height: 29px;
+  padding-block: 0.22rem;
+  font-size: 0.67rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-reader-controls,
+.publication-reader-page--dense-pdf-reader .publication-control-banner {
+  flex: 0 0 auto;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-reader-controls {
+  min-height: 34px;
+  padding-block: 0.18rem;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-reader-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.publication-reader-page--dense-pdf-reader .publication-document-canvas,
+.publication-reader-page--dense-pdf-reader .publication-linked-layout,
+.publication-reader-page--dense-pdf-reader .publication-native-pdf {
+  min-height: 0;
+  height: 100%;
+}
+
+/* The page-count suffix must follow the toolbar's resolved foreground colour.
+ * Reader V4 and the portal shell can resolve their theme variables at different
+ * cascade layers; inheriting here prevents a dark-muted token from landing on a
+ * light toolbar (or the inverse) while retaining the compact typography. */
+.publication-reader-page--dense-pdf-reader .pdfv4-reader .pdfv3-pages > span {
+  color: inherit;
+}
+
+/* The virtual reader is the scroll authority. Browser scroll anchoring must
+ * not replay stale geometry while pages are remeasured after a zoom change. */
+.publication-reader-page--dense-pdf-reader .pdfv3-viewport,
+.publication-reader-page--dense-pdf-reader .pdfv3-virtual-canvas,
+.publication-reader-page--dense-pdf-reader .pdfv3-virtual-row {
+  overflow-anchor: none;
+}
+
+.publication-reader-page--dense-pdf-reader .pdfv3-viewport {
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* Size the uncontrolled mark from the rendered PDF sheet, not the browser
+ * viewport, so it remains proportional at different reader zoom levels. */
+.publication-reader-page--dense-pdf-reader .pdfv3-page {
+  container-type: inline-size;
+}
+
+.publication-reader-page--dense-pdf-reader .pdfv3-watermark {
+  inset: 50% auto auto 50%;
+  width: 88%;
+  transform: translate(-50%, -50%) rotate(-28deg);
+  font-size: clamp(1.05rem, 8cqw, 5.4rem);
+  line-height: 0.96;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .publication-reader-page--dense-pdf-reader .publication-document-header {
+    min-height: 44px;
+    padding: 0.28rem 0.4rem;
+  }
+
+  .publication-reader-page--dense-pdf-reader .publication-document-tabs {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .publication-reader-page--dense-pdf-reader .publication-document-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .publication-reader-page--dense-pdf-reader .publication-document-tabs button {
+    flex: 0 0 auto;
+  }
+}

@@ -4,6 +4,7 @@ import DocumentationAssistantPanel from "./DocumentationAssistantPanel";
 import PublicationAssistedNavigationBridge from "./PublicationAssistedNavigationBridge";
 import PublicationsReaderPage from "./PublicationsReaderPage";
 import PublicationInlineReferenceController from "./PublicationInlineReferenceController";
+import "./publicationReaderPost477Stability.css";
 
 export default function ManualReaderPage() {
   const params = useParams<{ amoCode?: string; tenantSlug?: string; manualId?: string; revId?: string }>();
