@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const DESKTOP = { width: 1440, height: 900 };
 const MOBILE = { width: 390, height: 844 };
@@ -32,7 +32,7 @@ function contrast(foreground: string, background: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-async function seedSession(page: Parameters<typeof test>[0] extends never ? never : any) {
+async function seedSession(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const user = {
       id: "tenant-shell-e2e-user",
