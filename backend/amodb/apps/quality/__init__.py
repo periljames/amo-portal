@@ -58,6 +58,7 @@ from . import mission_router as _mission_router  # noqa: F401,E402
 from . import mission_management_guard_router as _mission_management_guard_router  # noqa: F401,E402
 from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router  # noqa: F401,E402
 from . import audit_programme_router as _audit_programme_router  # noqa: F401,E402
+from . import audit_programme_queue_router as _audit_programme_queue_router  # noqa: F401,E402
 from . import audit_programme_schedule_router as _audit_programme_schedule_router  # noqa: F401,E402
 
 
@@ -134,6 +135,12 @@ _include_once(
     _audit_programme_router.router,
     "/api/maintenance/{amo_code}/qms/audit-programmes",
 )
+
+# The scheduling queue is a bounded join of approved/active programme
+# requirements. It prevents the frontend from issuing one detail request per
+# programme revision simply to discover work awaiting the Planner.
+_canonical_router.router.include_router(_audit_programme_queue_router.router)
+_canonical_router.legacy_router.include_router(_audit_programme_queue_router.router)
 
 # Programme-to-Planner linkage is a focused transactional adapter around the
 # authoritative audit schedule engine. It is deliberately registered after the
