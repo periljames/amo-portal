@@ -30,6 +30,11 @@ pycparser==2.23
 pydantic==2.12.4
 pydantic_core==2.41.5
 openpyxl==3.1.5
+opentelemetry-api==1.43.0
+opentelemetry-sdk==1.43.0
+opentelemetry-exporter-otlp-proto-http==1.43.0
+opentelemetry-instrumentation-fastapi==0.64b0
+opentelemetry-instrumentation-sqlalchemy==0.64b0
 python-dotenv==1.2.1
 python-jose==3.5.0
 python-multipart==0.0.20
