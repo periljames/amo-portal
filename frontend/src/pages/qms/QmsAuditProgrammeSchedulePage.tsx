@@ -139,6 +139,7 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["qms-audit-programme", amoCode, programmeId] }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-programmes", amoCode] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-audit-programme-scheduling-queue", amoCode] }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-programme-schedule-links", amoCode, programmeId] }),
         queryClient.invalidateQueries({ queryKey: ["qms-planner"] }),
       ]);
