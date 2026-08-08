@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -224,12 +224,11 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
   if (selectedMissionId) return <MissionDetail amoCode={amoCode} missionId={selectedMissionId} onBack={backToPortfolio} />;
 
   const missions = listQuery.data?.items || [];
-  const totals = useMemo(() => {
-    const active = missions.filter((mission) => !["COMPLETE", "CANCELLED"].includes(mission.status)).length;
-    const blocked = missions.filter((mission) => mission.readiness.blocking_gates.some((gate) => gate.status === "FAIL" || gate.status === "BLOCKED")).length;
-    const gateReview = missions.filter((mission) => mission.status === "GATE_REVIEW" || mission.status === "READY_FOR_APPROVAL").length;
-    return { active, blocked, gateReview };
-  }, [missions]);
+  const totals = {
+    active: missions.filter((mission) => !["COMPLETE", "CANCELLED"].includes(mission.status)).length,
+    blocked: missions.filter((mission) => mission.readiness.blocking_gates.some((gate) => gate.status === "FAIL" || gate.status === "BLOCKED")).length,
+    gateReview: missions.filter((mission) => mission.status === "GATE_REVIEW" || mission.status === "READY_FOR_APPROVAL").length,
+  };
 
   const submitCreate = (event: React.FormEvent) => {
     event.preventDefault();
