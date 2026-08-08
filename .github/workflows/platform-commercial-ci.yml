@@ -33,7 +33,7 @@ jobs:
   backend-commercial:
     name: Backend commercial contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
@@ -87,10 +87,14 @@ jobs:
           amodb/apps/platform/module_offer_policy.py
           amodb/apps/platform/module_catalog_runtime_policy.py
           amodb/apps/platform/payment_data_policy.py
+          amodb/apps/platform/payment_transport_policy.py
           amodb/entitlements.py
           amodb/jobs/saas_worker_safe.py
           amodb/jobs/billing_maintenance.py
           amodb/database.py
+      - name: Upgrade disposable commercial PostgreSQL schema
+        working-directory: backend
+        run: python -m alembic -c amodb/alembic.ini upgrade heads
       - name: Run commercial provider, module and payment-safety tests
         working-directory: backend
         run: >-
