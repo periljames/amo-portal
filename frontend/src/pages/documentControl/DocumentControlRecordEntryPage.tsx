@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 
 import {
   getDocumentControlDashboard,
@@ -8,6 +8,7 @@ import {
   type ReadTargetResponse,
 } from "../../services/documentControl";
 import DocumentControlRecordPage from "./DocumentControlRecordPage";
+import DocumentGovernanceRecordPage from "./DocumentGovernanceRecordPage";
 import DocumentControlShell, {
   DocumentControlError,
   DocumentControlLoading,
@@ -19,12 +20,13 @@ import DocumentControlShell, {
  *
  * Controllers enter the unified lifecycle workspace. Ordinary readers skip
  * administrative metadata and open the immutable revision they are permitted to
- * read. Detailed governance assignment tooling remains available from the
- * controller workspace through the compatibility governance route while it is
- * progressively folded into Overview/Relationships.
+ * read. Detailed governance assignment tooling remains a compatibility subview
+ * of the same document URL while it is progressively folded into
+ * Overview/Relationships.
  */
 export default function DocumentControlRecordEntryPage() {
   const { tenant, docId, basePath, readerBasePath } = useDocumentControlRoute();
+  const [searchParams] = useSearchParams();
   const [dashboard, setDashboard] = useState<DocumentControlDashboard | null>(null);
   const [target, setTarget] = useState<ReadTargetResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +57,9 @@ export default function DocumentControlRecordEntryPage() {
   if (error) {
     return <DocumentControlShell title="Document unavailable" subtitle="The portal could not resolve a controlled workspace for this record." canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
   }
-  if (dashboard?.capabilities.control) return <DocumentControlRecordPage />;
+  if (dashboard?.capabilities.control) {
+    return searchParams.get("governance") === "assignments" ? <DocumentGovernanceRecordPage /> : <DocumentControlRecordPage />;
+  }
   if (target?.revision_id) {
     return <Navigate to={`${readerBasePath}/${docId}/rev/${target.revision_id}/read`} replace />;
   }
