@@ -122,6 +122,34 @@ def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
     return False
 
 
+def _raise_module_payment_required_if_due(
+    db: Session,
+    *,
+    amo_id: str,
+    module_key: str,
+) -> None:
+    # Imported lazily to avoid a core-entitlement <-> platform package cycle at
+    # application import time. This path executes only when a module is denied,
+    # so it does not add queries to normal entitled requests.
+    from amodb.apps.platform.module_access_router import _payment_due_for_module
+
+    if _payment_due_for_module(
+        db,
+        tenant_id=amo_id,
+        module_code=module_key,
+        now=datetime.now(timezone.utc),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "MODULE_PAYMENT_REQUIRED",
+                "message": f"Module '{module_key}' requires renewal payment.",
+                "module_code": module_key,
+                "redirect_to_billing": True,
+            },
+        )
+
+
 def require_module(module_key: str) -> Callable[[account_models.User, Session], account_models.User]:
     """FastAPI dependency that blocks access when a module is not entitled."""
 
@@ -129,7 +157,6 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_read_db),
     ) -> account_models.User:
-        # Global superusers can always access modules for diagnostics/support.
         if getattr(current_user, "is_superuser", False):
             return current_user
 
@@ -153,12 +180,9 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 },
             )
 
-        # Explicit module subscription is authoritative when present. Do not run
-        # the legacy entitlement query as well: that historical fallback can scan
-        # license records and was previously executed even when the answer was
-        # already known from ModuleSubscription.
         subscription_allowed = _has_module_subscription(db, amo_id, module_key)
         if subscription_allowed is False:
+            _raise_module_payment_required_if_due(db, amo_id=amo_id, module_key=module_key)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -166,14 +190,14 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                     "message": f"Module '{module_key}' is not enabled for this account.",
                     "module_code": module_key,
                     "upgrade_available": True,
+                    "redirect_to_billing": True,
                 },
             )
         if subscription_allowed is True:
             return current_user
 
-        # Backwards-compatible fallback for tenants still licensed exclusively
-        # through LicenseEntitlement records.
         if not _has_module_entitlement(db, amo_id, module_key):
+            _raise_module_payment_required_if_due(db, amo_id=amo_id, module_key=module_key)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -181,6 +205,7 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                     "message": f"Module '{module_key}' is not enabled for this account.",
                     "module_code": module_key,
                     "upgrade_available": True,
+                    "redirect_to_billing": True,
                 },
             )
         return current_user
