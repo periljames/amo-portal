@@ -11,7 +11,7 @@ from . import commercial_services, saas_queue, saas_services
 _INSTALLED = False
 
 
-def _minimized_paystack_webhook(
+def _safe_paystack_webhook(
     db: Session,
     *,
     raw_payload: bytes,
@@ -31,17 +31,9 @@ def _minimized_paystack_webhook(
     if not tenant_id or not invoice_id or not reference:
         raise ValueError("Paystack event is missing portal tenant, invoice or reference metadata")
 
-    credential = commercial_services._provider_credential(
-        db,
-        integrations.PAYSTACK_CODE,
-        tenant_id=tenant_id,
-    )
+    credential = commercial_services._provider_credential(db, integrations.PAYSTACK_CODE, tenant_id=tenant_id)
     secret = saas_services.provider_secrets(credential)
-    if not integrations.verify_paystack_signature(
-        raw_payload,
-        signature,
-        str(secret.get("secret_key") or ""),
-    ):
+    if not integrations.verify_paystack_signature(raw_payload, signature, str(secret.get("secret_key") or "")):
         raise PermissionError("Invalid Paystack webhook signature")
 
     return saas_queue.enqueue_job(
@@ -67,5 +59,5 @@ def install_payment_data_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    commercial_services.record_paystack_webhook = _minimized_paystack_webhook
+    commercial_services.record_paystack_webhook = _safe_paystack_webhook
     _INSTALLED = True
