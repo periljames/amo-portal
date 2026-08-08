@@ -256,9 +256,6 @@ def list_module_catalog(db: Session, *, include_inactive: bool = True) -> list[d
         if code in member_overrides:
             included = set(member_overrides[code])
         implemented = bool(base.get("implemented", code in FIRST_PARTY_MODULES))
-        # A dynamic/custom module becomes sellable only when explicitly bound to a
-        # capability that the code knows how to enforce. An unknown code may be
-        # prepared and priced, but stays catalog-only.
         if code not in FIRST_PARTY_MODULES:
             implemented = False
             base["kind"] = "CATALOG_ONLY"
@@ -306,8 +303,6 @@ def upsert_module_definition(
     first_party = FIRST_PARTY_MODULES.get(code)
     requested_selectable = bool(payload.get("customer_selectable", True))
     if first_party is None:
-        # Superuser can prepare arbitrary commercial catalog entries, but an
-        # unknown capability cannot be sold until code is deployed that enforces it.
         kind = "CATALOG_ONLY"
         requested_selectable = False
 
@@ -339,8 +334,6 @@ def upsert_module_definition(
 
     requested_dependencies = {normalize_code(v) for v in (payload.get("hard_requires") or []) if str(v).strip()}
     minimum_dependencies = {normalize_code(v) for v in ((first_party or {}).get("hard_requires") or [])}
-    if not minimum_dependencies.issubset(requested_dependencies | minimum_dependencies):
-        raise ValueError("Required first-party dependencies cannot be removed")
     requested_dependencies |= minimum_dependencies
 
     requested_members = {normalize_code(v) for v in (payload.get("included_modules") or []) if str(v).strip()}
@@ -349,7 +342,6 @@ def upsert_module_definition(
     if first_party and first_party.get("kind") == "BUNDLE" and not requested_members:
         requested_members = {normalize_code(v) for v in first_party.get("included_modules") or []}
 
-    # Replace active dependency/member rule flags for this commercial definition.
     prefix_dep = f"commercial.module.{code}.requires."
     prefix_member = f"commercial.bundle.{code}.includes."
     existing_rules = (
@@ -517,6 +509,23 @@ def _decode_metadata(row: account_models.ModuleSubscription | None) -> dict[str,
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _parse_offer_expiry(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("valid_until must be an ISO-8601 timestamp") from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _offer_is_current(terms: dict[str, Any], *, now: datetime | None = None) -> bool:
+    if not bool(terms.get("customer_selectable", True)):
+        return False
+    expiry = _parse_offer_expiry(terms.get("valid_until"))
+    return expiry is None or expiry >= (now or datetime.now(timezone.utc))
+
+
 def tenant_offer_overrides(db: Session, *, tenant_id: str) -> dict[str, dict[str, Any]]:
     rows = db.query(account_models.ModuleSubscription).filter(account_models.ModuleSubscription.amo_id == tenant_id).all()
     result: dict[str, dict[str, Any]] = {}
@@ -555,6 +564,13 @@ def set_tenant_offer(
     tax_rate_bps = int(payload.get("tax_rate_bps") if payload.get("tax_rate_bps") is not None else (price.tax_rate_bps if price else 0))
     if tax_rate_bps < 0 or tax_rate_bps > 10000:
         raise ValueError("tax_rate_bps must be between 0 and 10000")
+    trial_days = int(payload.get("trial_days") if payload.get("trial_days") is not None else (price.trial_days if price else 0))
+    if trial_days < 0 or trial_days > 365:
+        raise ValueError("trial_days must be between 0 and 365")
+    valid_until = payload.get("valid_until")
+    expiry = _parse_offer_expiry(valid_until)
+    if expiry is not None and expiry <= datetime.now(timezone.utc):
+        raise ValueError("valid_until must be in the future when creating or updating an offer")
 
     row = (
         db.query(account_models.ModuleSubscription)
@@ -575,9 +591,9 @@ def set_tenant_offer(
         "currency": currency,
         "billing_term": term,
         "tax_rate_bps": tax_rate_bps,
-        "trial_days": int(payload.get("trial_days") if payload.get("trial_days") is not None else (price.trial_days if price else 0)),
+        "trial_days": trial_days,
         "customer_selectable": bool(payload.get("customer_selectable", True)),
-        "valid_until": payload.get("valid_until"),
+        "valid_until": expiry.isoformat() if expiry is not None else None,
         "reason": str(payload.get("reason") or "Tenant commercial terms")[:1000],
         "updated_by": actor_user_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -635,25 +651,37 @@ def self_service_catalog(db: Session, *, tenant_id: str) -> dict[str, Any]:
         for row in db.query(account_models.ModuleSubscription).filter(account_models.ModuleSubscription.amo_id == tenant_id).all()
     }
     items: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
     for code, definition in definitions.items():
         if not definition.get("customer_selectable"):
             continue
         module_prices = list(price_by_module.get(code) or [])
         override = overrides.get(code)
-        if override and override.get("customer_selectable", True):
-            base_id = str(override.get("base_price_id") or "")
-            base = next((row for row in module_prices if row["id"] == base_id), module_prices[0] if module_prices else None)
-            if base:
-                effective = dict(base)
-                effective.update({
-                    "amount_cents": int(override.get("amount_cents", base["amount_cents"])),
-                    "currency": str(override.get("currency") or base["currency"]).upper(),
-                    "billing_term": str(override.get("billing_term") or base["billing_term"]).upper(),
-                    "tax_rate_bps": int(override.get("tax_rate_bps", base["tax_rate_bps"])),
-                    "trial_days": int(override.get("trial_days", base["trial_days"])),
-                    "tenant_override": True,
-                })
-                module_prices = [effective]
+        if override is not None:
+            if not _offer_is_current(override, now=now):
+                # A tenant-specific commercial record is authoritative. Hidden or
+                # expired negotiated terms must not silently fall back to a global
+                # public price that the commercial team intentionally overrode.
+                module_prices = []
+            else:
+                base_id = str(override.get("base_price_id") or "")
+                base = next((row for row in module_prices if row["id"] == base_id), module_prices[0] if module_prices else None)
+                if base:
+                    effective = dict(base)
+                    effective.update({
+                        "amount_cents": int(override.get("amount_cents", base["amount_cents"])),
+                        "currency": str(override.get("currency") or base["currency"]).upper(),
+                        "billing_term": str(override.get("billing_term") or base["billing_term"]).upper(),
+                        "tax_rate_bps": int(override.get("tax_rate_bps", base["tax_rate_bps"])),
+                        "trial_days": int(override.get("trial_days", base["trial_days"])),
+                        "tenant_override": True,
+                        "offer_valid_until": override.get("valid_until"),
+                    })
+                    module_prices = [effective]
+                else:
+                    # Negotiated terms require an enforceable server price identity.
+                    # Do not create a purchasable offer from free-form metadata alone.
+                    module_prices = []
         subscription = subscriptions.get(code)
         missing = validate_dependencies(db, tenant_id=tenant_id, module_code=code)
         items.append({
@@ -701,13 +729,13 @@ def create_self_service_invoice(
 
     available = self_service_catalog(db, tenant_id=tenant_id)
     offer = next((item for item in available["items"] if item["code"] == code), None)
-    if not offer:
-        raise ValueError("Module offer is not available")
+    if not offer or not offer.get("can_subscribe"):
+        raise ValueError("Module offer is not currently available for this tenant")
     selected = next((row for row in offer.get("prices") or [] if str(row.get("id")) == str(price_id)), None)
-    if selected is None and len(offer.get("prices") or []) == 1 and bool((offer.get("prices") or [{}])[0].get("tenant_override")):
-        selected = (offer.get("prices") or [None])[0]
     if selected is None:
         raise ValueError("Price is not available for this tenant")
+    if normalize_code(str(selected.get("module_code") or code)) != code:
+        raise ValueError("Selected price does not belong to this module")
     if int(selected["amount_cents"]) != int(expected_amount_cents):
         raise ValueError("Displayed price changed; refresh the billing page before accepting")
     currency = str(selected["currency"]).upper()
@@ -725,7 +753,14 @@ def create_self_service_invoice(
     )
     if existing:
         details = _safe_invoice_details(existing.description)
-        if str(details.get("module_code") or "") != code or int(existing.amount_cents or 0) != int(selected["amount_cents"]) + int(details.get("tax_amount_cents") or 0):
+        expected_total = int(selected["amount_cents"]) + _tax_cents(int(selected["amount_cents"]), int(selected.get("tax_rate_bps") or 0))
+        if (
+            str(details.get("module_code") or "") != code
+            or str(details.get("price_id") or "") != str(selected.get("id") or "")
+            or str(existing.currency or "").upper() != currency
+            or int(existing.amount_cents or 0) != expected_total
+            or str(details.get("terms_version") or "") != str(terms_version)
+        ):
             raise ValueError("idempotency_key is already bound to a different checkout")
         return _invoice_view(existing)
 
@@ -740,7 +775,7 @@ def create_self_service_invoice(
         amount_cents=total,
         currency=currency,
         entry_type=account_models.LedgerEntryType.CHARGE,
-        description=json.dumps({"event": "MODULE_SELF_SERVICE_ORDER", "module_code": code, "activation_codes": activation_codes, "subtotal_cents": subtotal, "tax_amount_cents": tax_amount, "total_cents": total}, separators=(",", ":")),
+        description=json.dumps({"event": "MODULE_SELF_SERVICE_ORDER", "module_code": code, "price_id": selected.get("id"), "activation_codes": activation_codes, "subtotal_cents": subtotal, "tax_amount_cents": tax_amount, "total_cents": total}, separators=(",", ":")),
         idempotency_key=key,
         recorded_at=now,
     )
@@ -750,6 +785,9 @@ def create_self_service_invoice(
         {
             "module_code": code,
             "module_name": definition.get("name"),
+            "price_id": selected.get("id"),
+            "tenant_override": bool(selected.get("tenant_override")),
+            "offer_valid_until": selected.get("offer_valid_until"),
             "activation_codes": activation_codes,
             "plan_code": selected.get("plan_code") or "STANDARD",
             "billing_term": selected.get("billing_term") or "MONTHLY",
@@ -778,8 +816,6 @@ def create_self_service_invoice(
         description=description,
         idempotency_key=key,
         issued_at=now,
-        # Pay-now module orders are not account-level arrears. A pending optional
-        # order therefore does not lock unrelated subscribed modules.
         due_at=None,
     )
     db.add(invoice)
@@ -838,11 +874,6 @@ def _invoice_view(invoice: account_models.BillingInvoice) -> dict[str, Any]:
 
 
 def resolve_access_aliases(module_key: str) -> tuple[str, ...]:
-    """Compatibility aliases used by route-level entitlement checks.
-
-    The historical finance_inventory subscription grants all three split
-    capabilities. New direct subscriptions use the narrower keys.
-    """
     key = normalize_code(module_key)
     aliases: dict[str, tuple[str, ...]] = {
         "finance": ("finance", "finance_inventory"),
