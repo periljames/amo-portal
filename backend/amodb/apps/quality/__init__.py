@@ -12,6 +12,7 @@ from . import excellence_models as _excellence_models  # noqa: F401,E402
 from . import mission_models as _mission_models  # noqa: F401,E402
 from . import audit_programme_models as _audit_programme_models  # noqa: F401,E402
 from . import people_models as _people_models  # noqa: F401,E402
+from . import assurance_case_models as _assurance_case_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -62,6 +63,7 @@ from . import audit_programme_router as _audit_programme_router  # noqa: F401,E4
 from . import audit_programme_queue_router as _audit_programme_queue_router  # noqa: F401,E402
 from . import audit_programme_schedule_router as _audit_programme_schedule_router  # noqa: F401,E402
 from . import people_router as _people_router  # noqa: F401,E402
+from . import assurance_case_router as _assurance_case_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -165,8 +167,23 @@ _include_once(
     "/api/maintenance/{amo_code}/qms/people",
 )
 
+# Assurance Cases coordinate source-backed investigations and corrective-action
+# effectiveness without creating duplicate audit, CAR, supplier or maintenance
+# records. Investigation statements and lifecycle events remain attributable.
+_include_once(
+    _canonical_router.router,
+    _assurance_case_router.router,
+    "/api/maintenance/{amo_code}/quality/assurance-cases",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _assurance_case_router.router,
+    "/api/maintenance/{amo_code}/qms/assurance-cases",
+)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
 from . import mission_route_order as _mission_route_order  # noqa: F401,E402
 from . import audit_programme_route_order as _audit_programme_route_order  # noqa: F401,E402
+from . import assurance_case_route_order as _assurance_case_route_order  # noqa: F401,E402
