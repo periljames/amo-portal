@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 
-from . import commercial_services, module_commerce, saas_services
+from . import commercial_services, module_commerce
 
 
 _INSTALLED = False
@@ -61,8 +61,6 @@ def enable_paid_module_contract(
         for value in (commercial.get("activation_codes") or [])
         if str(value).strip()
     ]
-    # Always retain the commercial parent subscription as the contract identity;
-    # bundles additionally activate each enforceable child capability.
     codes: list[str] = []
     for code in [root_code, *activation_codes]:
         if code and code not in codes:
@@ -71,6 +69,9 @@ def enable_paid_module_contract(
     now = datetime.now(timezone.utc)
     term = str(commercial.get("billing_term") or "MONTHLY").strip().upper()
     delta = _period_delta(term)
+    subtotal_cents = int(commercial.get("subtotal_cents") or invoice.amount_cents or 0)
+    tax_amount_cents = int(commercial.get("tax_amount_cents") or 0)
+    tax_rate_bps = int(commercial.get("tax_rate_bps") or 0)
     root_row: account_models.ModuleSubscription | None = None
 
     for code in codes:
@@ -104,12 +105,18 @@ def enable_paid_module_contract(
         metadata = _metadata(row)
         metadata.update(
             {
+                "commercial_offer_only": False,
                 "billing_provider": provider,
                 "payment_reference": provider_reference,
                 "portal_invoice_id": invoice.id,
                 "contract_module_code": root_code,
+                "activation_codes": activation_codes,
                 "bundle_parent": root_code if code != root_code else None,
                 "billing_term": term,
+                "plan_code": row.plan_code,
+                "subtotal_cents": subtotal_cents,
+                "tax_rate_bps": tax_rate_bps,
+                "tax_amount_cents": tax_amount_cents,
                 "amount_cents": int(invoice.amount_cents or 0),
                 "currency": str(invoice.currency or "USD").upper(),
                 "current_period_start": period_start.isoformat(),
@@ -134,7 +141,5 @@ def install_module_activation_policy() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    # mark_invoice_paid resolves this global at call time, so installing the
-    # function once updates Paystack, M-PESA and referenced offline settlement.
     commercial_services._enable_paid_module = enable_paid_module_contract
     _INSTALLED = True
