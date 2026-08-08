@@ -19,6 +19,7 @@ from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
 from .module_offer_policy import install_module_offer_policy
+from .payment_data_policy import install_payment_data_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -47,6 +48,9 @@ install_commercial_safety_policy()
 # Keep the tenant access-status request path bounded at scale and prevent default
 # ORM eager loaders from fetching entitlements/ledger/usage data it never uses.
 install_billing_access_hot_path()
+# Retire direct-payment mutations, prevent payment-method records from
+# auto-converting trials, and persist only minimized Paystack webhook metadata.
+install_payment_data_policy()
 # One commercial snapshot now drives invoice documents/exports, settlement,
 # QuickBooks writeback and eTIMS fiscalization. Tax is rounded deterministically
 # and idempotency replays must match the original invoice payload.
