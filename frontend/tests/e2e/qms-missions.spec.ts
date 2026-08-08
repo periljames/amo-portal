@@ -19,6 +19,22 @@ const gateCodes = [
   "SAFETY_CHANGE_ASSESSMENT",
 ] as const;
 
+type GateCode = (typeof gateCodes)[number];
+
+const gateTitles: Record<GateCode, string> = {
+  APPROVAL_RATING: "Approval / rating",
+  FACILITIES: "Facilities and housing",
+  TECHNICAL_DATA: "Current technical data",
+  TOOLING: "Tooling and test equipment",
+  MATERIALS: "Materials and parts support",
+  PERSONNEL: "Qualified personnel",
+  TRAINING: "Training and competence evidence",
+  PROCEDURES: "Approved procedures",
+  CONTRACTED_FUNCTIONS: "Contracted functions and specialist support",
+  MANPOWER: "Manpower and competent coverage",
+  SAFETY_CHANGE_ASSESSMENT: "Safety / change assessment",
+};
+
 function mission(id = "mission-1") {
   return {
     id,
@@ -47,7 +63,7 @@ function mission(id = "mission-1") {
       blocking_gates: gateCodes.map((gateCode, index) => ({
         id: `gate-${index + 1}`,
         gate_code: gateCode,
-        title: gateCode.replaceAll("_", " "),
+        title: gateTitles[gateCode],
         status: "PENDING",
         evidence_status: "UNLINKED",
         blocking_reason: null,
@@ -56,7 +72,7 @@ function mission(id = "mission-1") {
     gates: gateCodes.map((gateCode, index) => ({
       id: `gate-${index + 1}`,
       gate_code: gateCode,
-      title: gateCode.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      title: gateTitles[gateCode],
       category: index < 2 ? "Approval" : "Readiness",
       description: null,
       gate_type: "HARD",
@@ -195,8 +211,8 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
   await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
   await expect(page.getByText("Not assigned", { exact: true })).toBeVisible();
   await expect(page.locator(".qms-mission-detail__gate")).toHaveCount(11);
-  await expect(page.getByText("Tooling And Test Equipment", { exact: true })).toBeVisible();
-  await expect(page.getByText("Training And Competence Evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tooling and test equipment", { exact: true })).toBeVisible();
+  await expect(page.getByText("Training and competence evidence", { exact: true })).toBeVisible();
 });
 
 test("Quality Manager can create a capability Mission and receives seeded hard gates", async ({ page }) => {
