@@ -8,6 +8,8 @@ export { default as DocControlChangesPortfolioPage } from "./documentControl/Doc
 export { default as DocControlDistributionPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlDistributionPortfolioPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlCompliancePortfolioPage } from "./documentControl/DocumentControlCompliancePortfolioPage";
+export { default as DocControlReportsPage } from "./documentControl/DocumentControlReportsPage";
+export { default as DocControlAdministrationPage } from "./documentControl/DocumentControlAdministrationPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordsPage } from "./documentControl/DocumentControlRecordsPage";
 export { default as DocumentControlCopiesPage } from "./documentControl/DocumentLibraryCopiesPage";
