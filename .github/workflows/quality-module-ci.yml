@@ -285,6 +285,9 @@ jobs:
       - name: Browser - governed Missions
         if: always()
         run: npx playwright test tests/e2e/qms-missions.spec.ts --workers=1
+      - name: Browser - Audit Programme
+        if: always()
+        run: npx playwright test tests/e2e/qms-audit-programme.spec.ts --workers=1
       - name: Browser - bounded generic registers
         if: always()
         run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
@@ -303,6 +306,7 @@ jobs:
           npm exec -- eslint
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
+          src/services/qmsAuditProgramme.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
           src/services/qmsMissions.ts
