@@ -209,5 +209,6 @@ _canonical_router.legacy_router.include_router(_intelligence_governance_router.r
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
 from . import mission_route_order as _mission_route_order  # noqa: F401,E402
 from . import audit_programme_route_order as _audit_programme_route_order  # noqa: F401,E402
+from . import people_route_order as _people_route_order  # noqa: F401,E402
 from . import assurance_case_route_order as _assurance_case_route_order  # noqa: F401,E402
 from . import intelligence_route_order as _intelligence_route_order  # noqa: F401,E402
