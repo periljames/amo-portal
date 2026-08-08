@@ -157,7 +157,7 @@ export default function DocumentGovernanceDashboardPage() {
       { id: "acks", label: "Overdue acknowledgements", count: metrics.overdue_acknowledgements || 0, path: `${basePath}/distribution`, tone: "danger" as const },
       { id: "tr", label: "Temporary revisions expiring in 30 days", count: metrics.temporary_revisions_expiring_30_days || 0, path: `${basePath}/changes?view=temporary-revisions`, tone: "warning" as const },
       { id: "reviews", label: "Periodic reviews due in 60 days", count: metrics.reviews_due_60_days || 0, path: `${basePath}/compliance?view=reviews`, tone: "warning" as const },
-      { id: "external", label: "External-source currency checks due", count: metrics.external_currency_checks_due || 0, path: `${basePath}/compliance?view=external`, tone: "warning" as const },
+      { id: "external", label: "External-source currency checks due", count: metrics.external_currency_checks_due || 0, path: `${basePath}/compliance?view=external-sources`, tone: "warning" as const },
     ].filter((item) => item.count > 0);
   }, [basePath, dashboard]);
 
