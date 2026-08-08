@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from amodb.apps.platform import (
     module_commerce,
     payment_data_policy,
     payment_transport_policy,
+    saas_webhooks,
 )
 from amodb.database import WriteSessionLocal
 
@@ -80,6 +82,46 @@ def test_paystack_durable_webhook_payload_is_data_minimized() -> None:
     assert '"reference": reference' in source
     assert '"invoice_id": invoice_id' in source
     assert '"credential_id": credential.id' in source
+
+
+def test_stripe_durable_event_excludes_card_and_billing_details() -> None:
+    payload = {
+        "id": "evt_secure",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_secure",
+                "client_reference_id": "amo-secure",
+                "customer": "cus_secure",
+                "subscription": "sub_secure",
+                "payment_status": "paid",
+                "metadata": {
+                    "tenant_id": "amo-secure",
+                    "module_code": "quality",
+                    "irrelevant_secretish_field": "discard-me",
+                },
+                "customer_details": {
+                    "email": "person@example.test",
+                    "address": {"line1": "Discard me"},
+                },
+                "payment_method_details": {
+                    "card": {"brand": "visa", "last4": "4242"},
+                },
+            }
+        },
+    }
+    minimized = saas_webhooks._minimized_stripe_payload(payload)
+    encoded = json.dumps(minimized)
+    assert minimized["data_minimized"] is True
+    assert minimized["data"]["object"]["metadata"] == {
+        "tenant_id": "amo-secure",
+        "module_code": "quality",
+    }
+    assert "customer_details" not in encoded
+    assert "payment_method_details" not in encoded
+    assert "last4" not in encoded
+    assert "person@example.test" not in encoded
+    assert "discard-me" not in encoded
 
 
 def test_mpesa_durable_callback_does_not_retain_full_callback_or_phone() -> None:
@@ -223,7 +265,7 @@ def test_paid_legacy_period_creates_renewal_invoice_and_locks() -> None:
         assert invoice.amount_cents == 125000
         assert invoice.currency == "KES"
         assert invoice.due_at is not None
-        details = payment_data_policy.json.loads(invoice.description or "{}")
+        details = json.loads(invoice.description or "{}")
         assert details.get("source") == "LEGACY_BASE_RENEWAL"
         assert details.get("lock_scope") == "ACCOUNT"
     finally:
