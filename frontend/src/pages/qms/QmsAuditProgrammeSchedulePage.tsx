@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CalendarCheck2, CheckCircle2, ShieldAlert } from "lucide-react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { ApiClientError } from "../../services/apiClient";
 import {
@@ -22,10 +22,16 @@ const FREQUENCY_BY_RECURRENCE: Record<string, AuditScheduleFrequency | undefined
   ANNUAL: "ANNUAL",
 };
 
-function extractRoute(pathname: string): { programmeId: string; itemId: string } | null {
-  const match = pathname.match(/\/(?:quality|qms)\/audits\/program\/([^/]+)\/items\/([^/]+)\/schedule\/?$/i);
+type ProgrammeScheduleRoute = { amoCode: string; programmeId: string; itemId: string };
+
+function extractRoute(pathname: string): ProgrammeScheduleRoute | null {
+  const match = pathname.match(/\/maintenance\/([^/]+)\/(?:quality|qms)\/audits\/program\/([^/]+)\/items\/([^/]+)\/schedule\/?$/i);
   if (!match) return null;
-  return { programmeId: decodeURIComponent(match[1]), itemId: decodeURIComponent(match[2]) };
+  return {
+    amoCode: decodeURIComponent(match[1]),
+    programmeId: decodeURIComponent(match[2]),
+    itemId: decodeURIComponent(match[3]),
+  };
 }
 
 function criteriaText(criteria: Array<string | Record<string, unknown>>): string {
@@ -61,23 +67,23 @@ type ScheduleFormState = {
 };
 
 const QmsAuditProgrammeSchedulePage: React.FC = () => {
-  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
   const location = useLocation();
   const queryClient = useQueryClient();
   const route = useMemo(() => extractRoute(location.pathname), [location.pathname]);
+  const amoCode = route?.amoCode || "UNKNOWN";
   const programmeId = route?.programmeId || "";
   const itemId = route?.itemId || "";
 
   const programmeQuery = useQuery({
     queryKey: ["qms-audit-programme", amoCode, programmeId],
     queryFn: ({ signal }) => getAuditProgramme(amoCode, programmeId, signal),
-    enabled: Boolean(programmeId),
+    enabled: Boolean(route),
     staleTime: 3_000,
   });
   const optionsQuery = useQuery({
     queryKey: ["qms-planner-schedule-options", amoCode],
     queryFn: ({ signal }) => getPlannerScheduleOptions(amoCode, signal),
-    enabled: Boolean(programmeId),
+    enabled: Boolean(route),
     staleTime: 10_000,
   });
   const programme = programmeQuery.data;
@@ -222,24 +228,24 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
           {!resultScheduleId && canSchedule ? (
             <form className="qms-audit-programme__form" onSubmit={(event) => { event.preventDefault(); setConflicts([]); scheduleMutation.mutate(false); }}>
               <header><strong>Authoritative schedule</strong><small>Personnel and location conflicts are checked before the schedule and programme lineage are committed.</small></header>
-              <label className="is-wide"><span>Schedule title</span><input required minLength={3} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} /></label>
-              <label><span>Date</span><input required type="date" min={item.target_start || programme.period_start} max={item.target_end || programme.period_end} value={form.next_due_date} onChange={(event) => setForm((current) => ({ ...current, next_due_date: event.target.value }))} /></label>
-              <label><span>Frequency</span><input readOnly value={expectedFrequency || "Unsupported"} /></label>
-              <label><span>Start time</span><input required type="time" value={form.start_time} onChange={(event) => setForm((current) => ({ ...current, start_time: event.target.value }))} /></label>
-              <label><span>End time</span><input type="time" value={form.end_time} onChange={(event) => setForm((current) => ({ ...current, end_time: event.target.value }))} /></label>
-              <label><span>Duration · days</span><input type="number" min={1} max={90} value={form.duration_days} onChange={(event) => setForm((current) => ({ ...current, duration_days: event.target.value }))} /></label>
-              <label><span>Audit kind</span><select value={form.kind} onChange={(event) => setForm((current) => ({ ...current, kind: event.target.value }))}>{(optionsQuery.data?.kinds || ["INTERNAL", "EXTERNAL", "THIRD_PARTY"]).map((kind) => <option key={kind} value={kind}>{kind.replaceAll("_", " ")}</option>)}</select></label>
-              <label><span>Audit scope</span><select value={form.audit_scope_id} onChange={(event) => setForm((current) => ({ ...current, audit_scope_id: event.target.value }))}><option value="">Use planner default for kind</option>{(optionsQuery.data?.scopes || []).map((scope) => <option key={scope.id} value={scope.id}>{scope.code} · {scope.name}</option>)}</select></label>
-              <label><span>Location</span><input value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))} /></label>
-              <label className="is-wide"><span>Scope</span><textarea required minLength={3} rows={3} value={form.scope} onChange={(event) => setForm((current) => ({ ...current, scope: event.target.value }))} /></label>
-              <label className="is-wide"><span>Criteria</span><textarea rows={3} value={form.criteria} onChange={(event) => setForm((current) => ({ ...current, criteria: event.target.value }))} /></label>
-              <label><span>Auditee / unit</span><input value={form.auditee} onChange={(event) => setForm((current) => ({ ...current, auditee: event.target.value }))} /></label>
-              <label><span>Lead auditor</span><select value={form.lead_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, lead_auditor_user_id: event.target.value }))}><option value="">Unassigned</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.department_name ? ` · ${person.department_name}` : ""}</option>)}</select></label>
-              <label><span>Observer auditor</span><select value={form.observer_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, observer_auditor_user_id: event.target.value }))}><option value="">None</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
-              <label><span>Assistant auditor</span><select value={form.assistant_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, assistant_auditor_user_id: event.target.value }))}><option value="">None</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
-              <label className="is-wide"><span>Planner notes</span><textarea rows={2} value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} /></label>
-              <label className="is-checkbox"><input type="checkbox" checked={form.notify_auditors} onChange={(event) => setForm((current) => ({ ...current, notify_auditors: event.target.checked }))} /><span>Notify auditors</span></label>
-              <label className="is-checkbox"><input type="checkbox" checked={form.notify_auditees} onChange={(event) => setForm((current) => ({ ...current, notify_auditees: event.target.checked }))} /><span>Notify auditee</span></label>
+              <label className="is-wide" htmlFor="programme-schedule-title"><span>Schedule title</span><input id="programme-schedule-title" required minLength={3} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-date"><span>Date</span><input id="programme-schedule-date" required type="date" min={item.target_start || programme.period_start} max={item.target_end || programme.period_end} value={form.next_due_date} onChange={(event) => setForm((current) => ({ ...current, next_due_date: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-frequency"><span>Frequency</span><input id="programme-schedule-frequency" readOnly value={expectedFrequency || "Unsupported"} /></label>
+              <label htmlFor="programme-schedule-start"><span>Start time</span><input id="programme-schedule-start" required type="time" value={form.start_time} onChange={(event) => setForm((current) => ({ ...current, start_time: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-end"><span>End time</span><input id="programme-schedule-end" type="time" value={form.end_time} onChange={(event) => setForm((current) => ({ ...current, end_time: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-duration"><span>Duration · days</span><input id="programme-schedule-duration" type="number" min={1} max={90} value={form.duration_days} onChange={(event) => setForm((current) => ({ ...current, duration_days: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-kind"><span>Audit kind</span><select id="programme-schedule-kind" value={form.kind} onChange={(event) => setForm((current) => ({ ...current, kind: event.target.value }))}>{(optionsQuery.data?.kinds || ["INTERNAL", "EXTERNAL", "THIRD_PARTY"]).map((kind) => <option key={kind} value={kind}>{kind.replaceAll("_", " ")}</option>)}</select></label>
+              <label htmlFor="programme-schedule-scope-id"><span>Audit scope</span><select id="programme-schedule-scope-id" value={form.audit_scope_id} onChange={(event) => setForm((current) => ({ ...current, audit_scope_id: event.target.value }))}><option value="">Use planner default for kind</option>{(optionsQuery.data?.scopes || []).map((scope) => <option key={scope.id} value={scope.id}>{scope.code} · {scope.name}</option>)}</select></label>
+              <label htmlFor="programme-schedule-location"><span>Location</span><input id="programme-schedule-location" value={form.location} onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))} /></label>
+              <label className="is-wide" htmlFor="programme-schedule-scope"><span>Scope</span><textarea id="programme-schedule-scope" required minLength={3} rows={3} value={form.scope} onChange={(event) => setForm((current) => ({ ...current, scope: event.target.value }))} /></label>
+              <label className="is-wide" htmlFor="programme-schedule-criteria"><span>Criteria</span><textarea id="programme-schedule-criteria" rows={3} value={form.criteria} onChange={(event) => setForm((current) => ({ ...current, criteria: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-auditee"><span>Auditee / unit</span><input id="programme-schedule-auditee" value={form.auditee} onChange={(event) => setForm((current) => ({ ...current, auditee: event.target.value }))} /></label>
+              <label htmlFor="programme-schedule-lead"><span>Lead auditor</span><select id="programme-schedule-lead" value={form.lead_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, lead_auditor_user_id: event.target.value }))}><option value="">Unassigned</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.department_name ? ` · ${person.department_name}` : ""}</option>)}</select></label>
+              <label htmlFor="programme-schedule-observer"><span>Observer auditor</span><select id="programme-schedule-observer" value={form.observer_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, observer_auditor_user_id: event.target.value }))}><option value="">None</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
+              <label htmlFor="programme-schedule-assistant"><span>Assistant auditor</span><select id="programme-schedule-assistant" value={form.assistant_auditor_user_id} onChange={(event) => setForm((current) => ({ ...current, assistant_auditor_user_id: event.target.value }))}><option value="">None</option>{people.map((person) => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
+              <label className="is-wide" htmlFor="programme-schedule-notes"><span>Planner notes</span><textarea id="programme-schedule-notes" rows={2} value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} /></label>
+              <label className="is-checkbox" htmlFor="programme-schedule-notify-auditors"><input id="programme-schedule-notify-auditors" type="checkbox" checked={form.notify_auditors} onChange={(event) => setForm((current) => ({ ...current, notify_auditors: event.target.checked }))} /><span>Notify auditors</span></label>
+              <label className="is-checkbox" htmlFor="programme-schedule-notify-auditee"><input id="programme-schedule-notify-auditee" type="checkbox" checked={form.notify_auditees} onChange={(event) => setForm((current) => ({ ...current, notify_auditees: event.target.checked }))} /><span>Notify auditee</span></label>
               <footer><Link to={backHref}>Cancel</Link><button className="is-primary" disabled={scheduleMutation.isPending || optionsQuery.isLoading}>{scheduleMutation.isPending ? "Checking conflicts…" : "Create authoritative schedule"}</button></footer>
             </form>
           ) : null}
@@ -249,7 +255,7 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
               <header><strong>Scheduling conflicts</strong><small>The schedule was not created. Review the affected personnel/location commitments before using a governed override.</small></header>
               {conflicts.map((conflict) => <article key={`${conflict.subject_type}-${conflict.subject_id}`}><span><AlertTriangle size={14} /><strong>{conflict.title}</strong></span><p>{conflict.reason}</p><small>{conflict.start_date}{conflict.start_time ? ` · ${conflict.start_time}` : ""}{conflict.location ? ` · ${conflict.location}` : ""}</small></article>)}
               <form className="qms-audit-programme__form is-embedded" onSubmit={(event) => { event.preventDefault(); scheduleMutation.mutate(true); }}>
-                <label className="is-wide"><span>Conflict override reason</span><textarea required minLength={8} rows={3} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Explain why this allocation is operationally acceptable despite the identified conflict." /></label>
+                <label className="is-wide" htmlFor="programme-schedule-conflict-reason"><span>Conflict override reason</span><textarea id="programme-schedule-conflict-reason" required minLength={8} rows={3} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Explain why this allocation is operationally acceptable despite the identified conflict." /></label>
                 <footer><button type="submit" className="is-primary" disabled={overrideReason.trim().length < 8 || scheduleMutation.isPending}>Create with governed override</button></footer>
               </form>
             </section>
