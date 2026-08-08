@@ -60,6 +60,14 @@ export type SelfServiceCatalog = {
   terms: ModuleCommerceTerms;
 };
 
+export type ModuleAccessState = {
+  module_code: string;
+  access_state: string;
+  has_access: boolean;
+  redirect_to_billing: boolean;
+  message?: string | null;
+};
+
 export type CommerceInvoice = {
   id: string;
   invoice_number?: string;
@@ -92,6 +100,13 @@ export function makeCommerceIdempotencyKey(prefix = "commerce") {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export async function fetchTenantModuleAccess(moduleCode: string): Promise<ModuleAccessState> {
+  return apiGet<ModuleAccessState>(
+    `/platform/commerce/access/modules/${encodeURIComponent(moduleCode)}`,
+    { headers: authHeaders(), silent: true },
+  );
 }
 
 export async function fetchSelfServiceModuleCatalog(): Promise<SelfServiceCatalog> {
