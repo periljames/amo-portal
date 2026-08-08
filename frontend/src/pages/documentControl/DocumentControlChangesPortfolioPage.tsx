@@ -129,7 +129,7 @@ export default function DocumentControlChangesPortfolioPage() {
     canControl
     actions={<>
       <button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={14} /> Refresh</button>
-      <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/change-proposals`)}><ClipboardList size={14} /> Raise change request</button>
+      <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library?action=raise-change`)}><ClipboardList size={14} /> Raise change request</button>
     </>}
   >
     <section className="dms-changes" data-testid="document-control-changes" aria-busy={refreshing}>
