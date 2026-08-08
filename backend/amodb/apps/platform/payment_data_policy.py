@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import schemas as account_schemas
 from amodb.apps.accounts import services as account_services
 
 from . import commercial_access_policy, commercial_integrations as integrations
@@ -48,7 +49,191 @@ def _safe_trial_projection(original):
     return project
 
 
-def _expire_ended_trials_before_legacy_roll(
+def _safe_legacy_subscription_projection(
+    db: Session,
+    *,
+    license: account_models.TenantLicense,
+    as_of: datetime | None = None,
+) -> account_schemas.SubscriptionRead:
+    now = as_of or datetime.now(timezone.utc)
+    status = license.status
+    read_only = bool(license.is_read_only)
+    grace = license.trial_grace_expires_at
+    current_period_end = license.current_period_end
+
+    overdue = (
+        db.query(account_models.BillingInvoice.id)
+        .filter(
+            account_models.BillingInvoice.amo_id == license.amo_id,
+            account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
+            account_models.BillingInvoice.due_at.isnot(None),
+            account_models.BillingInvoice.due_at <= now,
+        )
+        .first()
+        is not None
+    )
+
+    if status == account_models.LicenseStatus.TRIALING and license.trial_ends_at and license.trial_ends_at <= now:
+        status = account_models.LicenseStatus.EXPIRED
+        grace = grace or license.trial_ends_at + timedelta(days=7)
+        current_period_end = license.trial_ends_at
+        read_only = now >= grace
+    elif status == account_models.LicenseStatus.EXPIRED:
+        if license.trial_ends_at:
+            grace = grace or license.trial_ends_at + timedelta(days=7)
+            read_only = now >= grace
+            current_period_end = current_period_end or license.trial_ends_at
+        else:
+            read_only = True
+    elif status == account_models.LicenseStatus.CANCELLED:
+        read_only = True
+    elif current_period_end and current_period_end <= now:
+        read_only = True
+    elif overdue:
+        read_only = True
+
+    return account_schemas.SubscriptionRead(
+        id=license.id,
+        amo_id=license.amo_id,
+        sku_id=license.sku_id,
+        term=license.term,
+        status=status,
+        trial_started_at=license.trial_started_at,
+        trial_ends_at=license.trial_ends_at,
+        trial_grace_expires_at=grace,
+        is_read_only=read_only,
+        current_period_start=license.current_period_start,
+        current_period_end=current_period_end,
+        canceled_at=license.canceled_at,
+    )
+
+
+def _term_delta(term: account_models.BillingTerm) -> timedelta:
+    return {
+        account_models.BillingTerm.MONTHLY: timedelta(days=30),
+        account_models.BillingTerm.BI_ANNUAL: timedelta(days=182),
+        account_models.BillingTerm.ANNUAL: timedelta(days=365),
+    }.get(term, timedelta(days=30))
+
+
+def _prepare_legacy_renewals(
+    db: Session,
+    *,
+    now: datetime,
+) -> list[str]:
+    """Turn elapsed paid legacy periods into invoices, never free extensions."""
+    due = (
+        db.query(account_models.TenantLicense)
+        .filter(
+            account_models.TenantLicense.status == account_models.LicenseStatus.ACTIVE,
+            account_models.TenantLicense.current_period_end.isnot(None),
+            account_models.TenantLicense.current_period_end <= now,
+        )
+        .all()
+    )
+    payment_required: list[str] = []
+    for license in due:
+        sku = db.get(account_models.CatalogSKU, license.sku_id)
+        if sku is None:
+            license.status = account_models.LicenseStatus.EXPIRED
+            license.is_read_only = True
+            db.add(license)
+            payment_required.append(license.id)
+            continue
+
+        if int(sku.amount_cents or 0) <= 0:
+            start = license.current_period_end or now
+            while start <= now:
+                start = start + _term_delta(license.term)
+            license.current_period_start = license.current_period_end or now
+            license.current_period_end = start
+            license.is_read_only = False
+            db.add(license)
+            account_services._log_billing_audit(
+                db,
+                amo_id=license.amo_id,
+                event="FREE_PERIOD_ROLLED",
+                details={"license_id": license.id, "next_period_end": start.isoformat()},
+            )
+            continue
+
+        ended = license.current_period_end or now
+        key = f"legacy-renewal:{license.id}:{ended.isoformat()}"[:128]
+        existing = (
+            db.query(account_models.BillingInvoice)
+            .filter(
+                account_models.BillingInvoice.amo_id == license.amo_id,
+                account_models.BillingInvoice.idempotency_key == key,
+            )
+            .first()
+        )
+        if existing is None:
+            ledger = account_models.LedgerEntry(
+                amo_id=license.amo_id,
+                license_id=license.id,
+                amount_cents=int(sku.amount_cents or 0),
+                currency=str(sku.currency or "USD").upper(),
+                entry_type=account_models.LedgerEntryType.CHARGE,
+                description=json.dumps(
+                    {
+                        "event": "LEGACY_BASE_RENEWAL",
+                        "sku_code": sku.code,
+                        "license_id": license.id,
+                    },
+                    separators=(",", ":"),
+                ),
+                idempotency_key=key,
+                recorded_at=now,
+            )
+            db.add(ledger)
+            db.flush()
+            invoice = account_models.BillingInvoice(
+                amo_id=license.amo_id,
+                license_id=license.id,
+                ledger_entry_id=ledger.id,
+                amount_cents=int(sku.amount_cents or 0),
+                currency=str(sku.currency or "USD").upper(),
+                status=account_models.InvoiceStatus.PENDING,
+                description=json.dumps(
+                    {
+                        "source": "LEGACY_BASE_RENEWAL",
+                        "sku_code": sku.code,
+                        "billing_term": getattr(license.term, "value", str(license.term)),
+                        "subtotal_cents": int(sku.amount_cents or 0),
+                        "tax_rate_bps": 0,
+                        "tax_amount_cents": 0,
+                        "total_cents": int(sku.amount_cents or 0),
+                        "lock_scope": "ACCOUNT",
+                    },
+                    separators=(",", ":"),
+                ),
+                idempotency_key=key,
+                issued_at=now,
+                due_at=now,
+            )
+            db.add(invoice)
+            account_services._log_billing_audit(
+                db,
+                amo_id=license.amo_id,
+                event="RENEWAL_INVOICE_ISSUED",
+                details={
+                    "license_id": license.id,
+                    "sku": sku.code,
+                    "amount_cents": int(sku.amount_cents or 0),
+                    "currency": str(sku.currency or "USD").upper(),
+                },
+            )
+
+        license.status = account_models.LicenseStatus.EXPIRED
+        license.is_read_only = True
+        db.add(license)
+        payment_required.append(license.id)
+    if due:
+        db.flush()
+    return payment_required
+
+
+def _secure_billing_maintenance(
     db: Session,
     *,
     as_of: datetime | None = None,
@@ -56,7 +241,10 @@ def _expire_ended_trials_before_legacy_roll(
 ) -> dict[str, Any]:
     now = as_of or datetime.now(timezone.utc)
     grace = timedelta(days=7)
-    ended = (
+
+    # Expired trials require a deliberate paid checkout; a stored provider
+    # reference cannot auto-convert them.
+    trials = (
         db.query(account_models.TenantLicense)
         .filter(
             account_models.TenantLicense.status == account_models.LicenseStatus.TRIALING,
@@ -65,7 +253,7 @@ def _expire_ended_trials_before_legacy_roll(
         )
         .all()
     )
-    for license in ended:
+    for license in trials:
         license.status = account_models.LicenseStatus.EXPIRED
         license.current_period_end = license.trial_ends_at
         if not license.trial_grace_expires_at:
@@ -83,9 +271,14 @@ def _expire_ended_trials_before_legacy_roll(
                 "reason": "Provider reference alone is not verified payment settlement.",
             },
         )
-    if ended:
+
+    renewal_due = _prepare_legacy_renewals(db, now=now)
+    if trials or renewal_due:
         db.flush()
-    return _ORIGINAL_ROLL(db, as_of=now, warn_threshold=warn_threshold)
+
+    summary = _ORIGINAL_ROLL(db, as_of=now, warn_threshold=warn_threshold)
+    summary["payment_required_licenses"] = sorted(set(renewal_due))
+    return summary
 
 
 def _safe_paystack_webhook(
@@ -147,8 +340,9 @@ def install_payment_data_policy() -> None:
     account_services.add_payment_method = _blocked_payment_method
 
     # Existing payment-method rows remain readable/removable for migration and
-    # audit, but can no longer auto-convert a trial into paid service.
-    account_services.roll_billing_periods_and_alert = _expire_ended_trials_before_legacy_roll
+    # audit, but can no longer prove payment or renew/convert access.
+    account_services.roll_billing_periods_and_alert = _secure_billing_maintenance
+    account_services._project_subscription_runtime = _safe_legacy_subscription_projection
     commercial_access_policy._project_subscription = _safe_trial_projection(
         commercial_access_policy._project_subscription
     )
