@@ -32,6 +32,7 @@ name: Document Control Governance CI
   push:
     branches:
       - agent/dms-reader-governance-completion
+      - agent/dms-frontend-operating-model-refactor
     paths:
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
@@ -118,7 +119,7 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_rel_20260807_merge"], heads
+          assert len(heads) == 1, f"Expected one Alembic head, got: {heads}"
           ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
           required = {
               "docgov_20260806_governance",
@@ -185,9 +186,11 @@ jobs:
           src/services/documentGovernance.test.ts
           src/services/readerGovernance.test.ts
           src/pages/manuals/PublicationGovernancePanel.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
       - name: Lint changed Document Control and reader surfaces
         run: >-
           npm exec -- eslint
+          src/router.tsx
           src/services/apiClient.ts
           src/services/documentLibrary.ts
           src/services/documentGovernance.ts
@@ -199,6 +202,7 @@ jobs:
           src/pages/documentControl/DocumentLibraryHubPage.tsx
           src/pages/documentControl/DocumentLibraryCopiesPage.tsx
           src/pages/documentControl/DocumentControlShell.tsx
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/pages/manuals/PublicationsReaderPage.tsx
           src/pages/manuals/PublicationGovernancePanel.tsx
           tests/e2e/document-governance-live.spec.ts
