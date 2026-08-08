@@ -199,7 +199,7 @@ function createMockApi() {
     }
     if (action === "/view" && method === "GET") {
       const warning = row.status === "SUPERSEDED" ? "SUPERSEDED — retained historical revision" : "CURRENT CONTROLLED REVISION";
-      return route.fulfill({ status: 200, contentType: "text/html", headers: { ETag: row.html_sha256 || "" }, body: `<!doctype html><html><body><div>${warning}</div><h1>${row.report_number}</h1><p>${row.html_sha256}</p></body></html>` });
+      return route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", headers: { ETag: row.html_sha256 || "" }, body: `<!doctype html><html><body><div>${warning}</div><h1>${row.report_number}</h1><p>${row.html_sha256}</p></body></html>` });
     }
     if (action === "/pdf" && method === "GET") return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.4 mock" });
     return json({ detail: "Unknown report action" }, 404);
