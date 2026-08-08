@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.mission_lifecycle_guard_router import assert_mission_actor_allowed
 from amodb.apps.quality.mission_router import (
     CAPABILITY_ADDITION_GATE_TEMPLATE,
     MissionDecisionCreate,
@@ -63,8 +64,13 @@ def _decision(decision_type: str, status: str):
     )
 
 
-def _mission(*, gates=None, decisions=None):
-    return SimpleNamespace(gates=list(gates or []), decisions=list(decisions or []))
+def _mission(*, gates=None, decisions=None, owner_user_id="quality-owner", sponsor_user_id="accountable-executive"):
+    return SimpleNamespace(
+        gates=list(gates or []),
+        decisions=list(decisions or []),
+        owner_user_id=owner_user_id,
+        sponsor_user_id=sponsor_user_id,
+    )
 
 
 def test_mission_router_exposes_bounded_governed_contract() -> None:
@@ -85,11 +91,17 @@ def test_mission_routes_are_promoted_before_generic_quality_catchall() -> None:
         (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     )
     for router, prefix in cases:
-        full_path = f"{prefix}/missions"
-        matches = _matching_routes(router, full_path, "GET")
-        assert len(matches) == 1
-        assert matches[0].endpoint.__name__ == "list_missions"
-        assert router.routes.index(matches[0]) < _catchall_index(router)
+        list_path = f"{prefix}/missions"
+        list_matches = _matching_routes(router, list_path, "GET")
+        assert len(list_matches) == 1
+        assert list_matches[0].endpoint.__name__ == "list_missions"
+        assert router.routes.index(list_matches[0]) < _catchall_index(router)
+
+        decision_path = f"{prefix}/missions/{{mission_id}}/decisions"
+        decision_matches = _matching_routes(router, decision_path, "POST")
+        assert len(decision_matches) == 1
+        assert decision_matches[0].endpoint.__name__ == "record_governed_mission_decision"
+        assert router.routes.index(decision_matches[0]) < _catchall_index(router)
 
 
 def test_mission_models_are_registered_in_shared_metadata() -> None:
@@ -164,6 +176,35 @@ def test_accountable_executive_cannot_approve_before_quality_self_evaluation() -
         )
     assert exc.value.status_code == 409
     assert "Quality self-evaluation" in str(exc.value.detail)
+
+
+def test_accountable_executive_decision_requires_named_sponsor() -> None:
+    payload = MissionDecisionCreate(
+        decision_type="ACCOUNTABLE_EXECUTIVE",
+        status="APPROVED",
+        rationale="Approve capability addition.",
+    )
+    with pytest.raises(HTTPException) as missing:
+        assert_mission_actor_allowed(_mission(sponsor_user_id=None), payload, "accountable-executive")
+    assert missing.value.status_code == 409
+
+    with pytest.raises(HTTPException) as wrong_actor:
+        assert_mission_actor_allowed(_mission(), payload, "quality-owner")
+    assert wrong_actor.value.status_code == 403
+
+    assert_mission_actor_allowed(_mission(), payload, "accountable-executive")
+
+
+def test_quality_and_authority_workflow_decisions_require_named_mission_owner() -> None:
+    payload = MissionDecisionCreate(
+        decision_type="QUALITY_SELF_EVALUATION",
+        status="APPROVED",
+        rationale="Quality self-evaluation approved.",
+    )
+    with pytest.raises(HTTPException) as wrong_actor:
+        assert_mission_actor_allowed(_mission(), payload, "amo-admin")
+    assert wrong_actor.value.status_code == 403
+    assert_mission_actor_allowed(_mission(), payload, "quality-owner")
 
 
 def test_authority_submission_requires_accountable_executive_approval() -> None:
