@@ -64,7 +64,7 @@ const QmsAuditProgrammePage: React.FC = () => {
     queryFn: ({ signal }) => listAuditUniverse(amoCode, signal),
     staleTime: 10_000,
   });
-  const programmes = programmesQuery.data?.items || [];
+  const programmes = useMemo<AuditProgramme[]>(() => programmesQuery.data?.items ?? [], [programmesQuery.data?.items]);
   const selectedProgrammeId = selectedId || programmes[0]?.id || null;
   const detailQuery = useQuery({
     queryKey: ["qms-audit-programme", amoCode, selectedProgrammeId],
