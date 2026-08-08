@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { isAuthenticated } from "../services/auth";
+import { emitProductEvent } from "../services/productAnalytics";
 import PortalRoutes from "../portalRoutes";
 
 const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
@@ -56,11 +57,23 @@ export const AppRouter: React.FC = () => {
   const location = useLocation();
   const parts = pathSegments(location.pathname);
   const isTenantPath = parts[0] === "maintenance" && Boolean(parts[1]);
-  if (!isTenantPath) return <PortalRoutes />;
-
-  const amoCode = parts[1];
+  const amoCode = parts[1] || "";
   const module = parts[2] || "";
   const view = parts[3] || "";
+
+  React.useEffect(() => {
+    if (!isTenantPath || !module || !isAuthenticated()) return;
+    void emitProductEvent({
+      event_type: "module_opened",
+      module,
+      metadata: {
+        entry_point: view ? "module-subview" : "module-root",
+        route_name: view ? `${module}.${view}` : module,
+      },
+    });
+  }, [isTenantPath, module, view]);
+
+  if (!isTenantPath) return <PortalRoutes />;
 
   if (
     DEPARTMENT_HOMES.has(module)
@@ -87,7 +100,6 @@ export const AppRouter: React.FC = () => {
       </Routes>
     );
   }
-
 
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {
