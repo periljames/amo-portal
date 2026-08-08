@@ -84,6 +84,32 @@ export type AuditProgramme = {
 export type AuditProgrammeList = { items: AuditProgramme[]; total: number; limit: number; offset: number; has_more: boolean };
 export type AuditUniverseList = { items: AuditUniverseItem[]; total: number; limit: number; offset: number; has_more: boolean };
 
+export type AuditProgrammeSchedulingQueueItem = {
+  programme_id: string;
+  programme_ref: string;
+  programme_status: AuditProgrammeStatus;
+  programme_year: number;
+  programme_revision_no: number;
+  programme_item_id: string;
+  universe_item_id: string;
+  auditable_entity?: string | null;
+  audit_type: string;
+  title: string;
+  recurrence: string;
+  mandatory_surveillance: boolean;
+  target_start?: string | null;
+  target_end?: string | null;
+  prioritization_basis: Array<Record<string, unknown>>;
+};
+
+export type AuditProgrammeSchedulingQueue = {
+  items: AuditProgrammeSchedulingQueueItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
 export type AuditProgrammeScheduleLink = {
   programme_item_id: string;
   state: AuditProgrammeItemState;
@@ -221,6 +247,10 @@ export function addAuditProgrammeItem(amoCode: string, programmeId: string, payl
   prioritization_basis: Array<Record<string, unknown>>;
 }): Promise<AuditProgrammeItem> {
   return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items`), jsonOptions("POST", payload));
+}
+
+export function listAuditProgrammeSchedulingQueue(amoCode: string, signal?: AbortSignal): Promise<AuditProgrammeSchedulingQueue> {
+  return apiRequest(qmsPath(amoCode, "/audit-programmes/planner/queue?limit=50&offset=0"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
 }
 
 export function listAuditProgrammeScheduleLinks(amoCode: string, programmeId: string, signal?: AbortSignal): Promise<{ items: AuditProgrammeScheduleLink[] }> {
