@@ -2,19 +2,22 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  BrainCircuit,
   CalendarDays,
   ChevronDown,
   ClipboardCheck,
+  FolderKanban,
   Gauge,
-  Inbox,
   ListChecks,
   MoreHorizontal,
   Plus,
   RefreshCw,
   ShieldCheck,
+  UserRoundCheck,
   type LucideIcon,
 } from "lucide-react";
 
+import { qmsWorkspaceNavigationItems, type QmsWorkspaceId } from "../../pages/qms/routes/qmsWorkspaceRegistry";
 
 type ContextTab = {
   id: string;
@@ -58,38 +61,62 @@ const STATIC_CAR_VIEWS = new Set([
   "closed",
 ]);
 
+const WORKSPACE_ICONS: Record<QmsWorkspaceId, LucideIcon> = {
+  "control-room": Gauge,
+  planner: CalendarDays,
+  missions: FolderKanban,
+  people: UserRoundCheck,
+  assurance: ShieldCheck,
+  intelligence: BrainCircuit,
+};
+
 function parseQualityRoute(pathname: string): QualityRoute | null {
-  const match = pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/(.*))?$/i);
-  if (!match) return null;
-  const amoCode = decodeURIComponent(match[1]);
-  return {
-    amoCode,
-    basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
-    segments: (match[2] || "").split("/").filter(Boolean).map((segment) => decodeURIComponent(segment)),
-  };
+  const qualityMatch = pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/(.*))?$/i);
+  if (qualityMatch) {
+    const amoCode = decodeURIComponent(qualityMatch[1]);
+    return {
+      amoCode,
+      basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
+      segments: (qualityMatch[2] || "").split("/").filter(Boolean).map((segment) => decodeURIComponent(segment)),
+    };
+  }
+
+  // People & Privileges deliberately consumes the authoritative Training/Competence
+  // workspace during the transition instead of creating a duplicate QMS personnel store.
+  const peopleMatch = pathname.match(/^\/maintenance\/([^/]+)\/training\/competence(?:\/.*)?$/i);
+  if (peopleMatch) {
+    const amoCode = decodeURIComponent(peopleMatch[1]);
+    return {
+      amoCode,
+      basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
+      segments: ["people"],
+    };
+  }
+
+  return null;
 }
 
 function moduleTitle(segment: string | undefined): string {
   const labels: Record<string, string> = {
-    inbox: "My Quality Work",
-    calendar: "QMS Calendar",
-    audits: "Audits",
-    findings: "Findings",
-    cars: "CAR / CAPA",
-    risk: "Risk & Opportunities",
-    "change-control": "Change Control",
-    system: "System & Processes",
+    calendar: "Planner",
+    audits: "Audit Assurance",
+    findings: "Finding Assurance",
+    cars: "Corrective Action",
+    risk: "Risk Intelligence",
+    "change-control": "Missions",
+    system: "Quality System",
     documents: "Controlled Documents",
-    suppliers: "Suppliers",
-    "equipment-calibration": "Equipment & Calibration",
-    "external-interface": "External Interface",
+    suppliers: "Supplier Assurance",
+    "equipment-calibration": "Tooling Assurance",
+    "external-interface": "External Assurance",
     "management-review": "Management Review",
-    reports: "Reports & Analytics",
-    "evidence-vault": "Evidence Vault",
+    reports: "Quality Intelligence",
+    "evidence-vault": "Evidence Room",
     settings: "QMS Settings",
     aerodoc: "AeroDoc",
+    people: "People & Privileges",
   };
-  return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Control Centre";
+  return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Assurance";
 }
 
 function pathMatches(current: string, target: string): boolean {
@@ -109,16 +136,42 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
   return pathMatches(current, target);
 }
 
-function topLevelTabs(basePath: string): ContextTab[] {
-  return [
-    { id: "overview", label: "Control Centre", path: basePath, icon: Gauge, exact: true },
-    { id: "work", label: "My Work", path: `${basePath}/inbox/assigned-to-me`, icon: Inbox, activePrefixes: [`${basePath}/inbox`] },
-    { id: "calendar", label: "Calendar", path: `${basePath}/calendar/month`, icon: CalendarDays, activePrefixes: [`${basePath}/calendar`] },
-    { id: "audits", label: "Audits", path: `${basePath}/audits/dashboard`, icon: ClipboardCheck, activePrefixes: [`${basePath}/audits`] },
-    { id: "findings", label: "Findings", path: `${basePath}/findings/register`, icon: ShieldCheck, activePrefixes: [`${basePath}/findings`] },
-    { id: "cars", label: "CAR / CAPA", path: `${basePath}/cars/register`, icon: ListChecks, activePrefixes: [`${basePath}/cars`] },
-    { id: "reports", label: "Reports", path: `${basePath}/reports/executive-dashboard`, activePrefixes: [`${basePath}/reports`] },
-  ];
+function topLevelTabs(route: QualityRoute): ContextTab[] {
+  const workspaceItems = qmsWorkspaceNavigationItems(route.amoCode);
+  const base = route.basePath;
+  const training = `/maintenance/${encodeURIComponent(route.amoCode)}/training/competence`;
+  const activePrefixes: Record<QmsWorkspaceId, string[]> = {
+    "control-room": [base],
+    planner: [`${base}/planner`, `${base}/calendar`],
+    missions: [`${base}/missions`, `${base}/change-control`],
+    people: [`${base}/people`, training],
+    assurance: [
+      `${base}/assurance`,
+      `${base}/audits`,
+      `${base}/findings`,
+      `${base}/cars`,
+      `${base}/suppliers`,
+      `${base}/equipment-calibration`,
+      `${base}/external-interface`,
+      `${base}/evidence-vault`,
+    ],
+    intelligence: [
+      `${base}/intelligence`,
+      `${base}/risk`,
+      `${base}/management-review`,
+      `${base}/reports`,
+      `${base}/system`,
+    ],
+  };
+
+  return workspaceItems.map((workspace) => ({
+    id: workspace.id,
+    label: workspace.shortLabel,
+    path: workspace.path,
+    icon: WORKSPACE_ICONS[workspace.id],
+    exact: workspace.id === "control-room",
+    activePrefixes: workspace.id === "control-room" ? undefined : activePrefixes[workspace.id],
+  }));
 }
 
 function auditSectionTabs(basePath: string): ContextTab[] {
@@ -220,7 +273,7 @@ const QualityContextTabs: React.FC = () => {
       ? carRecordTabs(route.basePath, safeRecordKey)
       : moduleSegment === "audits"
         ? auditSectionTabs(route.basePath)
-        : topLevelTabs(route.basePath);
+        : topLevelTabs(route);
 
   const title = isAuditRecord
     ? `Audit ${safeRecordKey}`
@@ -228,6 +281,7 @@ const QualityContextTabs: React.FC = () => {
       ? `CAR ${safeRecordKey}`
       : moduleTitle(moduleSegment);
 
+  const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
   const primaryAction = isAuditRecord
     ? { label: "Audit register", path: `${route.basePath}/audits/register`, icon: ClipboardCheck }
     : isCarRecord
@@ -236,15 +290,17 @@ const QualityContextTabs: React.FC = () => {
         ? { label: "New finding", path: `${route.basePath}/findings/new`, icon: Plus }
         : moduleSegment === "cars"
           ? { label: "Create CAR", path: `${route.basePath}/cars/new`, icon: Plus }
-          : { label: "Schedule audit", path: `${route.basePath}/audits/plan?view=calendar&create=1`, icon: Plus };
+          : moduleSegment === "change-control"
+            ? { label: "New mission", path: `${route.basePath}/change-control/new`, icon: Plus }
+            : { label: "My work", path: defaultWorkPath, icon: ListChecks };
 
   const PrimaryIcon = primaryAction.icon;
 
   return createPortal(
-    <section className="quality-context-bar" aria-label="Quality workspace navigation">
+    <section className="quality-context-bar" aria-label="Quality Assurance workspace navigation">
       <div className="quality-context-bar__identity">
         <span className="quality-context-bar__mark"><ShieldCheck size={17} aria-hidden="true" /></span>
-        <span><small>Quality workspace</small><strong>{title}</strong></span>
+        <span><small>Quality assurance</small><strong>{title}</strong></span>
       </div>
 
       <nav className="quality-context-bar__tabs" aria-label={`${title} related pages`}>
@@ -260,16 +316,20 @@ const QualityContextTabs: React.FC = () => {
       </nav>
 
       <div className="quality-context-bar__actions">
-        <span className="quality-context-bar__live" title="QMS pages refresh automatically while active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
+        <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
         <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}><PrimaryIcon size={15} aria-hidden="true" /><span>{primaryAction.label}</span></button>
         <details className="quality-context-bar__more">
-          <summary aria-label="More Quality pages"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
+          <summary aria-label="Open Quality assurance lenses"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
           <div>
-            <button type="button" onClick={() => navigate(`${route.basePath}/risk/register`)}>Risk & opportunities</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/change-control/register`)}>Change control</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/documents/library`)}>Controlled documents</button>
+            <strong>Assurance lenses</strong>
+            <button type="button" onClick={() => navigate(`${route.basePath}/audits/dashboard`)}>Audits & surveillance</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/findings/register`)}>Findings</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/cars/register`)}>Corrective action</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/suppliers/approved-list`)}>Supplier assurance</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/equipment-calibration/overdue`)}>Tooling exposure</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/risk/risk-matrix`)}>Risk intelligence</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/management-review/dashboard`)}>Management review</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/evidence-vault/search`)}>Evidence vault</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/evidence-vault/search`)}>Evidence room</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/settings/general`)}>QMS settings</button>
           </div>
         </details>
