@@ -192,8 +192,9 @@ test.describe("Document Control daily operating model", () => {
     await expect(page.locator(".pdfv3-pages")).toContainText("of 2000", { timeout: 30_000 });
     await expect(page.locator(".pdfv3-error,.pdfv3-document-error")).toHaveCount(0);
 
+    const readingMode = page.getByRole("group", { name: "Reading mode" });
     for (const label of ["Standard", "Immersive", "Review changes", "Fullscreen"]) {
-      await expect(page.getByRole("button", { name: new RegExp(label, "i") })).toBeVisible();
+      await expect(readingMode.getByRole("button", { name: new RegExp(label, "i") })).toBeVisible();
     }
 
     const jumpMetrics: Array<{ page: number; elapsed_ms: number; mounted_pages: number }> = [];
