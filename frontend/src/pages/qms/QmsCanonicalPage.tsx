@@ -1,8 +1,8 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
 import QualityCarsPage from "../QualityCarsPage";
-import QmsAuditProgrammePage from "./QmsAuditProgrammePage";
 import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
+import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
 import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
@@ -32,7 +32,7 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }
 
   if (/\/(?:quality|qms)\/audits\/program\/?$/i.test(location.pathname)) {
-    return <QmsAuditProgrammePage />;
+    return <QmsAuditProgrammeWorkspacePage />;
   }
 
   if (pathname.includes("/quality/calendar") || pathname.includes("/qms/calendar")) {
