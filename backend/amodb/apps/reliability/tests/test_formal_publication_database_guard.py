@@ -27,7 +27,10 @@ def test_published_child_guards_include_insert_on_postgresql():
     engine = _postgres_engine()
     with engine.connect() as connection:
         rows = connection.execute(text("""
-            SELECT tgname::text AS tgname, pg_get_triggerdef(oid) AS definition
+            SELECT
+              tgname::text AS tgname,
+              tgrelid::regclass::text AS table_name,
+              pg_get_triggerdef(oid) AS definition
             FROM pg_trigger
             WHERE tgname::text IN (
               'trg_rel_formal_section_guard',
@@ -37,11 +40,12 @@ def test_published_child_guards_include_insert_on_postgresql():
             )
               AND NOT tgisinternal
         """)).mappings().all()
-    definitions = {row["tgname"]: row["definition"] for row in rows}
-    assert definitions.keys() == TRIGGERS.keys()
+    trigger_rows = {row["tgname"]: row for row in rows}
+    assert trigger_rows.keys() == TRIGGERS.keys()
     for trigger, table in TRIGGERS.items():
-        definition = definitions[trigger]
-        assert f"ON public.{table}" in definition or f"ON {table}" in definition
+        row = trigger_rows[trigger]
+        assert row["table_name"].split(".")[-1] == table
+        definition = row["definition"]
         assert "INSERT" in definition
         assert "UPDATE" in definition
         assert "DELETE" in definition
