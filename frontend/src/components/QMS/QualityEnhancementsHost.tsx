@@ -60,6 +60,48 @@ const CarInviteResponsiveStyleLoader: React.FC = () => {
   return null;
 };
 
+const QualityDialogFocusRestorer: React.FC = () => {
+  useEffect(() => {
+    let activeDialog: HTMLElement | null = null;
+    let opener: HTMLElement | null = null;
+    let lastExternalFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('[role="dialog"][aria-modal="true"]')) return;
+      lastExternalFocus = target;
+    };
+
+    const observer = new MutationObserver(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      if (dialog && !activeDialog) {
+        activeDialog = dialog;
+        opener = lastExternalFocus?.isConnected ? lastExternalFocus : null;
+        return;
+      }
+      if (!dialog && activeDialog) {
+        const restoreTarget = opener;
+        activeDialog = null;
+        opener = null;
+        window.requestAnimationFrame(() => {
+          if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
+        });
+        return;
+      }
+      if (dialog) activeDialog = dialog;
+    });
+
+    document.addEventListener("focusin", onFocusIn, true);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      observer.disconnect();
+    };
+  }, []);
+  return null;
+};
+
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const queryClient = useQueryClient();
   const [cacheRevision, setCacheRevision] = useState(0);
@@ -125,6 +167,7 @@ const QualityEnhancementsHost: React.FC = () => {
       <PortalTextScaleManager />
       <QualityContextTabs />
       <QualityDataFreshnessCoordinator />
+      <QualityDialogFocusRestorer />
       {auditEnhancement}
     </>
   );
