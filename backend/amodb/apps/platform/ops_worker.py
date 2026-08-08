@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+import time
 
 from amodb.database import WriteSessionLocal, close_session_safely
-from amodb.observability import operation_span
+from amodb.observability import operation_span, record_job_execution
 
 from . import models, platform_command_queue, saas_lease, saas_queue
 
@@ -45,6 +46,8 @@ def _process_one(db, identity: str) -> bool:
         return False
 
     job = jobs[0]
+    started = time.perf_counter()
+    outcome = "FAILED"
     try:
         with operation_span(
             "platform_ops.command.execute",
@@ -59,16 +62,19 @@ def _process_one(db, identity: str) -> bool:
                 result = platform_command_queue.process_leased_job(db, job)
                 heartbeat.raise_if_lost()
         saas_queue.complete_job(db, job, result, worker_id=identity)
+        outcome = "SUCCEEDED"
     except saas_queue.LeaseLostError:
+        outcome = "LEASE_LOST"
         db.rollback()
-        return True
     except PermissionError as exc:
+        outcome = "BLOCKED"
         try:
             saas_queue.fail_job(db, job, exc, retryable=False, worker_id=identity)
         except saas_queue.LeaseLostError:
+            outcome = "LEASE_LOST"
             db.rollback()
-        return True
     except Exception as exc:
+        outcome = "FAILED"
         try:
             saas_queue.fail_job(
                 db,
@@ -78,8 +84,15 @@ def _process_one(db, identity: str) -> bool:
                 worker_id=identity,
             )
         except saas_queue.LeaseLostError:
+            outcome = "LEASE_LOST"
             db.rollback()
-        return True
+    finally:
+        record_job_execution(
+            job_type=job.job_type,
+            status=outcome,
+            duration_seconds=time.perf_counter() - started,
+            retry_count=max(0, int(job.attempt_count or 0) - 1),
+        )
     return True
 
 
