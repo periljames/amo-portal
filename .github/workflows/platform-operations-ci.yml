@@ -96,19 +96,20 @@ jobs:
           for path in root.rglob("*"):
               if not path.is_file() or path.name in excluded_names:
                   continue
-              if path.suffix.lower() in {".json", ".yml", ".yaml", ".sh", ".conf", ".toml", ".ini"}:
-                  try:
-                      lines = path.read_text(encoding="utf-8").splitlines()
-                  except UnicodeDecodeError:
+              if path.suffix.lower() not in {".json", ".yml", ".yaml", ".sh", ".conf", ".toml", ".ini"}:
+                  continue
+              try:
+                  lines = path.read_text(encoding="utf-8").splitlines()
+              except UnicodeDecodeError:
+                  continue
+              for lineno, line in enumerate(lines, 1):
+                  match = credential_key.search(line.strip())
+                  if not match:
                       continue
-                  for lineno, line in enumerate(lines, 1):
-                      match = credential_key.search(line.strip())
-                      if not match:
-                          continue
-                      value = match.group(2).strip()
-                      if not value or value.startswith(("$", "<", "{{", "${env:")):
-                          continue
-                      suspicious.append(f"{path}:{lineno}: literal credential assignment")
+                  value = match.group(2).strip().strip("\"'").strip()
+                  if not value or value.startswith(("$", "<", "{{", "${env:")):
+                      continue
+                  suspicious.append(f"{path}:{lineno}: literal credential assignment")
           if suspicious:
               print("\n".join(suspicious), file=sys.stderr)
               raise SystemExit("Potential hard-coded observability credential found")
