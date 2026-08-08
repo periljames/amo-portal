@@ -18,11 +18,14 @@ jobs:
         with:
           ref: agent/platform-commercial-scale-hardening
           fetch-depth: 0
-      - name: Consolidate commercial access and delete dead surfaces
+
+      - name: Transform stale commercial code
         shell: bash
         run: |
+          set -euxo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
 
           def swap(path: str, old: str, new: str) -> None:
               p = Path(path)
@@ -57,9 +60,7 @@ jobs:
 
           routes = Path("frontend/src/portalRoutes.tsx")
           text = routes.read_text(encoding="utf-8")
-          for line in text.splitlines(True):
-              if "UpsellPage" in line:
-                  text = text.replace(line, "")
+          text = "".join(line for line in text.splitlines(True) if "UpsellPage" not in line)
           routes.write_text(text, encoding="utf-8")
 
           for stale in (
@@ -86,23 +87,24 @@ jobs:
                   "          amodb/apps/accounts/router_billing.py\n          amodb/apps/accounts/billing_access.py\n          amodb/apps/accounts/billing_auth.py\n",
               )
           ci.write_text(text, encoding="utf-8")
-
-          for needle in ("commercial_access_policy", "commercial_access_scope_policy", "UpsellPage"):
-              hits = []
-              for root in (Path("backend/amodb"), Path("frontend/src")):
-                  for p in root.rglob("*"):
-                      if p.is_file() and p.suffix in {".py", ".ts", ".tsx"}:
-                          if needle in p.read_text(encoding="utf-8", errors="ignore"):
-                              hits.append(str(p))
-              if hits:
-                  print(f"REMAINING {needle}: " + ", ".join(hits))
           PY
+          git status --short
+          git diff --check
 
+      - name: Commit transformed tree
+        shell: bash
+        run: |
+          set -euxo pipefail
           git config user.name "amo-portal-ci"
           git config user.email "amo-portal-ci@users.noreply.github.com"
           git add -A
           git diff --cached --check
           if ! git diff --cached --quiet; then
             git commit -m "refactor(commercial): remove runtime access compatibility layers"
-            git push origin HEAD:agent/platform-commercial-scale-hardening
           fi
+
+      - name: Push transformed tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git push origin HEAD:agent/platform-commercial-scale-hardening
