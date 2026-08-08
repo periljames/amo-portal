@@ -3,6 +3,7 @@ import { Navigate, useLocation, useParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
 import QmsWorkspaceBridgePage from "./QmsWorkspaceBridgePage";
 import type { QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
@@ -21,15 +22,16 @@ function amoCodeFromPath(pathname: string): string {
   return parts[0] === "maintenance" ? decodeSegment(parts[1]) : "";
 }
 
+function assuranceHub(search: string): "controls" | "evidence" | "intelligence" | null {
+  const requested = new URLSearchParams(search).get("hub");
+  return requested === "controls" || requested === "evidence" || requested === "intelligence" ? requested : null;
+}
+
 function requestedWorkspace(search: string): QmsWorkspaceId {
-  const query = new URLSearchParams(search);
-  const requested = query.get("workspace");
+  const requested = new URLSearchParams(search).get("workspace");
   if (["missions", "people", "assurance", "intelligence", "planner"].includes(requested || "")) {
     return requested as QmsWorkspaceId;
   }
-  const legacyHub = query.get("hub");
-  if (legacyHub === "intelligence") return "intelligence";
-  if (legacyHub === "controls" || legacyHub === "evidence") return "assurance";
   return "control-room";
 }
 
@@ -37,6 +39,7 @@ const QmsOverviewPage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();
   const location = useLocation();
   const amoCode = params.amoCode || amoCodeFromPath(location.pathname) || "UNKNOWN";
+  const hub = assuranceHub(location.search);
   const workspace = requestedWorkspace(location.search);
 
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
@@ -50,9 +53,11 @@ const QmsOverviewPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      {workspace === "control-room"
-        ? <QmsOperationalControlCentre amoCode={amoCode} />
-        : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
+      {hub
+        ? <QualityExcellenceCockpit amoCode={amoCode} />
+        : workspace === "control-room"
+          ? <QmsOperationalControlCentre amoCode={amoCode} />
+          : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
     </DepartmentLayout>
   );
 };
