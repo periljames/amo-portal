@@ -6,6 +6,8 @@ const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
+const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", import.meta.url), "utf-8");
+const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
 describe("DMS frontend operating-model contract", () => {
   it("keeps permanent Document Control navigation bounded to seven daily workspaces", () => {
@@ -83,9 +85,18 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain('activeView="integrations"');
   });
 
-  it("retains the proven Publications reader route family as the canonical reading owner", () => {
+  it("retains the proven Publications reader and adds URL-addressable immersive/fullscreen experience controls", () => {
     expect(router).toContain("./pages/manuals/ManualReaderPage");
     expect(router).toContain("/maintenance/:amoCode/publications/:manualId/rev/:revId/read");
     expect(router).toContain("<PublicationReaderPage />");
+    expect(manualReader).toContain('type ReaderExperienceMode = "standard" | "immersive"');
+    expect(manualReader).toContain('searchParams.get("readerMode")');
+    expect(manualReader).toContain('next.set("readerMode", nextMode)');
+    expect(manualReader).toContain("requestFullscreen()");
+    expect(manualReader).toContain("document.exitFullscreen()");
+    expect(readerExperience).toContain(".dms-reader-shell--immersive .publication-document-header");
+    expect(readerExperience).toContain(".dms-reader-shell--immersive .tenant-shell__sidebar");
+    expect(readerExperience).toContain(".dms-reader-shell--fullscreen .publication-document-tabs");
+    expect(readerExperience).toContain(".dms-reader-shell--fullscreen .publication-metadata");
   });
 });
