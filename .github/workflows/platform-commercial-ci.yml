@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "backend/amodb/apps/platform/**"
+      - "backend/amodb/apps/accounts/router_billing.py"
       - "backend/amodb/entitlements.py"
       - "backend/amodb/database.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
@@ -88,6 +89,8 @@ jobs:
           amodb/apps/platform/module_catalog_runtime_policy.py
           amodb/apps/platform/payment_data_policy.py
           amodb/apps/platform/payment_transport_policy.py
+          amodb/apps/platform/billing_privacy_policy.py
+          amodb/apps/platform/saas_webhooks.py
           amodb/entitlements.py
           amodb/jobs/saas_worker_safe.py
           amodb/jobs/billing_maintenance.py
@@ -101,6 +104,9 @@ jobs:
       - name: Run module and payment security contracts
         working-directory: backend
         run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "not paid_legacy_period_creates_renewal_invoice_and_locks and not verified_legacy_renewal_settlement_reactivates_license"
+      - name: Run tenant billing privacy contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_billing_privacy.py
       - name: Prove elapsed paid period creates renewal obligation and lock
         working-directory: backend
         run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_creates_renewal_invoice_and_locks"
