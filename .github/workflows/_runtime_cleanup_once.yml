@@ -1,11 +1,11 @@
-name: One-time command bridge consolidation
+name: One-time commercial service consolidation
 
 on:
   push:
     branches: [agent/platform-commercial-scale-hardening]
     paths:
       - ".github/workflows/_runtime_cleanup_once.yml"
-      - "ops/cleanup_command_bridge_once.py"
+      - "ops/cleanup_commercial_overlays_once.py"
 
 permissions:
   contents: write
@@ -18,8 +18,8 @@ jobs:
         with:
           ref: agent/platform-commercial-scale-hardening
           fetch-depth: 0
-      - name: Remove command bridge
-        run: python ops/cleanup_command_bridge_once.py
+      - name: Consolidate commercial overlays
+        run: python ops/cleanup_commercial_overlays_once.py
       - name: Compile and verify
         run: |
           python -m compileall -q backend/amodb
@@ -30,5 +30,5 @@ jobs:
           git config user.email "amo-portal-ci@users.noreply.github.com"
           git add backend
           git diff --cached --check
-          git commit -m "refactor(platform): eliminate legacy command queue bridge"
+          git commit -m "refactor(commercial): remove remaining commercial service overlays"
           git push origin HEAD:agent/platform-commercial-scale-hardening
