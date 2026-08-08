@@ -260,6 +260,7 @@ jobs:
           npx playwright test \
             tests/e2e/qms-excellence-cockpit.spec.ts \
             tests/e2e/qms-usability-enhancements.spec.ts \
+            tests/e2e/qms-missions.spec.ts \
             tests/e2e/qms-register-bounded.spec.ts \
             tests/e2e/qms-modern-planner-live.spec.ts \
             tests/e2e/qms-planner-lifecycle.spec.ts \
@@ -272,6 +273,7 @@ jobs:
           src/services/qmsAuditHubActions.test.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
+          src/services/qmsMissions.ts
           src/services/qmsRegisters.ts
           src/services/qualityExcellence.ts
           src/services/portalPreferences.ts
