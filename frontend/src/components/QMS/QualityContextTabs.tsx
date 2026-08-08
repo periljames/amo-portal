@@ -317,7 +317,7 @@ const QualityContextTabs: React.FC = () => {
           <summary aria-label="Open Quality assurance lenses"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
           <div>
             <strong>Assurance lenses</strong>
-            <button type="button" onClick={() => navigate(`${route.basePath}/audits/dashboard`)}>Audits & surveillance</button>
+            <button type="button" onClick={() => navigate(`${route.basePath}/audits/dashboard`)}>Audit operations</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/findings/register`)}>Findings</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/cars/register`)}>Corrective action</button>
             <button type="button" onClick={() => navigate(`${route.basePath}/suppliers/approved-list`)}>Supplier assurance</button>
