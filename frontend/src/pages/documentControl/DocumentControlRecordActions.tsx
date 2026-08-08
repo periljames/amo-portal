@@ -1,4 +1,5 @@
-import { Settings2 } from "lucide-react";
+import { Settings2, UsersRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
@@ -43,11 +44,19 @@ export default function DocumentControlRecordActions({
   compact?: boolean;
   activeView?: ActiveView;
 }) {
+  const navigate = useNavigate();
   const { tenant, basePath } = useDocumentControlRoute();
 
   if (compact) {
     return <>
       <DocumentControlPrimaryActions detail={detail} tenant={tenant} basePath={basePath} onChanged={onChanged} />
+      <button
+        type="button"
+        className="dc-button"
+        onClick={() => navigate(`${basePath}/library/${detail.document.id}?governance=assignments`)}
+      >
+        <UsersRound size={14} /> Responsibilities
+      </button>
       <button
         type="button"
         className="dc-button"
