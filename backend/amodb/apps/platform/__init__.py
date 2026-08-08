@@ -15,6 +15,7 @@ from .commercial_integrations import install_commercial_integrations
 from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_access_policy import install_billing_access_hot_path
+from .commercial_access_scope_policy import install_commercial_access_scope_policy
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
@@ -31,50 +32,27 @@ from .router import router
 # retains the platform credential only when no tenant-specific credential exists.
 _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
-# Enforce credential inheritance, terminal fiscalization, provider execution,
-# frontend-link and outbound network rules before superuser or tenant routes
-# capture the shared service functions.
 install_tenant_provider_override_policy()
 install_fiscalization_enqueue_policy()
 install_saas_execution_policy()
 install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
-# Commercial adapters are installed after network/provider hardening so Paystack,
-# Daraja and QuickBooks inherit the same SSRF and secret-handling boundaries.
 install_commercial_integrations()
-# Never blend amounts from unlike currencies in platform financial metrics.
 install_accounting_summary_policy()
-# Strict callback, accounting-currency and load-proof boundaries are layered on
-# the adapters before API routes capture the shared commercial functions.
 install_commercial_safety_policy()
-# Keep the tenant access-status request path bounded at scale and prevent default
-# ORM eager loaders from fetching entitlements/ledger/usage data it never uses.
+# First install the bounded legacy/base access implementation, then replace only
+# its commercial decision layer so account debt and individual module debt are
+# treated independently without reintroducing N+1 queries.
 install_billing_access_hot_path()
-# Retire direct-payment mutations, prevent payment-method records from
-# auto-converting trials, and persist only minimized Paystack webhook metadata.
 install_payment_data_policy()
-# Validate hosted checkout redirects and persist only settlement-critical M-PESA
-# callback fields; raw card/SAD and unnecessary mobile-payment personal data stay
-# at the payment provider rather than in the portal queue.
+install_commercial_access_scope_policy()
 install_payment_transport_policy()
-# Add root-contract/cancellation and negotiated-offer expiry state to the shared
-# module catalog before either platform or tenant commerce routes consume it.
 install_module_catalog_runtime_policy()
-# One commercial snapshot now drives invoice documents/exports, settlement,
-# QuickBooks writeback and eTIMS fiscalization. Tax is rounded deterministically
-# and idempotency replays must match the original invoice payload.
 install_invoice_accounting_policy()
-# Resolve the separate SaaS fiscalization record for invoice views/documents so
-# customer-facing status never contradicts the actual eTIMS workflow state.
 install_fiscal_document_policy()
-# Negotiated price placeholders must never override existing bundle entitlement.
 install_module_offer_policy()
-# Verified settlement activates the commercial parent and every enforceable child
-# capability in a bundle for a finite paid service period.
 install_module_activation_policy()
-# Separate administrative tenant state from commercial billing connectivity and
-# replace placeholder commercial metrics with auditable subledger-derived values.
 install_commercial_control_policy()
 
 from .console_router import router as console_router  # noqa: E402
@@ -88,12 +66,14 @@ from .commercial_router import router as commercial_router  # noqa: E402
 from .module_commerce_router import router as module_commerce_router  # noqa: E402
 from .module_subscription_router import router as module_subscription_router  # noqa: E402
 from .module_payment_status_router import router as module_payment_status_router  # noqa: E402
+from .module_access_router import router as module_access_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
 # Billing lock reason remains visible to all authenticated tenant users through
-# /billing/access-status, but invoice amounts, payment references, negotiated
-# prices and recurring-contract actions are least-privilege finance/admin data.
+# /billing/access-status and the privacy-safe module access endpoint. Invoice
+# amounts, payment references, negotiated prices and recurring-contract actions
+# remain least-privilege finance/admin data.
 install_billing_privacy_policy(
     module_commerce_router=module_commerce_router,
     module_subscription_router=module_subscription_router,
@@ -109,6 +89,7 @@ router.include_router(commercial_router)
 router.include_router(module_commerce_router)
 router.include_router(module_subscription_router)
 router.include_router(module_payment_status_router)
+router.include_router(module_access_router)
 router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
