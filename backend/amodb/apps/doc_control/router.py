@@ -22,6 +22,7 @@ from .workspace_distribution_router import router as workspace_distribution_rout
 from .workspace_external_router import router as workspace_external_router
 from .workspace_integration_router import router as workspace_integration_router
 from .workspace_library_router import router as workspace_library_router
+from .workspace_portfolio_router import router as workspace_portfolio_router
 from .workspace_profile_router import router as workspace_profile_router
 from .workspace_record_router import router as workspace_record_router
 from .workspace_reports_router import router as workspace_reports_router
@@ -44,10 +45,11 @@ router.include_router(legacy_router)
 # follow-up, profile-owner tenancy, terminal temporary-revision immutability,
 # accountable approval authority, decision evidence, active-recipient publication,
 # server-derived workflow impact, governed hierarchy/reference integrity, generated
-# record custody, permission-filtered assisted search, and release safeguards. They
-# must precede the compatibility workspace router because Starlette resolves
-# matching routes in declaration order.
+# record custody, permission-filtered assisted search, bounded operating portfolios,
+# and release safeguards. They must precede the compatibility workspace router
+# because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
+router.include_router(workspace_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
 router.include_router(
