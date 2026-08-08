@@ -7,6 +7,8 @@ name: Document Control Governance CI
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
+      - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
@@ -42,6 +44,8 @@ name: Document Control Governance CI
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
+      - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
       - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
@@ -80,7 +84,7 @@ concurrency:
 
 jobs:
   backend-postgres:
-    name: PostgreSQL migration, routes, security and Document Control tests
+    name: PostgreSQL migration, security, domain and 10k scale gate
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -117,8 +121,14 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Compile governed Document Control backend
-        run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py amodb/scripts/seed_document_governance_e2e.py
+      - name: Compile governed Document Control backend and scale fixtures
+        run: >-
+          python -m compileall -q
+          amodb/apps/doc_control
+          amodb/jobs/document_governance_backfill.py
+          amodb/scripts/seed_document_governance_e2e.py
+          amodb/scripts/seed_document_reader_scale_e2e.py
+          amodb/scripts/benchmark_document_control_library_scale.py
       - name: Verify one Alembic head and merged ancestry
         run: |
           python - <<'PY'
@@ -147,7 +157,7 @@ jobs:
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade head
-      - name: Configure mappers and verify governed reader and physical-library routes
+      - name: Configure mappers and verify governed operating routes
         run: |
           python - <<'PY'
           from sqlalchemy.orm import configure_mappers
@@ -166,6 +176,9 @@ jobs:
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/scan",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/circulation",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf",
+              "/doc-control/workspace/t/{tenant_slug}/changes-portfolio",
+              "/doc-control/workspace/t/{tenant_slug}/distribution-portfolio",
+              "/doc-control/workspace/t/{tenant_slug}/compliance-portfolio",
               "/doc-control/workspace/t/{tenant_slug}/reports-portfolio",
           }
           missing = required - paths
@@ -173,9 +186,18 @@ jobs:
           PY
       - name: Run Document Control governance, library, reader and security tests
         run: pytest -q amodb/apps/doc_control/tests
+      - name: Prove 10k-document PostgreSQL library performance
+        run: python amodb/scripts/benchmark_document_control_library_scale.py
+      - name: Upload 10k library scale evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-library-10k-performance
+          path: backend/test-results/document-control-library-scale.json
+          if-no-files-found: warn
 
   frontend:
-    name: Governed library and reader typecheck, build and contracts
+    name: Governed workspaces, reader contracts, lint and production build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -212,6 +234,7 @@ jobs:
           src/services/documentControlReports.ts
           src/services/documentGovernance.ts
           src/services/readerGovernance.ts
+          src/components/QMS/PortalTextScaleManager.tsx
           src/pages/DocControlPages.tsx
           src/pages/documentControl/documentControlRoute.ts
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
@@ -236,7 +259,7 @@ jobs:
         run: npm run build
 
   authenticated-browser:
-    name: Production-build authenticated DMS operating-model acceptance
+    name: Production-build authenticated DMS operating-model and 2000-page acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -291,6 +314,9 @@ jobs:
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Replace browser fixture with real 2000-page PDF source
+        working-directory: backend
+        run: python amodb/scripts/seed_document_reader_scale_e2e.py
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
