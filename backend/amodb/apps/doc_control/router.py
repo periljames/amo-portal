@@ -27,6 +27,7 @@ from .workspace_library_router import router as workspace_library_router
 from .workspace_portfolio_router import router as workspace_portfolio_router
 from .workspace_profile_router import router as workspace_profile_router
 from .workspace_record_router import router as workspace_record_router
+from .workspace_reports_portfolio_router import router as workspace_reports_portfolio_router
 from .workspace_reports_router import router as workspace_reports_router
 from .workspace_review_router import router as workspace_review_router
 from .workspace_router import router as workspace_router
@@ -54,6 +55,7 @@ router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_distribution_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_compliance_portfolio_router, prefix="/doc-control")
+router.include_router(workspace_reports_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
 router.include_router(
