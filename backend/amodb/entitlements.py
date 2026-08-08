@@ -23,12 +23,11 @@ from .database import get_read_db
 from .security import get_current_active_user
 
 
-# Commercial compatibility aliases. The historical finance_inventory product
-# granted all three capabilities. New offers can sell them independently without
-# taking access away from already-contracted tenants. Procurement still has two
-# legacy routers carrying the suite key; allow its new narrow entitlement there
-# until those route declarations are migrated without rewriting their large files.
+# Commercial compatibility aliases. Historical product groupings continue to
+# satisfy a newly separated capability until the tenant receives an explicit
+# narrow subscription. An explicit narrow row is authoritative when present.
 _MODULE_ALIASES: dict[str, tuple[str, ...]] = {
+    "document_control": ("document_control", "quality"),
     "finance": ("finance", "finance_inventory"),
     "inventory": ("inventory", "finance_inventory"),
     "procurement": ("procurement", "finance_inventory"),
