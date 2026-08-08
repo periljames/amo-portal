@@ -1,11 +1,11 @@
-name: One-time runtime compatibility deletion
+name: One-time command bridge consolidation
 
 on:
   push:
     branches: [agent/platform-commercial-scale-hardening]
     paths:
       - ".github/workflows/_runtime_cleanup_once.yml"
-      - "ops/cleanup_runtime_once.py"
+      - "ops/cleanup_command_bridge_once.py"
 
 permissions:
   contents: write
@@ -18,9 +18,9 @@ jobs:
         with:
           ref: agent/platform-commercial-scale-hardening
           fetch-depth: 0
-      - name: Apply runtime compatibility cleanup
-        run: python ops/cleanup_runtime_once.py
-      - name: Compile backend and verify whitespace
+      - name: Remove command bridge
+        run: python ops/cleanup_command_bridge_once.py
+      - name: Compile and verify
         run: |
           python -m compileall -q backend/amodb
           git diff --check
@@ -28,7 +28,7 @@ jobs:
         run: |
           git config user.name "amo-portal-ci"
           git config user.email "amo-portal-ci@users.noreply.github.com"
-          git add backend frontend
+          git add backend
           git diff --cached --check
-          git commit -m "refactor(runtime): delete migrated aliases and compatibility routes"
+          git commit -m "refactor(platform): eliminate legacy command queue bridge"
           git push origin HEAD:agent/platform-commercial-scale-hardening
