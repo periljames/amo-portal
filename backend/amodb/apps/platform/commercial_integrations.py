@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 import urllib.parse
 from typing import Any, Callable
@@ -41,6 +42,35 @@ def verify_paystack_signature(raw_payload: bytes, signature: str, secret_key: st
     return hmac.compare_digest(expected, signature.strip())
 
 
+def _production_runtime() -> bool:
+    return str(os.getenv("APP_ENV") or "production").strip().lower() in {
+        "production",
+        "prod",
+        "staging",
+        "stage",
+    }
+
+
+def _require_secure_callback(url: str, *, label: str) -> None:
+    if not url:
+        return
+    parsed = urllib.parse.urlsplit(url)
+    if not parsed.hostname:
+        raise ValueError(f"{label} must be an absolute URL")
+    if _production_runtime() and parsed.scheme.lower() != "https":
+        raise ValueError(f"{label} must use HTTPS outside local/test environments")
+
+
+def _trusted_hosted_redirect(url: str, *, provider: str, allowed_hosts: set[str]) -> str:
+    parsed = urllib.parse.urlsplit(str(url or "").strip())
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https" or hostname not in allowed_hosts:
+        raise RuntimeError(f"{provider} returned an untrusted hosted checkout URL")
+    if parsed.username or parsed.password:
+        raise RuntimeError(f"{provider} checkout URL must not contain user credentials")
+    return urllib.parse.urlunsplit(parsed)
+
+
 def paystack_initialize_transaction(
     *,
     secret: dict[str, Any],
@@ -67,6 +97,7 @@ def paystack_initialize_transaction(
     }
     callback_url = str(config.get("callback_url") or "").strip()
     if callback_url:
+        _require_secure_callback(callback_url, label="Paystack callback_url")
         body["callback_url"] = saas_providers._safe_url(callback_url, allowed_schemes=("https", "http"))
     status, response, elapsed = saas_providers._json_request(
         f"{_paystack_base(config)}/transaction/initialize",
@@ -83,7 +114,7 @@ def paystack_initialize_transaction(
     return {
         "provider": PAYSTACK_CODE,
         "reference": str(data.get("reference")),
-        "authorization_url": str(data.get("authorization_url")),
+        "authorization_url": _trusted_hosted_redirect(str(data.get("authorization_url")), provider="Paystack", allowed_hosts={"checkout.paystack.com", "standard.paystack.co"}),
         "access_code": data.get("access_code"),
         "latency_ms": elapsed,
     }
@@ -192,6 +223,7 @@ def mpesa_stk_push(
     phone = normalize_ke_phone(phone)
     timestamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     token = mpesa_access_token(secret=secret, config=config)
+    _require_secure_callback(callback_url, label="M-PESA callback_url")
     body = {
         "BusinessShortCode": shortcode,
         "Password": _mpesa_password(shortcode, passkey, timestamp),

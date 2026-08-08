@@ -577,6 +577,7 @@ def set_tenant_offer(
         .filter(account_models.ModuleSubscription.amo_id == tenant_id, account_models.ModuleSubscription.module_code == code)
         .first()
     )
+    created_offer_placeholder = row is None
     if row is None:
         row = account_models.ModuleSubscription(
             amo_id=tenant_id,
@@ -585,6 +586,8 @@ def set_tenant_offer(
         )
         db.add(row)
     metadata = _decode_metadata(row)
+    if created_offer_placeholder:
+        metadata["commercial_offer_only"] = True
     terms = {
         "base_price_id": price.id if price else None,
         "amount_cents": int(amount if amount is not None else (price.amount_cents if price else 0)),

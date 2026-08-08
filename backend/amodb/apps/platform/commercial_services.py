@@ -23,6 +23,7 @@ from . import models as platform_models
 from . import saas_models as models
 from . import saas_queue, saas_secrets, saas_services
 from . import commercial_integrations as integrations
+from . import module_commerce
 
 
 COMMERCIAL_JOB_TYPES = frozenset(
@@ -225,6 +226,59 @@ def _append_payment_ledger(
     return entry
 
 
+def _activation_details(invoice: account_models.BillingInvoice) -> dict[str, Any]:
+    raw = invoice.description
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+def _activation_activation_period_delta(term: str) -> timedelta:
+    normalized = str(term or "MONTHLY").strip().upper()
+    if normalized == "ANNUAL":
+        return timedelta(days=365)
+    if normalized == "BI_ANNUAL":
+        return timedelta(days=182)
+    return timedelta(days=30)
+
+def _activation_activation_metadata(row: account_models.ModuleSubscription) -> dict[str, Any]:
+    if not row.metadata_json:
+        return {}
+    try:
+        value = json.loads(row.metadata_json)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+def _restore_base_license(
+    db: Session,
+    *,
+    invoice: account_models.BillingInvoice,
+    commercial: dict[str, Any],
+) -> bool:
+    if str(commercial.get("source") or "").upper() != "BASE_RENEWAL":
+        return False
+    if not invoice.license_id:
+        raise ValueError("Base renewal invoice is missing its licence reference")
+    license = db.get(account_models.TenantLicense, invoice.license_id)
+    if license is None or str(license.amo_id) != str(invoice.amo_id):
+        raise ValueError("Base renewal licence does not match the invoice tenant")
+
+    now = datetime.now(timezone.utc)
+    term = str(commercial.get("billing_term") or getattr(license.term, "value", license.term) or "MONTHLY")
+    license.status = account_models.LicenseStatus.ACTIVE
+    license.is_read_only = False
+    license.current_period_start = now
+    license.current_period_end = now + _activation_period_delta(term)
+    license.trial_grace_expires_at = None
+    db.add(license)
+    db.flush()
+    return True
+
+
 def _enable_paid_module(
     db: Session,
     *,
@@ -232,50 +286,94 @@ def _enable_paid_module(
     provider: str,
     provider_reference: str,
 ) -> account_models.ModuleSubscription | None:
-    commercial = _json_description(invoice)
-    module_code = str(commercial.get("module_code") or "").strip()
-    if not module_code:
+    commercial = _activation_details(invoice)
+    if _restore_base_license(db, invoice=invoice, commercial=commercial):
         return None
-    module_code = saas_services.normalize_module_code(module_code)
-    row = (
-        db.query(account_models.ModuleSubscription)
-        .filter(
-            account_models.ModuleSubscription.amo_id == invoice.amo_id,
-            account_models.ModuleSubscription.module_code == module_code,
+
+    root_code = module_commerce.normalize_code(str(commercial.get("module_code") or ""))
+    if not root_code:
+        return None
+
+    activation_codes = [
+        module_commerce.normalize_code(str(value))
+        for value in (commercial.get("activation_codes") or [])
+        if str(value).strip()
+    ]
+    codes: list[str] = []
+    for code in [root_code, *activation_codes]:
+        if code and code not in codes:
+            codes.append(code)
+
+    now = datetime.now(timezone.utc)
+    term = str(commercial.get("billing_term") or "MONTHLY").strip().upper()
+    delta = _activation_period_delta(term)
+    subtotal_cents = int(commercial.get("subtotal_cents") or invoice.amount_cents or 0)
+    tax_amount_cents = int(commercial.get("tax_amount_cents") or 0)
+    tax_rate_bps = int(commercial.get("tax_rate_bps") or 0)
+    root_row: account_models.ModuleSubscription | None = None
+
+    for code in codes:
+        row = (
+            db.query(account_models.ModuleSubscription)
+            .filter(
+                account_models.ModuleSubscription.amo_id == invoice.amo_id,
+                account_models.ModuleSubscription.module_code == code,
+            )
+            .first()
         )
-        .first()
-    )
-    if row is None:
-        row = account_models.ModuleSubscription(amo_id=invoice.amo_id, module_code=module_code)
-        db.add(row)
-    row.status = account_models.ModuleSubscriptionStatus.ENABLED
-    row.plan_code = str(commercial.get("plan_code") or row.plan_code or "STANDARD").strip().upper()
-    row.effective_from = row.effective_from or utcnow()
-    row.effective_to = None
-    previous: dict[str, Any] = {}
-    if row.metadata_json:
-        try:
-            decoded = json.loads(row.metadata_json)
-            if isinstance(decoded, dict):
-                previous = decoded
-        except (TypeError, ValueError):
-            previous = {}
-    row.metadata_json = json.dumps(
-        {
-            **previous,
-            "billing_provider": provider,
-            "payment_reference": provider_reference,
-            "portal_invoice_id": invoice.id,
-            "billing_term": commercial.get("billing_term"),
-            "amount_cents": int(invoice.amount_cents or 0),
-            "currency": str(invoice.currency or "USD").upper(),
-            "updated_by": "verified_payment",
-            "updated_at": utcnow().isoformat(),
-        },
-        separators=(",", ":"),
-    )
+        if row is None:
+            row = account_models.ModuleSubscription(
+                amo_id=invoice.amo_id,
+                module_code=code,
+                status=account_models.ModuleSubscriptionStatus.ENABLED,
+            )
+            db.add(row)
+
+        previous_end = row.effective_to
+        if previous_end is not None and previous_end.tzinfo is None:
+            previous_end = previous_end.replace(tzinfo=timezone.utc)
+        period_start = previous_end if previous_end and previous_end > now else now
+        period_end = period_start + delta
+
+        row.status = account_models.ModuleSubscriptionStatus.ENABLED
+        row.plan_code = str(commercial.get("plan_code") or row.plan_code or "STANDARD").strip().upper()
+        row.effective_from = row.effective_from or period_start
+        row.effective_to = period_end
+
+        metadata = _activation_metadata(row)
+        metadata.update(
+            {
+                "commercial_offer_only": False,
+                "billing_provider": provider,
+                "payment_reference": provider_reference,
+                "portal_invoice_id": invoice.id,
+                "contract_module_code": root_code,
+                "activation_codes": activation_codes,
+                "bundle_parent": root_code if code != root_code else None,
+                "billing_term": term,
+                "plan_code": row.plan_code,
+                "subtotal_cents": subtotal_cents,
+                "tax_rate_bps": tax_rate_bps,
+                "tax_amount_cents": tax_amount_cents,
+                "amount_cents": int(invoice.amount_cents or 0),
+                "currency": str(invoice.currency or "USD").upper(),
+                "current_period_start": period_start.isoformat(),
+                "current_period_end": period_end.isoformat(),
+                "auto_renew": bool(commercial.get("auto_renew_accepted", True)),
+                "terms_version": commercial.get("terms_version"),
+                "last_settled_invoice_id": invoice.id,
+                "renewal_invoice_id": None,
+                "updated_by": "verified_payment",
+                "updated_at": now.isoformat(),
+            }
+        )
+        row.metadata_json = json.dumps(metadata, separators=(",", ":"))
+        if code == root_code:
+            root_row = row
+
     db.flush()
-    return row
+    return root_row
+
 
 
 def mark_invoice_paid(
@@ -504,39 +602,44 @@ def record_paystack_webhook(
     *,
     raw_payload: bytes,
     signature: str,
-) -> models.SaaSJob:
+):
+    """Persist only identifiers required for server-side payment verification."""
     payload = json.loads(raw_payload.decode("utf-8"))
     event_type = str(payload.get("event") or "").strip().lower()
     data = payload.get("data") or {}
     if not isinstance(data, dict):
         raise ValueError("Paystack event data is invalid")
-    metadata = _metadata_dict(data.get("metadata"))
+
+    metadata = commercial_services._metadata_dict(data.get("metadata"))
     tenant_id = str(metadata.get("tenant_id") or "").strip()
     invoice_id = str(metadata.get("portal_invoice_id") or "").strip()
     reference = str(data.get("reference") or "").strip()
     if not tenant_id or not invoice_id or not reference:
         raise ValueError("Paystack event is missing portal tenant, invoice or reference metadata")
-    credential = _provider_credential(db, integrations.PAYSTACK_CODE, tenant_id=tenant_id)
+
+    credential = commercial_services._provider_credential(db, integrations.PAYSTACK_CODE, tenant_id=tenant_id)
     secret = saas_services.provider_secrets(credential)
     if not integrations.verify_paystack_signature(raw_payload, signature, str(secret.get("secret_key") or "")):
         raise PermissionError("Invalid Paystack webhook signature")
+
     return saas_queue.enqueue_job(
         db,
         job_type="PAYSTACK_WEBHOOK",
         queue_name="billing",
         tenant_id=tenant_id,
         payload={
-            "event": payload,
             "event_type": event_type,
             "credential_id": credential.id,
             "invoice_id": invoice_id,
             "reference": reference,
+            "data_minimized": True,
         },
         idempotency_key=f"{event_type}:{reference}",
         correlation_id=reference,
         max_attempts=6,
         priority=5,
     )
+
 
 
 def _process_paystack_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
@@ -645,6 +748,22 @@ def _append_callback_query(base: str, *, tenant_id: str, invoice_id: str, token:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment))
 
 
+def _settlement_credential(
+    db: Session,
+    *,
+    provider: str,
+    tenant_id: str,
+    label: str,
+):
+    row = saas_services.get_provider_credential(db, provider=provider, tenant_id=tenant_id)
+    if row is None:
+        raise ValueError(f"{label} is not configured")
+    state = str(row.status or "").strip().upper()
+    if state in {"DISABLED", "NOT_CONFIGURED"}:
+        raise PermissionError(f"{label} settlement rejected because the provider is disabled")
+    return row
+
+
 def record_mpesa_callback(
     db: Session,
     *,
@@ -652,8 +771,8 @@ def record_mpesa_callback(
     invoice_id: str,
     token: str,
     payload: dict[str, Any],
-) -> models.SaaSJob:
-    account = _billing_account(db, tenant_id=tenant_id, provider="mpesa_daraja")
+):
+    account = commercial_services._billing_account(db, tenant_id=tenant_id, provider="mpesa_daraja")
     if account is None or str(account.status or "").upper() != "PAYMENT_PENDING":
         raise ValueError("No pending M-PESA payment exists for this tenant")
     metadata = dict(account.metadata_json or {})
@@ -661,13 +780,25 @@ def record_mpesa_callback(
         raise ValueError("M-PESA callback invoice does not match the pending collection")
     if not hmac.compare_digest(str(metadata.get("callback_token") or ""), str(token or "")):
         raise PermissionError("Invalid M-PESA callback token")
+
     body = payload.get("Body") or {}
     stk = body.get("stkCallback") if isinstance(body, dict) else None
-    if not isinstance(stk, dict):
-        raise ValueError("Invalid M-PESA STK callback body")
+    if not isinstance(stk, dict) or "ResultCode" not in stk:
+        raise ValueError("M-PESA callback is missing ResultCode")
     checkout_request_id = str(stk.get("CheckoutRequestID") or "").strip()
     if not checkout_request_id or checkout_request_id != str(metadata.get("checkout_request_id") or ""):
         raise ValueError("M-PESA checkout request does not match the pending collection")
+
+    result_code = int(stk.get("ResultCode"))
+    result_desc = str(stk.get("ResultDesc") or "")[:500]
+    callback_items = commercial_services._mpesa_callback_items(stk) if result_code == 0 else {}
+    amount = callback_items.get("Amount")
+    receipt = str(callback_items.get("MpesaReceiptNumber") or "").strip() or None
+
+    # Do not retain the full Safaricom callback. Phone number, transaction date
+    # and other personal/provider metadata are unnecessary for settlement once
+    # the callback has been authenticated and correlated. The server-side query
+    # remains authoritative before money/access state is changed.
     return saas_queue.enqueue_job(
         db,
         job_type="MPESA_CALLBACK",
@@ -676,13 +807,18 @@ def record_mpesa_callback(
         payload={
             "invoice_id": invoice_id,
             "checkout_request_id": checkout_request_id,
-            "callback": payload,
+            "result_code": result_code,
+            "result_desc": result_desc,
+            "amount_kes": str(amount) if amount is not None else None,
+            "receipt_number": receipt,
+            "data_minimized": True,
         },
-        idempotency_key=f"mpesa:{checkout_request_id}:{stk.get('ResultCode')}",
+        idempotency_key=f"mpesa:{checkout_request_id}:{result_code}",
         correlation_id=checkout_request_id,
         max_attempts=5,
         priority=5,
     )
+
 
 
 def _mpesa_callback_items(stk: dict[str, Any]) -> dict[str, Any]:
@@ -695,31 +831,51 @@ def _mpesa_callback_items(stk: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _process_mpesa_callback(db: Session, job: models.SaaSJob) -> dict[str, Any]:
+def _process_mpesa_callback(db: Session, job) -> dict[str, Any]:
     payload = dict(job.payload_json or {})
     tenant_id = str(job.tenant_id or "")
-    invoice = _invoice(db, str(payload.get("invoice_id") or ""), tenant_id=tenant_id, lock=True)
-    account = _billing_account(db, tenant_id=tenant_id, provider="mpesa_daraja", lock=True)
+    invoice = commercial_services._invoice(
+        db,
+        str(payload.get("invoice_id") or ""),
+        tenant_id=tenant_id,
+        lock=True,
+    )
+    account = commercial_services._billing_account(
+        db,
+        tenant_id=tenant_id,
+        provider="mpesa_daraja",
+        lock=True,
+    )
     if account is None:
         raise ValueError("M-PESA billing account is missing")
     metadata = dict(account.metadata_json or {})
     checkout_request_id = str(payload.get("checkout_request_id") or "")
     if checkout_request_id != str(metadata.get("checkout_request_id") or ""):
         raise ValueError("M-PESA callback does not match the pending checkout")
-    credential = _provider_credential(db, "mpesa_daraja", tenant_id=tenant_id)
-    callback = payload.get("callback") or {}
-    body = callback.get("Body") or {}
-    stk = body.get("stkCallback") if isinstance(body, dict) else None
-    if not isinstance(stk, dict):
-        raise ValueError("Invalid M-PESA callback")
-    callback_code = int(stk.get("ResultCode") or 0)
-    if callback_code != 0:
+
+    result_code = int(payload.get("result_code"))
+    if result_code != 0:
         account.status = "PAYMENT_FAILED"
-        metadata.update({"last_result_code": callback_code, "last_result_desc": stk.get("ResultDesc")})
+        metadata.update(
+            {
+                "last_result_code": result_code,
+                "last_result_desc": str(payload.get("result_desc") or "")[:500],
+            }
+        )
         account.metadata_json = metadata
         db.flush()
-        return {"paid": False, "result_code": callback_code, "result_desc": stk.get("ResultDesc")}
+        return {
+            "paid": False,
+            "result_code": result_code,
+            "result_desc": payload.get("result_desc"),
+        }
 
+    credential = _settlement_credential(
+        db,
+        provider="mpesa_daraja",
+        tenant_id=tenant_id,
+        label="M-PESA Daraja",
+    )
     verification = integrations.mpesa_query_stk(
         secret=saas_services.provider_secrets(credential),
         config=credential.config_json or {},
@@ -728,21 +884,26 @@ def _process_mpesa_callback(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     verified = verification.get("data") or {}
     if not isinstance(verified, dict) or str(verified.get("ResultCode") or "") != "0":
         raise ValueError("M-PESA server-side STK query does not confirm successful settlement")
-    callback_items = _mpesa_callback_items(stk)
-    receipt = str(callback_items.get("MpesaReceiptNumber") or "").strip()
-    paid_amount_kes = Decimal(str(callback_items.get("Amount") or "0"))
-    verified_amount_cents = int(paid_amount_kes * Decimal("100"))
-    paid = mark_invoice_paid(
+
+    receipt = str(payload.get("receipt_number") or "").strip()
+    if not receipt:
+        raise ValueError("Successful M-PESA callback is missing MpesaReceiptNumber")
+    amount = Decimal(str(payload.get("amount_kes") or "0"))
+    if amount <= 0:
+        raise ValueError("Successful M-PESA callback is missing a positive settlement amount")
+    amount_cents = int((amount * Decimal("100")).quantize(Decimal("1")))
+    paid = commercial_services.mark_invoice_paid(
         db,
         invoice_id=invoice.id,
         provider="mpesa_daraja",
-        provider_reference=receipt or checkout_request_id,
+        provider_reference=receipt,
         actor_user_id=job.created_by,
-        verified_amount_cents=verified_amount_cents,
+        verified_amount_cents=amount_cents,
         verified_currency="KES",
-        reason="M-PESA STK settlement confirmed by callback and server-side query",
+        reason="M-PESA STK settlement confirmed by minimized callback and server-side query",
     )
     return {"paid": True, "receipt": receipt, "invoice": paid}
+
 
 
 def _state_payload(tenant_id: str) -> str:
