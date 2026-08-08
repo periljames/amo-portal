@@ -1,0 +1,32 @@
+groups:
+  - name: amo-platform-observability-foundation
+    rules:
+      - alert: AMOObservabilityNodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: observability
+        annotations:
+          summary: "Node exporter is unavailable on {{ $labels.node_id }}"
+          description: "Host telemetry cannot be scraped for node {{ $labels.node_id }} in cluster {{ $labels.cluster_id }}."
+
+      - alert: AMOObservabilityCadvisorDown
+        expr: up{job="cadvisor"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "cAdvisor is unavailable on {{ $labels.node_id }}"
+          description: "Container telemetry cannot be scraped for node {{ $labels.node_id }} in cluster {{ $labels.cluster_id }}."
+
+      - alert: AMOObservabilityOtelHubDown
+        expr: up{job="otel-hub"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "OpenTelemetry hub metrics exporter is unavailable"
+          description: "Application telemetry ingestion or export may be degraded. Tenant traffic must remain independent of this condition."
