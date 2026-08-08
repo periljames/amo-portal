@@ -91,6 +91,10 @@ jobs:
           trigger_fix = script.get_revision("quality_260804_trigger_fix")
           missions = script.get_revision("quality_260808_missions")
           audit_programme = script.get_revision("quality_260808_audit_programme")
+          programme_schedule = script.get_revision("quality_260808_prog_schedule")
+          people = script.get_revision("quality_260808_people_privileges")
+          assurance_cases = script.get_revision("quality_260808_assurance_cases")
+          intelligence = script.get_revision("quality_260808_intel_graph")
 
           assert integrity is not None
           assert integrity.down_revision == "workforce_20260721_complete"
@@ -108,9 +112,29 @@ jobs:
           assert missions.down_revision == "docgov_rel_20260807_merge"
           assert audit_programme is not None
           assert audit_programme.down_revision == "quality_260808_missions"
+          assert programme_schedule is not None
+          assert programme_schedule.down_revision == "quality_260808_audit_programme"
+          assert people is not None
+          assert people.down_revision == "quality_260808_prog_schedule"
+          assert assurance_cases is not None
+          assert assurance_cases.down_revision == "quality_260808_people_privileges"
+          assert intelligence is not None
+          assert intelligence.down_revision == "quality_260808_assurance_cases"
           assert all(
               len(revision.revision) <= 32
-              for revision in (preferences, assurance, assurance_rls, assurance_wiring, trigger_fix, missions, audit_programme)
+              for revision in (
+                  preferences,
+                  assurance,
+                  assurance_rls,
+                  assurance_wiring,
+                  trigger_fix,
+                  missions,
+                  audit_programme,
+                  programme_schedule,
+                  people,
+                  assurance_cases,
+                  intelligence,
+              )
           )
           PY
       - name: Compile Quality backend
@@ -127,6 +151,10 @@ jobs:
           amodb/alembic/versions/quality_260804_trigger_fix.py
           amodb/alembic/versions/quality_260808_missions.py
           amodb/alembic/versions/quality_260808_audit_programme.py
+          amodb/alembic/versions/quality_260808_prog_schedule.py
+          amodb/alembic/versions/quality_260808_people_privileges.py
+          amodb/alembic/versions/quality_260808_assurance_cases.py
+          amodb/alembic/versions/quality_260808_intelligence_graph.py
       - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
@@ -145,6 +173,15 @@ jobs:
           SECRET_KEY: quality-audit-programme-secret
           QUALITY_SCHEMA_STRICT: "0"
         run: pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
+      - name: Run completed assurance operating system contract
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: "sqlite+pysqlite:///:memory:"
+          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+          SECRET_KEY: quality-assurance-operating-system-secret
+          QUALITY_SCHEMA_STRICT: "0"
+        run: pytest -q amodb/apps/quality/tests/test_assurance_operating_system_completion.py
       - name: Run Quality workflow and dashboard regressions
         env:
           APP_ENV: test
@@ -234,6 +271,13 @@ jobs:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
           DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
         run: python -m amodb.apps.quality.tests.postgres_audit_programme_probe
+      - name: Run People, Assurance, Intelligence and Approval Graph probe
+        env:
+          APP_ENV: test
+          SECRET_KEY: quality-postgres-test-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+        run: python -m amodb.apps.quality.tests.postgres_assurance_operating_system_probe
 
   frontend:
     runs-on: ubuntu-latest
@@ -288,6 +332,9 @@ jobs:
       - name: Browser - Audit Programme
         if: always()
         run: npx playwright test tests/e2e/qms-audit-programme.spec.ts --workers=1
+      - name: Browser - People, Assurance and Intelligence workspaces
+        if: always()
+        run: npx playwright test tests/e2e/qms-assurance-operating-system.spec.ts --workers=1
       - name: Browser - bounded generic registers
         if: always()
         run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
@@ -304,12 +351,15 @@ jobs:
         if: always()
         run: >-
           npm exec -- eslint
+          src/services/qmsAssuranceCases.ts
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
           src/services/qmsAuditProgramme.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
+          src/services/qmsIntelligence.ts
           src/services/qmsMissions.ts
+          src/services/qmsPeople.ts
           src/services/qmsRegisters.ts
           src/services/qualityExcellence.ts
           src/services/portalPreferences.ts
