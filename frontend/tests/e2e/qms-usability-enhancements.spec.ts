@@ -232,7 +232,7 @@ function testState(): TestState {
   return { scale: "standard", qualityReads: 0, carRegisterUrls: [] };
 }
 
-test("QMS context navigation and user text scale persist without duplicate headers", async ({ page }) => {
+test("QMS six-workspace navigation and user text scale persist without duplicate headers", async ({ page }) => {
   const state = testState();
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepare(page, state);
@@ -240,7 +240,9 @@ test("QMS context navigation and user text scale persist without duplicate heade
 
   const contextBar = page.locator(".quality-context-bar");
   await expect(contextBar).toBeVisible();
-  await expect(contextBar.getByRole("button", { name: "Findings" })).toHaveAttribute("aria-current", "page");
+  for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
+    await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
+  }
   await expect(contextBar.getByRole("button", { name: "New finding" })).toBeVisible();
   await expect(page.locator(".qms-ops-page > .page-header")).toBeHidden();
 

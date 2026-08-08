@@ -9,6 +9,7 @@ from .router import router, public_router  # noqa: F401
 # Register extension metadata and assurance permission alignment before route
 # dependencies are evaluated during application startup.
 from . import excellence_models as _excellence_models  # noqa: F401,E402
+from . import mission_models as _mission_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -52,6 +53,9 @@ from . import excellence_router as _excellence_router  # noqa: F401,E402
 from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
 from . import assurance_metrics_router as _assurance_metrics_router  # noqa: F401,E402
 from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_router  # noqa: F401,E402
+from . import mission_router as _mission_router  # noqa: F401,E402
+from . import mission_management_guard_router as _mission_management_guard_router  # noqa: F401,E402
+from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -93,6 +97,28 @@ _canonical_router.legacy_router.include_router(_assurance_metrics_router.router)
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
 _canonical_router.legacy_router.include_router(_assurance_lifecycle_guard_router.router)
 
+# Missions are additive governed workflows rather than a duplicate operational
+# register. They coordinate evidence and decisions sourced from other AMO
+# domains, and keep canonical and legacy tenant aliases contract-compatible.
+_include_once(
+    _canonical_router.router,
+    _mission_router.router,
+    "/api/maintenance/{amo_code}/quality/missions",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _mission_router.router,
+    "/api/maintenance/{amo_code}/qms/missions",
+)
+
+# Write guards override only the Mission operations that require stronger tenant
+# participant validation, gate evidence checks and attributable human approval.
+_canonical_router.router.include_router(_mission_management_guard_router.router)
+_canonical_router.legacy_router.include_router(_mission_management_guard_router.router)
+_canonical_router.router.include_router(_mission_lifecycle_guard_router.router)
+_canonical_router.legacy_router.include_router(_mission_lifecycle_guard_router.router)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
+from . import mission_route_order as _mission_route_order  # noqa: F401,E402
