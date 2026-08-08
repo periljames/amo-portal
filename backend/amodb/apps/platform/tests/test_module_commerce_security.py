@@ -150,68 +150,93 @@ def test_legacy_subscription_page_redirects_to_canonical_billing() -> None:
     assert "addPaymentMethod" not in source
 
 
-def test_paid_legacy_period_requires_invoice_and_verified_settlement() -> None:
+def _create_elapsed_paid_legacy_case() -> tuple[object, str, str, str, datetime]:
     suffix = uuid.uuid4().hex[:10]
     now = datetime.now(timezone.utc)
     amo_id = f"amo-renew-{suffix}"
     sku_id = f"sku-renew-{suffix}"
     license_id = f"lic-renew-{suffix}"
     db = WriteSessionLocal()
-    try:
-        db.add(
-            account_models.AMO(
-                id=amo_id,
-                amo_code=f"RN{suffix[:8].upper()}",
-                login_slug=f"renew-{suffix}",
-                name=f"Renewal Test {suffix}",
-                country="KE",
-                is_demo=True,
-                is_active=True,
-            )
+    db.add(
+        account_models.AMO(
+            id=amo_id,
+            amo_code=f"RN{suffix[:8].upper()}",
+            login_slug=f"renew-{suffix}",
+            name=f"Renewal Test {suffix}",
+            country="KE",
+            is_demo=True,
+            is_active=True,
         )
-        db.add(
-            account_models.CatalogSKU(
-                id=sku_id,
-                code=f"RENEW_{suffix.upper()}",
-                name="Paid renewal test",
-                term=account_models.BillingTerm.MONTHLY,
-                trial_days=0,
-                amount_cents=125000,
-                currency="KES",
-                is_active=True,
-            )
+    )
+    db.add(
+        account_models.CatalogSKU(
+            id=sku_id,
+            code=f"RENEW_{suffix.upper()}",
+            name="Paid renewal test",
+            term=account_models.BillingTerm.MONTHLY,
+            trial_days=0,
+            amount_cents=125000,
+            currency="KES",
+            is_active=True,
         )
-        db.add(
-            account_models.TenantLicense(
-                id=license_id,
-                amo_id=amo_id,
-                sku_id=sku_id,
-                term=account_models.BillingTerm.MONTHLY,
-                status=account_models.LicenseStatus.ACTIVE,
-                is_read_only=False,
-                current_period_start=now - timedelta(days=31),
-                current_period_end=now - timedelta(minutes=5),
-            )
+    )
+    db.add(
+        account_models.TenantLicense(
+            id=license_id,
+            amo_id=amo_id,
+            sku_id=sku_id,
+            term=account_models.BillingTerm.MONTHLY,
+            status=account_models.LicenseStatus.ACTIVE,
+            is_read_only=False,
+            current_period_start=now - timedelta(days=31),
+            current_period_end=now - timedelta(minutes=5),
         )
-        db.commit()
+    )
+    db.commit()
+    return db, suffix, amo_id, license_id, now
 
+
+def _renewal_invoice(db, *, amo_id: str, license_id: str) -> account_models.BillingInvoice:
+    return (
+        db.query(account_models.BillingInvoice)
+        .filter(
+            account_models.BillingInvoice.amo_id == amo_id,
+            account_models.BillingInvoice.license_id == license_id,
+            account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
+        )
+        .one()
+    )
+
+
+def test_paid_legacy_period_creates_renewal_invoice_and_locks() -> None:
+    db, _suffix, amo_id, license_id, now = _create_elapsed_paid_legacy_case()
+    try:
         payment_data_policy._secure_billing_maintenance(db, as_of=now)
         db.commit()
+        db.expire_all()
+
         license = db.get(account_models.TenantLicense, license_id)
-        invoice = (
-            db.query(account_models.BillingInvoice)
-            .filter(
-                account_models.BillingInvoice.amo_id == amo_id,
-                account_models.BillingInvoice.license_id == license_id,
-                account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
-            )
-            .one()
-        )
+        invoice = _renewal_invoice(db, amo_id=amo_id, license_id=license_id)
         assert license is not None
         assert license.status == account_models.LicenseStatus.EXPIRED
         assert license.is_read_only is True
         assert invoice.amount_cents == 125000
         assert invoice.currency == "KES"
+        assert invoice.due_at is not None
+        details = payment_data_policy.json.loads(invoice.description or "{}")
+        assert details.get("source") == "LEGACY_BASE_RENEWAL"
+        assert details.get("lock_scope") == "ACCOUNT"
+    finally:
+        db.close()
+
+
+def test_verified_legacy_renewal_settlement_reactivates_license() -> None:
+    db, suffix, amo_id, license_id, now = _create_elapsed_paid_legacy_case()
+    try:
+        payment_data_policy._secure_billing_maintenance(db, as_of=now)
+        db.commit()
+        db.expire_all()
+        invoice = _renewal_invoice(db, amo_id=amo_id, license_id=license_id)
 
         commercial_services.mark_invoice_paid(
             db,
@@ -224,6 +249,7 @@ def test_paid_legacy_period_requires_invoice_and_verified_settlement() -> None:
             reason="Integration-test verified renewal settlement",
         )
         db.expire_all()
+
         renewed = db.get(account_models.TenantLicense, license_id)
         paid_invoice = db.get(account_models.BillingInvoice, invoice.id)
         assert renewed is not None
