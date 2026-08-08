@@ -87,6 +87,14 @@
   height: 100%;
 }
 
+/* The page-count suffix must follow the toolbar's resolved foreground colour.
+ * Reader V4 and the portal shell can resolve their theme variables at different
+ * cascade layers; inheriting here prevents a dark-muted token from landing on a
+ * light toolbar (or the inverse) while retaining the compact typography. */
+.publication-reader-page--dense-pdf-reader .pdfv4-reader .pdfv3-pages > span {
+  color: inherit;
+}
+
 /* The virtual reader is the scroll authority. Browser scroll anchoring must
  * not replay stale geometry while pages are remeasured after a zoom change. */
 .publication-reader-page--dense-pdf-reader .pdfv3-viewport,
