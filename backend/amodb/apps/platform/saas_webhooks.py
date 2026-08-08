@@ -222,9 +222,6 @@ def record_stripe_webhook(
         event = account_models.WebhookEvent(
             provider=account_models.PaymentProvider.STRIPE,
             external_event_id=external_id,
-            # Retain a fingerprint rather than the full signed header. The raw
-            # request was already verified; the verified credential id is stored
-            # on the durable job for traceability.
             signature=None,
             event_type=str(payload.get("type") or "")[:128],
             payload=json.dumps(minimized_payload, separators=(",", ":")),
@@ -241,7 +238,6 @@ def record_stripe_webhook(
             "webhook_event_id": event.id,
             "verified_credential_id": matched.id,
             "verified_tenant_id": verified_tenant_id or None,
-            "data_minimized": True,
         },
         idempotency_key=external_id,
         correlation_id=external_id,
