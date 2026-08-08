@@ -44,7 +44,7 @@ def test_published_child_guards_include_insert_on_postgresql():
 
 def test_published_section_insert_is_rejected_on_postgresql():
     engine = _postgres_engine()
-    with engine.connect() as connection:
+    with engine.begin() as connection:
         report = connection.execute(text("""
             SELECT id, amo_id
             FROM reliability_formal_reports
@@ -55,7 +55,6 @@ def test_published_section_insert_is_rejected_on_postgresql():
         if not report:
             pytest.skip("No published formal Reliability fixture exists in this database.")
 
-        transaction = connection.begin()
         savepoint = connection.begin_nested()
         try:
             with pytest.raises(DBAPIError):
@@ -75,6 +74,5 @@ def test_published_section_insert_is_rejected_on_postgresql():
                     "report_id": report["id"],
                     "section_code": f"mutation_probe_{uuid.uuid4().hex[:8]}",
                 })
-            savepoint.rollback()
         finally:
-            transaction.rollback()
+            savepoint.rollback()
