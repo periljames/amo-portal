@@ -54,6 +54,7 @@ from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,
 from . import assurance_metrics_router as _assurance_metrics_router  # noqa: F401,E402
 from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_router  # noqa: F401,E402
 from . import mission_router as _mission_router  # noqa: F401,E402
+from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -108,6 +109,12 @@ _include_once(
     _mission_router.router,
     "/api/maintenance/{amo_code}/qms/missions",
 )
+
+# The Mission lifecycle guard intentionally overrides only the decision endpoint
+# so generic change-management permission can never impersonate the named
+# Accountable Executive or Quality Mission owner.
+_canonical_router.router.include_router(_mission_lifecycle_guard_router.router)
+_canonical_router.legacy_router.include_router(_mission_lifecycle_guard_router.router)
 
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
