@@ -6,21 +6,39 @@ const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 
+let materialBrowserErrors: string[] = [];
+
 test.use({
   viewport: { width: 1440, height: 900 },
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
-  screenshot: "only-on-failure",
+  screenshot: "on",
 });
+
+function watchMaterialBrowserErrors(page: Page): void {
+  materialBrowserErrors = [];
+  page.on("pageerror", (error) => materialBrowserErrors.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (/favicon\.ico/i.test(text)) return;
+    materialBrowserErrors.push(`console: ${text}`);
+  });
+  page.on("response", (response) => {
+    const status = response.status();
+    if (status >= 500) materialBrowserErrors.push(`http ${status}: ${response.url()}`);
+    if (status === 401 && response.url().includes("/auth/portal-preferences")) {
+      materialBrowserErrors.push(`anonymous preference probe: ${response.url()}`);
+    }
+  });
+}
 
 async function signIn(page: Page): Promise<void> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
 
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
-  if (await continueButton.count()) {
-    await continueButton.click();
-  }
+  if (await continueButton.count()) await continueButton.click();
 
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
@@ -38,7 +56,12 @@ test.describe("Document Control daily operating model", () => {
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
+    watchMaterialBrowserErrors(page);
     await signIn(page);
+  });
+
+  test.afterEach(() => {
+    expect(materialBrowserErrors, materialBrowserErrors.join("\n")).toEqual([]);
   });
 
   test("Home exposes actionable work surfaces and opens the bounded company library", async ({ page }) => {
@@ -76,7 +99,6 @@ test.describe("Document Control daily operating model", () => {
     await expect(externalRow).toContainText("CURRENT");
     await expect(externalRow).toContainText("KCAR 2025 CI proof");
 
-    await expect(page.getByRole("button", { name: /Browse hierarchy/i })).toBeVisible();
     await page.getByRole("button", { name: /Browse hierarchy/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
     const tree = page.locator(".dc-structure-tree");
@@ -97,7 +119,7 @@ test.describe("Document Control daily operating model", () => {
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
-  test("canonical Changes, Distribution and Compliance workspaces load from bounded portfolio APIs", async ({ page }) => {
+  test("all five controller workspaces use their final bounded owners", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/changes`);
     await expect(page.getByTestId("document-control-changes")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("navigation", { name: "Change lifecycle views" })).toBeVisible();
@@ -109,9 +131,35 @@ test.describe("Document Control daily operating model", () => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/compliance`);
     await expect(page.getByTestId("document-control-compliance")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("navigation", { name: "Document assurance views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/reports`);
+    await expect(page.getByTestId("document-control-reports")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Export current page CSV/i })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/administration`);
+    await expect(page.getByTestId("document-control-administration")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Governance defaults", { exact: true })).toBeVisible();
   });
 
-  test("document workspace exposes the unified lifecycle and regulatory links resolve on a clean database", async ({ page }) => {
+  test("legacy list bookmarks converge on canonical workspaces", async ({ page }) => {
+    const cases = [
+      ["drafts", /\/document-control\/changes\?.*view=in-review/],
+      ["change-proposals", /\/document-control\/changes\?.*view=requests/],
+      ["authority", /\/document-control\/changes\?.*view=authority/],
+      ["tr", /\/document-control\/changes\?.*view=temporary-revisions/],
+      ["reviews", /\/document-control\/compliance\?.*view=reviews/],
+      ["external-sources", /\/document-control\/compliance\?.*view=external-sources/],
+      ["integrations", /\/document-control\/compliance\?.*view=relationships/],
+      ["registers", /\/document-control\/reports/],
+      ["settings", /\/document-control\/administration/],
+    ] as const;
+    for (const [legacy, target] of cases) {
+      await page.goto(`/maintenance/${AMO_CODE}/document-control/${legacy}`);
+      await expect(page).toHaveURL(target);
+    }
+  });
+
+  test("document workspace exposes unified lifecycle and clean-database regulatory links", async ({ page }) => {
     const regulationResponse = page.waitForResponse((response) => response.url().includes(`/documents/${DOCUMENT_ID}/regulation-links`));
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
 
@@ -127,13 +175,27 @@ test.describe("Document Control daily operating model", () => {
     await expect(page.getByRole("button", { name: /Read current/i })).toBeVisible();
   });
 
-  test("opening the permitted revision mounts one authoritative PDF reader source", async ({ page }) => {
+  test("reader exposes one authoritative PDF source plus Standard, Immersive, Review and Fullscreen controls", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
     await page.getByRole("button", { name: /Read current/i }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
     await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-error,.pdfv3-document-error")).toHaveCount(0);
+    for (const label of ["Standard", "Immersive", "Review changes", "Fullscreen"]) {
+      await expect(page.getByRole("button", { name: new RegExp(label, "i") })).toBeVisible();
+    }
+  });
+
+  test("200 percent visual zoom keeps core Home actions reachable and keyboard focus visible", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control`);
+    await expect(page.getByTestId("document-control-home")).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+    const libraryButton = page.getByRole("button", { name: /Open library/i });
+    await expect(libraryButton).toBeVisible();
+    await libraryButton.focus();
+    await expect(libraryButton).toBeFocused();
+    await expect(page.getByText("My Work", { exact: true })).toBeVisible();
   });
 
   test("physical library registers, labels, checks out and returns one numbered copy", async ({ page }) => {
