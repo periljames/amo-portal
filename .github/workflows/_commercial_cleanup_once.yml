@@ -19,13 +19,12 @@ jobs:
           ref: agent/platform-commercial-scale-hardening
           fetch-depth: 0
 
-      - name: Transform stale commercial code
+      - name: Transform stale source code
         shell: bash
         run: |
           set -euxo pipefail
           python - <<'PY'
           from pathlib import Path
-          import re
 
           def swap(path: str, old: str, new: str) -> None:
               p = Path(path)
@@ -71,39 +70,23 @@ jobs:
               path = Path(stale)
               if path.exists():
                   path.unlink()
-
-          ci = Path(".github/workflows/platform-commercial-ci.yml")
-          text = ci.read_text(encoding="utf-8")
-          for line in (
-              "          amodb/apps/platform/commercial_access_policy.py\n",
-              "          amodb/apps/platform/commercial_access_scope_policy.py\n",
-              "          amodb/apps/platform/billing_privacy_policy.py\n",
-              '      - "frontend/src/pages/AdminBillingPage.tsx"\n',
-          ):
-              text = text.replace(line, "")
-          if "          amodb/apps/accounts/billing_access.py\n" not in text:
-              text = text.replace(
-                  "          amodb/apps/accounts/router_billing.py\n",
-                  "          amodb/apps/accounts/router_billing.py\n          amodb/apps/accounts/billing_access.py\n          amodb/apps/accounts/billing_auth.py\n",
-              )
-          ci.write_text(text, encoding="utf-8")
           PY
           git status --short
           git diff --check
 
-      - name: Commit transformed tree
+      - name: Commit source cleanup
         shell: bash
         run: |
           set -euxo pipefail
           git config user.name "amo-portal-ci"
           git config user.email "amo-portal-ci@users.noreply.github.com"
-          git add -A
+          git add backend frontend
           git diff --cached --check
           if ! git diff --cached --quiet; then
             git commit -m "refactor(commercial): remove runtime access compatibility layers"
           fi
 
-      - name: Push transformed tree
+      - name: Push source cleanup
         shell: bash
         run: |
           set -euxo pipefail
