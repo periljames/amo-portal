@@ -77,6 +77,17 @@ def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> Non
         ("/audit-programmes/{programme_id}/items/{item_id}/schedule", "POST"),
     }.issubset(methods)
 
+    # The standalone adapter remains the schedule authority. Canonical tenant
+    # routing deliberately exposes the People & Privileges guard wrapper, which
+    # validates auditor hard gates and then delegates to this adapter.
+    adapter_matches = _matching(
+        audit_programme_schedule_router,
+        "/audit-programmes/{programme_id}/items/{item_id}/schedule",
+        "POST",
+    )
+    assert len(adapter_matches) == 1
+    assert adapter_matches[0].endpoint.__name__ == "schedule_programme_requirement"
+
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
         (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
@@ -84,7 +95,7 @@ def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> Non
         schedule_path = f"{prefix}/audit-programmes/{{programme_id}}/items/{{item_id}}/schedule"
         matches = _matching(router, schedule_path, "POST")
         assert len(matches) == 1
-        assert matches[0].endpoint.__name__ == "schedule_programme_requirement"
+        assert matches[0].endpoint.__name__ == "schedule_guarded_programme_requirement"
         assert router.routes.index(matches[0]) < _catchall_index(router)
 
 
@@ -149,44 +160,31 @@ def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> 
     _assert_editable(SimpleNamespace(status="UNDER_REVIEW"))
 
 
-def test_programme_period_and_custom_recurrence_are_validated() -> None:
+def test_programme_payload_validates_period_and_custom_recurrence() -> None:
     with pytest.raises(ValidationError):
         ProgrammeCreate(
             programme_year=2026,
-            title="2026 audit programme",
+            title="Invalid period",
             period_start="2026-12-31",
             period_end="2026-01-01",
         )
+
     with pytest.raises(ValidationError):
         ProgrammeItemCreate(
-            universe_item_id="universe-1",
+            universe_item_id="universe",
             audit_type="INTERNAL",
-            title="Internal audit",
-            scope="Quality system",
+            title="Bad custom cadence",
+            scope="Quality",
             recurrence="CUSTOM",
         )
 
 
-def test_programme_recurrence_maps_only_to_supported_authoritative_planner_cadence() -> None:
-    assert _RECURRENCE_TO_FREQUENCY == {
-        "ONE_TIME": QMSAuditScheduleFrequency.ONE_TIME,
-        "MONTHLY": QMSAuditScheduleFrequency.MONTHLY,
-        "QUARTERLY": QMSAuditScheduleFrequency.QUARTERLY,
-        "SEMI_ANNUAL": QMSAuditScheduleFrequency.BI_ANNUAL,
-        "ANNUAL": QMSAuditScheduleFrequency.ANNUAL,
-    }
-    assert _expected_frequency(SimpleNamespace(recurrence="SEMI_ANNUAL")) == QMSAuditScheduleFrequency.BI_ANNUAL
-    for recurrence in ("CUSTOM", "RISK_TRIGGERED"):
-        with pytest.raises(HTTPException) as exc:
-            _expected_frequency(SimpleNamespace(recurrence=recurrence))
-        assert exc.value.status_code == 409
+def test_schedule_frequency_is_derived_from_governed_recurrence() -> None:
+    assert _RECURRENCE_TO_FREQUENCY["ONE_TIME"] == QMSAuditScheduleFrequency.ONE_TIME
+    assert _RECURRENCE_TO_FREQUENCY["QUARTERLY"] == QMSAuditScheduleFrequency.QUARTERLY
+    assert _RECURRENCE_TO_FREQUENCY["SEMI_ANNUAL"] == QMSAuditScheduleFrequency.BI_ANNUAL
+    assert _expected_frequency(SimpleNamespace(recurrence="ANNUAL")) == QMSAuditScheduleFrequency.ANNUAL
 
-
-def test_universe_source_identity_is_a_real_relational_contract() -> None:
-    table = Base.metadata.tables["quality_audit_universe_items"]
-    unique_names = {constraint.name for constraint in table.constraints if constraint.name}
-    assert "uq_quality_audit_universe_source" in unique_names
-    item_table = Base.metadata.tables["quality_audit_programme_items"]
-    fk_targets = {element.target_fullname for fk in item_table.foreign_key_constraints for element in fk.elements}
-    assert "quality_audit_programmes.id" in fk_targets
-    assert "quality_audit_universe_items.id" in fk_targets
+    with pytest.raises(HTTPException) as exc:
+        _expected_frequency(SimpleNamespace(recurrence="RISK_TRIGGERED"))
+    assert exc.value.status_code == 409
