@@ -3,9 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import billing_auth
 from amodb.database import get_read_db
-from amodb.security import get_current_active_user
 
 from . import saas_models
 
@@ -13,29 +12,15 @@ from . import saas_models
 router = APIRouter(prefix="/commerce/self-service", tags=["tenant-module-payment"])
 
 
-def _role(user: account_models.User) -> str:
-    value = getattr(user, "role", None)
-    return str(getattr(value, "value", value) or "").upper()
-
-
-def _tenant_payment_user(user: account_models.User) -> str:
-    if getattr(user, "is_superuser", False):
-        raise HTTPException(status_code=403, detail="Tenant context required.")
-    tenant_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None) or "").strip()
-    if not tenant_id:
-        raise HTTPException(status_code=403, detail="Tenant context required.")
-    if not bool(getattr(user, "is_amo_admin", False)) and _role(user) not in {"AMO_ADMIN", "FINANCE_MANAGER", "ACCOUNTS_OFFICER"}:
-        raise HTTPException(status_code=403, detail="Authorised tenant finance role required.")
-    return tenant_id
-
-
 @router.get("/payment-jobs/{job_id}")
 def payment_job_status(
     job_id: str,
     db: Session = Depends(get_read_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user=Depends(billing_auth.require_billing_reader),
 ):
-    tenant_id = _tenant_payment_user(user)
+    tenant_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None) or "").strip()
+    if not tenant_id or getattr(user, "is_superuser", False):
+        raise HTTPException(status_code=403, detail="A tenant billing context is required.")
     row = db.get(saas_models.SaaSJob, job_id)
     if row is None or str(row.tenant_id or "") != tenant_id:
         raise HTTPException(status_code=404, detail="Payment job not found.")
