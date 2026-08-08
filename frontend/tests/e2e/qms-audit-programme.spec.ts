@@ -84,11 +84,36 @@ function programme(id = "programme-1", status = "APPROVED") {
   };
 }
 
+function schedulingQueue() {
+  return {
+    items: [{
+      programme_id: "programme-1",
+      programme_ref: "AP-2026-BASE-R01",
+      programme_status: "APPROVED",
+      programme_year: 2026,
+      programme_revision_no: 1,
+      programme_item_id: "programme-item-1",
+      universe_item_id: "universe-1",
+      auditable_entity: "Maintenance Department",
+      audit_type: "DEPARTMENTAL",
+      title: "Maintenance Department Audit",
+      recurrence: "ANNUAL",
+      mandatory_surveillance: true,
+      target_start: "2026-08-15",
+      target_end: "2026-08-15",
+      prioritization_basis: [],
+    }],
+    total: 1,
+    limit: 50,
+    offset: 0,
+    has_more: false,
+  };
+}
+
 async function prepare(page: Page): Promise<void> {
   const token = futureToken();
   let programmes = [programme()];
   let current = programmes[0];
-  let scheduleAttempts = 0;
 
   await page.addInitScript(({ storedToken }) => {
     localStorage.setItem("amo_portal_token", storedToken);
@@ -131,6 +156,10 @@ async function prepare(page: Page): Promise<void> {
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(current) });
       return;
     }
+    if (path === "/api/maintenance/tenant-a/quality/audit-programmes/planner/queue" && request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(schedulingQueue()) });
+      return;
+    }
     if (path === "/api/maintenance/tenant-a/quality/audit-programmes/universe/items") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [universeItem()], total: 1, limit: 200, offset: 0, has_more: false }) });
       return;
@@ -149,7 +178,6 @@ async function prepare(page: Page): Promise<void> {
     }
     const scheduleMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)\/items\/([^/]+)\/schedule$/);
     if (scheduleMatch && request.method() === "POST") {
-      scheduleAttempts += 1;
       const payload = request.postDataJSON() as { allow_conflicts?: boolean; conflict_override_reason?: string };
       if (!payload.allow_conflicts) {
         await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: {
@@ -213,8 +241,6 @@ async function prepare(page: Page): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
-
-  await page.exposeFunction("auditProgrammeScheduleAttempts", () => scheduleAttempts);
 }
 
 test("opens governed programme and keeps Audit Universe source lineage visible", async ({ page }) => {
