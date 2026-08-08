@@ -151,7 +151,6 @@ def get_compliance_portfolio(
         )
         if status:
             query = query.filter(dm.ExternalDocumentSource.status == status.upper())
-        query = _document_search(query, q, manual_models.Manual)
         if q and q.strip():
             needle = f"%{q.strip()}%"
             query = query.filter(
