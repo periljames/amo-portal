@@ -76,6 +76,7 @@ jobs:
           amodb/apps/platform/commercial_policy.py
           amodb/apps/platform/commercial_safety_policy.py
           amodb/apps/platform/commercial_access_policy.py
+          amodb/apps/platform/commercial_access_scope_policy.py
           amodb/apps/platform/commercial_invoice_policy.py
           amodb/apps/platform/commercial_fiscal_document_policy.py
           amodb/apps/platform/commercial_router.py
@@ -83,6 +84,7 @@ jobs:
           amodb/apps/platform/module_commerce_router.py
           amodb/apps/platform/module_subscription_router.py
           amodb/apps/platform/module_payment_status_router.py
+          amodb/apps/platform/module_access_router.py
           amodb/apps/platform/module_activation_policy.py
           amodb/apps/platform/module_renewals.py
           amodb/apps/platform/module_offer_policy.py
@@ -107,6 +109,12 @@ jobs:
       - name: Run tenant billing privacy contracts
         working-directory: backend
         run: pytest -q amodb/apps/platform/tests/test_billing_privacy.py
+      - name: Run module/account payment scope contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_access_scope.py
+      - name: Run tenant offer tamper-resistance contracts
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_offer_security.py
       - name: Prove elapsed paid period creates renewal obligation and lock
         working-directory: backend
         run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_creates_renewal_invoice_and_locks"
