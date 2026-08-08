@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -99,13 +99,21 @@ def get_reports_portfolio(
     if lifecycle_status:
         query = query.filter(manual_models.Manual.status == lifecycle_status.upper())
     if document_class:
-        query = query.join(
+        wanted_class = document_class.upper()
+        query = query.outerjoin(
             dm.DocumentControlProfile,
-            dm.DocumentControlProfile.manual_id == manual_models.Manual.id,
-        ).filter(
-            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
-            dm.DocumentControlProfile.document_class == document_class.upper(),
+            and_(
+                dm.DocumentControlProfile.manual_id == manual_models.Manual.id,
+                dm.DocumentControlProfile.tenant_id == tenant.amo_id,
+            ),
         )
+        if wanted_class == "INTERNAL":
+            query = query.filter(or_(
+                dm.DocumentControlProfile.id.is_(None),
+                dm.DocumentControlProfile.document_class == "INTERNAL",
+            ))
+        else:
+            query = query.filter(dm.DocumentControlProfile.document_class == wanted_class)
 
     total = int(query.order_by(None).count())
     manuals = query.order_by(manual_models.Manual.code.asc()).offset(offset).limit(per_page).all()
