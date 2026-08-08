@@ -69,7 +69,12 @@ export type PaymentJob = {
   status: string;
   tenant_id?: string | null;
   correlation_id?: string | null;
+  result?: Record<string, unknown> | null;
+  last_error?: string | null;
+  attempt_count?: number;
   created_at?: string | null;
+  updated_at?: string | null;
+  finished_at?: string | null;
 };
 
 export function makeCommerceIdempotencyKey(prefix = "commerce") {
@@ -114,6 +119,13 @@ export async function initiateTenantInvoicePayment(
       ...payload,
       idempotency_key: payload.idempotency_key || makeCommerceIdempotencyKey("invoice-payment"),
     },
+    { headers: authHeaders() },
+  );
+}
+
+export async function fetchTenantPaymentJob(jobId: string): Promise<PaymentJob> {
+  return apiGet<PaymentJob>(
+    `/platform/commerce/self-service/payment-jobs/${encodeURIComponent(jobId)}`,
     { headers: authHeaders() },
   );
 }
