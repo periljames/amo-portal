@@ -87,6 +87,12 @@ function detailCells(item: CompliancePortfolioItem) {
   </>;
 }
 
+function normalizedView(params: URLSearchParams): CompliancePortfolioView {
+  const raw = params.get("view");
+  if (raw === "external") return "external-sources";
+  return VIEWS.some((candidate) => candidate.id === raw) ? raw as CompliancePortfolioView : "reviews";
+}
+
 export default function DocumentControlCompliancePortfolioPage() {
   const navigate = useNavigate();
   const { tenant } = useDocumentControlRoute();
@@ -98,7 +104,7 @@ export default function DocumentControlCompliancePortfolioPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const hasLoadedRef = useRef(false);
-  const view = (params.get("view") as CompliancePortfolioView) || "reviews";
+  const view = normalizedView(params);
   const page = Math.max(1, Number(params.get("page") || 1));
   const perPage = Math.min(100, Math.max(25, Number(params.get("per_page") || 50)));
 
@@ -142,6 +148,7 @@ export default function DocumentControlCompliancePortfolioPage() {
 
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
+    if (key === "view") next.delete("status");
     if (value) next.set(key, value); else next.delete(key);
     if (key !== "page") next.set("page", "1");
     setParams(next);
