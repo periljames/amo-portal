@@ -71,7 +71,45 @@ jobs:
             echo "Wildcard monitoring host binding is forbidden" >&2
             exit 1
           fi
-          if grep -RniE '(password|token|secret)[[:space:]]*[:=][[:space:]]*[^$<{[:space:]]+' ops/observability --exclude='.env.example' --exclude='README.md'; then
-            echo "Potential hard-coded observability secret found" >&2
+
+      - name: Enforce observability secret hygiene
+        run: |
+          if git ls-files --error-unmatch ops/observability/.env >/dev/null 2>&1; then
+            echo "Deployment-local ops/observability/.env must never be tracked" >&2
             exit 1
           fi
+          if git ls-files 'ops/observability/**' | grep -E '\.(pem|key|p12|pfx)$'; then
+            echo "Credential/key material must not be committed under ops/observability" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path("ops/observability")
+          excluded_names = {".env.example", "README.md"}
+          credential_key = re.compile(
+              r"(?i)\b(?:[A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET_KEY|CLIENT_SECRET|API_KEY)|password|token|secret_key|client_secret|api_key)\b\s*[:=]\s*([\"']?)(.+?)\1\s*$"
+          )
+          suspicious = []
+          for path in root.rglob("*"):
+              if not path.is_file() or path.name in excluded_names:
+                  continue
+              if path.suffix.lower() in {".json", ".yml", ".yaml", ".sh", ".conf", ".toml", ".ini"}:
+                  try:
+                      lines = path.read_text(encoding="utf-8").splitlines()
+                  except UnicodeDecodeError:
+                      continue
+                  for lineno, line in enumerate(lines, 1):
+                      match = credential_key.search(line.strip())
+                      if not match:
+                          continue
+                      value = match.group(2).strip()
+                      if not value or value.startswith(("$", "<", "{{", "${env:")):
+                          continue
+                      suspicious.append(f"{path}:{lineno}: literal credential assignment")
+          if suspicious:
+              print("\n".join(suspicious), file=sys.stderr)
+              raise SystemExit("Potential hard-coded observability credential found")
+          PY
