@@ -80,6 +80,13 @@ const PortalTextScalePreferenceScope: React.FC<PortalTextScalePreferenceScopePro
   }, [scale]);
 
   useEffect(() => {
+    // The appearance manager is mounted at the application root, including on
+    // public login routes. Account preferences are authenticated data; do not
+    // probe the endpoint for an anonymous visitor and generate a routine 401.
+    if (!getCachedUser()) {
+      setSyncState("local");
+      return;
+    }
     let cancelled = false;
     void getPortalPreferences()
       .then((preferences) => {
@@ -138,6 +145,10 @@ const PortalTextScalePreferenceScope: React.FC<PortalTextScalePreferenceScopePro
   const chooseScale = (next: PortalTextScale) => {
     setScale(next);
     window.localStorage.setItem(storageKey, next);
+    if (!getCachedUser()) {
+      setSyncState("local");
+      return;
+    }
     setSyncState("saving");
     void updatePortalPreferences({ text_scale: next })
       .then((preferences) => {
