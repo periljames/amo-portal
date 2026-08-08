@@ -19,6 +19,7 @@ from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
 from .module_offer_policy import install_module_offer_policy
+from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .payment_data_policy import install_payment_data_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
@@ -51,6 +52,9 @@ install_billing_access_hot_path()
 # Retire direct-payment mutations, prevent payment-method records from
 # auto-converting trials, and persist only minimized Paystack webhook metadata.
 install_payment_data_policy()
+# Add root-contract/cancellation and negotiated-offer expiry state to the shared
+# module catalog before either platform or tenant commerce routes consume it.
+install_module_catalog_runtime_policy()
 # One commercial snapshot now drives invoice documents/exports, settlement,
 # QuickBooks writeback and eTIMS fiscalization. Tax is rounded deterministically
 # and idempotency replays must match the original invoice payload.
@@ -76,6 +80,7 @@ from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
 from .commercial_router import router as commercial_router  # noqa: E402
 from .module_commerce_router import router as module_commerce_router  # noqa: E402
+from .module_subscription_router import router as module_subscription_router  # noqa: E402
 from .module_payment_status_router import router as module_payment_status_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
@@ -87,6 +92,7 @@ router.include_router(support_router)
 router.include_router(integration_router)
 router.include_router(commercial_router)
 router.include_router(module_commerce_router)
+router.include_router(module_subscription_router)
 router.include_router(module_payment_status_router)
 router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
