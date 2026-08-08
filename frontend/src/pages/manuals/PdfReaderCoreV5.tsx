@@ -89,7 +89,7 @@ function initialNavigationOpen(): boolean {
 
 function clearReaderHash(): void {
   if (typeof window === "undefined" || !/^#pdf-page-\d+$/i.test(window.location.hash)) return;
-  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
 }
 
 export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {

@@ -22,6 +22,8 @@ def test_post477_reader_releases_stale_programmatic_navigation() -> None:
     assert "onPointerDownCapture" in core
     assert "scheduleScaleStabilization" in core
     assert "SCALE_SETTLE_MS" in core
+    assert "window.history.replaceState(window.history.state" in core
+    assert "window.history.replaceState(null" not in core
 
 
 def test_assisted_navigation_understands_the_virtual_reader_scroll_owner() -> None:

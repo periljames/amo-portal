@@ -206,6 +206,26 @@ test.describe("Publications reader integrated real-world stability", () => {
     await expectNoReaderError(page);
   });
 
+  test("releasing a PDF deep link preserves router history state", async ({ page }) => {
+    const expectedState = await page.evaluate(() => {
+      const current = window.history.state;
+      const nextState = current && typeof current === "object"
+        ? { ...current, readerHistoryMarker: "preserve-me" }
+        : { readerHistoryMarker: "preserve-me" };
+      window.history.replaceState(
+        nextState,
+        "",
+        `${window.location.pathname}${window.location.search}#pdf-page-2`,
+      );
+      return window.history.state;
+    });
+
+    await expect(page).toHaveURL(/#pdf-page-2$/);
+    await page.locator(".pdfv3-viewport").dispatchEvent("pointerdown");
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
+    expect(await page.evaluate(() => window.history.state)).toEqual(expectedState);
+  });
+
   test("scale changes never replay an old Contents request", async ({ page }) => {
     await openContentsTarget(page);
 
