@@ -331,11 +331,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
 
     if (path.endsWith("/quality/excellence/events")) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }], total: 1 }),
-      });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }], total: 1 }) });
       return;
     }
 
@@ -420,8 +416,8 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
 
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
   await expect(page).toHaveURL(/\?workspace=assurance$/);
-  await expect(page.getByRole("heading", { name: "Assurance", exact: true })).toBeVisible();
-  await expect(page.getByText("Audits & surveillance", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cases, investigation & effectiveness" })).toBeVisible();
+  await expect(page.getByText(/source audit, CAR, supplier or maintenance records/i)).toBeVisible();
 });
 
 test("Quality management selects and links a validated tenant source record", async ({ page }) => {
