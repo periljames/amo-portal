@@ -4,6 +4,7 @@ import { Navigate, useLocation, useParams } from "react-router-dom";
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
+import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
 import QmsWorkspaceBridgePage from "./QmsWorkspaceBridgePage";
 import type { QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
@@ -57,7 +58,9 @@ const QmsOverviewPage: React.FC = () => {
         ? <QualityExcellenceCockpit amoCode={amoCode} />
         : workspace === "control-room"
           ? <QmsOperationalControlCentre amoCode={amoCode} />
-          : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
+          : workspace === "missions"
+            ? <QmsMissionsPage amoCode={amoCode} />
+            : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
     </DepartmentLayout>
   );
 };
