@@ -6,6 +6,7 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
 import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
+import QmsPeoplePage from "./QmsPeoplePage";
 import QmsWorkspaceBridgePage from "./QmsWorkspaceBridgePage";
 import { QMS_WORKSPACES, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
 
@@ -69,7 +70,9 @@ const QmsOverviewPage: React.FC = () => {
           ? <QmsOperationalControlCentre amoCode={amoCode} />
           : workspace === "missions"
             ? <QmsMissionsPage amoCode={amoCode} />
-            : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
+            : workspace === "people"
+              ? <QmsPeoplePage amoCode={amoCode} />
+              : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
     </DepartmentLayout>
   );
 };
