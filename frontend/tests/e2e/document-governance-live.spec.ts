@@ -17,18 +17,11 @@ async function signIn(page: Page): Promise<void> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
 
-  // Generic login resolves the AMO in a first "Continue" step, while an
-  // AMO-specific route already has its tenant context and renders Sign In
-  // immediately. Support both paths so this acceptance test exercises the
-  // production tenant login route rather than assuming the generic flow.
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
   if (await continueButton.count()) {
     await continueButton.click();
   }
 
-  // The password visibility control intentionally contains the word Password
-  // in its accessible name. Target the stable input id so strict-mode browser
-  // acceptance cannot accidentally match that adjacent control.
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
@@ -40,7 +33,7 @@ function futureLocalDateTime(hours = 2): string {
   return local.toISOString().slice(0, 16);
 }
 
-test.describe("Document Control governed workflow", () => {
+test.describe("Document Control daily operating model", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_DOCUMENT_GOVERNANCE=1 to run authenticated DMS governance checks.");
 
   test.beforeEach(async ({ page }) => {
@@ -48,20 +41,21 @@ test.describe("Document Control governed workflow", () => {
     await signIn(page);
   });
 
-  test("dashboard queues open a URL-backed bounded company library", async ({ page }) => {
+  test("Home exposes actionable work surfaces and opens the bounded company library", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control`);
-    await expect(page.getByTestId("document-governance-dashboard")).toBeVisible();
-    const queue = page.getByRole("button", { name: /Ownership requiring confirmation/i });
-    await expect(queue).toBeVisible();
-    await queue.click();
-    await expect(page).toHaveURL(/\/document-control\/library\?.*unresolved_ownership=true/);
-    await expect(page.getByTestId("integrated-document-library")).toBeVisible();
-    await expect(page.getByText("Governance queue")).toBeVisible();
-    await expect(page.getByRole("table")).toBeVisible();
-    await expect(page.getByText("DMS-CI-MOM", { exact: true })).toBeVisible();
+    const home = page.getByTestId("document-control-home");
+    await expect(home).toBeVisible({ timeout: 30_000 });
+
+    for (const section of ["My Work", "Exceptions", "Due Soon", "Recent Changes", "Quick Actions"]) {
+      await expect(home.getByText(section, { exact: true })).toBeVisible();
+    }
+
+    await page.getByRole("button", { name: /Open library/i }).click();
+    await expect(page).toHaveURL(/\/document-control\/library/);
+    await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
   });
 
-  test("company library proves governed policy, external-data currency and full hierarchy navigation", async ({ page }) => {
+  test("company library proves governed categories, external-data currency and hierarchy navigation", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?per_page=25`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
@@ -82,8 +76,8 @@ test.describe("Document Control governed workflow", () => {
     await expect(externalRow).toContainText("CURRENT");
     await expect(externalRow).toContainText("KCAR 2025 CI proof");
 
-    await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
-    await page.getByRole("button", { name: /Full tree/i }).click();
+    await expect(page.getByRole("button", { name: /Browse hierarchy/i })).toBeVisible();
+    await page.getByRole("button", { name: /Browse hierarchy/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
     const tree = page.locator(".dc-structure-tree");
     await expect(tree).toBeVisible({ timeout: 30_000 });
@@ -92,7 +86,7 @@ test.describe("Document Control governed workflow", () => {
     await expect(tree).toContainText("KCAA-CI-EXT-001");
   });
 
-  test("bounded library filters survive a hard browser navigation", async ({ page }) => {
+  test("bounded library filters survive hard browser navigation", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=POLICY&per_page=25&sort=code&direction=asc`);
     await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible();
@@ -103,20 +97,39 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
-  test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
-    await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    const record = page.getByTestId("document-governance-record");
-    await expect(record).toBeVisible({ timeout: 30_000 });
-    await expect(record.getByText("Ownership and responsibility")).toBeVisible();
-    await expect(record.getByText("Controlled structure")).toBeVisible();
-    await expect(record.getByText("Related controlled items")).toBeVisible();
-    await expect(record.getByText("Detection review")).toBeVisible();
-    await expect(record.getByText("Revision and lifecycle evidence")).toBeVisible();
+  test("canonical Changes, Distribution and Compliance workspaces load from bounded portfolio APIs", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/changes`);
+    await expect(page.getByTestId("document-control-changes")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Change lifecycle views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/distribution`);
+    await expect(page.getByTestId("document-control-distribution")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Distribution views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/compliance`);
+    await expect(page.getByTestId("document-control-compliance")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Document assurance views" })).toBeVisible();
   });
 
-  test("opening the permitted revision mounts one authoritative reader source", async ({ page }) => {
+  test("document workspace exposes the unified lifecycle and regulatory links resolve on a clean database", async ({ page }) => {
+    const regulationResponse = page.waitForResponse((response) => response.url().includes(`/documents/${DOCUMENT_ID}/regulation-links`));
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    await page.getByRole("button", { name: /Read current issue|Read current revision|Read approved working revision|Read uncontrolled copy/i }).click();
+
+    const workspace = page.getByTestId("document-workspace");
+    await expect(workspace).toBeVisible({ timeout: 30_000 });
+    const regulation = await regulationResponse;
+    expect(regulation.ok(), `regulation-links returned ${regulation.status()}`).toBeTruthy();
+
+    await expect(workspace.getByText("DMS-CI-MOM", { exact: true }).first()).toBeVisible();
+    for (const tab of ["Overview", "Content", "Changes", "Workflow", "Distribution", "Compliance", "Relationships", "History"]) {
+      await expect(workspace.getByRole("button", { name: new RegExp(`^${tab}`) })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: /Read current/i })).toBeVisible();
+  });
+
+  test("opening the permitted revision mounts one authoritative PDF reader source", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
+    await page.getByRole("button", { name: /Read current/i }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
     await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });
