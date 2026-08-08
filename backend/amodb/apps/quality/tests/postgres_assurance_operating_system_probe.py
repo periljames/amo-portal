@@ -149,8 +149,8 @@ def main() -> None:
             {"id": row_ids["signal_rule"], "amo": ids["amo_a"], "user": ids["user_a"]})
         connection.execute(text("""INSERT INTO quality_signal_observations
             (id,amo_id,rule_id,metric,observed_value,threshold,operator,triggered,severity,explanation,source_snapshot,source_references,as_of,state,observed_by_user_id,observed_at)
-            VALUES (:id,:amo,:rule,'OVERDUE_CAR_COUNT',1,0,'GT',true,'WARNING','Observed 1 GT threshold 0.',CAST('{"count":1}' AS json),CAST('[]' AS json),NOW(),'OPEN',:user,NOW())"""),
-            {"id": row_ids["observation"], "amo": ids["amo_a"], "rule": row_ids["signal_rule"], "user": ids["user_a"]})
+            VALUES (:id,:amo,:rule,'OVERDUE_CAR_COUNT',1,0,'GT',true,'WARNING','Observed 1 GT threshold 0.',CAST(:source_snapshot AS json),CAST('[]' AS json),NOW(),'OPEN',:user,NOW())"""),
+            {"id": row_ids["observation"], "amo": ids["amo_a"], "rule": row_ids["signal_rule"], "user": ids["user_a"], "source_snapshot": '{"count":1}'})
         for key, node_type, title, source_type, source_id, state in (
             ("node_a", "REQUIREMENT", "KCAR requirement", "REGULATION_CLAUSE", "KCAR-PROBE", "SUPPORTED"),
             ("node_b", "MANUAL", "MPM procedure", "CONTROLLED_DOCUMENT", "MPM-PROBE", "UNRESOLVED"),
