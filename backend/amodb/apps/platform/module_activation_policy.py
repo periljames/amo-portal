@@ -44,6 +44,32 @@ def _metadata(row: account_models.ModuleSubscription) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _restore_legacy_base_license(
+    db: Session,
+    *,
+    invoice: account_models.BillingInvoice,
+    commercial: dict[str, Any],
+) -> bool:
+    if str(commercial.get("source") or "").upper() != "LEGACY_BASE_RENEWAL":
+        return False
+    if not invoice.license_id:
+        raise ValueError("Legacy renewal invoice is missing its licence reference")
+    license = db.get(account_models.TenantLicense, invoice.license_id)
+    if license is None or str(license.amo_id) != str(invoice.amo_id):
+        raise ValueError("Legacy renewal licence does not match the invoice tenant")
+
+    now = datetime.now(timezone.utc)
+    term = str(commercial.get("billing_term") or getattr(license.term, "value", license.term) or "MONTHLY")
+    license.status = account_models.LicenseStatus.ACTIVE
+    license.is_read_only = False
+    license.current_period_start = now
+    license.current_period_end = now + _period_delta(term)
+    license.trial_grace_expires_at = None
+    db.add(license)
+    db.flush()
+    return True
+
+
 def enable_paid_module_contract(
     db: Session,
     *,
@@ -52,6 +78,9 @@ def enable_paid_module_contract(
     provider_reference: str,
 ) -> account_models.ModuleSubscription | None:
     commercial = _details(invoice)
+    if _restore_legacy_base_license(db, invoice=invoice, commercial=commercial):
+        return None
+
     root_code = module_commerce.normalize_code(str(commercial.get("module_code") or ""))
     if not root_code:
         return None
