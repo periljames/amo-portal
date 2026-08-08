@@ -82,3 +82,14 @@ def test_contract_manager_dependency_is_installed_on_self_service_subscription_a
     assert billing_privacy_policy.require_tenant_contract_manager in _dependency_calls(subscribe)
     assert billing_privacy_policy.require_tenant_contract_manager in _dependency_calls(cancel)
     assert billing_privacy_policy.require_tenant_billing_reader in _dependency_calls(payment_status)
+
+
+def test_generic_legacy_payment_webhook_is_retired_before_endpoint_processing() -> None:
+    legacy_webhook = next(
+        route for route in router_billing.router.routes
+        if isinstance(route, APIRoute) and route.path == "/billing/webhooks/{provider}"
+    )
+    assert billing_privacy_policy.reject_legacy_generic_payment_webhook in _dependency_calls(legacy_webhook)
+    with pytest.raises(HTTPException) as error:
+        billing_privacy_policy.reject_legacy_generic_payment_webhook()
+    assert error.value.status_code == 410
