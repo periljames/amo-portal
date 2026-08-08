@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Archive, Boxes, FolderTree, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -13,6 +13,7 @@ import DocumentControlShell, {
   DocumentControlSection,
 } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
+import "./dmsHome.css";
 
 export default function DocumentControlAdministrationPage() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export default function DocumentControlAdministrationPage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!tenant) return;
     setLoading(true);
     setError("");
@@ -34,9 +35,9 @@ export default function DocumentControlAdministrationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenant]);
 
-  useEffect(() => { void load(); }, [tenant]);
+  useEffect(() => { void load(); }, [load]);
 
   const save = async () => {
     if (!settings) return;
