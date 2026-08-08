@@ -26,6 +26,7 @@ type ContextTab = {
   icon?: LucideIcon;
   exact?: boolean;
   queryTab?: string;
+  queryWorkspace?: QmsWorkspaceId;
   activePrefixes?: string[];
 };
 
@@ -72,28 +73,13 @@ const WORKSPACE_ICONS: Record<QmsWorkspaceId, LucideIcon> = {
 
 function parseQualityRoute(pathname: string): QualityRoute | null {
   const qualityMatch = pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/(.*))?$/i);
-  if (qualityMatch) {
-    const amoCode = decodeURIComponent(qualityMatch[1]);
-    return {
-      amoCode,
-      basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
-      segments: (qualityMatch[2] || "").split("/").filter(Boolean).map((segment) => decodeURIComponent(segment)),
-    };
-  }
-
-  // People & Privileges deliberately consumes the authoritative Training/Competence
-  // workspace during the transition instead of creating a duplicate QMS personnel store.
-  const peopleMatch = pathname.match(/^\/maintenance\/([^/]+)\/training\/competence(?:\/.*)?$/i);
-  if (peopleMatch) {
-    const amoCode = decodeURIComponent(peopleMatch[1]);
-    return {
-      amoCode,
-      basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
-      segments: ["people"],
-    };
-  }
-
-  return null;
+  if (!qualityMatch) return null;
+  const amoCode = decodeURIComponent(qualityMatch[1]);
+  return {
+    amoCode,
+    basePath: `/maintenance/${encodeURIComponent(amoCode)}/quality`,
+    segments: (qualityMatch[2] || "").split("/").filter(Boolean).map((segment) => decodeURIComponent(segment)),
+  };
 }
 
 function moduleTitle(segment: string | undefined): string {
@@ -114,7 +100,6 @@ function moduleTitle(segment: string | undefined): string {
     "evidence-vault": "Evidence Room",
     settings: "QMS Settings",
     aerodoc: "AeroDoc",
-    people: "People & Privileges",
   };
   return segment ? labels[segment] || segment.replaceAll("-", " ") : "Quality Assurance";
 }
@@ -127,24 +112,36 @@ function pathMatches(current: string, target: string): boolean {
 function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean {
   const target = tab.path.split("?")[0].replace(/\/$/, "");
   const current = pathname.replace(/\/$/, "");
+  const params = new URLSearchParams(search);
+
   if (tab.queryTab) {
-    return pathMatches(current, target)
-      && (new URLSearchParams(search).get("tab") || "war-room") === tab.queryTab;
+    return pathMatches(current, target) && (params.get("tab") || "war-room") === tab.queryTab;
+  }
+  if (tab.queryWorkspace) {
+    const requested = params.get("workspace");
+    const legacyHub = params.get("hub");
+    const legacyWorkspace = legacyHub === "intelligence"
+      ? "intelligence"
+      : legacyHub === "controls" || legacyHub === "evidence"
+        ? "assurance"
+        : null;
+    return current === target && (requested || legacyWorkspace) === tab.queryWorkspace;
   }
   if (tab.activePrefixes?.some((prefix) => pathMatches(current, prefix))) return true;
-  if (tab.exact) return current === target;
+  if (tab.exact) {
+    return current === target && !params.get("workspace") && !params.get("hub");
+  }
   return pathMatches(current, target);
 }
 
 function topLevelTabs(route: QualityRoute): ContextTab[] {
   const workspaceItems = qmsWorkspaceNavigationItems(route.amoCode);
   const base = route.basePath;
-  const training = `/maintenance/${encodeURIComponent(route.amoCode)}/training/competence`;
   const activePrefixes: Record<QmsWorkspaceId, string[]> = {
     "control-room": [base],
     planner: [`${base}/planner`, `${base}/calendar`],
     missions: [`${base}/missions`, `${base}/change-control`],
-    people: [`${base}/people`, training],
+    people: [`${base}/people`],
     assurance: [
       `${base}/assurance`,
       `${base}/audits`,
@@ -170,7 +167,10 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
     path: workspace.path,
     icon: WORKSPACE_ICONS[workspace.id],
     exact: workspace.id === "control-room",
-    activePrefixes: workspace.id === "control-room" ? undefined : activePrefixes[workspace.id],
+    queryWorkspace: ["missions", "people", "assurance", "intelligence"].includes(workspace.id) ? workspace.id : undefined,
+    activePrefixes: workspace.id === "control-room" || ["missions", "people", "assurance", "intelligence"].includes(workspace.id)
+      ? undefined
+      : activePrefixes[workspace.id],
   }));
 }
 
