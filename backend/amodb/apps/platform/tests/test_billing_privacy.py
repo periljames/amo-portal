@@ -6,9 +6,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
 
-from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts import router_billing
-from amodb.apps.platform import billing_privacy_policy
+from amodb.apps.accounts import billing_auth, models as account_models, router_billing
 from amodb.apps.platform.module_commerce_router import router as module_commerce_router
 from amodb.apps.platform.module_subscription_router import router as module_subscription_router
 from amodb.apps.platform.module_payment_status_router import router as module_payment_status_router
@@ -28,7 +26,7 @@ def _dependency_calls(route: APIRoute):
     return {item.call for item in route.dependant.dependencies}
 
 
-def test_locked_general_user_can_read_access_status_but_not_invoice_details() -> None:
+def test_access_status_remains_available_without_exposing_invoices() -> None:
     access_route = next(
         route for route in router_billing.router.routes
         if isinstance(route, APIRoute) and route.path == "/billing/access-status"
@@ -37,8 +35,9 @@ def test_locked_general_user_can_read_access_status_but_not_invoice_details() ->
         route for route in router_billing.router.routes
         if isinstance(route, APIRoute) and route.path == "/billing/invoices" and "GET" in (route.methods or set())
     )
-    assert billing_privacy_policy.require_tenant_billing_reader not in _dependency_calls(access_route)
-    assert billing_privacy_policy.require_tenant_billing_reader in _dependency_calls(invoice_route)
+    assert billing_auth.require_authenticated_user in _dependency_calls(access_route)
+    assert billing_auth.require_billing_reader not in _dependency_calls(access_route)
+    assert billing_auth.require_billing_reader in _dependency_calls(invoice_route)
 
 
 def test_finance_roles_can_read_billing_records() -> None:
@@ -47,26 +46,24 @@ def test_finance_roles_can_read_billing_records() -> None:
         account_models.AccountRole.FINANCE_MANAGER,
         account_models.AccountRole.ACCOUNTS_OFFICER,
     ):
-        assert billing_privacy_policy.require_tenant_billing_reader(_user(role)).role == role
+        assert billing_auth.require_billing_reader(_user(role)).role == role
 
 
 def test_non_finance_tenant_role_cannot_read_commercial_records() -> None:
     with pytest.raises(HTTPException) as error:
-        billing_privacy_policy.require_tenant_billing_reader(
-            _user(account_models.AccountRole.QUALITY_MANAGER)
-        )
+        billing_auth.require_billing_reader(_user(account_models.AccountRole.QUALITY_MANAGER))
     assert error.value.status_code == 403
 
 
 def test_accounts_officer_can_settle_but_cannot_bind_recurring_contract() -> None:
     accounts = _user(account_models.AccountRole.ACCOUNTS_OFFICER)
-    assert billing_privacy_policy.require_tenant_billing_reader(accounts) is accounts
+    assert billing_auth.require_billing_reader(accounts) is accounts
     with pytest.raises(HTTPException) as error:
-        billing_privacy_policy.require_tenant_contract_manager(accounts)
+        billing_auth.require_contract_manager(accounts)
     assert error.value.status_code == 403
 
 
-def test_contract_manager_dependency_is_installed_on_self_service_subscription_and_cancel() -> None:
+def test_contract_routes_declare_authority_directly() -> None:
     subscribe = next(
         route for route in module_commerce_router.routes
         if isinstance(route, APIRoute) and route.path.endswith("/commerce/self-service/subscribe")
@@ -79,17 +76,23 @@ def test_contract_manager_dependency_is_installed_on_self_service_subscription_a
         route for route in module_payment_status_router.routes
         if isinstance(route, APIRoute) and "/commerce/self-service/payment-jobs/" in route.path
     )
-    assert billing_privacy_policy.require_tenant_contract_manager in _dependency_calls(subscribe)
-    assert billing_privacy_policy.require_tenant_contract_manager in _dependency_calls(cancel)
-    assert billing_privacy_policy.require_tenant_billing_reader in _dependency_calls(payment_status)
+    assert billing_auth.require_contract_manager in _dependency_calls(subscribe)
+    assert billing_auth.require_contract_manager in _dependency_calls(cancel)
+    assert billing_auth.require_billing_reader in _dependency_calls(payment_status)
 
 
-def test_generic_legacy_payment_webhook_is_retired_before_endpoint_processing() -> None:
-    legacy_webhook = next(
-        route for route in router_billing.router.routes
-        if isinstance(route, APIRoute) and route.path == "/billing/webhooks/{provider}"
-    )
-    assert billing_privacy_policy.reject_legacy_generic_payment_webhook in _dependency_calls(legacy_webhook)
-    with pytest.raises(HTTPException) as error:
-        billing_privacy_policy.reject_legacy_generic_payment_webhook()
-    assert error.value.status_code == 410
+def test_obsolete_billing_mutations_and_generic_webhook_do_not_exist() -> None:
+    paths = {route.path for route in router_billing.router.routes if isinstance(route, APIRoute)}
+    for retired in {
+        "/billing/catalog",
+        "/billing/catalog/{sku_id}",
+        "/billing/subscription",
+        "/billing/payment-methods",
+        "/billing/payment-methods/{payment_method_id}",
+        "/billing/trial",
+        "/billing/purchase",
+        "/billing/cancel",
+        "/billing/audit-events",
+        "/billing/webhooks/{provider}",
+    }:
+        assert retired not in paths
