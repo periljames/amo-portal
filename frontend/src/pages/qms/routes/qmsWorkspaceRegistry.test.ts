@@ -29,13 +29,13 @@ describe("QMS assurance workspace registry", () => {
     );
   });
 
-  it("uses existing governed surfaces while the new workspaces are phased in", () => {
+  it("consolidates transitional workspace entries on the Quality root", () => {
     expect(qmsWorkspaceEntryPath("SAF", "control-room")).toBe("/maintenance/SAF/quality");
     expect(qmsWorkspaceEntryPath("SAF", "planner")).toBe("/maintenance/SAF/quality/calendar/month");
-    expect(qmsWorkspaceEntryPath("SAF", "missions")).toBe("/maintenance/SAF/quality/change-control/register");
-    expect(qmsWorkspaceEntryPath("SAF", "people")).toBe("/maintenance/SAF/training/competence/dashboard");
-    expect(qmsWorkspaceEntryPath("SAF", "assurance")).toBe("/maintenance/SAF/quality/audits/dashboard");
-    expect(qmsWorkspaceEntryPath("SAF", "intelligence")).toBe("/maintenance/SAF/quality/reports/executive-dashboard");
+    expect(qmsWorkspaceEntryPath("SAF", "missions")).toBe("/maintenance/SAF/quality?workspace=missions");
+    expect(qmsWorkspaceEntryPath("SAF", "people")).toBe("/maintenance/SAF/quality?workspace=people");
+    expect(qmsWorkspaceEntryPath("SAF", "assurance")).toBe("/maintenance/SAF/quality?workspace=assurance");
+    expect(qmsWorkspaceEntryPath("SAF", "intelligence")).toBe("/maintenance/SAF/quality?workspace=intelligence");
   });
 
   it("maps legacy QMS modules into their owning workspace instead of new top-level registers", () => {
@@ -55,10 +55,10 @@ describe("QMS assurance workspace registry", () => {
     expect(items.map((item) => item.path)).toEqual([
       "/maintenance/SAF/quality",
       "/maintenance/SAF/quality/calendar/month",
-      "/maintenance/SAF/quality/change-control/register",
-      "/maintenance/SAF/training/competence/dashboard",
-      "/maintenance/SAF/quality/audits/dashboard",
-      "/maintenance/SAF/quality/reports/executive-dashboard",
+      "/maintenance/SAF/quality?workspace=missions",
+      "/maintenance/SAF/quality?workspace=people",
+      "/maintenance/SAF/quality?workspace=assurance",
+      "/maintenance/SAF/quality?workspace=intelligence",
     ]);
   });
 });
