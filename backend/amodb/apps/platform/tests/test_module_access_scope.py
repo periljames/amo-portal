@@ -5,7 +5,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.platform import commercial_access_scope_policy, module_access_router
+from amodb.apps.accounts import billing_access
+from amodb.apps.platform import module_access_router
 from amodb.database import WriteSessionLocal
 
 
@@ -87,7 +88,7 @@ def test_module_only_customer_has_account_access_without_legacy_license() -> Non
         )
         db.commit()
 
-        status = commercial_access_scope_policy.scoped_billing_access_status(db, amo_id=amo_id, as_of=now)
+        status = billing_access.get_billing_access_status(db, amo_id=amo_id, as_of=now)
         assert status.has_access is True
         assert status.access_state == "MODULE_SUBSCRIBED"
         assert status.redirect_to_billing is False
@@ -118,7 +119,7 @@ def test_overdue_module_renewal_does_not_lock_other_active_modules() -> None:
         _renewal_invoice(db, amo_id=amo_id, module_code="reliability", due_at=now - timedelta(minutes=1))
         db.commit()
 
-        account = commercial_access_scope_policy.scoped_billing_access_status(db, amo_id=amo_id, as_of=now)
+        account = billing_access.get_billing_access_status(db, amo_id=amo_id, as_of=now)
         quality = module_access_router.module_access_state(db, tenant_id=amo_id, module_code="quality", now=now)
         reliability = module_access_router.module_access_state(db, tenant_id=amo_id, module_code="reliability", now=now)
 
@@ -162,7 +163,7 @@ def test_account_scoped_overdue_invoice_locks_all_modules() -> None:
         )
         db.commit()
 
-        account = commercial_access_scope_policy.scoped_billing_access_status(db, amo_id=amo_id, as_of=now)
+        account = billing_access.get_billing_access_status(db, amo_id=amo_id, as_of=now)
         quality = module_access_router.module_access_state(db, tenant_id=amo_id, module_code="quality", now=now)
         assert account.has_access is False
         assert account.access_state == "PAYMENT_OVERDUE"

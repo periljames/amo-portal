@@ -12,8 +12,6 @@ from .resend_email_policy import install_resend_email_provider
 from .commercial_integrations import install_commercial_integrations
 from .commercial_accounting import install_accounting_summary_policy
 from .commercial_safety_policy import install_commercial_safety_policy
-from .commercial_access_policy import install_billing_access_hot_path
-from .commercial_access_scope_policy import install_commercial_access_scope_policy
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
 from .module_activation_policy import install_module_activation_policy
@@ -37,9 +35,7 @@ install_resend_email_provider()
 install_commercial_integrations()
 install_accounting_summary_policy()
 install_commercial_safety_policy()
-install_billing_access_hot_path()
 install_payment_data_policy()
-install_commercial_access_scope_policy()
 install_payment_transport_policy()
 install_module_product_boundary_policy()
 install_module_catalog_runtime_policy()

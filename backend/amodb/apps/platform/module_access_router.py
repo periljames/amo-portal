@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from amodb import entitlements
 from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts import services as account_services
+from amodb.apps.accounts import billing_access
 from amodb.database import get_read_db
 from amodb.security import get_current_active_user
 
@@ -85,7 +85,7 @@ def module_access_state(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     checked_at = now or datetime.now(timezone.utc)
-    account = account_services.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)
+    account = billing_access.get_billing_access_status(db, amo_id=tenant_id, as_of=checked_at)
     if not account.has_access:
         return {
             "module_code": module_code,

@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts import services as account_services
+from amodb.apps.accounts import billing_access
 
 from .database import get_read_db
 from .security import get_current_active_user
@@ -109,7 +109,7 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
 
 def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
     """Return True if the AMO has an active legacy entitlement for this capability."""
-    entitlements = account_services.resolve_entitlements(db, amo_id=amo_id)
+    entitlements = billing_access.resolve_entitlements(db, amo_id=amo_id)
     for alias in _module_aliases(module_key):
         entitlement = entitlements.get(alias)
         if entitlement is None:
@@ -166,7 +166,7 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 detail="No AMO selected for the current session.",
             )
 
-        access_status = account_services.get_billing_access_status(db, amo_id=amo_id)
+        access_status = billing_access.get_billing_access_status(db, amo_id=amo_id)
         if not access_status.has_access:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,

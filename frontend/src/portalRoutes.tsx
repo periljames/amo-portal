@@ -216,7 +216,6 @@ const AeroDocHangarDashboardPage = lazyDefault(() => import("./pages/AeroDocHang
 const QualityCarsPage = lazyDefault(() => import("./pages/QualityCarsPage"));
 const PublicCarInvitePage = lazyDefault(() => import("./pages/PublicCarInvitePage"));
 const SubscriptionManagementPage = lazyDefault(() => import("./pages/SubscriptionManagementPage"));
-const UpsellPage = lazyDefault(() => import("./pages/UpsellPage"));
 const UserWidgetsPage = lazyDefault(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazyDefault(() => import("./pages/OnboardingPasswordPage"));
 const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/PublicCertificateVerificationPage"));

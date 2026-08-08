@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 
-from . import billing_auth, models, schemas, services
+from . import billing_access, billing_auth, models, schemas, services
 
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -215,7 +215,7 @@ def get_billing_access_status(
 ):
     if _is_platform_superuser(current_user):
         return _platform_access_status()
-    return services.get_billing_access_status(db, amo_id=current_user.amo_id)
+    return billing_access.get_billing_access_status(db, amo_id=current_user.amo_id)
 
 
 @router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
@@ -225,7 +225,7 @@ def list_entitlements(
 ):
     if _is_platform_superuser(current_user):
         return _platform_entitlements()
-    return list(services.resolve_entitlements(db, amo_id=current_user.amo_id).values())
+    return list(billing_access.resolve_entitlements(db, amo_id=current_user.amo_id).values())
 
 
 @router.get("/usage-meters", response_model=list[schemas.UsageMeterRead])
