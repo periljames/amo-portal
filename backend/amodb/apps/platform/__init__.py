@@ -22,6 +22,7 @@ from .module_offer_policy import install_module_offer_policy
 from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .payment_data_policy import install_payment_data_policy
 from .payment_transport_policy import install_payment_transport_policy
+from .billing_privacy_policy import install_billing_privacy_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -89,6 +90,15 @@ from .module_subscription_router import router as module_subscription_router  # 
 from .module_payment_status_router import router as module_payment_status_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
+
+# Billing lock reason remains visible to all authenticated tenant users through
+# /billing/access-status, but invoice amounts, payment references, negotiated
+# prices and recurring-contract actions are least-privilege finance/admin data.
+install_billing_privacy_policy(
+    module_commerce_router=module_commerce_router,
+    module_subscription_router=module_subscription_router,
+    module_payment_status_router=module_payment_status_router,
+)
 
 router.include_router(console_router)
 router.include_router(platform_saas_router)
