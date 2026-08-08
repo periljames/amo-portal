@@ -1,8 +1,8 @@
 """Billing maintenance job.
 
 This script is intended for cron/Task Scheduler (e.g. hourly) to:
- - roll active/trial subscription periods forward
- - log audit entries when usage meters near their entitlement limits
+ - roll legacy tenant-license periods and usage alerts
+ - generate governed module-renewal invoices before paid service periods end
 """
 
 from __future__ import annotations
@@ -11,18 +11,21 @@ from datetime import datetime, timezone
 
 from amodb.database import WriteSessionLocal
 from amodb.apps.accounts import services as account_services
+from amodb.apps.platform.module_renewals import generate_module_renewal_invoices
 
 
 def run() -> dict:
-    """Execute the maintenance job and return a summary dict."""
+    """Execute all billing lifecycle maintenance and return an auditable summary."""
     db = WriteSessionLocal()
     try:
-        summary = account_services.roll_billing_periods_and_alert(
-            db,
-            as_of=datetime.now(timezone.utc),
-        )
+        now = datetime.now(timezone.utc)
+        legacy = account_services.roll_billing_periods_and_alert(db, as_of=now)
+        modules = generate_module_renewal_invoices(db, as_of=now)
         db.commit()
-        return summary
+        return {
+            "legacy_billing": legacy,
+            "module_commerce": modules,
+        }
     finally:
         db.close()
 
