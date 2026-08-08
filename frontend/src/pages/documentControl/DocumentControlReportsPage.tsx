@@ -17,9 +17,10 @@ import "./documentLibrary.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
 
-function csvCell(value: unknown): string {
+export function csvCell(value: unknown): string {
   const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
+  const safe = /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 function revisionLabel(revision: ReportsPortfolioResponse["items"][number]["latest_revision"]): string {
