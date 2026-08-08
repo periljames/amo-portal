@@ -5,12 +5,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import billing_auth
 from amodb.database import get_db
-from amodb.security import get_current_active_user
 
 from . import module_renewals
-from .module_commerce_router import _require_contract_authority, _tenant_id
 
 
 router = APIRouter(prefix="/commerce/self-service/modules", tags=["tenant-module-subscriptions"])
@@ -21,10 +19,11 @@ def cancel_module_at_period_end(
     module_code: str,
     payload: dict[str, Any],
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user=Depends(billing_auth.require_contract_manager),
 ):
-    tenant_id = _tenant_id(user)
-    _require_contract_authority(user)
+    tenant_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None) or "").strip()
+    if not tenant_id or getattr(user, "is_superuser", False):
+        raise HTTPException(status_code=403, detail="A tenant billing context is required.")
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(status_code=422, detail="A cancellation reason is required.")
