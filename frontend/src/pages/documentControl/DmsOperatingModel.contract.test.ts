@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 const shell = readFileSync(new URL("./DocumentControlShell.tsx", import.meta.url), "utf-8");
 const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8");
+const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
+const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
 
 describe("DMS frontend operating-model contract", () => {
   it("keeps permanent Document Control navigation bounded to seven daily workspaces", () => {
@@ -42,6 +44,14 @@ describe("DMS frontend operating-model contract", () => {
     ]) {
       expect(router).toContain(`path="${compatibilityRoute}"`);
     }
+  });
+
+  it("routes controllers into the lifecycle-rich document workspace while preserving governance tools", () => {
+    expect(recordEntry).toContain("<DocumentControlRecordPage />");
+    expect(recordEntry).toContain('searchParams.get("governance") === "assignments"');
+    expect(recordEntry).toContain("<DocumentGovernanceRecordPage />");
+    expect(recordActions).toContain("Responsibilities");
+    expect(recordActions).toContain("?governance=assignments");
   });
 
   it("retains the proven Publications reader route family as the canonical reading owner", () => {
