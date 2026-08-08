@@ -64,6 +64,7 @@ from . import audit_programme_queue_router as _audit_programme_queue_router  # n
 from . import audit_programme_schedule_router as _audit_programme_schedule_router  # noqa: F401,E402
 from . import people_router as _people_router  # noqa: F401,E402
 from . import assurance_case_router as _assurance_case_router  # noqa: F401,E402
+from . import intelligence_router as _intelligence_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -181,9 +182,24 @@ _include_once(
     "/api/maintenance/{amo_code}/qms/assurance-cases",
 )
 
+# Quality Intelligence is a bounded read model over governed source records. It
+# exposes transparent calculations and deterministic surveillance factors; it
+# does not manufacture predictive compliance or risk scores.
+_include_once(
+    _canonical_router.router,
+    _intelligence_router.router,
+    "/api/maintenance/{amo_code}/quality/intelligence",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _intelligence_router.router,
+    "/api/maintenance/{amo_code}/qms/intelligence",
+)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
 from . import mission_route_order as _mission_route_order  # noqa: F401,E402
 from . import audit_programme_route_order as _audit_programme_route_order  # noqa: F401,E402
 from . import assurance_case_route_order as _assurance_case_route_order  # noqa: F401,E402
+from . import intelligence_route_order as _intelligence_route_order  # noqa: F401,E402
