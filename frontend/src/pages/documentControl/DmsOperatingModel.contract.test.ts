@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 
 const shell = readFileSync(new URL("./DocumentControlShell.tsx", import.meta.url), "utf-8");
 const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8");
+const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.url), "utf-8");
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
 const changesPortfolio = readFileSync(new URL("./DocumentControlChangesPortfolioPage.tsx", import.meta.url), "utf-8");
 const portfolioService = readFileSync(new URL("../../services/documentControlPortfolios.ts", import.meta.url), "utf-8");
+const distributionPortfolio = readFileSync(new URL("./DocumentControlDistributionPortfolioPage.tsx", import.meta.url), "utf-8");
+const distributionPortfolioService = readFileSync(new URL("../../services/documentControlDistributionPortfolio.ts", import.meta.url), "utf-8");
 const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", import.meta.url), "utf-8");
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
@@ -30,6 +33,7 @@ describe("DMS frontend operating-model contract", () => {
   it("provides stable canonical entry URLs without deleting compatibility routes", () => {
     for (const route of [
       "/maintenance/:amoCode/document-control/changes",
+      "/maintenance/:amoCode/document-control/distribution",
       "/maintenance/:amoCode/document-control/compliance",
       "/maintenance/:amoCode/document-control/reports",
       "/maintenance/:amoCode/document-control/administration",
@@ -41,7 +45,9 @@ describe("DMS frontend operating-model contract", () => {
       "/maintenance/:amoCode/document-control/drafts",
       "/maintenance/:amoCode/document-control/change-proposals",
       "/maintenance/:amoCode/document-control/tr",
+      "/maintenance/:amoCode/document-control/distribution/:eventId",
       "/maintenance/:amoCode/document-control/reviews",
+      "/maintenance/:amoCode/document-control/controlled-copies",
       "/maintenance/:amoCode/document-control/external-sources",
       "/maintenance/:amoCode/document-control/integrations",
       "/maintenance/:amoCode/document-control/registers",
@@ -61,6 +67,20 @@ describe("DMS frontend operating-model contract", () => {
     expect(changesPortfolio).toContain('aria-busy={refreshing}');
     for (const label of ["Requests", "Draft", "In Review", "Awaiting Quality", "Awaiting Management", "Authority", "Temporary Revisions", "Ready for Release", "Closed"]) {
       expect(changesPortfolio).toContain(`label: "${label}"`);
+    }
+  });
+
+  it("routes canonical Distribution to a bounded portfolio while retaining campaign detail and copy operations", () => {
+    expect(pageExports).toContain('DocControlDistributionPage } from "./documentControl/DocumentControlDistributionPortfolioPage"');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage />');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/distribution/:eventId" element={<WorkspaceRequireAuth><DocControlDistributionDetailPage />');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/controlled-copies" element={<WorkspaceRequireAuth><DocumentControlCopiesPage />');
+    expect(distributionPortfolioService).toContain("distribution-portfolio");
+    expect(distributionPortfolioService).toContain("per_page");
+    expect(distributionPortfolio).toContain("SEARCH_DEBOUNCE_MS = 320");
+    expect(distributionPortfolio).toContain('aria-busy={refreshing}');
+    for (const label of ["Current Distributions", "Pending Acknowledgements", "Overdue Acknowledgements", "Physical Copies", "Recalls"]) {
+      expect(distributionPortfolio).toContain(`label: "${label}"`);
     }
   });
 
