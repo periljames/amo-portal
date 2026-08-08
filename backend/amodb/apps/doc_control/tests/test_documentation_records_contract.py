@@ -44,7 +44,11 @@ def test_frontend_has_generated_record_register_and_review_surface() -> None:
     page = (root / "frontend/src/pages/documentControl/DocumentControlRecordsPage.tsx").read_text(encoding="utf-8")
     service = (root / "frontend/src/services/documentationRecords.ts").read_text(encoding="utf-8")
     shell = (root / "frontend/src/pages/documentControl/DocumentControlShell.tsx").read_text(encoding="utf-8")
+    router = (root / "frontend/src/router.tsx").read_text(encoding="utf-8")
     assert "Generated records" in page
     assert "reviewGeneratedDocumentationRecord" in page
     assert "integrity" in service
-    assert 'path: "/records"' in shell
+    # Generated records remain deep-linkable during migration, but they are a
+    # retained-record/library concern rather than permanent daily DMS navigation.
+    assert '/maintenance/:amoCode/document-control/records' in router
+    assert 'path: "/records"' not in shell
