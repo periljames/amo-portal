@@ -100,10 +100,13 @@ jobs:
         run: pytest -q amodb/apps/platform/tests/test_commercial_control_plane.py
       - name: Run module and payment security contracts
         working-directory: backend
-        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "not paid_legacy_period_requires_invoice_and_verified_settlement"
-      - name: Prove paid renewal requires verified settlement
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "not paid_legacy_period_creates_renewal_invoice_and_locks and not verified_legacy_renewal_settlement_reactivates_license"
+      - name: Prove elapsed paid period creates renewal obligation and lock
         working-directory: backend
-        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_requires_invoice_and_verified_settlement"
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "paid_legacy_period_creates_renewal_invoice_and_locks"
+      - name: Prove verified renewal settlement reactivates access
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_module_commerce_security.py -k "verified_legacy_renewal_settlement_reactivates_license"
 
   frontend-platform:
     name: Frontend platform build
