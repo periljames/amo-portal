@@ -5,6 +5,7 @@ export { default as DocControlLibraryPage } from "./documentControl/DocumentLibr
 export { default as DocControlDocumentDetailPage } from "./documentControl/DocumentControlRecordEntryPage";
 export { default as DocControlGovernanceDetailPage } from "./documentControl/DocumentGovernanceRecordPage";
 export { default as DocControlChangesPortfolioPage } from "./documentControl/DocumentControlChangesPortfolioPage";
+export { default as DocControlDistributionPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlDistributionPortfolioPage } from "./documentControl/DocumentControlDistributionPortfolioPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordsPage } from "./documentControl/DocumentControlRecordsPage";
@@ -16,7 +17,6 @@ export {
   DocumentControlChangeRequestDetailPage as DocControlChangeProposalDetailPage,
   DocumentControlChangeRequestsPage as DocControlChangeProposalPage,
   DocumentControlDistributionDetailPage as DocControlDistributionDetailPage,
-  DocumentControlDistributionPage as DocControlDistributionPage,
   DocumentControlExternalSourcesPage,
   DocumentControlIntegrationsPage,
   DocumentControlLEPPage as DocControlLEPPage,
