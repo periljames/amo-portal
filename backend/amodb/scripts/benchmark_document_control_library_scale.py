@@ -24,7 +24,7 @@ from amodb.scripts.seed_document_governance_e2e import (
 
 SCALE_DOCUMENTS = 10_000
 MAX_QUERY_SECONDS = 5.0
-EVIDENCE_PATH = Path("/tmp/document-control-library-scale.json")
+EVIDENCE_PATH = Path("test-results/document-control-library-scale.json")
 
 
 def _scale_id(index: int) -> str:
@@ -111,6 +111,7 @@ def main() -> None:
             "exact_search_seconds": round(search_seconds, 4),
             "threshold_seconds": MAX_QUERY_SECONDS,
         }
+        EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
         EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
         print(json.dumps(evidence, indent=2))
     finally:
