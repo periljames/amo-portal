@@ -60,6 +60,11 @@ jobs:
             backend/amodb/apps/platform/ops_gateway.py \
             backend/amodb/apps/platform/ops_logic.py \
             backend/amodb/apps/platform/ops_worker.py \
+            backend/amodb/apps/platform/ops_query_registry.py \
+            backend/amodb/apps/platform/ops_api_router.py \
+            backend/amodb/apps/platform/ops_data_models.py \
+            backend/amodb/apps/platform/ops_management_router.py \
+            backend/amodb/apps/platform/product_analytics.py \
             backend/amodb/apps/platform/platform_command_queue.py \
             backend/amodb/jobs/saas_worker_safe.py \
             backend/amodb/platform_ops_main.py \
@@ -73,10 +78,16 @@ jobs:
           pytest -q \
             backend/amodb/apps/platform/tests/test_saas_queue_fencing.py \
             backend/amodb/apps/platform/tests/test_platform_command_queue.py
-      - name: Prove mounted console uses prepared broker router
+      - name: Prove bounded query registry and analytics privacy contracts
+        run: |
+          pytest -q \
+            backend/amodb/apps/platform/tests/test_ops_query_registry.py \
+            backend/amodb/apps/platform/tests/test_product_analytics.py
+      - name: Prove mounted console and versioned Operations API contracts
         run: |
           PYTHONPATH=backend python - <<'PY'
           from amodb.apps.platform import router
+          from amodb.platform_ops_main import app
           mounted = [
               (getattr(r, "path", ""), getattr(getattr(r, "endpoint", None), "__module__", ""))
               for r in router.routes
@@ -84,6 +95,27 @@ jobs:
           routes = [item for item in mounted if item[0].endswith("/console/events")]
           assert len(routes) == 1, mounted
           assert routes[0][1].endswith("ops_console_router"), routes[0]
+
+          methods_and_paths = {
+              (method, getattr(route, "path", ""))
+              for route in app.routes
+              for method in (getattr(route, "methods", None) or set())
+          }
+          required = {
+              ("GET", "/ops/v1/bootstrap"),
+              ("GET", "/ops/v1/live"),
+              ("GET", "/ops/v1/nodes"),
+              ("GET", "/ops/v1/nodes/{node_id}/timeseries"),
+              ("GET", "/ops/v1/database"),
+              ("GET", "/ops/v1/queues"),
+              ("GET", "/ops/v1/slo"),
+              ("GET", "/ops/v1/capacity"),
+              ("GET", "/ops/v1/tenant-health"),
+              ("GET", "/ops/v1/product-analytics/rollups"),
+              ("GET", "/ops/v1/incident-center"),
+          }
+          missing = required - methods_and_paths
+          assert not missing, missing
           PY
       - name: Prove external-pooler mode does not create process-local QueuePool
         env:
@@ -103,6 +135,19 @@ jobs:
           grep -q 'target: 1000' ops/load/k6_1000_tenants.js
           grep -q 'http_req_failed' ops/load/k6_1000_tenants.js
           grep -q 'p(95)<750' ops/load/k6_1000_tenants.js
+      - name: Validate telemetry cardinality guardrails
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("backend/amodb/observability.py").read_text(encoding="utf-8")
+          forbidden_metric_attributes = [
+              '"tenant_id"', '"user_id"', '"email"', '"serial_number"',
+              '"document_id"', '"work_order_id"', '"sql"',
+          ]
+          metric_section = source[source.index("def _configure_metrics"):source.index("def configure_telemetry")]
+          found = [value for value in forbidden_metric_attributes if value in metric_section]
+          assert not found, found
+          PY
       - name: Validate production compose model
         run: |
           touch .env
@@ -122,7 +167,7 @@ jobs:
 
   clean-postgres-and-failure-isolation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -147,6 +192,7 @@ jobs:
       OTEL_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:59998"
       OTEL_EXPORT_TIMEOUT_SEC: "0.5"
+      OTEL_METRIC_EXPORT_INTERVAL_MS: "5000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -161,7 +207,48 @@ jobs:
         run: alembic -c amodb/alembic.ini heads --verbose
       - name: Upgrade a clean PostgreSQL database to every head
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade heads
+        run: |
+          alembic -c amodb/alembic.ini upgrade heads
+          alembic -c amodb/alembic.ini current | grep -q "platform_ops_20260808_control_data"
+      - name: Prove product analytics batch and rollups on PostgreSQL
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from amodb.apps.accounts.models import AMO
+          from amodb.apps.platform import ops_data_models, product_analytics
+          from amodb.database import WriteSessionLocal
+
+          db = WriteSessionLocal()
+          tenant = AMO(amo_code="CI-OPS", name="CI Operations Tenant", login_slug="ci-operations-tenant", is_demo=False, is_active=True)
+          db.add(tenant)
+          db.commit()
+          db.refresh(tenant)
+          tenant_id = tenant.id
+          db.close()
+
+          event = product_analytics._normalise_event(
+              tenant_id=tenant_id,
+              event_type="workflow_completed",
+              module="quality",
+              outcome="SUCCESS",
+              duration_ms=250,
+              session_class="tenant_user",
+              metadata={"workflow": "audit-closeout", "user_id": "must-be-dropped"},
+              occurred_at=datetime.now(timezone.utc),
+          )
+          product_analytics._persist([event])
+
+          db = WriteSessionLocal()
+          assert db.query(ops_data_models.PlatformProductEvent).filter_by(tenant_id=tenant_id).count() == 1
+          assert db.query(ops_data_models.PlatformProductRollup).filter_by(tenant_id=tenant_id).count() == 2
+          summary = product_analytics.analytics_summary(db, data_mode="REAL", days=30)
+          assert summary["events"] == 1
+          assert summary["workflow_funnel"]["completed"] == 1
+          raw = db.query(ops_data_models.PlatformProductEvent).filter_by(tenant_id=tenant_id).one()
+          assert "user_id" not in (raw.metadata_json or {})
+          db.close()
+          PY
       - name: Prove Platform command executes through lease-fenced durable queue
         working-directory: backend
         run: |
