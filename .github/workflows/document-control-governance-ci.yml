@@ -8,6 +8,7 @@ name: Document Control Governance CI
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
+      - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/app/TenantRouteBoundary.tsx"
@@ -15,6 +16,7 @@ name: Document Control Governance CI
       - "frontend/src/utils/departmentAccess.ts"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/ManualReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
@@ -22,10 +24,13 @@ name: Document Control Governance CI
       - "frontend/src/services/config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentControl*"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
       - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/src/components/QMS/PortalTextScaleManager.tsx"
+      - "frontend/src/styles/components/toast.css"
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
@@ -38,6 +43,7 @@ name: Document Control Governance CI
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
+      - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/app/TenantRouteBoundary.tsx"
@@ -45,6 +51,7 @@ name: Document Control Governance CI
       - "frontend/src/utils/departmentAccess.ts"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/ManualReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
@@ -52,10 +59,13 @@ name: Document Control Governance CI
       - "frontend/src/services/config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentControl*"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
       - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/src/components/QMS/PortalTextScaleManager.tsx"
+      - "frontend/src/styles/components/toast.css"
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
@@ -130,6 +140,7 @@ jobs:
               "docgov_merge_20260807_qms",
               "docgov_20260807_qms_audit_runtime",
               "rel_20260807_main_merge",
+              "docctl_20260808_regmap",
           }
           missing = required - ancestry
           assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
@@ -155,6 +166,7 @@ jobs:
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/scan",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/circulation",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf",
+              "/doc-control/workspace/t/{tenant_slug}/reports-portfolio",
           }
           missing = required - paths
           assert not missing, missing
@@ -193,6 +205,11 @@ jobs:
           src/router.tsx
           src/services/apiClient.ts
           src/services/documentLibrary.ts
+          src/services/documentControlPortfolios.ts
+          src/services/documentControlDistributionPortfolio.ts
+          src/services/documentControlCompliancePortfolio.ts
+          src/services/documentControlReportsPortfolio.ts
+          src/services/documentControlReports.ts
           src/services/documentGovernance.ts
           src/services/readerGovernance.ts
           src/pages/DocControlPages.tsx
@@ -201,8 +218,17 @@ jobs:
           src/pages/documentControl/DocumentGovernanceRecordPage.tsx
           src/pages/documentControl/DocumentLibraryHubPage.tsx
           src/pages/documentControl/DocumentLibraryCopiesPage.tsx
+          src/pages/documentControl/DocumentControlChangesPortfolioPage.tsx
+          src/pages/documentControl/DocumentControlDistributionPortfolioPage.tsx
+          src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
+          src/pages/documentControl/DocumentControlReportsPage.tsx
+          src/pages/documentControl/DocumentControlAdministrationPage.tsx
+          src/pages/documentControl/DocumentControlRecordPage.tsx
+          src/pages/documentControl/DocumentControlRecordEntryPage.tsx
+          src/pages/documentControl/DocumentControlRecordActions.tsx
           src/pages/documentControl/DocumentControlShell.tsx
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/manuals/ManualReaderPage.tsx
           src/pages/manuals/PublicationsReaderPage.tsx
           src/pages/manuals/PublicationGovernancePanel.tsx
           tests/e2e/document-governance-live.spec.ts
@@ -210,7 +236,7 @@ jobs:
         run: npm run build
 
   authenticated-browser:
-    name: Authenticated DMS library, governance, physical custody and reader acceptance
+    name: Production-build authenticated DMS operating-model acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -268,10 +294,13 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Build production frontend for browser acceptance
+        working-directory: frontend
+        run: npm run build
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
-      - name: Start backend and frontend
+      - name: Start backend and production preview
         shell: bash
         run: |
           set -euo pipefail
@@ -282,20 +311,30 @@ jobs:
             sleep 1
           done
           sleep 2
-          if grep -Eq "UndefinedColumn|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
+          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
             echo "::error::Backend startup reported an ORM/schema integration failure"
             cat /tmp/dms-backend.log
             exit 1
           fi
-          (cd frontend && nohup npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
             if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
             sleep 1
           done
-      - name: Run real-login Document Control library, governance and custody acceptance
+      - name: Run real-login Document Control operating-model acceptance
         working-directory: frontend
         run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
+      - name: Verify production runtime logs are clean
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn" /tmp/dms-frontend.log /tmp/dms-backend.log 2>/dev/null; then
+            echo "::error::Material runtime or development-server noise detected during production acceptance"
+            cat /tmp/dms-frontend.log 2>/dev/null || true
+            cat /tmp/dms-backend.log 2>/dev/null || true
+            exit 1
+          fi
       - name: Dump server logs on failure
         if: failure()
         shell: bash
@@ -304,15 +343,15 @@ jobs:
           cat /tmp/dms-backend.log 2>/dev/null || true
           echo '--- frontend ---'
           cat /tmp/dms-frontend.log 2>/dev/null || true
-      - name: Upload Playwright evidence on failure
-        if: failure()
+      - name: Upload Playwright release evidence
+        if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: document-control-governance-playwright
+          name: document-control-operating-model-evidence
           path: |
             frontend/test-results
             frontend/playwright-report
-          if-no-files-found: ignore
+          if-no-files-found: warn
       - name: Stop acceptance servers
         if: always()
         shell: bash
