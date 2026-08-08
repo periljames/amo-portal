@@ -178,7 +178,12 @@ case "$ROLE" in
     "${COMPOSE[@]}" --profile hub up -d
     ;;
   all)
-    "${SCRIPT_DIR}/add-node.sh" --node-id "$NODE_ID" --address "$AGENT_BIND" --environment "$ENVIRONMENT" --cluster-id "$CLUSTER_ID"
+    "${SCRIPT_DIR}/add-node.sh" \
+      --node-id "$NODE_ID" \
+      --node-exporter-target "node-exporter:9100" \
+      --cadvisor-target "cadvisor:8080" \
+      --environment "$ENVIRONMENT" \
+      --cluster-id "$CLUSTER_ID"
     "${COMPOSE[@]}" --profile agent --profile hub up -d
     ;;
 esac

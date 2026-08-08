@@ -21,7 +21,7 @@ sudo ./ops/observability/scripts/install-ubuntu.sh --role hub --bind-address 10.
 sudo ./ops/observability/scripts/install-ubuntu.sh --role agent --bind-address 10.0.0.21 --hub-address 10.0.0.10
 ```
 
-`agent` installs/runs Node Exporter, cAdvisor and an OTel Collector agent. `hub` runs Prometheus, Alertmanager, an OTel ingest collector and provisioned Grafana. `all` runs both roles for the current single-server deployment.
+`agent` runs Node Exporter, cAdvisor and an OTel Collector agent. `hub` runs Prometheus, Alertmanager, an OTel ingest collector and provisioned Grafana. `all` runs both roles for the current single-server deployment and registers local collectors through Docker service DNS.
 
 The installer uses Docker's official Ubuntu apt repository if Docker Engine/Compose are absent. It rejects wildcard monitoring binds. A remote agent requires a trusted private hub address. Use a private LAN/Tailscale/VPN address and enforce host firewall policy.
 
@@ -53,7 +53,7 @@ Prometheus, Alertmanager, Grafana, OTel ingest, Node Exporter and cAdvisor are p
 
 ## Secrets
 
-`.env` is deployment-local and must not be committed. The installer creates it with mode `0600`. Grafana's admin password is generated once for hub/all roles when absent and is printed only on that generation run. Configure Alertmanager receiver credentials through deployment-local secret material before enabling paging.
+`.env` and `backups/` are ignored locally under this directory. The installer creates `.env` with mode `0600`. Grafana's admin password is generated once for hub/all roles when absent and is printed only on that generation run. Configure Alertmanager receiver credentials through deployment-local secret material before enabling paging.
 
 ## Backup / restore
 
@@ -62,7 +62,7 @@ sudo ./ops/observability/scripts/backup.sh /secure/backup/amo-observability
 sudo ./ops/observability/scripts/restore.sh /secure/backup/amo-observability
 ```
 
-Restore stops the observability stack and does not touch the tenant application stack.
+Restore stops the observability Compose project. It refuses to overwrite a non-empty named volume; removing or moving an existing volume is an explicit operator decision. Version-controlled configuration and `.env` are not automatically overwritten: review `configuration.tgz` before restoring them.
 
 ## Verification boundary
 

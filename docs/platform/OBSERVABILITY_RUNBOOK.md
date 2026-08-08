@@ -20,11 +20,11 @@ For split topology, install the hub on a trusted private address, then each agen
 sudo ./ops/observability/scripts/verify.sh all
 ```
 
-For a hub, inspect Prometheus Targets and confirm the registered `node-exporter` and `cadvisor` targets are `UP`. Grafana is a deep SRE interface; the product frontend will use the dedicated Platform Ops Gateway in a later phase.
+For a hub, inspect Prometheus Targets and confirm registered `node-exporter` and `cadvisor` targets are `UP`. Grafana is a deep SRE interface; the product frontend will use the dedicated Platform Ops Gateway in a later phase.
 
 ## Failure behavior
 
-- Prometheus down: tenant API continues; Superadmin gateway will later serve last-known data marked stale.
+- Prometheus down: tenant API continues; the later Superadmin gateway will serve last-known data marked stale.
 - Alertmanager down: metrics remain queryable; paging is degraded.
 - Grafana down: tenant API and metric collection continue.
 - OTel hub unreachable: each agent retries for a bounded window with a bounded queue, then drops telemetry rather than accumulating indefinitely.
@@ -41,13 +41,13 @@ Prometheus file discovery refreshes without application code changes.
 
 ## Backup/restore
 
-Run `backup.sh` to capture configs/targets and named data volumes. Keep backups outside the repository and restrict permissions. `restore.sh` stops only the observability Compose project before restoring volumes.
+Run `backup.sh` to capture configs/targets and named data volumes. Keep backups outside the repository and restrict permissions. `restore.sh` stops only the observability Compose project and refuses to overwrite non-empty data volumes. The configuration archive is intentionally left for operator review rather than automatically overwriting deployment-local secrets or Git-managed files.
 
 ## Moving the hub
 
 1. Back up the existing hub.
 2. Install `--role hub` on the new trusted private host.
-3. Restore the backup.
+3. Restore data into empty observability volumes and review the configuration archive.
 4. Change each agent's `OTEL_EXPORTER_OTLP_ENDPOINT` in its deployment-local `.env` and restart only `otel-agent`.
 5. Ensure the new hub can reach registered Node Exporter/cAdvisor private addresses.
 6. Verify all targets and alerts before retiring the old hub.
@@ -56,4 +56,4 @@ No application business logic changes when the hub address changes.
 
 ## Unverified deployment gates
 
-CI cannot prove host networking, Docker daemon policy, Tailscale/VPN ACLs, clean Ubuntu idempotency, cgroup behavior or a second physical/VM node. Record those results during deployment acceptance. Never convert an unexecuted gate into a 'verified' checkbox.
+CI cannot prove host networking, Docker daemon policy, Tailscale/VPN ACLs, clean Ubuntu idempotency, cgroup behavior or a second physical/VM node. Record those results during deployment acceptance. Never convert an unexecuted gate into a verified checkbox.
