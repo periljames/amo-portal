@@ -4,6 +4,7 @@ export { default as DocControlDashboardPage } from "./documentControl/DocumentGo
 export { default as DocControlLibraryPage } from "./documentControl/DocumentLibraryHubPage";
 export { default as DocControlDocumentDetailPage } from "./documentControl/DocumentControlRecordEntryPage";
 export { default as DocControlGovernanceDetailPage } from "./documentControl/DocumentGovernanceRecordPage";
+export { default as DocControlChangesPortfolioPage } from "./documentControl/DocumentControlChangesPortfolioPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordsPage } from "./documentControl/DocumentControlRecordsPage";
 export { default as DocumentControlCopiesPage } from "./documentControl/DocumentLibraryCopiesPage";
