@@ -1,7 +1,7 @@
 """Add versioned governed audit preparation snapshots.
 
 Revision ID: quality_260808_audit_prep
-Revises: quality_260808_intelligence_graph
+Revises: quality_260808_intel_graph
 Create Date: 2026-08-08
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "quality_260808_audit_prep"
-down_revision = "quality_260808_intelligence_graph"
+down_revision = "quality_260808_intel_graph"
 branch_labels = None
 depends_on = None
 
