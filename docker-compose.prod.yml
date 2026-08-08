@@ -31,6 +31,9 @@ services:
       PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC: "${PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC:-10}"
     command: ["uvicorn", "amodb.platform_ops_main:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
     restart: unless-stopped
+    cpus: "${PLATFORM_OPS_CPU_LIMIT:-0.75}"
+    mem_limit: "${PLATFORM_OPS_MEMORY_LIMIT:-768m}"
+    pids_limit: 256
     ports:
       - "127.0.0.1:8090:8090"
     healthcheck:
@@ -38,6 +41,25 @@ services:
       interval: 15s
       timeout: 3s
       retries: 5
+
+  platform-ops-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DB_POOL_SIZE: "${PLATFORM_OPS_WORKER_DB_POOL_SIZE:-2}"
+      DB_MAX_OVERFLOW: "${PLATFORM_OPS_WORKER_DB_MAX_OVERFLOW:-1}"
+      DB_POOL_TIMEOUT: "${PLATFORM_OPS_WORKER_DB_POOL_TIMEOUT:-3}"
+      PLATFORM_OPS_WORKER_SECONDS: "${PLATFORM_OPS_WORKER_SECONDS:-2}"
+      PLATFORM_OPS_WORKER_BATCH_SIZE: "${PLATFORM_OPS_WORKER_BATCH_SIZE:-10}"
+      PLATFORM_OPS_JOB_LEASE_SECONDS: "${PLATFORM_OPS_JOB_LEASE_SECONDS:-120}"
+    command: ["python", "-m", "amodb.platform_ops_worker_main"]
+    restart: unless-stopped
+    cpus: "${PLATFORM_OPS_WORKER_CPU_LIMIT:-0.35}"
+    mem_limit: "${PLATFORM_OPS_WORKER_MEMORY_LIMIT:-384m}"
+    pids_limit: 128
 
   rostering-automation:
     build:
@@ -62,4 +84,7 @@ services:
     ports:
       - "127.0.0.1:3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      platform-ops-gateway:
+        condition: service_healthy

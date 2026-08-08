@@ -8,14 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from amodb.apps.platform.ops_console_router import broker, router as console_router
 from amodb.apps.platform.ops_gateway import router as operations_router, snapshot_refresher, snapshot_store
-from amodb.apps.platform.ops_worker import durable_command_worker
 from amodb.database import dispose_engines, read_engine, write_engine
 from amodb.observability import configure_telemetry
 
 
 app = FastAPI(
     title="AMO Portal Platform Operations Gateway",
-    version="2.0.0",
+    version="2.1.0",
     docs_url=None if os.getenv("APP_ENV", "").lower() in {"prod", "production"} else "/docs",
 )
 
@@ -38,7 +37,6 @@ async def _start_operations_gateway() -> None:
     stop = asyncio.Event()
     app.state.ops_stop = stop
     app.state.snapshot_task = asyncio.create_task(snapshot_refresher(stop), name="platform-ops-intelligence-refresh")
-    app.state.command_task = asyncio.create_task(durable_command_worker(stop), name="platform-ops-command-worker")
 
 
 @app.on_event("shutdown")
@@ -47,8 +45,9 @@ async def _stop_operations_gateway() -> None:
     if stop is not None:
         stop.set()
     await broker.stop()
-    tasks = [getattr(app.state, name, None) for name in ("snapshot_task", "command_task")]
-    await asyncio.gather(*(task for task in tasks if task is not None), return_exceptions=True)
+    task = getattr(app.state, "snapshot_task", None)
+    if task is not None:
+        await asyncio.gather(task, return_exceptions=True)
     dispose_engines()
 
 

@@ -2,38 +2,118 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 
 from amodb.database import WriteSessionLocal, close_session_safely
 from amodb.observability import operation_span
 
-from . import models, services
+from . import models, platform_command_queue, saas_lease, saas_queue
+
 
 WORKER_SECONDS = max(1.0, float(os.getenv("PLATFORM_OPS_WORKER_SECONDS", "2") or "2"))
 WORKER_BATCH_SIZE = max(1, min(100, int(os.getenv("PLATFORM_OPS_WORKER_BATCH_SIZE", "10") or "10")))
+LEASE_SECONDS = max(30, min(3600, int(os.getenv("PLATFORM_OPS_JOB_LEASE_SECONDS", "120") or "120")))
+
+
+def worker_id() -> str:
+    configured = (os.getenv("PLATFORM_OPS_WORKER_ID") or "").strip()
+    if configured:
+        return configured[:128]
+    return f"{socket.gethostname()}:{os.getpid()}:platform-ops"[:128]
+
+
+def _record_heartbeat(db, identity: str, *, status: str = "ONLINE", metadata: dict | None = None) -> None:
+    row = db.query(models.PlatformWorkerHeartbeat).filter(models.PlatformWorkerHeartbeat.worker_name == identity).first()
+    if row is None:
+        row = models.PlatformWorkerHeartbeat(worker_name=identity, worker_type="platform-ops-command")
+        db.add(row)
+    row.last_seen_at = models.utcnow()
+    row.status = status
+    row.metadata_json = metadata or {}
+    db.flush()
+
+
+def _process_one(db, identity: str) -> bool:
+    jobs = saas_queue.claim_jobs(
+        db,
+        worker_id=identity,
+        queue_names=("platform",),
+        batch_size=1,
+        lease_seconds=LEASE_SECONDS,
+    )
+    if not jobs:
+        return False
+
+    job = jobs[0]
+    try:
+        with operation_span(
+            "platform_ops.command.execute",
+            job_type=job.job_type,
+            queue_name=job.queue_name,
+        ):
+            with saas_lease.LeaseHeartbeat(
+                job,
+                worker_id=identity,
+                lease_seconds=LEASE_SECONDS,
+            ) as heartbeat:
+                result = platform_command_queue.process_leased_job(db, job)
+                heartbeat.raise_if_lost()
+        saas_queue.complete_job(db, job, result, worker_id=identity)
+    except saas_queue.LeaseLostError:
+        db.rollback()
+        return True
+    except PermissionError as exc:
+        try:
+            saas_queue.fail_job(db, job, exc, retryable=False, worker_id=identity)
+        except saas_queue.LeaseLostError:
+            db.rollback()
+        return True
+    except Exception as exc:
+        try:
+            saas_queue.fail_job(
+                db,
+                job,
+                exc,
+                retryable=platform_command_queue.queue_job_is_retryable(job),
+                worker_id=identity,
+            )
+        except saas_queue.LeaseLostError:
+            db.rollback()
+        return True
+    return True
 
 
 def process_pending_batch() -> int:
+    """Reconcile pending command rows and execute a bounded lease-fenced batch."""
+
     db = WriteSessionLocal()
-    completed = 0
+    identity = worker_id()
+    processed = 0
     try:
-        rows = (
-            db.query(models.PlatformCommandJob)
-            .filter(models.PlatformCommandJob.status == "PENDING")
-            .order_by(models.PlatformCommandJob.created_at.asc())
-            .limit(WORKER_BATCH_SIZE)
-            .with_for_update(skip_locked=True)
-            .all()
-        )
-        for row in rows:
-            actor = str(row.actor_user_id or row.requested_by_user_id or "")
-            with operation_span("platform_ops.command.execute", command=row.command_name, tenant_id=row.tenant_id, job_id=row.id):
-                services.execute_command_job(db, row, actor_id=actor)
-            completed += 1
+        _record_heartbeat(db, identity, metadata={"phase": "reconcile"})
         db.commit()
-        return completed
-    except Exception:
+        platform_command_queue.reconcile_pending_jobs(db, limit=max(WORKER_BATCH_SIZE * 4, 20))
+
+        for _ in range(WORKER_BATCH_SIZE):
+            if not _process_one(db, identity):
+                break
+            processed += 1
+
+        _record_heartbeat(
+            db,
+            identity,
+            metadata={"processed_last_batch": processed, "lease_seconds": LEASE_SECONDS},
+        )
+        db.commit()
+        return processed
+    except Exception as exc:
         db.rollback()
-        return completed
+        try:
+            _record_heartbeat(db, identity, status="DEGRADED", metadata={"error": str(exc)[:300]})
+            db.commit()
+        except Exception:
+            db.rollback()
+        return processed
     finally:
         close_session_safely(db)
 

@@ -7,6 +7,7 @@ on:
       - "backend/amodb/platform_ops_main.py"
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/requirements.txt"
@@ -23,6 +24,7 @@ on:
       - "backend/amodb/platform_ops_main.py"
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
       - "docker-compose.prod.yml"
@@ -58,11 +60,19 @@ jobs:
             backend/amodb/apps/platform/ops_gateway.py \
             backend/amodb/apps/platform/ops_logic.py \
             backend/amodb/apps/platform/ops_worker.py \
+            backend/amodb/apps/platform/platform_command_queue.py \
+            backend/amodb/jobs/saas_worker_safe.py \
             backend/amodb/platform_ops_main.py \
+            backend/amodb/platform_ops_worker_main.py \
             backend/amodb/observability.py \
             backend/amodb/database.py
       - name: Prove browser fan-out does not multiply refresh work
         run: pytest -q backend/amodb/apps/platform/tests/test_ops_broker.py
+      - name: Prove durable queue fencing and approval boundary
+        run: |
+          pytest -q \
+            backend/amodb/apps/platform/tests/test_saas_queue_fencing.py \
+            backend/amodb/apps/platform/tests/test_platform_command_queue.py
       - name: Prove mounted console uses prepared broker router
         run: |
           PYTHONPATH=backend python - <<'PY'
@@ -98,10 +108,12 @@ jobs:
           touch .env
           docker compose -f docker-compose.prod.yml config >/tmp/platform-compose.yml
           grep -q "platform-ops-gateway:" /tmp/platform-compose.yml
-          if grep -A45 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
+          grep -q "platform-ops-worker:" /tmp/platform-compose.yml
+          if grep -A55 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
             echo "Platform ops gateway must not be published on a wildcard host address" >&2
             exit 1
           fi
+          grep -A30 "frontend:" /tmp/platform-compose.yml | grep -q "platform-ops-gateway"
       - name: Build production frontend
         working-directory: frontend
         run: |
@@ -150,6 +162,57 @@ jobs:
       - name: Upgrade a clean PostgreSQL database to every head
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Prove Platform command executes through lease-fenced durable queue
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from amodb.apps.platform import models, saas_models, saas_queue
+          from amodb.apps.platform.ops_worker import process_pending_batch
+          from amodb.database import WriteSessionLocal
+
+          db = WriteSessionLocal()
+          command = models.PlatformCommandJob(
+              command_name="RUN_PLATFORM_HEALTH_PROBE",
+              risk_level="LOW",
+              status="QUEUED",
+              dry_run=True,
+              max_retries=0,
+              timeout_seconds=10,
+              reason="CI lease/fencing proof",
+          )
+          db.add(command)
+          db.commit()
+          db.refresh(command)
+          queue_job = saas_queue.enqueue_job(
+              db,
+              job_type="PLATFORM_COMMAND_JOB",
+              queue_name="platform",
+              payload={"command_job_id": command.id, "actor_id": "ci-system"},
+              idempotency_key=f"ci-platform-command:{command.id}",
+              max_attempts=1,
+              commit=True,
+          )
+          queue_id = queue_job.id
+          command_id = command.id
+          db.close()
+
+          processed = process_pending_batch()
+          assert processed == 1, processed
+
+          db = WriteSessionLocal()
+          command = db.get(models.PlatformCommandJob, command_id)
+          queue_job = db.get(saas_models.SaaSJob, queue_id)
+          assert command.status == "SUCCEEDED", command.status
+          assert (command.output_json or {}).get("dry_run") is True, command.output_json
+          assert queue_job.status == "SUCCEEDED", queue_job.status
+          assert queue_job.locked_by is None
+          assert queue_job.lease_token is None
+          assert queue_job.lease_expires_at is None
+          heartbeat = db.query(models.PlatformWorkerHeartbeat).filter(models.PlatformWorkerHeartbeat.worker_type == "platform-ops-command").first()
+          assert heartbeat is not None
+          assert heartbeat.status == "ONLINE"
+          db.close()
+          PY
       - name: Start gateway with Prometheus and OTLP deliberately unavailable
         working-directory: backend
         run: |
