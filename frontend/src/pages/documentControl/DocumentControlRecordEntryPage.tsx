@@ -7,7 +7,7 @@ import {
   type DocumentControlDashboard,
   type ReadTargetResponse,
 } from "../../services/documentControl";
-import DocumentGovernanceRecordPage from "./DocumentGovernanceRecordPage";
+import DocumentControlRecordPage from "./DocumentControlRecordPage";
 import DocumentControlShell, {
   DocumentControlError,
   DocumentControlLoading,
@@ -15,9 +15,13 @@ import DocumentControlShell, {
 } from "./DocumentControlShell";
 
 /**
- * Keeps governance records controller-only without making ordinary readers wander
- * through an empty control record. Controllers receive the full governed record;
- * readers are sent directly to the immutable revision they are permitted to open.
+ * Resolve the correct role surface for one controlled document.
+ *
+ * Controllers enter the unified lifecycle workspace. Ordinary readers skip
+ * administrative metadata and open the immutable revision they are permitted to
+ * read. Detailed governance assignment tooling remains available from the
+ * controller workspace through the compatibility governance route while it is
+ * progressively folded into Overview/Relationships.
  */
 export default function DocumentControlRecordEntryPage() {
   const { tenant, docId, basePath, readerBasePath } = useDocumentControlRoute();
@@ -46,12 +50,12 @@ export default function DocumentControlRecordEntryPage() {
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
-    return <DocumentControlShell title="Opening document" subtitle="Resolving the immutable revision available to your role." canControl={false}><DocumentControlLoading label="Resolving your permitted revision…" /></DocumentControlShell>;
+    return <DocumentControlShell title="Opening document" subtitle="Resolving the controlled workspace available to your role." canControl={false}><DocumentControlLoading label="Resolving your permitted document workspace…" /></DocumentControlShell>;
   }
   if (error) {
-    return <DocumentControlShell title="Document unavailable" subtitle="The portal could not resolve a readable revision for this record." canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
+    return <DocumentControlShell title="Document unavailable" subtitle="The portal could not resolve a controlled workspace for this record." canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
   }
-  if (dashboard?.capabilities.control) return <DocumentGovernanceRecordPage />;
+  if (dashboard?.capabilities.control) return <DocumentControlRecordPage />;
   if (target?.revision_id) {
     return <Navigate to={`${readerBasePath}/${docId}/rev/${target.revision_id}/read`} replace />;
   }
