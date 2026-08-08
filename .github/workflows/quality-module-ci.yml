@@ -145,6 +145,7 @@ jobs:
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
           amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_register_pagination.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
           amodb/apps/quality/tests/test_excellence_contract.py
@@ -247,6 +248,7 @@ jobs:
           npx playwright test \
             tests/e2e/qms-excellence-cockpit.spec.ts \
             tests/e2e/qms-usability-enhancements.spec.ts \
+            tests/e2e/qms-register-bounded.spec.ts \
             tests/e2e/qms-modern-planner-live.spec.ts \
             tests/e2e/qms-planner-lifecycle.spec.ts \
             tests/e2e/qms-planner-audit-handoff.spec.ts \
@@ -258,8 +260,11 @@ jobs:
           src/services/qmsAuditHubActions.test.ts
           src/services/qmsDashboard.ts
           src/services/qmsDashboard.test.ts
+          src/services/qmsRegisters.ts
           src/services/qualityExcellence.ts
           src/services/portalPreferences.ts
+          src/pages/QualityCarsPage.tsx
+          src/pages/qualityAudits/QualityAuditRegisterPage.tsx
           src/pages/qms
           src/components/QMS/PortalTextScaleManager.tsx
           src/components/QMS/QualityContextTabs.tsx

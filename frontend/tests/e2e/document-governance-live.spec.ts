@@ -58,20 +58,49 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.getByTestId("integrated-document-library")).toBeVisible();
     await expect(page.getByText("Governance queue")).toBeVisible();
     await expect(page.getByRole("table")).toBeVisible();
-    await expect(page.getByText("DMS-CI-MOM")).toBeVisible();
+    await expect(page.getByText("DMS-CI-MOM", { exact: true })).toBeVisible();
   });
 
-  test("company library exposes document shelves and the full hierarchy entry point", async ({ page }) => {
-    await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
+  test("company library proves governed policy, external-data currency and full hierarchy navigation", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library?per_page=25`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
     for (const shelf of ["Policies", "Manuals", "Procedures", "Work instructions", "Forms", "Checklists", "Registers", "External data"]) {
       await expect(library.getByRole("button", { name: new RegExp(shelf, "i") })).toBeVisible();
     }
+
+    await library.getByRole("button", { name: /Policies/i }).click();
+    await expect(page).toHaveURL(/type=POLICY/);
+    await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Controlled Information Policy")).toBeVisible();
+
+    await library.getByRole("button", { name: /External data/i }).click();
+    await expect(page).toHaveURL(/type=EXTERNAL_DOCUMENT/);
+    const externalRow = page.getByRole("row").filter({ hasText: "KCAA-CI-EXT-001" });
+    await expect(externalRow).toBeVisible({ timeout: 30_000 });
+    await expect(externalRow).toContainText("Kenya Civil Aviation Authority");
+    await expect(externalRow).toContainText("CURRENT");
+    await expect(externalRow).toContainText("KCAR 2025 CI proof");
+
     await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
     await page.getByRole("button", { name: /Full tree/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
-    await expect(page.locator(".dc-structure-tree")).toBeVisible({ timeout: 30_000 });
+    const tree = page.locator(".dc-structure-tree");
+    await expect(tree).toBeVisible({ timeout: 30_000 });
+    await expect(tree).toContainText("DMS-CI-MOM");
+    await expect(tree).toContainText("DMS-CI-POL-001");
+    await expect(tree).toContainText("KCAA-CI-EXT-001");
+  });
+
+  test("bounded library filters survive a hard browser navigation", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=POLICY&per_page=25&sort=code&direction=asc`);
+    await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page).toHaveURL(/type=POLICY/);
+    await expect(page).toHaveURL(/per_page=25/);
+    await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
   test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
@@ -87,7 +116,7 @@ test.describe("Document Control governed workflow", () => {
 
   test("opening the permitted revision mounts one authoritative reader source", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    await page.getByRole("button", { name: /Read current revision|Read approved working revision|Read uncontrolled copy/i }).click();
+    await page.getByRole("button", { name: /Read current issue|Read current revision|Read approved working revision|Read uncontrolled copy/i }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
     await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });

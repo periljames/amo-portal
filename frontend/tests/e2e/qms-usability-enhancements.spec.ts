@@ -1,13 +1,53 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 type StoredScale = "standard" | "large" | "extra-large";
+type TestState = {
+  scale: StoredScale;
+  qualityReads: number;
+  carRegisterUrls: string[];
+};
 
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
 }
 
-async function prepare(page: Page, state: { scale: StoredScale; qualityReads: number }): Promise<void> {
+function carRecord(id = "car-1", program: "QUALITY" | "RELIABILITY" = "QUALITY") {
+  return {
+    id,
+    program,
+    car_number: program === "RELIABILITY" ? "REL-CAR-007" : "QMS-CAR-001",
+    title: program === "RELIABILITY" ? "Investigate repeat component removal" : "Restore training currency",
+    summary: program === "RELIABILITY" ? "Review the repeat-removal event and corrective action." : "Update the affected controlled training record.",
+    priority: "HIGH",
+    status: "OPEN",
+    due_date: "2026-08-20",
+    target_closure_date: "2026-08-24",
+    closed_at: null,
+    escalated_at: null,
+    finding_id: "finding-1",
+    requested_by_user_id: "quality-user-a",
+    assigned_to_user_id: "auditee-a",
+    invite_token: "invite-token",
+    reminder_interval_days: 7,
+    next_reminder_at: null,
+    submitted_at: null,
+    root_cause_status: "DRAFT",
+    capa_status: "DRAFT",
+    can_current_user_modify: true,
+    can_current_user_review: true,
+    audit_id: "audit-1",
+    audit_ref: "QAR/MO/26/101",
+    audit_title: "Base maintenance audit",
+    finding_ref: "QAR/MO/26/101-F-001",
+    responsible_department: "Engineering",
+    responsible_personnel: "Amina Ali",
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-07T00:00:00Z",
+  };
+}
+
+async function prepare(page: Page, state: TestState): Promise<void> {
   const token = futureToken();
   await page.addInitScript(({ storedToken }) => {
     localStorage.setItem("amo_portal_token", storedToken);
@@ -46,6 +86,7 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
   const fulfil = async (route: Route) => {
     const request = route.request();
     const url = request.url();
+    const parsed = new URL(url);
 
     if (url.includes("/auth/portal-preferences/")) {
       if (request.method() === "PATCH") {
@@ -72,6 +113,56 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
 
     if (url.includes("/accounts/admin/admin-profile/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
+      return;
+    }
+
+    if (url.includes("/quality/cars/register/paged")) {
+      state.qualityReads += 1;
+      state.carRegisterUrls.push(url);
+      const directId = parsed.searchParams.get("car_id");
+      const item = directId ? carRecord(directId, "RELIABILITY") : carRecord();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [item],
+          total: 1,
+          limit: Number(parsed.searchParams.get("limit") || 25),
+          offset: Number(parsed.searchParams.get("offset") || 0),
+          has_more: false,
+          summary: { total: 1, open: 1, overdue: 0, in_review: 0 },
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/quality/cars/assignees")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: "auditee-a",
+            full_name: "Amina Ali",
+            email: "amina@tenant-a.test",
+            staff_code: "ENG-001",
+            role: "ENGINEER",
+            department_id: "dept-eng",
+            department_code: "ENG",
+            department_name: "Engineering",
+          },
+          {
+            id: "auditee-b",
+            full_name: "Brian Kilonzo",
+            email: "brian@tenant-a.test",
+            staff_code: "STO-002",
+            role: "STORES",
+            department_id: "dept-stores",
+            department_code: "STO",
+            department_name: "Stores",
+          },
+        ]),
+      });
       return;
     }
 
@@ -134,10 +225,15 @@ async function prepare(page: Page, state: { scale: StoredScale; qualityReads: nu
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await page.route("**/quality/cars/assignees**", fulfil);
+}
+
+function testState(): TestState {
+  return { scale: "standard", qualityReads: 0, carRegisterUrls: [] };
 }
 
 test("QMS context navigation and user text scale persist without duplicate headers", async ({ page }) => {
-  const state = { scale: "standard" as StoredScale, qualityReads: 0 };
+  const state = testState();
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/findings/register", { waitUntil: "domcontentloaded" });
@@ -170,7 +266,7 @@ test("QMS context navigation and user text scale persist without duplicate heade
 });
 
 test("QMS explicit refresh event revalidates active data without browser reload", async ({ page }) => {
-  const state = { scale: "standard" as StoredScale, qualityReads: 0 };
+  const state = testState();
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/findings/register", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".quality-context-bar")).toBeVisible();
@@ -179,4 +275,76 @@ test("QMS explicit refresh event revalidates active data without browser reload"
 
   await page.evaluate(() => window.dispatchEvent(new Event("amo:qms:refresh")));
   await expect.poll(() => state.qualityReads, { timeout: 10_000 }).toBeGreaterThan(readsBefore);
+});
+
+test("CAR register stays bounded and preserves governed assignee and creation controls", async ({ page }) => {
+  test.setTimeout(75_000);
+  const state = testState();
+  const runtimeErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} :: ${request.failure()?.errorText || "failed"}`));
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await prepare(page, state);
+  await page.goto("/maintenance/tenant-a/quality/cars/register", { waitUntil: "domcontentloaded" });
+
+  try {
+    await expect(page.getByRole("heading", { name: "Corrective action register" })).toBeVisible({ timeout: 15_000 });
+  } catch (error) {
+    const body = page.isClosed() ? "<page closed>" : (await page.locator("body").innerText().catch(() => "<body unavailable>")).slice(0, 4_000);
+    console.error("CAR route render diagnostic", {
+      url: page.isClosed() ? "<page closed>" : page.url(),
+      runtimeErrors,
+      consoleErrors,
+      failedRequests,
+      carRegisterUrls: state.carRegisterUrls,
+      body,
+    });
+    throw error;
+  }
+  expect(runtimeErrors).toEqual([]);
+  await expect(page.getByText("QMS-CAR-001", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => state.carRegisterUrls.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  expect(state.carRegisterUrls.at(-1)).toContain("limit=25");
+  expect(state.carRegisterUrls.at(-1)).not.toContain("limit=1000");
+
+  const ownerFilter = page
+    .locator(".audit-workspace__toolbar-row label")
+    .filter({ hasText: "Responsible" })
+    .locator("select");
+  await expect(ownerFilter.locator('option[value="auditee-a"]')).toHaveCount(1, { timeout: 15_000 });
+  await ownerFilter.selectOption("auditee-a");
+  await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("assigned_to_user_id=auditee-a");
+
+  await page.getByRole("button", { name: "New CAR" }).click();
+  const createDialog = page.getByRole("dialog", { name: "Create corrective action" });
+  await expect(createDialog).toBeVisible();
+  await createDialog.getByLabel("Responsible department").selectOption("dept-eng");
+  await createDialog.getByLabel("Find responsible person").fill("Amina");
+  const responsiblePersonSelect = createDialog
+    .locator("label")
+    .filter({ hasText: /^Responsible person/ })
+    .locator("select");
+  await expect(responsiblePersonSelect.locator('option[value="auditee-a"]')).toHaveCount(1, { timeout: 15_000 });
+  await responsiblePersonSelect.selectOption("auditee-a");
+  await createDialog.getByLabel("Finding ID").fill("11111111-1111-1111-1111-111111111111");
+  await createDialog.getByLabel("Title").fill("Restore training currency");
+  await createDialog.getByLabel("Summary").fill("Update and verify the controlled training record.");
+  await createDialog.getByRole("button", { name: "Review & create" }).click();
+
+  const preview = page.getByRole("dialog", { name: "Confirm corrective action details" });
+  await expect(preview).toBeVisible();
+  await expect(preview.getByText("Amina Ali", { exact: true })).toBeVisible();
+  await expect(preview.getByText("Engineering", { exact: true })).toBeVisible();
+
+  await page.goto("/maintenance/tenant-a/quality/cars?carId=rel-car-7", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("REL-CAR-007", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("car_id=rel-car-7");
+  expect(state.carRegisterUrls.at(-1)).not.toContain("program=QUALITY");
+  expect(runtimeErrors).toEqual([]);
 });

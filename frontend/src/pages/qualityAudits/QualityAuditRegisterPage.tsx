@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
@@ -6,16 +6,41 @@ import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
-import { qmsGetAuditRegister, type CAROut, type QMSAuditOut, type QMSFindingOut } from "../../services/qms";
+import { qmsGetAuditRegisterPage } from "../../services/qmsRegisters";
+import type { CAROut, QMSAuditOut, QMSFindingOut } from "../../services/qms";
 import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 
 type RegisterTab = "findings" | "cars";
+type RegisterPageSize = 25 | 50 | 100;
 
 type RegisterRow = {
   audit: QMSAuditOut;
   finding: QMSFindingOut;
   linkedCars: CAROut[];
+};
+
+type HeaderFilters = {
+  ref: string;
+  finding: string;
+  audit: string;
+  type: string;
+  owner: string;
+  car: string;
+};
+
+type PaginationState = {
+  scopeKey: string;
+  page: number;
+};
+
+const EMPTY_FILTERS: HeaderFilters = {
+  ref: "",
+  finding: "",
+  audit: "",
+  type: "",
+  owner: "",
+  car: "",
 };
 
 const QualityAuditRegisterPage: React.FC = () => {
@@ -27,14 +52,11 @@ const QualityAuditRegisterPage: React.FC = () => {
   const [showFilters, setShowFilters] = useState(true);
   const [showOwner, setShowOwner] = useState(true);
   const [quickFilter, setQuickFilter] = useState("");
-  const [headerFilters, setHeaderFilters] = useState({
-    ref: "",
-    finding: "",
-    audit: "",
-    type: "",
-    owner: "",
-    car: "",
-  });
+  const [headerFilters, setHeaderFilters] = useState<HeaderFilters>(EMPTY_FILTERS);
+  const [debouncedQuickFilter, setDebouncedQuickFilter] = useState("");
+  const [debouncedHeaderFilters, setDebouncedHeaderFilters] = useState<HeaderFilters>(EMPTY_FILTERS);
+  const [pageSize, setPageSize] = useState<RegisterPageSize>(25);
+  const [pagination, setPagination] = useState<PaginationState>({ scopeKey: "", page: 1 });
   const { density, setDensity } = useDensityPreference("audit-register", "compact");
 
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -43,10 +65,70 @@ const QualityAuditRegisterPage: React.FC = () => {
   const department = params.department ?? "quality";
   const navigate = useNavigate();
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuickFilter(quickFilter.trim());
+      setDebouncedHeaderFilters({
+        ref: headerFilters.ref.trim(),
+        finding: headerFilters.finding.trim(),
+        audit: headerFilters.audit.trim(),
+        type: headerFilters.type.trim(),
+        owner: headerFilters.owner.trim(),
+        car: headerFilters.car.trim(),
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [headerFilters, quickFilter]);
+
+  const paginationScopeKey = useMemo(() => JSON.stringify([
+    tab,
+    auditId,
+    debouncedQuickFilter,
+    debouncedHeaderFilters.ref,
+    debouncedHeaderFilters.finding,
+    debouncedHeaderFilters.audit,
+    debouncedHeaderFilters.type,
+    debouncedHeaderFilters.owner,
+    debouncedHeaderFilters.car,
+    pageSize,
+  ]), [auditId, debouncedHeaderFilters, debouncedQuickFilter, pageSize, tab]);
+  const currentPage = pagination.scopeKey === paginationScopeKey ? pagination.page : 1;
+  const setCurrentPage = (nextPage: number | ((page: number) => number)) => {
+    setPagination((current) => {
+      const basePage = current.scopeKey === paginationScopeKey ? current.page : 1;
+      const page = typeof nextPage === "function" ? nextPage(basePage) : nextPage;
+      return { scopeKey: paginationScopeKey, page };
+    });
+  };
+
   const registerQuery = useQuery({
-    queryKey: ["qms-audit-register", amoCode],
-    queryFn: () => qmsGetAuditRegister({ domain: "AMO" }),
-    staleTime: 60_000,
+    queryKey: [
+      "qms-audit-register-paged",
+      amoCode,
+      tab,
+      auditId,
+      debouncedQuickFilter,
+      debouncedHeaderFilters,
+      pageSize,
+      currentPage,
+    ],
+    queryFn: ({ signal }) => qmsGetAuditRegisterPage({
+      domain: "AMO",
+      auditId: auditId || undefined,
+      onlyWithCars: tab === "cars",
+      search: debouncedQuickFilter || undefined,
+      ref: debouncedHeaderFilters.ref || undefined,
+      finding: debouncedHeaderFilters.finding || undefined,
+      audit: debouncedHeaderFilters.audit || undefined,
+      findingType: debouncedHeaderFilters.type || undefined,
+      owner: debouncedHeaderFilters.owner || undefined,
+      car: debouncedHeaderFilters.car || undefined,
+      limit: pageSize,
+      offset: (currentPage - 1) * pageSize,
+      signal,
+    }),
+    staleTime: 30_000,
+    placeholderData: (previous) => previous,
   });
 
   const rows = useMemo<RegisterRow[]>(() => {
@@ -57,36 +139,27 @@ const QualityAuditRegisterPage: React.FC = () => {
     }));
   }, [registerQuery.data]);
 
-  const filteredRows = useMemo(() => {
-    const q = quickFilter.trim().toLowerCase();
-    return rows.filter(({ audit, finding, linkedCars }) => {
-      if (auditId && audit.id !== auditId) return false;
-      if (tab === "cars" && linkedCars.length === 0) return false;
-      const haystack = [
-        audit.audit_ref,
-        audit.title,
-        finding.finding_ref || finding.id,
-        finding.description,
-        finding.finding_type,
-        finding.acknowledged_by_name || "",
-        ...linkedCars.map((car) => `${car.car_number} ${car.title} ${car.summary}`),
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      if (q && !haystack.includes(q)) return false;
-      if (headerFilters.ref && !(finding.finding_ref || finding.id).toLowerCase().includes(headerFilters.ref.toLowerCase())) return false;
-      if (headerFilters.finding && !finding.description.toLowerCase().includes(headerFilters.finding.toLowerCase())) return false;
-      if (headerFilters.audit && !`${audit.audit_ref} ${audit.title}`.toLowerCase().includes(headerFilters.audit.toLowerCase())) return false;
-      if (headerFilters.type && !finding.finding_type.toLowerCase().includes(headerFilters.type.toLowerCase())) return false;
-      if (headerFilters.owner && !(finding.acknowledged_by_name || "").toLowerCase().includes(headerFilters.owner.toLowerCase())) return false;
-      if (headerFilters.car && !linkedCars.some((car) => `${car.car_number} ${car.title}`.toLowerCase().includes(headerFilters.car.toLowerCase()))) return false;
-      return true;
-    });
-  }, [headerFilters, quickFilter, rows, tab]);
+  const total = registerQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = total === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1;
+  const pageEnd = total === 0 ? 0 : Math.min(total, (safeCurrentPage - 1) * pageSize + rows.length);
 
   const loading = registerQuery.isLoading;
+  const refreshing = registerQuery.isFetching && !registerQuery.isLoading;
   const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
+  const filtersActive = Boolean(
+    quickFilter.trim()
+      || Object.values(headerFilters).some((value) => value.trim())
+      || auditId
+      || tab === "cars",
+  );
+
+  const clearFilters = () => {
+    setQuickFilter("");
+    setHeaderFilters(EMPTY_FILTERS);
+    setCurrentPage(1);
+  };
 
   return (
     <QualityAuditsSectionLayout
@@ -137,10 +210,38 @@ const QualityAuditRegisterPage: React.FC = () => {
           <div className="audit-panel__header">
             <div>
               <h2 className="audit-panel__title">Closeout register</h2>
-              <p className="audit-panel__subtitle">{filteredRows.length} visible rows · {tab === "cars" ? "CAR-linked findings only" : "all findings"}</p>
+              <p className="audit-panel__subtitle">
+                {pageStart}-{pageEnd} of {total} matched rows · {tab === "cars" ? "CAR-linked findings only" : "all findings"}
+                {refreshing ? " · refreshing" : ""}
+              </p>
             </div>
-            <span className="qms-pill">{density === "compact" ? "Compact density" : "Comfortable density"}</span>
+            <div className="audit-chip-list">
+              {filtersActive ? (
+                <button type="button" className="secondary-chip-btn" onClick={clearFilters}>Clear filters</button>
+              ) : null}
+              <label className="qms-pill">
+                Rows
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value) as RegisterPageSize)}
+                  aria-label="Audit register rows per page"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+              <span className="qms-pill">{density === "compact" ? "Compact density" : "Comfortable density"}</span>
+            </div>
           </div>
+
+          {registerQuery.isError ? (
+            <div className="card card--error" role="alert">
+              <p>{registerQuery.error instanceof Error ? registerQuery.error.message : "Failed to load the audit register."}</p>
+              <button type="button" className="secondary-chip-btn" onClick={() => void registerQuery.refetch()}>Retry</button>
+            </div>
+          ) : null}
+
           <div className="table-wrapper">
             <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
               <thead>
@@ -170,12 +271,12 @@ const QualityAuditRegisterPage: React.FC = () => {
                   <tr>
                     <td colSpan={showOwner ? 7 : 6}>Loading register…</td>
                   </tr>
-                ) : filteredRows.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <tr>
                     <td colSpan={showOwner ? 7 : 6}>No register rows match the current filters.</td>
                   </tr>
                 ) : (
-                  filteredRows.map(({ audit, finding, linkedCars }) => (
+                  rows.map(({ audit, finding, linkedCars }) => (
                     <tr key={finding.id}>
                       <td>{finding.finding_ref || finding.id}</td>
                       <td>
@@ -218,20 +319,40 @@ const QualityAuditRegisterPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          <div className="qms-car-pagination" aria-label="Audit register pagination">
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={safeCurrentPage <= 1 || registerQuery.isFetching}
+            >
+              Previous
+            </button>
+            <span>Page {safeCurrentPage} of {totalPages}</span>
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={!registerQuery.data?.has_more || registerQuery.isFetching}
+            >
+              Next
+            </button>
+          </div>
         </div>
 
         <div className="audit-stats-grid">
           <div className="audit-stat-card">
             <div className="audit-stat-card__label"><ClipboardList size={15} /> Findings in scope</div>
-            <div className="audit-stat-card__value">{rows.length}</div>
+            <div className="audit-stat-card__value">{total}</div>
           </div>
           <div className="audit-stat-card">
             <div className="audit-stat-card__label"><ShieldAlert size={15} /> Findings with CARs</div>
-            <div className="audit-stat-card__value">{rows.filter((row) => row.linkedCars.length > 0).length}</div>
+            <div className="audit-stat-card__value">{registerQuery.data?.car_linked_findings ?? 0}</div>
           </div>
           <div className="audit-stat-card">
             <div className="audit-stat-card__label"><AlertTriangle size={15} /> Open CAR count</div>
-            <div className="audit-stat-card__value">{rows.flatMap((row) => row.linkedCars).filter((car) => car.status !== "CLOSED").length}</div>
+            <div className="audit-stat-card__value">{registerQuery.data?.open_car_count ?? 0}</div>
           </div>
         </div>
       </div>
