@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Expand, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowLeft, Expand, FileDiff, Maximize2, Minimize2 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DocumentationAssistantPanel from "./DocumentationAssistantPanel";
@@ -36,6 +36,11 @@ export default function ManualReaderPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const openReview = () => {
+    if (!workspaceCode || !params.manualId || !params.revId) return;
+    navigate(`/maintenance/${encodeURIComponent(workspaceCode)}/publications/${encodeURIComponent(params.manualId)}/rev/${encodeURIComponent(params.revId)}/diff`);
+  };
+
   const toggleFullscreen = async () => {
     setFullscreenError("");
     try {
@@ -56,6 +61,7 @@ export default function ManualReaderPage() {
       <div role="group" aria-label="Reading mode">
         <button type="button" className={mode === "standard" ? "active" : ""} aria-pressed={mode === "standard"} onClick={() => setMode("standard")}><Expand size={14} /><span>Standard</span></button>
         <button type="button" className={mode === "immersive" ? "active" : ""} aria-pressed={mode === "immersive"} onClick={() => setMode("immersive")}><Maximize2 size={14} /><span>Immersive</span></button>
+        {params.manualId && params.revId ? <button type="button" onClick={openReview} title="Review changes against the available baseline"><FileDiff size={14} /><span>Review changes</span></button> : null}
         <button type="button" className={fullscreen ? "active" : ""} aria-pressed={fullscreen} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</span></button>
       </div>
     </div>
