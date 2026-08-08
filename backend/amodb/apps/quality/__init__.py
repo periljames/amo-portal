@@ -14,6 +14,7 @@ from . import audit_programme_models as _audit_programme_models  # noqa: F401,E4
 from . import people_models as _people_models  # noqa: F401,E402
 from . import assurance_case_models as _assurance_case_models  # noqa: F401,E402
 from . import intelligence_models as _intelligence_models  # noqa: F401,E402
+from . import audit_preparation_models as _audit_preparation_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -67,6 +68,9 @@ from . import people_router as _people_router  # noqa: F401,E402
 from . import assurance_case_router as _assurance_case_router  # noqa: F401,E402
 from . import intelligence_router as _intelligence_router  # noqa: F401,E402
 from . import intelligence_governance_router as _intelligence_governance_router  # noqa: F401,E402
+from . import audit_preparation_router as _audit_preparation_router  # noqa: F401,E402
+from . import planner_assignment_guard_router as _planner_assignment_guard_router  # noqa: F401,E402
+from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycle_guard  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -204,6 +208,26 @@ _include_once(
 _canonical_router.router.include_router(_intelligence_governance_router.router)
 _canonical_router.legacy_router.include_router(_intelligence_governance_router.router)
 
+# Preparation revisions preserve the controlled checklist/criteria/document
+# request state used to prepare an audit. They snapshot authoritative records;
+# they do not replace the live execution workflow.
+_include_once(
+    _canonical_router.router,
+    _audit_preparation_router.router,
+    "/api/maintenance/{amo_code}/quality/audits/{audit_id}/preparation-revisions",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _audit_preparation_router.router,
+    "/api/maintenance/{amo_code}/qms/audits/{audit_id}/preparation-revisions",
+)
+
+# Governed assignment routes intentionally override selected Planner writes.
+# The original scheduling functions remain authoritative and are called only
+# after People & Privileges hard gates have been evaluated.
+_canonical_router.router.include_router(_planner_assignment_guard_router.router)
+_canonical_router.legacy_router.include_router(_planner_assignment_guard_router.router)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
@@ -212,3 +236,5 @@ from . import audit_programme_route_order as _audit_programme_route_order  # noq
 from . import people_route_order as _people_route_order  # noqa: F401,E402
 from . import assurance_case_route_order as _assurance_case_route_order  # noqa: F401,E402
 from . import intelligence_route_order as _intelligence_route_order  # noqa: F401,E402
+from . import audit_preparation_route_order as _audit_preparation_route_order  # noqa: F401,E402
+from . import planner_assignment_guard_route_order as _planner_assignment_guard_route_order  # noqa: F401,E402
