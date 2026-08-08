@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 const shell = readFileSync(new URL("./DocumentControlShell.tsx", import.meta.url), "utf-8");
 const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8");
 const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.url), "utf-8");
+const homePage = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
+const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
@@ -69,6 +71,17 @@ describe("DMS frontend operating-model contract", () => {
     for (const label of ["Requests", "Draft", "In Review", "Awaiting Quality", "Awaiting Management", "Authority", "Temporary Revisions", "Ready for Release", "Closed"]) expect(changesPortfolio).toContain(`label: "${label}"`);
   });
 
+  it("makes raising a change request a real document-selection to canonical mutation flow", () => {
+    expect(changesPortfolio).toContain("/library?action=raise-change");
+    expect(changesPortfolio).not.toContain("`${basePath}/change-proposals`");
+    expect(libraryPage).toContain('params.get("action") === "raise-change"');
+    expect(libraryPage).toContain("Select a document for the change request");
+    expect(libraryPage).toContain("Select for change");
+    expect(libraryPage).toContain('navigate(`${basePath}/library/${item.id}?tab=changes`)');
+    expect(recordActions).toContain("<ChangeRequestForm");
+    expect(recordActions).toContain("createDocumentChangeRequest");
+  });
+
   it("routes canonical Distribution to the bounded custody portfolio", () => {
     expect(pageExports).toContain('DocControlDistributionPage } from "./documentControl/DocumentControlDistributionPortfolioPage"');
     expect(distributionService).toContain("distribution-portfolio");
@@ -88,6 +101,13 @@ describe("DMS frontend operating-model contract", () => {
     for (const label of ["Periodic Reviews", "External Technical Data", "Relationship Review", "Applicability", "Superseded References"]) expect(compliancePortfolio).toContain(`label: "${label}"`);
   });
 
+  it("keeps compliance links canonical and clears status when changing assurance domains", () => {
+    expect(homePage).toContain("/compliance?view=external-sources");
+    expect(homePage).not.toContain("/compliance?view=external\"");
+    expect(compliancePortfolio).toContain('if (raw === "external") return "external-sources"');
+    expect(compliancePortfolio).toContain('if (key === "view") next.delete("status")');
+  });
+
   it("routes Reports to bounded evidence and Administration to the low-frequency control hub", () => {
     expect(pageExports).toContain("function DocControlRegistersPage()");
     expect(pageExports).toContain("<ReportsPage />");
@@ -103,6 +123,11 @@ describe("DMS frontend operating-model contract", () => {
     expect(administrationPage).toContain("Hierarchy & taxonomy");
     expect(administrationPage).toContain("Retained generated records");
     expect(administrationPage).toContain("Indexing exceptions");
+  });
+
+  it("neutralizes spreadsheet formulas before producing controlled CSV exports", () => {
+    expect(reportsPage).toContain("/^\\s*[=+\\-@]/");
+    expect(reportsPage).toContain("? `'${text}` : text");
   });
 
   it("routes controllers into the lifecycle-rich document workspace while preserving governance tools", () => {
