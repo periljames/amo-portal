@@ -8,8 +8,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from time import perf_counter
 import uuid
+
+# This script is intentionally executable both as ``python -m ...`` and by its
+# repository path from the backend working directory used in GitHub Actions.
+# Direct path execution otherwise puts ``amodb/scripts`` (not ``backend``) on
+# sys.path and fails before the benchmark can seed or measure anything.
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.workspace_library_router import list_visible_documents
