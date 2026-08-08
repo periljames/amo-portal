@@ -215,9 +215,20 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/:department/doc-control/*" element={<CanonicalDocumentControlRedirect />} />
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
+
+        {/* Canonical daily-use DMS workspace entry points. During Slice 1 these
+            reuse the proven underlying worklists while the unified portfolios
+            are implemented behind the stable URLs. */}
+        <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
+
+        {/* Compatibility routes retained until each replacement workspace has
+            exact browser-contract coverage. */}
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/records" element={<WorkspaceRequireAuth><DocControlGeneratedRecordsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<WorkspaceRequireAuth><DocControlDraftDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<WorkspaceRequireAuth><DocControlChangeProposalPage /></WorkspaceRequireAuth>} />
