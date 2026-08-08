@@ -7,9 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import billing_auth, models as account_models
 from amodb.database import get_db, get_read_db
-from amodb.security import get_current_active_user
 
 from . import commercial_services, module_commerce
 from .router import require_platform_superuser
@@ -42,33 +41,6 @@ def _tenant_id(user: account_models.User) -> str:
     return tenant_id
 
 
-def _role_value(user: account_models.User) -> str:
-    role = getattr(user, "role", None)
-    return str(getattr(role, "value", role) or "").upper()
-
-
-def _require_contract_authority(user: account_models.User) -> None:
-    if bool(getattr(user, "is_amo_admin", False)):
-        return
-    if _role_value(user) in {"AMO_ADMIN", "FINANCE_MANAGER"}:
-        return
-    raise HTTPException(
-        status_code=403,
-        detail="Only an AMO administrator or Finance Manager may accept a new recurring module subscription.",
-    )
-
-
-def _require_payment_authority(user: account_models.User) -> None:
-    if bool(getattr(user, "is_amo_admin", False)):
-        return
-    if _role_value(user) in {"AMO_ADMIN", "FINANCE_MANAGER", "ACCOUNTS_OFFICER"}:
-        return
-    raise HTTPException(
-        status_code=403,
-        detail="Only an AMO administrator or authorised finance role may initiate tenant payments.",
-    )
-
-
 def _job_payload(job) -> dict[str, Any]:
     return {
         "id": job.id,
@@ -84,20 +56,11 @@ def _terms_payload() -> dict[str, Any]:
     return {"version": TERMS_VERSION, "hash": TERMS_HASH, **SUBSCRIPTION_TERMS}
 
 
-def _stamp_accepted_terms(
-    db: Session,
-    *,
-    tenant_id: str,
-    invoice_id: str,
-) -> dict[str, Any]:
-    invoice = (
-        db.query(account_models.BillingInvoice)
-        .filter(
-            account_models.BillingInvoice.id == invoice_id,
-            account_models.BillingInvoice.amo_id == tenant_id,
-        )
-        .first()
-    )
+def _stamp_accepted_terms(db: Session, *, tenant_id: str, invoice_id: str) -> dict[str, Any]:
+    invoice = db.query(account_models.BillingInvoice).filter(
+        account_models.BillingInvoice.id == invoice_id,
+        account_models.BillingInvoice.amo_id == tenant_id,
+    ).first()
     if invoice is None:
         raise ValueError("Created checkout invoice could not be reloaded")
     try:
@@ -116,11 +79,6 @@ def _stamp_accepted_terms(
     db.add(invoice)
     db.commit()
     return details
-
-
-# ---------------------------------------------------------------------------
-# Platform superuser commercial governance
-# ---------------------------------------------------------------------------
 
 
 @router.get("/catalog/modules")
@@ -142,11 +100,7 @@ def module_definition_update(
     request = dict(payload or {})
     request["code"] = module_code
     try:
-        return module_commerce.upsert_module_definition(
-            db,
-            payload=request,
-            actor_user_id=str(user.id),
-        )
+        return module_commerce.upsert_module_definition(db, payload=request, actor_user_id=str(user.id))
     except Exception as exc:
         _bad(exc)
 
@@ -180,16 +134,10 @@ def tenant_offer_update(
         _bad(exc)
 
 
-# ---------------------------------------------------------------------------
-# Tenant self-service commerce. Billing remains reachable while modules are
-# locked so the tenant always has a cure path.
-# ---------------------------------------------------------------------------
-
-
 @router.get("/self-service/catalog")
 def self_service_catalog(
     db: Session = Depends(get_read_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user=Depends(billing_auth.require_billing_reader),
 ):
     tenant_id = _tenant_id(user)
     result = module_commerce.self_service_catalog(db, tenant_id=tenant_id)
@@ -201,10 +149,9 @@ def self_service_catalog(
 def self_service_subscribe(
     payload: dict[str, Any],
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user=Depends(billing_auth.require_contract_manager),
 ):
     tenant_id = _tenant_id(user)
-    _require_contract_authority(user)
     submitted_terms_version = str(payload.get("terms_version") or "").strip()
     if submitted_terms_version != TERMS_VERSION:
         raise HTTPException(
@@ -224,11 +171,7 @@ def self_service_subscribe(
             terms_version=TERMS_VERSION,
             auto_renew_accepted=bool(payload.get("auto_renew_accepted", False)),
         )
-        result["commercial"] = _stamp_accepted_terms(
-            db,
-            tenant_id=tenant_id,
-            invoice_id=str(result["id"]),
-        )
+        result["commercial"] = _stamp_accepted_terms(db, tenant_id=tenant_id, invoice_id=str(result["id"]))
         return result
     except Exception as exc:
         _bad(exc)
@@ -239,18 +182,13 @@ def self_service_invoice_payment(
     invoice_id: str,
     payload: dict[str, Any],
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user),
+    user=Depends(billing_auth.require_billing_reader),
 ):
     tenant_id = _tenant_id(user)
-    _require_payment_authority(user)
-    invoice = (
-        db.query(account_models.BillingInvoice)
-        .filter(
-            account_models.BillingInvoice.id == invoice_id,
-            account_models.BillingInvoice.amo_id == tenant_id,
-        )
-        .first()
-    )
+    invoice = db.query(account_models.BillingInvoice).filter(
+        account_models.BillingInvoice.id == invoice_id,
+        account_models.BillingInvoice.amo_id == tenant_id,
+    ).first()
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     try:
