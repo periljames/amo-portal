@@ -15,6 +15,12 @@ from amodb.apps.quality.audit_programme_router import (
     _assert_editable,
     router as audit_programme_router,
 )
+from amodb.apps.quality.audit_programme_schedule_router import (
+    _RECURRENCE_TO_FREQUENCY,
+    _expected_frequency,
+    router as audit_programme_schedule_router,
+)
+from amodb.apps.quality.enums import QMSAuditScheduleFrequency
 
 
 def _route_methods(router):
@@ -46,6 +52,24 @@ def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
     }.issubset(methods)
 
 
+def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> None:
+    methods = _route_methods(audit_programme_schedule_router)
+    assert {
+        ("/audit-programmes/{programme_id}/schedule-links", "GET"),
+        ("/audit-programmes/{programme_id}/items/{item_id}/schedule", "POST"),
+    }.issubset(methods)
+
+    for router, prefix in (
+        (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
+        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
+    ):
+        schedule_path = f"{prefix}/audit-programmes/{{programme_id}}/items/{{item_id}}/schedule"
+        matches = _matching(router, schedule_path, "POST")
+        assert len(matches) == 1
+        assert matches[0].endpoint.__name__ == "schedule_programme_requirement"
+        assert router.routes.index(matches[0]) < _catchall_index(router)
+
+
 def test_audit_programme_routes_are_promoted_before_generic_quality_catchall() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
@@ -70,6 +94,16 @@ def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
     assert "quality_audit_programme_events" in Base.metadata.tables
     assert Base.metadata.tables["quality_audit_programmes"].c.amo_id.nullable is False
     assert Base.metadata.tables["quality_audit_universe_items"].c.amo_id.nullable is False
+
+    item_table = Base.metadata.tables["quality_audit_programme_items"]
+    assert item_table.c.schedule_id.nullable is True
+    assert item_table.c.scheduled_by_user_id.nullable is True
+    assert item_table.c.scheduled_at.nullable is True
+    unique_names = {constraint.name for constraint in item_table.constraints if constraint.name}
+    assert "uq_quality_audit_programme_item_schedule" in unique_names
+    fk_targets = {element.target_fullname for fk in item_table.foreign_key_constraints for element in fk.elements}
+    assert "qms_audit_schedules.id" in fk_targets
+    assert "users.id" in fk_targets
 
 
 def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> None:
@@ -105,6 +139,21 @@ def test_programme_period_and_custom_recurrence_are_validated() -> None:
             scope="Quality system",
             recurrence="CUSTOM",
         )
+
+
+def test_programme_recurrence_maps_only_to_supported_authoritative_planner_cadence() -> None:
+    assert _RECURRENCE_TO_FREQUENCY == {
+        "ONE_TIME": QMSAuditScheduleFrequency.ONE_TIME,
+        "MONTHLY": QMSAuditScheduleFrequency.MONTHLY,
+        "QUARTERLY": QMSAuditScheduleFrequency.QUARTERLY,
+        "SEMI_ANNUAL": QMSAuditScheduleFrequency.BI_ANNUAL,
+        "ANNUAL": QMSAuditScheduleFrequency.ANNUAL,
+    }
+    assert _expected_frequency(SimpleNamespace(recurrence="SEMI_ANNUAL")) == QMSAuditScheduleFrequency.BI_ANNUAL
+    for recurrence in ("CUSTOM", "RISK_TRIGGERED"):
+        with pytest.raises(HTTPException) as exc:
+            _expected_frequency(SimpleNamespace(recurrence=recurrence))
+        assert exc.value.status_code == 409
 
 
 def test_universe_source_identity_is_a_real_relational_contract() -> None:
