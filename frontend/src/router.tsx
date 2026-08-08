@@ -83,7 +83,10 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   const view = parts[1] || route.module.defaultView;
 
   if (route.module.id === "calendar" || route.module.id === "evidence-vault" || route.module.id === "aerodoc") return false;
-  if (route.module.id === "audits") return ["program", "programme", "checklists", "reports", "templates"].includes(view);
+  // Programme/programme are governed specialist Audit Operations routes owned by
+  // PortalRouteSurface. Only the remaining shallow audit registers stay on the
+  // generic register shortcut.
+  if (route.module.id === "audits") return ["checklists", "reports", "templates"].includes(view);
   // CAR/CAPA has a governed specialist owner in PortalRouteSurface. Keeping it
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
