@@ -8,14 +8,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from amodb.apps.accounts import models as account_models
-
 from . import commercial_integrations as integrations
-from . import commercial_services, saas_queue, saas_services
+from . import commercial_services, saas_providers, saas_queue, saas_services
 
 
 _INSTALLED = False
 _ORIGINAL_PAYSTACK_INITIALIZE = integrations.paystack_initialize_transaction
+_ORIGINAL_STRIPE_CHECKOUT = saas_providers.create_stripe_checkout_session
 
 
 def _production_runtime() -> bool:
@@ -37,16 +36,13 @@ def _require_secure_callback(url: str, *, label: str) -> None:
         raise ValueError(f"{label} must use HTTPS outside local/test environments")
 
 
-def _trusted_paystack_checkout(url: str) -> str:
+def _trusted_hosted_redirect(url: str, *, provider: str, allowed_hosts: set[str]) -> str:
     parsed = urllib.parse.urlsplit(str(url or "").strip())
     hostname = (parsed.hostname or "").lower()
-    if parsed.scheme.lower() != "https" or hostname not in {
-        "checkout.paystack.com",
-        "standard.paystack.co",
-    }:
-        raise RuntimeError("Paystack returned an untrusted checkout URL")
+    if parsed.scheme.lower() != "https" or hostname not in allowed_hosts:
+        raise RuntimeError(f"{provider} returned an untrusted hosted checkout URL")
     if parsed.username or parsed.password:
-        raise RuntimeError("Paystack checkout URL must not contain user credentials")
+        raise RuntimeError(f"{provider} checkout URL must not contain user credentials")
     return urllib.parse.urlunsplit(parsed)
 
 
@@ -54,7 +50,28 @@ def guarded_paystack_initialize_transaction(**kwargs) -> dict[str, Any]:
     config = dict(kwargs.get("config") or {})
     _require_secure_callback(str(config.get("callback_url") or "").strip(), label="Paystack callback_url")
     result = dict(_ORIGINAL_PAYSTACK_INITIALIZE(**kwargs))
-    result["authorization_url"] = _trusted_paystack_checkout(str(result.get("authorization_url") or ""))
+    result["authorization_url"] = _trusted_hosted_redirect(
+        str(result.get("authorization_url") or ""),
+        provider="Paystack",
+        allowed_hosts={"checkout.paystack.com", "standard.paystack.co"},
+    )
+    return result
+
+
+def guarded_stripe_checkout_session(**kwargs) -> dict[str, Any]:
+    config = dict(kwargs.get("config") or {})
+    _require_secure_callback(str(config.get("success_url") or "").strip(), label="Stripe success_url")
+    _require_secure_callback(str(config.get("cancel_url") or "").strip(), label="Stripe cancel_url")
+    result = dict(_ORIGINAL_STRIPE_CHECKOUT(**kwargs))
+    checkout_url = str(result.get("checkout_url") or "").strip()
+    if checkout_url:
+        parsed = urllib.parse.urlsplit(checkout_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme.lower() != "https" or not (host == "checkout.stripe.com" or host.endswith(".checkout.stripe.com")):
+            raise RuntimeError("Stripe returned an untrusted hosted checkout URL")
+        if parsed.username or parsed.password:
+            raise RuntimeError("Stripe checkout URL must not contain user credentials")
+        result["checkout_url"] = urllib.parse.urlunsplit(parsed)
     return result
 
 
@@ -209,6 +226,7 @@ def install_payment_transport_policy() -> None:
     if _INSTALLED:
         return
     integrations.paystack_initialize_transaction = guarded_paystack_initialize_transaction
+    saas_providers.create_stripe_checkout_session = guarded_stripe_checkout_session
     commercial_services.record_mpesa_callback = minimized_mpesa_callback
     commercial_services._process_mpesa_callback = process_minimized_mpesa_callback
     _INSTALLED = True
