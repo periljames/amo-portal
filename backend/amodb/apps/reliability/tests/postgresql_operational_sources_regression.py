@@ -53,6 +53,7 @@ def _exercise_formal_publication_controls(connection) -> None:
     section_id = "00000000-0000-7000-8000-000000000205"
     approval_id = "00000000-0000-7000-8000-000000000206"
     lifecycle_id = "00000000-0000-7000-8000-000000000207"
+    inserted_section_id = "00000000-0000-7000-8000-000000000208"
 
     # Keep the formal report's tenant parent valid when origin-mode FK checks run
     # during the allowed lifecycle update below. The remaining retained-history
@@ -153,6 +154,21 @@ def _exercise_formal_publication_controls(connection) -> None:
         "UPDATE reliability_formal_report_sections SET title='mutated' WHERE id=:id",
         {"id": section_id},
         "published-child-mutation",
+    )
+    _must_fail(
+        connection,
+        """
+        INSERT INTO reliability_formal_report_sections (
+            id, amo_id, report_id, section_code, sequence, title, required,
+            status, computed_data, commentary, evidence_refs, warnings, updated_at
+        ) VALUES (
+            :id, :amo_id, :report_id, 'post_publication_probe', 999,
+            'Post-publication mutation probe', false, 'READY', '{}'::jsonb,
+            '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, NOW()
+        )
+        """,
+        {"id": inserted_section_id, "amo_id": amo_id, "report_id": report_id},
+        "published-child-insert",
     )
     _must_fail(
         connection,
