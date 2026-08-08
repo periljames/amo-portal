@@ -89,6 +89,7 @@ export const platformOperationsApi = {
   queues: (mode: DataMode = "REAL") => request<Record<string, any>>(`/queues?data_mode=${mode}`),
   slo: (mode: DataMode = "REAL") => request<Record<string, any>>(`/slo?data_mode=${mode}`),
   capacity: (mode: DataMode = "REAL") => request<Record<string, any>>(`/capacity?data_mode=${mode}`),
+  capacityForecast: (range: "6h" | "24h" | "7d" | "30d" = "7d") => request<Record<string, any>>(`/capacity/forecast?range=${range}`),
   slowRoutes: (mode: DataMode = "REAL", limit = 25) => request<Record<string, any>>(`/routes/slow?${queryString({ data_mode: mode, limit })}`),
   errorRoutes: (mode: DataMode = "REAL", limit = 25) => request<Record<string, any>>(`/routes/errors?${queryString({ data_mode: mode, limit })}`),
   tenantHealth: (params: TenantHealthQuery) => request<Record<string, any>>(`/tenant-health?${queryString(params)}`),
