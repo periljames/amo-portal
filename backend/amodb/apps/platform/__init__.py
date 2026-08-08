@@ -1,7 +1,5 @@
 """Platform control-plane package for global and tenant SaaS operations."""
 
-# Import the durable SaaS models before FastAPI startup/Alembic mapper checks so
-# SQLAlchemy registers every control-plane table in the shared metadata.
 from . import saas_models as _saas_models  # noqa: F401
 from . import saas_services as _saas_services
 from . import saas_webhooks as _saas_webhooks
@@ -24,13 +22,10 @@ from .module_product_boundary_policy import install_module_product_boundary_poli
 from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .payment_data_policy import install_payment_data_policy
 from .payment_transport_policy import install_payment_transport_policy
-from .billing_privacy_policy import install_billing_privacy_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
-# Replace the legacy platform-only Stripe verifier before the webhook route is
-# imported. The scoped implementation validates tenant endpoint secrets and
-# retains the platform credential only when no tenant-specific credential exists.
+
 _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
 install_tenant_provider_override_policy()
@@ -42,15 +37,10 @@ install_resend_email_provider()
 install_commercial_integrations()
 install_accounting_summary_policy()
 install_commercial_safety_policy()
-# First install the bounded legacy/base access implementation, then replace only
-# its commercial decision layer so account debt and individual module debt are
-# treated independently without reintroducing N+1 queries.
 install_billing_access_hot_path()
 install_payment_data_policy()
 install_commercial_access_scope_policy()
 install_payment_transport_policy()
-# Commercial product boundaries are reconciled with actual entitlement-gated
-# workspaces before any catalog/offer route consumes the first-party registry.
 install_module_product_boundary_policy()
 install_module_catalog_runtime_policy()
 install_invoice_accounting_policy()
@@ -73,16 +63,6 @@ from .module_payment_status_router import router as module_payment_status_router
 from .module_access_router import router as module_access_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
-
-# Billing lock reason remains visible to all authenticated tenant users through
-# /billing/access-status and the privacy-safe module access endpoint. Invoice
-# amounts, payment references, negotiated prices and recurring-contract actions
-# remain least-privilege finance/admin data.
-install_billing_privacy_policy(
-    module_commerce_router=module_commerce_router,
-    module_subscription_router=module_subscription_router,
-    module_payment_status_router=module_payment_status_router,
-)
 
 router.include_router(console_router)
 router.include_router(platform_saas_router)
