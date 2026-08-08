@@ -5,10 +5,10 @@ import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
 import QmsAssurancePage from "./QmsAssurancePage";
+import QmsIntelligencePage from "./QmsIntelligencePage";
 import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
 import QmsPeoplePage from "./QmsPeoplePage";
-import QmsWorkspaceBridgePage from "./QmsWorkspaceBridgePage";
 import { QMS_WORKSPACES, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
 
 function decodeSegment(value: string | undefined): string {
@@ -75,7 +75,7 @@ const QmsOverviewPage: React.FC = () => {
               ? <QmsPeoplePage amoCode={amoCode} />
               : workspace === "assurance"
                 ? <QmsAssurancePage amoCode={amoCode} />
-                : <QmsWorkspaceBridgePage amoCode={amoCode} workspace={workspace} />}
+                : <QmsIntelligencePage amoCode={amoCode} />}
     </DepartmentLayout>
   );
 };
