@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+from amodb.database import Base
+from amodb.apps.quality import canonical_router
+from amodb.apps.quality.assurance_case_router import router as assurance_case_router
+from amodb.apps.quality.intelligence_governance_router import _compare, _percent, router as intelligence_governance_router
+from amodb.apps.quality.intelligence_router import router as intelligence_router
+from amodb.apps.quality.people_router import router as people_router
+
+
+def _methods(router):
+    return {
+        (str(route.path), method)
+        for route in router.routes
+        for method in (getattr(route, "methods", None) or set())
+    }
+
+
+def _catchall_index(router) -> int:
+    return next(
+        index
+        for index, route in enumerate(router.routes)
+        if str(route.path).endswith("/{module_path:path}")
+    )
+
+
+def _matching(router, path: str, method: str):
+    return [
+        route
+        for route in router.routes
+        if str(route.path) == path and method in (getattr(route, "methods", None) or set())
+    ]
+
+
+def test_people_router_exposes_governed_privilege_and_independence_contract() -> None:
+    assert {
+        ("/people/summary", "GET"),
+        ("/people/rules", "GET"),
+        ("/people/rules", "POST"),
+        ("/people/privileges", "GET"),
+        ("/people/privileges", "POST"),
+        ("/people/eligibility", "GET"),
+        ("/people/privileges/{privilege_id}/decisions", "POST"),
+        ("/people/independence", "POST"),
+    }.issubset(_methods(people_router))
+
+
+def test_assurance_case_router_exposes_investigation_and_effectiveness_contract() -> None:
+    assert {
+        ("/assurance-cases", "GET"),
+        ("/assurance-cases", "POST"),
+        ("/assurance-cases/{case_id}", "GET"),
+        ("/assurance-cases/{case_id}/transitions", "POST"),
+        ("/assurance-cases/{case_id}/investigation", "POST"),
+        ("/assurance-cases/{case_id}/effectiveness-plans", "POST"),
+        ("/assurance-cases/{case_id}/effectiveness-plans/{plan_id}/conclusion", "POST"),
+    }.issubset(_methods(assurance_case_router))
+
+
+def test_intelligence_contract_is_deterministic_and_source_explainable() -> None:
+    assert ("/intelligence/overview", "GET") in _methods(intelligence_router)
+    assert {
+        ("/intelligence/signal-rules", "GET"),
+        ("/intelligence/signal-rules", "POST"),
+        ("/intelligence/signal-rules/defaults", "POST"),
+        ("/intelligence/signals/evaluate", "POST"),
+        ("/intelligence/signals", "GET"),
+        ("/intelligence/approval-graph", "GET"),
+        ("/intelligence/approval-graph/nodes", "POST"),
+        ("/intelligence/approval-graph/links", "POST"),
+        ("/intelligence/approval-digital-twin", "GET"),
+    }.issubset(_methods(intelligence_governance_router))
+
+    assert _percent(8, 10) == Decimal("80.000000")
+    assert _percent(0, 0) == Decimal("0.000000")
+    assert _compare(Decimal("80"), "LT", Decimal("81")) is True
+    assert _compare(Decimal("10"), "GT", Decimal("10")) is False
+    assert _compare(Decimal("10"), "GTE", Decimal("10")) is True
+
+
+def test_new_operating_system_models_are_registered_in_shared_metadata() -> None:
+    required_tables = {
+        "quality_privilege_rules",
+        "quality_privileges",
+        "quality_privilege_decisions",
+        "quality_independence_declarations",
+        "quality_assurance_cases",
+        "quality_investigation_entries",
+        "quality_effectiveness_plans",
+        "quality_assurance_case_events",
+        "quality_signal_rules",
+        "quality_signal_observations",
+        "quality_requirement_nodes",
+        "quality_requirement_links",
+    }
+    assert required_tables.issubset(Base.metadata.tables)
+
+
+def test_people_assurance_and_intelligence_routes_precede_generic_catchall() -> None:
+    cases = (
+        (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
+        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
+    )
+    route_checks = (
+        ("/people/summary", "GET", "people_summary"),
+        ("/people/eligibility", "GET", "get_eligibility"),
+        ("/assurance-cases", "GET", "list_cases"),
+        ("/assurance-cases/{case_id}/investigation", "POST", "add_investigation_entry"),
+        ("/intelligence/overview", "GET", "intelligence_overview"),
+        ("/intelligence/signals/evaluate", "POST", "evaluate_signals"),
+        ("/intelligence/approval-digital-twin", "GET", "approval_digital_twin"),
+    )
+    for api_router, prefix in cases:
+        catchall_index = _catchall_index(api_router)
+        for suffix, method, endpoint_name in route_checks:
+            matches = _matching(api_router, f"{prefix}{suffix}", method)
+            assert len(matches) == 1, (prefix, suffix, method, [route.endpoint.__name__ for route in matches])
+            assert matches[0].endpoint.__name__ == endpoint_name
+            assert api_router.routes.index(matches[0]) < catchall_index
