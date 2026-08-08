@@ -13,6 +13,13 @@ from . import saas_providers, saas_queue, saas_secrets
 
 
 ACTIVE_CREDENTIAL_STATES = {"CONFIGURED", "HEALTHY", "UNHEALTHY"}
+PORTAL_STRIPE_METADATA_KEYS = {
+    "tenant_id",
+    "module_code",
+    "module_price_id",
+    "external_price_ref",
+    "portal_invoice_id",
+}
 
 
 def _stripe_object(payload: dict[str, Any]) -> dict[str, Any]:
@@ -20,14 +27,62 @@ def _stripe_object(payload: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _portal_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value.get(key)
+        for key in PORTAL_STRIPE_METADATA_KEYS
+        if value.get(key) not in {None, ""}
+    }
+
+
 def _metadata(obj: dict[str, Any]) -> dict[str, Any]:
-    value = obj.get("metadata") or {}
-    result = dict(value) if isinstance(value, dict) else {}
+    result = _portal_metadata(obj.get("metadata"))
     subscription_details = obj.get("subscription_details") or {}
     nested = subscription_details.get("metadata") if isinstance(subscription_details, dict) else None
     if isinstance(nested, dict):
-        result = {**nested, **result}
+        result = {**_portal_metadata(nested), **result}
     return result
+
+
+def _minimized_stripe_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist only fields required by the verified Stripe lifecycle worker.
+
+    Signature verification happens against the original raw request before this
+    function is called. The durable record intentionally excludes billing details,
+    card/payment-method objects, addresses, receipts and any other Stripe fields
+    the portal does not need to reconcile tenant/module state.
+    """
+    obj = _stripe_object(payload)
+    minimized_obj: dict[str, Any] = {}
+    for key in (
+        "id",
+        "client_reference_id",
+        "customer",
+        "subscription",
+        "payment_status",
+        "status",
+    ):
+        value = obj.get(key)
+        if value not in {None, ""}:
+            minimized_obj[key] = value
+
+    metadata = _portal_metadata(obj.get("metadata"))
+    if metadata:
+        minimized_obj["metadata"] = metadata
+    subscription_details = obj.get("subscription_details")
+    nested = subscription_details.get("metadata") if isinstance(subscription_details, dict) else None
+    nested_metadata = _portal_metadata(nested)
+    if nested_metadata:
+        minimized_obj["subscription_details"] = {"metadata": nested_metadata}
+
+    return {
+        "id": str(payload.get("id") or ""),
+        "type": str(payload.get("type") or ""),
+        "data": {"object": minimized_obj},
+        "data_minimized": True,
+    }
 
 
 def _resolved_tenant_hints(
@@ -91,8 +146,6 @@ def _credential_candidates(
             .all()
         )
         if scoped_rows:
-            # A disabled or incomplete scoped row deliberately blocks platform
-            # fallback. The tenant must repair or remove that override.
             return [
                 row
                 for row in scoped_rows
@@ -156,6 +209,7 @@ def record_stripe_webhook(
     external_id = str(payload.get("id") or "").strip()
     if not external_id:
         raise ValueError("Stripe event id is required")
+    minimized_payload = _minimized_stripe_payload(payload)
     event = (
         db.query(account_models.WebhookEvent)
         .filter(
@@ -168,9 +222,12 @@ def record_stripe_webhook(
         event = account_models.WebhookEvent(
             provider=account_models.PaymentProvider.STRIPE,
             external_event_id=external_id,
-            signature=signature[:256],
+            # Retain a fingerprint rather than the full signed header. The raw
+            # request was already verified; the verified credential id is stored
+            # on the durable job for traceability.
+            signature=None,
             event_type=str(payload.get("type") or "")[:128],
-            payload=raw_payload.decode("utf-8"),
+            payload=json.dumps(minimized_payload, separators=(",", ":")),
             status=account_models.WebhookStatus.RECEIVED,
         )
         db.add(event)
@@ -184,6 +241,7 @@ def record_stripe_webhook(
             "webhook_event_id": event.id,
             "verified_credential_id": matched.id,
             "verified_tenant_id": verified_tenant_id or None,
+            "data_minimized": True,
         },
         idempotency_key=external_id,
         correlation_id=external_id,
