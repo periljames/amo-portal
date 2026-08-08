@@ -61,7 +61,7 @@ def _checkout(db, *, tenant_id: str, price_id: str, amount: int = 100000, curren
         price_id=price_id,
         expected_amount_cents=amount,
         expected_currency=currency,
-        actor_user_id="actor-offer-test",
+        actor_user_id=None,
         idempotency_key=f"checkout-{uuid.uuid4().hex}",
         terms_version="module-subscription-2026-08-08",
         auto_renew_accepted=True,
@@ -104,7 +104,7 @@ def test_hidden_tenant_offer_is_authoritative_and_does_not_fallback_global() -> 
                 "customer_selectable": False,
                 "reason": "Private negotiated offer not yet released",
             },
-            actor_user_id="platform-superuser-test",
+            actor_user_id=None,
         )
         catalog = module_commerce.self_service_catalog(db, tenant_id=tenant_id)
         item = next(row for row in catalog["items"] if row["code"] == "quality")
@@ -170,7 +170,7 @@ def test_new_offer_cannot_be_saved_with_past_valid_until() -> None:
                     "valid_until": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
                     "reason": "Invalid expired offer",
                 },
-                actor_user_id="platform-superuser-test",
+                actor_user_id=None,
             )
     finally:
         db.close()
