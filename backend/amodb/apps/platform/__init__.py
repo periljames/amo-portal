@@ -21,6 +21,7 @@ from .module_activation_policy import install_module_activation_policy
 from .module_offer_policy import install_module_offer_policy
 from .module_catalog_runtime_policy import install_module_catalog_runtime_policy
 from .payment_data_policy import install_payment_data_policy
+from .payment_transport_policy import install_payment_transport_policy
 from .commercial_policy import install_commercial_control_policy
 from .router import router
 
@@ -52,6 +53,10 @@ install_billing_access_hot_path()
 # Retire direct-payment mutations, prevent payment-method records from
 # auto-converting trials, and persist only minimized Paystack webhook metadata.
 install_payment_data_policy()
+# Validate hosted checkout redirects and persist only settlement-critical M-PESA
+# callback fields; raw card/SAD and unnecessary mobile-payment personal data stay
+# at the payment provider rather than in the portal queue.
+install_payment_transport_policy()
 # Add root-contract/cancellation and negotiated-offer expiry state to the shared
 # module catalog before either platform or tenant commerce routes consume it.
 install_module_catalog_runtime_policy()
