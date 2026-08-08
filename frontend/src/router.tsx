@@ -105,6 +105,22 @@ function isSupportedDocumentReaderPath(pathname: string): boolean {
   return Boolean(reader || revision);
 }
 
+function isSupportedAuditProgrammeSchedulePath(pathname: string): boolean {
+  const parts = pathSegments(pathname);
+  const qualityIndex = parts.indexOf("quality");
+  if (qualityIndex < 0) return false;
+  const relative = parts.slice(qualityIndex + 1);
+  return Boolean(
+    relative.length === 6 &&
+    relative[0] === "audits" &&
+    relative[1] === "program" &&
+    relative[2] &&
+    relative[3] === "items" &&
+    relative[4] &&
+    relative[5] === "schedule"
+  );
+}
+
 function rosteringWorkforceRedirect(pathname: string): string | null {
   const parts = pathSegments(pathname);
   if (parts[0] !== "maintenance" || !parts[1] || parts[2] !== "rostering" || parts[3] !== "workforce") return null;
@@ -286,7 +302,11 @@ export const AppRouter: React.FC = () => {
   }
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
-  if (qmsRoute.kind === "unknown" && !isSupportedDocumentReaderPath(location.pathname)) return <QmsNotFoundRouteSurface />;
+  if (
+    qmsRoute.kind === "unknown" &&
+    !isSupportedDocumentReaderPath(location.pathname) &&
+    !isSupportedAuditProgrammeSchedulePath(location.pathname)
+  ) return <QmsNotFoundRouteSurface />;
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
