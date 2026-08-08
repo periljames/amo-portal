@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from . import test_formal_reporting_contract  # noqa: F401
 from amodb.apps.reliability.formal_reporting_source_capture import (
     DASHBOARD_SOURCE_FAMILIES,
     SOURCE_KIND,
