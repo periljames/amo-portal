@@ -6,6 +6,7 @@ on:
       - agent/platform-commercial-scale-hardening
     paths:
       - ".github/workflows/_commercial_cleanup_once.yml"
+      - "backend/amodb/apps/accounts/billing_access.py"
 
 permissions:
   contents: write
