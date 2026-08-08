@@ -46,6 +46,16 @@ def require_tenant_contract_manager(current_user=Depends(get_current_active_user
     return user
 
 
+def reject_legacy_generic_payment_webhook() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "The generic billing webhook endpoint is retired. Use the provider-specific "
+            "verified Stripe, Paystack or M-PESA webhook endpoint."
+        ),
+    )
+
+
 def _attach(route: APIRoute, dependency) -> None:
     if any(item.call is dependency for item in route.dependant.dependencies):
         return
@@ -81,7 +91,15 @@ def install_billing_privacy_policy(
     from amodb.apps.accounts import router_billing
 
     for route in router_billing.router.routes:
-        if isinstance(route, APIRoute) and _financial_account_route(route.path):
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path == "/billing/webhooks/{provider}":
+            # This old catch-all endpoint accepted arbitrary JSON and cannot meet
+            # the provider-specific signature/minimization guarantees. Retire it
+            # before request-body parsing; the dedicated payment-provider routes
+            # are the only supported payment ingress.
+            _attach(route, reject_legacy_generic_payment_webhook)
+        elif _financial_account_route(route.path):
             _attach(route, require_tenant_billing_reader)
 
     if module_commerce_router is not None:
