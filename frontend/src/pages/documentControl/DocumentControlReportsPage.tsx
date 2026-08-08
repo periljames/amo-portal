@@ -13,6 +13,7 @@ import DocumentControlShell, {
   DocumentControlStatus,
 } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
+import "./documentLibrary.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
 
