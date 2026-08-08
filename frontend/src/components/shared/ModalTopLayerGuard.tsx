@@ -54,7 +54,10 @@ function selectTopLayerHost(dialog: HTMLElement): ManagedDialog {
     const position = window.getComputedStyle(current).position;
     const coversViewport = bounds.width >= viewportWidth * 0.88
       && bounds.height >= viewportHeight * 0.88;
-    if ((position === "fixed" || position === "absolute") && coversViewport) {
+    const coversViewportHeight = bounds.height >= viewportHeight * 0.88;
+    const touchesViewportEdge = bounds.left <= 1 || bounds.right >= viewportWidth - 1;
+    const edgeDrawer = position === "fixed" && coversViewportHeight && touchesViewportEdge;
+    if ((position === "fixed" || position === "absolute") && (coversViewport || edgeDrawer)) {
       return { host: current as PopoverElement, surface: false };
     }
     current = current.parentElement;
