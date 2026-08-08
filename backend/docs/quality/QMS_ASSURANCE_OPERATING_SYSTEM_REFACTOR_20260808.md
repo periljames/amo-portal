@@ -1,626 +1,720 @@
 # QMS Assurance Operating System Refactor
 
 **Date:** 2026-08-08  
-**Status:** Architecture contract and phased implementation plan  
+**Status:** Active implementation — Phase A stabilized; Audit Programme + Audit Universe implemented and under exact-head validation  
+**Pull request:** `#488` — **DRAFT**  
 **Branch:** `agent/qms-assurance-operating-system-refactor`  
-**Base:** `main@1c7407f05dbbe47d18ab472de839a49e66440593`
+**Current base verified:** `main@aa7e754eeeac73ae4adbcb0c0f537a8c1adb89c8`
 
-## 1. Decision
+## 1. Permanent product model
 
-The Quality module will no longer evolve as a menu of registers that mirrors the Maintenance Procedures Manual table of contents. It will become the aviation **assurance and decision layer** over the AMO.
-
-Quality should continuously answer:
-
-1. What changed?
-2. What is deteriorating?
-3. Which approval, capability, control, or personnel privilege is becoming exposed?
-4. Why is it happening?
-5. What decision or action is required next?
-6. Did the corrective or preventive control actually work?
-
-The primary navigation is therefore reduced to six workspaces:
+The Quality module is an aviation **Assurance Operating System**. Its permanent top-level operating model is:
 
 ```text
 CONTROL ROOM | PLANNER | MISSIONS | PEOPLE | ASSURANCE | INTELLIGENCE
 ```
 
-`My Work` becomes a global task drawer rather than a permanent full module. Settings remain administrative and do not compete with operational navigation.
+This six-workspace model does **not** flatten specialist audit operations. Audits remain a deep operational domain inside Assurance with their own programme, planner, execution, findings, evidence, report, CAR, closeout and follow-up routes.
 
-The system keeps the specialist audit and CAR workflows already proven in the repository, but they become governed lenses inside Assurance instead of defining the information architecture of the entire QMS.
+Quality exists to answer:
 
-## 2. Source-of-truth principle
+1. What requires action?
+2. Why does it require action?
+3. By when?
+4. What approval, capability or control is exposed?
+5. What authoritative evidence supports the conclusion?
+6. What decision or assurance action is required next?
+7. Did the corrective action actually work?
 
-Quality must not duplicate data that another operational module owns.
+## 2. Source ownership
+
+Quality must not copy authoritative operational master data simply because it needs to audit or assure it.
 
 | Domain | Authoritative owner | Quality responsibility |
 |---|---|---|
-| Tooling/calibration | Workshops / tooling | assurance state, exposure, OOT blast radius, control effectiveness |
-| Work execution | Work orders / workpacks | surveillance, sampling, drift, evidence, findings |
-| Personnel | Accounts / HR / Training | eligibility, competence, internal privilege, authorization decisions |
-| Rosters | Rostering | future competent coverage and privilege demand |
-| Suppliers / receipts | Procurement / Stores | approval decision, supplier quality trend, suspension/escalation |
-| Controlled documents | Document Control | requirement/control mapping, currency exposure, change impact |
-| Reliability | Reliability | quality signals where control or process performance is implicated |
-| Safety occurrences | Safety / SMS | linked assurance evidence and shared investigation context |
-| Aircraft capability / AMP | Fleet / Planning / Engineering | capability readiness, self-evaluation, approval assurance |
-| Audits / findings / CAPA | Quality | governed execution, investigation, corrective action, effectiveness |
+| Audits / findings / CAR / effectiveness | Quality | governed programme, execution, evidence, decisions and follow-up |
+| Training / competence records | Training | reference evidence; Quality owns internal privilege decisions later |
+| Workforce / roster / leave | Workforce / Rostering | reference availability and future coverage |
+| Tooling / calibration | Tooling / Workshops | reference calibration state and exposure |
+| Suppliers / procurement / receipts | Procurement / Stores | supplier assurance and surveillance decisions |
+| Controlled manuals / procedures | DMS / Document Control | requirement and checklist references; no copied controlled text |
+| Work orders / workpacks / defects | Maintenance | sampling, surveillance, findings and trend references |
+| Fleet / aircraft records | Fleet / Technical Records | capability and aircraft surveillance references |
+| Reliability | Reliability | source signals and exposure context |
+| Safety occurrences | Safety / SMS | linked assurance context where legitimately available |
+| Finance | Finance | no duplicated Quality records |
 
-A Quality page must not exist merely because a table exists.
+The new Audit Universe follows this rule by storing a typed source pointer rather than a copied supplier, department, station, aircraft or personnel master record.
 
-## 3. Regulatory and procedural anchors
+## 3. Audit Operations target lifecycle
 
-The refactor is designed around the duties already present in the Safarilink MPM and KCAR 2025 transition material, including:
-
-- Head of Quality continuous monitoring, audit scheduling, corrective-action follow-up and liaison duties;
-- certifying staff qualification, records and company authorization;
-- qualifying inspectors and technicians;
-- competence assessment of AMO personnel;
-- capability-list self-evaluation before adding an article or rating;
-- exemptions and concessions;
-- control of manufacturers' working teams and subcontracted activities;
-- missing-tool, occurrence and Quality Work Instruction controls;
-- supplier evaluation and monitoring;
-- management review and continuous quality improvement.
-
-The architecture must support globally applicable jurisdiction packs so Kenya, EASA, FAA and ICAO obligations can map to the same control graph without hard-coding a Kenya-only product model.
-
-## 4. Core operating model: Assurance Graph
+The governing lifecycle is:
 
 ```text
-REGULATION / MANUAL / CONTRACT / CUSTOMER REQUIREMENT
-                         |
-                         v
-                  ASSURANCE REQUIREMENT
-                         |
-                         v
-                    ASSURANCE CONTROL
-                   /       |        \
-                  /        |         \
-              PEOPLE    PROCESS     ASSET
-                  \        |         /
-                   \       |        /
-                         v
-                    LIVE EVIDENCE
-                         |
-                         v
-                   CONTROL HEALTH
-                         |
-              +----------+----------+
-              |                     |
-           HEALTHY               SIGNAL / DRIFT
-                                    |
-                        +-----------+-----------+
-                        |           |           |
-                      REVIEW    INVESTIGATE    MISSION
-                                    |
-                                    v
-                                 ACTIONS
-                                    |
-                                    v
-                           EFFECTIVENESS TEST
+PROGRAMME
+   ↓
+PLAN
+   ↓
+SCHEDULE
+   ↓
+PREPARE
+   ↓
+NOTIFY
+   ↓
+EXECUTE
+   ↓
+FINDINGS
+   ↓
+REPORT
+   ↓
+CAR / FOLLOW-UP
+   ↓
+EFFECTIVENESS
+   ↓
+CLOSEOUT
+   ↓
+TREND
 ```
 
-The graph is relational and auditable. AI may explain or suggest; AI may not approve, accept a root cause, grant a privilege, close a finding, authorize work, or declare compliance.
+These are workflow states and gates, not cosmetic tabs. Existing specialist audit pages are retained while the lifecycle is progressively strengthened.
 
-## 5. Canonical route tree
+### Audit execution closure is not assurance closure
 
-The new canonical user-facing route tree is deliberately small:
+The architecture distinguishes:
 
 ```text
-/maintenance/:amoCode/quality
-|
-|-- /control-room
-|-- /planner
-|-- /missions
-|    `-- /:missionId
-|-- /people
-|    `-- /:personId
-|-- /assurance
-|    |-- /:caseId
-|    `-- /investigations/:investigationId
-|-- /intelligence
-|-- /controls/:controlId
-`-- /settings
+AUDIT EXECUTION CLOSED
 ```
 
-Existing deep links remain supported during migration:
+from:
 
 ```text
-/audits/*                   -> Assurance · Audit lens
-/findings/*                 -> Assurance · Finding lens
-/cars/*                     -> Assurance · CAPA lens
-/risk/*                     -> Intelligence · Risk lens
-/change-control/*           -> Missions
-/suppliers/*                -> Assurance · Supplier lens
-/equipment-calibration/*    -> Assurance · Tooling lens
-/external-interface/*       -> Assurance · External lens
-/management-review/*        -> Intelligence · Management Review lens
-/evidence-vault/*           -> contextual Evidence Room
-/documents/*                -> Document Control handoff
+ASSURANCE FOLLOW-UP COMPLETE
 ```
 
-No destructive URL migration is required in Phase 1. Bookmarks and regulated evidence references must continue to resolve.
+An issued report can close field execution while findings, CARs, effectiveness reviews or follow-up audits remain open.
 
-## 6. Global Quality shell
+## 4. Phase A stabilization — complete
 
-Every Quality page uses one operational navigation row only.
+Phase A was frozen and proven on exact head:
 
 ```text
-+--------------------------------------------------------------------------------+
-| PORTAL HEADER                                              alerts  user menu   |
-+--------------------------------------------------------------------------------+
-| QUALITY  Control Room  Planner  Missions  People  Assurance  Intelligence     |
-|                                                      My Work (6)   Settings    |
-+--------------------------------------------------------------------------------+
-| PAGE CONTENT                                                                   |
-+--------------------------------------------------------------------------------+
+5621c155b9398a8ebb0ac298d3efb67e3b723dd0
 ```
 
-Rules:
-
-- no second `Operations / Controls / Evidence / Intelligence` tab strip;
-- no DOM-injected duplicate navigation as a long-term architecture;
-- specialist record tabs are allowed only inside the record workspace;
-- route permissions hide unavailable navigation rather than producing dead links;
-- mobile collapses navigation; it does not create an endlessly scrolling tab row.
-
-## 7. Control Room wireframe
-
-Purpose: show where Quality attention can change an outcome today. This is not a data-entry page.
+with base:
 
 ```text
-+ QUALITY ASSURANCE                                        LIVE 08 AUG 07:54 ----+
-| Ask Quality: What can compromise our approval in the next 60 days?       [cmdK]|
-+--------------------------------------------------------------------------------+
-| DECISIONS DUE | EMERGING SIGNALS | APPROVAL EXPOSURE | MY ACTIONS              |
-|       4       |        7         |         3         |      6                  |
-+---------------------------------------+----------------------------------------+
-| EMERGING ASSURANCE SIGNALS            | APPROVAL / PRIVILEGE OUTLOOK           |
-| Repeat workpack omissions   HIGH      | DHC8 certifying coverage    AT RISK    |
-| 4.2 sigma above baseline              | gap projected 28 Aug                   |
-| Investigate ->                        |                                        |
-| Supplier paperwork rejection HIGH     | Battery Shop capability     HEALTHY    |
-| Review supplier ->                    |                                        |
-| Tool use after expiry       CRITICAL  | AMO renewal                AT RISK     |
-+---------------------------------------+----------------------------------------+
-| CONTROL HEALTH: People | Capability | Maintenance | Tooling | Supplier | Data  |
-+---------------------------------------+----------------------------------------+
-| WHAT CHANGED SINCE MY LAST REVIEW     | UPCOMING DECISIONS                     |
-| 2 regulatory impacts                  | 12 Aug Authorization Board              |
-| 1 effectiveness test failed           | 15 Aug Capability gate review          |
-| 3 new signals                         | 19 Aug QMS surveillance                 |
-+---------------------------------------+----------------------------------------+
+main@aa7e754eeeac73ae4adbcb0c0f537a8c1adb89c8
 ```
 
-The Control Room must never repeat one count in multiple cards without adding a new denominator, trend or decision context.
+### Repaired defects
 
-## 8. Planner wireframe
+- Mission browser fixtures now use the exact governed backend gate titles.
+- Best-effort realtime presence/token bootstrap failures no longer masquerade as persistent failed user actions and block Quality navigation.
+- Governed QMS dialogs restore focus to their opener; Planner keyboard quick-create returns focus to its canonical Quick Schedule control.
+- Assurance workspace and specialist Audit Operations navigation are semantically distinct without removing audit workflow depth.
 
-The existing modern planner is retained and expanded into the temporal projection of the Assurance Graph.
+### Exact-head acceptance
+
+Quality Module CI run `31269405823` passed on `5621c155...`, including:
+
+- Quality frontend unit tests;
+- CSS ownership checks;
+- production build/typecheck;
+- Control Room Playwright;
+- Quality navigation/CAR Playwright;
+- Mission Playwright;
+- bounded-register Playwright;
+- modern Planner Playwright;
+- Planner lifecycle Playwright;
+- Planner audit handoff Playwright;
+- Quality frontend lint;
+- backend Quality contracts;
+- PostgreSQL Quality schema probe;
+- continuous-assurance RLS probe;
+- Mission migration/RLS probe.
+
+Portal Error Feedback CI was also green on that stabilization head.
+
+## 5. Existing audit systems retained
+
+The repository already contains substantial functional audit capability. It is being extended, not replaced.
+
+### Existing audit execution domain
+
+`QMSAudit`, `QMSAuditFinding`, evidence, CAR and specialist audit routes remain the execution source of truth.
+
+Existing execution features include:
+
+- audit records and generated references;
+- planned / actual execution dates;
+- auditors and auditees;
+- notice/reminder fields;
+- checklist execution;
+- findings;
+- evidence;
+- CAR lifecycle;
+- report / closeout surfaces;
+- the Audit War Room.
+
+### Existing recurring schedule engine
+
+The modern audit planner and `planner_schedule` domain already provide useful scheduling machinery including:
+
+- tenant-owned schedules;
+- recurrence source/occurrence relationships;
+- timezone and location fields;
+- responsible users and attendees;
+- lifecycle/suspension state;
+- controlled reschedule reasons;
+- optimistic versioning;
+- recurrence materialization;
+- calendar/list/table projections;
+- Planner → authoritative Audit Planner handoff.
+
+This engine remains the schedule authority. The Audit Programme does not create a second scheduling system.
+
+## 6. 2026-08-08 audit-domain gap map
+
+The following findings are based on the implementation inspected on PR #488.
+
+| Area | Existing state | Gap / action |
+|---|---|---|
+| Annual Audit Programme | old `Programme` surface was effectively a recurring schedule projection | **Slice 2 implemented governed versioned programme entity/API/UI** |
+| Audit Universe | absent | **Slice 2 implemented typed authoritative-source catalogue** |
+| Programme approval history | absent as a first-class immutable programme history | **Slice 2 implemented attributable programme events and revision supersession** |
+| Programme amendments | schedule edits could mutate planning state | **Slice 2 creates a new DRAFT revision instead of editing approved programme history** |
+| Risk-based planning | schedule has operational fields but no explainable surveillance priority model | pending deterministic signal/rule engine |
+| Audit Planner | capable calendar/list/table and recurrence implementation exists | retain and expand; connect programme requirements and deterministic conflicts |
+| Auditor availability | no complete Workforce/Rostering availability gate | pending Slice 4 |
+| Auditor competence | no complete authoritative Training eligibility gate | pending Slice 4 |
+| Auditor independence | not a complete deterministic assignment rule | pending Slice 4 |
+| Notice lifecycle | notice/reminder fields exist | pending governed draft/review/generate/deliver/ack/revise workflow and configurable policy |
+| Preparation workspace | execution pages exist | pending consolidated prior findings/CARs/DMS/source references/evidence requests |
+| Checklist versioning | checklist capability exists | pending immutable template revision capture per audit |
+| Audit lifecycle | legacy audit status remains too coarse for target lifecycle | pending progressive lifecycle strengthening without breaking existing records |
+| Report governance | report workflow exists | pending revision/issued-history hardening |
+| Closeout | closeout exists | pending explicit execution-close vs assurance-follow-up gates |
+| Effectiveness | CAR workflow exists | pending expected outcome, measure, observation window, verification method and conclusion model |
+| Recurrence | recurring schedule engine exists | retain; link recurrence requirements to programme rather than cloning completed history |
+| Control Room audit signals | partial | pending due/overdue/conflicts/reports/CAR/effectiveness/deferral action queue |
+
+## 7. Slice 2 — governed Audit Programme
+
+Slice 2 introduces four Quality-owned relational tables.
+
+### `quality_audit_programmes`
+
+Fields include:
+
+- `amo_id` — mandatory tenant owner;
+- `programme_ref`;
+- `programme_series`;
+- `programme_year`;
+- `revision_no`;
+- `title`;
+- `objectives`;
+- `regulatory_basis`;
+- `status`;
+- `period_start` / `period_end`;
+- `owner_user_id`;
+- `supersedes_programme_id`;
+- approval / activation / closure attribution and timestamps;
+- created / updated attribution and timestamps.
+
+Programme states:
 
 ```text
-+ PLANNER                 AUGUST 2026          Month Week Agenda Timeline        |
-| Sources: Audits Surveillance Missions Authorizations Training Reviews Tooling |
-+------------------+-------------------------------------------+-----------------+
-| mini calendar    | unified calendar / timeline               | selected item   |
-| owners / filters | conflicts, due states, dependency marks   | decision/action |
-+------------------+-------------------------------------------+-----------------+
-| NEXT 7 DAYS                          | OVERDUE / DUE SOON                       |
-+--------------------------------------------------------------------------------+
+DRAFT
+  ↓
+UNDER_REVIEW
+  ├──→ DRAFT
+  └──→ APPROVED
+          ↓
+        ACTIVE
+          ↓
+        CLOSED
 ```
 
-Planner events include audits, targeted surveillance, mission milestones, authorization boards, competence assessments, regulatory transition deadlines, concession/exemption expiry, effectiveness reviews and approval-renewal milestones.
+Approved or active revisions can also become `SUPERSEDED` through the controlled amendment path.
 
-The planner must compute conflicts such as competent-cover shortfalls or privilege expiry before a planned maintenance event.
-
-## 9. Missions wireframe and semantics
-
-A Mission is a controlled cross-department change/project with regulatory gates. It replaces generic change-control forms for high-value work.
-
-Mission templates include:
-
-- aircraft/type capability inclusion;
-- component workshop capability addition;
-- new line station;
-- supplier/subcontractor approval;
-- certifying privilege or authorization campaign;
-- significant procedure/manual change;
-- regulatory transition;
-- AMO renewal;
-- major corrective/preventive improvement project.
-
-### Mission portfolio
+Terminal states:
 
 ```text
-+ MISSIONS                                                    + New Mission      |
-| Active | Planning | Completed | Templates                                      |
-+--------------------------------------------------------------------------------+
-| MISSION                 TYPE              OWNER        READY     RISK            |
-| DHC8-400 inclusion      Capability        Quality       71%      HIGH       ->   |
-| Battery shop expansion  Capability        Workshop      83%      MEDIUM     ->   |
-| AMO renewal 2026        Regulatory        Quality       58%      HIGH       ->   |
-+--------------------------------------------------------------------------------+
+SUPERSEDED
+CLOSED
 ```
 
-### Capability inclusion detail
+### Amendment rule
+
+Approved and active programme revisions are immutable through the programme edit API.
+
+A controlled amendment creates:
 
 ```text
-DHC-8-400 CAPABILITY INCLUSION                                      71% READY
-
-Regulatory basis: KCAR AMO / MPM 1.8 / capability self-evaluation
-
-GATE                          STATE        EVIDENCE / EXCEPTION            OWNER
-Approval rating               PASS         within rating                   Quality
-Facilities                    PASS         hangar verified                 Engineering
-Technical data                PASS         AMM/IPC/SRM current             DMS/Planning
-Tooling                       AT RISK      3 mandatory tools unresolved    Stores
-Materials                     PASS         adequate                       Procurement
-Personnel                     AT RISK      2 privileges missing            People
-Training                      IN PROGRESS  3 type courses                  Training
-Procedures                    PASS         current                        Quality/DMS
-Contracted functions          PASS         NDT subcontractor approved     Quality
-Manpower                      AT RISK      Sep coverage below demand       Rostering
-Safety/change assessment      PASS         residual risk accepted         Safety
-Quality self-evaluation       LOCKED       waits for hard gates           Quality
-Accountable Executive         LOCKED       waits for QA sign-off          AE
-Authority submission          LOCKED       waits for internal approval    Quality
+APPROVED/ACTIVE REVISION N
+          |
+          └── superseded by → DRAFT REVISION N+1
 ```
 
-Mission gates are not averaged into a legal-compliance score. A failed hard gate blocks readiness regardless of soft progress percentage.
+The previous approved revision is not marked `SUPERSEDED` until the replacement revision is itself approved. This preserves the currently approved programme while the amendment is being prepared/reviewed.
 
-## 10. People & Privileges wireframes
+## 8. Slice 2 — Audit Universe
 
-Purpose: answer whether a person can perform a task, on a given aircraft/component, at a location and time, under the AMO approval.
+`quality_audit_universe_items` is the governed catalogue of auditable entities.
 
-### Team view
+Supported entity classes currently include:
+
+- department;
+- facility;
+- station;
+- supplier;
+- contractor;
+- process;
+- capability;
+- approval rating;
+- aircraft type;
+- personnel group;
+- other governed entity.
+
+Each entry carries:
 
 ```text
-+ PEOPLE & PRIVILEGES                                Forecast next 90 days      |
-| Role | Aircraft/Type | Location | Eligibility | Expiring                         |
-+--------------------------------------------------------------------------------+
-| James Engineer     B1 DHC8      NBO     94% evidence       Ground run 29 Aug  ->|
-| Peter Technician   Mechanic     NBO     89% evidence       HF 18 Sep          ->|
-+--------------------------------------------------------------------------------+
+source_owner_module
+source_type
+source_id
+source_route
 ```
 
-### Person assurance passport
+plus:
+
+- risk classification;
+- regulatory criticality;
+- surveillance interval where applicable;
+- mandatory-surveillance flag;
+- active state;
+- Quality notes.
+
+The unique source identity is tenant-scoped:
 
 ```text
-JAMES ENGINEER                                  ELIGIBLE · 94% evidence complete
-
-CURRENT PRIVILEGES                 HARD GATES
-Line CRS          VALID            AMEL                  VALID
-Base CRS          VALID            Company authorization VALID
-Duplicate Insp.   VALID            Human Factors         VALID
-Engine Ground Run EXPIRES 29 AUG   SMS                    VALID
-                                   Recent exercise        1/3 missing
-                                   Competence review      VALID
-
-DEMAND FORECAST
-Required DHC8 B1 shifts  14
-Qualified coverage       11
-Predicted shortfall       3
-
-Recommendation: renew ground-run privilege and obtain one recent-exercise record.
+amo_id + source_owner_module + source_type + source_id
 ```
 
-Hard eligibility gates are Boolean and fail closed. Predictive exposure is calculated separately from legal eligibility.
+This prevents Quality from creating multiple copies of the same authoritative source record inside the Audit Universe.
 
-## 11. Assurance workspace
+## 9. Slice 2 — programme surveillance requirements
 
-Assurance is a single workspace with lenses, not separate top-level modules.
+`quality_audit_programme_items` relates a programme revision to an Audit Universe item.
 
-Lenses:
+Supported audit types currently include:
 
-- Signals
-- Audits & Surveillance
-- Findings
-- CAPA
-- Supplier
-- Tooling / Calibration exposure
-- External / Regulator
-- Effectiveness
-- Controls
+- internal;
+- departmental;
+- technical;
+- work-pack;
+- supplier;
+- contracted-function;
+- facility;
+- personnel;
+- product;
+- process;
+- regulatory;
+- special;
+- reactive;
+- follow-up.
 
-### Signal list
+Supported recurrence definitions currently include:
+
+- one-time;
+- monthly;
+- quarterly;
+- semi-annual;
+- annual;
+- custom interval;
+- risk-triggered.
+
+Requirement state:
 
 ```text
-+ ASSURANCE SIGNALS                                    + New manual signal       |
-| All | Mine | Investigations | Trends                                         |
-+--------------------------------------------------------------------------------+
-| SIGNAL                         SOURCE        SEVERITY  TREND   STATUS           |
-| Workpack omissions rising      Maintenance   HIGH      up      Investigating ->|
-| Tool used after calibration    Tooling       CRITICAL  new     Open          ->|
-| Supplier paperwork rejects     Stores        MEDIUM    up      Open          ->|
-+--------------------------------------------------------------------------------+
+PLANNED | SCHEDULED | COMPLETED | DEFERRED | CANCELLED | FOLLOW_UP_REQUIRED
 ```
 
-Quality should be able to create an assurance case from any signal while preserving source lineage.
+A deferral or cancellation requires an explicit reason through the programme API.
 
-## 12. Investigation Studio
+`prioritization_basis` is intentionally a structured evidence/rule container. It is **not** an opaque AI risk score. The deterministic risk/planning engine will populate explainable contributing factors in a later slice.
 
-The Investigation Studio is not a free-text `root cause` field.
+## 10. Slice 2 — immutable programme events
 
-Supported analysis methods:
+`quality_audit_programme_events` records human-attributed programme history.
 
-- evidence-constrained 5 Whys;
-- Ishikawa / causal map;
-- MEDA / HFACS-ME classification where appropriate;
-- BowTie / barrier analysis;
-- fault tree / cause-consequence analysis;
-- Pareto / recurrence clustering;
-- statistical process-control analysis;
-- change-impact analysis;
-- supplier defect-pattern analysis.
+Current event types include:
+
+- created;
+- updated;
+- submitted for review;
+- returned to draft;
+- approved;
+- activated;
+- amendment created;
+- superseded;
+- closed;
+- programme item added;
+- programme item updated.
+
+Each event carries:
+
+- reason;
+- before snapshot where relevant;
+- after snapshot where relevant;
+- actor;
+- timestamp.
+
+No programme-event update/delete API is exposed. Database-level append-only trigger hardening remains a later integrity improvement if required by the repository-wide event architecture.
+
+## 11. Slice 2 API surface
+
+Canonical APIs:
 
 ```text
-INVESTIGATION · CAR/26/033 · Tool control failure
+GET    /api/maintenance/{amo_code}/quality/audit-programmes
+POST   /api/maintenance/{amo_code}/quality/audit-programmes
+GET    /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}
+PATCH  /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}
+POST   /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}/transitions
+POST   /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}/amendments
 
-SYSTEM CONTEXT
-Aircraft 5Y-SLK | WO 2026-01771 | Tool TL-0041 | Calibration expired +3 days
-Personnel 4 | Procedure QWI-003 Rev 2 | Shift Afternoon
+GET    /api/maintenance/{amo_code}/quality/audit-programmes/universe/items
+POST   /api/maintenance/{amo_code}/quality/audit-programmes/universe/items
+PATCH  /api/maintenance/{amo_code}/quality/audit-programmes/universe/items/{item_id}
 
-Suggested method: MEDA + Barrier Analysis
-
-CAUSAL MAP
-Expired tool used
-  |- calibration warning not surfaced
-  |- issue process allowed release
-  `- work order did not validate calibration state
-
-SIMILAR EVENTS
-89% CAR/25/018
-76% OBS/26/041
-
-HYPOTHESES
-1. Tool-control gate absent at issue point         STRONG
-2. Personnel knowledge deficiency                  WEAK
-3. Calibration scheduling capacity                 INSUFFICIENT EVIDENCE
+POST   /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}/items
+PATCH  /api/maintenance/{amo_code}/quality/audit-programmes/{programme_id}/items/{item_id}
 ```
 
-AI can suggest or challenge a hypothesis, but a named authorized human must accept the root cause.
+The legacy `/qms/` tenant alias is retained for compatibility.
 
-## 13. Effectiveness engineering
+Static Audit Programme routes are explicitly promoted ahead of the generic Quality catch-all so they cannot silently fall into the legacy register reader.
 
-A CAPA cannot close merely because an action was completed.
+All list APIs are bounded.
 
-Every material corrective action should define:
-
-- baseline metric;
-- expected future state;
-- leading indicator;
-- observation window;
-- source dataset;
-- review date;
-- pass/fail rule;
-- accountable reviewer.
-
-Example:
+## 12. Slice 2 frontend route ownership
 
 ```text
-Baseline:          8 tool-control deviations / 90 days
-Expected:          <= 1 / 90 days
-Leading indicator: 100% tool issues pass automatic validity gate
-Observation:       90 days
-Review:            15 Nov 2026
+/maintenance/:amoCode/quality/audits/program
 ```
 
-A recurrence inside the observation window creates an effectiveness challenge and reopens Quality review; it does not silently rewrite the original finding.
+now owns the governed Audit Programme and Audit Universe workspace.
 
-## 14. Intelligence workspace
-
-Intelligence combines analysis, regulatory impact and management-review preparation.
-
-Primary lenses:
-
-- Executive
-- Performance
-- Risk
-- Trends
-- Regulatory
-- Approval Digital Twin
-- Management Review
-- Exports
-
-Statistical methods are preferred before AI:
-
-| Problem | Method |
-|---|---|
-| process drift | EWMA / CUSUM |
-| event frequency | exposure-normalised rates |
-| low-volume supplier comparison | Bayesian shrinkage |
-| recurring issues | clustering + similarity |
-| CAR aging | survival / hazard model |
-| privilege and resource exposure | constraint solving |
-| surveillance targeting | risk-weighted sampling |
-| change impact | graph traversal |
-| anomaly discovery | statistical / ML anomaly detection |
-
-All model outputs must retain source lineage, calculation version, inputs, as-of time and explanation.
-
-## 15. Approval Digital Twin
-
-A live approval graph is the long-term differentiator.
+The existing authoritative schedule/planner remains:
 
 ```text
-AMO APPROVAL
-|
-|-- Rating / SOP
-|    `-- aircraft / engine / component / specialized activity
-|-- Capability
-|    |-- technical data
-|    |-- tools
-|    |-- facilities
-|    |-- materials
-|    |-- procedures
-|    `-- contracted services
-|-- People
-|    |-- competence
-|    |-- licences
-|    |-- training
-|    `-- internal privileges
-|-- Execution controls
-|-- Quality controls
-`-- Regulatory evidence
+/maintenance/:amoCode/quality/audits/plan
+/maintenance/:amoCode/quality/audits/schedule
 ```
 
-The target system question is:
-
-> Can this AMO legally and practically perform this work at the requested time, location and scope?
-
-The answer must explain blockers and evidence, not return an opaque score.
-
-## 16. Regulatory intelligence
-
-Requirements are versioned in jurisdiction packs and map to controls rather than living as a second document library.
-
-Target jurisdictions:
-
-- Kenya / KCAA / KCAR 2025;
-- ICAO SARPs and guidance where applicable;
-- EASA Part-145 / AMC / GM;
-- FAA 14 CFR Part 145 and relevant advisory circulars;
-- tenant/operator/customer contractual requirements.
-
-A regulatory change can therefore produce an impact graph:
+The existing execution domain remains:
 
 ```text
-Requirement changed
-  -> 4 capability templates
-  -> 2 MPM sections
-  -> 1 QWI
-  -> 17 capability nodes
-  -> 6 personnel assessments
-  -> create Regulatory Change Mission
+/maintenance/:amoCode/quality/audits/register
+/maintenance/:amoCode/quality/audits/:auditId/*
 ```
 
-Human review remains mandatory before requirements or controls are made authoritative.
+This separation is deliberate:
 
-## 17. Domain primitives
+```text
+PROGRAMME REQUIREMENT
+        |
+        v
+AUDIT PLANNER / SCHEDULE
+        |
+        v
+LIVE AUDIT RECORD / WAR ROOM
+```
 
-The final architecture should converge on these concepts. Some continuous-assurance equivalents already exist in the current repository and should be extended rather than duplicated.
+The programme does not directly manufacture a parallel live audit record.
 
-| Primitive | Purpose |
-|---|---|
-| `AssuranceRequirement` | regulatory/manual/contract/customer obligation |
-| `AssuranceControl` | how the organisation satisfies a requirement |
-| `EvidencePointer` | typed pointer to authoritative evidence |
-| `AssuranceSignal` | exception, drift, anomaly or emerging exposure |
-| `AssuranceCase` | governed Quality review / investigation case |
-| `Mission` | controlled cross-department project/change |
-| `MissionGate` | hard or soft readiness dependency |
-| `CapabilityNode` | approval/capability relationship and state |
-| `PersonPrivilege` | internal authorization / scope / limitation |
-| `CompetenceAssessment` | competence evidence and decision |
-| `Decision` | explicit governed human decision |
-| `Investigation` | structured RCA case |
-| `CauseNode` / `Barrier` | causal model |
-| `ImprovementAction` | corrective/preventive action |
-| `EffectivenessTest` | proof an action/control worked |
+## 13. Tenant isolation and data integrity
 
-No new duplicate operational register is to be introduced without an ownership analysis.
+Migration:
 
-## 18. Phase plan
+```text
+quality_260808_audit_programme
+```
 
-### Phase 0 — architecture lock
+descends from:
 
-- commit this document;
-- preserve current `main` deep links;
-- create a six-workspace route/navigation registry;
-- add route-contract tests;
-- freeze creation of new generic QMS register pages.
+```text
+quality_260808_missions
+```
 
-### Phase 1 — shell and Control Room
+All four Slice 2 tables:
 
-- replace seven-item audit-centric top navigation with six workspaces;
-- remove the duplicate Control Centre sub-navigation;
-- reframe current `dashboard-v2` data as decisions, signals, exposure and control health;
-- move diagnostics behind a data-health disclosure;
-- retain audit planning and CAR deep links.
+- require non-null `amo_id`;
+- use real tenant FKs;
+- have tenant-oriented indexes;
+- enable PostgreSQL RLS;
+- force PostgreSQL RLS;
+- use a tenant-isolation policy based on `app.tenant_id`.
 
-### Phase 2 — Missions
+The PostgreSQL Audit Programme probe verifies:
 
-- mission model, templates, dependencies, gate engine and evidence pointers;
-- first full template: aircraft/capability inclusion;
-- capability self-evaluation orchestration across Fleet, Planning, Tooling, Training, Rostering, DMS and Quality;
-- explicit Accountable Executive and Authority gates.
+1. RLS enabled and forced;
+2. tenant policy exists on every new table;
+3. tenant A can create programme/universe/item/event records;
+4. tenant B sees zero tenant-A rows;
+5. tenant B cannot update or delete tenant-A programme data.
 
-### Phase 3 — People & Privileges
+## 14. Slice 2 testing / CI contract
 
-- privilege model and scope;
-- competence assessment workflow;
-- internal authorization board;
-- training/licence/recency/experience evidence;
-- future demand / roster constraint checks;
-- immutable decision history.
+Dedicated tests added:
 
-### Phase 4 — Assurance Cases and Investigation Studio
+```text
+backend/amodb/apps/quality/tests/test_audit_programme_contract.py
+backend/amodb/apps/quality/tests/postgres_audit_programme_probe.py
+frontend/tests/e2e/qms-audit-programme.spec.ts
+```
 
-- unified signals/cases;
-- audit/finding/CAPA lenses;
-- method-driven RCA;
-- evidence-linked causal nodes;
-- similar-event retrieval;
-- effectiveness plans and recurrence challenge.
+Quality CI now has named checks for:
 
-### Phase 5 — Intelligence and Digital Twin
+- Audit Programme backend contract;
+- Audit Programme PostgreSQL migration/RLS;
+- Audit Programme Playwright.
 
-- statistical signal engine;
-- risk-targeted surveillance recommendation;
-- regulatory impact graph;
-- approval/capability digital twin;
-- management-review pack generation.
+The browser contract verifies:
 
-### Phase 6 — legacy consolidation
+- governed programme route loads;
+- programme reference/history is visible;
+- Audit Universe source lineage remains visible;
+- a programme can be created in DRAFT;
+- review transition remains disabled until a reason is entered;
+- reasoned transition history is visible after the state change.
 
-- convert obsolete register pages to lenses or redirects;
-- remove generic QMS renderer from regulated workflows;
-- remove DOM navigation injection after every specialist workspace mounts the shared shell directly;
-- retain compatibility redirects and audit evidence links.
+At the time of this documentation update, Slice 2 is running through exact-head GitHub Actions and must not be called accepted until those jobs complete on the same branch head.
 
-## 19. Phase 1 acceptance criteria
+## 15. Audit Planner — next vertical slice
 
-1. One permanent Quality navigation row.
-2. Six operational destinations only: Control Room, Planner, Missions, People, Assurance, Intelligence.
-3. Existing audit/CAR/document deep links continue to resolve.
-4. No second `Operations / Controls / Evidence / Intelligence` navigation strip.
-5. Root Control Room shows decisions/signals/exposure rather than duplicate count cards.
-6. No red status without an actionable destination or explanation.
-7. Diagnostics are not permanent primary content.
-8. Permissions hide inaccessible destinations.
-9. Every new canonical path is covered by route tests.
-10. Unknown QMS paths fail safely.
-11. Existing Planner behavior remains intact.
-12. Audit and CAR specialist workflow ownership remains intact.
-13. Generic register rendering is not expanded.
-14. No AI-generated state change is introduced.
+The next implementation slice extends the existing planner; it does not replace it.
 
-## 20. Test and release strategy
+Required additions:
 
-Every slice must run the applicable Quality CI on the exact head. Minimum checks:
+### Programme handoff
 
-- TypeScript route registry tests;
-- frontend lint/typecheck/build for modified QMS surfaces;
-- QMS route/deep-link browser contracts;
-- existing modern planner Playwright suite;
-- audit workflow browser suite;
-- CAR governed workflow suite;
-- backend QMS tests affected by new APIs/models;
-- clean PostgreSQL Alembic upgrade for any schema slice;
-- tenant isolation and permission tests;
-- negative controls proving no hard compliance gate is converted to a weighted score.
+A programme requirement must be able to create a scheduling **intent** in the authoritative Audit Planner while retaining:
 
-The PR remains draft until exact-head CI is green for the slice being claimed. Later phases may remain intentionally incomplete, but no partially implemented screen may falsely advertise readiness or predictive confidence.
+- programme ID;
+- programme-item ID;
+- Audit Universe item;
+- audit type;
+- title;
+- scope;
+- criteria;
+- mandatory-surveillance requirement;
+- target window;
+- explainable prioritization basis.
 
-## 21. Immediate implementation scope on this branch
+The Planner remains responsible for creating the actual scheduled/live audit record.
 
-This branch begins with Phase 0 and the first Phase 1 frontend slice:
+### Deterministic conflict engine
 
-- establish the six-workspace navigation contract;
-- add canonical top-level workspace routes while retaining legacy deep links;
-- rebuild the root as `Control Room` rather than the current duplicate-navigation Control Centre;
-- introduce purposeful placeholder surfaces for Missions, People, Assurance and Intelligence only where a governed source workflow does not yet exist;
-- route Planner to the already proven modern planner;
-- do not add new duplicate backend registers.
+Conflicts will be classified as:
 
-Subsequent commits will add Mission, People/Privilege, Assurance Case and Intelligence domain APIs only after their source ownership and migration contracts are explicit.
+```text
+BLOCKING
+WARNING
+```
+
+Planned deterministic rules include:
+
+- missing lead auditor;
+- missing auditee where required;
+- missing scope;
+- missing criteria;
+- lead auditor double-booked;
+- audit-team member double-booked;
+- Workforce/Rostering unavailability where authoritative data exists;
+- auditor competence ineligibility where authoritative Training data exists;
+- independence conflict;
+- schedule outside programme period;
+- mandatory surveillance past due;
+- configured notice period insufficient;
+- unrealistic overlapping surveillance of the same entity;
+- location/facility constraints where authoritative data exists.
+
+Mandatory regulatory surveillance is a hard constraint and will not be averaged away by a numerical risk score.
+
+## 16. Planned remaining vertical slices
+
+### Slice 3 — Audit Planner + conflict engine
+
+- programme-to-planner handoff;
+- deterministic conflict classes;
+- controlled date/auditor changes;
+- richer Year / Quarter / Month / Week / Agenda perspectives using bounded requests.
+
+### Slice 4 — auditor availability / competence / independence
+
+- Workforce/Rostering source references;
+- Training/Competence source references;
+- explicit independence declarations/rules;
+- workload/capacity projection;
+- no copied training or roster records.
+
+### Slice 5 — notices + controlled rescheduling / deferral
+
+- configurable tenant notice policy;
+- draft/review/approval/generation/delivery/acknowledgement/revision;
+- explicit exception path for emergency/unannounced audits;
+- immutable before/after schedule history.
+
+### Slice 6 — preparation + checklist versioning
+
+- prior audit/findings/CAR context;
+- DMS/regulatory links;
+- evidence requests;
+- opening-meeting preparation;
+- immutable checklist template revision captured by audit.
+
+### Slice 7 — Audit War Room enhancement
+
+- execution progress;
+- evidence requests;
+- source-record viewer/deep links;
+- quick structured finding creation;
+- controlled autosave without auto-finalization.
+
+### Slice 8 — reporting + execution closeout
+
+- governed report revision lifecycle;
+- execution-close gates;
+- issued report immutability;
+- CAR/follow-up obligations remain independently open.
+
+### Slice 9 — follow-up + effectiveness engineering
+
+- expected outcome;
+- effectiveness measure;
+- verification method;
+- responsible reviewer;
+- observation period;
+- planned review date;
+- source indicators;
+- conclusion: EFFECTIVE / PARTIALLY_EFFECTIVE / INEFFECTIVE / INCONCLUSIVE;
+- reopen/escalate/follow-up actions when ineffective.
+
+### Slice 10 — People & Privileges
+
+Training remains authoritative for training records. Quality will own internal privileges such as auditor, lead auditor, supplier auditor, technical auditor, CAR reviewer and effectiveness reviewer.
+
+### Slice 11 — Assurance Cases + Investigation Studio
+
+- evidence/decision-centred cases;
+- 5 Whys;
+- Ishikawa;
+- causal factor analysis;
+- barrier analysis;
+- change analysis;
+- human/organizational factors;
+- explicit fact vs hypothesis vs causal conclusion.
+
+### Slice 12 — Quality Intelligence
+
+- audit completion vs programme;
+- deferral rate;
+- finding recurrence;
+- CAR ageing/closure cycle;
+- ineffective-action rate;
+- supplier/department surveillance;
+- auditor capacity;
+- explainable derived indicators.
+
+### Slice 13 — Regulatory Impact Graph + Approval Digital Twin
+
+- requirement → approval/manual/procedure/form/training/role/checklist/evidence/mission/finding/action graph;
+- supported / unsupported / stale / unresolved / blocked capability state;
+- no unsupported binary compliance declaration.
+
+### Slice 14 — controlled removal of obsolete surfaces
+
+Only remove generic/legacy QMS surfaces once replacement behaviour is proven and deep links remain compatible.
+
+## 17. UX rules
+
+Audit planning and execution must behave like an operational planning application, not a register wrapped in cards.
+
+Prefer:
+
+- bounded dense tables;
+- split panes;
+- compact drawers;
+- keyboard operation;
+- stable URLs and deep links;
+- saved filters/views;
+- visible source lineage;
+- clear blocking vs warning state;
+- mobile/tablet layouts that preserve essential actions.
+
+Avoid:
+
+- KPI walls;
+- fake percentages;
+- giant empty hero sections;
+- repeated headers;
+- duplicate top-level navigation;
+- uncontrolled modal stacks;
+- browser-side loading of the entire Quality history for filtering.
+
+## 18. Security and API rules
+
+All new Quality APIs must:
+
+- resolve tenant from the authenticated route context;
+- set PostgreSQL tenant context;
+- enforce server-side Quality permissions;
+- return deterministic validation/conflict errors;
+- use bounded pagination;
+- avoid N+1 fan-out;
+- keep date/calendar reads bounded;
+- preserve actor attribution;
+- use timezone-aware timestamps for events;
+- never rely on frontend permission checks for security.
+
+## 19. AI boundary
+
+AI may:
+
+- explain source evidence;
+- help draft reports/findings/actions;
+- surface trends;
+- recommend what to inspect;
+- suggest investigation methods;
+- help navigate the portal.
+
+AI may not independently:
+
+- fabricate objective evidence;
+- approve a programme;
+- accept a root cause;
+- grant a privilege;
+- close a finding/CAR/audit;
+- declare a capability compliant;
+- override a mandatory surveillance requirement.
+
+Named authorized humans remain accountable for controlled decisions.
+
+## 20. Definition of done
+
+PR #488 remains **DRAFT** until the complete required Quality scope is implemented and proven.
+
+The six workspace routes rendering is not completion.
+
+Audit Operations is complete only when programme, universe, risk planning, scheduling, eligibility, notices, preparation, versioned checklists, execution, findings, reporting, CAR handoff, follow-up, effectiveness, governed closeout, recurrence and programme-performance visibility are operational.
+
+The overall Assurance Operating System is complete only when People/Privileges, Assurance Cases, Investigation Studio, Intelligence, Regulatory Impact and Approval Digital Twin are also operational and all impacted exact-head CI is green.
+
+Until then:
+
+```text
+KEEP PR #488 DRAFT.
+```
