@@ -73,11 +73,23 @@ const QualityDialogFocusRestorer: React.FC = () => {
       lastExternalFocus = target;
     };
 
+    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => {
+      if (dialog.classList.contains("qms-planner-create-modal")) {
+        return document.querySelector<HTMLElement>(".qms-planner-quick-schedule");
+      }
+      return null;
+    };
+
     const observer = new MutationObserver(() => {
       const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
       if (dialog && !activeDialog) {
         activeDialog = dialog;
-        opener = lastExternalFocus?.isConnected ? lastExternalFocus : null;
+        const canonicalOpener = canonicalDialogOpener(dialog);
+        opener = canonicalOpener?.isConnected
+          ? canonicalOpener
+          : lastExternalFocus?.isConnected
+            ? lastExternalFocus
+            : null;
         return;
       }
       if (!dialog && activeDialog) {
