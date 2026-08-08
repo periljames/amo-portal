@@ -27,6 +27,7 @@ import DocumentControlShell, {
   DocumentControlLoading,
   DocumentControlStatus,
 } from "./DocumentControlShell";
+import { useDocumentControlRoute } from "./documentControlRoute";
 import "./dmsCompliancePortfolio.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
@@ -88,8 +89,8 @@ function detailCells(item: CompliancePortfolioItem) {
 
 export default function DocumentControlCompliancePortfolioPage() {
   const navigate = useNavigate();
+  const { tenant } = useDocumentControlRoute();
   const [params, setParams] = useSearchParams();
-  const tenant = window.location.pathname.split("/").filter(Boolean)[1] || "";
   const urlQuery = params.get("q") || "";
   const [searchText, setSearchText] = useState(urlQuery);
   const [data, setData] = useState<CompliancePortfolioResponse | null>(null);
