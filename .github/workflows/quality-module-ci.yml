@@ -95,6 +95,7 @@ jobs:
           people = script.get_revision("quality_260808_people_privileges")
           assurance_cases = script.get_revision("quality_260808_assurance_cases")
           intelligence = script.get_revision("quality_260808_intel_graph")
+          audit_prep = script.get_revision("quality_260808_audit_prep")
 
           assert integrity is not None
           assert integrity.down_revision == "workforce_20260721_complete"
@@ -120,6 +121,8 @@ jobs:
           assert assurance_cases.down_revision == "quality_260808_people_privileges"
           assert intelligence is not None
           assert intelligence.down_revision == "quality_260808_assurance_cases"
+          assert audit_prep is not None
+          assert audit_prep.down_revision == "quality_260808_intel_graph"
           assert all(
               len(revision.revision) <= 32
               for revision in (
@@ -134,6 +137,7 @@ jobs:
                   people,
                   assurance_cases,
                   intelligence,
+                  audit_prep,
               )
           )
           PY
@@ -155,6 +159,7 @@ jobs:
           amodb/alembic/versions/quality_260808_people_privileges.py
           amodb/alembic/versions/quality_260808_assurance_cases.py
           amodb/alembic/versions/quality_260808_intelligence_graph.py
+          amodb/alembic/versions/quality_260808_audit_prep.py
       - name: Configure application mappers used by Quality
         env:
           APP_ENV: test
@@ -181,7 +186,10 @@ jobs:
           DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
           SECRET_KEY: quality-assurance-operating-system-secret
           QUALITY_SCHEMA_STRICT: "0"
-        run: pytest -q amodb/apps/quality/tests/test_assurance_operating_system_completion.py
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_assurance_operating_system_completion.py
+          amodb/apps/quality/tests/test_assurance_os_contract.py
       - name: Run Quality workflow and dashboard regressions
         env:
           APP_ENV: test
@@ -278,6 +286,13 @@ jobs:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
           DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
         run: python -m amodb.apps.quality.tests.postgres_assurance_operating_system_probe
+      - name: Run completed assurance OS and audit preparation RLS probe
+        env:
+          APP_ENV: test
+          SECRET_KEY: quality-postgres-test-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+        run: python -m amodb.apps.quality.tests.postgres_assurance_os_probe
 
   frontend:
     runs-on: ubuntu-latest
