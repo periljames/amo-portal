@@ -6,6 +6,8 @@ const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
+const changesPortfolio = readFileSync(new URL("./DocumentControlChangesPortfolioPage.tsx", import.meta.url), "utf-8");
+const portfolioService = readFileSync(new URL("../../services/documentControlPortfolios.ts", import.meta.url), "utf-8");
 const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", import.meta.url), "utf-8");
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
@@ -46,6 +48,19 @@ describe("DMS frontend operating-model contract", () => {
       "/maintenance/:amoCode/document-control/settings",
     ]) {
       expect(router).toContain(`path="${compatibilityRoute}"`);
+    }
+  });
+
+  it("routes canonical Changes to a bounded paginated portfolio without replacing compatibility worklists", () => {
+    expect(router).toContain("DocControlChangesPortfolioPage");
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage />');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage />');
+    expect(portfolioService).toContain("changes-portfolio");
+    expect(portfolioService).toContain("per_page");
+    expect(changesPortfolio).toContain("SEARCH_DEBOUNCE_MS = 320");
+    expect(changesPortfolio).toContain('aria-busy={refreshing}');
+    for (const label of ["Requests", "Draft", "In Review", "Awaiting Quality", "Awaiting Management", "Authority", "Temporary Revisions", "Ready for Release", "Closed"]) {
+      expect(changesPortfolio).toContain(`label: "${label}"`);
     }
   });
 
