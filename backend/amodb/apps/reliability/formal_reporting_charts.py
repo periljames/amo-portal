@@ -254,7 +254,9 @@ def svg_for_spec(spec: PublicationChartSpec, *, width: int = 760, height: int = 
     ]
     if not valid_values:
         parts.append(f"<text x='{margin_left + 12}' y='{margin_top + plot_height / 2}' font-size='11' font-weight='700'>WITHHELD — no plottable governed value</text>")
-        parts.append("</svg>")
+        if spec.denominator_context:
+            parts.append(f"<text x='{margin_left}' y='{height - 8}' font-size='7'>{escape(spec.denominator_context[:120])}</text>")
+        parts.append(f"<metadata>source={escape(spec.source_path)}</metadata></svg>")
         return "".join(parts)
 
     count = max(len(spec.labels), 1)
