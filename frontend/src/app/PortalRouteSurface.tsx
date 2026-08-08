@@ -1,7 +1,8 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import { isAuthenticated } from "../services/auth";
+import { getCachedUser, isAuthenticated } from "../services/auth";
+import { fetchBillingAccessStatus } from "../services/billing";
 import PortalRoutes from "../portalRoutes";
 
 const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
@@ -37,6 +38,59 @@ function LoadingRoute({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function BillingAccessBoundary({ amoCode, children }: { amoCode: string; children: React.ReactElement }) {
+  const location = useLocation();
+  const currentUser = getCachedUser();
+  const [checking, setChecking] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const parts = pathSegments(location.pathname);
+  const tenantSection = parts.slice(2).join("/");
+  const isBillingCurePath = tenantSection.startsWith("admin/billing") || tenantSection.startsWith("admin/invoices");
+  const isAuthOrOnboarding = tenantSection === "login" || tenantSection.startsWith("onboarding/");
+  const shouldCheck = isAuthenticated()
+    && !currentUser?.is_superuser
+    && !isBillingCurePath
+    && !isAuthOrOnboarding;
+
+  useEffect(() => {
+    if (!shouldCheck) {
+      setChecking(false);
+      setLocked(false);
+      return;
+    }
+    let active = true;
+    setChecking(true);
+    fetchBillingAccessStatus()
+      .then((status) => {
+        if (!active) return;
+        setLocked(Boolean(status.redirect_to_billing && !status.has_access));
+      })
+      .catch(() => {
+        // Do not turn a transient billing-status read failure into a denial of
+        // service. Module API enforcement remains authoritative server-side.
+        if (active) setLocked(false);
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => { active = false; };
+  }, [location.pathname, shouldCheck]);
+
+  if (checking) return <LoadingRoute label="account access" />;
+  if (locked) {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    const query = new URLSearchParams({ reason: "payment_required", returnTo });
+    return (
+      <Navigate
+        to={`/maintenance/${encodeURIComponent(amoCode)}/admin/billing?${query.toString()}`}
+        replace
+        state={{ from: returnTo }}
+      />
+    );
+  }
+  return children;
+}
+
 function AuthenticatedSurface({
   amoCode,
   label,
@@ -49,7 +103,11 @@ function AuthenticatedSurface({
   if (!isAuthenticated()) {
     return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/login`} replace />;
   }
-  return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
+  return (
+    <BillingAccessBoundary amoCode={amoCode}>
+      <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>
+    </BillingAccessBoundary>
+  );
 }
 
 export const AppRouter: React.FC = () => {
@@ -88,7 +146,6 @@ export const AppRouter: React.FC = () => {
     );
   }
 
-
   if (module === "ehm" && parts.length === 4) {
     const surfaces: Record<string, React.ReactElement> = {
       dashboard: <EhmDashboardPage />,
@@ -112,7 +169,13 @@ export const AppRouter: React.FC = () => {
     }
   }
 
-  return <PortalRoutes />;
+  // PortalRoutes contains the wider route registry. Keep the billing boundary
+  // outside it so every authenticated tenant surface follows the same cure path.
+  return (
+    <BillingAccessBoundary amoCode={amoCode}>
+      <PortalRoutes />
+    </BillingAccessBoundary>
+  );
 };
 
 export default AppRouter;
