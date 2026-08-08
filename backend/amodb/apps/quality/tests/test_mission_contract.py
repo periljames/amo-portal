@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.mission_lifecycle_guard_router import assert_mission_actor_allowed
+from amodb.apps.quality.mission_management_guard_router import router as mission_management_router
 from amodb.apps.quality.mission_router import (
     CAPABILITY_ADDITION_GATE_TEMPLATE,
     MissionDecisionCreate,
@@ -73,7 +74,7 @@ def _mission(*, gates=None, decisions=None, owner_user_id="quality-owner", spons
     )
 
 
-def test_mission_router_exposes_bounded_governed_contract() -> None:
+def test_mission_router_exposes_bounded_read_contract_and_base_write_contract() -> None:
     methods = _route_methods(mission_router)
     assert {
         ("/missions/templates", "GET"),
@@ -83,6 +84,13 @@ def test_mission_router_exposes_bounded_governed_contract() -> None:
         ("/missions/{mission_id}/gates/{gate_id}", "PATCH"),
         ("/missions/{mission_id}/decisions", "POST"),
     }.issubset(methods)
+
+    management_methods = _route_methods(mission_management_router)
+    assert {
+        ("/missions", "POST"),
+        ("/missions/{mission_id}", "PATCH"),
+        ("/missions/{mission_id}/gates/{gate_id}", "PATCH"),
+    }.issubset(management_methods)
 
 
 def test_mission_routes_are_promoted_before_generic_quality_catchall() -> None:
@@ -96,6 +104,23 @@ def test_mission_routes_are_promoted_before_generic_quality_catchall() -> None:
         assert len(list_matches) == 1
         assert list_matches[0].endpoint.__name__ == "list_missions"
         assert router.routes.index(list_matches[0]) < _catchall_index(router)
+
+        create_matches = _matching_routes(router, list_path, "POST")
+        assert len(create_matches) == 1
+        assert create_matches[0].endpoint.__name__ == "create_governed_mission"
+        assert router.routes.index(create_matches[0]) < _catchall_index(router)
+
+        update_path = f"{prefix}/missions/{{mission_id}}"
+        update_matches = _matching_routes(router, update_path, "PATCH")
+        assert len(update_matches) == 1
+        assert update_matches[0].endpoint.__name__ == "update_mission_metadata"
+        assert router.routes.index(update_matches[0]) < _catchall_index(router)
+
+        gate_path = f"{prefix}/missions/{{mission_id}}/gates/{{gate_id}}"
+        gate_matches = _matching_routes(router, gate_path, "PATCH")
+        assert len(gate_matches) == 1
+        assert gate_matches[0].endpoint.__name__ == "update_governed_mission_gate"
+        assert router.routes.index(gate_matches[0]) < _catchall_index(router)
 
         decision_path = f"{prefix}/missions/{{mission_id}}/decisions"
         decision_matches = _matching_routes(router, decision_path, "POST")
