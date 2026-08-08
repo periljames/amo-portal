@@ -1,13 +1,14 @@
-"""Seed an ephemeral AMO and governed publication for browser acceptance CI.
+"""Seed an ephemeral AMO and governed publications for browser acceptance CI.
 
 This script is intentionally deterministic and is only used against the disposable
 PostgreSQL service created by Document Control Governance CI. It exercises the
-same password login, tenant scoping, governed library and Publications reader
-routes used in production without depending on production credentials or data.
+same password login, tenant scoping, governed library, hierarchy, external-data
+currency, physical custody and Publications reader routes used in production
+without depending on production credentials or data.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 import sys
@@ -25,8 +26,7 @@ if str(BACKEND_ROOT) not in sys.path:
 # Importing the application registers the full model graph before we seed rows.
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
-from amodb.apps.doc_control import governance_models  # noqa: E402
-from amodb.apps.doc_control.knowledge_service import reconcile_documentation_hierarchy  # noqa: E402
+from amodb.apps.doc_control import domain_models, governance_models, knowledge_models  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.database import WriteSessionLocal  # noqa: E402
 from amodb.security import get_password_hash  # noqa: E402
@@ -40,6 +40,17 @@ REVISION_ID = "00000000-0000-4000-8000-000000000481"
 SECTION_ID = "00000000-0000-4000-8000-000000000482"
 BLOCK_ID = "00000000-0000-4000-8000-000000000483"
 ASSIGNMENT_ID = "00000000-0000-4000-8000-000000000484"
+ROOT_NODE_ID = "00000000-0000-4000-8000-000000000485"
+MANUAL_NODE_ID = "00000000-0000-4000-8000-000000000486"
+POLICY_MANUAL_ID = "00000000-0000-4000-8000-000000000487"
+POLICY_REVISION_ID = "00000000-0000-4000-8000-000000000488"
+POLICY_NODE_ID = "00000000-0000-4000-8000-000000000489"
+EXTERNAL_MANUAL_ID = "00000000-0000-4000-8000-000000000490"
+EXTERNAL_REVISION_ID = "00000000-0000-4000-8000-000000000491"
+EXTERNAL_NODE_ID = "00000000-0000-4000-8000-000000000492"
+EXTERNAL_PROFILE_ID = "00000000-0000-4000-8000-000000000493"
+EXTERNAL_SOURCE_ID = "00000000-0000-4000-8000-000000000494"
+EXTERNAL_RECEIPT_ID = "00000000-0000-4000-8000-000000000495"
 
 AMO_CODE = "DMSGATE"
 AMO_SLUG = "dmsgate"
@@ -54,11 +65,7 @@ STABILITY_TARGET_PAGE = 6
 
 
 def _build_stability_pdf() -> tuple[Path, str]:
-    """Create a bounded real PDF source for scroll/zoom browser acceptance.
-
-    ReportLab's invariant mode keeps metadata stable while the recorded checksum
-    is always calculated from the exact bytes that the reader will stream.
-    """
+    """Create a bounded real PDF source for scroll/zoom browser acceptance."""
     STABILITY_PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
     document = pdf_canvas.Canvas(
         str(STABILITY_PDF_PATH),
@@ -79,15 +86,45 @@ def _build_stability_pdf() -> tuple[Path, str]:
             document.setFont("Helvetica-Bold", 14)
             document.drawString(56, height - 145, STABILITY_TARGET)
             document.setFont("Helvetica", 11)
-            document.drawString(56, height - 168, "Manual interaction must permanently release consumed programmatic navigation.")
+            document.drawString(
+                56,
+                height - 168,
+                "Manual interaction must permanently release consumed programmatic navigation.",
+            )
         else:
-            document.drawString(56, height - 145, "Controlled publication content for deterministic virtual-reader geometry.")
+            document.drawString(
+                56,
+                height - 145,
+                "Controlled publication content for deterministic virtual-reader geometry.",
+            )
         document.setFont("Helvetica", 9)
         document.drawRightString(width - 56, 42, f"DMS-CI-MOM · Rev 1 · Page {page_number}")
         document.showPage()
     document.save()
     content = STABILITY_PDF_PATH.read_bytes()
     return STABILITY_PDF_PATH.resolve(), hashlib.sha256(content).hexdigest()
+
+
+def _published_revision(
+    *,
+    revision_id: str,
+    manual_id: str,
+    user_id: str,
+    revision_number: str,
+    issue_number: str,
+) -> manual_models.ManualRevision:
+    return manual_models.ManualRevision(
+        id=revision_id,
+        manual_id=manual_id,
+        rev_number=revision_number,
+        issue_number=issue_number,
+        effective_date=date.today(),
+        status_enum=manual_models.ManualRevisionStatus.PUBLISHED,
+        created_by=user_id,
+        created_at=datetime.now(timezone.utc),
+        published_at=datetime.now(timezone.utc),
+        immutable_locked=True,
+    )
 
 
 def seed() -> None:
@@ -169,24 +206,22 @@ def seed() -> None:
         db.add(manual)
         db.flush()
 
-        revision = manual_models.ManualRevision(
-            id=REVISION_ID,
+        revision = _published_revision(
+            revision_id=REVISION_ID,
             manual_id=manual.id,
-            rev_number="1",
+            user_id=user.id,
+            revision_number="1",
             issue_number="1",
-            effective_date=date.today(),
-            status_enum=manual_models.ManualRevisionStatus.PUBLISHED,
-            created_by=user.id,
-            created_at=datetime.now(timezone.utc),
-            published_at=datetime.now(timezone.utc),
-            immutable_locked=True,
-            source_type_enum=manual_models.ManualSourceType.PDF,
-            source_filename="document-governance-browser-gate.pdf",
-            source_mime_type="application/pdf",
-            source_storage_path=str(source_path),
-            source_sha256=source_sha,
-            source_page_count=STABILITY_PDF_PAGES,
         )
+        # Exercise the production PDF stream with real multi-page bytes so reader
+        # acceptance can prove physical scrolling, zoom, TOC/search integration,
+        # responsive toolbar fit and manual-navigation release behavior.
+        revision.source_type_enum = manual_models.ManualSourceType.PDF
+        revision.source_filename = "document-governance-browser-gate.pdf"
+        revision.source_mime_type = "application/pdf"
+        revision.source_storage_path = str(source_path)
+        revision.source_sha256 = source_sha
+        revision.source_page_count = STABILITY_PDF_PAGES
         db.add(revision)
         db.flush()
         manual.current_published_rev_id = revision.id
@@ -220,6 +255,163 @@ def seed() -> None:
             )
         )
 
+        # Seed real hierarchy nodes so category filtering and the full-tree route
+        # prove governed data, not merely the presence of navigation buttons.
+        root_node = knowledge_models.DocumentationNode(
+            id=ROOT_NODE_ID,
+            tenant_id=amo.id,
+            node_type="ROOT",
+            code="DMS-CI",
+            normalized_code="DMS-CI",
+            title="Document Governance CI Library",
+            path="DMS-CI",
+            depth=0,
+            order_index=0,
+            status="ACTIVE",
+            created_by_user_id=user.id,
+        )
+        db.add(root_node)
+        db.flush()
+        db.add(
+            knowledge_models.DocumentationNode(
+                id=MANUAL_NODE_ID,
+                tenant_id=amo.id,
+                parent_id=root_node.id,
+                manual_id=manual.id,
+                node_type="MANUAL",
+                code=manual.code,
+                normalized_code=manual.code.upper(),
+                title=manual.title,
+                path=f"DMS-CI/{manual.code}",
+                depth=1,
+                order_index=10,
+                status="ACTIVE",
+                created_by_user_id=user.id,
+            )
+        )
+
+        policy = manual_models.Manual(
+            id=POLICY_MANUAL_ID,
+            tenant_id=tenant.id,
+            code="DMS-CI-POL-001",
+            title="Controlled Information Policy",
+            manual_type="POLICY",
+            owner_role="DOCUMENT_CONTROL",
+            status="ACTIVE",
+        )
+        db.add(policy)
+        db.flush()
+        policy_revision = _published_revision(
+            revision_id=POLICY_REVISION_ID,
+            manual_id=policy.id,
+            user_id=user.id,
+            revision_number="1",
+            issue_number="1",
+        )
+        db.add(policy_revision)
+        db.flush()
+        policy.current_published_rev_id = policy_revision.id
+        db.add(
+            knowledge_models.DocumentationNode(
+                id=POLICY_NODE_ID,
+                tenant_id=amo.id,
+                parent_id=root_node.id,
+                manual_id=policy.id,
+                node_type="POLICY",
+                code=policy.code,
+                normalized_code=policy.code.upper(),
+                title=policy.title,
+                path=f"DMS-CI/{policy.code}",
+                depth=1,
+                order_index=20,
+                status="ACTIVE",
+                created_by_user_id=user.id,
+            )
+        )
+
+        external = manual_models.Manual(
+            id=EXTERNAL_MANUAL_ID,
+            tenant_id=tenant.id,
+            code="KCAA-CI-EXT-001",
+            title="KCAA Controlled External Technical Data",
+            manual_type="EXTERNAL_DOCUMENT",
+            owner_role="DOCUMENT_CONTROL",
+            status="ACTIVE",
+        )
+        db.add(external)
+        db.flush()
+        external_revision = _published_revision(
+            revision_id=EXTERNAL_REVISION_ID,
+            manual_id=external.id,
+            user_id=user.id,
+            revision_number="2026-1",
+            issue_number="2026",
+        )
+        db.add(external_revision)
+        db.flush()
+        external.current_published_rev_id = external_revision.id
+        db.add_all([
+            knowledge_models.DocumentationNode(
+                id=EXTERNAL_NODE_ID,
+                tenant_id=amo.id,
+                parent_id=root_node.id,
+                manual_id=external.id,
+                node_type="EXTERNAL_DOCUMENT",
+                code=external.code,
+                normalized_code=external.code.upper(),
+                title=external.title,
+                path=f"DMS-CI/{external.code}",
+                depth=1,
+                order_index=30,
+                status="ACTIVE",
+                created_by_user_id=user.id,
+            ),
+            domain_models.DocumentControlProfile(
+                id=EXTERNAL_PROFILE_ID,
+                tenant_id=amo.id,
+                manual_id=external.id,
+                document_class="EXTERNAL",
+                owner_department="DOCUMENT_CONTROL",
+                acknowledgement_required=False,
+                access_scope_json={},
+                tags_json=["KCAA", "external-data", "ci-proof"],
+                metadata_json={"source": "document_governance_ci_seed"},
+            ),
+        ])
+        external_source = domain_models.ExternalDocumentSource(
+            id=EXTERNAL_SOURCE_ID,
+            tenant_id=amo.id,
+            manual_id=external.id,
+            provider="Kenya Civil Aviation Authority",
+            authority="KCAA",
+            subscription_reference="DMS-CI-EXT",
+            access_url="https://www.kcaa.or.ke/",
+            update_method="MANUAL_CHECK",
+            status="ACTIVE",
+            last_checked_at=datetime.now(timezone.utc),
+            next_check_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+            metadata_json={"source": "document_governance_ci_seed"},
+        )
+        db.add(external_source)
+        db.flush()
+        db.add(
+            domain_models.ExternalRevisionReceipt(
+                id=EXTERNAL_RECEIPT_ID,
+                tenant_id=amo.id,
+                source_id=external_source.id,
+                manual_id=external.id,
+                revision_label="KCAR 2025 CI proof",
+                publication_date=date.today(),
+                received_at=datetime.now(timezone.utc),
+                received_by_user_id=user.id,
+                checksum_sha256=hashlib.sha256(b"amo-portal-external-data-ci-proof").hexdigest(),
+                currency_status="CURRENT",
+                applicability_status="APPLICABLE",
+                evidence_json=[{"type": "ci_fixture", "reference": "KCAA-CI-EXT-001"}],
+                notes="Deterministic external-data currency evidence for browser acceptance.",
+            )
+        )
+
         # One unresolved owner proposal makes the dashboard queue and URL-backed
         # bounded-library filter observable without inventing production data.
         db.add(
@@ -240,12 +432,6 @@ def seed() -> None:
                 created_by_user_id=user.id,
             )
         )
-
-        # The public hierarchy GET is intentionally read-only after #477. Persist
-        # the same controlled-information graph that production reconciliation
-        # would create so browser acceptance tests the read boundary, not a hidden
-        # GET-time mutation side effect.
-        reconcile_documentation_hierarchy(db, manual_tenant=tenant, actor_id=user.id)
         db.commit()
     except Exception:
         db.rollback()
