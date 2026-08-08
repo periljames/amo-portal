@@ -38,6 +38,73 @@ def _root_contract(row: account_models.ModuleSubscription) -> bool:
     )
 
 
+def _void_unpaid_renewal(
+    db: Session,
+    *,
+    row: account_models.ModuleSubscription,
+    metadata: dict[str, Any],
+    actor_user_id: str,
+    reason: str,
+) -> str | None:
+    renewal_invoice_id = str(metadata.get("renewal_invoice_id") or "").strip()
+    if not renewal_invoice_id:
+        return None
+    invoice = db.get(account_models.BillingInvoice, renewal_invoice_id)
+    if invoice is None or invoice.status != account_models.InvoiceStatus.PENDING:
+        return None
+
+    invoice.status = account_models.InvoiceStatus.VOID
+    reversal_key = f"module-renewal-cancel:{invoice.id}"[:128]
+    existing_reversal = (
+        db.query(account_models.LedgerEntry)
+        .filter(
+            account_models.LedgerEntry.amo_id == row.amo_id,
+            account_models.LedgerEntry.idempotency_key == reversal_key,
+        )
+        .first()
+    )
+    if existing_reversal is None and int(invoice.amount_cents or 0):
+        db.add(
+            account_models.LedgerEntry(
+                amo_id=row.amo_id,
+                amount_cents=-int(invoice.amount_cents or 0),
+                currency=str(invoice.currency or "USD").upper(),
+                entry_type=account_models.LedgerEntryType.ADJUSTMENT,
+                description=json.dumps(
+                    {
+                        "event": "MODULE_RENEWAL_CANCELLED",
+                        "invoice_id": invoice.id,
+                        "module_code": row.module_code,
+                        "reason": reason[:1000],
+                    },
+                    separators=(",", ":"),
+                ),
+                idempotency_key=reversal_key,
+                recorded_at=datetime.now(timezone.utc),
+            )
+        )
+    metadata["cancelled_renewal_invoice_id"] = invoice.id
+    metadata["renewal_invoice_id"] = None
+    db.add(
+        platform_models.PlatformAuditLog(
+            actor_user_id=actor_user_id,
+            tenant_id=row.amo_id,
+            action="saas.module_renewal.invoice_voided",
+            module="billing",
+            entity_type="billing_invoice",
+            entity_id=invoice.id,
+            reason=reason[:1000],
+            details_json={
+                "module_code": row.module_code,
+                "amount_cents": int(invoice.amount_cents or 0),
+                "currency": str(invoice.currency or "USD").upper(),
+                "adjustment_idempotency_key": reversal_key,
+            },
+        )
+    )
+    return invoice.id
+
+
 def cancel_at_period_end(
     db: Session,
     *,
@@ -62,6 +129,16 @@ def cancel_at_period_end(
     metadata = _metadata(row)
     if metadata.get("bundle_parent"):
         raise ValueError("Cancel the parent bundle rather than an included module")
+    if bool(metadata.get("commercial_offer_only")):
+        raise ValueError("The module has a commercial offer but no active subscription contract")
+
+    voided_invoice_id = _void_unpaid_renewal(
+        db,
+        row=row,
+        metadata=metadata,
+        actor_user_id=actor_user_id,
+        reason=clean_reason,
+    )
     metadata["auto_renew"] = False
     metadata["cancel_at_period_end"] = True
     metadata["cancel_requested_at"] = datetime.now(timezone.utc).isoformat()
@@ -80,6 +157,7 @@ def cancel_at_period_end(
             details_json={
                 "module_code": row.module_code,
                 "effective_to": _aware(row.effective_to).isoformat() if row.effective_to else None,
+                "voided_renewal_invoice_id": voided_invoice_id,
             },
         )
     )
@@ -90,6 +168,7 @@ def cancel_at_period_end(
         "auto_renew": False,
         "cancel_at_period_end": True,
         "effective_to": row.effective_to,
+        "voided_renewal_invoice_id": voided_invoice_id,
     }
 
 
