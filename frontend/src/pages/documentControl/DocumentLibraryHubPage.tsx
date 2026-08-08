@@ -117,6 +117,7 @@ export default function DocumentLibraryHubPage() {
   }), [params]);
 
   const activeQueue = useMemo(() => queueLabel(params), [params]);
+  const selectingChangeDocument = params.get("action") === "raise-change";
 
   const load = useCallback(async () => {
     if (!tenant) return;
@@ -185,6 +186,12 @@ export default function DocumentLibraryHubPage() {
     setParams(next);
   };
 
+  const cancelChangeSelection = () => {
+    const next = new URLSearchParams(params);
+    next.delete("action");
+    setParams(next, { replace: true });
+  };
+
   const totalPages = data ? Math.max(1, Math.ceil(data.pagination.total / data.pagination.per_page)) : 1;
   const canControl = Boolean(data?.capabilities.control);
 
@@ -192,6 +199,10 @@ export default function DocumentLibraryHubPage() {
     const revisionId = item.read_target?.revision_id;
     if (!revisionId) return;
     navigate(`${readerBasePath}/${item.id}/rev/${revisionId}/read`);
+  };
+
+  const selectForChange = (item: IntegratedLibraryItem) => {
+    navigate(`${basePath}/library/${item.id}?tab=changes`);
   };
 
   return <DocumentControlShell
@@ -205,6 +216,7 @@ export default function DocumentLibraryHubPage() {
     </>}
   >
     <section className="dlibrary" data-testid="integrated-document-library" aria-busy={refreshing}>
+      {canControl && selectingChangeDocument ? <div className="dlibrary__queue-filter" role="status"><span><ClipboardCheck size={15} /><strong>Select a document for the change request.</strong> Search or filter the library, then choose Select for change.</span><button type="button" onClick={cancelChangeSelection}><FilterX size={14} /> Cancel</button></div> : null}
       {activeQueue ? <div className="dlibrary__queue-filter" role="status"><span><ShieldCheck size={15} /><strong>Governance queue</strong> · {activeQueue}</span><button type="button" onClick={clearGovernanceQueue}><FilterX size={14} /> Clear queue filter</button></div> : null}
       {error && data ? <div className="dlibrary__queue-filter" role="alert"><span><strong>The latest library update could not be loaded.</strong> The last available results remain visible.</span><button type="button" onClick={() => void load()}>Retry</button></div> : null}
 
@@ -249,7 +261,7 @@ export default function DocumentLibraryHubPage() {
             <td><div className="dlibrary__availability"><span><BookOpen size={14} /> Digital {item.read_target.revision_id ? "available" : "unavailable"}</span><span className={physical.overdue ? "is-danger" : ""}><Copy size={14} /> {physicalText(item)}</span>{physical.overdue ? <small>{physical.overdue} overdue return{physical.overdue === 1 ? "" : "s"}</small> : null}</div></td>
             <td>{canControl ? <div className="dlibrary__connections"><span><Link2 size={14} /> {item.library.semantic_relationships || 0} document links</span><span><Workflow size={14} /> {integration?.count || 0} module links</span><span><Archive size={14} /> {item.library.generated_records || 0} generated records</span>{integration?.modules?.length ? <small>{integration.modules.join(" · ")}</small> : null}</div> : <small>Open the document to follow permitted links.</small>}</td>
             <td>{external ? <><strong>{external.provider}</strong><DocumentControlStatus status={external.currency_status} kind={statusKind(external.currency_status)} /><small>{external.revision_label || "Revision not received"}{external.authority ? ` · ${external.authority}` : ""}</small></> : <><DocumentControlStatus status={item.profile.document_class} kind={statusKind(item.profile.document_class)} /><small>Company-controlled source</small></>}</td>
-            <td><div className="dlibrary__actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}><BookOpen size={14} /> Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</div></td>
+            <td><div className="dlibrary__actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}><BookOpen size={14} /> Read</button>{canControl ? selectingChangeDocument ? <button type="button" className="dc-button dc-button--primary" onClick={() => selectForChange(item)}>Select for change</button> : <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</div></td>
           </tr>;
         })}</tbody>
       </table></div> : null}
