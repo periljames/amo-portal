@@ -28,7 +28,10 @@ install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
 
-from .console_router import router as console_router  # noqa: E402
+# The legacy console router performed DB polling per connected browser. Keep its
+# helper functions available for compatibility, but mount only the prepared
+# snapshot broker router. This makes browser fan-out independent of DB polling.
+from .ops_console_router import router as console_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
@@ -38,9 +41,6 @@ from .resend_email_router import router as resend_email_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
-# ``amodb.main`` already mounts this package router at /platform. Keeping the
-# expansion here preserves one audited top-level control-plane namespace while
-# each tenant route applies its own AMO-admin/superuser permission boundary.
 router.include_router(console_router)
 router.include_router(platform_saas_router)
 router.include_router(webhook_router)
@@ -50,18 +50,8 @@ router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
 
-# Existing diagnostics/maintenance endpoints keep their response contracts but
-# no longer run low/medium work inside the HTTP request.
 install_legacy_command_queue()
-
-# Usage aggregation remains batched per API worker, but database increments are
-# atomic across workers and failed batches are restored before the next flush.
 install_usage_meter_hardening(router)
-
-# Route latency and request distributions are process-local while requests are
-# active. Persist each worker's current bucket on a real lifecycle timer so the
-# dashboard combines every worker and the final bucket survives idle periods or
-# a graceful restart.
 install_platform_metrics_lifecycle(router)
 
 __all__ = ["router"]

@@ -17,6 +17,28 @@ services:
       timeout: 5s
       retries: 5
 
+  platform-ops-gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DB_POOL_SIZE: "${PLATFORM_OPS_DB_POOL_SIZE:-3}"
+      DB_MAX_OVERFLOW: "${PLATFORM_OPS_DB_MAX_OVERFLOW:-2}"
+      DB_POOL_TIMEOUT: "${PLATFORM_OPS_DB_POOL_TIMEOUT:-3}"
+      PLATFORM_OPS_POLL_INTERVAL_SEC: "${PLATFORM_OPS_POLL_INTERVAL_SEC:-2}"
+      PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC: "${PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC:-10}"
+    command: ["uvicorn", "amodb.platform_ops_main:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/healthz || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
   rostering-automation:
     build:
       context: .
