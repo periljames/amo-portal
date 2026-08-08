@@ -11,8 +11,6 @@ from amodb.apps.accounts import models as account_models
 from . import saas_models, saas_services
 
 
-_INSTALLED = False
-
 
 def _tenant_ids(db: Session, mode: str) -> list[str]:
     query = db.query(account_models.AMO.id)
@@ -141,14 +139,3 @@ def subledger_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]
         "failed_payment_jobs_30d": failed_jobs,
         "provider_statuses": provider_statuses,
     }
-
-
-def install_accounting_summary_policy() -> None:
-    """Make currency-safe subledger metrics authoritative across old/new pages."""
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import commercial_services
-
-    commercial_services.commercial_summary = subledger_summary
-    _INSTALLED = True

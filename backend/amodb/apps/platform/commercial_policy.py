@@ -7,15 +7,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from amodb.apps.accounts import models as account_models
 
-from . import commercial_services
 from . import models as platform_models
 from . import saas_models
-from . import services as platform_services
 
 
-_INSTALLED = False
-_ORIGINAL_BILLING_SUMMARY = None
-_ORIGINAL_DASHBOARD_SUMMARY = None
 
 
 def _enum_value(value: Any) -> str | None:
@@ -277,46 +272,3 @@ def reconcile_tenant_status(
     )
     db.commit()
     return {**tenant_lifecycle_evidence(db, tenant_id=tenant_id), "changed": changed}
-
-
-def _billing_summary(db: Session, data_mode: str | None = "REAL") -> dict[str, Any]:
-    assert _ORIGINAL_BILLING_SUMMARY is not None
-    base = dict(_ORIGINAL_BILLING_SUMMARY(db, data_mode=data_mode))
-    commercial = commercial_services.commercial_summary(db, data_mode=str(data_mode or "REAL"))
-    return {
-        **base,
-        **commercial,
-        "failed_payments": commercial["failed_payment_jobs_30d"],
-        "tenant_churn_rate": None,
-        "expansion_revenue": None,
-        "contraction_revenue": None,
-    }
-
-
-def _dashboard_summary(db: Session, data_mode: str | None = "REAL") -> dict[str, Any]:
-    assert _ORIGINAL_DASHBOARD_SUMMARY is not None
-    base = dict(_ORIGINAL_DASHBOARD_SUMMARY(db, data_mode=data_mode))
-    commercial = commercial_services.commercial_summary(db, data_mode=str(data_mode or "REAL"))
-    return {
-        **base,
-        "failed_payments": commercial["failed_payment_jobs_30d"],
-        "outstanding_ar_cents": commercial["outstanding_ar_cents"],
-        "overdue_ar_cents": commercial["overdue_ar_cents"],
-        "collected_30d_cents": commercial["collected_30d_cents"],
-        "tenant_churn_rate": None,
-        "expansion_revenue": None,
-        "contraction_revenue": None,
-        "commercial_metric_quality": commercial["metric_quality"],
-    }
-
-
-def install_commercial_control_policy() -> None:
-    global _INSTALLED, _ORIGINAL_BILLING_SUMMARY, _ORIGINAL_DASHBOARD_SUMMARY
-    if _INSTALLED:
-        return
-    _ORIGINAL_BILLING_SUMMARY = platform_services.billing_summary
-    _ORIGINAL_DASHBOARD_SUMMARY = platform_services.dashboard_summary
-    platform_services.list_tenants = list_tenants_authoritative
-    platform_services.billing_summary = _billing_summary
-    platform_services.dashboard_summary = _dashboard_summary
-    _INSTALLED = True

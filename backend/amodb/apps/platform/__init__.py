@@ -10,11 +10,8 @@ from .saas_fiscalization_policy import install_fiscalization_enqueue_policy
 from .saas_provider_network import install_provider_network_hardening
 from .resend_email_policy import install_resend_email_provider
 from .commercial_integrations import install_commercial_integrations
-from .commercial_accounting import install_accounting_summary_policy
-from .commercial_safety_policy import install_commercial_safety_policy
 from .commercial_invoice_policy import install_invoice_accounting_policy
 from .commercial_fiscal_document_policy import install_fiscal_document_policy
-from .commercial_policy import install_commercial_control_policy
 from .router import router
 
 
@@ -27,11 +24,8 @@ install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
 install_commercial_integrations()
-install_accounting_summary_policy()
-install_commercial_safety_policy()
 install_invoice_accounting_policy()
 install_fiscal_document_policy()
-install_commercial_control_policy()
 
 from .console_router import router as console_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402

@@ -597,48 +597,27 @@ def _metadata_dict(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def record_paystack_webhook(
-    db: Session,
-    *,
-    raw_payload: bytes,
-    signature: str,
-):
-    """Persist only identifiers required for server-side payment verification."""
+def record_paystack_webhook(db: Session, *, raw_payload: bytes, signature: str):
     payload = json.loads(raw_payload.decode("utf-8"))
     event_type = str(payload.get("event") or "").strip().lower()
     data = payload.get("data") or {}
     if not isinstance(data, dict):
         raise ValueError("Paystack event data is invalid")
-
-    metadata = commercial_services._metadata_dict(data.get("metadata"))
+    metadata = _metadata_dict(data.get("metadata"))
     tenant_id = str(metadata.get("tenant_id") or "").strip()
     invoice_id = str(metadata.get("portal_invoice_id") or "").strip()
     reference = str(data.get("reference") or "").strip()
     if not tenant_id or not invoice_id or not reference:
         raise ValueError("Paystack event is missing portal tenant, invoice or reference metadata")
-
-    credential = commercial_services._provider_credential(db, integrations.PAYSTACK_CODE, tenant_id=tenant_id)
+    _invoice(db, invoice_id, tenant_id=tenant_id)
+    credential = _settlement_credential(db, provider=integrations.PAYSTACK_CODE, tenant_id=tenant_id, label="Paystack")
     secret = saas_services.provider_secrets(credential)
     if not integrations.verify_paystack_signature(raw_payload, signature, str(secret.get("secret_key") or "")):
         raise PermissionError("Invalid Paystack webhook signature")
+    return saas_queue.enqueue_job(db, job_type="PAYSTACK_WEBHOOK", queue_name="billing", tenant_id=tenant_id,
+        payload={"event_type": event_type, "credential_id": credential.id, "invoice_id": invoice_id, "reference": reference, "data_minimized": True},
+        idempotency_key=f"{event_type}:{reference}", correlation_id=reference, max_attempts=6, priority=5)
 
-    return saas_queue.enqueue_job(
-        db,
-        job_type="PAYSTACK_WEBHOOK",
-        queue_name="billing",
-        tenant_id=tenant_id,
-        payload={
-            "event_type": event_type,
-            "credential_id": credential.id,
-            "invoice_id": invoice_id,
-            "reference": reference,
-            "data_minimized": True,
-        },
-        idempotency_key=f"{event_type}:{reference}",
-        correlation_id=reference,
-        max_attempts=6,
-        priority=5,
-    )
 
 
 
@@ -646,35 +625,26 @@ def _process_paystack_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any
     payload = dict(job.payload_json or {})
     event_type = str(payload.get("event_type") or "").strip().lower()
     reference = str(payload.get("reference") or "").strip()
-    invoice = _invoice(db, str(payload.get("invoice_id") or ""), tenant_id=str(job.tenant_id or ""), lock=True)
+    tenant_id = str(job.tenant_id or "")
+    invoice = _invoice(db, str(payload.get("invoice_id") or ""), tenant_id=tenant_id, lock=True)
     credential = db.get(models.SaaSProviderCredential, str(payload.get("credential_id") or ""))
     if credential is None:
-        raise ValueError("Paystack credential is missing")
-    saas_services.require_operational_provider(credential, label="Paystack")
+        credential = _settlement_credential(db, provider=integrations.PAYSTACK_CODE, tenant_id=tenant_id, label="Paystack")
+    elif str(credential.status or "").strip().upper() in {"DISABLED", "NOT_CONFIGURED"}:
+        raise PermissionError("Paystack settlement rejected because the provider is disabled")
     if event_type != "charge.success":
         return {"ignored": True, "event_type": event_type, "reference": reference}
-    verification = integrations.paystack_verify_transaction(
-        secret=saas_services.provider_secrets(credential),
-        config=credential.config_json or {},
-        reference=reference,
-    )
+    verification = integrations.paystack_verify_transaction(secret=saas_services.provider_secrets(credential), config=credential.config_json or {}, reference=reference)
     data = verification.get("data") or {}
     if not isinstance(data, dict) or str(data.get("status") or "").lower() != "success":
         raise ValueError("Paystack transaction is not verified as successful")
     metadata = _metadata_dict(data.get("metadata"))
     if str(metadata.get("tenant_id") or "") != invoice.amo_id or str(metadata.get("portal_invoice_id") or "") != invoice.id:
         raise ValueError("Paystack verified transaction metadata does not match the portal invoice")
-    paid = mark_invoice_paid(
-        db,
-        invoice_id=invoice.id,
-        provider=integrations.PAYSTACK_CODE,
-        provider_reference=reference,
-        actor_user_id=job.created_by,
-        verified_amount_cents=int(data.get("amount") or 0),
-        verified_currency=str(data.get("currency") or ""),
-        reason="Paystack transaction verified server-side",
-    )
+    paid = mark_invoice_paid(db, invoice_id=invoice.id, provider=integrations.PAYSTACK_CODE, provider_reference=reference,
+        actor_user_id=job.created_by, verified_amount_cents=int(data.get("amount") or 0), verified_currency=str(data.get("currency") or ""), reason="Paystack transaction verified server-side")
     return {"verified": True, "reference": reference, "invoice": paid}
+
 
 
 def _callback_token(*, tenant_id: str, invoice_id: str, idempotency_key: str) -> str:
@@ -1022,6 +992,13 @@ def enqueue_quickbooks_sync(
     credential = _provider_credential(db, integrations.QUICKBOOKS_CODE, tenant_id=None)
     if not bool((credential.config_json or {}).get("writeback_enabled")):
         raise ValueError("QuickBooks writeback is disabled; enable it only after account/tax mappings are verified")
+    config = dict(credential.config_json or {})
+    home_currency = str(config.get("home_currency") or "").strip().upper()
+    if not home_currency:
+        raise ValueError("QuickBooks home_currency must be configured before writeback is enabled")
+    invoice_currency = str(invoice.currency or "USD").strip().upper()
+    if invoice_currency != home_currency:
+        raise ValueError("QuickBooks writeback is blocked for a non-home-currency invoice until deliberate multi-currency accounting is configured")
     return saas_queue.enqueue_job(
         db,
         job_type="QUICKBOOKS_SYNC_INVOICE",
@@ -1267,87 +1244,9 @@ def process_job(db: Session, job: models.SaaSJob) -> dict[str, Any]:
 
 
 def commercial_summary(db: Session, *, data_mode: str = "REAL") -> dict[str, Any]:
-    mode = str(data_mode or "REAL").strip().upper()
-    tenant_query = db.query(account_models.AMO.id)
-    if mode == "REAL":
-        tenant_query = tenant_query.filter(account_models.AMO.is_demo.is_(False))
-    elif mode == "DEMO":
-        tenant_query = tenant_query.filter(account_models.AMO.is_demo.is_(True))
-    tenant_ids = [str(row[0]) for row in tenant_query.all()]
-    if not tenant_ids:
-        return {
-            "currency": "USD",
-            "outstanding_ar_cents": 0,
-            "overdue_ar_cents": 0,
-            "overdue_invoice_count": 0,
-            "invoiced_30d_cents": 0,
-            "collected_30d_cents": 0,
-            "failed_payment_jobs_30d": 0,
-            "provider_statuses": {},
-            "metric_quality": {"cohort_metrics": "NOT_IMPLEMENTED"},
-        }
-    now = utcnow()
-    since = now - timedelta(days=30)
-    invoices = db.query(account_models.BillingInvoice).filter(account_models.BillingInvoice.amo_id.in_(tenant_ids))
-    outstanding = int(
-        invoices.with_entities(func.coalesce(func.sum(account_models.BillingInvoice.amount_cents), 0))
-        .filter(account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING)
-        .scalar()
-        or 0
-    )
-    overdue_q = invoices.filter(
-        account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
-        account_models.BillingInvoice.due_at.isnot(None),
-        account_models.BillingInvoice.due_at < now,
-    )
-    overdue_amount = int(overdue_q.with_entities(func.coalesce(func.sum(account_models.BillingInvoice.amount_cents), 0)).scalar() or 0)
-    overdue_count = int(overdue_q.count())
-    invoiced_30d = int(
-        invoices.with_entities(func.coalesce(func.sum(account_models.BillingInvoice.amount_cents), 0))
-        .filter(account_models.BillingInvoice.created_at >= since)
-        .scalar()
-        or 0
-    )
-    collected_30d = int(
-        invoices.with_entities(func.coalesce(func.sum(account_models.BillingInvoice.amount_cents), 0))
-        .filter(
-            account_models.BillingInvoice.status == account_models.InvoiceStatus.PAID,
-            account_models.BillingInvoice.paid_at.isnot(None),
-            account_models.BillingInvoice.paid_at >= since,
-        )
-        .scalar()
-        or 0
-    )
-    failed_jobs = int(
-        db.query(func.count(models.SaaSJob.id))
-        .filter(
-            models.SaaSJob.tenant_id.in_(tenant_ids),
-            models.SaaSJob.queue_name == "billing",
-            models.SaaSJob.status.in_(["FAILED", "DEAD"]),
-            models.SaaSJob.created_at >= since,
-        )
-        .scalar()
-        or 0
-    )
-    providers = saas_services.list_provider_credentials(db)
-    provider_statuses = {str(item.get("provider")): str(item.get("status")) for item in providers if item.get("category") in {"BILLING", "PAYMENTS", "ACCOUNTING", "TAX"}}
-    return {
-        "currency": "USD",
-        "outstanding_ar_cents": outstanding,
-        "overdue_ar_cents": overdue_amount,
-        "overdue_invoice_count": overdue_count,
-        "invoiced_30d_cents": invoiced_30d,
-        "collected_30d_cents": collected_30d,
-        "failed_payment_jobs_30d": failed_jobs,
-        "provider_statuses": provider_statuses,
-        "metric_quality": {
-            "ar_and_collection_metrics": "AUTHORITATIVE_PORTAL_SUBLEDGER",
-            "mrr_arr": "LEGACY_LICENSE_MODEL_UNTIL_MODULE_PRICE_COHORT_RECONCILIATION",
-            "logo_churn": "NOT_IMPLEMENTED",
-            "net_revenue_retention": "NOT_IMPLEMENTED",
-            "gross_revenue_retention": "NOT_IMPLEMENTED",
-        },
-    }
+    from .commercial_accounting import subledger_summary
+    return subledger_summary(db, data_mode=data_mode)
+
 
 
 def capacity_readiness(db: Session) -> dict[str, Any]:
@@ -1379,7 +1278,7 @@ def capacity_readiness(db: Session) -> dict[str, Any]:
     }
     return {
         "target_concurrent_tenants": 1000,
-        "status": "VERIFIED" if verified and all(value for key, value in checks.items() if key != "read_replica_or_split_read_dsn") else "NOT_YET_PROVEN",
+        "status": "VERIFIED" if verified and checks and all(checks.values()) else "NOT_YET_PROVEN",
         "checks": checks,
         "observed": {"real_tenants": tenants, "users": users, "active_saas_workers": workers, "queue_depth": queue_depth},
         "note": "Configuration is not a capacity guarantee. LOAD_TEST_1000_VERIFIED must only be set after the repository load harness passes against the intended production topology.",
