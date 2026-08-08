@@ -138,7 +138,7 @@ def test_postgresql_search_migration_is_online_safe_and_reversible() -> None:
     assert "DROP INDEX CONCURRENTLY IF EXISTS" in source
 
 
-def test_frontend_assistant_is_mounted_in_reader_and_document_control() -> None:
+def test_frontend_assistant_remains_contextual_and_not_permanent_dms_chrome() -> None:
     root = _repository_root() / "frontend/src"
     service = (root / "services/documentationAssistant.ts").read_text(encoding="utf-8")
     panel = (root / "pages/manuals/DocumentationAssistantPanel.tsx").read_text(encoding="utf-8")
@@ -149,9 +149,11 @@ def test_frontend_assistant_is_mounted_in_reader_and_document_control() -> None:
     assert "controlled_source_is_authoritative" in service
     assert "amo:publication-navigate" in panel
     assert "The controlled source remains authoritative" in panel
+    # Assisted search remains available in the document-reading context, but it
+    # must not turn every DMS workspace into an always-mounted chat surface.
     assert "DocumentationAssistantPanel" in reader
     assert "PublicationAssistedNavigationBridge" in reader
-    assert "DocumentationAssistantPanel" in shell
+    assert "DocumentationAssistantPanel" not in shell
     assert "OPENAI_API_KEY" not in service + panel + reader + shell
 
 
