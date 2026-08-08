@@ -8,6 +8,7 @@ license entitlements for the tenant (AMO).
 
 from __future__ import annotations
 
+import json
 from typing import Callable, Optional
 
 from datetime import datetime, timezone
@@ -40,6 +41,20 @@ def _module_aliases(module_key: str) -> tuple[str, ...]:
     return _MODULE_ALIASES.get(normalized, (normalized,))
 
 
+def _row_metadata(row: account_models.ModuleSubscription) -> dict:
+    if not row.metadata_json:
+        return {}
+    try:
+        value = json.loads(row.metadata_json)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _offer_only(row: account_models.ModuleSubscription) -> bool:
+    return bool(_row_metadata(row).get("commercial_offer_only"))
+
+
 def _row_is_current(row: account_models.ModuleSubscription, now: datetime) -> bool:
     effective_from = row.effective_from
     effective_to = row.effective_to
@@ -70,7 +85,7 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
     now = datetime.now(timezone.utc)
     exact_code = aliases[0]
     exact = next((row for row in rows if str(row.module_code) == exact_code), None)
-    if exact is not None:
+    if exact is not None and not _offer_only(exact):
         if not _row_is_current(exact, now):
             return False
         return exact.status in {
@@ -78,9 +93,11 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
             account_models.ModuleSubscriptionStatus.TRIAL,
         }
 
-    # No narrow subscription exists. Preserve access from a compatible legacy
-    # bundle only while that bundle is currently enabled/trialing.
+    # A commercial-offer placeholder is not an entitlement decision. Ignore it
+    # and preserve a compatible legacy bundle if one exists.
     for row in rows:
+        if _offer_only(row):
+            continue
         if not _row_is_current(row, now):
             continue
         if row.status in {
@@ -88,7 +105,7 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
             account_models.ModuleSubscriptionStatus.TRIAL,
         }:
             return True
-    return False
+    return None if all(_offer_only(row) for row in rows) else False
 
 
 def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
