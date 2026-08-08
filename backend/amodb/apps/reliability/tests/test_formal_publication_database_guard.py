@@ -27,11 +27,16 @@ def test_published_child_guards_include_insert_on_postgresql():
     engine = _postgres_engine()
     with engine.connect() as connection:
         rows = connection.execute(text("""
-            SELECT tgname, pg_get_triggerdef(oid) AS definition
+            SELECT tgname::text AS tgname, pg_get_triggerdef(oid) AS definition
             FROM pg_trigger
-            WHERE tgname = ANY(:names)
+            WHERE tgname::text IN (
+              'trg_rel_formal_section_guard',
+              'trg_rel_formal_req_guard',
+              'trg_rel_formal_source_guard',
+              'trg_rel_formal_override_guard'
+            )
               AND NOT tgisinternal
-        """), {"names": list(TRIGGERS)}).mappings().all()
+        """)).mappings().all()
     definitions = {row["tgname"]: row["definition"] for row in rows}
     assert definitions.keys() == TRIGGERS.keys()
     for trigger, table in TRIGGERS.items():
