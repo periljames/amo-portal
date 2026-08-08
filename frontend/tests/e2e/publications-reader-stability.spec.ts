@@ -13,6 +13,14 @@ const SEARCH_TERM = process.env.E2E_PUBLICATION_SEARCH_TERM || TOC_TARGET;
 const SETTLE_MS = Number(process.env.E2E_PUBLICATION_STABILITY_SETTLE_MS || 5_000);
 const RENDER_MS = Number(process.env.E2E_PUBLICATION_TARGET_RENDER_MS || 8_000);
 
+test.use({
+  viewport: { width: 1440, height: 900 },
+  ignoreHTTPSErrors: true,
+  trace: "retain-on-failure",
+  screenshot: "only-on-failure",
+  video: "retain-on-failure",
+});
+
 function requiredConfiguration(): string[] {
   const missing: string[] = [];
   if (!ADMIN_EMAIL) missing.push("E2E_AMO_ADMIN_EMAIL");
@@ -173,14 +181,6 @@ test.describe("Publications reader integrated real-world stability", () => {
     !LIVE_ENABLED,
     "Set E2E_LIVE_PUBLICATIONS_READER=1 to run authenticated publication stability checks.",
   );
-
-  test.use({
-    viewport: { width: 1440, height: 900 },
-    ignoreHTTPSErrors: true,
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
-  });
 
   test.beforeEach(async ({ page }) => {
     const missing = requiredConfiguration();
