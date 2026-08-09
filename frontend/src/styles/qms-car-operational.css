@@ -1,4 +1,71 @@
-/* QMS CAR/CAPA operational presentation. Scoped by dialog aria-label so global modal consumers are untouched. */
+/* QMS CAR/CAPA operational presentation. Scoped so global modal consumers are untouched. */
+
+.qms-car-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 22px 24px;
+  border: 1px solid var(--border-color, #dfe3e8);
+  border-radius: 14px;
+  background: var(--surface-elevated, #fff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.qms-car-page-heading .page-header__eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .055em; }
+.qms-car-page-heading .page-header__title { margin-top: 6px; font-size: clamp(28px, 2.25vw, 34px); line-height: 1.08; letter-spacing: -.02em; }
+.qms-car-page-heading .page-header__subtitle { max-width: 900px; margin-top: 5px; font-size: 14px; line-height: 1.55; }
+.qms-car-page-heading > .audit-chip-list { align-items: center; gap: 8px; }
+.qms-car-page-heading .primary-chip-btn,
+.qms-car-page-heading .secondary-chip-btn { min-height: 40px; padding-inline: 13px; font-size: 13px; }
+
+.qms-car-page-heading ~ .audit-stats-grid { gap: 12px; margin-bottom: 16px; }
+.qms-car-page-heading ~ .audit-stats-grid .audit-stat-card { min-height: 108px; padding: 17px 18px; border-radius: 12px; }
+.qms-car-page-heading ~ .audit-stats-grid .audit-stat-card__label { font-size: 12px; line-height: 1.35; }
+.qms-car-page-heading ~ .audit-stats-grid .audit-stat-card__value { margin-top: 6px; font-size: 28px; }
+
+.qms-car-page-heading ~ .audit-panel { overflow: hidden; border-radius: 14px; }
+.qms-car-page-heading ~ .audit-panel .audit-panel__header { min-height: 72px; padding: 15px 17px; }
+.qms-car-page-heading ~ .audit-panel .audit-panel__title { font-size: 18px; }
+.qms-car-page-heading ~ .audit-panel .audit-panel__subtitle { margin-top: 4px; font-size: 12.5px; line-height: 1.45; }
+.qms-car-page-heading ~ .audit-panel .audit-workspace__toolbar-row { gap: 10px; padding: 0 16px; }
+.qms-car-page-heading ~ .audit-panel .audit-workspace__toolbar-row label { gap: 5px; font-size: 12px; font-weight: 700; }
+.qms-car-page-heading ~ .audit-panel .audit-workspace__toolbar-row .input,
+.qms-car-page-heading ~ .audit-panel .audit-search input { min-height: 40px; font-size: 13.5px; }
+.qms-car-page-heading ~ .audit-panel .table-wrapper { margin-top: 12px; }
+.qms-car-page-heading ~ .audit-panel .table { min-width: 1120px; }
+.qms-car-page-heading ~ .audit-panel .table th { padding: 11px 12px; font-size: 11.5px; letter-spacing: .04em; }
+.qms-car-page-heading ~ .audit-panel .table td { padding: 13px 12px; font-size: 13px; line-height: 1.42; vertical-align: top; }
+.qms-car-page-heading ~ .audit-panel .table td strong { font-size: 13.5px; }
+.qms-car-page-heading ~ .audit-panel .table .text-muted,
+.qms-car-page-heading ~ .audit-panel .qms-cell-text { margin-top: 3px; font-size: 11.5px; line-height: 1.4; }
+.qms-car-page-heading ~ .audit-panel .table .badge { min-height: 27px; padding: 4px 8px; font-size: 11.5px; }
+.qms-car-page-heading ~ .audit-panel .link-button { font-size: 13.5px; }
+
+/* Keep all governed CAR actions available, but establish one clear primary row action. */
+.qms-car-page-heading ~ .audit-panel .table td:last-child .audit-chip-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(82px, 1fr));
+  gap: 6px;
+  min-width: 188px;
+}
+.qms-car-page-heading ~ .audit-panel .table td:last-child .secondary-chip-btn {
+  min-height: 33px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.qms-car-page-heading ~ .audit-panel .table td:last-child .secondary-chip-btn:first-child {
+  border-color: var(--accent-primary, #2563eb);
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+  font-weight: 750;
+}
+.qms-car-page-heading ~ .audit-panel .table td:last-child .secondary-chip-btn:last-child:not(:first-child) { color: var(--accent-danger, #b42318); }
+.qms-car-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 9px 14px; border-top: 1px solid var(--border-color, #dfe3e8); font-size: 12.5px; }
+.qms-car-pagination .secondary-chip-btn { min-height: 36px; padding-inline: 12px; font-size: 12.5px; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] {
   align-items: center;
@@ -105,9 +172,7 @@
   line-height: 1.35;
 }
 
-.upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal > label {
-  margin: 14px 22px 0;
-}
+.upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal > label { margin: 14px 22px 0; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .input,
 .upsell-modal__backdrop[aria-label*="corrective action"] input,
@@ -127,10 +192,7 @@
 }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] textarea.input,
-.upsell-modal__backdrop[aria-label*="corrective action"] textarea {
-  min-height: 104px;
-  resize: vertical;
-}
+.upsell-modal__backdrop[aria-label*="corrective action"] textarea { min-height: 104px; resize: vertical; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card {
   margin: 14px 22px 0;
@@ -139,24 +201,11 @@
   border-radius: 10px;
   background: var(--surface, #f8fafc);
 }
-
-.upsell-modal__backdrop[aria-label="Review corrective action response"] .qms-form-grid .qms-card {
-  margin: 0;
-}
-
+.upsell-modal__backdrop[aria-label="Review corrective action response"] .qms-form-grid .qms-card { margin: 0; }
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card strong,
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__title {
-  font-size: 14px;
-  line-height: 1.35;
-}
-
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__title { font-size: 14px; line-height: 1.35; }
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card p,
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__subtitle {
-  margin: 5px 0 0;
-  color: var(--text-secondary, #667085);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__subtitle { margin: 5px 0 0; color: var(--text-secondary, #667085); font-size: 12.5px; line-height: 1.5; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid {
   display: grid;
@@ -165,31 +214,9 @@
   margin: 0;
   padding: 20px 22px 0;
 }
-
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--border-color, #dfe3e8);
-  border-radius: 9px;
-  background: var(--surface, #f8fafc);
-}
-
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dt {
-  color: var(--text-secondary, #667085);
-  font-size: 11.5px;
-  font-weight: 800;
-  letter-spacing: .035em;
-  text-transform: uppercase;
-}
-
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 13.5px;
-  font-weight: 650;
-}
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid > div { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border: 1px solid var(--border-color, #dfe3e8); border-radius: 9px; background: var(--surface, #f8fafc); }
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dt { color: var(--text-secondary, #667085); font-size: 11.5px; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dd { margin: 0; overflow-wrap: anywhere; font-size: 13.5px; font-weight: 650; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__actions {
   position: sticky;
@@ -203,38 +230,24 @@
   border-top: 1px solid var(--border-color, #dfe3e8);
   background: var(--surface-elevated, #fff);
 }
-
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__actions button,
 .upsell-modal__backdrop[aria-label*="corrective action"] .primary-chip-btn,
-.upsell-modal__backdrop[aria-label*="corrective action"] .secondary-chip-btn {
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 700;
-}
+.upsell-modal__backdrop[aria-label*="corrective action"] .secondary-chip-btn { min-height: 40px; padding: 0 14px; border-radius: 9px; font-size: 13px; font-weight: 700; }
 
-.upsell-modal__backdrop[aria-label*="corrective action"] :where(button, input, select, textarea):focus-visible {
-  outline: 2px solid var(--accent-primary, #2563eb);
-  outline-offset: 2px;
+.upsell-modal__backdrop[aria-label*="corrective action"] :where(button, input, select, textarea):focus-visible { outline: 2px solid var(--accent-primary, #2563eb); outline-offset: 2px; }
+
+@media (max-width: 900px) {
+  .qms-car-page-heading { flex-direction: column; }
+  .qms-car-page-heading > .audit-chip-list { width: 100%; }
 }
 
 @media (max-width: 720px) {
-  .upsell-modal__backdrop[aria-label*="corrective action"] {
-    align-items: stretch;
-    padding: 0;
-  }
-
+  .qms-car-page-heading { padding: 18px; }
+  .qms-car-page-heading > .audit-chip-list .primary-chip-btn,
+  .qms-car-page-heading > .audit-chip-list .secondary-chip-btn { flex: 1; }
+  .upsell-modal__backdrop[aria-label*="corrective action"] { align-items: stretch; padding: 0; }
   .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal,
-  .upsell-modal__backdrop[aria-label="Review corrective action response"] .upsell-modal {
-    width: 100%;
-    max-width: none !important;
-    max-height: 100vh;
-    border-radius: 0;
-  }
-
+  .upsell-modal__backdrop[aria-label="Review corrective action response"] .upsell-modal { width: 100%; max-width: none !important; max-height: 100vh; border-radius: 0; }
   .upsell-modal__backdrop[aria-label*="corrective action"] .qms-form-grid,
-  .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid {
-    grid-template-columns: 1fr;
-  }
+  .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid { grid-template-columns: 1fr; }
 }
