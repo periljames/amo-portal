@@ -32,7 +32,6 @@ type ParsedSseBlock = {
 };
 
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
-const OPERATIONS_PATH = "/platform/operations";
 
 function parseSseBlock(block: string): ParsedSseBlock | null {
   let event = "message";
@@ -61,18 +60,17 @@ function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
   return { ...event, snapshot: normalizedSnapshot };
 }
 
-export function shouldUseShellOperationsStream(enabled: boolean, pathname: string): boolean {
-  return enabled && pathname !== OPERATIONS_PATH;
+export function shouldUseShellOperationsStream(enabled: boolean, _pathname: string): boolean {
+  return enabled;
 }
 
 /**
- * Own the single shared Platform browser SSE connection outside Operations.
+ * Own the single shared Platform browser SSE connection.
  *
- * PlatformShell consumes the isolated Operations Gateway stream across normal
- * Platform pages. `/platform/operations` already owns that same stream because
- * it renders its own authoritative connection/degraded state, so the shell
- * deliberately yields ownership there. This prevents two simultaneous Platform
- * SSE requests for one Superadmin browser page.
+ * PlatformShell is the sole owner of the isolated Operations Gateway stream on
+ * every Platform route. Pages, including `/platform/operations`, consume the
+ * normalized `amo:platform-live` browser event rather than opening a second
+ * stream. This keeps one realtime connection per Superadmin Platform session.
  */
 export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
@@ -175,12 +173,12 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
     const root = document.documentElement;
-    const owner = enabled && !streamEnabled ? "operations-page" : enabled ? "platform-shell" : "none";
+    const owner = enabled ? "platform-shell" : "none";
     root.dataset.platformRealtimeOwner = owner;
     return () => {
       if (root.dataset.platformRealtimeOwner === owner) delete root.dataset.platformRealtimeOwner;
     };
-  }, [enabled, streamEnabled]);
+  }, [enabled]);
 
   useEffect(() => {
     connectRef.current = connect;
