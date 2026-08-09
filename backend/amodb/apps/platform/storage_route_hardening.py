@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import os
 import tempfile
 import zipfile
@@ -63,8 +64,8 @@ def _stage_upload(upload, *, max_bytes: int, prefix: str) -> tuple[Path, int, st
 
 
 def _install_fleet() -> None:
-    from amodb.apps.fleet import models as fleet_models
-    from amodb.apps.fleet import router as fleet_router
+    fleet_models = importlib.import_module("amodb.apps.fleet.models")
+    fleet_router = importlib.import_module("amodb.apps.fleet.router")
 
     legacy_root = Path(fleet_router.DOC_UPLOAD_DIR).resolve()
 
@@ -126,8 +127,6 @@ def _install_fleet() -> None:
                         old.unlink(missing_ok=True)
             except Exception:
                 pass
-        # The model does not currently retain a SHA column. Keep the checksum in
-        # the object key-independent audit trail only; do not invent a DB field.
         _ = sha256
         return fleet_router._document_to_schema(doc, evaluation)
 
@@ -203,9 +202,9 @@ def _install_fleet() -> None:
 
 
 def _install_ehm() -> None:
-    from amodb.apps.reliability import models as reliability_models
-    from amodb.apps.reliability import router as reliability_router
-    from amodb.apps.reliability import schemas as reliability_schemas
+    reliability_models = importlib.import_module("amodb.apps.reliability.models")
+    reliability_router = importlib.import_module("amodb.apps.reliability.router")
+    reliability_schemas = importlib.import_module("amodb.apps.reliability.schemas")
 
     def upload_ehm_log_shared(**values: Any):
         background_tasks = values["background_tasks"]
