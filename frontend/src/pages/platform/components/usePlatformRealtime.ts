@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getToken } from "../../../services/auth";
 import { readPlatformDataMode } from "../../../services/platformEnvironment";
 import { operationsStreamUrl, type DataMode } from "../../../services/platformOperations";
+import "../../../styles/platform-realtime-ownership.css";
 
 export type PlatformLiveStatus = "connecting" | "live" | "offline";
 
@@ -31,6 +32,7 @@ type ParsedSseBlock = {
 };
 
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
+const OPERATIONS_PATH = "/platform/operations";
 
 function parseSseBlock(block: string): ParsedSseBlock | null {
   let event = "message";
@@ -59,21 +61,28 @@ function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
   return { ...event, snapshot: normalizedSnapshot };
 }
 
+export function shouldUseShellOperationsStream(enabled: boolean, pathname: string): boolean {
+  return enabled && pathname !== OPERATIONS_PATH;
+}
+
 /**
- * Own the single Platform browser SSE connection.
+ * Own the single shared Platform browser SSE connection outside Operations.
  *
- * Every Platform page is rendered inside PlatformShell, so the shell connects to
- * the isolated Operations Gateway once and republishes snapshot frames as a
- * window event for page-level consumers. Individual pages must not open their
- * own competing Platform SSE connection.
+ * PlatformShell consumes the isolated Operations Gateway stream across normal
+ * Platform pages. `/platform/operations` already owns that same stream because
+ * it renders its own authoritative connection/degraded state, so the shell
+ * deliberately yields ownership there. This prevents two simultaneous Platform
+ * SSE requests for one Superadmin browser page.
  */
 export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+  const streamEnabled = shouldUseShellOperationsStream(enabled, pathname);
   const selectedMode = dataMode || (typeof window !== "undefined" ? readPlatformDataMode(window.location.search) : "REAL");
-  const [status, setStatus] = useState<PlatformLiveStatus>(enabled ? "connecting" : "offline");
+  const [status, setStatus] = useState<PlatformLiveStatus>(streamEnabled ? "connecting" : "offline");
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastEvent, setLastEvent] = useState<PlatformConsoleEvent | null>(null);
-  const statusRef = useRef<PlatformLiveStatus>(enabled ? "connecting" : "offline");
+  const statusRef = useRef<PlatformLiveStatus>(streamEnabled ? "connecting" : "offline");
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<number | null>(null);
   const retryRef = useRef(0);
@@ -95,7 +104,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
   const connect = useCallback(() => {
     controllerRef.current?.abort();
     if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
-    if (!enabled) return;
+    if (!streamEnabled) return;
 
     const token = getToken();
     if (!token || (typeof navigator !== "undefined" && !navigator.onLine)) {
@@ -148,24 +157,36 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
         }
         if (!controller.signal.aborted) throw new Error("Platform live stream closed");
       } catch {
-        if (controller.signal.aborted || !enabled) return;
+        if (controller.signal.aborted || !streamEnabled) return;
         updateStatus("offline");
         const delay = Math.min(30_000, 1_500 * 2 ** retryRef.current);
         retryRef.current += 1;
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [enabled, publish, selectedMode, updateStatus]);
+  }, [publish, selectedMode, streamEnabled, updateStatus]);
 
   const reconnect = useCallback(() => {
-    if (!enabled) return;
+    if (!streamEnabled) return;
     retryRef.current = 0;
     connectRef.current();
-  }, [enabled]);
+  }, [streamEnabled]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const root = document.documentElement;
+    const owner = enabled && !streamEnabled ? "operations-page" : enabled ? "platform-shell" : "none";
+    root.dataset.platformRealtimeOwner = owner;
+    return () => {
+      if (root.dataset.platformRealtimeOwner === owner) delete root.dataset.platformRealtimeOwner;
+    };
+  }, [enabled, streamEnabled]);
 
   useEffect(() => {
     connectRef.current = connect;
-    if (!enabled) {
+    if (!streamEnabled) {
+      controllerRef.current?.abort();
+      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       updateStatus("offline");
       return;
     }
@@ -188,7 +209,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [connect, enabled, reconnect, updateStatus]);
+  }, [connect, reconnect, streamEnabled, updateStatus]);
 
   return { status, snapshot, lastUpdated, lastEvent, reconnect };
 }
