@@ -1,5 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 
+export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
+
 export type ChecklistTemplateItem = {
   section?: string | null;
   category?: string | null;
@@ -11,6 +13,8 @@ export type ChecklistTemplateItem = {
   expected_evidence?: string | null;
   response_type: string;
   applicability: string;
+  mandatory?: boolean;
+  finding_trigger?: ChecklistFindingTrigger;
   sort_order: number;
 };
 
