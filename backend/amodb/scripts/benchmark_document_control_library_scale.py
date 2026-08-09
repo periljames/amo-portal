@@ -1,8 +1,9 @@
 """Deterministic 10k-document PostgreSQL scale gate for Document Control.
 
-Runs only against disposable CI data. It proves that the authoritative library
-route keeps access filtering/counting/pagination in PostgreSQL and materializes
-at most the requested page even when tenant volume exceeds 10,000 documents.
+Runs only against disposable CI data. It proves that both the authoritative
+Library table and the richer MD discovery/search route keep access filtering,
+counting and pagination in PostgreSQL and materialize at most the requested
+page when tenant volume exceeds 10,000 documents.
 """
 from __future__ import annotations
 
@@ -12,15 +13,12 @@ import sys
 from time import perf_counter
 import uuid
 
-# This script is intentionally executable both as ``python -m ...`` and by its
-# repository path from the backend working directory used in GitHub Actions.
-# Direct path execution otherwise puts ``amodb/scripts`` (not ``backend``) on
-# sys.path and fails before the benchmark can seed or measure anything.
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.doc_control.workspace_library_discovery_router import library_discovery
 from amodb.apps.doc_control.workspace_library_router import list_visible_documents
 from amodb.apps.manuals import models as manual_models
 from amodb.database import WriteSessionLocal
@@ -41,9 +39,6 @@ def _scale_id(index: int) -> str:
 
 
 def _query_library(*, db, user, q: str | None, page: int, per_page: int):
-    # FastAPI Query defaults are descriptor objects when an endpoint is invoked
-    # directly. Pass every request parameter explicitly so this benchmark
-    # exercises exactly the same SQL path without depending on request injection.
     return list_visible_documents(
         tenant_slug="dmsgate",
         q=q,
@@ -59,6 +54,18 @@ def _query_library(*, db, user, q: str | None, page: int, per_page: int):
         superseded_referenced=False,
         sort="code",
         direction="asc",
+        page=page,
+        per_page=per_page,
+        db=db,
+        current_user=user,
+    )
+
+
+def _query_discovery(*, db, user, q: str | None, page: int, per_page: int):
+    return library_discovery(
+        tenant_slug="dmsgate",
+        view="all",
+        q=q,
         page=page,
         per_page=per_page,
         db=db,
@@ -101,6 +108,10 @@ def main() -> None:
         searched = _query_library(db=db, user=user, q="DMS-SCALE-09999", page=1, per_page=25)
         search_seconds = perf_counter() - started
 
+        started = perf_counter()
+        discovered = _query_discovery(db=db, user=user, q="DMS-SCALE-09999", page=1, per_page=25)
+        discovery_search_seconds = perf_counter() - started
+
         evidence = {
             "seeded_scale_documents": SCALE_DOCUMENTS,
             "total_visible_documents": first_page["pagination"]["total"],
@@ -108,6 +119,8 @@ def main() -> None:
             "first_page_seconds": round(first_page_seconds, 4),
             "exact_search_returned": searched["pagination"]["returned"],
             "exact_search_seconds": round(search_seconds, 4),
+            "discovery_exact_search_returned": discovered["pagination"]["returned"],
+            "discovery_exact_search_seconds": round(discovery_search_seconds, 4),
             "threshold_seconds": MAX_QUERY_SECONDS,
         }
         EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -121,8 +134,13 @@ def main() -> None:
         assert searched["pagination"]["total"] == 1, searched["pagination"]
         assert searched["pagination"]["returned"] == 1, searched["pagination"]
         assert searched["items"][0]["code"] == "DMS-SCALE-09999"
+        assert discovered["pagination"]["total"] == 1, discovered["pagination"]
+        assert discovered["pagination"]["returned"] == 1, discovered["pagination"]
+        assert discovered["items"][0]["code"] == "DMS-SCALE-09999"
+        assert len(discovered["items"]) <= 25
         assert first_page_seconds <= MAX_QUERY_SECONDS, f"10k first page took {first_page_seconds:.3f}s"
         assert search_seconds <= MAX_QUERY_SECONDS, f"10k exact search took {search_seconds:.3f}s"
+        assert discovery_search_seconds <= MAX_QUERY_SECONDS, f"10k rich discovery search took {discovery_search_seconds:.3f}s"
     finally:
         db.close()
 
