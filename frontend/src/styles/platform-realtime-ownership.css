@@ -1,0 +1,5 @@
+:root[data-platform-realtime-owner="operations-page"] .platform-sidebar__status,
+:root[data-platform-realtime-owner="operations-page"] .platform-global-actions > button[aria-label="Reconnect live updates"],
+:root[data-platform-realtime-owner="operations-page"] .platform-page-actions > .platform-live-chip {
+  display: none;
+}
