@@ -5,6 +5,8 @@ from decimal import Decimal
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_case_router import router as assurance_case_router
+from amodb.apps.quality.audit_notice_router import router as audit_notice_router
+from amodb.apps.quality.audit_preparation_router import router as audit_preparation_router
 from amodb.apps.quality.intelligence_governance_router import _compare, _percent, router as intelligence_governance_router
 from amodb.apps.quality.intelligence_router import router as intelligence_router
 from amodb.apps.quality.people_router import router as people_router
@@ -80,6 +82,23 @@ def test_intelligence_contract_is_deterministic_and_source_explainable() -> None
     assert _compare(Decimal("10"), "GTE", Decimal("10")) is True
 
 
+def test_audit_preparation_and_notice_governance_contract() -> None:
+    assert {
+        ("/audits/{audit_id}/preparation-revisions", "GET"),
+        ("/audits/{audit_id}/preparation-revisions", "POST"),
+        ("/audits/{audit_id}/preparation-revisions/{revision_id}/issue", "POST"),
+    }.issubset(_methods(audit_preparation_router))
+    assert {
+        ("/audit-notice-policies", "GET"),
+        ("/audit-notice-policies", "POST"),
+        ("/audit-notice-policies/{policy_id}", "PATCH"),
+        ("/audits/{audit_id}/notices", "GET"),
+        ("/audits/{audit_id}/notices", "POST"),
+        ("/audits/{audit_id}/notices/{notice_id}/revisions", "POST"),
+        ("/audits/{audit_id}/notices/{notice_id}/transitions", "POST"),
+    }.issubset(_methods(audit_notice_router))
+
+
 def test_new_operating_system_models_are_registered_in_shared_metadata() -> None:
     required_tables = {
         "quality_privilege_rules",
@@ -94,11 +113,16 @@ def test_new_operating_system_models_are_registered_in_shared_metadata() -> None
         "quality_signal_observations",
         "quality_requirement_nodes",
         "quality_requirement_links",
+        "quality_audit_preparation_revisions",
+        "quality_audit_preparation_events",
+        "quality_audit_notice_policies",
+        "quality_audit_notices",
+        "quality_audit_notice_events",
     }
     assert required_tables.issubset(Base.metadata.tables)
 
 
-def test_people_assurance_and_intelligence_routes_precede_generic_catchall() -> None:
+def test_people_assurance_intelligence_and_audit_governance_routes_precede_generic_catchall() -> None:
     cases = (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
         (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
@@ -111,6 +135,10 @@ def test_people_assurance_and_intelligence_routes_precede_generic_catchall() -> 
         ("/intelligence/overview", "GET", "intelligence_overview"),
         ("/intelligence/signals/evaluate", "POST", "evaluate_signals"),
         ("/intelligence/approval-digital-twin", "GET", "approval_digital_twin"),
+        ("/audits/{audit_id}/preparation-revisions", "GET", "list_preparation_revisions"),
+        ("/audit-notice-policies", "GET", "list_notice_policies"),
+        ("/audits/{audit_id}/notices", "GET", "list_audit_notices"),
+        ("/audits/{audit_id}/notices/{notice_id}/transitions", "POST", "transition_audit_notice"),
     )
     for api_router, prefix in cases:
         catchall_index = _catchall_index(api_router)
