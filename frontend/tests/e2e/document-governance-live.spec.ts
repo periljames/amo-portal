@@ -4,6 +4,7 @@ const LIVE_ENABLED = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
+const ADMIN_STORAGE_STATE = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 const READER_PAGE_CHECKPOINTS = [100, 500, 1000, 1999] as const;
 const MAX_READER_USABLE_MS = 20_000;
@@ -17,6 +18,7 @@ test.use({
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
   screenshot: "on",
+  ...(ADMIN_STORAGE_STATE ? { storageState: ADMIN_STORAGE_STATE } : {}),
 });
 
 function watchMaterialBrowserErrors(page: Page): void {
@@ -61,7 +63,7 @@ test.describe("Document Control daily operating model", () => {
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
     watchMaterialBrowserErrors(page);
-    await signIn(page);
+    if (!ADMIN_STORAGE_STATE) await signIn(page);
   });
 
   test.afterEach(() => {
@@ -100,8 +102,8 @@ test.describe("Document Control daily operating model", () => {
     const externalRow = page.getByRole("row").filter({ hasText: "KCAA-CI-EXT-001" });
     await expect(externalRow).toBeVisible({ timeout: 30_000 });
     await expect(externalRow).toContainText("Kenya Civil Aviation Authority");
-    await expect(externalRow).toContainText("CURRENT");
-    await expect(externalRow).toContainText("KCAR 2025 CI proof");
+    await expect(externalRow).toContainText("UNVERIFIED");
+    await expect(externalRow).toContainText("KCAR 2025 CI proof Rev 2");
 
     await page.getByRole("button", { name: /Browse hierarchy/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
