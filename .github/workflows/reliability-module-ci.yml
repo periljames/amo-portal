@@ -2,6 +2,7 @@ name: Reliability Module CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/reliability-module-ci.yml'
       - '.github/workflows/reliability-hotfix-finalizer.yml'
@@ -12,8 +13,8 @@ on:
       - 'backend/amodb/alembic/env.py'
       - 'backend/amodb/alembic/versions/qms_vernum_128.py'
       - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
+      - 'backend/amodb/alembic/versions/docgov_20260807_audit_controls.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
-      - 'backend/amodb/alembic/versions/docgov_rel_*.py'
       - 'backend/amodb/apps/reliability/**'
       - 'backend/scripts/apply_reliability_review_fixes.py'
       - 'backend/amodb/main.py'
@@ -28,6 +29,7 @@ on:
       - 'frontend/src/services/reliability.ts'
       - 'frontend/src/styles/reliability-v2.css'
       - 'frontend/tests/e2e/reliability-workbook-parity-ci.spec.ts'
+      - 'frontend/tests/e2e/reliability-formal-reporting-ci.spec.ts'
   workflow_dispatch:
 
 permissions:
@@ -79,13 +81,13 @@ jobs:
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
 
-          ACTIVATOR='^(backend/amodb/alembic/versions/rel_[^/]+\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          ACTIVATOR='^(backend/amodb/alembic/versions/(docgov_20260807_audit_controls|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
           if ! grep -E "$ACTIVATOR" /tmp/reliability-files.txt >/dev/null; then
             echo 'No Reliability-owned implementation changed; shared composition changes do not activate the Reliability-only scope guard.'
             exit 0
           fi
 
-          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-workbook-parity-ci\.spec\.ts)$'
+          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|docgov_20260807_audit_controls|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
           if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability-owned PR:'
             grep -Ev "$ALLOWED" /tmp/reliability-files.txt
@@ -145,15 +147,15 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
+          assert head == 'rel_20260807_formal_docgov_merge', head
           ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
-          ancestry.add(head)
           for required in (
+              'rel_20260807_formal_reporting',
+              'docgov_rel_20260807_merge',
+              'rel_20260807_main_merge',
               'rel_20260805_ops_exact_counts',
               'rel_20260806_reference_integrity',
-              'rel_20260807_main_merge',
               'merge_20260807_qms_planner_aircraft',
-              'docgov_rel_20260807_merge',
-              'docgov_20260807_qms_audit_runtime',
           ):
               assert required in ancestry, f'{required} is not an ancestor of {head}'
           print(f'alembic_head={head}')
@@ -183,6 +185,46 @@ jobs:
           assert width is not None and width >= 128, width
           assert version == expected, (version, expected)
           print(f'alembic_version={version}; capacity={width}')
+          PY
+
+      - name: Verify formal Reliability Programme schema
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          expected_tables = {
+              'reliability_regulatory_profiles',
+              'reliability_regulatory_requirements',
+              'reliability_formal_reports',
+              'reliability_formal_report_sections',
+              'reliability_formal_requirement_assessments',
+              'reliability_formal_report_sources',
+              'reliability_formal_approvals',
+              'reliability_formal_lifecycle_events',
+              'reliability_formal_completeness_overrides',
+              'reliability_amp_recommendations',
+              'reliability_reporting_schedule',
+              'reliability_formal_distributions',
+          }
+          expected_triggers = {
+              'trg_rel_formal_report_guard',
+              'trg_rel_formal_section_guard',
+              'trg_rel_formal_req_guard',
+              'trg_rel_formal_source_guard',
+              'trg_rel_formal_override_guard',
+              'trg_rel_formal_approval_append',
+              'trg_rel_formal_lifecycle_append',
+          }
+          engine = create_engine(os.environ['DATABASE_URL'])
+          with engine.connect() as connection:
+              tables = set(connection.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema='public'" )).scalars())
+              triggers = set(connection.execute(text("SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema='public'" )).scalars())
+          missing_tables = expected_tables - tables
+          missing_triggers = expected_triggers - triggers
+          assert not missing_tables, f'Missing formal Reliability tables: {sorted(missing_tables)}'
+          assert not missing_triggers, f'Missing formal Reliability immutability/audit triggers: {sorted(missing_triggers)}'
+          print('formal Reliability Programme schema verification passed')
           PY
 
       - name: Verify formula, workbook and exactness schema
@@ -225,6 +267,9 @@ jobs:
       - name: Run PostgreSQL operational-source integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_operational_sources_regression.py
 
+      - name: Run PostgreSQL formal snapshot concurrency regression
+        run: python backend/amodb/apps/reliability/tests/postgresql_formal_snapshot_guard_regression.py
+
       - name: Run PostgreSQL workbook-reference integrity regression
         run: python backend/amodb/apps/reliability/tests/postgresql_workbook_reference_integrity_regression.py
 
@@ -254,7 +299,7 @@ jobs:
         run: npm exec -- vitest run src/pages/reliability/reliabilityWorkbookParityModel.test.ts
       - name: Lint Reliability-owned frontend
         working-directory: frontend
-        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts
+        run: npm exec -- eslint src/pages/reliability/*.ts src/pages/reliability/*.tsx src/services/reliability.ts tests/e2e/reliability-workbook-parity-ci.spec.ts tests/e2e/reliability-formal-reporting-ci.spec.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
@@ -274,4 +319,4 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:4173 >/dev/null
-          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts
+          npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts tests/e2e/reliability-formal-reporting-ci.spec.ts
