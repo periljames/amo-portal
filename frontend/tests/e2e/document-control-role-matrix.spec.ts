@@ -45,7 +45,7 @@ async function workflow(page: Page): Promise<{ state: string; version: number }>
   expect(response.ok(), await response.text()).toBeTruthy();
   const payload = await response.json();
   const row = payload.workflows.find((item: { id: string }) => item.id === WORKFLOW_ID);
-  if (!row) throw new Error(`Workflow ${WORKFLOW_ID} is not visible to the authenticated fixture`);
+  if (!row) throw new Error(`Workflow ${WORKFLOW_ID} is not visible to the authenticated controller fixture`);
   return { state: row.state, version: row.version };
 }
 
@@ -70,6 +70,17 @@ async function openWorkspace(page: Page): Promise<void> {
   await expect(page.getByTestId("document-workspace")).toBeVisible({ timeout: 30_000 });
 }
 
+async function captureUiTransition(page: Page, actionButton: ReturnType<Page["getByRole"]>) {
+  const responsePromise = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+      && response.url().includes(`/workflows/${WORKFLOW_ID}/transition`),
+  );
+  await actionButton.click();
+  const response = await responsePromise;
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<{ state: string; version: number }>;
+}
+
 test.describe.serial("DMS authoritative role matrix", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_DOCUMENT_GOVERNANCE=1 to run authenticated DMS role checks.");
 
@@ -77,14 +88,18 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await signIn(page, READER_EMAIL, ROLE_PASSWORD);
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
     await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("row").filter({ hasText: "DMS-CI-MOM" }).getByRole("button", { name: /Open/i }).click();
-    await expect(page.getByTestId("document-workspace")).toBeVisible({ timeout: 30_000 });
+    const row = page.getByRole("row").filter({ hasText: "DMS-CI-MOM" });
+    await expect(row.getByRole("button", { name: "Read", exact: true })).toBeVisible();
+    await row.getByRole("button", { name: "Read", exact: true }).click();
+    await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
+
+    await openWorkspace(page);
     await expect(page.getByRole("button", { name: "Read current", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Review assigned change", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Responsibilities/i })).toHaveCount(0);
 
-    const current = await workflowForControllerOnly(page);
-    expect(current.status).toBe(403);
+    const forbidden = await workflowForControllerOnly(page);
+    expect(forbidden.status()).toBe(403);
   });
 
   test("confirmed technical reviewer receives only the technical decision", async ({ page }) => {
@@ -97,9 +112,9 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve technical review", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve Quality review", exact: true })).toHaveCount(0);
-    await dialog.getByRole("button", { name: "Approve technical review", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Assigned document review" })).toHaveCount(0, { timeout: 30_000 });
-    await expect.poll(async () => (await workflow(page)).state).toBe("TECHNICAL_APPROVED");
+    const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve technical review", exact: true }));
+    expect(result.state).toBe("TECHNICAL_APPROVED");
+    expect(result.version).toBe(2);
   });
 
   test("controller performs handoff but cannot impersonate the Quality reviewer decision surface", async ({ page }) => {
@@ -108,7 +123,8 @@ test.describe.serial("DMS authoritative role matrix", () => {
     expect(current.state).toBe("TECHNICAL_APPROVED");
     const response = await transitionAsCurrentUser(page, "START_QUALITY_REVIEW", current.version);
     expect(response.status(), await response.text()).toBe(200);
-    await expect.poll(async () => (await workflow(page)).state).toBe("QUALITY_REVIEW");
+    const result = await response.json();
+    expect(result.state).toBe("QUALITY_REVIEW");
   });
 
   test("confirmed Quality reviewer receives and records the Quality decision", async ({ page }) => {
@@ -118,29 +134,32 @@ test.describe.serial("DMS authoritative role matrix", () => {
     const dialog = page.getByRole("dialog", { name: "Assigned document review" });
     await expect(dialog.getByRole("button", { name: "Approve Quality review", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve technical review", exact: true })).toHaveCount(0);
-    await dialog.getByRole("button", { name: "Approve Quality review", exact: true }).click();
-    await expect.poll(async () => (await workflow(page)).state).toBe("QUALITY_APPROVED");
+    const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve Quality review", exact: true }));
+    expect(result.state).toBe("QUALITY_APPROVED");
+    expect(result.version).toBe(4);
   });
 
   test("controller hands off to management and governed approver records the decision", async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    let current = await workflow(page);
+    const current = await workflow(page);
     expect(current.state).toBe("QUALITY_APPROVED");
-    let response = await transitionAsCurrentUser(page, "SUBMIT_ACCOUNTABLE_MANAGER", current.version);
+    const response = await transitionAsCurrentUser(page, "SUBMIT_ACCOUNTABLE_MANAGER", current.version);
     expect(response.status(), await response.text()).toBe(200);
-    await expect.poll(async () => (await workflow(page)).state).toBe("ACCOUNTABLE_MANAGER_APPROVAL");
+    const handoff = await response.json();
+    expect(handoff.state).toBe("ACCOUNTABLE_MANAGER_APPROVAL");
+    expect(handoff.version).toBe(5);
 
     await signIn(page, MANAGEMENT_EMAIL, ROLE_PASSWORD);
     await openWorkspace(page);
     await page.getByRole("button", { name: "Review assigned change", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Assigned document review" });
     await expect(dialog.getByRole("button", { name: "Approve for management", exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Approve for management", exact: true }).click();
-    await expect.poll(async () => (await workflow(page)).state).toBe("SCHEDULED_FOR_EFFECTIVITY");
+    const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve for management", exact: true }));
+    expect(result.state).toBe("SCHEDULED_FOR_EFFECTIVITY");
+    expect(result.version).toBe(6);
 
-    current = await workflow(page);
-    response = await transitionAsCurrentUser(page, "PUBLISH", current.version);
-    expect(response.status()).toBe(403);
+    const forbiddenPublish = await transitionAsCurrentUser(page, "PUBLISH", result.version);
+    expect(forbiddenPublish.status()).toBe(403);
   });
 });
 
