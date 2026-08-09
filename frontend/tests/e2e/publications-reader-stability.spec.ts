@@ -13,6 +13,14 @@ const SEARCH_TERM = process.env.E2E_PUBLICATION_SEARCH_TERM || TOC_TARGET;
 const SETTLE_MS = Number(process.env.E2E_PUBLICATION_STABILITY_SETTLE_MS || 5_000);
 const RENDER_MS = Number(process.env.E2E_PUBLICATION_TARGET_RENDER_MS || 8_000);
 
+test.use({
+  viewport: { width: 1440, height: 900 },
+  ignoreHTTPSErrors: true,
+  trace: "retain-on-failure",
+  screenshot: "only-on-failure",
+  video: "retain-on-failure",
+});
+
 function requiredConfiguration(): string[] {
   const missing: string[] = [];
   if (!ADMIN_EMAIL) missing.push("E2E_AMO_ADMIN_EMAIL");
@@ -26,9 +34,12 @@ function requiredConfiguration(): string[] {
 async function signIn(page: Page): Promise<void> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
+  const continueButton = page.getByRole("button", { name: "Continue", exact: true });
+  if (await continueButton.count()) {
+    await continueButton.click();
+  }
+  await page.locator("#password").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 }
 
@@ -171,14 +182,6 @@ test.describe("Publications reader integrated real-world stability", () => {
     "Set E2E_LIVE_PUBLICATIONS_READER=1 to run authenticated publication stability checks.",
   );
 
-  test.use({
-    viewport: { width: 1440, height: 900 },
-    ignoreHTTPSErrors: true,
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
-  });
-
   test.beforeEach(async ({ page }) => {
     const missing = requiredConfiguration();
     if (missing.length) {
@@ -203,11 +206,31 @@ test.describe("Publications reader integrated real-world stability", () => {
     await expectNoReaderError(page);
   });
 
+  test("releasing a PDF deep link preserves router history state", async ({ page }) => {
+    const expectedState = await page.evaluate(() => {
+      const current = window.history.state;
+      const nextState = current && typeof current === "object"
+        ? { ...current, readerHistoryMarker: "preserve-me" }
+        : { readerHistoryMarker: "preserve-me" };
+      window.history.replaceState(
+        nextState,
+        "",
+        `${window.location.pathname}${window.location.search}#pdf-page-2`,
+      );
+      return window.history.state;
+    });
+
+    await expect(page).toHaveURL(/#pdf-page-2$/);
+    await page.locator(".pdfv3-viewport").dispatchEvent("pointerdown");
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
+    expect(await page.evaluate(() => window.history.state)).toEqual(expectedState);
+  });
+
   test("scale changes never replay an old Contents request", async ({ page }) => {
     await openContentsTarget(page);
 
     const manuallyReachedPage = await scrollUntilPageChanges(page, 1, TOC_TARGET_PAGE);
-    const scale = page.getByLabel("Zoom");
+    const scale = page.getByLabel("Zoom", { exact: true });
     for (const value of ["WIDTH", "PAGE", "ACTUAL", "125", "AUTO"]) {
       await scale.selectOption(value);
       await expect(page.locator(".pdfv3-page.is-current.is-ready")).toBeVisible({ timeout: RENDER_MS });
