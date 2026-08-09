@@ -10,12 +10,21 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from .workspace_decision_policy import is_decision_approver, require_decision_approver
 from .workspace_integration_router import refresh_integration_link
-from .workspace_router import transition_workflow as _transition_workflow
+from .workspace_responsibility_access import require_workflow_action
+from .workspace_router import _event
 from .workspace_service import (
-    is_approver,
-    require_approver,
+    audit,
+    get_manual,
+    get_revision,
+    next_workflow_state,
+    publish_revision,
     resolve_tenant,
+    serialize_workflow,
+    sync_revision_status,
+    utcnow,
+    workflow_blockers,
 )
 
 
@@ -98,7 +107,7 @@ def _validate_readiness_change(
     if not any(value is not None for value in proposed.values()):
         return
 
-    require_approver(current_user)
+    require_decision_approver(current_user)
     comments = str(payload.comments or "").strip()
     evidence = list(payload.evidence or [])
 
@@ -267,6 +276,19 @@ def get_profile_by_workflow(
     )
 
 
+def _dedupe_blockers(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    result: list[dict[str, str]] = []
+    for group in groups:
+        for blocker in group:
+            key = (str(blocker.get("code") or ""), str(blocker.get("message") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(blocker)
+    return result
+
+
 @router.post(
     "/t/{tenant_slug}/workflows/{workflow_id}/transition",
     include_in_schema=False,
@@ -291,6 +313,18 @@ def transition_workflow_with_release_guards(
     if not workflow:
         raise HTTPException(status_code=404, detail="Document workflow not found")
 
+    require_workflow_action(
+        db,
+        workflow=workflow,
+        user=current_user,
+        action=payload.action,
+    )
+    if workflow.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Workflow has changed", "current_version": workflow.version, "state": workflow.state},
+        )
+
     _validate_readiness_change(
         db,
         tenant=tenant,
@@ -299,26 +333,86 @@ def transition_workflow_with_release_guards(
         current_user=current_user,
     )
 
-    if payload.effective_at is not None and not is_approver(current_user):
+    if payload.effective_at is not None and not is_decision_approver(current_user):
         raise HTTPException(
             status_code=403,
-            detail="Document approval privileges are required to schedule effectivity",
+            detail="Accountable document approval privileges are required to schedule effectivity",
         )
 
+    if payload.action in {"PUBLISH", "ARCHIVE", "SCHEDULE_EFFECTIVITY"}:
+        require_decision_approver(current_user)
+
+    manual = get_manual(db, tenant, workflow.manual_id)
+    revision = get_revision(db, manual, workflow.revision_id)
+    if revision.immutable_locked and workflow.state not in {"PUBLISHED"}:
+        raise HTTPException(status_code=409, detail="The revision is immutable")
+
+    if payload.training_readiness_status is not None:
+        workflow.training_readiness_status = payload.training_readiness_status
+    if payload.qms_readiness_status is not None:
+        workflow.qms_readiness_status = payload.qms_readiness_status
+    if payload.distribution_readiness_status is not None:
+        workflow.distribution_readiness_status = payload.distribution_readiness_status
+    if payload.effective_at is not None:
+        workflow.effective_at = payload.effective_at
+
+    previous_state = workflow.state
+    next_state = next_workflow_state(workflow, payload.action)
     if payload.action == "PUBLISH":
-        require_approver(current_user)
-        blockers = _publication_blockers(db, tenant=tenant, workflow=workflow)
+        release_blockers = _publication_blockers(db, tenant=tenant, workflow=workflow)
+        state_blockers = workflow_blockers(db, workflow)
+        blockers = _dedupe_blockers(release_blockers, state_blockers)
         if blockers:
             raise HTTPException(
                 status_code=409,
                 detail={"message": "Publication is blocked", "blockers": blockers},
             )
+        if workflow.effective_at and workflow.effective_at > utcnow():
+            raise HTTPException(status_code=409, detail="The scheduled effectivity time has not been reached")
+        publish_revision(db, tenant, manual, revision)
+    else:
+        sync_revision_status(revision, next_state)
 
-    return _transition_workflow(
-        tenant_slug=tenant_slug,
-        workflow_id=workflow_id,
-        payload=payload,
-        request=request,
-        db=db,
-        current_user=current_user,
+    workflow.state = next_state
+    workflow.version += 1
+    workflow.updated_at = utcnow()
+    decision = dm.DocumentWorkflowDecision(
+        tenant_id=tenant.amo_id,
+        workflow_id=workflow.id,
+        step_code=payload.action,
+        decision=(
+            "APPROVED"
+            if payload.action.startswith(("APPROVE", "MARK", "PUBLISH", "SCHEDULE"))
+            else "SUBMITTED"
+            if payload.action.startswith(("SUBMIT", "RESUBMIT"))
+            else "CORRECTIONS_REQUESTED"
+            if payload.action == "REQUEST_CORRECTIONS"
+            else "COMPLETED"
+        ),
+        actor_user_id=current_user.id,
+        from_state=previous_state,
+        to_state=next_state,
+        comments=payload.comments,
+        evidence_json=list(payload.evidence),
     )
+    db.add(decision)
+    audit(
+        db,
+        tenant,
+        request,
+        "document.workflow.transitioned",
+        "document_workflow",
+        workflow.id,
+        {"action": payload.action, "from": previous_state, "to": next_state, "version": workflow.version},
+    )
+    db.commit()
+    _event(
+        event_type="doc_control.workflow_transitioned",
+        entity_type="document_workflow",
+        entity_id=workflow.id,
+        action=payload.action.lower(),
+        user=current_user,
+        tenant_id=tenant.amo_id,
+        metadata={"manual_id": manual.id, "revision_id": revision.id, "from": previous_state, "to": next_state},
+    )
+    return {**serialize_workflow(workflow), "blockers": workflow_blockers(db, workflow)}
