@@ -128,6 +128,7 @@ export const platformOperationsApi = {
   saveView: (payload: Record<string, any>) => request<Record<string, any>>("/tenant-health/saved-views", { method: "POST", body: JSON.stringify(payload) }),
   deleteSavedView: (id: string) => request<void>(`/tenant-health/saved-views/${encodeURIComponent(id)}`, { method: "DELETE" }),
   productRollups: (mode: DataMode = "REAL", days = 30) => request<Record<string, any>>(`/product-analytics/rollups?${queryString({ data_mode: mode, days })}`),
+  productInsights: (mode: DataMode = "REAL", days = 30, dormantDays = 30) => request<Record<string, any>>(`/product-analytics/insights?${queryString({ data_mode: mode, days, dormant_days: dormantDays })}`),
   users: (params: URLSearchParams) => request<Record<string, any>>(`/users?${params.toString()}`),
   usersV2: (params: UserHubQuery) => request<Record<string, any>>(`/users/v2?${queryString(params)}`),
   usersBulk: (payload: Record<string, any>) => request<Record<string, any>>("/users/v2/bulk", { method: "POST", body: JSON.stringify(payload) }),
