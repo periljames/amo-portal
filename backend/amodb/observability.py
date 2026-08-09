@@ -489,17 +489,45 @@ def record_provider_call(*, provider: object, operation: object, status: str, du
 
 @contextmanager
 def operation_span(name: str, **attributes: object) -> Iterator[None]:
+    """Create one fail-open telemetry span without changing business semantics."""
+
     if not _enabled():
         yield
         return
+
+    span_manager = None
     try:
         from opentelemetry import trace
-        with trace.get_tracer("amo-portal.operations").start_as_current_span(name) as span:
-            for key, value in attributes.items():
-                if value is not None:
-                    # Span attributes are intentionally not metric labels. Callers
-                    # must still avoid secrets and sensitive payload contents.
-                    span.set_attribute(key, value)
-            yield
+
+        span_manager = trace.get_tracer("amo-portal.operations").start_as_current_span(name)
+        span = span_manager.__enter__()
     except Exception:
+        # Telemetry setup must never prevent the wrapped operation from running.
         yield
+        return
+
+    try:
+        for key, value in attributes.items():
+            if value is None:
+                continue
+            try:
+                # Span attributes are intentionally not metric labels. Callers
+                # must still avoid secrets and sensitive payload contents.
+                span.set_attribute(key, value)
+            except Exception:
+                # A malformed attribute must not affect the business operation.
+                pass
+        yield
+    except BaseException as exc:
+        try:
+            span_manager.__exit__(type(exc), exc, exc.__traceback__)
+        except Exception:
+            # Span teardown must not replace the original business exception.
+            pass
+        raise
+    else:
+        try:
+            span_manager.__exit__(None, None, None)
+        except Exception:
+            # Telemetry teardown is fail-open on successful business execution.
+            pass
