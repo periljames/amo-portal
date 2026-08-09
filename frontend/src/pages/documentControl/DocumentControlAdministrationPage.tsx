@@ -5,6 +5,7 @@ import {
   FileCog,
   FileStack,
   FolderTree,
+  History,
   Link2,
   Plus,
   RefreshCw,
@@ -19,6 +20,7 @@ import {
   type DocumentControlAdministration,
 } from "../../services/documentControlReports";
 import DocumentControlShell, {
+  DocumentControlEmpty,
   DocumentControlError,
   DocumentControlLoading,
   DocumentControlSection,
@@ -26,6 +28,12 @@ import DocumentControlShell, {
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./dmsHome.css";
 import "./dmsAdministration.css";
+
+function formatAuditTime(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
 
 export default function DocumentControlAdministrationPage() {
   const navigate = useNavigate();
@@ -103,6 +111,8 @@ export default function DocumentControlAdministrationPage() {
     setSettings({ ...settings, retention_classes: settings.retention_classes.filter((_item, itemIndex) => itemIndex !== index) });
   };
 
+  const auditHistory = settings?.audit_history || [];
+
   return <DocumentControlShell
     title="Administration"
     eyebrow="LOW-FREQUENCY CONTROL"
@@ -163,6 +173,10 @@ export default function DocumentControlAdministrationPage() {
             <label><input type="checkbox" checked={settings.physical_copy_policy.location_verification_required} onChange={(event) => setSettings({ ...settings, physical_copy_policy: { ...settings.physical_copy_policy, location_verification_required: event.target.checked } })} /> Location verification required</label>
             <label><input type="checkbox" checked={settings.physical_copy_policy.recall_on_supersession} onChange={(event) => setSettings({ ...settings, physical_copy_policy: { ...settings.physical_copy_policy, recall_on_supersession: event.target.checked } })} /> Recall copies on supersession</label>
           </div>
+        </DocumentControlSection>
+
+        <DocumentControlSection title="Administration audit history" description={`The latest ${settings.audit_history_limit || 25} policy changes are retained server-side and shown here for controller verification.`}>
+          {auditHistory.length ? <div className="dc-table-wrap" data-testid="administration-audit-history"><table className="dc-table"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Evidence</th></tr></thead><tbody>{auditHistory.map((item) => <tr key={item.id}><td>{formatAuditTime(item.at)}</td><td><strong>{item.action}</strong></td><td>{item.actor_id || "System"}</td><td>{item.changes?.before && item.changes?.after ? "Before / after retained" : "Change payload retained"}</td></tr>)}</tbody></table></div> : <DocumentControlEmpty icon={History} title="No administration changes yet" message="The first governed administration change will appear here after it is saved." />}
         </DocumentControlSection>
 
         <DocumentControlSection title="Administrative tools" description="Specialist configuration remains available without occupying permanent DMS navigation.">
