@@ -11,13 +11,15 @@ from amodb.apps.platform.ops_capacity_router import router as capacity_router
 from amodb.apps.platform.ops_console_router import broker, router as console_router
 from amodb.apps.platform.ops_gateway import router as operations_router, snapshot_refresher, snapshot_store
 from amodb.apps.platform.ops_management_router import router as management_router
+from amodb.apps.platform.ops_metric_router import router as metric_router
+from amodb.apps.platform.ops_slo_router import router as slo_router
 from amodb.database import dispose_engines, read_engine, write_engine
 from amodb.observability import configure_telemetry
 
 
 app = FastAPI(
     title="AMO Portal Platform Operations Gateway",
-    version="2.4.0",
+    version="2.5.0",
     docs_url=None if os.getenv("APP_ENV", "").lower() in {"prod", "production"} else "/docs",
 )
 
@@ -33,6 +35,8 @@ app.include_router(console_router, prefix="/platform")
 app.include_router(operations_router)
 app.include_router(versioned_ops_router)
 app.include_router(capacity_router)
+app.include_router(metric_router)
+app.include_router(slo_router)
 app.include_router(management_router)
 configure_telemetry(app, service_name=os.getenv("OTEL_PLATFORM_OPS_SERVICE_NAME", "amo-portal-platform-ops"), engines=(write_engine, read_engine))
 
