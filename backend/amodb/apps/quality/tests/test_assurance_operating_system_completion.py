@@ -8,6 +8,7 @@ from alembic.script import ScriptDirectory
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_case_router import router as assurance_case_router
+from amodb.apps.quality.audit_checklist_execution_router import router as audit_checklist_execution_router
 from amodb.apps.quality.audit_checklist_template_router import router as audit_checklist_template_router
 from amodb.apps.quality.audit_closure_router import router as audit_closure_router
 from amodb.apps.quality.audit_deferral_router import router as audit_deferral_router
@@ -40,7 +41,7 @@ def _matching(router, path: str, method: str):
 
 def test_repository_has_one_expected_alembic_head() -> None:
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-    assert script.get_heads() == ["quality_260809_effect_response"]
+    assert script.get_heads() == ["quality_260809_checklist_exec"]
 
 
 def test_people_router_exposes_governed_privilege_and_independence_contract() -> None:
@@ -114,6 +115,10 @@ def test_full_audit_governance_contract() -> None:
         ("/audits/{audit_id}/checklist-bindings", "POST"),
     }.issubset(_methods(audit_checklist_template_router))
     assert {
+        ("/audits/{audit_id}/checklist-execution-governance", "GET"),
+        ("/audits/{audit_id}/checklist-items/{item_id}/execution-governance", "PATCH"),
+    }.issubset(_methods(audit_checklist_execution_router))
+    assert {
         ("/audits/{audit_id}/report-revisions", "GET"),
         ("/audits/{audit_id}/report-revisions/adopt-current", "POST"),
         ("/audits/{audit_id}/report-revisions/{revision_id}/transitions", "POST"),
@@ -149,6 +154,7 @@ def test_new_operating_system_models_are_registered_in_shared_metadata() -> None
         "quality_audit_preparation_revisions", "quality_audit_preparation_events",
         "quality_audit_notice_policies", "quality_audit_notices", "quality_audit_notice_events",
         "quality_audit_checklist_templates", "quality_audit_checklist_template_revisions", "quality_audit_checklist_bindings",
+        "quality_audit_checklist_execution_governance", "quality_audit_checklist_execution_events",
         "quality_audit_report_revisions", "quality_audit_report_events",
         "quality_audit_closure_states", "quality_audit_closure_events",
         "quality_audit_deferrals", "quality_audit_deferral_events", "quality_audit_source_links",
@@ -176,6 +182,8 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         ("/audits/{audit_id}/notices", "GET", "list_audit_notices"),
         ("/audit-checklist-templates", "GET", "list_checklist_templates"),
         ("/audits/{audit_id}/checklist-bindings", "POST", "apply_checklist_revision"),
+        ("/audits/{audit_id}/checklist-execution-governance", "GET", "list_checklist_execution_governance"),
+        ("/audits/{audit_id}/checklist-items/{item_id}/execution-governance", "PATCH", "update_checklist_execution_governance"),
         ("/audits/{audit_id}/report-revisions", "GET", "list_report_revisions"),
         ("/audits/{audit_id}/closure-state", "GET", "get_audit_closure_state"),
         ("/audit-deferrals", "POST", "request_deferral"),
