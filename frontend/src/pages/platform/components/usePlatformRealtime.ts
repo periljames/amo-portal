@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../../../services/auth";
+import { readPlatformDataMode } from "../../../services/platformEnvironment";
 import { operationsStreamUrl, type DataMode } from "../../../services/platformOperations";
 
 export type PlatformLiveStatus = "connecting" | "live" | "offline";
 
 export type PlatformConsoleSnapshot = Record<string, unknown> & {
   generated_at?: string;
+  data_mode?: DataMode;
   overview?: Record<string, unknown>;
 };
 
@@ -44,6 +46,19 @@ function parseSseBlock(block: string): ParsedSseBlock | null {
   return data.length ? { event, id, data: data.join("\n") } : null;
 }
 
+function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
+  const source = event.snapshot;
+  if (!source) return event;
+  // Legacy Platform navigation badges read a few summary keys at the snapshot
+  // root. Preserve that compatibility while the authoritative Ops payload keeps
+  // those fields grouped under `overview`.
+  const normalizedSnapshot: PlatformConsoleSnapshot = {
+    ...(source.overview || {}),
+    ...source,
+  };
+  return { ...event, snapshot: normalizedSnapshot };
+}
+
 /**
  * Own the single Platform browser SSE connection.
  *
@@ -52,7 +67,8 @@ function parseSseBlock(block: string): ParsedSseBlock | null {
  * window event for page-level consumers. Individual pages must not open their
  * own competing Platform SSE connection.
  */
-export function usePlatformRealtime(enabled = true, dataMode: DataMode = "REAL") {
+export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
+  const selectedMode = dataMode || (typeof window !== "undefined" ? readPlatformDataMode(window.location.search) : "REAL");
   const [status, setStatus] = useState<PlatformLiveStatus>(enabled ? "connecting" : "offline");
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -68,7 +84,8 @@ export function usePlatformRealtime(enabled = true, dataMode: DataMode = "REAL")
     setStatus(next);
   }, []);
 
-  const publish = useCallback((event: PlatformConsoleEvent) => {
+  const publish = useCallback((rawEvent: PlatformConsoleEvent) => {
+    const event = normalizedEvent(rawEvent);
     setLastEvent(event);
     setLastUpdated(new Date(event.created_at || event.snapshot?.generated_at || Date.now()));
     if (event.snapshot) setSnapshot(event.snapshot);
@@ -92,7 +109,7 @@ export function usePlatformRealtime(enabled = true, dataMode: DataMode = "REAL")
 
     void (async () => {
       try {
-        const response = await fetch(operationsStreamUrl(dataMode), {
+        const response = await fetch(operationsStreamUrl(selectedMode), {
           method: "GET",
           credentials: "include",
           signal: controller.signal,
@@ -138,7 +155,7 @@ export function usePlatformRealtime(enabled = true, dataMode: DataMode = "REAL")
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [dataMode, enabled, publish, updateStatus]);
+  }, [enabled, publish, selectedMode, updateStatus]);
 
   const reconnect = useCallback(() => {
     if (!enabled) return;
