@@ -3,212 +3,177 @@
 **Date:** 2026-08-09  
 **Pull request:** #488  
 **Branch:** `agent/qms-assurance-operating-system-refactor`  
-**Base verified at this status snapshot:** `main@e452af62e386db65eddda6ee4ef3d14eacd5739b`  
-**Head at this status snapshot:** `ca878d197a0a661e4c3a667f078572f4b5f4113e`  
-**Release state:** DRAFT — do not merge or mark ready until exact-head acceptance is green.
+**Release state:** DRAFT until the exact head carrying this document is green.  
+**Acceptance source of truth:** the original supplied implementation MD.
 
-## 1. Acceptance source of truth
+## 1. Product architecture implemented
 
-The original supplied implementation MD remains the acceptance contract. This document is a current code-to-requirement map; it is not a substitute for that MD and does not infer completion from CI alone.
-
-The earlier `QMS_ASSURANCE_OPERATING_SYSTEM_REFACTOR_20260808.md` records the architecture and earlier implementation slices. Its phase/slice status statements are historical snapshots where they conflict with this current status file.
-
-## 2. Current product architecture
-
-The permanent Quality operating model remains:
+The permanent Quality operating model is:
 
 ```text
 CONTROL ROOM | PLANNER | MISSIONS | PEOPLE | ASSURANCE | INTELLIGENCE
 ```
 
-Specialist Audit Operations remain a deep governed workflow rather than being flattened into generic Quality registers.
-
-The governing audit lifecycle remains:
+Audit Operations remains a specialist governed workflow inside the Quality assurance system:
 
 ```text
-PROGRAMME
-  → PLAN
-  → SCHEDULE
-  → PREPARE
-  → NOTIFY
-  → EXECUTE
-  → FINDINGS
-  → REPORT
-  → CAR / FOLLOW-UP
-  → EFFECTIVENESS
-  → CLOSEOUT
-  → TREND
+PROGRAMME → PLAN → SCHEDULE → PREPARE → NOTIFY → EXECUTE → FINDINGS
+→ REPORT → CAR / FOLLOW-UP → EFFECTIVENESS → CLOSEOUT → TREND
 ```
 
-## 3. Implemented and retained on PR #488
+The branch implements the six-workspace information architecture without copying authoritative Training, Workforce, Tooling, Stores/Procurement, DMS, Maintenance, Fleet, Reliability or Safety master data into QMS.
 
-The current branch contains first-class implementations for the following original-MD requirements:
+## 2. Original-MD material scope completed in code
 
-- six-workspace Quality information architecture;
+The current branch contains first-class governed implementations for:
+
 - source-backed Control Room;
-- governed Missions and capability-readiness gates;
+- governed Missions, readiness gates and approval decisions;
 - versioned Audit Programme and typed Audit Universe;
 - programme requirement → authoritative Planner lineage;
-- modern Planner plus strategic Year / Quarter and workload / coverage projections;
-- deterministic schedule conflicts and controlled rescheduling;
-- People & Privileges, eligibility and independence declarations;
+- Year / Quarter / Month / Week / Agenda planning plus workload and coverage perspectives;
+- deterministic scheduling conflict detection and controlled rescheduling;
+- People & Privileges, hard eligibility checks and independence declarations;
 - Assurance Cases and structured Investigation Studio;
-- effectiveness plans plus governed downstream responses for ineffective/inconclusive reviews;
-- deterministic Intelligence and source-attributed risk-planning context;
-- Regulatory / Requirement Graph and Approval Digital Twin;
+- effectiveness plans and governed responses for ineffective/inconclusive reviews;
+- deterministic Intelligence, Requirement Graph and Approval Digital Twin;
 - governed audit preparation revisions with immutable issued snapshots;
-- governed audit notice policies, revisions and lifecycle transitions;
-- reusable checklist templates, immutable issued revisions and exact-revision audit binding;
-- checklist template item governance for mandatory/optional semantics and finding-trigger policy;
-- governed report revisions and formal report state transitions;
+- controlled notice policy/revision lifecycle through acknowledgement;
+- reusable checklist templates with immutable issued revisions and exact audit binding;
+- checklist item mandatory/optional state and finding-trigger policy;
+- governed checklist execution with canonical response vocabulary, auditor notes and structured evidence references;
+- governed report revisions and `DRAFT → INTERNAL_REVIEW → APPROVED → ISSUED → SUPERSEDED` transitions;
 - separate `AUDIT EXECUTION CLOSED` and `ASSURANCE FOLLOW-UP COMPLETE` states;
-- governed audit deferrals;
+- governed deferrals with decision/apply workflow;
 - custom and risk-triggered programme occurrences;
 - Mission → Audit and Intelligence signal → Audit handoffs;
-- PostgreSQL tenant RLS and cross-tenant denial probes for the new Quality-owned domains;
-- immutable/append-only event history where the relevant domains require it.
+- governed downstream responses to ineffective effectiveness reviews, including follow-up audit, CAR reopening, additional action, escalation and risk reassessment;
+- PostgreSQL tenant RLS/cross-tenant probes and append-only event history for the new Quality-owned governance domains.
 
-## 4. Frontend integration correction completed on 2026-08-09
+## 3. Checklist execution contract
 
-A code review found that multiple implemented specialist frontend hosts existed but were not mounted into the live Quality route tree. The global Quality enhancement host now mounts the governed operational surfaces instead of leaving them as dormant components.
-
-Mounted surfaces now include:
-
-- strategic Planner views;
-- custom / risk-triggered programme occurrence controls;
-- Mission / Intelligence audit handoffs;
-- checklist revision governance;
-- audit preparation intelligence;
-- audit notice governance;
-- report / closeout governance;
-- effectiveness-response actions.
-
-Audit-record detection excludes collection routes such as programme, schedule, register, checklists and reports so a collection route cannot be misinterpreted as an audit identifier.
-
-## 5. Checklist governance status
-
-Reusable template governance now retains, in the issued revision hash/snapshot:
-
-- section / category;
-- checklist reference;
-- requirement reference;
-- regulatory source;
-- manual source;
-- prompt;
-- expected evidence;
-- response type;
-- applicability;
-- mandatory / optional state;
-- governed finding-trigger policy;
-- sort order.
-
-Finding-trigger policy does not auto-finalize a finding. Human auditor judgment remains authoritative.
-
-### Residual checklist execution gap
-
-The authoritative legacy execution row still exposes the historical response contract:
+The original checklist execution row historically stores:
 
 ```text
-PENDING
-COMPLIANT
-NON_CONFORMING
-OBSERVATION
-NOT_APPLICABLE
+PENDING | COMPLIANT | NON_CONFORMING | OBSERVATION | NOT_APPLICABLE
 ```
 
-The original MD requires the execution contract to support:
+The governed execution layer now exposes the MD vocabulary:
 
 ```text
-COMPLIANT
-NONCOMPLIANT
-OBSERVATION
-NOT_APPLICABLE
-NOT_VERIFIED
+COMPLIANT | NONCOMPLIANT | OBSERVATION | NOT_APPLICABLE | NOT_VERIFIED
 ```
 
-and to retain explicit auditor notes plus evidence attachment/reference semantics.
+Compatibility is intentionally additive:
 
-This must be closed additively. Existing `NON_CONFORMING` records must remain readable; they must not be destructively renamed. `NOT_VERIFIED` must remain an unresolved condition for legacy workflow gates rather than being treated as compliant completion.
+- `NONCOMPLIANT → NON_CONFORMING` in the historical row;
+- `NOT_VERIFIED → PENDING` in the historical row so old closeout gates remain unresolved.
 
-## 6. Risk-planning status
+The same authoritative checklist item is retained. The governance record adds attributable auditor notes, structured evidence references and append-only execution events; it is not a second checklist engine.
 
-The current deterministic risk-planning service fuses governed, attributable pressures including mandatory surveillance, regulatory criticality, universe risk, deferred programme requirements, open findings, overdue CARs, training expiry, supplier approval exposure, tooling/calibration exposure, high critical risks, pending changes, overdue management review, regulator findings, external commitments and Reliability signals.
+## 4. Risk-based audit planning contract
 
-The engine explicitly orders planning attention rather than declaring compliance or generating a predictive probability.
+`GET /audit-programmes/risk-context` now provides deterministic, source-attributed planning context. Mandatory surveillance remains a hard obligation and is never averaged away.
 
-### Residual verification required
+Implemented attributable factors include:
 
-Before calling the original MD's risk-planning section complete, verify and, where needed, add explicit attributable factors for:
+- mandatory regulatory surveillance;
+- regulatory criticality and previous governed Audit Universe risk;
+- time since last attributable audit;
+- historical audit findings;
+- repeat requirement findings across distinct audits;
+- overdue CARs;
+- governed ineffective corrective-action effectiveness conclusions;
+- organizational/process change exposure;
+- governed capability additions/changes from Missions;
+- aircraft-type exposure only from explicit governed Mission scope keys;
+- supplier approval exposure;
+- Reliability events, recurrence and recommendations;
+- tooling/calibration and out-of-tolerance exposure;
+- training/competence exposure;
+- Safety occurrences only through explicit `safety / SAFETY_OCCURRENCE` source references;
+- management-review actions;
+- regulator findings and external commitments;
+- governed deferral pressure.
 
-- time since last audit;
-- repeat audit findings/history;
-- ineffective corrective actions as a direct planning factor;
-- safety occurrences as a named source contract;
-- new capabilities / aircraft types where not already attributable through governed change/Mission sources.
+Calculated factors expose their factor/rule, source category, source-record reference, source date/observation date and rationale. The engine does **not** produce a predictive probability or automated compliance conclusion.
 
-No factor should be claimed merely because a similarly named aggregate exists elsewhere.
+Safety-source rule: generic risk records are never relabelled as Safety occurrences. Specific Safety targeting requires an explicit source reference; specific universe targeting requires an explicit `audit_universe_source_id`.
 
-## 7. Audit lifecycle Playwright acceptance
+Aircraft-source rule: free-text Mission titles/descriptions are never parsed as aircraft-type evidence. Aircraft-type exposure requires an explicit Mission scope field such as `aircraft_type`, `aircraft_types`, `aircraft_type_id` or `aircraft_type_ids`.
 
-A dedicated workflow now exists:
+## 5. Audit lifecycle browser acceptance
+
+Dedicated workflow:
 
 ```text
 .github/workflows/qms-audit-lifecycle-ci.yml
 ```
 
-with check/job naming centered on:
+The complete requirement-to-browser trace is maintained in:
 
 ```text
-Audit lifecycle Playwright
+backend/docs/quality/QMS_AUDIT_ACCEPTANCE_TRACE_20260809.md
 ```
 
-It executes the existing focused Programme, modern Planner, Planner lifecycle, Planner → Audit handoff and Quality usability suites together with:
+The suite now gives named deterministic ownership to all 18 original MD scenarios, including the previously weakly traced actions:
+
+- changing the lead auditor through the authoritative schedule-participant PATCH;
+- creating a structured finding from the Run Hub;
+- creating and associating a CAR using the exact persisted finding ID;
+- governed checklist execution using the canonical response contract.
+
+The lifecycle suite also covers Programme creation/scheduling, quick Planner handoff, conflicts, controlled rescheduling, notices, preparation, reporting, execution closure, retained follow-up, keyboard use, constrained viewports and refresh/deep-link persistence.
+
+## 6. Frontend integration and route ownership
+
+The global Quality enhancement host mounts the governed specialist controls for:
+
+- strategic Planner views;
+- custom/risk-triggered programme occurrences;
+- Mission/Intelligence audit handoffs;
+- checklist template revision governance;
+- checklist execution governance;
+- preparation intelligence;
+- notice governance;
+- report/closeout governance;
+- effectiveness-response actions.
+
+Audit-record detection excludes collection routes so `program`, `schedule`, `register`, `checklists`, `reports` and similar collection paths are never treated as audit identifiers.
+
+### Generic-surface cleanup result
+
+The cleanup requirement was audited rather than interpreted as a deletion target.
+
+Main audit dashboard, planning, schedule detail, register and Run Hub routes already have specialist owners. Two bounded collection routes remain behind the canonical compatibility dispatcher:
+
+- `/quality/audits/checklists`;
+- `/quality/audits/reports`.
+
+They are intentionally retained because they still provide collection/register context underneath specialist checklist/report governance. Removing them would remove working functionality and violate the MD instruction not to delete a working system merely to clean up generic surfaces. Specialist audit-record workflows remain authoritative for revision/approval/issue operations.
+
+## 7. Database and migration state
+
+The expected single Quality migration head is:
 
 ```text
-frontend/tests/e2e/qms-audit-governed-lifecycle.spec.ts
+quality_260809_checklist_exec
 ```
 
-The new governed lifecycle browser contract directly exercises:
+New Quality-owned governance tables are registered in shared SQLAlchemy metadata and are covered by the dedicated completion contract. PostgreSQL probes exercise tenant isolation and append-only/immutability rules for the applicable domains.
 
-- controlled preparation revision creation and issue;
-- notice draft, review, approval, generation, delivery and acknowledgement;
-- report adoption, internal review, approval and issue;
-- execution closure as a state independent from assurance follow-up completion;
-- retention of an open CAR/effectiveness obligation after execution closure;
-- mobile closeout deep-link persistence across refresh.
+## 8. CI / release rule
 
-### Acceptance still required
+No historical green SHA validates a newer head.
 
-Do not declare the original 18-scenario browser Definition of Done complete until the dedicated exact-head check is green and each scenario is traceable to an executed assertion. In particular, independently confirm explicit browser assertions for:
+PR #488 may be considered materially complete only when the exact current head has no required red/cancelled impacted checks and the relevant checks are green, including:
 
-- changing the auditor;
-- controlled rescheduling;
-- conflict detection;
-- creating/associating a CAR from the audit lifecycle;
-- checklist execution using the final canonical response contract.
+- Quality Module CI;
+- QMS Assurance OS Completion CI;
+- Audit lifecycle Playwright;
+- QMS Planner CI when triggered;
+- impacted Document Control Governance CI;
+- relevant PostgreSQL/RLS probes;
+- other repository checks triggered by the final head.
 
-## 8. CI status rule
-
-Green build/typecheck or isolated unit tests are not sufficient.
-
-Ready-for-review requires, on one exact PR head:
-
-- Quality Module CI green;
-- Audit lifecycle Playwright green;
-- QMS Planner CI green when triggered;
-- impacted Document Control Governance CI green;
-- relevant PostgreSQL/RLS probes green;
-- no required impacted repository check red or cancelled;
-- PR still based on the intended current `main` reconciliation.
-
-As of this document commit, the latest exact-head workflows were still queued/running. No green-completion claim is made here.
-
-## 9. Remaining execution order
-
-1. Prove the new dedicated lifecycle browser check and repair any exact assertion/integration failures.
-2. Close the checklist execution response/notes/evidence-reference contract additively and preserve legacy data.
-3. Audit the deterministic risk-planning factor list against the exact original MD and add only genuinely missing authoritative source factors.
-4. Make every one of the original 18 Playwright scenarios independently traceable to an executed test assertion.
-5. Reconcile this status back into the long-form architecture document once code and tests are stable.
-6. Remove obsolete generic QMS surfaces only after their specialist replacements are proven and deep links remain safe.
-7. Keep PR #488 draft until all exact-head acceptance checks are green.
+Until that exact-head condition is met, the PR remains draft. This document records the as-built scope; GitHub Actions remains the source of truth for the final validation state.
