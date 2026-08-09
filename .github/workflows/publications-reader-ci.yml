@@ -188,3 +188,10 @@ jobs:
       - name: Verify light and dark desktop/mobile layouts
         working-directory: frontend
         run: npm run test:tenant-render
+      - name: Upload tenant-shell layout evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tenant-shell-layout-evidence
+          path: frontend/test-results
+          if-no-files-found: warn

@@ -22,6 +22,13 @@ describe("portal-wide modal top layer", () => {
     expect(guard).toContain("portal-modal-fallback-ancestor");
   });
 
+  it("keeps full-height fixed edge drawers as layout hosts instead of centring them", () => {
+    expect(guard).toContain("coversViewportHeight");
+    expect(guard).toContain("touchesViewportEdge");
+    expect(guard).toContain('const edgeDrawer = position === "fixed" && coversViewportHeight && touchesViewportEdge');
+    expect(guard).toContain("coversViewport || edgeDrawer");
+  });
+
   it("mounts the guard in both portal entry paths", () => {
     expect(main).toContain("<QualityEnhancementsRouteGate />");
     expect(routeGate).toContain("<ModalTopLayerGuard />");

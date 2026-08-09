@@ -7,7 +7,12 @@ name: Document Control Governance CI
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_roles_e2e.py"
+      - "backend/amodb/scripts/seed_document_external_assessment_e2e.py"
+      - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
+      - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
+      - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/app/TenantRouteBoundary.tsx"
@@ -15,6 +20,7 @@ name: Document Control Governance CI
       - "frontend/src/utils/departmentAccess.ts"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/ManualReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
@@ -22,21 +28,32 @@ name: Document Control Governance CI
       - "frontend/src/services/config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentControl*"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
       - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/src/components/QMS/PortalTextScaleManager.tsx"
+      - "frontend/src/styles/components/toast.css"
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
+      - "frontend/tests/e2e/document-control-md-completion.spec.ts"
+      - "frontend/tests/e2e/document-control-role-matrix.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
   push:
     branches:
       - agent/dms-reader-governance-completion
+      - agent/dms-frontend-operating-model-refactor
     paths:
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_roles_e2e.py"
+      - "backend/amodb/scripts/seed_document_external_assessment_e2e.py"
+      - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
+      - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
+      - "backend/amodb/alembic/versions/document_control_*.py"
       - "frontend/src/router.tsx"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/app/TenantRouteBoundary.tsx"
@@ -44,6 +61,7 @@ name: Document Control Governance CI
       - "frontend/src/utils/departmentAccess.ts"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/pages/manuals/ManualReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
       - "frontend/src/pages/manuals/PublicationGovernancePanel.tsx"
       - "frontend/src/pages/manuals/publicationReaderGovernanceWorkspace.css"
@@ -51,12 +69,17 @@ name: Document Control Governance CI
       - "frontend/src/services/config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/documentLibrary.ts"
+      - "frontend/src/services/documentControl*"
       - "frontend/src/services/documentGovernance.ts"
       - "frontend/src/services/documentGovernance.test.ts"
       - "frontend/src/services/readerGovernance.ts"
       - "frontend/src/services/readerGovernance.test.ts"
+      - "frontend/src/components/QMS/PortalTextScaleManager.tsx"
+      - "frontend/src/styles/components/toast.css"
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
+      - "frontend/tests/e2e/document-control-md-completion.spec.ts"
+      - "frontend/tests/e2e/document-control-role-matrix.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
   workflow_dispatch:
 
@@ -69,7 +92,7 @@ concurrency:
 
 jobs:
   backend-postgres:
-    name: PostgreSQL migration, routes, security and Document Control tests
+    name: PostgreSQL migration, security, domain and 10k scale gate
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -106,8 +129,16 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Compile governed Document Control backend
-        run: python -m compileall -q amodb/apps/doc_control amodb/jobs/document_governance_backfill.py amodb/scripts/seed_document_governance_e2e.py
+      - name: Compile governed Document Control backend and scale fixtures
+        run: >-
+          python -m compileall -q
+          amodb/apps/doc_control
+          amodb/jobs/document_governance_backfill.py
+          amodb/scripts/seed_document_governance_e2e.py
+          amodb/scripts/seed_document_roles_e2e.py
+          amodb/scripts/seed_document_external_assessment_e2e.py
+          amodb/scripts/seed_document_reader_scale_e2e.py
+          amodb/scripts/benchmark_document_control_library_scale.py
       - name: Verify one Alembic head and merged ancestry
         run: |
           python - <<'PY'
@@ -118,7 +149,7 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert len(heads) == 1, f"Expected one repository Alembic head, got {heads}"
+          assert len(heads) == 1, f"Expected one Alembic head, got: {heads}"
           ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
           required = {
               "docgov_20260806_governance",
@@ -128,15 +159,18 @@ jobs:
               "merge_20260807_qms_planner_aircraft",
               "docgov_merge_20260807_qms",
               "docgov_20260807_qms_audit_runtime",
-              "rel_20260807_main_merge",
               "docgov_rel_20260807_merge",
+              "rel_20260807_main_merge",
+              "rel_20260807_formal_docgov_merge",
+              "docctl_20260808_regmap",
+              "docctl_20260809_main_merge",
           }
           missing = required - ancestry
           assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
           PY
       - name: Upgrade clean PostgreSQL schema
         run: alembic -c amodb/alembic.ini upgrade head
-      - name: Configure mappers and verify governed reader and physical-library routes
+      - name: Configure mappers and verify governed operating routes
         run: |
           python - <<'PY'
           from sqlalchemy.orm import configure_mappers
@@ -155,15 +189,28 @@ jobs:
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/scan",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/circulation",
               "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/label.pdf",
+              "/doc-control/workspace/t/{tenant_slug}/changes-portfolio",
+              "/doc-control/workspace/t/{tenant_slug}/distribution-portfolio",
+              "/doc-control/workspace/t/{tenant_slug}/compliance-portfolio",
+              "/doc-control/workspace/t/{tenant_slug}/reports-portfolio",
           }
           missing = required - paths
           assert not missing, missing
           PY
       - name: Run Document Control governance, library, reader and security tests
         run: pytest -q amodb/apps/doc_control/tests
+      - name: Prove 10k-document PostgreSQL library performance
+        run: python amodb/scripts/benchmark_document_control_library_scale.py
+      - name: Upload 10k library scale evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-library-10k-performance
+          path: backend/test-results/document-control-library-scale.json
+          if-no-files-found: warn
 
   frontend:
-    name: Governed library and reader typecheck, build and contracts
+    name: Governed workspaces, reader contracts, lint and production build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -186,28 +233,49 @@ jobs:
           src/services/documentGovernance.test.ts
           src/services/readerGovernance.test.ts
           src/pages/manuals/PublicationGovernancePanel.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
       - name: Lint changed Document Control and reader surfaces
         run: >-
           npm exec -- eslint
+          src/router.tsx
           src/services/apiClient.ts
           src/services/documentLibrary.ts
+          src/services/documentControlPortfolios.ts
+          src/services/documentControlDistributionPortfolio.ts
+          src/services/documentControlCompliancePortfolio.ts
+          src/services/documentControlReportsPortfolio.ts
+          src/services/documentControlReports.ts
           src/services/documentGovernance.ts
           src/services/readerGovernance.ts
+          src/components/QMS/PortalTextScaleManager.tsx
           src/pages/DocControlPages.tsx
           src/pages/documentControl/documentControlRoute.ts
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
           src/pages/documentControl/DocumentGovernanceRecordPage.tsx
           src/pages/documentControl/DocumentLibraryHubPage.tsx
           src/pages/documentControl/DocumentLibraryCopiesPage.tsx
+          src/pages/documentControl/DocumentControlChangesPortfolioPage.tsx
+          src/pages/documentControl/DocumentControlDistributionPortfolioPage.tsx
+          src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
+          src/pages/documentControl/DocumentControlReportsPage.tsx
+          src/pages/documentControl/DocumentControlAdministrationPage.tsx
+          src/pages/documentControl/DocumentControlRecordPage.tsx
+          src/pages/documentControl/DocumentControlRecordEntryPage.tsx
+          src/pages/documentControl/DocumentControlRecordActions.tsx
+          src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
           src/pages/documentControl/DocumentControlShell.tsx
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/manuals/ManualReaderPage.tsx
           src/pages/manuals/PublicationsReaderPage.tsx
           src/pages/manuals/PublicationGovernancePanel.tsx
           tests/e2e/document-governance-live.spec.ts
+          tests/e2e/document-control-md-completion.spec.ts
+          tests/e2e/document-control-role-matrix.spec.ts
       - name: Build production frontend
         run: npm run build
 
   authenticated-browser:
-    name: Authenticated DMS library, governance, physical custody and reader acceptance
+    name: Production-build authenticated DMS operating-model, role and 2000-page acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -234,11 +302,21 @@ jobs:
       VITE_API_PROXY_TARGET: http://127.0.0.1:8080
       VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
       E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_DIRECT_API_URL: http://127.0.0.1:8080
       E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
       E2E_AMO_CODE: dmsgate
       E2E_AMO_ADMIN_EMAIL: dms-gate@example.com
       E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
       E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
+      E2E_DMS_READER_EMAIL: dms-reader@example.com
+      E2E_DMS_TECH_REVIEWER_EMAIL: dms-tech-reviewer@example.com
+      E2E_DMS_QUALITY_REVIEWER_EMAIL: dms-quality-reviewer@example.com
+      E2E_DMS_MANAGEMENT_APPROVER_EMAIL: dms-management-approver@example.com
+      E2E_DMS_ROLE_PASSWORD: DmsRoles!2026-Local
+      E2E_DMS_CANDIDATE_REVISION_ID: 00000000-0000-4000-8000-000000000500
+      E2E_DMS_WORKFLOW_ID: 00000000-0000-4000-8000-000000000501
+      E2E_DMS_EXTERNAL_SOURCE_ID: 00000000-0000-4000-8000-000000000494
+      E2E_DMS_EXTERNAL_RECEIPT_ID: 00000000-0000-4000-8000-000000000506
     steps:
       - uses: actions/checkout@v6
         with:
@@ -262,13 +340,25 @@ jobs:
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Seed reader, reviewer and management responsibility fixtures
+        working-directory: backend
+        run: python amodb/scripts/seed_document_roles_e2e.py
+      - name: Seed external revision assessment fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_document_external_assessment_e2e.py
+      - name: Replace browser fixture with real 2000-page PDF source
+        working-directory: backend
+        run: python amodb/scripts/seed_document_reader_scale_e2e.py
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Build production frontend for browser acceptance
+        working-directory: frontend
+        run: npm run build
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
-      - name: Start backend and frontend
+      - name: Start backend and production preview
         shell: bash
         run: |
           set -euo pipefail
@@ -279,20 +369,34 @@ jobs:
             sleep 1
           done
           sleep 2
-          if grep -Eq "UndefinedColumn|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
+          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed" /tmp/dms-backend.log; then
             echo "::error::Backend startup reported an ORM/schema integration failure"
             cat /tmp/dms-backend.log
             exit 1
           fi
-          (cd frontend && nohup npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/dms-frontend.log 2>&1 & echo $! > /tmp/dms-frontend.pid)
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
             if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
             sleep 1
           done
-      - name: Run real-login Document Control library, governance and custody acceptance
+      - name: Run real-login Document Control operating-model, MD completion and role-matrix acceptance
         working-directory: frontend
-        run: npm exec -- playwright test tests/e2e/document-governance-live.spec.ts
+        run: >-
+          npm exec -- playwright test
+          tests/e2e/document-governance-live.spec.ts
+          tests/e2e/document-control-md-completion.spec.ts
+          tests/e2e/document-control-role-matrix.spec.ts
+      - name: Verify production runtime logs are clean
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn" /tmp/dms-frontend.log /tmp/dms-backend.log 2>/dev/null; then
+            echo "::error::Material runtime or development-server noise detected during production acceptance"
+            cat /tmp/dms-frontend.log 2>/dev/null || true
+            cat /tmp/dms-backend.log 2>/dev/null || true
+            exit 1
+          fi
       - name: Dump server logs on failure
         if: failure()
         shell: bash
@@ -301,15 +405,15 @@ jobs:
           cat /tmp/dms-backend.log 2>/dev/null || true
           echo '--- frontend ---'
           cat /tmp/dms-frontend.log 2>/dev/null || true
-      - name: Upload Playwright evidence on failure
-        if: failure()
+      - name: Upload Playwright release evidence
+        if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: document-control-governance-playwright
+          name: document-control-operating-model-evidence
           path: |
             frontend/test-results
             frontend/playwright-report
-          if-no-files-found: ignore
+          if-no-files-found: warn
       - name: Stop acceptance servers
         if: always()
         shell: bash

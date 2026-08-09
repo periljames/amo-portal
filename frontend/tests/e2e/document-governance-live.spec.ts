@@ -4,34 +4,66 @@ const LIVE_ENABLED = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
+const ADMIN_STORAGE_STATE = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
+const READER_PAGE_CHECKPOINTS = [100, 500, 1000, 1999] as const;
+const MAX_READER_USABLE_MS = 20_000;
+const MAX_READER_JUMP_MS = 15_000;
+const MAX_MOUNTED_PDF_PAGES = 30;
+
+let materialBrowserErrors: string[] = [];
+let cachedAdminStorage: Record<string, string> | null = null;
 
 test.use({
   viewport: { width: 1440, height: 900 },
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
-  screenshot: "only-on-failure",
+  screenshot: "on",
+  ...(ADMIN_STORAGE_STATE ? { storageState: ADMIN_STORAGE_STATE } : {}),
 });
 
+function watchMaterialBrowserErrors(page: Page): void {
+  materialBrowserErrors = [];
+  page.on("pageerror", (error) => materialBrowserErrors.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (/favicon\.ico/i.test(text)) return;
+    materialBrowserErrors.push(`console: ${text}`);
+  });
+  page.on("response", (response) => {
+    const status = response.status();
+    if (status >= 500) materialBrowserErrors.push(`http ${status}: ${response.url()}`);
+    if (status === 401 && response.url().includes("/auth/portal-preferences")) {
+      materialBrowserErrors.push(`anonymous preference probe: ${response.url()}`);
+    }
+  });
+}
+
+async function restoreCachedAdminSession(page: Page): Promise<boolean> {
+  if (!cachedAdminStorage) return false;
+  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
+  await page.evaluate((storage) => {
+    localStorage.clear();
+    for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
+  }, cachedAdminStorage);
+  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/document-control`);
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+  return true;
+}
+
 async function signIn(page: Page): Promise<void> {
+  if (await restoreCachedAdminSession(page)) return;
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
 
-  // Generic login resolves the AMO in a first "Continue" step, while an
-  // AMO-specific route already has its tenant context and renders Sign In
-  // immediately. Support both paths so this acceptance test exercises the
-  // production tenant login route rather than assuming the generic flow.
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
-  if (await continueButton.count()) {
-    await continueButton.click();
-  }
+  if (await continueButton.count()) await continueButton.click();
 
-  // The password visibility control intentionally contains the word Password
-  // in its accessible name. Target the stable input id so strict-mode browser
-  // acceptance cannot accidentally match that adjacent control.
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+  cachedAdminStorage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
 }
 
 function futureLocalDateTime(hours = 2): string {
@@ -40,28 +72,34 @@ function futureLocalDateTime(hours = 2): string {
   return local.toISOString().slice(0, 16);
 }
 
-test.describe("Document Control governed workflow", () => {
+test.describe("Document Control daily operating model", () => {
   test.skip(!LIVE_ENABLED, "Set E2E_LIVE_DOCUMENT_GOVERNANCE=1 to run authenticated DMS governance checks.");
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
-    await signIn(page);
+    watchMaterialBrowserErrors(page);
+    if (!ADMIN_STORAGE_STATE) await signIn(page);
   });
 
-  test("dashboard queues open a URL-backed bounded company library", async ({ page }) => {
+  test.afterEach(() => {
+    expect(materialBrowserErrors, materialBrowserErrors.join("\n")).toEqual([]);
+  });
+
+  test("Home exposes actionable work surfaces and opens the bounded company library", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control`);
-    await expect(page.getByTestId("document-governance-dashboard")).toBeVisible();
-    const queue = page.getByRole("button", { name: /Ownership requiring confirmation/i });
-    await expect(queue).toBeVisible();
-    await queue.click();
-    await expect(page).toHaveURL(/\/document-control\/library\?.*unresolved_ownership=true/);
-    await expect(page.getByTestId("integrated-document-library")).toBeVisible();
-    await expect(page.getByText("Governance queue")).toBeVisible();
-    await expect(page.getByRole("table")).toBeVisible();
-    await expect(page.getByText("DMS-CI-MOM", { exact: true })).toBeVisible();
+    const home = page.getByTestId("document-control-home");
+    await expect(home).toBeVisible({ timeout: 30_000 });
+
+    for (const section of ["My Work", "Exceptions", "Due Soon", "Recent Changes", "Quick Actions"]) {
+      await expect(home.getByText(section, { exact: true })).toBeVisible();
+    }
+
+    await page.getByRole("button", { name: /Open library/i }).click();
+    await expect(page).toHaveURL(/\/document-control\/library/);
+    await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
   });
 
-  test("company library proves governed policy, external-data currency and full hierarchy navigation", async ({ page }) => {
+  test("company library proves governed categories, external-data currency and hierarchy navigation", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?per_page=25`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
@@ -79,11 +117,10 @@ test.describe("Document Control governed workflow", () => {
     const externalRow = page.getByRole("row").filter({ hasText: "KCAA-CI-EXT-001" });
     await expect(externalRow).toBeVisible({ timeout: 30_000 });
     await expect(externalRow).toContainText("Kenya Civil Aviation Authority");
-    await expect(externalRow).toContainText("CURRENT");
-    await expect(externalRow).toContainText("KCAR 2025 CI proof");
+    await expect(externalRow).toContainText("UNVERIFIED");
+    await expect(externalRow).toContainText("KCAR 2025 CI proof Rev 2");
 
-    await expect(page.getByRole("button", { name: /Full tree/i })).toBeVisible();
-    await page.getByRole("button", { name: /Full tree/i }).click();
+    await page.getByRole("button", { name: /Browse hierarchy/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
     const tree = page.locator(".dc-structure-tree");
     await expect(tree).toBeVisible({ timeout: 30_000 });
@@ -92,7 +129,7 @@ test.describe("Document Control governed workflow", () => {
     await expect(tree).toContainText("KCAA-CI-EXT-001");
   });
 
-  test("bounded library filters survive a hard browser navigation", async ({ page }) => {
+  test("bounded library filters survive hard browser navigation", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=POLICY&per_page=25&sort=code&direction=asc`);
     await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible();
@@ -103,24 +140,116 @@ test.describe("Document Control governed workflow", () => {
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
-  test("document detail exposes identity, ownership, structure, links and detection state", async ({ page }) => {
-    await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    const record = page.getByTestId("document-governance-record");
-    await expect(record).toBeVisible({ timeout: 30_000 });
-    await expect(record.getByText("Ownership and responsibility")).toBeVisible();
-    await expect(record.getByText("Controlled structure")).toBeVisible();
-    await expect(record.getByText("Related controlled items")).toBeVisible();
-    await expect(record.getByText("Detection review")).toBeVisible();
-    await expect(record.getByText("Revision and lifecycle evidence")).toBeVisible();
+  test("all five controller workspaces use their final bounded owners", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/changes`);
+    await expect(page.getByTestId("document-control-changes")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Change lifecycle views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/distribution`);
+    await expect(page.getByTestId("document-control-distribution")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Distribution views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/compliance`);
+    await expect(page.getByTestId("document-control-compliance")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("navigation", { name: "Document assurance views" })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/reports`);
+    await expect(page.getByTestId("document-control-reports")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Export current page CSV/i })).toBeVisible();
+
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/administration`);
+    await expect(page.getByTestId("document-control-administration")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Governance defaults", { exact: true })).toBeVisible();
   });
 
-  test("opening the permitted revision mounts one authoritative reader source", async ({ page }) => {
+  test("legacy list bookmarks converge on canonical workspaces", async ({ page }) => {
+    const cases = [
+      ["drafts", /\/document-control\/changes\?.*view=in-review/],
+      ["change-proposals", /\/document-control\/changes\?.*view=requests/],
+      ["authority", /\/document-control\/changes\?.*view=authority/],
+      ["tr", /\/document-control\/changes\?.*view=temporary-revisions/],
+      ["reviews", /\/document-control\/compliance\?.*view=reviews/],
+      ["external-sources", /\/document-control\/compliance\?.*view=external-sources/],
+      ["integrations", /\/document-control\/compliance\?.*view=relationships/],
+      ["registers", /\/document-control\/reports/],
+      ["settings", /\/document-control\/administration/],
+    ] as const;
+    for (const [legacy, target] of cases) {
+      await page.goto(`/maintenance/${AMO_CODE}/document-control/${legacy}`);
+      await expect(page).toHaveURL(target);
+    }
+  });
+
+  test("document workspace exposes unified lifecycle and clean-database regulatory links", async ({ page }) => {
+    const regulationResponse = page.waitForResponse((response) => response.url().includes(`/documents/${DOCUMENT_ID}/regulation-links`));
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
-    await page.getByRole("button", { name: /Read current issue|Read current revision|Read approved working revision|Read uncontrolled copy/i }).click();
+
+    const workspace = page.getByTestId("document-workspace");
+    await expect(workspace).toBeVisible({ timeout: 30_000 });
+    const regulation = await regulationResponse;
+    expect(regulation.ok(), `regulation-links returned ${regulation.status()}`).toBeTruthy();
+
+    await expect(workspace.getByText("DMS-CI-MOM", { exact: true }).first()).toBeVisible();
+    for (const tab of ["Overview", "Content", "Changes", "Workflow", "Distribution", "Compliance", "Relationships", "History"]) {
+      await expect(workspace.getByRole("button", { name: new RegExp(`^${tab}`) })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: /Read current/i })).toBeVisible();
+  });
+
+  test("2,000-page reader remains bounded and responsive across deep jumps", async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${DOCUMENT_ID}`);
+    const openStarted = Date.now();
+    await page.getByRole("button", { name: /Read current/i }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".pdfv3-viewport")).toHaveCount(1);
-    await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".pdfv3-page.is-ready").first()).toBeVisible({ timeout: MAX_READER_USABLE_MS });
+    const usableMs = Date.now() - openStarted;
+    expect(usableMs).toBeLessThanOrEqual(MAX_READER_USABLE_MS);
+    await expect(page.locator(".pdfv3-pages")).toContainText("of 2000", { timeout: 30_000 });
     await expect(page.locator(".pdfv3-error,.pdfv3-document-error")).toHaveCount(0);
+
+    const readingMode = page.getByRole("group", { name: "Reading mode" });
+    for (const label of ["Standard", "Immersive", "Review changes", "Fullscreen"]) {
+      await expect(readingMode.getByRole("button", { name: new RegExp(label, "i") })).toBeVisible();
+    }
+
+    const jumpMetrics: Array<{ page: number; elapsed_ms: number; mounted_pages: number }> = [];
+    const pageInput = page.getByLabel("Page number");
+    for (const checkpoint of READER_PAGE_CHECKPOINTS) {
+      const started = Date.now();
+      await pageInput.fill(String(checkpoint));
+      await pageInput.press("Enter");
+      await expect(page.locator(`.pdfv3-page[data-page-number="${checkpoint}"].is-ready`)).toBeVisible({ timeout: MAX_READER_JUMP_MS });
+      const elapsedMs = Date.now() - started;
+      const mountedPages = await page.locator(".pdfv3-page").count();
+      expect(elapsedMs).toBeLessThanOrEqual(MAX_READER_JUMP_MS);
+      expect(mountedPages).toBeLessThanOrEqual(MAX_MOUNTED_PDF_PAGES);
+      jumpMetrics.push({ page: checkpoint, elapsed_ms: elapsedMs, mounted_pages: mountedPages });
+    }
+
+    await testInfo.attach("reader-2000-page-performance.json", {
+      body: Buffer.from(JSON.stringify({
+        pages: 2000,
+        first_usable_ms: usableMs,
+        max_first_usable_ms: MAX_READER_USABLE_MS,
+        max_jump_ms: MAX_READER_JUMP_MS,
+        max_mounted_pages: MAX_MOUNTED_PDF_PAGES,
+        jumps: jumpMetrics,
+      }, null, 2)),
+      contentType: "application/json",
+    });
+  });
+
+  test("200 percent visual zoom keeps core Home actions reachable and keyboard focus visible", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control`);
+    await expect(page.getByTestId("document-control-home")).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+    const libraryButton = page.getByRole("button", { name: /Open library/i });
+    await expect(libraryButton).toBeVisible();
+    await libraryButton.focus();
+    await expect(libraryButton).toBeFocused();
+    await expect(page.getByText("My Work", { exact: true })).toBeVisible();
   });
 
   test("physical library registers, labels, checks out and returns one numbered copy", async ({ page }) => {

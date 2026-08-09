@@ -11,7 +11,7 @@ def read(relative: str) -> str:
 
 def test_procurement_workspace_is_split_and_canonical():
     module = read("pages/procurement/ProcurementModule.tsx")
-    shared = read("pages/procurement/procurementUiShared.tsx")
+    navigation_model = read("pages/procurement/procurementUiModel.ts")
     router = read("router.tsx")
     assert "ProcurementSections" in module
     assert "ProcurementForms" in module
@@ -20,7 +20,7 @@ def test_procurement_workspace_is_split_and_canonical():
     assert 'parts[2] === "procurement"' in router
     assert 'parts[2] === "procurement" || parts[2] === "stores"' not in router
     for section in ["Command", "Requests", "Sourcing", "Orders", "Receiving", "Suppliers", "Quality Control", "Documents"]:
-        assert section in shared
+        assert section in navigation_model
 
 
 def test_procurement_feedback_and_loading_are_accessible():

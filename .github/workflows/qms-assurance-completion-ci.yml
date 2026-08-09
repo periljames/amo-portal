@@ -52,14 +52,19 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Compile complete Quality governance surface
         run: python -m compileall -q amodb/apps/quality amodb/alembic/versions
-      - name: Prove one Alembic head
+      - name: Prove one Alembic head with completed QMS ancestry
         run: |
           python - <<'PY'
           from alembic.config import Config
           from alembic.script import ScriptDirectory
-          heads = ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads()
-          assert heads == ["quality_260809_checklist_exec"], heads
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          assert len(heads) == 1, heads
+          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+          assert "quality_260809_checklist_exec" in ancestry, heads
           print("single Alembic head:", heads[0])
+          print("QMS completion revision retained in ancestry")
           PY
       - name: Run Assurance OS completion contracts
         run: |

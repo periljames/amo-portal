@@ -18,7 +18,6 @@ from . import knowledge_models as km
 from .governance_service import effective_assignments, serialize_assignment
 from .workspace_service import (
     is_control_user,
-    readable_revision,
     resolve_tenant,
     role_value,
     serialize_manual,
@@ -104,6 +103,34 @@ def _scope_match(scope_column, key: str, expected: str, *, case_insensitive: boo
     candidate = func.upper(values.c.value) if case_insensitive else values.c.value
     target = expected.upper() if case_insensitive else expected
     return select(1).select_from(values).where(candidate == target).exists()
+
+
+def _page_read_target(
+    manual: manual_models.Manual,
+    *,
+    controller: bool,
+    revisions_by_id: dict[str, manual_models.ManualRevision],
+    latest_by_manual: dict[str, manual_models.ManualRevision],
+) -> tuple[manual_models.ManualRevision | None, str]:
+    """Resolve a library-row read target from the already bulk-loaded page data.
+
+    This intentionally mirrors ``workspace_service.readable_revision`` without
+    issuing one or more revision queries for every result row.  The canonical
+    reader still validates the target independently when opened.
+    """
+    if manual.current_published_rev_id:
+        published = revisions_by_id.get(manual.current_published_rev_id)
+        if (
+            published
+            and published.manual_id == manual.id
+            and published.status_enum == manual_models.ManualRevisionStatus.PUBLISHED
+        ):
+            return published, "PUBLISHED"
+    if controller:
+        latest = latest_by_manual.get(manual.id)
+        if latest:
+            return latest, "UNCONTROLLED"
+    return None, "NONE"
 
 
 @router.get("/t/{tenant_slug}/documents", include_in_schema=False)
@@ -298,8 +325,10 @@ def list_visible_documents(
         .all()
     )
     latest_by_manual: dict[str, manual_models.ManualRevision] = {}
+    revisions_by_id: dict[str, manual_models.ManualRevision] = {}
     for revision in revisions:
         latest_by_manual.setdefault(revision.manual_id, revision)
+        revisions_by_id[revision.id] = revision
 
     visible_nodes = (
         db.query(km.DocumentationNode)
@@ -426,7 +455,12 @@ def list_visible_documents(
     items: list[dict] = []
     for manual in manuals:
         profile = profiles.get(manual.id)
-        target, target_kind = readable_revision(db, manual, current_user)
+        target, target_kind = _page_read_target(
+            manual,
+            controller=controller,
+            revisions_by_id=revisions_by_id,
+            latest_by_manual=latest_by_manual,
+        )
         latest = latest_by_manual.get(manual.id) if controller else target
         payload = serialize_manual(manual, profile, target, target_kind, latest)
         node = nodes.get(manual.id)

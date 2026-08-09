@@ -207,6 +207,12 @@ export default defineConfig(({ mode }) => {
       allowedHosts,
       proxy,
     },
+    // Authenticated release acceptance deliberately exercises the built bundle
+    // through `vite preview`; keep same-origin API semantics identical to dev.
+    preview: {
+      allowedHosts,
+      proxy,
+    },
     build: {
       manifest: true,
       sourcemap: false,
