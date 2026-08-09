@@ -60,7 +60,14 @@ jobs:
         run: python -m compileall -q amodb/apps/doc_control amodb/apps/manuals
       - name: Run Document Control domain invariants
         working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests
+        run: pytest -q amodb/apps/doc_control/tests --junitxml=test-results/document-control-domain.xml
+      - name: Upload Document Control pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-domain-pytest
+          path: backend/test-results/document-control-domain.xml
+          if-no-files-found: warn
       - name: Run Publications integration contracts
         working-directory: backend
         run: >-

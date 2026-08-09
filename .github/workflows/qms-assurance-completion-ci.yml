@@ -6,7 +6,6 @@ on:
       - "backend/amodb/apps/quality/**"
       - "backend/amodb/alembic/versions/quality_260809_*.py"
       - "backend/amodb/alembic/versions/merge_260809_qms_reliability.py"
-      - "backend/amodb/alembic/versions/plat_qms_260809_merge.py"
       - "frontend/src/components/QMS/**"
       - "frontend/src/pages/qms/**"
       - "frontend/src/services/qmsAudit*.ts"
@@ -53,14 +52,19 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Compile complete Quality governance surface
         run: python -m compileall -q amodb/apps/quality amodb/alembic/versions
-      - name: Prove one Alembic head
+      - name: Prove one Alembic head with completed QMS ancestry
         run: |
           python - <<'PY'
           from alembic.config import Config
           from alembic.script import ScriptDirectory
-          heads = ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads()
-          assert heads == ["plat_qms_260809_merge"], heads
-          print("single synchronized Alembic head:", heads[0])
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          assert len(heads) == 1, heads
+          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+          assert "quality_260809_checklist_exec" in ancestry, heads
+          print("single Alembic head:", heads[0])
+          print("QMS completion revision retained in ancestry")
           PY
       - name: Run Assurance OS completion contracts
         run: |

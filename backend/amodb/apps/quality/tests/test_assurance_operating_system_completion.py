@@ -41,7 +41,10 @@ def _matching(router, path: str, method: str):
 
 def test_repository_has_one_expected_alembic_head() -> None:
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-    assert script.get_heads() == ["plat_qms_260809_merge"]
+    heads = script.get_heads()
+    assert len(heads) == 1, heads
+    ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+    assert "quality_260809_checklist_exec" in ancestry
 
 
 def test_people_router_exposes_governed_privilege_and_independence_contract() -> None:

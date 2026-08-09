@@ -88,7 +88,7 @@ def test_external_provider_request_is_server_side_non_storing_and_citation_limit
 def test_navigation_url_carries_precise_page_and_anchor() -> None:
     tenant = SimpleNamespace(slug="safarilink")
     url = assistant._reader_url(tenant, "manual-1", "revision-2", page=51, anchor="qam-51")
-    assert url == "/maintenance/SAFARILINK/publications/manual-1/rev/revision-2/read?page=51&anchor=qam-51"
+    assert url == "/maintenance/SAFARILINK/document-control/library/manual-1?tab=content&revision=revision-2&page=51&anchor=qam-51"
 
 
 def test_results_are_ranked_and_deduplicated_by_revision_location() -> None:
@@ -138,7 +138,7 @@ def test_postgresql_search_migration_is_online_safe_and_reversible() -> None:
     assert "DROP INDEX CONCURRENTLY IF EXISTS" in source
 
 
-def test_frontend_assistant_is_mounted_in_reader_and_document_control() -> None:
+def test_frontend_assistant_remains_contextual_and_not_permanent_dms_chrome() -> None:
     root = _repository_root() / "frontend/src"
     service = (root / "services/documentationAssistant.ts").read_text(encoding="utf-8")
     panel = (root / "pages/manuals/DocumentationAssistantPanel.tsx").read_text(encoding="utf-8")
@@ -149,9 +149,14 @@ def test_frontend_assistant_is_mounted_in_reader_and_document_control() -> None:
     assert "controlled_source_is_authoritative" in service
     assert "amo:publication-navigate" in panel
     assert "The controlled source remains authoritative" in panel
+    # Assisted search remains available in the controlled-reading and Library
+    # contexts, but it must not become a permanent chat-first DMS surface.
     assert "DocumentationAssistantPanel" in reader
     assert "PublicationAssistedNavigationBridge" in reader
     assert "DocumentationAssistantPanel" in shell
+    assert 'location.pathname.includes("/document-control/library")' in shell
+    assert "showContextualAssistant ? <DocumentationAssistantPanel" in shell
+    assert 'label: "Assistant"' not in shell
     assert "OPENAI_API_KEY" not in service + panel + reader + shell
 
 

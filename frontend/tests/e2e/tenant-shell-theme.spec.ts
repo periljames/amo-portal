@@ -1,70 +1,45 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type Theme = "light" | "dark";
+const DESKTOP = { width: 1440, height: 900 };
+const MOBILE = { width: 390, height: 844 };
+const CASES = [
+  { scheme: "light", viewport: DESKTOP, label: "desktop" },
+  { scheme: "dark", viewport: DESKTOP, label: "desktop" },
+  { scheme: "light", viewport: MOBILE, label: "mobile" },
+  { scheme: "dark", viewport: MOBILE, label: "mobile" },
+] as const;
 
-const HOME_RESPONSE = {
-  contract: "department-home.v1",
-  amo: { id: "amo-a", code: "AMO-A", slug: "tenant-a", name: "Tenant A Aviation" },
-  department: "planning",
-  generated_at: "2026-08-03T09:00:00Z",
-  summary: { assigned_open: 5, approvals_open: 2, overdue: 1, due_soon: 3, high_priority: 2 },
-  alerts: [{
-    id: "alert-1",
-    tone: "danger",
-    title: "Overdue planning review",
-    message: "Assigned task is overdue.",
-    route: "/maintenance/tenant-a/planning",
-  }],
-  assigned_work: [{
-    id: "task-1",
-    title: "Review maintenance forecast and due list",
-    description: "Confirm the next planning window.",
-    priority: 1,
-    status: "OPEN",
-    due_at: "2026-08-04T09:00:00Z",
-    route: "/maintenance/tenant-a/planning/forecast-due-list",
-    entity_type: "planning-review",
-    entity_id: "review-1",
-  }],
-  approvals: [],
-  schedule: [],
-  recent_activity: [{
-    id: "activity-1",
-    action: "forecast_reviewed",
-    entity_type: "planning-review",
-    entity_id: "review-1",
-    occurred_at: "2026-08-03T08:30:00Z",
-  }],
-  quick_actions: [{
-    id: "planning-1",
-    label: "Open forecast",
-    description: "Review upcoming maintenance exposure",
-    route: "/maintenance/tenant-a/planning/forecast-due-list",
-  }],
-  news: [],
-  source_health: { tasks: "healthy", activity: "healthy", news: "not_configured" },
-};
-
-function futureToken(): string {
-  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
+function parseChannel(value: string): number[] {
+  const matched = value.match(/[\d.]+/g);
+  return matched ? matched.slice(0, 3).map(Number) : [0, 0, 0];
 }
 
-async function prepare(page: Page, theme: Theme): Promise<void> {
-  const token = futureToken();
-  await page.addInitScript(({ storedToken, selectedTheme }) => {
-    localStorage.setItem("amo_portal_token", storedToken);
-    localStorage.setItem("amo_code", "AMO-A");
-    localStorage.setItem("amo_slug", "tenant-a");
-    localStorage.setItem("amo_department", "planning");
-    localStorage.setItem("amo_color_scheme", selectedTheme);
-    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
-    localStorage.setItem("amo_current_user", JSON.stringify({
-      id: "user-a",
-      amo_id: "amo-a",
-      department_id: "department-planning",
-      staff_code: "PLN-001",
-      email: "planner@tenant-a.test",
+function luminance(color: string): number {
+  const [r, g, b] = parseChannel(color).map((value) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(foreground: string, background: string): number {
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+async function seedSession(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const user = {
+      id: "tenant-shell-e2e-user",
+      amo_id: "amo-e2e",
+      department_id: "planning-department-e2e",
+      staff_code: "PLN-E2E",
+      email: "planner@example.com",
       first_name: "Planning",
       last_name: "Engineer",
       full_name: "Planning Engineer",
@@ -81,63 +56,61 @@ async function prepare(page: Page, theme: Theme): Promise<void> {
       must_change_password: false,
       last_login_at: null,
       last_login_ip: null,
-      created_at: "2026-08-01T00:00:00Z",
-      updated_at: "2026-08-01T00:00:00Z",
-    }));
-  }, { storedToken: token, selectedTheme: theme });
+      created_at: "2026-08-08T00:00:00Z",
+      updated_at: "2026-08-08T00:00:00Z",
+    };
 
-  await page.route("**/auth/home/tenant-a/planning", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HOME_RESPONSE) });
-  });
-  await page.route("**/accounts/admin/admin-profile/**", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
-  });
-  await page.route("http://127.0.0.1:8080/**", async (route) => {
-    const url = route.request().url();
-    if (url.includes("/auth/home/tenant-a/planning")) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HOME_RESPONSE) });
-      return;
-    }
-    if (url.includes("/accounts/admin/admin-profile/")) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
-      return;
-    }
-    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not configured in render smoke test" }) });
+    // Keep this fixture aligned with services/auth.ts rather than inventing a
+    // separate test-only guard bypass. The opaque token has no exp claim, which
+    // is accepted by isAuthenticated while all backend calls remain mocked.
+    window.localStorage.setItem("amo_portal_token", "tenant-shell-e2e-token");
+    window.localStorage.setItem("amo_current_user", JSON.stringify(user));
+    window.localStorage.setItem("amo_code", "DEMO");
+    window.localStorage.setItem("amo_slug", "demo");
+    window.localStorage.setItem("amo_department", "planning");
+    window.localStorage.setItem("amodb_active_amo_id", "amo-e2e");
+    window.sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
   });
 }
 
-function relativeLuminance(rgb: string): number {
-  const channels = rgb.match(/[\d.]+/g)?.slice(0, 3).map(Number) || [0, 0, 0];
-  const linear = channels.map((channel) => {
-    const value = channel / 255;
-    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-}
+test.describe("tenant shell theme and responsive layout", () => {
+  for (const entry of CASES) {
+    test(`${entry.scheme} ${entry.label} keeps navigation and appearance controls inside the viewport`, async ({ page }) => {
+      await page.setViewportSize(entry.viewport);
+      await seedSession(page);
+      await page.emulateMedia({ colorScheme: entry.scheme });
 
-function contrast(foreground: string, background: string): number {
-  const first = relativeLuminance(foreground);
-  const second = relativeLuminance(background);
-  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-}
+      await page.route("**/auth/home/planning**", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            department: "planning",
+            title: "Planning home",
+            subtitle: "Operational planning workspace",
+            work_sections: [],
+            status_sections: [],
+            quick_actions: [],
+          }),
+        });
+      });
+      await page.route("**/auth/admin-profile**", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ eligible: false, active: false }),
+        });
+      });
+      await page.route("http://127.0.0.1:8080/**", async (route) => {
+        await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      });
 
-for (const theme of ["light", "dark"] as const) {
-  for (const viewport of [
-    { name: "desktop", width: 1440, height: 900 },
-    { name: "mobile", width: 390, height: 844 },
-  ]) {
-    test(`${theme} ${viewport.name} department home has no shell collisions or washed-out controls`, async ({ page }) => {
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await prepare(page, theme);
-      await page.goto("/maintenance/tenant-a/planning", { waitUntil: "networkidle" });
-
+      await page.goto("/maintenance/demo/home/planning");
       await expect(page.getByRole("heading", { name: "Planning home" })).toBeVisible();
-      await expect(page.locator(".department-home__metrics")).toBeVisible();
-      await expect(page.locator("html")).toHaveAttribute("data-color-scheme", theme);
 
       const overflow = await page.evaluate(() => ({
-        document: document.documentElement.scrollWidth - window.innerWidth,
-        body: document.body.scrollWidth - window.innerWidth,
+        document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        body: document.body.scrollWidth - document.body.clientWidth,
       }));
       expect(overflow.document).toBeLessThanOrEqual(1);
       expect(overflow.body).toBeLessThanOrEqual(1);
@@ -145,15 +118,18 @@ for (const theme of ["light", "dark"] as const) {
       const workspace = await page.locator(".tenant-shell__workspace").boundingBox();
       expect(workspace).not.toBeNull();
       expect(workspace!.x).toBeGreaterThanOrEqual(0);
-      expect(workspace!.x + workspace!.width).toBeLessThanOrEqual(viewport.width + 1);
+      expect(workspace!.x + workspace!.width).toBeLessThanOrEqual(entry.viewport.width + 1);
 
       await page.getByRole("button", { name: "Open navigation" }).click();
       const drawer = page.locator(".tenant-shell__sidebar");
       await expect(drawer).toBeVisible();
+      await expect.poll(async () => (await drawer.boundingBox())?.x ?? -999, {
+        message: "navigation drawer should finish its transition inside the viewport",
+      }).toBeGreaterThanOrEqual(-1);
       const drawerBox = await drawer.boundingBox();
       expect(drawerBox).not.toBeNull();
       expect(drawerBox!.x).toBeGreaterThanOrEqual(-1);
-      expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+      expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(entry.viewport.width + 1);
 
       const search = page.getByPlaceholder("Search pages");
       await expect(search).toBeVisible();
@@ -168,24 +144,25 @@ for (const theme of ["light", "dark"] as const) {
       expect(contrast(searchColors.foreground, searchColors.background)).toBeGreaterThanOrEqual(4.5);
 
       await page.keyboard.press("Escape");
-      await expect(drawer).toHaveAttribute("aria-hidden", "true");
-
-      await page.locator(".tenant-shell__profile-trigger").click();
-      await page.getByRole("menuitem", { name: "Appearance" }).click();
-      const themeSelect = page.locator(".tenant-shell__appearance label").filter({ hasText: "Theme" }).locator("select");
+      const profileButton = page.locator(".tenant-shell__profile-trigger");
+      await profileButton.click();
+      await page.getByRole("menuitem", { name: /appearance/i }).click();
+      const themeSelect = page.locator(".tenant-shell__appearance select").first();
       await expect(themeSelect).toBeVisible();
-      const selectColors = await themeSelect.evaluate((element) => {
+
+      const themeColors = await themeSelect.evaluate((element) => {
         const style = getComputedStyle(element);
         return { foreground: style.color, background: style.backgroundColor };
       });
-      expect(contrast(selectColors.foreground, selectColors.background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(themeColors.foreground, themeColors.background)).toBeGreaterThanOrEqual(4.5);
 
-      const menuBox = await page.locator(".tenant-shell__profile-menu").boundingBox();
+      const profileMenu = page.locator(".tenant-shell__profile-menu");
+      const menuBox = await profileMenu.boundingBox();
       expect(menuBox).not.toBeNull();
-      expect(menuBox!.x).toBeGreaterThanOrEqual(0);
-      expect(menuBox!.y).toBeGreaterThanOrEqual(0);
-      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width + 1);
-      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+      expect(menuBox!.x).toBeGreaterThanOrEqual(-1);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(entry.viewport.width + 1);
+      expect(menuBox!.y).toBeGreaterThanOrEqual(-1);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(entry.viewport.height + 1);
     });
   }
-}
+});

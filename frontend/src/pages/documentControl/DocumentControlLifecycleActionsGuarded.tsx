@@ -11,6 +11,7 @@ import DocumentControlControllerLifecycleActions from "./DocumentControlControll
 import DocumentControlLifecycleActions, {
   type LifecycleView,
 } from "./DocumentControlLifecycleActions";
+import DocumentControlReviewerLifecycleActions from "./DocumentControlReviewerLifecycleActions";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
 
@@ -23,7 +24,7 @@ type Props = {
 
 type DetailWithPeople = DocumentDetailResponse & {
   active_users?: PersonSummary[];
-  capabilities: DocumentDetailResponse["capabilities"] & { approve?: boolean };
+  capabilities: DocumentDetailResponse["capabilities"] & { approve?: boolean; review?: boolean };
 };
 
 const COPY_EVENTS: Record<string, string[]> = {
@@ -160,7 +161,18 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
 export type { LifecycleView };
 
 export default function DocumentControlLifecycleActionsGuarded(props: Props) {
-  const canApprove = Boolean((props.detail as DetailWithPeople).capabilities?.approve);
+  const capabilities = (props.detail as DetailWithPeople).capabilities;
+  const canApprove = Boolean(capabilities?.approve);
+  const canControl = Boolean(capabilities?.control);
+  const canReview = Boolean(capabilities?.review);
+
+  if (canReview && !canControl) {
+    if (props.activeView === "workflow") {
+      return <DocumentControlReviewerLifecycleActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
+    }
+    return <DocumentControlEmpty title="No reviewer action" message="This assigned reviewer account may act only on its current document workflow decision." />;
+  }
+
   if (props.activeView === "copies") {
     return <ControlledCopyCanonicalActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
   }

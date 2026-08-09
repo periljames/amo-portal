@@ -22,6 +22,7 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
 const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
 const DocControlGeneratedRecordsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordsPage })));
 const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
@@ -243,9 +244,19 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/:department/doc-control/*" element={<CanonicalDocumentControlRedirect />} />
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
+
+        {/* Canonical daily-use DMS workspace entry points. Compatibility routes
+            remain separate until replacement workspaces have exact browser evidence. */}
+        <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
+
+        {/* Compatibility routes retained until each replacement workspace has
+            exact browser-contract coverage. */}
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/records" element={<WorkspaceRequireAuth><DocControlGeneratedRecordsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<WorkspaceRequireAuth><DocControlDraftDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<WorkspaceRequireAuth><DocControlChangeProposalPage /></WorkspaceRequireAuth>} />
