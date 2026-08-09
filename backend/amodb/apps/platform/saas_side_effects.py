@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
+from amodb.observability import operation_span, record_provider_call
 
 from . import saas_models as models
 from . import saas_execution_policy, saas_providers, saas_secrets, saas_services
@@ -72,13 +74,17 @@ def process_etims_fiscalization(
     fiscalization.last_error = None
     db.commit()
 
+    provider_started = time.perf_counter()
+    provider_status = "ERROR"
     try:
-        result = saas_providers.fiscalize_etims_invoice(
-            provider=credential.provider,
-            secret=secret,
-            config=credential.config_json or {},
-            invoice_payload=request_payload,
-        )
+        with operation_span("provider.etims.fiscalize", provider="ETIMS", operation="FISCALIZE"):
+            result = saas_providers.fiscalize_etims_invoice(
+                provider=credential.provider,
+                secret=secret,
+                config=credential.config_json or {},
+                invoice_payload=request_payload,
+            )
+        provider_status = "SUCCESS"
     except Exception as exc:
         # A transport exception cannot prove whether the certified control unit
         # accepted the invoice. Do not blindly POST it again.
@@ -92,6 +98,13 @@ def process_etims_fiscalization(
             }
             db.commit()
         raise NonRepeatableJobError(str(exc)) from exc
+    finally:
+        record_provider_call(
+            provider="ETIMS",
+            operation="FISCALIZE",
+            status=provider_status,
+            duration_seconds=time.perf_counter() - provider_started,
+        )
 
     fiscalization = db.get(models.SaaSInvoiceFiscalization, fiscalization.id)
     if fiscalization is None:
@@ -148,18 +161,31 @@ def process_ai_support_reply(
         "security incidents, tax/fiscalization issues, or account access changes to a human support agent."
     )
     secret = saas_secrets.decrypt_secret(credential.encrypted_secret)
-    draft = saas_providers.openai_support_response(
-        secret=secret,
-        config=credential.config_json or {},
-        instructions=instructions,
-        user_message=(
-            f"Ticket: {ticket.title}\n"
-            f"Category: {detail.category}\n"
-            f"Priority: {ticket.priority}\n"
-            f"Description: {detail.description}\n"
-            f"Conversation:\n{transcript}"
-        ),
-    )
+    provider_started = time.perf_counter()
+    provider_status = "ERROR"
+    try:
+        with operation_span("provider.ai.fetch", provider="AI", operation="FETCH"):
+            draft = saas_providers.openai_support_response(
+                secret=secret,
+                config=credential.config_json or {},
+                instructions=instructions,
+                user_message=(
+                    f"Ticket: {ticket.title}\n"
+                    f"Category: {detail.category}\n"
+                    f"Priority: {ticket.priority}\n"
+                    f"Description: {detail.description}\n"
+                    f"Conversation:\n{transcript}"
+                ),
+            )
+        provider_status = "SUCCESS"
+    finally:
+        record_provider_call(
+            provider="AI",
+            operation="FETCH",
+            status=provider_status,
+            duration_seconds=time.perf_counter() - provider_started,
+        )
+
     reply = str(draft.get("text") or "").strip()
     if not reply:
         raise NonRepeatableJobError("AI provider returned an empty support draft")
