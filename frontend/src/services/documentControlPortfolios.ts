@@ -2,6 +2,7 @@ import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 export type ChangesPortfolioView =
+  | "my-changes"
   | "requests"
   | "draft"
   | "in-review"
