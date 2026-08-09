@@ -5,13 +5,15 @@ Key goals:
 - Separate read and write engines.
 - Bounded direct pools for small/medium deployments.
 - External-pooler mode for horizontally scaled API/worker fleets.
+- Transaction-level statement/idle guards that also work through PgBouncer.
+- Optional read-only enforcement for read-session workloads.
 - Backwards compatibility: ``engine``, ``SessionLocal`` and ``get_db``.
 """
 
 import logging
 import os
 
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import MetaData, create_engine, event
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -49,6 +51,9 @@ POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
 MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
 POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "5"))
 POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE_SEC", "1800"))
+STATEMENT_TIMEOUT_MS = max(1000, min(600000, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000") or "30000")))
+IDLE_IN_TRANSACTION_TIMEOUT_MS = max(5000, min(1800000, int(os.getenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "60000") or "60000")))
+READ_ONLY_TRANSACTIONS = _env_bool("DB_READ_ONLY_TRANSACTIONS", False)
 
 COMMON_ENGINE_KWARGS = {
     "pool_pre_ping": True,
@@ -84,6 +89,27 @@ if READ_DB_URL == WRITE_DB_URL:
 else:
     read_engine = create_engine(READ_DB_URL, **_engine_kwargs(READ_DB_URL))
 
+
+class ReadOnlySession(Session):
+    """Marker session class for optional transaction-level read-only enforcement."""
+
+
+@event.listens_for(Session, "after_begin", propagate=True)
+def _apply_transaction_guards(session: Session, transaction, connection) -> None:
+    """Apply PostgreSQL guards inside each transaction.
+
+    ``SET LOCAL`` is transaction-scoped, so it is safe with direct connections and
+    transaction-pooled PgBouncer: settings cannot leak to a later borrower.
+    """
+
+    if getattr(connection.dialect, "name", "") != "postgresql":
+        return
+    connection.exec_driver_sql(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}")
+    connection.exec_driver_sql(f"SET LOCAL idle_in_transaction_session_timeout = {IDLE_IN_TRANSACTION_TIMEOUT_MS}")
+    if READ_ONLY_TRANSACTIONS and isinstance(session, ReadOnlySession):
+        connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+
+
 WriteSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -92,6 +118,7 @@ WriteSessionLocal = sessionmaker(
     future=True,
 )
 ReadSessionLocal = sessionmaker(
+    class_=ReadOnlySession,
     autocommit=False,
     autoflush=False,
     bind=read_engine,
