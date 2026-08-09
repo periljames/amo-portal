@@ -5,11 +5,13 @@ services:
       dockerfile: backend/Dockerfile
     env_file:
       - .env
+    environment:
+      AMO_REQUIRE_SHARED_STORAGE: "true"
+      AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING: "true"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - /opt/amo-portal/shared/uploads:/srv/amo/uploads
       - /opt/amo-portal/shared/logs:/var/log/amo
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
@@ -72,10 +74,12 @@ services:
       dockerfile: backend/Dockerfile
     env_file:
       - .env
+    environment:
+      AMO_REQUIRE_SHARED_STORAGE: "true"
+      AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING: "false"
     command: ["python", "-m", "amodb.jobs.rostering_automation", "--loop"]
     restart: unless-stopped
     volumes:
-      - /opt/amo-portal/shared/uploads:/srv/amo/uploads
       - /opt/amo-portal/shared/logs:/var/log/amo
     depends_on:
       backend:
