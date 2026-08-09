@@ -1,5 +1,7 @@
 """Platform control-plane package for global and tenant SaaS operations."""
 
+import os
+
 # Import durable SaaS and Platform Operations data models before FastAPI
 # startup/Alembic mapper checks so SQLAlchemy registers every control-plane table
 # in the shared metadata.
@@ -15,14 +17,8 @@ from .saas_provider_network import install_provider_network_hardening
 from .resend_email_policy import install_resend_email_provider
 from .router import router
 
-# Replace the legacy platform-only Stripe verifier before the webhook route is
-# imported. The scoped implementation validates tenant endpoint secrets and
-# retains the platform credential only when no tenant-specific credential exists.
 _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
-# Enforce credential inheritance, terminal fiscalization, provider execution,
-# frontend-link and outbound network rules before superuser or tenant routes
-# capture the shared service functions.
 install_tenant_provider_override_policy()
 install_fiscalization_enqueue_policy()
 install_saas_execution_policy()
@@ -30,9 +26,6 @@ install_tenant_admin_links()
 install_provider_network_hardening()
 install_resend_email_provider()
 
-# The legacy console router performed DB polling per connected browser. Keep its
-# helper functions available for compatibility, but mount only the prepared
-# snapshot broker router. This makes browser fan-out independent of DB polling.
 from .ops_console_router import router as console_router  # noqa: E402
 from .product_analytics import router as product_analytics_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
@@ -43,7 +36,6 @@ from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
-from .storage_route_hardening import install_shared_storage_route_hardening  # noqa: E402
 
 router.include_router(console_router)
 router.include_router(product_analytics_router)
@@ -58,6 +50,13 @@ router.include_router(resend_email_router)
 install_legacy_command_queue()
 install_usage_meter_hardening(router)
 install_platform_metrics_lifecycle(router)
-install_shared_storage_route_hardening()
+
+# Fleet, Training and Reliability file-transfer policies belong to the tenant API
+# process. The isolated Ops gateway sets this flag false before importing the
+# Platform package so its failure domain and import graph remain independent.
+if (os.getenv("AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING") or "true").strip().lower() in {"1", "true", "yes", "on"}:
+    from .storage_route_hardening import install_shared_storage_route_hardening  # noqa: E402
+
+    install_shared_storage_route_hardening()
 
 __all__ = ["router"]
