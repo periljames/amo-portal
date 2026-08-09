@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from . import audit_notice_router
 from .canonical_router import legacy_router, router
 
 
@@ -21,6 +22,11 @@ def _is_generic_catchall(route_item) -> bool:
     return path.endswith("/{module_path:path}") and bool(methods & {"GET", "POST", "PATCH", "DELETE"})
 
 
+def _register(api_router: APIRouter) -> None:
+    if not any(_is_notice_route(item) for item in api_router.routes):
+        api_router.include_router(audit_notice_router.router)
+
+
 def _promote(api_router: APIRouter) -> None:
     routes = [item for item in api_router.routes if _is_notice_route(item)]
     if not routes:
@@ -30,5 +36,6 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-_promote(router)
-_promote(legacy_router)
+for api_router in (router, legacy_router):
+    _register(api_router)
+    _promote(api_router)
