@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 BASE_REVISION = "quality_260808_prog_schedule"
-TARGET_REVISION = "quality_260808_audit_prep"
+TARGET_REVISION = "quality_260809_audit_notice"
 APP_ROLE = "amo_quality_os_probe"
 
 TABLES = (
@@ -26,6 +26,9 @@ TABLES = (
     "quality_requirement_links",
     "quality_audit_preparation_revisions",
     "quality_audit_preparation_events",
+    "quality_audit_notice_policies",
+    "quality_audit_notices",
+    "quality_audit_notice_events",
 )
 
 
@@ -89,6 +92,7 @@ def main() -> None:
     ids.update({key: str(uuid4()) for key in (
         "rule", "privilege", "decision", "independence", "case", "entry", "plan", "case_event",
         "signal_rule", "observation", "node_a", "node_b", "link", "prep", "prep_event",
+        "notice_policy", "notice", "notice_event",
     )})
 
     with engine.begin() as connection:
@@ -118,7 +122,7 @@ def main() -> None:
             {"id": ids["case"], "amo": ids["amo_a"], "user": ids["user_a"]})
         connection.execute(text("""INSERT INTO quality_investigation_entries
             (id,amo_id,case_id,method,entry_type,sequence_no,statement,evidence_references,created_by_user_id,created_at)
-            VALUES (:id,:amo,:case,'FIVE_WHYS','FACT',1,'Verified source fact',CAST('[{"source":"probe"}]' AS json),:user,NOW())"""),
+            VALUES (:id,:amo,:case,'FIVE_WHYS','FACT',1,'Verified source fact',CAST('[{\"source\":\"probe\"}]' AS json),:user,NOW())"""),
             {"id": ids["entry"], "amo": ids["amo_a"], "case": ids["case"], "user": ids["user_a"]})
         connection.execute(text("""INSERT INTO quality_effectiveness_plans
             (id,amo_id,case_id,expected_outcome,effectiveness_measure,verification_method,source_indicators,responsible_reviewer_user_id,planned_review_date,status,conclusion_evidence,created_by_user_id,created_at,updated_at)
@@ -159,6 +163,19 @@ def main() -> None:
             VALUES (:id,:amo,:audit,:revision,'CREATED','Preparation snapshot created',:user,NOW())"""),
             {"id": ids["prep_event"], "amo": ids["amo_a"], "audit": ids["audit_a"], "revision": ids["prep"], "user": ids["user_a"]})
 
+        connection.execute(text("""INSERT INTO quality_audit_notice_policies
+            (id,amo_id,policy_code,title,minimum_notice_days,review_required,acknowledgement_required,emergency_exception_allowed,unannounced_exception_allowed,is_active,created_by_user_id,updated_by_user_id,created_at,updated_at)
+            VALUES (:id,:amo,'STANDARD_14_DAY','Standard audit notice',14,true,true,true,true,true,:user,:user,NOW(),NOW())"""),
+            {"id": ids["notice_policy"], "amo": ids["amo_a"], "user": ids["user_a"]})
+        connection.execute(text("""INSERT INTO quality_audit_notices
+            (id,amo_id,audit_id,policy_id,revision_no,status,required_notice_days,notice_date,subject,body,audit_snapshot,recipient_snapshot,delivery_channel,delivery_reference,acknowledged_by_user_id,acknowledged_at,created_by_user_id,created_at,updated_at)
+            VALUES (:id,:amo,:audit,:policy,1,'ACKNOWLEDGED',14,'2026-08-01','Probe notice','Controlled notice',CAST('{}' AS json),CAST('[]' AS json),'EMAIL','probe-message-id',:user,NOW(),:user,NOW(),NOW())"""),
+            {"id": ids["notice"], "amo": ids["amo_a"], "audit": ids["audit_a"], "policy": ids["notice_policy"], "user": ids["user_a"]})
+        connection.execute(text("""INSERT INTO quality_audit_notice_events
+            (id,amo_id,audit_id,notice_id,event_type,reason,after_snapshot,actor_user_id,created_at)
+            VALUES (:id,:amo,:audit,:notice,'ACKNOWLEDGED','Recipient acknowledgement recorded',CAST('{}' AS json),:user,NOW())"""),
+            {"id": ids["notice_event"], "amo": ids["amo_a"], "audit": ids["audit_a"], "notice": ids["notice"], "user": ids["user_a"]})
+
         for table in TABLES:
             assert connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one() >= 1
 
@@ -180,8 +197,10 @@ def main() -> None:
     _expect_blocked(engine, ids, "DELETE FROM quality_requirement_links WHERE id=:id", {"id": ids["link"]})
     _expect_blocked(engine, ids, "UPDATE quality_audit_preparation_revisions SET change_reason='mutated' WHERE id=:id", {"id": ids["prep"]})
     _expect_blocked(engine, ids, "DELETE FROM quality_audit_preparation_events WHERE id=:id", {"id": ids["prep_event"]})
+    _expect_blocked(engine, ids, "UPDATE quality_audit_notices SET subject='mutated' WHERE id=:id", {"id": ids["notice"]})
+    _expect_blocked(engine, ids, "DELETE FROM quality_audit_notice_events WHERE id=:id", {"id": ids["notice_event"]})
 
-    print("Quality assurance operating system RLS and immutability probe passed")
+    print("Quality assurance operating system, audit preparation and notice RLS/immutability probe passed")
 
 
 if __name__ == "__main__":
