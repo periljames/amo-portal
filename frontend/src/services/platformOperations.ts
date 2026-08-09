@@ -33,11 +33,7 @@ function url(path: string): string {
 
 function headers(extra?: Record<string, string>): Record<string, string> {
   const token = getToken();
-  return {
-    Accept: "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...extra,
-  };
+  return { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -59,9 +55,35 @@ export type TenantHealthQuery = {
   health?: string;
   active?: boolean;
   q?: string;
+  country?: string;
+  plan?: string;
+  module?: string;
+  lifecycle?: string;
+  billing_risk?: string;
+  security_risk?: string;
+  integration?: string;
+  support_state?: string;
+  recent_activity_hours?: number;
   min_users?: number;
   max_users?: number;
-  sort?: "health" | "name" | "traffic" | "users";
+  min_assets?: number;
+  max_assets?: number;
+  sort?: "health" | "name" | "traffic" | "users" | "assets" | "activity";
+  limit?: number;
+  cursor?: string | null;
+};
+
+export type UserHubQuery = {
+  data_mode?: DataMode;
+  q?: string;
+  role?: string;
+  status?: "active" | "disabled";
+  mfa?: boolean;
+  min_failed_logins?: number;
+  platform_only?: boolean;
+  last_login_after?: string;
+  last_login_before?: string;
+  sort?: "updated" | "last_login" | "name" | "failed_logins";
   limit?: number;
   cursor?: string | null;
 };
@@ -99,17 +121,21 @@ export const platformOperationsApi = {
   slowRoutes: (mode: DataMode = "REAL", limit = 25) => request<Record<string, any>>(`/routes/slow?${queryString({ data_mode: mode, limit })}`),
   errorRoutes: (mode: DataMode = "REAL", limit = 25) => request<Record<string, any>>(`/routes/errors?${queryString({ data_mode: mode, limit })}`),
   tenantHealth: (params: TenantHealthQuery) => request<Record<string, any>>(`/tenant-health?${queryString(params)}`),
+  tenantFleet: (params: TenantHealthQuery) => request<Record<string, any>>(`/tenant-fleet?${queryString(params)}`),
   tenantHealthOne: (tenantId: string, mode: DataMode = "REAL") => request<Record<string, any>>(`/tenant-health/${encodeURIComponent(tenantId)}?data_mode=${mode}`),
-  tenant360: (tenantId: string, mode: DataMode = "REAL") => request<Record<string, any>>(`/tenants/${encodeURIComponent(tenantId)}?data_mode=${mode}`),
+  tenant360: (tenantId: string, mode: DataMode = "REAL") => request<Record<string, any>>(`/tenant-360/${encodeURIComponent(tenantId)}?data_mode=${mode}`),
   savedViews: (scope = "tenant_fleet") => request<Record<string, any>>(`/tenant-health/saved-views?scope=${encodeURIComponent(scope)}`),
   saveView: (payload: Record<string, any>) => request<Record<string, any>>("/tenant-health/saved-views", { method: "POST", body: JSON.stringify(payload) }),
   deleteSavedView: (id: string) => request<void>(`/tenant-health/saved-views/${encodeURIComponent(id)}`, { method: "DELETE" }),
   productRollups: (mode: DataMode = "REAL", days = 30) => request<Record<string, any>>(`/product-analytics/rollups?${queryString({ data_mode: mode, days })}`),
   users: (params: URLSearchParams) => request<Record<string, any>>(`/users?${params.toString()}`),
+  usersV2: (params: UserHubQuery) => request<Record<string, any>>(`/users/v2?${queryString(params)}`),
+  usersBulk: (payload: Record<string, any>) => request<Record<string, any>>("/users/v2/bulk", { method: "POST", body: JSON.stringify(payload) }),
   incidentCenter: (params?: URLSearchParams) => request<Record<string, any>>(`/incident-center${params?.toString() ? `?${params.toString()}` : ""}`),
   incidentDetail: (id: string) => request<Record<string, any>>(`/incident-center/${encodeURIComponent(id)}`),
   createIncident: (payload: Record<string, any>) => request<Record<string, any>>("/incident-center", { method: "POST", body: JSON.stringify(payload) }),
   transitionIncident: (id: string, state: string, message: string) => request<Record<string, any>>(`/incident-center/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ state, message }) }),
+  commercial: (mode: DataMode = "REAL") => request<Record<string, any>>(`/commercial?data_mode=${mode}`),
   changeMarkers: (kind?: string) => request<Record<string, any>>(`/change-markers${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`),
   createChangeMarker: (payload: Record<string, any>) => request<Record<string, any>>("/change-markers", { method: "POST", body: JSON.stringify(payload) }),
   bulk: (payload: Record<string, any>) => request<Record<string, any>>("/operations/bulk", { method: "POST", body: JSON.stringify(payload) }),
