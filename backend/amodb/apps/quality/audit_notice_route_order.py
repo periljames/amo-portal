@@ -39,3 +39,7 @@ def _promote(api_router: APIRouter) -> None:
 for api_router in (router, legacy_router):
     _register(api_router)
     _promote(api_router)
+
+# Checklist template governance extends the same audit route family and is
+# registered after notice routes so both remain ahead of the generic reader.
+from . import audit_checklist_template_route_order as _audit_checklist_template_route_order  # noqa: F401,E402
