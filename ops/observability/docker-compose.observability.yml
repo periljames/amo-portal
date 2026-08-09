@@ -1,0 +1,150 @@
+name: amo-observability
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.11.1
+    profiles: ["agent"]
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($|/)
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "${OBSERVABILITY_AGENT_BIND_ADDRESS:-127.0.0.1}:9100:9100"
+    cpus: "0.10"
+    mem_limit: 64m
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    networks: [observability]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.60.5
+    profiles: ["agent"]
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    ports:
+      - "${OBSERVABILITY_AGENT_BIND_ADDRESS:-127.0.0.1}:8081:8080"
+    cpus: "0.25"
+    mem_limit: 256m
+    networks: [observability]
+
+  otel-agent:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    profiles: ["agent"]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/agent.yml"]
+    environment:
+      OBSERVABILITY_CLUSTER_ID: "${OBSERVABILITY_CLUSTER_ID:-amo-portal}"
+      OBSERVABILITY_NODE_ID: "${OBSERVABILITY_NODE_ID:-unknown-node}"
+      OBSERVABILITY_ENVIRONMENT: "${OBSERVABILITY_ENVIRONMENT:-production}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-hub:4317}"
+      OTEL_EXPORTER_OTLP_INSECURE: "${OTEL_EXPORTER_OTLP_INSECURE:-true}"
+    volumes:
+      - ./otel/agent.yml:/etc/otelcol-contrib/agent.yml:ro
+    ports:
+      - "${OBSERVABILITY_AGENT_BIND_ADDRESS:-127.0.0.1}:4317:4317"
+      - "${OBSERVABILITY_AGENT_BIND_ADDRESS:-127.0.0.1}:4318:4318"
+    cpus: "0.25"
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    networks: [observability]
+
+  otel-hub:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    profiles: ["hub"]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/hub.yml"]
+    volumes:
+      - ./otel/hub.yml:/etc/otelcol-contrib/hub.yml:ro
+    ports:
+      - "${OBSERVABILITY_HUB_BIND_ADDRESS:-127.0.0.1}:14317:4317"
+      - "${OBSERVABILITY_HUB_BIND_ADDRESS:-127.0.0.1}:14318:4318"
+    cpus: "0.25"
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    networks: [observability]
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    profiles: ["hub"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=8GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./runtime/targets:/etc/prometheus/targets:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${OBSERVABILITY_HUB_BIND_ADDRESS:-127.0.0.1}:9090:9090"
+    cpus: "1.00"
+    mem_limit: 1g
+    networks: [observability]
+
+  alertmanager:
+    image: prom/alertmanager:v0.32.1
+    profiles: ["hub"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "${OBSERVABILITY_HUB_BIND_ADDRESS:-127.0.0.1}:9093:9093"
+    cpus: "0.25"
+    mem_limit: 128m
+    networks: [observability]
+
+  grafana:
+    image: grafana/grafana:13.1.3
+    profiles: ["hub"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ENABLE_GZIP: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${OBSERVABILITY_HUB_BIND_ADDRESS:-127.0.0.1}:3001:3000"
+    cpus: "0.50"
+    mem_limit: 512m
+    networks: [observability]
+
+networks:
+  observability:
+    name: amo-observability
+    driver: bridge
+
+volumes:
+  prometheus-data:
+    name: amo-observability-prometheus-data
+  alertmanager-data:
+    name: amo-observability-alertmanager-data
+  grafana-data:
+    name: amo-observability-grafana-data

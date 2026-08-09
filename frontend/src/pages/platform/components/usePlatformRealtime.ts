@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../../../services/auth";
-import { getApiBaseUrl } from "../../../services/config";
+import { readPlatformDataMode } from "../../../services/platformEnvironment";
+import { operationsStreamUrl, type DataMode } from "../../../services/platformOperations";
+import "../../../styles/platform-realtime-ownership.css";
 
 export type PlatformLiveStatus = "connecting" | "live" | "offline";
 
 export type PlatformConsoleSnapshot = Record<string, unknown> & {
   generated_at?: string;
+  data_mode?: DataMode;
+  overview?: Record<string, unknown>;
 };
 
 export type PlatformConsoleEvent = {
@@ -27,7 +31,6 @@ type ParsedSseBlock = {
   data: string;
 };
 
-const LAST_EVENT_KEY = "amo_platform_console_last_event";
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
 
 function parseSseBlock(block: string): ParsedSseBlock | null {
@@ -44,19 +47,40 @@ function parseSseBlock(block: string): ParsedSseBlock | null {
   return data.length ? { event, id, data: data.join("\n") } : null;
 }
 
-function platformStreamUrl(lastEventId: string | null): string {
-  const query = new URLSearchParams();
-  if (lastEventId) query.set("last_event_id", lastEventId);
-  const suffix = query.toString();
-  return `${getApiBaseUrl()}/platform/console/events${suffix ? `?${suffix}` : ""}`;
+function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
+  const source = event.snapshot;
+  if (!source) return event;
+  // Legacy Platform navigation badges read a few summary keys at the snapshot
+  // root. Preserve that compatibility while the authoritative Ops payload keeps
+  // those fields grouped under `overview`.
+  const normalizedSnapshot: PlatformConsoleSnapshot = {
+    ...(source.overview || {}),
+    ...source,
+  };
+  return { ...event, snapshot: normalizedSnapshot };
 }
 
-export function usePlatformRealtime(enabled = true) {
-  const [status, setStatus] = useState<PlatformLiveStatus>(enabled ? "connecting" : "offline");
+export function shouldUseShellOperationsStream(enabled: boolean, _pathname: string): boolean {
+  return enabled;
+}
+
+/**
+ * Own the single shared Platform browser SSE connection.
+ *
+ * PlatformShell is the sole owner of the isolated Operations Gateway stream on
+ * every Platform route. Pages, including `/platform/operations`, consume the
+ * normalized `amo:platform-live` browser event rather than opening a second
+ * stream. This keeps one realtime connection per Superadmin Platform session.
+ */
+export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+  const streamEnabled = shouldUseShellOperationsStream(enabled, pathname);
+  const selectedMode = dataMode || (typeof window !== "undefined" ? readPlatformDataMode(window.location.search) : "REAL");
+  const [status, setStatus] = useState<PlatformLiveStatus>(streamEnabled ? "connecting" : "offline");
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastEvent, setLastEvent] = useState<PlatformConsoleEvent | null>(null);
-  const statusRef = useRef<PlatformLiveStatus>(enabled ? "connecting" : "offline");
+  const statusRef = useRef<PlatformLiveStatus>(streamEnabled ? "connecting" : "offline");
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<number | null>(null);
   const retryRef = useRef(0);
@@ -67,18 +91,18 @@ export function usePlatformRealtime(enabled = true) {
     setStatus(next);
   }, []);
 
-  const publish = useCallback((event: PlatformConsoleEvent) => {
+  const publish = useCallback((rawEvent: PlatformConsoleEvent) => {
+    const event = normalizedEvent(rawEvent);
     setLastEvent(event);
     setLastUpdated(new Date(event.created_at || event.snapshot?.generated_at || Date.now()));
     if (event.snapshot) setSnapshot(event.snapshot);
-    if (event.id) window.localStorage.setItem(LAST_EVENT_KEY, event.id);
     window.dispatchEvent(new CustomEvent<PlatformConsoleEvent>(PLATFORM_LIVE_EVENT, { detail: event }));
   }, []);
 
   const connect = useCallback(() => {
     controllerRef.current?.abort();
     if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
-    if (!enabled) return;
+    if (!streamEnabled) return;
 
     const token = getToken();
     if (!token || (typeof navigator !== "undefined" && !navigator.onLine)) {
@@ -89,11 +113,10 @@ export function usePlatformRealtime(enabled = true) {
     const controller = new AbortController();
     controllerRef.current = controller;
     updateStatus("connecting");
-    const cursor = window.localStorage.getItem(LAST_EVENT_KEY);
 
     void (async () => {
       try {
-        const response = await fetch(platformStreamUrl(cursor), {
+        const response = await fetch(operationsStreamUrl(selectedMode), {
           method: "GET",
           credentials: "include",
           signal: controller.signal,
@@ -132,24 +155,39 @@ export function usePlatformRealtime(enabled = true) {
         }
         if (!controller.signal.aborted) throw new Error("Platform live stream closed");
       } catch {
-        if (controller.signal.aborted || !enabled) return;
+        if (controller.signal.aborted || !streamEnabled) return;
         updateStatus("offline");
         const delay = Math.min(30_000, 1_500 * 2 ** retryRef.current);
         retryRef.current += 1;
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [enabled, publish, updateStatus]);
+  }, [publish, selectedMode, streamEnabled, updateStatus]);
 
   const reconnect = useCallback(() => {
-    if (!enabled) return;
+    if (!streamEnabled) return;
     retryRef.current = 0;
     connectRef.current();
+  }, [streamEnabled]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const root = document.documentElement;
+    const owner = enabled ? "platform-shell" : "none";
+    root.dataset.platformRealtimeOwner = owner;
+    return () => {
+      if (root.dataset.platformRealtimeOwner === owner) delete root.dataset.platformRealtimeOwner;
+    };
   }, [enabled]);
 
   useEffect(() => {
     connectRef.current = connect;
-    if (!enabled) return;
+    if (!streamEnabled) {
+      controllerRef.current?.abort();
+      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
+      updateStatus("offline");
+      return;
+    }
     connect();
     const online = () => reconnect();
     const offline = () => {
@@ -169,7 +207,7 @@ export function usePlatformRealtime(enabled = true) {
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [connect, enabled, reconnect, updateStatus]);
+  }, [connect, reconnect, streamEnabled, updateStatus]);
 
   return { status, snapshot, lastUpdated, lastEvent, reconnect };
 }

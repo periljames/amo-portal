@@ -75,6 +75,14 @@ make health
    ```
 5. Run targeted functional checks (see section 6).
 
+### Automatic Platform deployment marker
+
+After the backend passes `/healthz`, `scripts/deploy.sh` automatically records a `DEPLOYMENT` marker in the Platform change timeline. The marker includes the deployed Git SHA, UTC deploy timestamp, and `scripts/deploy.sh` as its source.
+
+The default execution reference is `<full-git-sha>@<utc-timestamp>`. A release orchestrator may provide `PLATFORM_DEPLOYMENT_REFERENCE` to supply its own stable deployment/run identifier. Retrying the marker write with the same reference updates the same automation-owned marker instead of creating another row.
+
+The marker write is deliberately **best effort**. If the Platform change-marker write fails after the application has passed health validation, the deploy script prints a warning and still completes. Observability/change telemetry must not become a dependency of a healthy tenant deployment.
+
 ## 4) Rollback in <= 10 minutes
 
 1. Trigger rollback script:

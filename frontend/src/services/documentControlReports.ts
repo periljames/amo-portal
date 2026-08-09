@@ -1,5 +1,6 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { trackProductWorkflow } from "./productAnalytics";
 
 export type DocumentControlSettings = {
   tenant_id: string;
@@ -103,7 +104,12 @@ export function updateDocumentControlSettings(
   tenant: string,
   payload: Omit<DocumentControlSettings, "tenant_id" | "configured">,
 ): Promise<DocumentControlSettings> {
-  return request(workspacePath(tenant, "/settings"), { method: "PUT", body: JSON.stringify(payload) });
+  return trackProductWorkflow({
+    module: "document-control",
+    workflow: "document-control-settings-update",
+    source: "document-control",
+    operation: () => request(workspacePath(tenant, "/settings"), { method: "PUT", body: JSON.stringify(payload) }),
+  });
 }
 
 export function getDocumentControlAdministration(tenant: string): Promise<DocumentControlAdministration> {
@@ -114,7 +120,12 @@ export function updateDocumentControlAdministration(
   tenant: string,
   payload: Omit<DocumentControlAdministration, "tenant_id" | "configured" | "audit_history" | "audit_history_limit">,
 ): Promise<DocumentControlAdministration> {
-  return request(workspacePath(tenant, "/administration"), { method: "PUT", body: JSON.stringify(payload) });
+  return trackProductWorkflow({
+    module: "document-control",
+    workflow: "document-control-administration-update",
+    source: "document-control",
+    operation: () => request(workspacePath(tenant, "/administration"), { method: "PUT", body: JSON.stringify(payload) }),
+  });
 }
 
 export function updateDocumentMetadata(
@@ -122,7 +133,12 @@ export function updateDocumentMetadata(
   manualId: string,
   payload: { title?: string; code?: string; manual_type?: string; owner_role?: string },
 ): Promise<{ id: string; code: string; title: string; manual_type: string; owner_role: string }> {
-  return request(workspacePath(tenant, `/documents/${encodeURIComponent(manualId)}/metadata`), { method: "PATCH", body: JSON.stringify(payload) });
+  return trackProductWorkflow({
+    module: "document-control",
+    workflow: "document-metadata-update",
+    source: "document-control",
+    operation: () => request(workspacePath(tenant, `/documents/${encodeURIComponent(manualId)}/metadata`), { method: "PATCH", body: JSON.stringify(payload) }),
+  });
 }
 
 export function getArchiveRegister(tenant: string, manualId?: string): Promise<ArchiveRegister> {

@@ -4,11 +4,11 @@ import re
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
 
+from amodb import storage
 from amodb.database import WriteSessionLocal
 from amodb.utils.identifiers import generate_uuid7
 from . import models
@@ -47,16 +47,13 @@ class ParsedRecordResult:
 def decode_ehm_payload(data: bytes, header_skip: int = DEFAULT_HEADER_SKIP_BYTES) -> tuple[str, int]:
     if len(data) <= header_skip:
         raise ValueError("EHM log is too small to contain a payload.")
-
     payload = _attempt_decompress(data, header_skip)
     if payload is not None:
         return payload.decode("utf-8", errors="replace"), header_skip
-
     for offset in _scan_for_zlib_header(data):
         payload = _attempt_decompress(data, offset)
         if payload is not None:
             return payload.decode("utf-8", errors="replace"), offset
-
     raise ValueError("Unable to decompress EHM log payload.")
 
 
@@ -89,11 +86,7 @@ def parse_ehm_records(text: str) -> list[ParsedRecordResult]:
         record_index = int(current_header["index"]) if current_header.get("index") else None
         unit_time_raw = current_header.get("timestamp")
         unit_time = _parse_unit_time(unit_time_raw)
-        payload = {
-            "header": header_line,
-            "detail": current_detail,
-            "fields": dict(current_fields),
-        }
+        payload = {"header": header_line, "detail": current_detail, "fields": dict(current_fields)}
         records.append(
             ParsedRecordResult(
                 record_type=record_type,
@@ -114,12 +107,9 @@ def parse_ehm_records(text: str) -> list[ParsedRecordResult]:
             current_fields = {}
             current_detail = current_header.get("detail")
             continue
-
         if not current_header:
             continue
-
         current_lines.append(line)
-
         if line.strip().startswith("$"):
             finalize_current()
             current_header = None
@@ -127,13 +117,9 @@ def parse_ehm_records(text: str) -> list[ParsedRecordResult]:
             current_fields = {}
             current_detail = None
             continue
-
         kv_match = KEY_VALUE_RE.match(line)
         if kv_match:
-            key = kv_match.group("key").strip()
-            value = kv_match.group("value").strip()
-            current_fields[key] = value
-
+            current_fields[kv_match.group("key").strip()] = kv_match.group("value").strip()
     finalize_current()
     return records
 
@@ -157,11 +143,7 @@ def extract_identifiers(text: str) -> dict:
                 engine_serial = match.group("value").strip()
         if aircraft and engine_position and engine_serial:
             break
-    return {
-        "aircraft_serial_number": aircraft,
-        "engine_position": engine_position,
-        "engine_serial_number": engine_serial,
-    }
+    return {"aircraft_serial_number": aircraft, "engine_position": engine_position, "engine_serial_number": engine_serial}
 
 
 def _parse_unit_time(raw: Optional[str]) -> Optional[datetime]:
@@ -169,11 +151,16 @@ def _parse_unit_time(raw: Optional[str]) -> Optional[datetime]:
         return None
     for fmt in ("%m/%d/%Y %H:%M:%S.%f", "%m/%d/%Y %H:%M:%S"):
         try:
-            parsed = datetime.strptime(raw.strip(), fmt)
-            return parsed.replace(tzinfo=timezone.utc)
+            return datetime.strptime(raw.strip(), fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return None
+
+
+def _log_bytes(log: models.EhmRawLog) -> bytes:
+    """Read a raw log through the portal storage contract with checksum validation."""
+    path = storage.materialize(log.storage_path, expected_sha256=log.sha256_hash)
+    return path.read_bytes()
 
 
 def parse_log_in_background(log_id: str) -> None:
@@ -195,7 +182,7 @@ def parse_log_now(db: Session, log: models.EhmRawLog) -> None:
 
 def _parse_log(db: Session, log: models.EhmRawLog) -> None:
     try:
-        data = Path(log.storage_path).read_bytes()
+        data = _log_bytes(log)
         text, offset = decode_ehm_payload(data)
         identifiers = extract_identifiers(text)
         records = parse_ehm_records(text)
@@ -233,7 +220,7 @@ def _parse_log(db: Session, log: models.EhmRawLog) -> None:
 def ensure_raw_text(db: Session, log: models.EhmRawLog) -> str:
     if log.raw_text:
         return log.raw_text
-    data = Path(log.storage_path).read_bytes()
+    data = _log_bytes(log)
     text, offset = decode_ehm_payload(data)
     log.unit_identifiers = extract_identifiers(text)
     log.raw_text = text
@@ -244,9 +231,7 @@ def ensure_raw_text(db: Session, log: models.EhmRawLog) -> str:
 
 def build_snapshot_window(at: Optional[datetime], start: Optional[datetime], end: Optional[datetime]) -> tuple[Optional[datetime], Optional[datetime]]:
     if at:
-        window_start = at - timedelta(hours=12)
-        window_end = at + timedelta(hours=12)
-        return window_start, window_end
+        return at - timedelta(hours=12), at + timedelta(hours=12)
     return start, end
 
 
@@ -294,60 +279,17 @@ def build_snapshot(
                 reasons.append("Data loss or bus power interruption noted")
                 break
 
-    latest_trend = None
-    if trend_records:
-        latest_trend = max(trend_records, key=lambda r: r.unit_time or datetime.min.replace(tzinfo=timezone.utc))
-
+    latest_trend = max(trend_records, key=lambda r: r.unit_time or datetime.min.replace(tzinfo=timezone.utc)) if trend_records else None
     unit_time_start = records[0].unit_time if records else window_start
     unit_time_end = records[-1].unit_time if records else window_end
 
     return {
-        "identity": {
-            "aircraft_serial_number": aircraft_serial_number,
-            "engine_position": engine_position,
-            "unit_time_start": unit_time_start,
-            "unit_time_end": unit_time_end,
-        },
-        "data_quality": {
-            "status": status,
-            "reasons": reasons,
-        },
-        "latest_trend": {
-            "record_id": latest_trend.id if latest_trend else None,
-            "unit_time": latest_trend.unit_time if latest_trend else None,
-            "fields": (latest_trend.payload_json or {}).get("fields") if latest_trend else None,
-        },
-        "engine_runs": [
-            {
-                "record_id": r.id,
-                "unit_time": r.unit_time,
-                "fields": (r.payload_json or {}).get("fields"),
-            }
-            for r in run_records
-        ],
-        "faults": [
-            {
-                "record_id": r.id,
-                "unit_time": r.unit_time,
-                "fields": (r.payload_json or {}).get("fields"),
-            }
-            for r in fault_records
-        ],
-        "sensor_failures": [
-            {
-                "record_id": r.id,
-                "unit_time": r.unit_time,
-                "fields": (r.payload_json or {}).get("fields"),
-            }
-            for r in sensor_records
-        ],
-        "derived_interpretation": {
-            "trend_shift_detected": None,
-            "trend_shift_reason": "insufficient baseline",
-            "candidate_causes": [],
-        },
-        "evidence": {
-            "log_ids": sorted({r.raw_log_id for r in records}),
-            "record_ids": [r.id for r in records],
-        },
+        "identity": {"aircraft_serial_number": aircraft_serial_number, "engine_position": engine_position, "unit_time_start": unit_time_start, "unit_time_end": unit_time_end},
+        "data_quality": {"status": status, "reasons": reasons},
+        "latest_trend": {"record_id": latest_trend.id if latest_trend else None, "unit_time": latest_trend.unit_time if latest_trend else None, "fields": (latest_trend.payload_json or {}).get("fields") if latest_trend else None},
+        "engine_runs": [{"record_id": r.id, "unit_time": r.unit_time, "fields": (r.payload_json or {}).get("fields")} for r in run_records],
+        "faults": [{"record_id": r.id, "unit_time": r.unit_time, "fields": (r.payload_json or {}).get("fields")} for r in fault_records],
+        "sensor_failures": [{"record_id": r.id, "unit_time": r.unit_time, "fields": (r.payload_json or {}).get("fields")} for r in sensor_records],
+        "derived_interpretation": {"trend_shift_detected": None, "trend_shift_reason": "insufficient baseline", "candidate_causes": []},
+        "evidence": {"log_ids": sorted({r.raw_log_id for r in records}), "record_ids": [r.id for r in records]},
     }

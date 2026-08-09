@@ -1,6 +1,7 @@
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
+import { trackProductWorkflow } from "./productAnalytics";
 
 export type CARActionType = "COMMENT" | "STATUS_CHANGE" | "REMINDER" | "ESCALATION" | "ASSIGNMENT" | string;
 
@@ -128,12 +129,17 @@ export async function qmsListCarActions(carId: string): Promise<CARActionOut[]> 
 }
 
 export async function qmsAddCarAction(carId: string, payload: CARActionCreate): Promise<CARActionOut> {
-  return hubRequest<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, {
-    method: "POST",
-    body: {
-      action_type: payload.action_type ?? "COMMENT",
-      message: payload.message,
-    },
+  return trackProductWorkflow({
+    module: "quality",
+    workflow: "car-action-submit",
+    source: "qms-audit-hub",
+    operation: () => hubRequest<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, {
+      method: "POST",
+      body: {
+        action_type: payload.action_type ?? "COMMENT",
+        message: payload.message,
+      },
+    }),
   });
 }
 
@@ -149,11 +155,16 @@ export async function qmsShareAuditReport(
   auditId: string,
   payload: QMSAuditReportSharePayload,
 ): Promise<QMSAuditReportShareOut> {
-  return hubRequest<QMSAuditReportShareOut>(`/quality/audits/${encodeURIComponent(auditId)}/report/share`, {
-    method: "POST",
-    body: {
-      recipient_groups: payload.recipient_groups,
-      message: payload.message ?? null,
-    },
+  return trackProductWorkflow({
+    module: "quality",
+    workflow: "audit-report-share",
+    source: "qms-audit-hub",
+    operation: () => hubRequest<QMSAuditReportShareOut>(`/quality/audits/${encodeURIComponent(auditId)}/report/share`, {
+      method: "POST",
+      body: {
+        recipient_groups: payload.recipient_groups,
+        message: payload.message ?? null,
+      },
+    }),
   });
 }

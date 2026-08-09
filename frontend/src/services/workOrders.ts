@@ -3,6 +3,7 @@
 
 import { authHeaders } from "./auth";
 import { apiGet, apiPost, apiPut } from "./crs";
+import { emitProductEvent, trackProductWorkflow } from "./productAnalytics";
 
 type QueryVal = string | number | boolean | null | undefined;
 
@@ -154,8 +155,13 @@ export async function listWorkOrders(params?: {
 
 export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderRead> {
   // Creation stays server-controlled unless the API supplies a durable idempotency key.
-  return apiPost<WorkOrderRead>("/work-orders/", payload, {
-    headers: authHeaders(),
+  return trackProductWorkflow({
+    module: "work-orders",
+    workflow: "work-order-create",
+    source: "maintenance",
+    operation: () => apiPost<WorkOrderRead>("/work-orders/", payload, {
+      headers: authHeaders(),
+    }),
   });
 }
 
@@ -179,8 +185,13 @@ export async function listTasksForWorkOrder(workOrderId: number): Promise<TaskCa
 
 export async function createTask(workOrderId: number, payload: TaskCreatePayload): Promise<TaskCardRead> {
   // Creation stays live-only to avoid duplicate maintenance instructions.
-  return apiPost<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, payload, {
-    headers: authHeaders(),
+  return trackProductWorkflow({
+    module: "work-orders",
+    workflow: "task-card-create",
+    source: "maintenance",
+    operation: () => apiPost<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, payload, {
+      headers: authHeaders(),
+    }),
   });
 }
 
@@ -192,21 +203,31 @@ export async function getTask(taskId: number): Promise<TaskCardRead> {
 
 export async function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<TaskCardRead> {
   // Task updates carry last_known_updated_at, so the backend can reject stale replay.
-  return apiPut<TaskCardRead>(`/work-orders/tasks/${taskId}`, payload, {
-    headers: authHeaders(),
-    offline: {
-      queueMutation: true,
-      entityType: "work-order-task",
-      entityId: String(taskId),
-    },
+  return trackProductWorkflow({
+    module: "work-orders",
+    workflow: payload.status ? "task-status-update" : "task-card-update",
+    source: "maintenance",
+    operation: () => apiPut<TaskCardRead>(`/work-orders/tasks/${taskId}`, payload, {
+      headers: authHeaders(),
+      offline: {
+        queueMutation: true,
+        entityType: "work-order-task",
+        entityId: String(taskId),
+      },
+    }),
   });
 }
 
 export async function updateWorkOrder(id: number, payload: WorkOrderUpdatePayload): Promise<WorkOrderRead> {
   // Work-order updates have no backend revision/idempotency contract yet.
   // Keep them live-only so delayed replay cannot overwrite a newer planner edit.
-  return apiPut<WorkOrderRead>(`/work-orders/${id}`, payload, {
-    headers: authHeaders(),
+  return trackProductWorkflow({
+    module: "work-orders",
+    workflow: payload.status ? "work-order-status-update" : "work-order-update",
+    source: "maintenance",
+    operation: () => apiPut<WorkOrderRead>(`/work-orders/${id}`, payload, {
+      headers: authHeaders(),
+    }),
   });
 }
 
@@ -215,16 +236,46 @@ export async function inspectTask(
   payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
 ): Promise<unknown> {
   // Inspection/signature actions must be confirmed by the live server.
-  return apiPost<unknown>(`/work-orders/tasks/${taskId}/inspect`, payload, {
-    headers: authHeaders(),
+  const result = await trackProductWorkflow({
+    module: "work-orders",
+    workflow: "task-inspection",
+    source: "maintenance",
+    operation: () => apiPost<unknown>(`/work-orders/tasks/${taskId}/inspect`, payload, {
+      headers: authHeaders(),
+    }),
   });
+  void emitProductEvent({
+    event_type: "approval_completed",
+    module: "work-orders",
+    outcome: "SUCCESS",
+    metadata: {
+      workflow: "task-inspection",
+      source: "maintenance",
+    },
+  });
+  return result;
 }
 
 export async function inspectWorkOrder(
   workOrderId: number,
   payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
 ): Promise<unknown> {
-  return apiPost<unknown>(`/work-orders/${workOrderId}/inspect`, payload, {
-    headers: authHeaders(),
+  const result = await trackProductWorkflow({
+    module: "work-orders",
+    workflow: "work-order-inspection",
+    source: "maintenance",
+    operation: () => apiPost<unknown>(`/work-orders/${workOrderId}/inspect`, payload, {
+      headers: authHeaders(),
+    }),
   });
+  void emitProductEvent({
+    event_type: "approval_completed",
+    module: "work-orders",
+    outcome: "SUCCESS",
+    metadata: {
+      workflow: "work-order-inspection",
+      source: "maintenance",
+    },
+  });
+  return result;
 }

@@ -1,0 +1,144 @@
+name: Platform Operations Documentation CI
+
+on:
+  pull_request:
+    paths:
+      - "docs/platform/**"
+      - "docs/DEPLOY_RUNBOOK.md"
+      - "backend/amodb/apps/platform/ops_api_router.py"
+      - "backend/amodb/apps/platform/ops_logic.py"
+      - "backend/amodb/apps/platform/ops_management_router.py"
+      - "backend/amodb/apps/platform/ops_query_registry.py"
+      - "backend/amodb/apps/platform/ops_scale_router.py"
+      - "backend/amodb/apps/platform/ops_slo_router.py"
+      - "backend/amodb/apps/platform/ops_capacity_router.py"
+      - "backend/amodb/apps/platform/product_analytics.py"
+      - "backend/amodb/apps/platform/change_markers.py"
+      - "backend/scripts/record_platform_deployment.py"
+      - "backend/amodb/database.py"
+      - "backend/amodb/storage.py"
+      - "scripts/deploy.sh"
+      - ".github/workflows/platform-operations-docs-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/platform/**"
+      - "docs/DEPLOY_RUNBOOK.md"
+      - "backend/amodb/apps/platform/ops_api_router.py"
+      - "backend/amodb/apps/platform/ops_logic.py"
+      - "backend/amodb/apps/platform/ops_management_router.py"
+      - "backend/amodb/apps/platform/ops_query_registry.py"
+      - "backend/amodb/apps/platform/ops_scale_router.py"
+      - "backend/amodb/apps/platform/ops_slo_router.py"
+      - "backend/amodb/apps/platform/ops_capacity_router.py"
+      - "backend/amodb/apps/platform/product_analytics.py"
+      - "backend/amodb/apps/platform/change_markers.py"
+      - "backend/scripts/record_platform_deployment.py"
+      - "backend/amodb/database.py"
+      - "backend/amodb/storage.py"
+      - "scripts/deploy.sh"
+      - ".github/workflows/platform-operations-docs-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require complete Platform Operations document set
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            docs/platform/PLATFORM_OPERATIONS_ARCHITECTURE.md
+            docs/platform/OBSERVABILITY_RUNBOOK.md
+            docs/platform/OBSERVABILITY_DATA_CONTRACT.md
+            docs/platform/PLATFORM_OPS_API.md
+            docs/platform/TENANT_HEALTH_MODEL.md
+            docs/platform/PLATFORM_ANALYTICS_TAXONOMY.md
+            docs/platform/HORIZONTAL_SCALE_RUNBOOK.md
+            docs/platform/INCIDENT_RESPONSE.md
+            docs/platform/CAPACITY_MANAGEMENT.md
+          )
+          for file in "${required[@]}"; do
+            test -s "$file" || { echo "Missing or empty required document: $file" >&2; exit 1; }
+          done
+
+      - name: Validate safety-critical documentation invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "Arbitrary PromQL is prohibited" docs/platform/OBSERVABILITY_DATA_CONTRACT.md
+          grep -q 'REAL.*DEMO\|DEMO.*REAL' docs/platform/OBSERVABILITY_DATA_CONTRACT.md
+          grep -q '/ops/v1' docs/platform/PLATFORM_OPS_API.md
+          grep -q 'cursor' docs/platform/TENANT_HEALTH_MODEL.md
+          grep -q 'workflow_started' docs/platform/PLATFORM_ANALYTICS_TAXONOMY.md
+          grep -q 'AMO_REQUIRE_SHARED_STORAGE=true' docs/platform/HORIZONTAL_SCALE_RUNBOOK.md
+          grep -q 'OPEN -> ACKNOWLEDGED -> INVESTIGATING -> MITIGATED -> RESOLVED' docs/platform/INCIDENT_RESPONSE.md
+          grep -q 'LOAD_TEST_1000_VERIFIED' docs/platform/CAPACITY_MANAGEMENT.md
+          grep -q 'must not depend' docs/platform/OBSERVABILITY_DATA_CONTRACT.md
+
+      - name: Prove documented incident lifecycle matches code
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('backend/amodb/apps/platform/ops_management_router.py').read_text(encoding='utf-8')
+          docs = Path('docs/platform/INCIDENT_RESPONSE.md').read_text(encoding='utf-8')
+          required = ('OPEN', 'ACKNOWLEDGED', 'INVESTIGATING', 'MITIGATED', 'RESOLVED')
+          assert '_INCIDENT_STATES = ("OPEN", "ACKNOWLEDGED", "INVESTIGATING", "MITIGATED", "RESOLVED")' in source
+          lifecycle = ' -> '.join(required)
+          assert lifecycle in docs
+          PY
+
+      - name: Prove documented analytics taxonomy contains code-approved events
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('backend/amodb/apps/platform/product_analytics.py').read_text(encoding='utf-8')
+          docs = Path('docs/platform/PLATFORM_ANALYTICS_TAXONOMY.md').read_text(encoding='utf-8')
+          events = (
+              'module_opened', 'workflow_started', 'workflow_completed', 'workflow_failed',
+              'report_generated', 'search_used', 'export_used', 'ai_assist_used',
+              'bulk_action_used', 'approval_completed',
+          )
+          for event in events:
+              assert f'"{event}"' in source, event
+              assert f'`{event}`' in docs, event
+          PY
+
+      - name: Prove horizontal-scale database and storage contracts are documented
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          database = Path('backend/amodb/database.py').read_text(encoding='utf-8')
+          storage = Path('backend/amodb/storage.py').read_text(encoding='utf-8')
+          docs = Path('docs/platform/HORIZONTAL_SCALE_RUNBOOK.md').read_text(encoding='utf-8')
+          for token in ('DATABASE_WRITE_URL', 'DATABASE_READ_URL', 'DB_EXTERNAL_POOLER', 'DB_STATEMENT_TIMEOUT_MS'):
+              assert token in database and token in docs, token
+          for token in ('AMO_STORAGE_BACKEND', 'AMO_REQUIRE_SHARED_STORAGE', 'AMO_STORAGE_S3_BUCKET'):
+              assert token in storage and token in docs, token
+          PY
+
+      - name: Prove successful deploys emit non-blocking Platform deployment markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          deploy = Path('scripts/deploy.sh').read_text(encoding='utf-8')
+          cli = Path('backend/scripts/record_platform_deployment.py').read_text(encoding='utf-8')
+          service = Path('backend/amodb/apps/platform/change_markers.py').read_text(encoding='utf-8')
+          runbook = Path('docs/DEPLOY_RUNBOOK.md').read_text(encoding='utf-8')
+
+          health = deploy.index('curl -fsS http://127.0.0.1:8080/healthz')
+          marker = deploy.index('record_platform_deployment.py')
+          assert health < marker, 'deployment marker must be written only after tenant health validation'
+          assert 'PLATFORM_DEPLOYMENT_REFERENCE' in deploy
+          assert 'WARNING: deployment succeeded but the Platform deployment marker could not be recorded' in deploy
+          assert 'record_deployment_marker' in cli
+          assert 'PlatformChangeMarker.kind == "DEPLOYMENT"' in service
+          assert 'PlatformChangeMarker.actor_user_id.is_(None)' in service
+          assert 'best effort' in runbook.lower()
+          PY

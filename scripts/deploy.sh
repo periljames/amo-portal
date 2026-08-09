@@ -41,6 +41,7 @@ backup_db
 # Save previous revision for rollback
 PREV_REV="$(git rev-parse --short HEAD || true)"
 echo "$PREV_REV" > .last_deploy_rev
+DEPLOY_REV="$(git rev-parse HEAD)"
 
 docker compose -f docker-compose.prod.yml build
 
@@ -50,4 +51,20 @@ docker compose -f docker-compose.prod.yml run --rm backend \
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
 curl -fsS http://127.0.0.1:8080/healthz >/dev/null
+
+# Deployment telemetry is best-effort and must never become a dependency of a
+# successful tenant deployment. The execution reference makes a retry of this
+# marker write idempotent while allowing a later deployment of the same Git SHA
+# to be recorded as a separate occurrence.
+DEPLOYMENT_REF="${PLATFORM_DEPLOYMENT_REFERENCE:-${DEPLOY_REV}@${TIMESTAMP}}"
+if ! docker compose -f docker-compose.prod.yml exec -T backend \
+  python /app/backend/scripts/record_platform_deployment.py \
+  --reference "$DEPLOYMENT_REF" \
+  --title "Deployment ${DEPLOY_REV:0:12}" \
+  --detail "git_sha=${DEPLOY_REV}" \
+  --detail "deployed_at=${TIMESTAMP}" \
+  --detail "source=scripts/deploy.sh"; then
+  echo "WARNING: deployment succeeded but the Platform deployment marker could not be recorded" >&2
+fi
+
 echo "Deploy complete"

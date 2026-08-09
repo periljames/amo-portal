@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: AMO Platform Operations
+    orgId: 1
+    folder: AMO Platform Operations
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

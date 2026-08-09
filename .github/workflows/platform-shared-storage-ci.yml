@@ -1,0 +1,91 @@
+name: Platform Shared Storage CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/storage.py"
+      - "backend/scripts/migrate_shared_storage.py"
+      - "backend/amodb/apps/accounts/router_amo_assets.py"
+      - "backend/amodb/apps/training/**"
+      - "backend/amodb/apps/procurement/**"
+      - "backend/amodb/apps/fleet/**"
+      - "backend/amodb/apps/reliability/**"
+      - "backend/amodb/apps/platform/storage_route_hardening.py"
+      - "backend/amodb/apps/platform/tests/test_shared_storage.py"
+      - "backend/requirements.txt"
+      - "docker-compose.prod.yml"
+      - ".env.example"
+      - ".github/workflows/platform-shared-storage-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/storage.py"
+      - "backend/scripts/migrate_shared_storage.py"
+      - "backend/amodb/apps/accounts/router_amo_assets.py"
+      - "backend/amodb/apps/training/**"
+      - "backend/amodb/apps/procurement/**"
+      - "backend/amodb/apps/fleet/**"
+      - "backend/amodb/apps/reliability/**"
+      - "backend/amodb/apps/platform/storage_route_hardening.py"
+      - "backend/requirements.txt"
+      - "docker-compose.prod.yml"
+      - ".env.example"
+      - ".github/workflows/platform-shared-storage-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  storage-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: "ci-only-shared-storage-key"
+      AMO_STORAGE_BACKEND: local
+      AMO_STORAGE_LOCAL_ROOT: /tmp/amo-storage-ci
+      AMO_STORAGE_CACHE_DIR: /tmp/amo-storage-cache-ci
+      AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile storage migration and route policies
+        run: |
+          python -m py_compile \
+            backend/amodb/storage.py \
+            backend/scripts/migrate_shared_storage.py \
+            backend/amodb/apps/accounts/router_amo_assets.py \
+            backend/amodb/apps/training/shared_storage_policy.py \
+            backend/amodb/apps/procurement/document_shared_storage.py \
+            backend/amodb/apps/platform/storage_route_hardening.py \
+            backend/amodb/apps/reliability/ehm.py
+      - name: Prove storage safety contracts
+        run: pytest -q backend/amodb/apps/platform/tests/test_shared_storage.py
+      - name: Prove migration defaults to dry-run
+        run: |
+          PYTHONPATH=backend python backend/scripts/migrate_shared_storage.py --help | grep -q -- "--apply"
+          grep -q "dry_run=not args.apply" backend/scripts/migrate_shared_storage.py
+          grep -q "delete_source and not args.apply" backend/scripts/migrate_shared_storage.py
+      - name: Validate horizontal production compose
+        run: |
+          touch .env
+          docker compose -f docker-compose.prod.yml config >/tmp/compose.yml
+          backend_block=$(sed -n '/^  backend:/,/^  platform-ops-gateway:/p' docker-compose.prod.yml)
+          roster_block=$(sed -n '/^  rostering-automation:/,/^  frontend:/p' docker-compose.prod.yml)
+          test "$(printf '%s' "$backend_block" | grep -c '/opt/amo-portal/shared/uploads' || true)" -eq 0
+          test "$(printf '%s' "$roster_block" | grep -c '/opt/amo-portal/shared/uploads' || true)" -eq 0
+          printf '%s' "$backend_block" | grep -q 'AMO_REQUIRE_SHARED_STORAGE: "true"'
+          printf '%s' "$roster_block" | grep -q 'AMO_REQUIRE_SHARED_STORAGE: "true"'
+      - name: Validate production storage example
+        run: |
+          grep -q '^AMO_STORAGE_BACKEND=s3$' .env.example
+          grep -q '^AMO_REQUIRE_SHARED_STORAGE=true$' .env.example
+          grep -q '^AMO_STORAGE_S3_BUCKET=UNKNOWN__FILL_ME$' .env.example

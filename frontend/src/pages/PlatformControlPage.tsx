@@ -1,1 +1,1 @@
-export { default } from "./platform/PlatformDashboardPage";
+export { default } from "./platform/PlatformOperationsPage";

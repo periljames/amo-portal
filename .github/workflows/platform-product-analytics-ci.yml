@@ -1,0 +1,58 @@
+name: Platform Product Analytics CI
+
+on:
+  pull_request:
+    paths:
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/services/productAnalytics.test.ts"
+      - "frontend/src/services/workOrders.ts"
+      - "frontend/src/services/qmsAuditHubActions.ts"
+      - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/ehm.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - ".github/workflows/platform-product-analytics-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/services/productAnalytics.test.ts"
+      - "frontend/src/services/workOrders.ts"
+      - "frontend/src/services/qmsAuditHubActions.ts"
+      - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/ehm.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - ".github/workflows/platform-product-analytics-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-workflow-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Prove privacy and fail-open workflow analytics
+        working-directory: frontend
+        run: npx vitest run src/services/productAnalytics.test.ts
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Enforce semantic instrumentation boundaries
+        run: |
+          grep -q 'trackProductWorkflow' frontend/src/services/workOrders.ts
+          grep -q 'trackProductWorkflow' frontend/src/services/qmsAuditHubActions.ts
+          grep -q 'trackProductWorkflow' frontend/src/services/documentControlReports.ts
+          grep -q 'trackProductWorkflow' frontend/src/services/ehm.ts
+          if grep -E 'tenant_id|user_id|document_id|work_order_id|aircraft_serial_number|signature_hash' frontend/src/services/productAnalytics.ts; then
+            echo "Sensitive or high-cardinality identifiers must not enter the product analytics transport contract." >&2
+            exit 1
+          fi

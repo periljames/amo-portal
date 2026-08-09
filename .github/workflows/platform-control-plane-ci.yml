@@ -1,0 +1,377 @@
+name: Platform Control Plane CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/platform/**"
+      - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/platform_ops_worker_main.py"
+      - "backend/amodb/observability.py"
+      - "backend/amodb/storage.py"
+      - "backend/amodb/jobs/saas_worker.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/tests/test_observability_operation_span.py"
+      - "backend/amodb/database.py"
+      - "backend/amodb/alembic/versions/**"
+      - "backend/requirements.txt"
+      - "docker-compose.prod.yml"
+      - "ops/load/**"
+      - "frontend/src/pages/platform/**"
+      - "frontend/src/services/platformOperations.ts"
+      - "frontend/src/services/platformEnvironment.ts"
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/portalRoutes.tsx"
+      - ".github/workflows/platform-control-plane-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/apps/platform/**"
+      - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/platform_ops_worker_main.py"
+      - "backend/amodb/observability.py"
+      - "backend/amodb/storage.py"
+      - "backend/amodb/jobs/saas_worker.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/tests/test_observability_operation_span.py"
+      - "backend/amodb/database.py"
+      - "backend/requirements.txt"
+      - "docker-compose.prod.yml"
+      - "ops/load/**"
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
+      - ".github/workflows/platform-control-plane-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  broker-and-scale-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: "ci-only-platform-control-plane-key"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile control-plane modules
+        run: |
+          python -m py_compile \
+            backend/amodb/apps/platform/ops_broker.py \
+            backend/amodb/apps/platform/ops_console_router.py \
+            backend/amodb/apps/platform/ops_gateway.py \
+            backend/amodb/apps/platform/ops_logic.py \
+            backend/amodb/apps/platform/ops_worker.py \
+            backend/amodb/apps/platform/ops_query_registry.py \
+            backend/amodb/apps/platform/ops_api_router.py \
+            backend/amodb/apps/platform/ops_metric_router.py \
+            backend/amodb/apps/platform/ops_slo_router.py \
+            backend/amodb/apps/platform/ops_scale_router.py \
+            backend/amodb/apps/platform/ops_capacity_router.py \
+            backend/amodb/apps/platform/ops_data_models.py \
+            backend/amodb/apps/platform/ops_management_router.py \
+            backend/amodb/apps/platform/ops_product_insights_router.py \
+            backend/amodb/apps/platform/product_analytics.py \
+            backend/amodb/apps/platform/platform_command_queue.py \
+            backend/amodb/jobs/saas_worker.py \
+            backend/amodb/jobs/saas_worker_safe.py \
+            backend/amodb/platform_ops_main.py \
+            backend/amodb/platform_ops_worker_main.py \
+            backend/amodb/observability.py \
+            backend/amodb/storage.py \
+            backend/amodb/database.py
+      - name: Prove browser fan-out does not multiply refresh work
+        run: pytest -q backend/amodb/apps/platform/tests/test_ops_broker.py
+      - name: Prove durable queue fencing and approval boundary
+        run: |
+          pytest -q \
+            backend/amodb/apps/platform/tests/test_saas_queue_fencing.py \
+            backend/amodb/apps/platform/tests/test_platform_command_queue.py
+      - name: Prove bounded query registry analytics and shared-storage contracts
+        run: |
+          pytest -q \
+            backend/amodb/apps/platform/tests/test_ops_query_registry.py \
+            backend/amodb/apps/platform/tests/test_product_analytics.py \
+            backend/amodb/apps/platform/tests/test_shared_storage.py \
+            backend/amodb/tests/test_observability_operation_span.py
+      - name: Prove mounted console and versioned Operations API contracts
+        run: |
+          PYTHONPATH=backend python - <<'PY'
+          from amodb.apps.platform import router
+          from amodb.platform_ops_main import app
+
+          mounted = [
+              (getattr(r, "path", ""), getattr(getattr(r, "endpoint", None), "__module__", ""))
+              for r in router.routes
+          ]
+          routes = [item for item in mounted if item[0].endswith("/console/events")]
+          assert len(routes) == 1, mounted
+          assert routes[0][1].endswith("ops_console_router"), routes[0]
+
+          methods_and_paths = {
+              (method, getattr(route, "path", ""))
+              for route in app.routes
+              for method in (getattr(route, "methods", None) or set())
+          }
+          required = {
+              ("GET", "/ops/v1/bootstrap"),
+              ("GET", "/ops/v1/live"),
+              ("GET", "/ops/v1/nodes"),
+              ("GET", "/ops/v1/nodes/{node_id}/timeseries"),
+              ("GET", "/ops/v1/infrastructure/summary"),
+              ("GET", "/ops/v1/database"),
+              ("GET", "/ops/v1/database/health"),
+              ("GET", "/ops/v1/queues"),
+              ("GET", "/ops/v1/slo"),
+              ("GET", "/ops/v1/slo/windows"),
+              ("GET", "/ops/v1/capacity"),
+              ("GET", "/ops/v1/tenant-health"),
+              ("GET", "/ops/v1/tenant-fleet"),
+              ("GET", "/ops/v1/tenant-360/{tenant_id}"),
+              ("GET", "/ops/v1/users/v2"),
+              ("POST", "/ops/v1/users/v2/bulk"),
+              ("GET", "/ops/v1/commercial"),
+              ("GET", "/ops/v1/product-analytics/rollups"),
+              ("GET", "/ops/v1/product-analytics/insights"),
+              ("GET", "/ops/v1/incident-center"),
+          }
+          missing = required - methods_and_paths
+          assert not missing, missing
+          PY
+      - name: Prove external-pooler mode does not create process-local QueuePool
+        env:
+          DATABASE_URL: "postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo"
+          DB_EXTERNAL_POOLER: "true"
+        run: |
+          PYTHONPATH=backend python - <<'PY'
+          from sqlalchemy.pool import NullPool
+          from amodb.database import read_engine, write_engine
+          assert isinstance(write_engine.pool, NullPool), type(write_engine.pool)
+          assert read_engine is write_engine
+          PY
+      - name: Validate 1,000-distinct-tenant load harness contract
+        run: |
+          test -f ops/load/k6_1000_tenants.js
+          grep -q "tenants.length < 1000" ops/load/k6_1000_tenants.js
+          grep -q 'target: 1000' ops/load/k6_1000_tenants.js
+          grep -q 'http_req_failed' ops/load/k6_1000_tenants.js
+          grep -q 'p(95)<750' ops/load/k6_1000_tenants.js
+      - name: Validate telemetry cardinality guardrails
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("backend/amodb/observability.py").read_text(encoding="utf-8")
+          forbidden_metric_attributes = [
+              '"tenant_id"', '"user_id"', '"email"', '"serial_number"',
+              '"document_id"', '"work_order_id"', '"sql"',
+          ]
+          metric_section = source[source.index("def _configure_metrics"):source.index("def configure_telemetry")]
+          found = [value for value in forbidden_metric_attributes if value in metric_section]
+          assert not found, found
+          PY
+      - name: Validate production compose model
+        run: |
+          touch .env
+          docker compose -f docker-compose.prod.yml config >/tmp/platform-compose.yml
+          grep -q "platform-ops-gateway:" /tmp/platform-compose.yml
+          grep -q "platform-ops-worker:" /tmp/platform-compose.yml
+          if grep -A70 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
+            echo "Platform ops gateway must not be published on a wildcard host address" >&2
+            exit 1
+          fi
+          grep -A35 "frontend:" /tmp/platform-compose.yml | grep -q "platform-ops-gateway"
+      - name: Build production frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  clean-postgres-and-failure-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amo
+          POSTGRES_PASSWORD: amo_ci_password
+          POSTGRES_DB: amodb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amo -d amodb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      DATABASE_WRITE_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      DATABASE_READ_URL: "postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb"
+      SECRET_KEY: "ci-only-platform-postgres-key"
+      PLATFORM_PROMETHEUS_URL: "http://127.0.0.1:59999"
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:59998"
+      OTEL_EXPORT_TIMEOUT_SEC: "0.5"
+      OTEL_METRIC_EXPORT_INTERVAL_MS: "5000"
+      DB_STATEMENT_TIMEOUT_MS: "15000"
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: "30000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Report authoritative Alembic heads
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini heads --verbose
+      - name: Upgrade a clean PostgreSQL database to every head
+        working-directory: backend
+        run: |
+          alembic -c amodb/alembic.ini upgrade heads
+          alembic -c amodb/alembic.ini current | grep -q "plat_qms_260809_merge"
+      - name: Prove transaction-local database guards
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from amodb.database import ReadSessionLocal, WriteSessionLocal
+
+          db = WriteSessionLocal()
+          statement_timeout = db.execute(text("SHOW statement_timeout")).scalar()
+          idle_timeout = db.execute(text("SHOW idle_in_transaction_session_timeout")).scalar()
+          assert statement_timeout not in {"0", "0ms"}, statement_timeout
+          assert idle_timeout not in {"0", "0ms"}, idle_timeout
+          db.rollback(); db.close()
+
+          read_db = ReadSessionLocal()
+          read_db.execute(text("SELECT 1"))
+          read_db.rollback(); read_db.close()
+          PY
+      - name: Prove product analytics batch and rollups on PostgreSQL
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from amodb.apps.accounts.models import AMO
+          from amodb.apps.platform import ops_data_models, product_analytics
+          from amodb.database import WriteSessionLocal
+
+          db = WriteSessionLocal()
+          tenant = AMO(amo_code="CI-OPS", name="CI Operations Tenant", login_slug="ci-operations-tenant", is_demo=False, is_active=True)
+          db.add(tenant)
+          db.commit()
+          db.refresh(tenant)
+          tenant_id = tenant.id
+          db.close()
+
+          event = product_analytics._normalise_event(
+              tenant_id=tenant_id,
+              event_type="workflow_completed",
+              module="quality",
+              outcome="SUCCESS",
+              duration_ms=250,
+              session_class="tenant_user",
+              metadata={"workflow": "audit-closeout", "user_id": "must-be-dropped"},
+              occurred_at=datetime.now(timezone.utc),
+          )
+          product_analytics._persist([event])
+
+          db = WriteSessionLocal()
+          assert db.query(ops_data_models.PlatformProductEvent).filter_by(tenant_id=tenant_id).count() == 1
+          assert db.query(ops_data_models.PlatformProductRollup).filter_by(tenant_id=tenant_id).count() == 2
+          summary = product_analytics.analytics_summary(db, data_mode="REAL", days=30)
+          assert summary["events"] == 1
+          assert summary["workflow_funnel"]["completed"] == 1
+          raw = db.query(ops_data_models.PlatformProductEvent).filter_by(tenant_id=tenant_id).one()
+          assert "user_id" not in (raw.metadata_json or {})
+          db.close()
+          PY
+      - name: Prove Platform command executes through lease-fenced durable queue
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from amodb.apps.platform import models, saas_models, saas_queue
+          from amodb.apps.platform.ops_worker import process_pending_batch
+          from amodb.database import WriteSessionLocal
+
+          db = WriteSessionLocal()
+          command = models.PlatformCommandJob(
+              command_name="RUN_PLATFORM_HEALTH_PROBE",
+              risk_level="LOW",
+              status="QUEUED",
+              dry_run=True,
+              max_retries=0,
+              timeout_seconds=10,
+              reason="CI lease/fencing proof",
+          )
+          db.add(command)
+          db.commit()
+          db.refresh(command)
+          queue_job = saas_queue.enqueue_job(
+              db,
+              job_type="PLATFORM_COMMAND_JOB",
+              queue_name="platform",
+              payload={"command_job_id": command.id, "actor_id": "ci-system"},
+              idempotency_key=f"ci-platform-command:{command.id}",
+              max_attempts=1,
+              commit=True,
+          )
+          queue_id = queue_job.id
+          command_id = command.id
+          db.close()
+
+          processed = process_pending_batch()
+          assert processed == 1, processed
+
+          db = WriteSessionLocal()
+          command = db.get(models.PlatformCommandJob, command_id)
+          queue_job = db.get(saas_models.SaaSJob, queue_id)
+          assert command.status == "SUCCEEDED", command.status
+          assert (command.output_json or {}).get("dry_run") is True, command.output_json
+          assert queue_job.status == "SUCCEEDED", queue_job.status
+          assert queue_job.locked_by is None
+          assert queue_job.lease_token is None
+          assert queue_job.lease_expires_at is None
+          heartbeat = db.query(models.PlatformWorkerHeartbeat).filter(models.PlatformWorkerHeartbeat.worker_type == "platform-ops-command").first()
+          assert heartbeat is not None
+          assert heartbeat.status == "ONLINE"
+          db.close()
+          PY
+      - name: Start gateway with Prometheus and OTLP deliberately unavailable
+        working-directory: backend
+        run: |
+          python -m uvicorn amodb.platform_ops_main:app --host 127.0.0.1 --port 8090 >/tmp/platform-ops-gateway.log 2>&1 &
+          echo $! >/tmp/platform-ops-gateway.pid
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8090/healthz >/tmp/platform-health.json; then
+              cat /tmp/platform-health.json
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/platform-ops-gateway.pid)" 2>/dev/null; then
+              cat /tmp/platform-ops-gateway.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/platform-ops-gateway.log
+          exit 1
+      - name: Prove telemetry outages did not kill the gateway
+        run: |
+          kill -0 "$(cat /tmp/platform-ops-gateway.pid)"
+          curl -fsS http://127.0.0.1:8090/healthz
+      - name: Show gateway logs
+        if: always()
+        run: cat /tmp/platform-ops-gateway.log 2>/dev/null || true

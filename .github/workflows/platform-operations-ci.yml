@@ -1,0 +1,116 @@
+name: Platform Operations CI
+
+on:
+  pull_request:
+    paths:
+      - "ops/observability/**"
+      - "docs/platform/**"
+      - ".github/workflows/platform-operations-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ops/observability/**"
+      - "docs/platform/**"
+      - ".github/workflows/platform-operations-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  observability-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Docker Compose model
+        working-directory: ops/observability
+        run: docker compose --env-file .env.example -f docker-compose.observability.yml --profile agent --profile hub config >/dev/null
+
+      - name: Validate Prometheus configuration and rules
+        run: |
+          docker run --rm \
+            -v "$PWD/ops/observability/prometheus:/etc/prometheus:ro" \
+            --entrypoint=/bin/promtool \
+            prom/prometheus:v3.13.2 check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            -v "$PWD/ops/observability/prometheus:/etc/prometheus:ro" \
+            --entrypoint=/bin/promtool \
+            prom/prometheus:v3.13.2 check rules /etc/prometheus/rules/platform-foundation.yml
+
+      - name: Validate Alertmanager configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/ops/observability/alertmanager:/etc/alertmanager:ro" \
+            --entrypoint=/bin/amtool \
+            prom/alertmanager:v0.32.1 check-config /etc/alertmanager/alertmanager.yml
+
+      - name: Validate OpenTelemetry configurations
+        run: |
+          docker run --rm \
+            -e OBSERVABILITY_CLUSTER_ID=ci \
+            -e OBSERVABILITY_NODE_ID=ci-node \
+            -e OBSERVABILITY_ENVIRONMENT=ci \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT=127.0.0.1:14317 \
+            -e OTEL_EXPORTER_OTLP_INSECURE=true \
+            -v "$PWD/ops/observability/otel/agent.yml:/config.yml:ro" \
+            otel/opentelemetry-collector-contrib:0.157.0 validate --config=/config.yml
+          docker run --rm \
+            -v "$PWD/ops/observability/otel/hub.yml:/config.yml:ro" \
+            otel/opentelemetry-collector-contrib:0.157.0 validate --config=/config.yml
+
+      - name: Shellcheck infrastructure scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck ops/observability/scripts/*.sh
+
+      - name: Enforce private host binding contract
+        run: |
+          if grep -nE '"(0\.0\.0\.0|::):[0-9]+' ops/observability/docker-compose.observability.yml; then
+            echo "Wildcard monitoring host binding is forbidden" >&2
+            exit 1
+          fi
+
+      - name: Enforce observability secret hygiene
+        run: |
+          if git ls-files --error-unmatch ops/observability/.env >/dev/null 2>&1; then
+            echo "Deployment-local ops/observability/.env must never be tracked" >&2
+            exit 1
+          fi
+          if git ls-files 'ops/observability/**' | grep -E '\.(pem|key|p12|pfx)$'; then
+            echo "Credential/key material must not be committed under ops/observability" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path("ops/observability")
+          excluded_names = {".env.example", "README.md"}
+          credential_key = re.compile(
+              r"(?i)\b(?:[A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET_KEY|CLIENT_SECRET|API_KEY)|password|token|secret_key|client_secret|api_key)\b\s*[:=]\s*([\"']?)(.+?)\1\s*$"
+          )
+          suspicious = []
+          for path in root.rglob("*"):
+              if not path.is_file() or path.name in excluded_names:
+                  continue
+              if path.suffix.lower() not in {".json", ".yml", ".yaml", ".sh", ".conf", ".toml", ".ini"}:
+                  continue
+              try:
+                  lines = path.read_text(encoding="utf-8").splitlines()
+              except UnicodeDecodeError:
+                  continue
+              for lineno, line in enumerate(lines, 1):
+                  match = credential_key.search(line.strip())
+                  if not match:
+                      continue
+                  value = match.group(2).strip().strip("\"'").strip()
+                  if not value or value.startswith(("$", "<", "{{", "${env:")):
+                      continue
+                  suspicious.append(f"{path}:{lineno}: literal credential assignment")
+          if suspicious:
+              print("\n".join(suspicious), file=sys.stderr)
+              raise SystemExit("Potential hard-coded observability credential found")
+          PY

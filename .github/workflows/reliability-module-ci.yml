@@ -15,6 +15,8 @@ on:
       - 'backend/amodb/alembic/versions/quality_20260705_notification_action_links.py'
       - 'backend/amodb/alembic/versions/docgov_20260807_audit_controls.py'
       - 'backend/amodb/alembic/versions/rel_*.py'
+      - 'backend/amodb/alembic/versions/platform_rel_*.py'
+      - 'backend/amodb/alembic/versions/plat_qms_260809_merge.py'
       - 'backend/amodb/apps/reliability/**'
       - 'backend/scripts/apply_reliability_review_fixes.py'
       - 'backend/amodb/main.py'
@@ -80,17 +82,21 @@ jobs:
           git fetch origin "${{ github.event.pull_request.base.ref }}"
           BASE_SHA=$(git merge-base "$BASE_REF" HEAD)
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/reliability-files.txt
+          # EHM file-storage hardening is a cross-cutting Platform storage change.
+          # It must still run the Reliability suite, but it must not reclassify the
+          # whole Platform control-plane PR as a Reliability-owned PR.
+          grep -v '^backend/amodb/apps/reliability/ehm.py$' /tmp/reliability-files.txt > /tmp/reliability-owned-files.txt || true
 
           ACTIVATOR='^(backend/amodb/alembic/versions/(docgov_20260807_audit_controls|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|docs/reliability/.*|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
-          if ! grep -E "$ACTIVATOR" /tmp/reliability-files.txt >/dev/null; then
-            echo 'No Reliability-owned implementation changed; shared composition changes do not activate the Reliability-only scope guard.'
+          if ! grep -E "$ACTIVATOR" /tmp/reliability-owned-files.txt >/dev/null; then
+            echo 'No Reliability-owned implementation changed; cross-cutting Platform/EHM and migration-composition changes do not activate the Reliability-only scope guard.'
             exit 0
           fi
 
-          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|docgov_20260807_audit_controls|rel_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
-          if grep -Ev "$ALLOWED" /tmp/reliability-files.txt | grep -q .; then
+          ALLOWED='^(\.github/workflows/(reliability-module-ci|reliability-hotfix-finalizer|reliability-hotfix-pr-finalizer|reliability-hotfix-scheduled|reliability-review-finalize-v2|reliability-review-fixes)\.yml|backend/amodb/alembic/env\.py|backend/amodb/alembic/versions/(qms_vernum_128|quality_20260705_notification_action_links|docgov_20260807_audit_controls|rel_[^/]+|platform_rel_[^/]+|plat_qms_[^/]+)\.py|backend/amodb/apps/reliability/.*|backend/scripts/apply_reliability_review_fixes\.py|backend/amodb/main\.py|docs/reliability/.*|frontend/src/app/(PortalRouteSurface|portalRouteManifest|portalRouteManifest\.test|routePreload)\.tsx?$|frontend/src/pages/ReliabilityReportsPage\.tsx|frontend/src/pages/reliability/.*|frontend/src/portalRoutes\.tsx|frontend/src/services/reliability\.ts|frontend/src/styles/reliability-v2\.css|frontend/tests/e2e/reliability-(workbook-parity|formal-reporting)-ci\.spec\.ts)$'
+          if grep -Ev "$ALLOWED" /tmp/reliability-owned-files.txt | grep -q .; then
             echo 'Unexpected files in Reliability-owned PR:'
-            grep -Ev "$ALLOWED" /tmp/reliability-files.txt
+            grep -Ev "$ALLOWED" /tmp/reliability-owned-files.txt
             exit 1
           fi
 
@@ -147,9 +153,13 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          assert head == 'rel_20260807_formal_docgov_merge', head
+          assert head == 'plat_qms_260809_merge', head
           ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
+          ancestry.add(head)
           for required in (
+              'platform_rel_20260809_merge',
+              'platform_ops_20260809_incident_lifecycle',
+              'rel_20260807_formal_docgov_merge',
               'rel_20260807_formal_reporting',
               'docgov_rel_20260807_merge',
               'rel_20260807_main_merge',

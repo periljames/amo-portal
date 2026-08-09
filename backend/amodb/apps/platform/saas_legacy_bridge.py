@@ -14,11 +14,11 @@ _ORIGINAL_EXECUTE: Callable[..., None] | None = None
 
 
 def install_legacy_command_queue() -> None:
-    """Route existing platform command endpoints through the durable queue.
+    """Route Platform commands through the durable lease-fenced queue.
 
-    Existing frontend/API contracts continue returning ``PlatformCommandJob``
-    records. Only execution changes: requests persist a queue item and return;
-    workers later invoke the original allowlisted command implementation.
+    Newer Platform services have native queue support. Older branches used this
+    bridge to wrap the synchronous executor. Keep both paths compatible so
+    existing API routes and already-persisted legacy SaaS queue rows remain safe.
     """
 
     global _INSTALLED, _ORIGINAL_EXECUTE
@@ -28,7 +28,46 @@ def install_legacy_command_queue() -> None:
     from . import services
 
     original_create = services.create_command_job
-    original_execute = services.execute_command_job
+
+    # Native Platform Ops implementation: preserve the actual allowlisted action
+    # only for a worker that already owns a SaaSJob lease, expose the historical
+    # execute_command_job name as enqueue-only compatibility, and strip the old
+    # caller-controlled `approved=true` shortcut before job creation.
+    if hasattr(services, "queue_command_job") and hasattr(services, "process_command_queue_job"):
+        native_action = getattr(services, "_execute_command_action", None)
+        if native_action is None:
+            raise RuntimeError("Native Platform command queue is missing its worker action executor")
+        _ORIGINAL_EXECUTE = native_action
+
+        def secure_create_command_job(
+            db: Session,
+            *,
+            payload: dict[str, Any],
+            actor_id: str,
+        ) -> platform_models.PlatformCommandJob:
+            safe_payload = dict(payload or {})
+            safe_payload.pop("approved", None)
+            return original_create(db, payload=safe_payload, actor_id=actor_id)
+
+        def queue_native_execution(
+            db: Session,
+            job: platform_models.PlatformCommandJob,
+            *,
+            actor_id: str,
+        ) -> None:
+            services.queue_command_job(db, job, actor_id=actor_id)
+
+        services.create_command_job = secure_create_command_job
+        services.execute_command_job = queue_native_execution
+        _INSTALLED = True
+        return
+
+    # Compatibility path for older service implementations that still expose a
+    # synchronous executor. The bridge captures it for lease-owned worker use and
+    # replaces HTTP-path execution with durable enqueueing.
+    original_execute = getattr(services, "execute_command_job", None)
+    if original_execute is None:
+        raise RuntimeError("Platform command service exposes neither native nor legacy execution")
     _ORIGINAL_EXECUTE = original_execute
 
     def queue_legacy_execution(db: Session, job: platform_models.PlatformCommandJob, *, actor_id: str) -> None:
@@ -51,18 +90,20 @@ def install_legacy_command_queue() -> None:
         )
 
     def create_command_job(db: Session, *, payload: dict[str, Any], actor_id: str) -> platform_models.PlatformCommandJob:
-        name = str(payload.get("command_name") or "").strip().upper()
+        safe_payload = dict(payload or {})
+        safe_payload.pop("approved", None)
+        name = str(safe_payload.get("command_name") or "").strip().upper()
         definition = get_definition(name)
         if not definition:
-            return original_create(db, payload=payload, actor_id=actor_id)
-        tenant_id = payload.get("tenant_id")
-        reason = payload.get("reason")
+            return original_create(db, payload=safe_payload, actor_id=actor_id)
+        tenant_id = safe_payload.get("tenant_id")
+        reason = safe_payload.get("reason")
         if definition.requires_tenant_id and not tenant_id:
             raise ValueError("This command requires tenant_id.")
         if definition.requires_reason and not str(reason or "").strip():
             raise ValueError("A reason is required for this command.")
 
-        status = "NEEDS_APPROVAL" if definition.requires_approval and not payload.get("approved") else "PENDING"
+        status = "NEEDS_APPROVAL" if definition.requires_approval else "PENDING"
         job = platform_models.PlatformCommandJob(
             command_name=definition.command_name,
             risk_level=definition.risk_level,
@@ -71,9 +112,9 @@ def install_legacy_command_queue() -> None:
             actor_user_id=actor_id,
             requested_by_user_id=actor_id,
             reason=reason,
-            idempotency_key=payload.get("idempotency_key"),
-            input_json=payload.get("input") or {},
-            dry_run=bool(payload.get("dry_run", False)),
+            idempotency_key=safe_payload.get("idempotency_key"),
+            input_json=safe_payload.get("input") or {},
+            dry_run=bool(safe_payload.get("dry_run", False)),
             max_retries=definition.max_retries,
             timeout_seconds=definition.timeout_seconds,
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,7 @@ from amodb.apps.platform import models as platform_models
 from amodb.apps.platform import saas_models as models
 from amodb.apps.platform import saas_providers, saas_services
 from amodb.database import WriteSessionLocal, close_session_safely
+from amodb.observability import operation_span, record_provider_call
 
 
 ACTIVE_SUBSCRIPTION_STATES = {"active", "trialing"}
@@ -40,6 +42,21 @@ def utcnow() -> datetime:
 
 def _worker_id() -> str:
     return os.getenv("SAAS_WORKER_ID") or f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _telemetry_provider(provider: object) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized == "stripe":
+        return "STRIPE"
+    if normalized in {"etims_oscu", "etims_vscu"}:
+        return "ETIMS"
+    if normalized == "smtp":
+        return "SMTP"
+    if normalized == "resend":
+        return "RESEND"
+    if normalized in {"openai", "azure_openai"}:
+        return "AI"
+    return "OTHER"
 
 
 def _credential(db: Session, credential_id: str) -> models.SaaSProviderCredential:
@@ -201,6 +218,7 @@ def _validate_pending_checkout(
     # mutable catalogue is intentionally not re-read after Stripe created the session.
     return account, pending, module_code, module_price_id, external_price_ref
 
+
 def _upsert_stripe_account_preserving_pending(
     db: Session,
     *,
@@ -237,6 +255,7 @@ def _upsert_stripe_account_preserving_pending(
         metadata=metadata,
     )
     return account, preserve_pending
+
 
 def _verified_stripe_tenant(
     job: models.SaaSJob,
@@ -464,12 +483,17 @@ def _process_provider_health(db: Session, job: models.SaaSJob) -> dict[str, Any]
         raise ValueError("Provider is not configured for a health check")
     inherited_platform_credential = bool(job.tenant_id and credential.tenant_id is None)
     mutate_status = bool(payload.get("mutate_credential_status", True)) and not inherited_platform_credential
+    telemetry_provider = _telemetry_provider(credential.provider)
+    provider_started = time.perf_counter()
+    provider_status = "ERROR"
     try:
-        result = saas_providers.check_provider(
-            credential.provider,
-            secret=saas_services.provider_secrets(credential),
-            config=credential.config_json or {},
-        )
+        with operation_span("provider.health", provider=telemetry_provider, operation="HEALTH"):
+            result = saas_providers.check_provider(
+                credential.provider,
+                secret=saas_services.provider_secrets(credential),
+                config=credential.config_json or {},
+            )
+        provider_status = "SUCCESS"
     except Exception as exc:
         if mutate_status:
             credential.status = "UNHEALTHY"
@@ -478,6 +502,13 @@ def _process_provider_health(db: Session, job: models.SaaSJob) -> dict[str, Any]
             credential.last_latency_ms = None
             db.flush()
         raise
+    finally:
+        record_provider_call(
+            provider=telemetry_provider,
+            operation="HEALTH",
+            status=provider_status,
+            duration_seconds=time.perf_counter() - provider_started,
+        )
     if mutate_status:
         credential.status = "HEALTHY"
         credential.last_checked_at = utcnow()
@@ -529,16 +560,28 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     ):
         raise ValueError("Module price is no longer active or no longer matches the queued checkout")
 
-    result = saas_providers.create_stripe_checkout_session(
-        secret=saas_services.provider_secrets(credential),
-        config=credential.config_json or {},
-        tenant_id=tenant_id,
-        tenant_email=payload.get("tenant_email"),
-        module_code=module_code,
-        module_price_id=module_price_id,
-        price_ref=external_price_ref,
-        idempotency_key=job.idempotency_key,
-    )
+    provider_started = time.perf_counter()
+    provider_status = "ERROR"
+    try:
+        with operation_span("provider.stripe.checkout", provider="STRIPE", operation="OTHER"):
+            result = saas_providers.create_stripe_checkout_session(
+                secret=saas_services.provider_secrets(credential),
+                config=credential.config_json or {},
+                tenant_id=tenant_id,
+                tenant_email=payload.get("tenant_email"),
+                module_code=module_code,
+                module_price_id=module_price_id,
+                price_ref=external_price_ref,
+                idempotency_key=job.idempotency_key,
+            )
+        provider_status = "SUCCESS"
+    finally:
+        record_provider_call(
+            provider="STRIPE",
+            operation="OTHER",
+            status=provider_status,
+            duration_seconds=time.perf_counter() - provider_started,
+        )
     session_id = str(result.get("session_id") or "").strip()
     if not session_id:
         raise ValueError("Stripe checkout did not return a session id")
@@ -565,6 +608,7 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     )
     db.flush()
     return result
+
 
 def process_job(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     if job.job_type == "PROVIDER_HEALTH_CHECK":

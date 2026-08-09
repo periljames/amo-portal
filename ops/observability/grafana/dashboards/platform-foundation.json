@@ -1,0 +1,51 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Scrape targets up",
+      "id": 1,
+      "datasource": {"type": "prometheus", "uid": "amo-prometheus"},
+      "targets": [{"expr": "sum(up)", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Host CPU utilization",
+      "id": 2,
+      "datasource": {"type": "prometheus", "uid": "amo-prometheus"},
+      "targets": [{"expr": "100 - (avg by (node_id) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{node_id}}", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Host memory available",
+      "id": 3,
+      "datasource": {"type": "prometheus", "uid": "amo-prometheus"},
+      "targets": [{"expr": "node_memory_MemAvailable_bytes", "legendFormat": "{{node_id}}", "refId": "A"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Host network throughput",
+      "id": 4,
+      "datasource": {"type": "prometheus", "uid": "amo-prometheus"},
+      "targets": [
+        {"expr": "sum by (node_id) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))", "legendFormat": "{{node_id}} ingress", "refId": "A"},
+        {"expr": "sum by (node_id) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))", "legendFormat": "{{node_id}} egress", "refId": "B"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": ["amo-portal", "platform-operations", "foundation"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "AMO Platform Operations — Foundation",
+  "uid": "amo-platform-foundation",
+  "version": 1
+}
