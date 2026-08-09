@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ["DATABASE_URL"] = "postgresql+psycopg2://test:test@localhost:5432/testdb"
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg2://test:test@localhost:5432/testdb")
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from amodb.database import Base  # noqa: E402
