@@ -13,6 +13,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
@@ -110,6 +111,16 @@ function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
   return "home";
 }
 
+function libraryDocumentId(pathname: string): string | undefined {
+  const match = pathname.match(/\/document-control\/library\/([^/?#]+)/);
+  if (!match?.[1]) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 export default function DocumentControlShell({
   title,
   eyebrow = "DOCUMENT CONTROL",
@@ -127,9 +138,11 @@ export default function DocumentControlShell({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { amoCode, basePath } = useDocumentControlRoute();
+  const { amoCode, tenant, basePath } = useDocumentControlRoute();
   const active = primaryWorkspaceForPath(location.pathname);
   const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
+  const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
+  const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
 
   const body = (
     <div className="dc-workspace">
@@ -162,6 +175,11 @@ export default function DocumentControlShell({
       </nav>
 
       <main className="dc-workspace__content">{children}</main>
+      {showContextualAssistant ? <DocumentationAssistantPanel
+        tenant={tenant}
+        manualId={assistantDocumentId}
+        title={assistantDocumentId ? "Document evidence search" : "Controlled information search"}
+      /> : null}
     </div>
   );
 
