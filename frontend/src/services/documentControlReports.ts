@@ -10,6 +10,18 @@ export type DocumentControlSettings = {
   configured: boolean;
 };
 
+export type DocumentControlAdministrationAudit = {
+  id: string;
+  action: string;
+  actor_id?: string | null;
+  at?: string | null;
+  changes: {
+    before?: Record<string, unknown>;
+    after?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+};
+
 export type DocumentControlAdministration = DocumentControlSettings & {
   document_classes: string[];
   workflow_policy: {
@@ -31,6 +43,8 @@ export type DocumentControlAdministration = DocumentControlSettings & {
     location_verification_required: boolean;
     recall_on_supersession: boolean;
   };
+  audit_history?: DocumentControlAdministrationAudit[];
+  audit_history_limit?: number;
 };
 
 export type ArchiveRegister = {
@@ -98,7 +112,7 @@ export function getDocumentControlAdministration(tenant: string): Promise<Docume
 
 export function updateDocumentControlAdministration(
   tenant: string,
-  payload: Omit<DocumentControlAdministration, "tenant_id" | "configured">,
+  payload: Omit<DocumentControlAdministration, "tenant_id" | "configured" | "audit_history" | "audit_history_limit">,
 ): Promise<DocumentControlAdministration> {
   return request(workspacePath(tenant, "/administration"), { method: "PUT", body: JSON.stringify(payload) });
 }
