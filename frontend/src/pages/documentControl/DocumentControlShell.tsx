@@ -18,6 +18,7 @@ import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
 import "./documentControlLibraryExperience.css";
+import "./dmsLibraryDiscovery.css";
 
 /**
  * Legacy workspace identifiers remain exported until the route migration is
