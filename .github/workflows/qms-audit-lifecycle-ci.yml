@@ -3,6 +3,7 @@ name: Audit lifecycle Playwright
 on:
   pull_request:
     paths:
+      - "backend/docs/quality/**"
       - "frontend/src/pages/QualityAudit*.tsx"
       - "frontend/src/pages/qualityAudits/**"
       - "frontend/src/pages/qms/**"
