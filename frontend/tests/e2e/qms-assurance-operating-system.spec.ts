@@ -235,7 +235,7 @@ test("Intelligence workspace is deterministic and exposes the approval evidence 
   await expect(page.getByRole("heading", { name: "Assurance signals & approval impact" })).toBeVisible();
   await expect(page.getByText(/No predictive compliance score is generated/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cross-source assurance pressure" })).toBeVisible();
-  await expect(page.getByText(/do not declare compliance or calculate a predictive probability/i)).toBeVisible();
+  await expect(page.getByText(/Mandatory surveillance remains a hard obligation\. Other factors order planning attention only/i)).toBeVisible();
   await expect(page.getByText("Approval Digital Twin", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "STALE" })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
