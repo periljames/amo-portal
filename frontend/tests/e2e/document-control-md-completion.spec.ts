@@ -4,6 +4,7 @@ const LIVE_ENABLED = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
+const ADMIN_STORAGE_STATE = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 const EXTERNAL_SOURCE_ID = process.env.E2E_DMS_EXTERNAL_SOURCE_ID || "00000000-0000-4000-8000-000000000494";
 
@@ -14,6 +15,7 @@ test.use({
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
   screenshot: "on",
+  ...(ADMIN_STORAGE_STATE ? { storageState: ADMIN_STORAGE_STATE } : {}),
 });
 
 function watchMaterialBrowserErrors(page: Page): void {
@@ -70,7 +72,7 @@ test.describe.serial("DMS MD completion acceptance", () => {
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E credentials and governed document id are required");
     watchMaterialBrowserErrors(page);
-    await signIn(page);
+    if (!ADMIN_STORAGE_STATE) await signIn(page);
   });
 
   test.afterEach(() => {
@@ -106,7 +108,11 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await page.getByRole("button", { name: "Open assisted search", exact: true }).click();
     await expect(assistantHeading).toBeVisible();
     await expect(page.getByText("Searches only documents this session is permitted to read.", { exact: true })).toBeVisible();
-    await expect(page.getByText("The controlled source remains authoritative.", { exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Search", exact: true }).click();
+    await page.getByLabel("Question or document reference").fill("DMS-CI-MOM");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(page.getByText("The controlled source remains authoritative.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("DMS-CI-MOM", { exact: true }).first()).toBeVisible();
   });
 
   test("Reports exposes the complete bounded evidence catalogue", async ({ page }) => {
