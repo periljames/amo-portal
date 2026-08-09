@@ -29,6 +29,13 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: qms-assurance-completion-secret
+      QUALITY_SCHEMA_STRICT: "0"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -48,13 +55,10 @@ jobs:
           from alembic.config import Config
           from alembic.script import ScriptDirectory
           heads = ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads()
-          assert heads == ["quality_260809_programme_occ"], heads
+          assert heads == ["quality_260809_effect_response"], heads
           print("single Alembic head:", heads[0])
           PY
       - name: Run Assurance OS completion contracts
-        env:
-          APP_ENV: test
-          SECRET_KEY: qms-assurance-completion-secret
         run: |
           pytest -q amodb/apps/quality/tests/test_assurance_operating_system_completion.py
           pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
