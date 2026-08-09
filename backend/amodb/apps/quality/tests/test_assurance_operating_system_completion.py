@@ -5,6 +5,7 @@ from decimal import Decimal
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_case_router import router as assurance_case_router
+from amodb.apps.quality.audit_checklist_template_router import router as audit_checklist_template_router
 from amodb.apps.quality.audit_notice_router import router as audit_notice_router
 from amodb.apps.quality.audit_preparation_router import router as audit_preparation_router
 from amodb.apps.quality.intelligence_governance_router import _compare, _percent, router as intelligence_governance_router
@@ -82,7 +83,7 @@ def test_intelligence_contract_is_deterministic_and_source_explainable() -> None
     assert _compare(Decimal("10"), "GTE", Decimal("10")) is True
 
 
-def test_audit_preparation_and_notice_governance_contract() -> None:
+def test_audit_preparation_notice_and_checklist_governance_contract() -> None:
     assert {
         ("/audits/{audit_id}/preparation-revisions", "GET"),
         ("/audits/{audit_id}/preparation-revisions", "POST"),
@@ -97,6 +98,15 @@ def test_audit_preparation_and_notice_governance_contract() -> None:
         ("/audits/{audit_id}/notices/{notice_id}/revisions", "POST"),
         ("/audits/{audit_id}/notices/{notice_id}/transitions", "POST"),
     }.issubset(_methods(audit_notice_router))
+    assert {
+        ("/audit-checklist-templates", "GET"),
+        ("/audit-checklist-templates", "POST"),
+        ("/audit-checklist-templates/{template_id}", "GET"),
+        ("/audit-checklist-templates/{template_id}/revisions", "POST"),
+        ("/audit-checklist-templates/{template_id}/revisions/{revision_id}/issue", "POST"),
+        ("/audits/{audit_id}/checklist-bindings", "GET"),
+        ("/audits/{audit_id}/checklist-bindings", "POST"),
+    }.issubset(_methods(audit_checklist_template_router))
 
 
 def test_new_operating_system_models_are_registered_in_shared_metadata() -> None:
@@ -118,6 +128,9 @@ def test_new_operating_system_models_are_registered_in_shared_metadata() -> None
         "quality_audit_notice_policies",
         "quality_audit_notices",
         "quality_audit_notice_events",
+        "quality_audit_checklist_templates",
+        "quality_audit_checklist_template_revisions",
+        "quality_audit_checklist_bindings",
     }
     assert required_tables.issubset(Base.metadata.tables)
 
@@ -139,6 +152,8 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         ("/audit-notice-policies", "GET", "list_notice_policies"),
         ("/audits/{audit_id}/notices", "GET", "list_audit_notices"),
         ("/audits/{audit_id}/notices/{notice_id}/transitions", "POST", "transition_audit_notice"),
+        ("/audit-checklist-templates", "GET", "list_checklist_templates"),
+        ("/audits/{audit_id}/checklist-bindings", "POST", "apply_checklist_revision"),
     )
     for api_router, prefix in cases:
         catchall_index = _catchall_index(api_router)
