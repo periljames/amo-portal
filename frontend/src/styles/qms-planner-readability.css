@@ -1,0 +1,164 @@
+/* QMS Planner readability layer. Preserves the planner interaction model and raises the human-readable scale. */
+
+.qms-modern-planner-v2 {
+  --planner-rail-width: clamp(13.5rem, 15vw, 15.75rem);
+  --planner-context-width: clamp(18rem, 19vw, 20rem);
+}
+
+.qms-modern-planner-v2 .qms-modern-planner__toolbar {
+  min-height: 4.15rem;
+  padding: .55rem .75rem;
+}
+
+.qms-modern-planner-v2 .qms-planner-title strong { font-size: clamp(1.12rem, 1.35vw, 1.35rem); }
+.qms-modern-planner-v2 .qms-planner-title span { font-size: .81rem; }
+
+.qms-modern-planner-v2 .qms-planner-icon-button,
+.qms-modern-planner-v2 .qms-planner-nav button,
+.qms-modern-planner-v2 .qms-planner-view-switch button {
+  min-width: 2.35rem;
+  min-height: 2.35rem;
+  font-size: .8rem;
+}
+.qms-modern-planner-v2 .qms-planner-nav button:nth-child(2) { min-width: 4.25rem; font-size: .82rem; }
+.qms-modern-planner-v2 .qms-planner-view-switch button { min-height: 2.15rem; padding-inline: .6rem; font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-toolbar__search { min-height: 2.5rem; padding: 0 .65rem; }
+.qms-modern-planner-v2 .qms-planner-toolbar__search span { font-size: .82rem; }
+.qms-modern-planner-v2 kbd { min-height: 1.45rem; font-size: .71rem; }
+
+.qms-modern-planner-v2 .qms-planner-mini { gap: .45rem; padding: .78rem .75rem .72rem; }
+.qms-modern-planner-v2 .qms-planner-mini > header strong { font-size: .9rem; }
+.qms-modern-planner-v2 .qms-planner-mini__weekdays span { min-height: 1.3rem; font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-mini__days button { font-size: .75rem; }
+.qms-modern-planner-v2 .qms-planner-quick-schedule { min-height: 2.6rem; }
+.qms-modern-planner-v2 .qms-planner-quick-schedule span { font-size: .82rem; }
+.qms-modern-planner-v2 .qms-planner-rail-section { gap: .28rem; padding: .65rem .6rem; }
+.qms-modern-planner-v2 .qms-planner-rail-section > header { min-height: 1.8rem; }
+.qms-modern-planner-v2 .qms-planner-rail-section > header strong { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-source-list button,
+.qms-modern-planner-v2 .qms-planner-focus-list button,
+.qms-modern-planner-v2 .qms-planner-shortcut-link { min-height: 2.35rem; padding: 0 .45rem; }
+.qms-modern-planner-v2 .qms-planner-source-list button > span:nth-child(2),
+.qms-modern-planner-v2 .qms-planner-focus-list button > span { font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-source-list button strong,
+.qms-modern-planner-v2 .qms-planner-focus-list button strong { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-owner-filter,
+.qms-modern-planner-v2 .qms-planner-rail-section--settings label { font-size: .74rem; }
+.qms-modern-planner-v2 .qms-planner-owner-filter select,
+.qms-modern-planner-v2 .qms-planner-rail-section--settings select { min-height: 2.35rem; font-size: .8rem; }
+
+.qms-modern-planner-v2 .qms-planner-banner { min-height: 2.55rem; padding: .45rem .75rem; font-size: .81rem; }
+.qms-modern-planner-v2 .qms-planner-loading { font-size: .88rem; }
+.qms-modern-planner-v2 .qms-planner-empty strong { font-size: 1rem; }
+.qms-modern-planner-v2 .qms-planner-empty span { font-size: .82rem; }
+
+.qms-modern-planner-v2 .qms-planner-month { grid-template-columns: repeat(7, minmax(8.4rem, 1fr)); min-width: 60rem; }
+.qms-modern-planner-v2 .qms-planner-month__dow { min-height: 2.25rem; padding: 0 .6rem; font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-month__day { padding: .46rem; }
+.qms-modern-planner-v2 .qms-planner-month__day > header { min-height: 1.7rem; margin-bottom: .3rem; }
+.qms-modern-planner-v2 .qms-planner-month__day > header strong { width: 1.7rem; height: 1.7rem; font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-month__day > header span { min-width: 1.35rem; height: 1.3rem; font-size: .69rem; }
+.qms-modern-planner-v2 .qms-planner-month__events { gap: .25rem; }
+.qms-modern-planner-v2 .qms-planner-month__more { min-height: 1.6rem; font-size: .72rem; }
+
+.qms-modern-planner-v2 .qms-planner-event {
+  min-height: 2.75rem;
+  gap: .34rem;
+  padding: .38rem .42rem .36rem .46rem;
+  border-left-width: 4px;
+}
+.qms-modern-planner-v2 .qms-planner-event__copy { gap: .08rem; }
+.qms-modern-planner-v2 .qms-planner-event__copy strong { font-size: .82rem; line-height: 1.2; }
+.qms-modern-planner-v2 .qms-planner-event__copy small { font-size: .72rem; line-height: 1.25; }
+.qms-modern-planner-v2 .qms-planner-event__meta time { font-size: .69rem; }
+.qms-modern-planner-v2 .qms-planner-event__meta i { width: 1.35rem; height: 1.35rem; font-size: .63rem; }
+.qms-modern-planner-v2 .qms-planner-event.is-compact { min-height: 2.05rem; padding-block: .28rem; }
+.qms-modern-planner-v2 .qms-planner-event.is-compact .qms-planner-event__copy strong { font-size: .78rem; }
+.qms-modern-planner-v2.density-compact .qms-planner-event { min-height: 2.25rem; }
+
+.qms-modern-planner-v2 .qms-planner-timeline__corner strong { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__corner small { font-size: .64rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__day-head span { font-size: .76rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__day-head strong { font-size: .94rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__all-day-label,
+.qms-modern-planner-v2 .qms-planner-timeline__more { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__times b { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__times small { font-size: .63rem; }
+.qms-modern-planner-v2 .qms-planner-timeline__now i { font-size: .65rem; }
+
+.qms-modern-planner-v2 .qms-planner-agenda { max-width: 82rem; gap: 1.15rem; padding-top: 1rem; }
+.qms-modern-planner-v2 .qms-planner-agenda > section > header { min-height: 2.3rem; }
+.qms-modern-planner-v2 .qms-planner-agenda > section > header strong { font-size: .95rem; }
+.qms-modern-planner-v2 .qms-planner-agenda > section > header span { min-width: 1.45rem; height: 1.3rem; font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-agenda__row { min-height: 4rem; padding: .58rem .75rem; gap: .8rem; }
+.qms-modern-planner-v2 .qms-planner-agenda__row :is(strong, b) { font-size: .86rem; }
+.qms-modern-planner-v2 .qms-planner-agenda__row :is(small, span) { font-size: .74rem; }
+
+.qms-modern-planner-v2 .qms-planner-inspector__title { gap: .25rem; padding: 1rem .95rem .9rem; }
+.qms-modern-planner-v2 .qms-planner-inspector__title strong { font-size: 1.08rem; }
+.qms-modern-planner-v2 .qms-planner-inspector__title p { font-size: .81rem; }
+.qms-modern-planner-v2 .qms-planner-inspector dl { padding: 0 .95rem .8rem; }
+.qms-modern-planner-v2 .qms-planner-inspector dl > div { grid-template-columns: 5.6rem minmax(0, 1fr); gap: .65rem; padding: .65rem 0; }
+.qms-modern-planner-v2 .qms-planner-inspector dt { font-size: .73rem; }
+.qms-modern-planner-v2 .qms-planner-inspector dd { font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-panel-section { gap: .55rem; padding: .85rem .95rem; }
+.qms-modern-planner-v2 .qms-planner-panel-section h3 { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-panel-section p { font-size: .79rem; }
+.qms-modern-planner-v2 .qms-planner-panel-section small { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-inspector__actions { gap: .45rem; padding: .85rem .95rem; }
+.qms-modern-planner-v2 .qms-planner-inspector__actions a,
+.qms-modern-planner-v2 .qms-planner-inspector__actions button { min-height: 2.5rem; font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-readonly { font-size: .77rem; }
+.qms-modern-planner-v2 .qms-planner-welcome { gap: .75rem; padding: 1rem .95rem; }
+.qms-modern-planner-v2 .qms-planner-welcome strong { font-size: .94rem; }
+.qms-modern-planner-v2 .qms-planner-welcome p { font-size: .78rem; }
+.qms-modern-planner-v2 .qms-planner-attention-grid button { min-height: 3.5rem; padding: .55rem; }
+.qms-modern-planner-v2 .qms-planner-attention-grid strong { font-size: 1.08rem; }
+.qms-modern-planner-v2 .qms-planner-attention-grid span { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-action-list button { min-height: 2.3rem; }
+.qms-modern-planner-v2 .qms-planner-action-list span { font-size: .79rem; }
+.qms-modern-planner-v2 .qms-planner-shortcut-summary > span { font-size: .77rem; }
+
+.qms-modern-planner-v2 .qms-planner-modal,
+.qms-modern-planner-v2 .qms-planner-shortcuts { width: min(100%, 40rem); }
+.qms-modern-planner-v2 .qms-planner-command { width: min(100%, 44rem); }
+.qms-modern-planner-v2 .qms-planner-modal > header,
+.qms-modern-planner-v2 .qms-planner-shortcuts > header { min-height: 4.1rem; padding: .75rem .95rem; }
+.qms-modern-planner-v2 .qms-planner-modal > header span,
+.qms-modern-planner-v2 .qms-planner-shortcuts > header span { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-modal > header strong,
+.qms-modern-planner-v2 .qms-planner-shortcuts > header strong { font-size: 1.02rem; }
+.qms-modern-planner-v2 .qms-planner-modal > header button,
+.qms-modern-planner-v2 .qms-planner-shortcuts > header button { width: 2.4rem; height: 2.4rem; }
+.qms-modern-planner-v2 .qms-planner-modal > footer { padding: .8rem .95rem; }
+.qms-modern-planner-v2 .qms-planner-modal__field { gap: .36rem; padding: .7rem .95rem; font-size: .77rem; }
+.qms-modern-planner-v2 .qms-planner-modal__field :is(input, textarea) { min-height: 2.55rem; padding: .5rem .65rem; font-size: .86rem; }
+.qms-modern-planner-v2 .qms-planner-modal__ack { padding: .65rem .95rem .85rem; font-size: .77rem; }
+.qms-modern-planner-v2 .qms-planner-move-summary { gap: .7rem; padding: .95rem; }
+.qms-modern-planner-v2 .qms-planner-move-summary small { font-size: .7rem; }
+.qms-modern-planner-v2 .qms-planner-move-summary strong { font-size: .86rem; }
+.qms-modern-planner-v2 .qms-planner-conflict { margin: 0 .95rem .55rem; padding: .65rem; font-size: .78rem; }
+.qms-modern-planner-v2 .qms-planner-create-types { gap: .4rem; padding: .8rem .95rem .2rem; }
+.qms-modern-planner-v2 .qms-planner-create-types button { min-height: 2.3rem; padding: 0 .7rem; font-size: .78rem; }
+.qms-modern-planner-v2 .qms-planner-create-note { margin: .35rem .95rem .85rem; padding: .65rem; font-size: .77rem; }
+
+.qms-modern-planner-v2 .qms-planner-command > header { min-height: 4rem; padding: .65rem .85rem; }
+.qms-modern-planner-v2 .qms-planner-command > header input { font-size: .9rem; }
+.qms-modern-planner-v2 .qms-planner-command__results > span { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-command__list button,
+.qms-modern-planner-v2 .qms-planner-command__results button { min-height: 3.25rem; padding: .55rem .6rem; }
+.qms-modern-planner-v2 .qms-planner-command__list strong,
+.qms-modern-planner-v2 .qms-planner-command__results strong { font-size: .82rem; }
+.qms-modern-planner-v2 .qms-planner-command__list small,
+.qms-modern-planner-v2 .qms-planner-command__results small { font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-shortcuts > div strong { font-size: .77rem; }
+.qms-modern-planner-v2 .qms-planner-toast { min-height: 3rem; font-size: .8rem; }
+
+@media (max-width: 1280px) {
+  .qms-modern-planner-v2 { --planner-rail-width: 13.5rem; --planner-context-width: 18.25rem; }
+}
+
+@media (max-width: 1080px) {
+  .qms-modern-planner-v2.has-left-rail.has-context { grid-template-columns: var(--planner-rail-width) minmax(0, 1fr); grid-template-areas: "toolbar toolbar" "rail canvas"; }
+  .qms-modern-planner-v2.has-left-rail.has-context .qms-planner-inspector { display: none; }
+}
