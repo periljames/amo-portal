@@ -182,6 +182,27 @@ def _recompute_source_identity(
     return population_hash, len(identity_rows), dict(sorted(family_counts.items()))
 
 
+def _freeze_resolved_aircraft_effectivity(
+    report: ReliabilityFormalReport,
+    effective_aircraft: set[str],
+) -> None:
+    effectivity = dict(getattr(report, "effectivity_json", {}) or {})
+    selected_types = [str(item) for item in effectivity.get("aircraft_types", []) if str(item).strip()]
+    requested_serials = [
+        str(item)
+        for item in effectivity.get("aircraft_serial_numbers", [])
+        if str(item).strip()
+    ]
+    if not selected_types:
+        return
+
+    effectivity["requested_aircraft_serial_numbers"] = sorted(requested_serials)
+    effectivity["resolved_aircraft_serial_numbers"] = sorted(effective_aircraft)
+    effectivity["aircraft_serial_numbers"] = sorted(effective_aircraft)
+    effectivity["scope"] = "AIRCRAFT_TYPE_EFFECTIVITY"
+    report.effectivity_json = effectivity
+
+
 def freeze_sources(
     db: Session,
     report: ReliabilityFormalReport,
@@ -198,6 +219,7 @@ def freeze_sources(
         for item in population.get("effective_aircraft_serial_numbers", [])
         if str(item).strip()
     }
+    _freeze_resolved_aircraft_effectivity(report, effective_aircraft)
     historical_start, windows = _configured_history_window(db, report)
 
     existing = db.query(ReliabilityFormalReportSource).filter(
@@ -252,6 +274,7 @@ def freeze_sources(
         "historical_window_months": windows,
         "historical_workbook_record_count": len(workbook_rows),
         "historical_canonical_event_count": len(event_rows),
+        "effective_aircraft_serial_numbers": sorted(effective_aircraft),
         "evidence_scope": "CURRENT_COMPARISON_AND_CONFIGURED_HISTORY_INPUTS",
     }
 
@@ -287,7 +310,6 @@ def _validate_publication_chain(
         for row in chain
         if row.id != replacement.id
         and row.status == FormalReportStatus.PUBLISHED.value
-        and row.published_at is not None
     ]
     if current and not replacement.supersedes_report_id:
         raise HTTPException(
