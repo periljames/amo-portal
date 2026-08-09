@@ -19,6 +19,7 @@ from .workspace_service import require_control_user, resolve_tenant
 router = APIRouter(prefix="/workspace", tags=["Document Control Portfolios"])
 
 ChangePortfolioView = Literal[
+    "my-changes",
     "requests",
     "draft",
     "in-review",
@@ -61,8 +62,16 @@ def _search_filter(q: str | None, *columns):
     return or_(*(column.ilike(needle) for column in columns))
 
 
-def _portfolio_counts(db: Session, tenant_id: str) -> dict[str, int]:
+def _portfolio_counts(db: Session, tenant_id: str, current_user_id: str) -> dict[str, int]:
     counts: dict[str, int] = {
+        "my-changes": db.query(func.count(dm.DocumentChangeRequest.id)).filter(
+            dm.DocumentChangeRequest.tenant_id == tenant_id,
+            or_(
+                dm.DocumentChangeRequest.owner_user_id == current_user_id,
+                dm.DocumentChangeRequest.proposer_user_id == current_user_id,
+            ),
+            dm.DocumentChangeRequest.status.notin_(["CLOSED", "REJECTED", "CANCELLED"]),
+        ).scalar() or 0,
         "requests": db.query(func.count(dm.DocumentChangeRequest.id)).filter(
             dm.DocumentChangeRequest.tenant_id == tenant_id,
             dm.DocumentChangeRequest.status.notin_(["CLOSED", "REJECTED", "CANCELLED"]),
@@ -87,7 +96,7 @@ def _portfolio_counts(db: Session, tenant_id: str) -> dict[str, int]:
 @router.get("/t/{tenant_slug}/changes-portfolio")
 def get_changes_portfolio(
     tenant_slug: str,
-    view: ChangePortfolioView = "in-review",
+    view: ChangePortfolioView = "my-changes",
     q: str | None = Query(default=None, max_length=255),
     status: str | None = Query(default=None, max_length=64),
     page: int = Query(default=1, ge=1),
@@ -106,14 +115,25 @@ def get_changes_portfolio(
     offset = (page - 1) * per_page
     items: list[dict[str, Any]] = []
 
-    if view == "requests":
+    if view in {"my-changes", "requests"}:
         query = db.query(dm.DocumentChangeRequest, manual_models.Manual).join(
             manual_models.Manual, manual_models.Manual.id == dm.DocumentChangeRequest.manual_id
         ).filter(
             dm.DocumentChangeRequest.tenant_id == tenant.amo_id,
             manual_models.Manual.tenant_id == tenant.id,
         )
-        if status:
+        if view == "my-changes":
+            query = query.filter(
+                or_(
+                    dm.DocumentChangeRequest.owner_user_id == current_user.id,
+                    dm.DocumentChangeRequest.proposer_user_id == current_user.id,
+                )
+            )
+            if status:
+                query = query.filter(dm.DocumentChangeRequest.status == status.upper())
+            else:
+                query = query.filter(dm.DocumentChangeRequest.status.notin_(["CLOSED", "REJECTED", "CANCELLED"]))
+        elif status:
             query = query.filter(dm.DocumentChangeRequest.status == status.upper())
         search = _search_filter(q, dm.DocumentChangeRequest.title, dm.DocumentChangeRequest.description, manual_models.Manual.code, manual_models.Manual.title)
         if search is not None:
@@ -235,6 +255,6 @@ def get_changes_portfolio(
         "view": view,
         "items": items,
         "pagination": _pagination(page, per_page, total, len(items)),
-        "facets": _portfolio_counts(db, tenant.amo_id),
+        "facets": _portfolio_counts(db, tenant.amo_id, str(current_user.id)),
         "generated_at": datetime.utcnow().isoformat(),
     }
