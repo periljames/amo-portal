@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 import os
 
+# The Ops gateway must not import tenant-domain file routers merely to install
+# shared-storage call-target replacements. Set this before importing the Platform
+# package so the control-plane failure domain remains isolated.
+os.environ.setdefault("AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING", "false")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
