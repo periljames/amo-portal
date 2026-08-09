@@ -66,3 +66,51 @@ export async function emitProductEvent(input: {
     return false;
   }
 }
+
+export async function trackProductWorkflow<T>(input: {
+  module: string;
+  workflow: string;
+  source?: string;
+  feature?: string;
+  operation: () => Promise<T>;
+}): Promise<T> {
+  const startedAt = Date.now();
+  void emitProductEvent({
+    event_type: "workflow_started",
+    module: input.module,
+    metadata: {
+      workflow: input.workflow,
+      source: input.source,
+      feature: input.feature,
+    },
+  });
+
+  try {
+    const result = await input.operation();
+    void emitProductEvent({
+      event_type: "workflow_completed",
+      module: input.module,
+      outcome: "SUCCESS",
+      duration_ms: Date.now() - startedAt,
+      metadata: {
+        workflow: input.workflow,
+        source: input.source,
+        feature: input.feature,
+      },
+    });
+    return result;
+  } catch (error) {
+    void emitProductEvent({
+      event_type: "workflow_failed",
+      module: input.module,
+      outcome: "FAILED",
+      duration_ms: Date.now() - startedAt,
+      metadata: {
+        workflow: input.workflow,
+        source: input.source,
+        feature: input.feature,
+      },
+    });
+    throw error;
+  }
+}
