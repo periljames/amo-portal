@@ -35,8 +35,8 @@ jobs:
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: qms-assurance-completion-secret
       QUALITY_SCHEMA_STRICT: "0"
     steps:
