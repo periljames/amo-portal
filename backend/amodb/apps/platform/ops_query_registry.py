@@ -6,7 +6,7 @@ import math
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -23,29 +23,104 @@ class QuerySpec:
     cache_ttl_seconds: float = 5.0
 
 
-# Expressions are repository-owned and never accepted from the browser.
+# Expressions are repository-owned and never accepted from the browser. Labels are
+# deliberately infrastructure/service bounded; tenant/user/document identifiers are
+# forbidden in this registry and asserted in CI.
 QUERY_REGISTRY: dict[str, QuerySpec] = {
+    # Host CPU / scheduler.
     "host_cpu_utilization": QuerySpec('100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)', "percent", 30 * 86400, 15),
+    "host_cpu_user": QuerySpec('avg by(instance) (rate(node_cpu_seconds_total{mode="user"}[5m])) * 100', "percent", 30 * 86400, 15),
+    "host_cpu_system": QuerySpec('avg by(instance) (rate(node_cpu_seconds_total{mode="system"}[5m])) * 100', "percent", 30 * 86400, 15),
     "host_cpu_iowait": QuerySpec('avg by(instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) * 100', "percent", 30 * 86400, 15),
+    "host_cpu_steal": QuerySpec('avg by(instance) (rate(node_cpu_seconds_total{mode="steal"}[5m])) * 100', "percent", 30 * 86400, 15),
+    "host_cpu_per_core": QuerySpec('100 - (avg by(instance,cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)', "percent", 7 * 86400, 15),
+    "host_cpu_count": QuerySpec('count without(cpu,mode) (node_cpu_seconds_total{mode="idle"})', "cores", 30 * 86400, 60),
     "host_load_1m": QuerySpec("node_load1", "load", 30 * 86400, 15),
+    "host_load_5m": QuerySpec("node_load5", "load", 30 * 86400, 15),
+    "host_load_15m": QuerySpec("node_load15", "load", 30 * 86400, 15),
+    "host_procs_running": QuerySpec("node_procs_running", "processes", 30 * 86400, 30),
+    "host_procs_blocked": QuerySpec("node_procs_blocked", "processes", 30 * 86400, 30),
+
+    # Host memory / VM pressure.
     "host_memory_utilization": QuerySpec('(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100', "percent", 30 * 86400, 15),
     "host_memory_available": QuerySpec("node_memory_MemAvailable_bytes", "bytes", 30 * 86400, 15),
+    "host_page_cache": QuerySpec("node_memory_Cached_bytes + node_memory_SReclaimable_bytes", "bytes", 30 * 86400, 30),
     "host_swap_utilization": QuerySpec('(1 - (node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))) * 100', "percent", 30 * 86400, 30),
+    "host_swap_in": QuerySpec("rate(node_vmstat_pswpin[5m])", "pages_per_second", 30 * 86400, 30),
+    "host_swap_out": QuerySpec("rate(node_vmstat_pswpout[5m])", "pages_per_second", 30 * 86400, 30),
+    "host_oom_kills": QuerySpec("increase(node_vmstat_oom_kill[5m])", "events", 30 * 86400, 60),
+
+    # Filesystem / block device.
     "filesystem_utilization": QuerySpec('100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}))', "percent", 30 * 86400, 30),
     "filesystem_free": QuerySpec('node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}', "bytes", 30 * 86400, 30),
     "filesystem_inode_utilization": QuerySpec('100 * (1 - (node_filesystem_files_free{fstype!~"tmpfs|overlay|squashfs"} / clamp_min(node_filesystem_files{fstype!~"tmpfs|overlay|squashfs"}, 1)))', "percent", 30 * 86400, 30),
+    "disk_read_throughput": QuerySpec('sum by(instance) (rate(node_disk_read_bytes_total{device!~"loop.*|ram.*"}[5m]))', "bytes_per_second", 30 * 86400, 30),
+    "disk_write_throughput": QuerySpec('sum by(instance) (rate(node_disk_written_bytes_total{device!~"loop.*|ram.*"}[5m]))', "bytes_per_second", 30 * 86400, 30),
+    "disk_read_latency": QuerySpec('sum by(instance) (rate(node_disk_read_time_seconds_total{device!~"loop.*|ram.*"}[5m])) / clamp_min(sum by(instance) (rate(node_disk_reads_completed_total{device!~"loop.*|ram.*"}[5m])), 0.001)', "seconds", 30 * 86400, 30),
+    "disk_write_latency": QuerySpec('sum by(instance) (rate(node_disk_write_time_seconds_total{device!~"loop.*|ram.*"}[5m])) / clamp_min(sum by(instance) (rate(node_disk_writes_completed_total{device!~"loop.*|ram.*"}[5m])), 0.001)', "seconds", 30 * 86400, 30),
+    "disk_io_utilization": QuerySpec('sum by(instance) (rate(node_disk_io_time_seconds_total{device!~"loop.*|ram.*"}[5m])) * 100', "percent", 30 * 86400, 30),
+
+    # Network / TCP.
     "network_ingress": QuerySpec('sum by(instance) (rate(node_network_receive_bytes_total{device!="lo"}[5m]))', "bytes_per_second", 30 * 86400, 15),
     "network_egress": QuerySpec('sum by(instance) (rate(node_network_transmit_bytes_total{device!="lo"}[5m]))', "bytes_per_second", 30 * 86400, 15),
     "network_errors": QuerySpec('sum by(instance) (rate(node_network_receive_errs_total{device!="lo"}[5m]) + rate(node_network_transmit_errs_total{device!="lo"}[5m]))', "errors_per_second", 30 * 86400, 30),
     "network_drops": QuerySpec('sum by(instance) (rate(node_network_receive_drop_total{device!="lo"}[5m]) + rate(node_network_transmit_drop_total{device!="lo"}[5m]))', "drops_per_second", 30 * 86400, 30),
+    "tcp_established": QuerySpec("node_netstat_Tcp_CurrEstab", "connections", 30 * 86400, 30),
+    "tcp_inuse": QuerySpec("node_sockstat_TCP_inuse", "sockets", 30 * 86400, 30),
+    "tcp_timewait": QuerySpec("node_sockstat_TCP_tw", "sockets", 30 * 86400, 30),
+
+    # Host lifecycle.
+    "host_uptime": QuerySpec("time() - node_boot_time_seconds", "seconds", 30 * 86400, 60),
+    "host_boot_time": QuerySpec("node_boot_time_seconds", "epoch_seconds", 30 * 86400, 60),
+
+    # Container / process boundary from cAdvisor.
     "container_cpu": QuerySpec('sum by(instance,name) (rate(container_cpu_usage_seconds_total{name!=""}[5m])) * 100', "percent", 7 * 86400, 30),
     "container_memory": QuerySpec('sum by(instance,name) (container_memory_working_set_bytes{name!=""})', "bytes", 7 * 86400, 30),
+    "container_block_read": QuerySpec('sum by(instance,name) (rate(container_fs_reads_bytes_total{name!=""}[5m]))', "bytes_per_second", 7 * 86400, 30),
+    "container_block_write": QuerySpec('sum by(instance,name) (rate(container_fs_writes_bytes_total{name!=""}[5m]))', "bytes_per_second", 7 * 86400, 30),
+    "container_uptime": QuerySpec('time() - container_start_time_seconds{name!=""}', "seconds", 7 * 86400, 60),
+    "container_restarts_1h": QuerySpec('changes(container_start_time_seconds{name!=""}[1h])', "restarts", 7 * 86400, 60),
+
+    # Component scrape health.
     "target_up": QuerySpec('up{job=~"node-exporter|cadvisor|otel-hub|prometheus|alertmanager"}', "boolean", 30 * 86400, 15),
-    "db_pool_checked_out": QuerySpec('amo_db_pool_checked_out', "connections", 30 * 86400, 30),
-    "db_pool_idle": QuerySpec('amo_db_pool_idle', "connections", 30 * 86400, 30),
-    "queue_depth": QuerySpec('amo_job_queue_depth', "jobs", 30 * 86400, 30),
-    "queue_oldest_age": QuerySpec('amo_job_queue_oldest_age_seconds', "seconds", 30 * 86400, 30),
-    "worker_freshness": QuerySpec('amo_worker_last_seen_age_seconds', "seconds", 30 * 86400, 30),
+
+    # Application / SQLAlchemy pool metrics exported by OpenTelemetry.
+    "process_cpu": QuerySpec("amo_process_cpu_percent", "percent", 7 * 86400, 15),
+    "process_memory_rss": QuerySpec("amo_process_memory_rss_bytes", "bytes", 7 * 86400, 15),
+    "db_pool_checked_out": QuerySpec("amo_db_pool_checked_out", "connections", 30 * 86400, 30),
+    "db_pool_idle": QuerySpec("amo_db_pool_idle", "connections", 30 * 86400, 30),
+    "db_pool_size": QuerySpec("amo_db_pool_size", "connections", 30 * 86400, 30),
+    "db_pool_overflow": QuerySpec("amo_db_pool_overflow", "connections", 30 * 86400, 30),
+    "db_pool_utilization": QuerySpec('100 * amo_db_pool_checked_out / clamp_min(amo_db_pool_size + clamp_min(amo_db_pool_overflow, 0), 1)', "percent", 30 * 86400, 30),
+
+    # PostgreSQL semantic health metrics exported by the application. These queries
+    # never expose SQL text or tenant identifiers.
+    "db_active_connections": QuerySpec("amo_db_active_connections", "connections", 30 * 86400, 30),
+    "db_max_connections": QuerySpec("amo_db_max_connections", "connections", 30 * 86400, 60),
+    "db_connection_utilization": QuerySpec("100 * amo_db_active_connections / clamp_min(amo_db_max_connections, 1)", "percent", 30 * 86400, 30),
+    "db_waiting_connections": QuerySpec("amo_db_waiting_connections", "connections", 30 * 86400, 30),
+    "db_lock_waiters": QuerySpec("amo_db_lock_waiters", "connections", 30 * 86400, 30),
+    "db_deadlocks_total": QuerySpec("amo_db_deadlocks_total", "deadlocks", 30 * 86400, 60),
+    "db_commits_total": QuerySpec("amo_db_commits_total", "transactions", 30 * 86400, 30),
+    "db_rollbacks_total": QuerySpec("amo_db_rollbacks_total", "transactions", 30 * 86400, 30),
+    "db_transaction_rate": QuerySpec("rate(amo_db_commits_total[5m]) + rate(amo_db_rollbacks_total[5m])", "transactions_per_second", 30 * 86400, 30),
+    "db_size": QuerySpec("amo_db_size_bytes", "bytes", 30 * 86400, 60),
+    "db_replica_lag": QuerySpec("amo_db_replica_lag_seconds", "seconds", 30 * 86400, 30),
+    "db_long_queries": QuerySpec("amo_db_long_running_queries", "queries", 30 * 86400, 30),
+
+    # API SLO metrics are low-cardinality, window-labelled observations calculated
+    # from the platform route-metric rollup.
+    "api_request_rate_5m": QuerySpec('amo_api_request_rate_per_second{window="5m"}', "requests_per_second", 30 * 86400, 15),
+    "api_error_rate_5m": QuerySpec('amo_api_error_rate{window="5m"}', "ratio", 30 * 86400, 15),
+    "api_error_rate_1h": QuerySpec('amo_api_error_rate{window="1h"}', "ratio", 30 * 86400, 30),
+    "api_p95_latency_5m": QuerySpec('amo_api_p95_latency_ms{window="5m"}', "milliseconds", 30 * 86400, 15),
+    "api_p99_latency_5m": QuerySpec('amo_api_p99_latency_ms{window="5m"}', "milliseconds", 30 * 86400, 15),
+
+    # Background work / providers.
+    "queue_depth": QuerySpec("amo_job_queue_depth", "jobs", 30 * 86400, 30),
+    "queue_oldest_age": QuerySpec("amo_job_queue_oldest_age_seconds", "seconds", 30 * 86400, 30),
+    "worker_freshness": QuerySpec("amo_worker_last_seen_age_seconds", "seconds", 30 * 86400, 30),
+    "provider_failure_rate": QuerySpec('sum by(job_type) (rate(amo_job_result_total{job_status=~"FAILED|ERROR|UNSUPPORTED"}[5m]))', "failures_per_second", 7 * 86400, 30),
 }
 
 WINDOWS: dict[str, tuple[int, int]] = {
