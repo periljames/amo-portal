@@ -39,6 +39,7 @@ def test_changes_portfolio_consolidates_lifecycle_without_changing_legacy_lists(
     source = _source("backend/amodb/apps/doc_control/workspace_portfolio_router.py")
 
     for view in (
+        "my-changes",
         "requests",
         "draft",
         "in-review",
@@ -57,6 +58,17 @@ def test_changes_portfolio_consolidates_lifecycle_without_changing_legacy_lists(
     assert '"kind": "TEMPORARY_REVISION"' in source
     assert 'document-control/library/{manual.id}?tab=workflow' in source
     assert 'document-control/library/{manual.id}?tab=changes' in source
+
+
+def test_my_changes_is_current_user_attributable_and_excludes_closed_by_default() -> None:
+    source = _source("backend/amodb/apps/doc_control/workspace_portfolio_router.py")
+
+    assert 'view: ChangePortfolioView = "my-changes"' in source
+    assert 'if view in {"my-changes", "requests"}' in source
+    assert "DocumentChangeRequest.owner_user_id == current_user.id" in source
+    assert "DocumentChangeRequest.proposer_user_id == current_user.id" in source
+    assert 'DocumentChangeRequest.status.notin_(["CLOSED", "REJECTED", "CANCELLED"])' in source
+    assert '_portfolio_counts(db, tenant.amo_id, str(current_user.id))' in source
 
 
 def test_changes_portfolio_keeps_tenant_scope_on_every_entity_query() -> None:
