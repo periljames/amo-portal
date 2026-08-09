@@ -159,6 +159,7 @@ jobs:
               "merge_20260807_qms_planner_aircraft",
               "docgov_merge_20260807_qms",
               "docgov_20260807_qms_audit_runtime",
+              "docgov_rel_20260807_merge",
               "rel_20260807_main_merge",
               "rel_20260807_formal_docgov_merge",
               "docctl_20260808_regmap",
