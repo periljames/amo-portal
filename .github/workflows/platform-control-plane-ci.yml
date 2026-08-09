@@ -230,7 +230,7 @@ jobs:
         working-directory: backend
         run: |
           alembic -c amodb/alembic.ini upgrade heads
-          alembic -c amodb/alembic.ini current | grep -q "platform_ops_20260809_incident_lifecycle"
+          alembic -c amodb/alembic.ini current | grep -q "platform_rel_20260809_merge"
       - name: Prove transaction-local database guards
         working-directory: backend
         run: |
