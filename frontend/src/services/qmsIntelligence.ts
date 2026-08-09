@@ -25,7 +25,18 @@ export type QmsIntelligenceOverview = {
     surveillance_interval_days?: number | null;
     programme_states: string[];
     priority_order: number;
-    factors: Array<{ code: string; label: string; value: unknown; hard_requirement: boolean; source: string; rule: string }>;
+    factors: Array<{
+      code: string;
+      label: string;
+      value: unknown;
+      hard_requirement: boolean;
+      source: string;
+      rule: string;
+      rationale?: string;
+      source_record?: string | null;
+      source_date?: string | null;
+      planning_weight?: number | null;
+    }>;
     explanation: string;
   }>;
   method: { type: string; statement: string };
@@ -36,8 +47,11 @@ export type QmsRiskPlanningFactor = {
   label: string;
   value: unknown;
   source: string;
+  source_record?: string | null;
+  source_date?: string | null;
   hard_requirement: boolean;
   rationale: string;
+  planning_weight?: number | null;
 };
 
 export type QmsRiskPlanningContext = {
