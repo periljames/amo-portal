@@ -110,8 +110,14 @@ def upgrade() -> None:
             CREATE OR REPLACE FUNCTION prevent_terminal_quality_audit_report_mutation()
             RETURNS trigger AS $$
             BEGIN
-                IF TG_OP = 'DELETE' OR OLD.status IN ('ISSUED','SUPERSEDED','CANCELLED') THEN
+                IF TG_OP = 'DELETE' THEN
+                    RAISE EXCEPTION 'audit report revisions cannot be deleted';
+                END IF;
+                IF OLD.status IN ('SUPERSEDED','CANCELLED') THEN
                     RAISE EXCEPTION 'terminal audit report revisions are immutable';
+                END IF;
+                IF OLD.status = 'ISSUED' AND NEW.status <> 'SUPERSEDED' THEN
+                    RAISE EXCEPTION 'issued audit report revisions may only transition to SUPERSEDED';
                 END IF;
                 RETURN NEW;
             END;
