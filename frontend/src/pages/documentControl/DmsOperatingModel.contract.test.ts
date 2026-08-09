@@ -6,6 +6,7 @@ const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8
 const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.url), "utf-8");
 const homePage = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
+const libraryService = readFileSync(new URL("../../services/documentLibrary.ts", import.meta.url), "utf-8");
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
@@ -19,6 +20,7 @@ const complianceService = readFileSync(new URL("../../services/documentControlCo
 const reportsPage = readFileSync(new URL("./DocumentControlReportsPage.tsx", import.meta.url), "utf-8");
 const reportsService = readFileSync(new URL("../../services/documentControlReportsPortfolio.ts", import.meta.url), "utf-8");
 const administrationPage = readFileSync(new URL("./DocumentControlAdministrationPage.tsx", import.meta.url), "utf-8");
+const administrationService = readFileSync(new URL("../../services/documentControlReports.ts", import.meta.url), "utf-8");
 const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", import.meta.url), "utf-8");
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
@@ -34,8 +36,12 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain("QMS and module links");
   });
 
-  it("does not mount the documentation assistant as permanent DMS chrome", () => {
-    expect(shell).not.toContain("DocumentationAssistantPanel");
+  it("mounts assisted search only in Library/document context rather than permanent DMS chrome", () => {
+    expect(shell).toContain("DocumentationAssistantPanel");
+    expect(shell).toContain("showContextualAssistant");
+    expect(shell).toContain('location.pathname.includes("/document-control/library")');
+    expect(shell).toContain('title={assistantDocumentId ? "Document evidence search" : "Controlled information search"}');
+    expect(shell).not.toContain('label: "Assistant"');
   });
 
   it("keeps canonical and specialist compatibility URLs addressable while converging legacy lists", () => {
@@ -60,6 +66,17 @@ describe("DMS frontend operating-model contract", () => {
     expect(pageExports).toContain('query.set("status", "ARCHIVED")');
     expect(pageExports).toContain('suffix="/reports"');
     expect(pageExports).toContain('suffix="/administration"');
+  });
+
+  it("gives Library the MD preset views and bounded rich controlled-information discovery", () => {
+    for (const label of ["All Documents", "My Documents", "Favorites", "Recently Opened", "Recently Revised", "Awaiting My Review", "External Technical Data", "Due for Review", "Superseded", "Archived"]) {
+      expect(libraryPage).toContain(`label: "${label}"`);
+    }
+    expect(libraryPage).toContain("discoverLibrary");
+    expect(libraryPage).toContain("Permission-filtered discovery · server-bounded");
+    expect(libraryPage).toContain("alias, owner, revision, filename, hierarchy or indexed text");
+    expect(libraryService).toContain("library-discovery");
+    expect(libraryService).toContain("per_page");
   });
 
   it("routes canonical Changes to a bounded paginated portfolio", () => {
@@ -111,21 +128,34 @@ describe("DMS frontend operating-model contract", () => {
     expect(compliancePortfolio).toContain('if (key === "view") next.delete("status")');
   });
 
-  it("routes Reports to bounded evidence and Administration to the low-frequency control hub", () => {
+  it("makes Reports a bounded controlled-evidence catalogue instead of a master-register-only page", () => {
     expect(pageExports).toContain("function DocControlRegistersPage()");
     expect(pageExports).toContain("<ReportsPage />");
-    expect(pageExports).toContain("function DocControlSettingsPage()");
-    expect(pageExports).toContain("<AdministrationPage />");
     expect(reportsService).toContain("reports-portfolio");
+    expect(reportsService).toContain("reports-register");
     expect(reportsService).toContain("per_page");
     expect(reportsService).toContain("authHeaders()");
     expect(reportsPage).toContain('data-testid="document-control-reports"');
+    for (const label of ["Master Documents", "LEP", "Revisions", "Distribution", "Acknowledgements", "Controlled Copies", "External Sources", "Review Due", "Temporary Revisions", "Authority", "Archive", "Change History", "Retention / Disposition"]) {
+      expect(reportsPage).toContain(`label: "${label}"`);
+    }
     expect(reportsPage).toContain("Export current page CSV");
+    expect(reportsPage).toContain("Print / PDF");
+  });
+
+  it("makes Administration a backend-governed low-frequency policy workspace", () => {
+    expect(pageExports).toContain("function DocControlSettingsPage()");
+    expect(pageExports).toContain("<AdministrationPage />");
     expect(administrationPage).toContain('data-testid="document-control-administration"');
-    expect(administrationPage).toContain("Governance defaults");
+    for (const heading of ["Governance defaults", "Workflow policy", "Retention classes", "Indexing and integration policy", "Physical controlled-copy policy", "Administrative tools"]) {
+      expect(administrationPage).toContain(heading);
+    }
+    expect(administrationPage).toContain("Document classes");
     expect(administrationPage).toContain("Hierarchy & taxonomy");
-    expect(administrationPage).toContain("Retained generated records");
-    expect(administrationPage).toContain("Indexing exceptions");
+    expect(administrationPage).toContain("Controlled templates");
+    expect(administrationPage).toContain("Integration mappings");
+    expect(administrationService).toContain("getDocumentControlAdministration");
+    expect(administrationService).toContain("updateDocumentControlAdministration");
   });
 
   it("neutralizes spreadsheet formulas before producing controlled CSV exports", () => {
