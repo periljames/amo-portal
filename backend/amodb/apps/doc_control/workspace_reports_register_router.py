@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -41,15 +41,19 @@ def _date_bounds(date_from: date | None, date_to: date | None) -> tuple[datetime
     return start, end
 
 
+def _manual_search_conditions(needle: str):
+    return (
+        manual_models.Manual.code.ilike(needle),
+        manual_models.Manual.title.ilike(needle),
+        manual_models.Manual.manual_type.ilike(needle),
+    )
+
+
 def _apply_manual_search(query, q: str | None):
     if not q or not q.strip():
         return query
     needle = f"%{q.strip()}%"
-    return query.filter(or_(
-        manual_models.Manual.code.ilike(needle),
-        manual_models.Manual.title.ilike(needle),
-        manual_models.Manual.manual_type.ilike(needle),
-    ))
+    return query.filter(or_(*_manual_search_conditions(needle)))
 
 
 def _manual_payload(manual: manual_models.Manual) -> dict[str, str]:
@@ -107,8 +111,8 @@ def get_reports_register(
     """Return one bounded authoritative DMS evidence register.
 
     The canonical Reports workspace selects a report family here instead of
-    loading complete domain tables into the browser.  Each report retains the
-    source entity identity and links back to the owning operational context.
+    loading complete domain tables into the browser. Each result retains its
+    source entity identity and links to the operational owner of the evidence.
     """
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
@@ -122,18 +126,17 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == manual_models.ManualRevision.manual_id)
             .filter(manual_models.Manual.tenant_id == tenant.id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
             query = query.filter(or_(
-                manual_models.Manual.code.ilike(needle),
-                manual_models.Manual.title.ilike(needle),
+                *_manual_search_conditions(needle),
                 manual_models.ManualRevision.rev_number.ilike(needle),
                 manual_models.ManualRevision.issue_number.ilike(needle),
                 manual_models.ManualRevision.source_filename.ilike(needle),
             ))
         if wanted_status:
-            query = query.filter(manual_models.ManualRevision.status_enum == wanted_status)
+            revision_status = manual_models.ManualRevisionStatus.__members__.get(wanted_status)
+            query = query.filter(manual_models.ManualRevision.status_enum == revision_status) if revision_status else query.filter(False)
         if start:
             query = query.filter(manual_models.ManualRevision.created_at >= start)
         if end:
@@ -172,7 +175,7 @@ def get_reports_register(
                 status="CURRENT",
                 date_value=revision.effective_date,
                 context=f"{revision.source_page_count or 0} source page(s) · Rev {revision.rev_number}",
-                target_path=f"lep/{manual.id}",
+                target_path=f"library/{manual.id}?tab=changes&view=lep",
                 details={"page_count": revision.source_page_count, "revision_number": revision.rev_number, "issue_number": revision.issue_number},
             ))
 
@@ -182,7 +185,9 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == dm.DocumentDistributionCampaign.manual_id)
             .filter(dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
+        if q and q.strip():
+            needle = f"%{q.strip()}%"
+            query = query.filter(or_(*_manual_search_conditions(needle), dm.DocumentDistributionCampaign.title.ilike(needle)))
         if wanted_status:
             query = query.filter(dm.DocumentDistributionCampaign.status == wanted_status)
         if start:
@@ -212,12 +217,11 @@ def get_reports_register(
             .outerjoin(account_models.User, account_models.User.id == dm.DocumentDistributionRecipient.recipient_user_id)
             .filter(dm.DocumentDistributionRecipient.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
             query = query.filter(or_(
-                manual_models.Manual.code.ilike(needle),
-                manual_models.Manual.title.ilike(needle),
+                *_manual_search_conditions(needle),
+                dm.DocumentDistributionCampaign.title.ilike(needle),
                 account_models.User.full_name.ilike(needle),
                 account_models.User.email.ilike(needle),
             ))
@@ -249,18 +253,20 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == dm.DocumentControlledCopy.manual_id)
             .filter(dm.DocumentControlledCopy.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
             query = query.filter(or_(
-                manual_models.Manual.code.ilike(needle),
-                manual_models.Manual.title.ilike(needle),
+                *_manual_search_conditions(needle),
                 dm.DocumentControlledCopy.copy_number.ilike(needle),
                 dm.DocumentControlledCopy.holder_name.ilike(needle),
                 dm.DocumentControlledCopy.location_text.ilike(needle),
             ))
         if wanted_status:
             query = query.filter(dm.DocumentControlledCopy.status == wanted_status)
+        if start:
+            query = query.filter(dm.DocumentControlledCopy.issued_at >= start)
+        if end:
+            query = query.filter(dm.DocumentControlledCopy.issued_at <= end)
         query = query.order_by(dm.DocumentControlledCopy.issued_at.desc())
         total, rows = _paginate(query, page, per_page)
         for copy, manual in rows:
@@ -284,12 +290,10 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == dm.ExternalDocumentSource.manual_id)
             .filter(dm.ExternalDocumentSource.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
             query = query.filter(or_(
-                manual_models.Manual.code.ilike(needle),
-                manual_models.Manual.title.ilike(needle),
+                *_manual_search_conditions(needle),
                 dm.ExternalDocumentSource.provider.ilike(needle),
                 dm.ExternalDocumentSource.authority.ilike(needle),
                 dm.ExternalDocumentSource.subscription_reference.ilike(needle),
@@ -340,7 +344,9 @@ def get_reports_register(
             .outerjoin(account_models.User, account_models.User.id == dm.DocumentReviewPlan.owner_user_id)
             .filter(dm.DocumentReviewPlan.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
+        if q and q.strip():
+            needle = f"%{q.strip()}%"
+            query = query.filter(or_(*_manual_search_conditions(needle), account_models.User.full_name.ilike(needle)))
         if wanted_status:
             query = query.filter(dm.DocumentReviewPlan.status == wanted_status)
         if start:
@@ -369,12 +375,20 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == dm.DocumentTemporaryRevision.manual_id)
             .filter(dm.DocumentTemporaryRevision.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
-            query = query.filter(or_(manual_models.Manual.code.ilike(needle), dm.DocumentTemporaryRevision.tr_number.ilike(needle), dm.DocumentTemporaryRevision.title.ilike(needle)))
+            query = query.filter(or_(
+                *_manual_search_conditions(needle),
+                dm.DocumentTemporaryRevision.tr_number.ilike(needle),
+                dm.DocumentTemporaryRevision.title.ilike(needle),
+                dm.DocumentTemporaryRevision.reason.ilike(needle),
+            ))
         if wanted_status:
             query = query.filter(dm.DocumentTemporaryRevision.status == wanted_status)
+        if date_from:
+            query = query.filter(dm.DocumentTemporaryRevision.effective_date >= date_from)
+        if date_to:
+            query = query.filter(dm.DocumentTemporaryRevision.expiry_date <= date_to)
         query = query.order_by(dm.DocumentTemporaryRevision.expiry_date.asc())
         total, rows = _paginate(query, page, per_page)
         for tr, manual in rows:
@@ -396,10 +410,13 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == dm.DocumentAuthoritySubmission.manual_id)
             .filter(dm.DocumentAuthoritySubmission.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
-            query = query.filter(or_(manual_models.Manual.code.ilike(needle), dm.DocumentAuthoritySubmission.submission_reference.ilike(needle), dm.DocumentAuthoritySubmission.authority_name.ilike(needle)))
+            query = query.filter(or_(
+                *_manual_search_conditions(needle),
+                dm.DocumentAuthoritySubmission.submission_reference.ilike(needle),
+                dm.DocumentAuthoritySubmission.authority_name.ilike(needle),
+            ))
         if wanted_status:
             query = query.filter(dm.DocumentAuthoritySubmission.status == wanted_status)
         if start:
@@ -434,7 +451,21 @@ def get_reports_register(
                 ]),
             )
         )
-        query = _apply_manual_search(query, q).order_by(manual_models.ManualRevision.created_at.desc())
+        if q and q.strip():
+            needle = f"%{q.strip()}%"
+            query = query.filter(or_(
+                *_manual_search_conditions(needle),
+                manual_models.ManualRevision.rev_number.ilike(needle),
+                manual_models.ManualRevision.issue_number.ilike(needle),
+            ))
+        if wanted_status:
+            revision_status = manual_models.ManualRevisionStatus.__members__.get(wanted_status)
+            query = query.filter(manual_models.ManualRevision.status_enum == revision_status) if revision_status else query.filter(False)
+        if start:
+            query = query.filter(manual_models.ManualRevision.created_at >= start)
+        if end:
+            query = query.filter(manual_models.ManualRevision.created_at <= end)
+        query = query.order_by(manual_models.ManualRevision.created_at.desc())
         total, rows = _paginate(query, page, per_page)
         for revision, manual in rows:
             raw_status = str(getattr(revision.status_enum, "value", revision.status_enum or ""))
@@ -456,10 +487,14 @@ def get_reports_register(
             .outerjoin(account_models.User, account_models.User.id == dm.DocumentChangeRequest.owner_user_id)
             .filter(dm.DocumentChangeRequest.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
-            query = query.filter(or_(manual_models.Manual.code.ilike(needle), dm.DocumentChangeRequest.title.ilike(needle), dm.DocumentChangeRequest.description.ilike(needle)))
+            query = query.filter(or_(
+                *_manual_search_conditions(needle),
+                dm.DocumentChangeRequest.title.ilike(needle),
+                dm.DocumentChangeRequest.description.ilike(needle),
+                account_models.User.full_name.ilike(needle),
+            ))
         if wanted_status:
             query = query.filter(dm.DocumentChangeRequest.status == wanted_status)
         if start:
@@ -488,10 +523,13 @@ def get_reports_register(
             .join(manual_models.Manual, manual_models.Manual.id == km.DocumentationRecord.template_manual_id)
             .filter(km.DocumentationRecord.tenant_id == tenant.amo_id)
         )
-        query = _apply_manual_search(query, q)
         if q and q.strip():
             needle = f"%{q.strip()}%"
-            query = query.filter(or_(manual_models.Manual.code.ilike(needle), km.DocumentationRecord.record_number.ilike(needle), km.DocumentationRecord.artifact_filename.ilike(needle)))
+            query = query.filter(or_(
+                *_manual_search_conditions(needle),
+                km.DocumentationRecord.record_number.ilike(needle),
+                km.DocumentationRecord.artifact_filename.ilike(needle),
+            ))
         if wanted_status:
             query = query.filter(km.DocumentationRecord.status == wanted_status)
         if start:
