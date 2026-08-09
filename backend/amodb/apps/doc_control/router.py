@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
 from .governance_router import router as governance_router
+from .governance_runtime_guard import install as install_governance_runtime_guard
 from .reader_governance_router import router as reader_governance_router
 from .knowledge_access_router import workspace_tree_router
 from .knowledge_resolution_router import router as knowledge_resolution_router
@@ -46,6 +47,7 @@ from .workspace_workflow_router import router as workspace_workflow_router
 
 
 install_knowledge_assistant_runtime_guard()
+install_governance_runtime_guard()
 
 router = APIRouter()
 router.include_router(legacy_router)
