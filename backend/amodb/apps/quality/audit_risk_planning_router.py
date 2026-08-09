@@ -13,6 +13,7 @@ from .assurance_case_models import QualityAssuranceCase, QualityEffectivenessPla
 from .assurance_metrics_router import _full_metrics
 from .assurance_wiring_router import _safe_identifier, _table_columns
 from .audit_programme_models import QualityAuditProgrammeItem, QualityAuditUniverseItem
+from .mission_models import QualityMission
 from .models import QMSAudit, QMSAuditFinding, QMSAuditSchedule
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -26,6 +27,12 @@ _SAFETY_OCCURRENCE_SOURCE_CONTRACT = {
     "source_route": "optional deep link into the authoritative Safety record",
     "audit_universe_source_id": "optional exact Quality Audit Universe source_id used only for explicit targeting",
 }
+_MISSION_AIRCRAFT_SCOPE_KEYS = (
+    "aircraft_type",
+    "aircraft_types",
+    "aircraft_type_id",
+    "aircraft_type_ids",
+)
 
 
 def _utcnow() -> datetime:
@@ -41,12 +48,16 @@ def _factor(
     rationale: str,
     hard: bool = False,
     planning_weight: int | None = None,
+    source_record: str | None = None,
+    source_date: str | None = None,
 ) -> dict[str, Any]:
     payload = {
         "code": code,
         "label": label,
         "value": value,
         "source": source,
+        "source_record": source_record or source,
+        "source_date": source_date,
         "hard_requirement": hard,
         "rationale": rationale,
     }
@@ -76,6 +87,79 @@ def _is_safety_occurrence_reference(reference: Any) -> bool:
     ).strip().lower()
     source_type = str(reference.get("source_type") or reference.get("type") or "").strip().upper()
     return owner == "safety" and source_type == "SAFETY_OCCURRENCE"
+
+
+def _scope_values(scope: Any, keys: tuple[str, ...]) -> list[str]:
+    if not isinstance(scope, dict):
+        return []
+    values: list[str] = []
+    for key in keys:
+        raw = scope.get(key)
+        if raw is None:
+            continue
+        candidates = raw if isinstance(raw, list) else [raw]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                candidate = candidate.get("id") or candidate.get("code") or candidate.get("name")
+            text_value = str(candidate or "").strip()
+            if text_value and text_value not in values:
+                values.append(text_value)
+    return values
+
+
+def _mission_change_context(db: Session, amo_id: str) -> dict[str, Any]:
+    rows = db.query(QualityMission).filter(
+        QualityMission.amo_id == amo_id,
+        QualityMission.status.notin_(("COMPLETE", "CANCELLED")),
+    ).limit(1000).all()
+
+    capability_records: list[dict[str, Any]] = []
+    aircraft_type_records: list[dict[str, Any]] = []
+    by_universe_source_id: dict[str, dict[str, int]] = {}
+    latest_change_at: datetime | None = None
+
+    for mission in rows:
+        changed_at = _aware(mission.updated_at or mission.created_at)
+        if changed_at is not None and (latest_change_at is None or changed_at > latest_change_at):
+            latest_change_at = changed_at
+        scope = mission.scope if isinstance(mission.scope, dict) else {}
+        universe_ids = _scope_values(scope, ("audit_universe_source_id", "audit_universe_source_ids"))
+        base_record = {
+            "mission_id": str(mission.id),
+            "mission_ref": mission.mission_ref,
+            "mission_type": mission.mission_type,
+            "title": mission.title,
+            "status": mission.status,
+            "risk_level": mission.risk_level,
+            "updated_at": changed_at.isoformat() if changed_at else None,
+            "route": f"/quality/missions/{mission.id}",
+        }
+
+        if mission.mission_type in {"CAPABILITY_ADDITION", "CAPABILITY_CHANGE"}:
+            capability_records.append(base_record)
+            for universe_source_id in universe_ids:
+                bucket = by_universe_source_id.setdefault(universe_source_id, {})
+                bucket["capability"] = bucket.get("capability", 0) + 1
+
+        aircraft_types = _scope_values(scope, _MISSION_AIRCRAFT_SCOPE_KEYS)
+        if aircraft_types:
+            aircraft_type_records.append({**base_record, "aircraft_types": aircraft_types})
+            for universe_source_id in universe_ids:
+                bucket = by_universe_source_id.setdefault(universe_source_id, {})
+                bucket["aircraft_type"] = bucket.get("aircraft_type", 0) + 1
+
+    return {
+        "open_capability_missions": len(capability_records),
+        "open_aircraft_type_missions": len(aircraft_type_records),
+        "capability_records": capability_records,
+        "aircraft_type_records": aircraft_type_records,
+        "by_universe_source_id": by_universe_source_id,
+        "latest_change_at": latest_change_at.isoformat() if latest_change_at else None,
+        "aircraft_scope_contract": {
+            "accepted_keys": list(_MISSION_AIRCRAFT_SCOPE_KEYS),
+            "method": "Aircraft-type exposure is counted only from explicit governed Mission scope keys; mission title/description text is never parsed as aircraft-type evidence.",
+        },
+    }
 
 
 def _reliability_context(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list[dict[str, str]]]:
@@ -299,29 +383,38 @@ def _global_factors(
     reliability: dict[str, int],
     effectiveness: dict[str, Any] | None = None,
     safety: dict[str, Any] | None = None,
+    mission_change: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     effectiveness = effectiveness or {}
     safety = safety or {}
+    mission_change = mission_change or {}
+    observed_at = _utcnow().isoformat()
     mapping = (
-        ("OPEN_FINDINGS", "Open audit findings", metrics.get("open_findings", 0), "quality", "Open findings increase assurance demand and may require targeted follow-up."),
-        ("OVERDUE_CARS", "Overdue corrective actions", metrics.get("overdue_cars", 0), "quality", "Overdue corrective actions are an explicit assurance exposure."),
-        ("INEFFECTIVE_CORRECTIVE_ACTIONS", "Ineffective corrective-action effectiveness reviews", effectiveness.get("ineffective_corrective_actions", 0), "effectiveness", "A governed INEFFECTIVE effectiveness conclusion is direct evidence that corrective action did not achieve the expected outcome."),
-        ("EXPIRED_TRAINING", "Expired training records", metrics.get("expired_training", 0), "training", "Expired competence evidence can increase personnel-related surveillance need."),
-        ("SUPPLIER_APPROVAL_EXPIRY", "Expired supplier approvals", metrics.get("expired_supplier_approvals", 0), "supplier", "Expired supplier approval evidence increases supplier-surveillance exposure."),
-        ("CALIBRATION_OVERDUE", "Overdue calibrations", metrics.get("overdue_calibrations", 0), "calibration", "Overdue calibration can affect inspection/test assurance."),
-        ("OUT_OF_TOLERANCE", "Open out-of-tolerance events", metrics.get("out_of_tolerance", 0), "calibration", "Out-of-tolerance events may require impact-focused surveillance."),
-        ("HIGH_CRITICAL_RISKS", "High / critical risks", metrics.get("high_risks", 0) + metrics.get("critical_risks", 0), "risk", "Open high or critical governed risks increase assurance attention."),
-        ("SAFETY_OCCURRENCES", "Open explicitly linked Safety occurrences", safety.get("open_linked_occurrences", 0), "safety-occurrence", "Only explicit Safety-owned SAFETY_OCCURRENCE references attached to open assurance cases contribute this factor."),
-        ("PENDING_CHANGES", "Pending organizational / process changes", metrics.get("pending_changes", 0), "change", "Active changes can require post-implementation or transition surveillance."),
-        ("MANAGEMENT_REVIEW_OVERDUE", "Overdue management-review actions", metrics.get("overdue_review_actions", 0), "management-review", "Overdue management commitments are assurance obligations."),
-        ("REGULATOR_FINDINGS", "Open regulator findings", metrics.get("open_regulator_findings", 0), "regulator", "Open authority findings are explicit regulatory-consequence exposure."),
-        ("EXTERNAL_COMMITMENTS", "Overdue external commitments", metrics.get("overdue_external_commitments", 0), "regulator", "Overdue authority/customer commitments require visible surveillance attention."),
-        ("RELIABILITY_EVENTS", "High / critical reliability events (90d)", reliability.get("high_critical_events_90d", 0), "reliability", "Recent high/critical reliability events can justify focused technical surveillance."),
-        ("REPEAT_RELIABILITY", "Repeat reliability events (90d)", reliability.get("repeat_events_90d", 0), "reliability", "Repeated reliability events are a deterministic recurrence signal."),
-        ("RELIABILITY_RECURRING_FINDINGS", "Reliability recurring findings", reliability.get("recurring_findings", 0), "reliability", "Recurring reliability findings increase targeted-surveillance attention."),
-        ("RELIABILITY_RECOMMENDATIONS", "Open high-priority reliability recommendations", reliability.get("open_high_recommendations", 0), "reliability", "Open high-priority reliability recommendations represent unresolved operational exposure."),
+        ("OPEN_FINDINGS", "Open audit findings", metrics.get("open_findings", 0), "quality", "quality_assurance_metrics.open_findings", "Open findings increase assurance demand and may require targeted follow-up."),
+        ("OVERDUE_CARS", "Overdue corrective actions", metrics.get("overdue_cars", 0), "quality", "quality_assurance_metrics.overdue_cars", "Overdue corrective actions are an explicit assurance exposure."),
+        ("INEFFECTIVE_CORRECTIVE_ACTIONS", "Ineffective corrective-action effectiveness reviews", effectiveness.get("ineffective_corrective_actions", 0), "effectiveness", "quality_effectiveness_plans.conclusion=INEFFECTIVE", "A governed INEFFECTIVE effectiveness conclusion is direct evidence that corrective action did not achieve the expected outcome."),
+        ("EXPIRED_TRAINING", "Expired training records", metrics.get("expired_training", 0), "training", "quality_assurance_metrics.expired_training", "Expired competence evidence can increase personnel-related surveillance need."),
+        ("SUPPLIER_APPROVAL_EXPIRY", "Expired supplier approvals", metrics.get("expired_supplier_approvals", 0), "supplier", "quality_assurance_metrics.expired_supplier_approvals", "Expired supplier approval evidence increases supplier-surveillance exposure."),
+        ("CALIBRATION_OVERDUE", "Overdue calibrations", metrics.get("overdue_calibrations", 0), "calibration", "quality_assurance_metrics.overdue_calibrations", "Overdue calibration can affect inspection/test assurance."),
+        ("OUT_OF_TOLERANCE", "Open out-of-tolerance events", metrics.get("out_of_tolerance", 0), "calibration", "quality_assurance_metrics.out_of_tolerance", "Out-of-tolerance events may require impact-focused surveillance."),
+        ("HIGH_CRITICAL_RISKS", "High / critical risks", metrics.get("high_risks", 0) + metrics.get("critical_risks", 0), "risk", "quality_assurance_metrics.high_risks+critical_risks", "Open high or critical governed risks increase assurance attention."),
+        ("SAFETY_OCCURRENCES", "Open explicitly linked Safety occurrences", safety.get("open_linked_occurrences", 0), "safety-occurrence", "quality_assurance_cases.source_references[safety/SAFETY_OCCURRENCE]", "Only explicit Safety-owned SAFETY_OCCURRENCE references attached to open assurance cases contribute this factor."),
+        ("PENDING_CHANGES", "Pending organizational / process changes", metrics.get("pending_changes", 0), "change", "quality_assurance_metrics.pending_changes", "Active changes can require post-implementation or transition surveillance."),
+        ("NEW_CAPABILITIES", "Open capability additions / changes", mission_change.get("open_capability_missions", 0), "mission-capability", "quality_missions.mission_type in CAPABILITY_ADDITION/CAPABILITY_CHANGE", "Governed capability additions or changes require readiness and post-implementation surveillance attention."),
+        ("NEW_AIRCRAFT_TYPES", "Open Missions explicitly scoped to aircraft types", mission_change.get("open_aircraft_type_missions", 0), "mission-aircraft-type", "quality_missions.scope.aircraft_type(s)", "Aircraft-type planning exposure is counted only where a governed Mission scope explicitly identifies an aircraft type."),
+        ("MANAGEMENT_REVIEW_OVERDUE", "Overdue management-review actions", metrics.get("overdue_review_actions", 0), "management-review", "quality_assurance_metrics.overdue_review_actions", "Overdue management commitments are assurance obligations."),
+        ("REGULATOR_FINDINGS", "Open regulator findings", metrics.get("open_regulator_findings", 0), "regulator", "quality_assurance_metrics.open_regulator_findings", "Open authority findings are explicit regulatory-consequence exposure."),
+        ("EXTERNAL_COMMITMENTS", "Overdue external commitments", metrics.get("overdue_external_commitments", 0), "regulator", "quality_assurance_metrics.overdue_external_commitments", "Overdue authority/customer commitments require visible surveillance attention."),
+        ("RELIABILITY_EVENTS", "High / critical reliability events (90d)", reliability.get("high_critical_events_90d", 0), "reliability", "reliability_events", "Recent high/critical reliability events can justify focused technical surveillance."),
+        ("REPEAT_RELIABILITY", "Repeat reliability events (90d)", reliability.get("repeat_events_90d", 0), "reliability", "reliability_events.repeat_key", "Repeated reliability events are a deterministic recurrence signal."),
+        ("RELIABILITY_RECURRING_FINDINGS", "Reliability recurring findings", reliability.get("recurring_findings", 0), "reliability", "reliability_recurring_findings", "Recurring reliability findings increase targeted-surveillance attention."),
+        ("RELIABILITY_RECOMMENDATIONS", "Open high-priority reliability recommendations", reliability.get("open_high_recommendations", 0), "reliability", "reliability_recommendations", "Open high-priority reliability recommendations represent unresolved operational exposure."),
     )
-    return [_factor(code, label, value, source=source, rationale=rationale) for code, label, value, source, rationale in mapping if int(value or 0) > 0]
+    return [
+        _factor(code, label, value, source=source, source_record=source_record, source_date=observed_at, rationale=rationale)
+        for code, label, value, source, source_record, rationale in mapping
+        if int(value or 0) > 0
+    ]
 
 
 def _applies(item: QualityAuditUniverseItem, factor: dict[str, Any]) -> bool:
@@ -336,6 +429,8 @@ def _applies(item: QualityAuditUniverseItem, factor: dict[str, Any]) -> bool:
         "risk": ("risk", "safety"),
         "safety-occurrence": ("safety", "sms", "occurrence", "incident", "hazard"),
         "change": ("change", "capability", "organization"),
+        "mission-capability": ("capability", "approval", "rating", "maintenance"),
+        "mission-aircraft-type": ("aircraft", "fleet", "type", "capability", "maintenance"),
         "management-review": ("management", "review"),
         "regulator": ("regulator", "authority", "approval", "commitment"),
         "reliability": ("reliability", "aircraft", "fleet", "technical", "maintenance"),
@@ -360,19 +455,22 @@ def _item_context(
     history: dict[str, Any] | None = None,
     effectiveness: dict[str, Any] | None = None,
     safety: dict[str, Any] | None = None,
+    mission_change: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     factors: list[dict[str, Any]] = []
     history = history or {}
     effectiveness = effectiveness or {}
     safety = safety or {}
+    mission_change = mission_change or {}
+    now_iso = _utcnow().isoformat()
     if item.mandatory_surveillance:
-        factors.append(_factor("MANDATORY_SURVEILLANCE", "Mandatory surveillance", True, source="audit-universe", rationale="Mandatory surveillance is a hard requirement and is never averaged away.", hard=True))
+        factors.append(_factor("MANDATORY_SURVEILLANCE", "Mandatory surveillance", True, source="audit-universe", source_record=f"quality_audit_universe_items:{item.id}", source_date=now_iso, rationale="Mandatory surveillance is a hard requirement and is never averaged away.", hard=True))
     if item.regulatory_criticality in {"HIGH", "CRITICAL"}:
-        factors.append(_factor("REGULATORY_CRITICALITY", "Regulatory criticality", item.regulatory_criticality, source="audit-universe", rationale="Governed HIGH/CRITICAL regulatory criticality increases planning priority."))
+        factors.append(_factor("REGULATORY_CRITICALITY", "Regulatory criticality", item.regulatory_criticality, source="audit-universe", source_record=f"quality_audit_universe_items:{item.id}", source_date=now_iso, rationale="Governed HIGH/CRITICAL regulatory criticality increases planning priority."))
     if item.risk_classification in {"HIGH", "CRITICAL"}:
-        factors.append(_factor("UNIVERSE_RISK", "Audit-universe risk classification", item.risk_classification, source="audit-universe", rationale="Governed HIGH/CRITICAL universe classification increases planning priority."))
+        factors.append(_factor("UNIVERSE_RISK", "Audit-universe risk classification", item.risk_classification, source="audit-universe", source_record=f"quality_audit_universe_items:{item.id}", source_date=now_iso, rationale="Governed HIGH/CRITICAL universe classification increases planning priority."))
     if "DEFERRED" in states:
-        factors.append(_factor("REPEATED_DEFERRAL_PRESSURE", "Deferred programme requirement", states.count("DEFERRED"), source="audit-programme", rationale="A deferred governed requirement remains visible as planning exposure."))
+        factors.append(_factor("REPEATED_DEFERRAL_PRESSURE", "Deferred programme requirement", states.count("DEFERRED"), source="audit-programme", source_record=f"quality_audit_programme_items:universe:{item.id}", source_date=now_iso, rationale="A deferred governed requirement remains visible as planning exposure."))
 
     days_since = history.get("days_since_last_audit")
     if days_since is not None:
@@ -383,6 +481,8 @@ def _item_context(
             "Time since last completed audit",
             int(days_since),
             source="audit-history",
+            source_record=", ".join(history.get("schedule_titles") or []) or f"universe:{item.id}",
+            source_date=history.get("last_audit_at"),
             rationale=(
                 f"The most recent attributable audit is {int(days_since)} day(s) old; the governed surveillance interval is {interval} day(s)."
                 if interval > 0
@@ -396,6 +496,8 @@ def _item_context(
             "No completed audit history",
             True,
             source="audit-history",
+            source_record=", ".join(history.get("schedule_titles") or []),
+            source_date=None,
             rationale="A programme-linked schedule exists but no attributable completed audit date is recorded.",
             planning_weight=12,
         ))
@@ -406,6 +508,8 @@ def _item_context(
             "Historical audit findings",
             int(history["finding_count"]),
             source="audit-history",
+            source_record=", ".join(history.get("schedule_titles") or []) or f"universe:{item.id}",
+            source_date=history.get("last_audit_at"),
             rationale="Historical findings from exact-title-linked audit instances remain visible to the planner.",
         ))
     if int(history.get("repeat_occurrence_count", 0)) > 0:
@@ -414,6 +518,8 @@ def _item_context(
             "Repeat audit findings",
             int(history["repeat_occurrence_count"]),
             source="audit-history",
+            source_record=", ".join(history.get("schedule_titles") or []) or f"universe:{item.id}",
+            source_date=history.get("last_audit_at"),
             rationale=f"{int(history.get('repeat_requirement_count', 0))} requirement reference(s) recurred across distinct attributable audits.",
             planning_weight=min(int(history["repeat_occurrence_count"]) * 3, 30),
         ))
@@ -425,6 +531,8 @@ def _item_context(
             "Ineffective corrective action linked to this source",
             direct_ineffective,
             source="effectiveness",
+            source_record=f"quality_effectiveness_plans:source_id:{item.source_id}",
+            source_date=now_iso,
             rationale="The governed effectiveness plan source_id exactly matches this Audit Universe source record.",
             planning_weight=min(direct_ineffective * 5, 30),
         ))
@@ -436,8 +544,36 @@ def _item_context(
             "Safety occurrence explicitly linked to this Audit Universe source",
             direct_safety,
             source="safety-occurrence",
+            source_record=f"quality_assurance_cases.source_references:audit_universe_source_id:{item.source_id}",
+            source_date=now_iso,
             rationale="The Safety-owned source reference explicitly names this Audit Universe source_id; no inferred linkage is used.",
             planning_weight=min(direct_safety * 5, 30),
+        ))
+
+    mission_bucket = (mission_change.get("by_universe_source_id") or {}).get(str(item.source_id), {})
+    direct_capability = int(mission_bucket.get("capability", 0))
+    if direct_capability > 0:
+        factors.append(_factor(
+            "DIRECT_NEW_CAPABILITY",
+            "Capability Mission explicitly linked to this source",
+            direct_capability,
+            source="mission-capability",
+            source_record=f"quality_missions.scope.audit_universe_source_id:{item.source_id}",
+            source_date=mission_change.get("latest_change_at"),
+            rationale="A governed capability addition/change Mission explicitly targets this Audit Universe source_id.",
+            planning_weight=min(direct_capability * 5, 30),
+        ))
+    direct_aircraft = int(mission_bucket.get("aircraft_type", 0))
+    if direct_aircraft > 0:
+        factors.append(_factor(
+            "DIRECT_NEW_AIRCRAFT_TYPE",
+            "Aircraft-type Mission explicitly linked to this source",
+            direct_aircraft,
+            source="mission-aircraft-type",
+            source_record=f"quality_missions.scope.audit_universe_source_id:{item.source_id}",
+            source_date=mission_change.get("latest_change_at"),
+            rationale="A governed Mission with explicit aircraft-type scope also explicitly targets this Audit Universe source_id.",
+            planning_weight=min(direct_aircraft * 5, 30),
         ))
 
     factors.extend(factor for factor in global_factors if _applies(item, factor))
@@ -474,7 +610,8 @@ def audit_programme_risk_context(
     reliability, reliability_warnings = _reliability_context(db, ctx)
     effectiveness = _effectiveness_context(db, ctx.amo_id)
     safety = _safety_occurrence_context(db, ctx.amo_id)
-    global_factors = _global_factors(metrics, reliability, effectiveness, safety)
+    mission_change = _mission_change_context(db, ctx.amo_id)
+    global_factors = _global_factors(metrics, reliability, effectiveness, safety, mission_change)
     states, audit_history = _audit_history_context(db, ctx.amo_id)
     universe = db.query(QualityAuditUniverseItem).filter(
         QualityAuditUniverseItem.amo_id == ctx.amo_id,
@@ -488,6 +625,7 @@ def audit_programme_risk_context(
             audit_history.get(str(row.id), {}),
             effectiveness,
             safety,
+            mission_change,
         )
         for row in universe
     ]
@@ -500,9 +638,10 @@ def audit_programme_risk_context(
         "reliability": reliability,
         "effectiveness": effectiveness,
         "safety_occurrence": safety,
+        "mission_change": mission_change,
         "source_warnings": [*assurance_warnings, *reliability_warnings],
         "method": {
             "type": "DETERMINISTIC_SOURCE_ATTRIBUTION",
-            "statement": "Mandatory surveillance remains a hard obligation. Audit history, repeat findings, governed ineffective corrective actions, and explicitly linked Safety occurrences are source-attributed planning inputs. Other factors order planning attention only; they do not declare compliance or calculate a predictive probability.",
+            "statement": "Mandatory surveillance remains a hard obligation. Audit history, repeat findings, governed ineffective corrective actions, explicit capability/aircraft-type Missions, and explicitly linked Safety occurrences are source-attributed planning inputs. Factors expose source record, observation date and rationale; they order planning attention only and do not declare compliance or calculate a predictive probability.",
         },
     }
