@@ -5,6 +5,7 @@ const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
+const EXTERNAL_SOURCE_ID = process.env.E2E_DMS_EXTERNAL_SOURCE_ID || "00000000-0000-4000-8000-000000000494";
 
 let materialBrowserErrors: string[] = [];
 
@@ -55,6 +56,12 @@ async function openRegisteredCopy(page: Page, copyNumber: string, homeLocation: 
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.getByRole("button", { name: /Open \/ scan/i }).click();
   await expect(page.getByTestId("physical-copy-scan")).toBeVisible({ timeout: 30_000 });
+}
+
+async function setIncidentEvidence(page: Page, reason: string, reference: string): Promise<void> {
+  const scan = page.getByTestId("physical-copy-scan");
+  await scan.getByLabel("Reason / incident narrative").fill(reason);
+  await scan.getByLabel("Retained evidence reference").fill(reference);
 }
 
 test.describe.serial("DMS MD completion acceptance", () => {
@@ -131,7 +138,7 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(page.getByRole("button", { name: /Print \/ PDF/i })).toBeVisible();
   });
 
-  test("Administration exposes governed policy instead of browser-only preferences", async ({ page }) => {
+  test("Administration persists governed policy and exposes retained audit evidence", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/administration`);
     const administration = page.getByTestId("document-control-administration");
     await expect(administration).toBeVisible({ timeout: 30_000 });
@@ -141,13 +148,30 @@ test.describe.serial("DMS MD completion acceptance", () => {
       "Retention classes",
       "Indexing and integration policy",
       "Physical controlled-copy policy",
+      "Administration audit history",
       "Administrative tools",
     ]) {
       await expect(administration.getByText(heading, { exact: true })).toBeVisible();
     }
     await expect(page.getByLabel("Document classes")).toBeVisible();
     await expect(page.getByLabel("Authority routing policy")).toBeVisible();
-    await expect(page.getByLabel("Default physical copy return days")).toBeVisible();
+
+    const dueDays = page.getByLabel("Default physical copy return days");
+    const original = Number(await dueDays.inputValue());
+    const changed = original >= 3650 ? original - 1 : original + 1;
+    await dueDays.fill(String(changed));
+    await page.getByRole("button", { name: "Save administration", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("saved with audit evidence", { timeout: 30_000 });
+    await expect(page.getByTestId("administration-audit-history")).toContainText("document.administration.updated");
+    await expect(page.getByTestId("administration-audit-history")).toContainText("Before / after retained");
+
+    await page.reload();
+    await expect(page.getByLabel("Default physical copy return days")).toHaveValue(String(changed), { timeout: 30_000 });
+    await expect(page.getByTestId("administration-audit-history")).toContainText("document.administration.updated");
+
+    await page.getByLabel("Default physical copy return days").fill(String(original));
+    await page.getByRole("button", { name: "Save administration", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("saved with audit evidence", { timeout: 30_000 });
   });
 
   test("Review Changes opens Revision Intelligence with evidence-safe comparison controls", async ({ page }) => {
@@ -164,45 +188,106 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(page.getByText(/Automated comparison is unavailable|Baseline ·/)).toBeVisible();
   });
 
-  test("External Technical Data opens explicit applicability assessment context", async ({ page }) => {
+  test("External Technical Data records a newer-revision applicability assessment with evidence", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/compliance?view=external-sources`);
     const compliance = page.getByTestId("document-control-compliance");
     await expect(compliance).toBeVisible({ timeout: 30_000 });
     const row = page.getByRole("row").filter({ hasText: "KCAA-CI-EXT-001" });
     await expect(row).toBeVisible({ timeout: 30_000 });
     await row.getByRole("button", { name: /Assess revision|Review source/i }).click();
-    const assessment = page.getByRole("dialog", { name: "External revision assessment" });
+    let assessment = page.getByRole("dialog", { name: "External revision assessment" });
     await expect(assessment).toBeVisible({ timeout: 30_000 });
-    await expect(assessment.getByText("Received revision", { exact: true })).toBeVisible();
-    await expect(assessment.getByText("Current source revision", { exact: true })).toBeVisible();
-    await expect(assessment.getByText("Affected internal documents", { exact: true })).toBeVisible();
-    if (await assessment.getByRole("button", { name: "Record assessment", exact: true }).count()) {
-      await expect(assessment.getByText(/NEW REVISION REQUIRES ASSESSMENT|Latest receipt has a recorded applicability assessment/)).toBeVisible();
-    }
+    await expect(assessment.getByText("KCAR 2025 CI proof Rev 2", { exact: true })).toBeVisible();
+    await expect(assessment.getByText("KCAR 2025 CI proof", { exact: true })).toBeVisible();
+    await expect(assessment.getByText("NEW REVISION REQUIRES ASSESSMENT", { exact: true })).toBeVisible();
+    await expect(assessment.getByText("DMS-CI-MOM", { exact: true })).toBeVisible();
+    await assessment.getByLabel("Applicability decision").selectOption("APPLICABLE");
+    await assessment.getByLabel("Assessment evidence / rationale").fill("KCAR Rev 2 applies to the controlled information manual; DMS-CI-MOM impact confirmed for CI acceptance.");
+    await assessment.getByRole("button", { name: "Record assessment", exact: true }).click();
+    await expect(assessment.getByText("Latest receipt has a recorded applicability assessment.", { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    const apiEvidence = await page.evaluate(async ({ amoCode, sourceId }) => {
+      const auth = localStorage.getItem("amo_portal_token");
+      const response = await fetch(`/doc-control/workspace/t/${encodeURIComponent(amoCode)}/external-sources/${sourceId}/assessment`, { headers: { Authorization: `Bearer ${auth}` } });
+      if (!response.ok) throw new Error(`Assessment reload failed: ${response.status}`);
+      return response.json();
+    }, { amoCode: AMO_CODE, sourceId: EXTERNAL_SOURCE_ID });
+    expect(apiEvidence.received_revision.applicability_status).toBe("APPLICABLE");
+    expect(apiEvidence.received_revision.evidence.some((item: { kind?: string; assessed_by_user_id?: string }) => item.kind === "APPLICABILITY_ASSESSMENT" && Boolean(item.assessed_by_user_id))).toBeTruthy();
+
+    await page.getByRole("button", { name: "Close external revision assessment" }).click();
+    await row.getByRole("button", { name: /Assess revision|Review source/i }).click();
+    assessment = page.getByRole("dialog", { name: "External revision assessment" });
+    await expect(assessment.getByText("Latest receipt has a recorded applicability assessment.", { exact: true })).toBeVisible({ timeout: 30_000 });
   });
 
-  test("physical custody supports verify, recall, incident and final disposition evidence", async ({ page }) => {
-    const copyNumber = `MD-${Date.now().toString(36).toUpperCase()}`;
-    const homeLocation = "Quality Library · MD Completion Shelf";
+  test("physical controlled copy completes label, custody, recall, return and destruction lifecycle", async ({ page }) => {
+    const copyNumber = `MD-LIFE-${Date.now().toString(36).toUpperCase()}`;
+    const homeLocation = "Quality Library · MD Lifecycle Shelf";
     await openRegisteredCopy(page, copyNumber, homeLocation);
     const scan = page.getByTestId("physical-copy-scan");
 
-    await expect(scan.getByText("Controller custody actions", { exact: true })).toBeVisible();
-    await expect(scan.getByRole("button", { name: "Verify location", exact: true })).toBeVisible();
-    await expect(scan.getByRole("button", { name: "Record damage", exact: true })).toBeVisible();
-    await expect(scan.getByRole("button", { name: "Record loss", exact: true })).toBeVisible();
-    await expect(scan.getByRole("button", { name: "Withdraw", exact: true })).toBeVisible();
-    await expect(scan.getByRole("button", { name: "Record destruction", exact: true })).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await scan.getByRole("button", { name: "Print QR label", exact: true }).click();
+    const download = await downloadPromise;
+    expect(await download.suggestedFilename()).toMatch(/\.pdf$/i);
 
-    await scan.getByLabel("Verify current physical location").fill(`${homeLocation} · Verified`);
-    await scan.getByRole("button", { name: "Verify location", exact: true }).click();
+    await scan.getByLabel("Return due").fill("2026-08-10T12:00");
+    await scan.getByLabel(/I accept custody/).check();
+    await scan.getByRole("button", { name: "Check out to me", exact: true }).click();
+    await expect(scan).toContainText("ISSUED", { timeout: 30_000 });
+    await expect(scan.getByText("Custody history", { exact: true })).toBeVisible();
+
+    const custodianSelect = scan.getByLabel("Transfer controlled copy to custodian");
+    const readerOption = custodianSelect.locator("option").filter({ hasText: "Ordinary Reader" });
+    await expect(readerOption).toHaveCount(1);
+    await custodianSelect.selectOption(await readerOption.getAttribute("value") || "");
+    await scan.getByLabel("Controlled location").fill("Technical Library · Desk T1");
+    await scan.getByRole("button", { name: "Transfer", exact: true }).click();
+    await expect(scan).toContainText("TRANSFER", { timeout: 30_000 });
+    await expect(scan).toContainText("Technical Library · Desk T1");
+
+    await scan.getByLabel("Controlled location").fill("Technical Library · Cabinet T2");
+    await scan.getByRole("button", { name: "Change location", exact: true }).click();
     await expect(scan).toContainText("LOCATION CHANGE", { timeout: 30_000 });
 
-    await scan.getByLabel("Reason / incident narrative").fill("Controlled-copy condition damage found during MD acceptance.");
-    await scan.getByLabel("Retained evidence reference").fill("MD-EVIDENCE-DAMAGE-001");
+    await scan.getByLabel("Reason / incident narrative").fill("Supersession readiness recall verification.");
+    await scan.getByRole("button", { name: "Recall", exact: true }).click();
+    await expect(scan).toContainText("RECALLED", { timeout: 30_000 });
+    await expect(scan).toContainText("RECALL");
+
+    await scan.getByLabel("Return to shelf / location").fill(homeLocation);
+    await scan.getByRole("button", { name: "Sign in / return", exact: true }).click();
+    await expect(scan).toContainText("RETURN", { timeout: 30_000 });
+
+    await setIncidentEvidence(page, "Controlled copy withdrawn after completed lifecycle acceptance.", "MD-EVIDENCE-WITHDRAW-001");
+    await scan.getByRole("button", { name: "Withdraw", exact: true }).click();
+    await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
+    await expect(scan).toContainText("MD-EVIDENCE-WITHDRAW-001");
+
+    await setIncidentEvidence(page, "Destroyed following controlled withdrawal and retained evidence review.", "MD-EVIDENCE-DESTROY-001");
+    await scan.getByRole("button", { name: "Record destruction", exact: true }).click();
+    await expect(scan).toContainText("DESTROYED", { timeout: 30_000 });
+    await expect(scan).toContainText("MD-EVIDENCE-DESTROY-001");
+  });
+
+  test("physical controlled copy damage and loss preserve isolated incident evidence", async ({ page }) => {
+    const damageNumber = `MD-DMG-${Date.now().toString(36).toUpperCase()}`;
+    await openRegisteredCopy(page, damageNumber, "Quality Library · Damage Fixture");
+    let scan = page.getByTestId("physical-copy-scan");
+    await setIncidentEvidence(page, "Binding and controlled pages damaged during condition inspection.", "MD-EVIDENCE-DAMAGE-001");
     await scan.getByRole("button", { name: "Record damage", exact: true }).click();
     await expect(scan).toContainText("DAMAGE", { timeout: 30_000 });
     await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
     await expect(scan).toContainText("MD-EVIDENCE-DAMAGE-001");
+
+    const lossNumber = `MD-LOSS-${Date.now().toString(36).toUpperCase()}`;
+    await openRegisteredCopy(page, lossNumber, "Quality Library · Loss Fixture");
+    scan = page.getByTestId("physical-copy-scan");
+    await setIncidentEvidence(page, "Numbered controlled copy could not be located after custody reconciliation.", "MD-EVIDENCE-LOSS-001");
+    await scan.getByRole("button", { name: "Record loss", exact: true }).click();
+    await expect(scan).toContainText("LOSS", { timeout: 30_000 });
+    await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
+    await expect(scan).toContainText("MD-EVIDENCE-LOSS-001");
   });
 });
