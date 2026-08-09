@@ -7,6 +7,7 @@ name: Document Control Governance CI
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_roles_e2e.py"
       - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
       - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
@@ -36,6 +37,7 @@ name: Document Control Governance CI
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
       - "frontend/tests/e2e/document-control-md-completion.spec.ts"
+      - "frontend/tests/e2e/document-control-role-matrix.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
   push:
     branches:
@@ -45,6 +47,7 @@ name: Document Control Governance CI
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "backend/amodb/scripts/seed_document_roles_e2e.py"
       - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
       - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
@@ -74,6 +77,7 @@ name: Document Control Governance CI
       - "frontend/vite.config.ts"
       - "frontend/tests/e2e/document-governance-live.spec.ts"
       - "frontend/tests/e2e/document-control-md-completion.spec.ts"
+      - "frontend/tests/e2e/document-control-role-matrix.spec.ts"
       - ".github/workflows/document-control-governance-ci.yml"
   workflow_dispatch:
 
@@ -129,6 +133,7 @@ jobs:
           amodb/apps/doc_control
           amodb/jobs/document_governance_backfill.py
           amodb/scripts/seed_document_governance_e2e.py
+          amodb/scripts/seed_document_roles_e2e.py
           amodb/scripts/seed_document_reader_scale_e2e.py
           amodb/scripts/benchmark_document_control_library_scale.py
       - name: Verify one Alembic head and merged ancestry
@@ -253,6 +258,7 @@ jobs:
           src/pages/documentControl/DocumentControlRecordPage.tsx
           src/pages/documentControl/DocumentControlRecordEntryPage.tsx
           src/pages/documentControl/DocumentControlRecordActions.tsx
+          src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
           src/pages/documentControl/DocumentControlShell.tsx
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/pages/manuals/ManualReaderPage.tsx
@@ -260,11 +266,12 @@ jobs:
           src/pages/manuals/PublicationGovernancePanel.tsx
           tests/e2e/document-governance-live.spec.ts
           tests/e2e/document-control-md-completion.spec.ts
+          tests/e2e/document-control-role-matrix.spec.ts
       - name: Build production frontend
         run: npm run build
 
   authenticated-browser:
-    name: Production-build authenticated DMS operating-model and 2000-page acceptance
+    name: Production-build authenticated DMS operating-model, role and 2000-page acceptance
     needs: [backend-postgres, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -291,11 +298,19 @@ jobs:
       VITE_API_PROXY_TARGET: http://127.0.0.1:8080
       VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
       E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_DIRECT_API_URL: http://127.0.0.1:8080
       E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
       E2E_AMO_CODE: dmsgate
       E2E_AMO_ADMIN_EMAIL: dms-gate@example.com
       E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
       E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
+      E2E_DMS_READER_EMAIL: dms-reader@example.com
+      E2E_DMS_TECH_REVIEWER_EMAIL: dms-tech-reviewer@example.com
+      E2E_DMS_QUALITY_REVIEWER_EMAIL: dms-quality-reviewer@example.com
+      E2E_DMS_MANAGEMENT_APPROVER_EMAIL: dms-management-approver@example.com
+      E2E_DMS_ROLE_PASSWORD: DmsRoles!2026-Local
+      E2E_DMS_CANDIDATE_REVISION_ID: 00000000-0000-4000-8000-000000000500
+      E2E_DMS_WORKFLOW_ID: 00000000-0000-4000-8000-000000000501
     steps:
       - uses: actions/checkout@v6
         with:
@@ -319,6 +334,9 @@ jobs:
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Seed reader, reviewer and management responsibility fixtures
+        working-directory: backend
+        run: python amodb/scripts/seed_document_roles_e2e.py
       - name: Replace browser fixture with real 2000-page PDF source
         working-directory: backend
         run: python amodb/scripts/seed_document_reader_scale_e2e.py
@@ -353,12 +371,13 @@ jobs:
             if [ "$attempt" -eq 60 ]; then cat /tmp/dms-frontend.log; exit 1; fi
             sleep 1
           done
-      - name: Run real-login Document Control operating-model and MD completion acceptance
+      - name: Run real-login Document Control operating-model, MD completion and role-matrix acceptance
         working-directory: frontend
         run: >-
           npm exec -- playwright test
           tests/e2e/document-governance-live.spec.ts
           tests/e2e/document-control-md-completion.spec.ts
+          tests/e2e/document-control-role-matrix.spec.ts
       - name: Verify production runtime logs are clean
         if: always()
         shell: bash
