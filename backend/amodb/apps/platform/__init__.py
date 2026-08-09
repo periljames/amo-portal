@@ -43,6 +43,7 @@ from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
+from .storage_route_hardening import install_shared_storage_route_hardening  # noqa: E402
 
 router.include_router(console_router)
 router.include_router(product_analytics_router)
@@ -57,5 +58,6 @@ router.include_router(resend_email_router)
 install_legacy_command_queue()
 install_usage_meter_hardening(router)
 install_platform_metrics_lifecycle(router)
+install_shared_storage_route_hardening()
 
 __all__ = ["router"]
