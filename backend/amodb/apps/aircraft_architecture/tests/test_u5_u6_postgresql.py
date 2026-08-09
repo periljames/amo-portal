@@ -458,16 +458,22 @@ def test_source_intake_packs_are_idempotent_and_publication_is_source_backed(ses
         db.commit()
         first = pack_services.bootstrap_source_intake_packs(db, user=superuser)
         second = pack_services.bootstrap_source_intake_packs(db, user=superuser)
-        assert {row.code for row in first} == {
+        expected_codes = {
             "CESSNA_208_SOURCE_INTAKE",
             "DHC8_SOURCE_INTAKE",
+            "DHC8_100_MPD_SOURCE_INTAKE",
+            "DHC8_200_MPD_SOURCE_INTAKE",
+            "DHC8_300_MPD_SOURCE_INTAKE",
+            "DHC8_400_MPD_SOURCE_INTAKE",
         }
+        assert {row.code for row in first} == expected_codes
         assert {row.id for row in first} == {row.id for row in second}
         assert db.query(pack_models.AircraftContentPack).filter(
-            pack_models.AircraftContentPack.code.in_(
-                ["CESSNA_208_SOURCE_INTAKE", "DHC8_SOURCE_INTAKE"]
-            )
-        ).count() == 2
+            pack_models.AircraftContentPack.code.in_(expected_codes)
+        ).count() == len(expected_codes)
+        assert {
+            row.series for row in first if row.code.startswith("DHC8_") and row.series
+        } == {"100", "200", "300", "400"}
 
         ordinary = account_models.User(
             amo_id=superuser.amo_id,
