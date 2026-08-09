@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getToken } from "../../../services/auth";
-import { getApiBaseUrl } from "../../../services/config";
+import { operationsStreamUrl, type DataMode } from "../../../services/platformOperations";
 
 export type PlatformLiveStatus = "connecting" | "live" | "offline";
 
 export type PlatformConsoleSnapshot = Record<string, unknown> & {
   generated_at?: string;
+  overview?: Record<string, unknown>;
 };
 
 export type PlatformConsoleEvent = {
@@ -27,7 +28,6 @@ type ParsedSseBlock = {
   data: string;
 };
 
-const LAST_EVENT_KEY = "amo_platform_console_last_event";
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
 
 function parseSseBlock(block: string): ParsedSseBlock | null {
@@ -44,14 +44,15 @@ function parseSseBlock(block: string): ParsedSseBlock | null {
   return data.length ? { event, id, data: data.join("\n") } : null;
 }
 
-function platformStreamUrl(lastEventId: string | null): string {
-  const query = new URLSearchParams();
-  if (lastEventId) query.set("last_event_id", lastEventId);
-  const suffix = query.toString();
-  return `${getApiBaseUrl()}/platform/console/events${suffix ? `?${suffix}` : ""}`;
-}
-
-export function usePlatformRealtime(enabled = true) {
+/**
+ * Own the single Platform browser SSE connection.
+ *
+ * Every Platform page is rendered inside PlatformShell, so the shell connects to
+ * the isolated Operations Gateway once and republishes snapshot frames as a
+ * window event for page-level consumers. Individual pages must not open their
+ * own competing Platform SSE connection.
+ */
+export function usePlatformRealtime(enabled = true, dataMode: DataMode = "REAL") {
   const [status, setStatus] = useState<PlatformLiveStatus>(enabled ? "connecting" : "offline");
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -71,7 +72,6 @@ export function usePlatformRealtime(enabled = true) {
     setLastEvent(event);
     setLastUpdated(new Date(event.created_at || event.snapshot?.generated_at || Date.now()));
     if (event.snapshot) setSnapshot(event.snapshot);
-    if (event.id) window.localStorage.setItem(LAST_EVENT_KEY, event.id);
     window.dispatchEvent(new CustomEvent<PlatformConsoleEvent>(PLATFORM_LIVE_EVENT, { detail: event }));
   }, []);
 
@@ -89,11 +89,10 @@ export function usePlatformRealtime(enabled = true) {
     const controller = new AbortController();
     controllerRef.current = controller;
     updateStatus("connecting");
-    const cursor = window.localStorage.getItem(LAST_EVENT_KEY);
 
     void (async () => {
       try {
-        const response = await fetch(platformStreamUrl(cursor), {
+        const response = await fetch(operationsStreamUrl(dataMode), {
           method: "GET",
           credentials: "include",
           signal: controller.signal,
@@ -139,7 +138,7 @@ export function usePlatformRealtime(enabled = true) {
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [enabled, publish, updateStatus]);
+  }, [dataMode, enabled, publish, updateStatus]);
 
   const reconnect = useCallback(() => {
     if (!enabled) return;
@@ -149,7 +148,10 @@ export function usePlatformRealtime(enabled = true) {
 
   useEffect(() => {
     connectRef.current = connect;
-    if (!enabled) return;
+    if (!enabled) {
+      updateStatus("offline");
+      return;
+    }
     connect();
     const online = () => reconnect();
     const offline = () => {
