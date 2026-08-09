@@ -59,8 +59,14 @@ if (os.getenv("AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING") or "true").strip().l
     from .storage_route_hardening import install_shared_storage_route_hardening  # noqa: E402
 
     # Production can explicitly require replica-safe object storage. Validate at
-    # import/startup instead of discovering a missing bucket on the first upload.
-    _storage.validate_storage_configuration()
+    # tenant-API startup/import instead of discovering a missing bucket on the
+    # first upload. Test/Alembic discovery imports deliberately skip this
+    # filesystem side effect: dedicated storage tests exercise the same validator
+    # explicitly, while CI runners must not need write access to /srv/amo merely
+    # to enumerate migrations or collect unrelated tests.
+    app_env = (os.getenv("APP_ENV") or "").strip().lower()
+    if app_env not in {"test", "testing"}:
+        _storage.validate_storage_configuration()
     install_shared_storage_route_hardening()
 
 __all__ = ["router"]
