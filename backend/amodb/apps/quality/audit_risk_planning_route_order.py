@@ -34,3 +34,5 @@ def _promote(api_router: APIRouter) -> None:
 for api_router in (router, legacy_router):
     _register(api_router)
     _promote(api_router)
+
+from . import audit_programme_occurrence_route_order as _audit_programme_occurrence_route_order  # noqa: F401,E402
