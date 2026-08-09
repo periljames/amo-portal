@@ -40,6 +40,10 @@ for api_router in (router, legacy_router):
     _register(api_router)
     _promote(api_router)
 
+# Canonical checklist execution metadata extends the authoritative legacy
+# checklist rows without replacing or duplicating the execution engine.
+from . import audit_checklist_execution_route_order as _audit_checklist_execution_route_order  # noqa: F401,E402
+
 # Report revisions extend the same governed audit family while preserving the
 # existing upload/download projection for backwards-compatible audit screens.
 from . import audit_report_governance_route_order as _audit_report_governance_route_order  # noqa: F401,E402
