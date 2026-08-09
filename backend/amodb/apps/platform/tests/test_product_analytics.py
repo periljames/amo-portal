@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from amodb.apps.platform import product_analytics
+from amodb.apps.platform.ops_product_insights_router import _cohort_payload, _retention_payload
 
 
 def test_product_event_taxonomy_is_explicit_not_generic_click_tracking():
@@ -57,3 +58,32 @@ def test_product_event_rejects_uncontrolled_taxonomy_and_module_names():
             session_class="tenant_user",
             metadata={},
         )
+
+
+def test_retention_is_tenant_aggregate_not_user_tracking():
+    payload = _retention_payload(
+        current={"tenant-a", "tenant-b", "tenant-c"},
+        previous={"tenant-a", "tenant-c", "tenant-d"},
+        eligible=5,
+    )
+    assert payload["retained_tenants"] == 2
+    assert payload["current_active_tenants"] == 3
+    assert payload["previous_active_tenants"] == 3
+    assert payload["retention_rate"] == pytest.approx(2 / 3)
+    assert payload["current_activation_rate"] == pytest.approx(3 / 5)
+    assert "user" not in " ".join(payload.keys()).lower()
+
+
+def test_cohort_payload_exposes_counts_only():
+    tenants = [
+        ("tenant-a", datetime(2026, 8, 1, tzinfo=timezone.utc)),
+        ("tenant-b", datetime(2026, 8, 2, tzinfo=timezone.utc)),
+        ("tenant-c", datetime(2026, 7, 20, tzinfo=timezone.utc)),
+    ]
+    rows = _cohort_payload(tenants, {"tenant-a", "tenant-c"})
+    august = next(row for row in rows if row["cohort"] == "2026-08")
+    july = next(row for row in rows if row["cohort"] == "2026-07")
+    assert august == {"cohort": "2026-08", "tenants": 2, "active_in_window": 1, "activation_rate": 0.5}
+    assert july["tenants"] == 1
+    assert july["active_in_window"] == 1
+    assert all("tenant_id" not in row for row in rows)
