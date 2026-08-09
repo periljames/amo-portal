@@ -142,8 +142,10 @@ test("MD scenario 6 — changes the lead auditor through the authoritative sched
 
   await expect.poll(() => state.patchBody).not.toBeNull();
   expect(state.patchBody).toMatchObject({ lead_auditor_user_id: "auditor-user-b" });
+  expect(state.leadAuditor).toBe("auditor-user-b");
   await expect(page.getByText("Audit team and auditee details updated.")).toBeVisible();
-  await expect(page.getByText("Auditor Two", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Edit team/i }).click();
+  await expect(page.getByLabel("Lead auditor")).toHaveValue("auditor-user-b");
 });
 
 type RunHubState = {
@@ -259,10 +261,10 @@ test("MD scenarios 11 and 13 — records a structured finding then creates and a
   await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=findings`, { waitUntil: "domcontentloaded" });
 
   await expect(page.getByLabel("Finding / observation statement")).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Level").selectOption("LEVEL_3");
-  await page.getByLabel("Requirement / reference").fill("KCAR-145.30");
+  await page.getByLabel("Classification").selectOption("LEVEL_3");
+  await page.getByLabel("Requirement / clause / checklist ref").fill("KCAR-145.30");
   await page.getByLabel("Finding / observation statement").fill("Sampled supplier approval evidence did not demonstrate current approval at the time of purchase.");
-  await page.getByLabel("Objective evidence").fill("Purchase order PO-017 and supplier approval register revision 4.");
+  await page.getByPlaceholder("Records checked, aircraft/component refs, photos, staff interviewed, dates, checklist refs, etc.").fill("Purchase order PO-017 and supplier approval register revision 4.");
   await page.getByRole("button", { name: "Record finding" }).click();
 
   await expect.poll(() => state.findingBody).not.toBeNull();
