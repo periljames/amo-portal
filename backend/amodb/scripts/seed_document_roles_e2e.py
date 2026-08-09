@@ -22,12 +22,14 @@ from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.database import WriteSessionLocal  # noqa: E402
 from amodb.security import get_password_hash  # noqa: E402
 
-from amodb.scripts.seed_document_governance_e2e import (  # noqa: E402
-    AMO_ID,
-    DEPARTMENT_ID,
-    MANUAL_ID,
-    REVISION_ID,
-)
+# Stable IDs are owned by the base disposable fixture. Duplicate them here rather
+# than importing the script as a package so direct script execution remains
+# independent of Python package layout.
+DEPARTMENT_ID = "00000000-0000-4000-8000-000000000476"
+AMO_ID = "00000000-0000-4000-8000-000000000477"
+CONTROLLER_USER_ID = "00000000-0000-4000-8000-000000000478"
+MANUAL_ID = "00000000-0000-4000-8000-000000000480"
+REVISION_ID = "00000000-0000-4000-8000-000000000481"
 
 ROLE_PASSWORD = "DmsRoles!2026-Local"
 READER_USER_ID = "00000000-0000-4000-8000-000000000496"
@@ -98,8 +100,8 @@ def _assignment(
         confidence_percent=100,
         confirmation_status="CONFIRMED",
         provenance_json={"source": "document_roles_ci_seed", "purpose": "deterministic_role_matrix"},
-        created_by_user_id=assignee_user_id,
-        confirmed_by_user_id=assignee_user_id,
+        created_by_user_id=CONTROLLER_USER_ID,
+        confirmed_by_user_id=CONTROLLER_USER_ID,
         confirmed_at=datetime.now(timezone.utc),
     )
 
@@ -112,6 +114,8 @@ def seed() -> None:
 
         published = db.query(manual_models.ManualRevision).filter(manual_models.ManualRevision.id == REVISION_ID).one()
         manual = db.query(manual_models.Manual).filter(manual_models.Manual.id == MANUAL_ID).one()
+        if not db.query(account_models.User).filter(account_models.User.id == CONTROLLER_USER_ID).first():
+            raise RuntimeError("Base DMS controller fixture is missing; run seed_document_governance_e2e.py first")
 
         reader = _user(
             user_id=READER_USER_ID,
@@ -184,7 +188,7 @@ def seed() -> None:
             qms_readiness_status="NOT_REQUIRED",
             distribution_readiness_status="NOT_REQUIRED",
             version=1,
-            created_by_user_id=technical.id,
+            created_by_user_id=CONTROLLER_USER_ID,
         )
         db.add(workflow)
         db.flush()
