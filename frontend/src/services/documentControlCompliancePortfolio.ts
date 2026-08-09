@@ -55,6 +55,8 @@ export type CompliancePortfolioResponse = {
   generated_at: string;
 };
 
+export type ExternalApplicabilityDecision = "APPLICABLE" | "PARTIAL" | "NOT_APPLICABLE";
+
 export type ExternalAssessmentContext = {
   source: {
     id: string;
@@ -136,7 +138,7 @@ export function getExternalAssessmentContext(tenant: string, sourceId: string): 
 export function assessExternalRevision(
   tenant: string,
   sourceId: string,
-  payload: { receipt_id: string; applicability_status: "APPLICABLE" | "PARTIALLY_APPLICABLE" | "NOT_APPLICABLE"; notes: string },
+  payload: { receipt_id: string; applicability_status: ExternalApplicabilityDecision; notes: string },
 ): Promise<ExternalAssessmentContext> {
   return request(`${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/external-sources/${encodeURIComponent(sourceId)}/assessment`, {
     method: "POST",
