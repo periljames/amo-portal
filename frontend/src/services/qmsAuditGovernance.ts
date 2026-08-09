@@ -65,7 +65,7 @@ function json(method: string, body: unknown): RequestInit {
 export function listAuditPreparationRevisions(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditPreparationRevision[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/preparation-revisions`),
-    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -90,7 +90,7 @@ export function issueAuditPreparationRevision(amoCode: string, auditId: string, 
 export function listAuditNoticePolicies(amoCode: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditNoticePolicy[] }>(
     qmsPath(amoCode, "/audit-notice-policies?active_only=true"),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -113,7 +113,7 @@ export function createAuditNoticePolicy(
 export function listAuditNotices(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditNotice[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices`),
-    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
