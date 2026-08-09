@@ -149,11 +149,14 @@ def test_frontend_assistant_remains_contextual_and_not_permanent_dms_chrome() ->
     assert "controlled_source_is_authoritative" in service
     assert "amo:publication-navigate" in panel
     assert "The controlled source remains authoritative" in panel
-    # Assisted search remains available in the document-reading context, but it
-    # must not turn every DMS workspace into an always-mounted chat surface.
+    # Assisted search remains available in the controlled-reading and Library
+    # contexts, but it must not become a permanent chat-first DMS surface.
     assert "DocumentationAssistantPanel" in reader
     assert "PublicationAssistedNavigationBridge" in reader
-    assert "DocumentationAssistantPanel" not in shell
+    assert "DocumentationAssistantPanel" in shell
+    assert 'location.pathname.includes("/document-control/library")' in shell
+    assert "showContextualAssistant ? <DocumentationAssistantPanel" in shell
+    assert 'label: "Assistant"' not in shell
     assert "OPENAI_API_KEY" not in service + panel + reader + shell
 
 
