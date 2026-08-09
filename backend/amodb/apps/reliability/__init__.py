@@ -34,6 +34,7 @@ from . import formal_reporting_history  # noqa: E402,F401
 from . import formal_reporting_source_capture  # noqa: E402,F401
 from . import formal_reporting_snapshot_guard  # noqa: E402,F401
 from . import formal_reporting_supersession  # noqa: E402,F401
+from . import formal_reporting_publication_hardening  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 
 workpack_integration.register(router)
@@ -57,6 +58,7 @@ management_reporting.register(router)
 formal_reporting_source_capture.apply()
 formal_reporting_snapshot_guard.apply()
 formal_reporting_supersession.apply()
+formal_reporting_publication_hardening.apply()
 formal_reporting.register(router)
 formal_reporting_render.register(router)
 formal_reporting_governance.register(router)
