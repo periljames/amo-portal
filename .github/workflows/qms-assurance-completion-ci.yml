@@ -1,0 +1,130 @@
+name: QMS Assurance OS Completion CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/**"
+      - "backend/amodb/alembic/versions/quality_260809_*.py"
+      - "backend/amodb/alembic/versions/merge_260809_qms_reliability.py"
+      - "frontend/src/components/QMS/**"
+      - "frontend/src/pages/qms/**"
+      - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsIntelligence.ts"
+      - "frontend/src/styles/qms-audit-*.css"
+      - "frontend/src/styles/qms-intelligence.css"
+      - "frontend/tests/e2e/qms-assurance-*.spec.ts"
+      - ".github/workflows/qms-assurance-completion-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-assurance-completion-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile complete Quality governance surface
+        run: python -m compileall -q amodb/apps/quality amodb/alembic/versions
+      - name: Prove one Alembic head
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          heads = ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads()
+          assert heads == ["quality_260809_programme_occ"], heads
+          print("single Alembic head:", heads[0])
+          PY
+      - name: Run Assurance OS completion contracts
+        env:
+          APP_ENV: test
+          SECRET_KEY: qms-assurance-completion-secret
+        run: |
+          pytest -q amodb/apps/quality/tests/test_assurance_operating_system_completion.py
+          pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
+          pytest -q amodb/apps/quality/tests/test_mission_contract.py
+
+  postgres-governance:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_quality_completion
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_quality_completion"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      SECRET_KEY: qms-assurance-completion-secret
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/amodb_quality_completion
+      DATABASE_WRITE_URL: postgresql://postgres:postgres@127.0.0.1:5432/amodb_quality_completion
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Prove post-Intelligence audit governance RLS and immutability
+        run: python -m amodb.apps.quality.tests.postgres_assurance_os_probe
+      - name: Prove custom and risk-triggered occurrence RLS and immutability
+        run: python -m amodb.apps.quality.tests.postgres_programme_occurrence_probe
+
+  frontend-completion:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint completed Assurance OS surfaces
+        run: >-
+          npx eslint
+          src/components/QMS/QualityAuditGovernancePanelHost.tsx
+          src/components/QMS/QualityAuditReportCloseoutHost.tsx
+          src/components/QMS/QualityEnhancementsHost.tsx
+          src/pages/qms/QmsIntelligencePage.tsx
+          src/services/qmsAuditGovernance.ts
+          src/services/qmsAuditCloseout.ts
+          src/services/qmsIntelligence.ts
+      - name: Production frontend build
+        run: npm run build
