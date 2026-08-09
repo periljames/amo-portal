@@ -8,7 +8,9 @@ on:
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
       - "backend/amodb/storage.py"
+      - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/tests/test_observability_operation_span.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/requirements.txt"
@@ -17,6 +19,8 @@ on:
       - "frontend/src/pages/platform/**"
       - "frontend/src/services/platformOperations.ts"
       - "frontend/src/services/platformEnvironment.ts"
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
       - "frontend/src/portalRoutes.tsx"
       - ".github/workflows/platform-control-plane-ci.yml"
   push:
@@ -27,12 +31,16 @@ on:
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
       - "backend/amodb/storage.py"
+      - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/tests/test_observability_operation_span.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/requirements.txt"
       - "docker-compose.prod.yml"
       - "ops/load/**"
+      - "frontend/src/services/productAnalytics.ts"
+      - "frontend/src/app/PortalRouteSurface.tsx"
       - ".github/workflows/platform-control-plane-ci.yml"
 
 permissions:
@@ -72,8 +80,10 @@ jobs:
             backend/amodb/apps/platform/ops_capacity_router.py \
             backend/amodb/apps/platform/ops_data_models.py \
             backend/amodb/apps/platform/ops_management_router.py \
+            backend/amodb/apps/platform/ops_product_insights_router.py \
             backend/amodb/apps/platform/product_analytics.py \
             backend/amodb/apps/platform/platform_command_queue.py \
+            backend/amodb/jobs/saas_worker.py \
             backend/amodb/jobs/saas_worker_safe.py \
             backend/amodb/platform_ops_main.py \
             backend/amodb/platform_ops_worker_main.py \
@@ -92,7 +102,8 @@ jobs:
           pytest -q \
             backend/amodb/apps/platform/tests/test_ops_query_registry.py \
             backend/amodb/apps/platform/tests/test_product_analytics.py \
-            backend/amodb/apps/platform/tests/test_shared_storage.py
+            backend/amodb/apps/platform/tests/test_shared_storage.py \
+            backend/amodb/tests/test_observability_operation_span.py
       - name: Prove mounted console and versioned Operations API contracts
         run: |
           PYTHONPATH=backend python - <<'PY'
@@ -131,6 +142,7 @@ jobs:
               ("POST", "/ops/v1/users/v2/bulk"),
               ("GET", "/ops/v1/commercial"),
               ("GET", "/ops/v1/product-analytics/rollups"),
+              ("GET", "/ops/v1/product-analytics/insights"),
               ("GET", "/ops/v1/incident-center"),
           }
           missing = required - methods_and_paths
