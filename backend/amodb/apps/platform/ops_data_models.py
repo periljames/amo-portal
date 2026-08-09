@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 
 from amodb.database import Base
@@ -83,7 +83,7 @@ class PlatformIncident(Base):
     title = Column(String(255), nullable=False)
     summary = Column(Text, nullable=True)
     severity = Column(String(16), nullable=False, default="HIGH", index=True)
-    state = Column(String(32), nullable=False, default="DETECTED", index=True)
+    state = Column(String(32), nullable=False, default="OPEN", index=True)
     source = Column(String(64), nullable=False, default="manual")
     components_json = Column(JSONB, nullable=True)
     affected_nodes_json = Column(JSONB, nullable=True)
@@ -95,6 +95,8 @@ class PlatformIncident(Base):
     started_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    investigated_at = Column(DateTime(timezone=True), nullable=True)
+    investigated_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     mitigated_at = Column(DateTime(timezone=True), nullable=True)
     mitigated_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
