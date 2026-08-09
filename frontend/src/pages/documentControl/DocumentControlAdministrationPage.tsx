@@ -8,7 +8,6 @@ import {
   Link2,
   Plus,
   RefreshCw,
-  Settings,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
