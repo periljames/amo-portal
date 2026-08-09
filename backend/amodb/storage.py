@@ -56,15 +56,20 @@ def shared_storage_enabled() -> bool:
 
 
 def validate_storage_configuration(*, require_shared: bool | None = None) -> dict[str, str | bool]:
+    """Validate declarative storage settings without touching the filesystem.
+
+    Import-time callers (Alembic, mapper checks, worker/test startup) must be able
+    to validate configuration without creating production paths such as
+    ``/srv/amo/uploads``. Actual local writes and health probes create their
+    required directories at the point of use.
+    """
+
     backend = _backend()
     required = _bool("AMO_REQUIRE_SHARED_STORAGE", False) if require_shared is None else require_shared
     if required and backend != "s3":
         raise RuntimeError("Horizontal application mode requires AMO_STORAGE_BACKEND=s3")
     if backend == "s3" and not bucket_name():
         raise RuntimeError("AMO_STORAGE_S3_BUCKET is required when AMO_STORAGE_BACKEND=s3")
-    root = local_root()
-    if backend == "local":
-        root.mkdir(parents=True, exist_ok=True)
     return {"backend": backend, "shared": backend == "s3", "bucket_configured": bool(bucket_name()), "require_shared": required}
 
 
@@ -121,45 +126,68 @@ def _extra_args(content_type: str | None = None) -> dict:
     return args
 
 
-def _cache_limits() -> tuple[int, int]:
-    max_bytes = max(64 * 1024 * 1024, int(os.getenv("AMO_STORAGE_CACHE_MAX_BYTES", str(2 * 1024 * 1024 * 1024)) or str(2 * 1024 * 1024 * 1024)))
-    max_age = max(300, int(os.getenv("AMO_STORAGE_CACHE_MAX_AGE_SEC", str(24 * 3600)) or str(24 * 3600)))
-    return max_bytes, max_age
+def _cache_limits() -> tuple[int, int, float]:
+    max_bytes = max(0, int(os.getenv("AMO_STORAGE_CACHE_MAX_BYTES", str(2 * 1024 * 1024 * 1024)) or "0"))
+    max_age = max(0, int(os.getenv("AMO_STORAGE_CACHE_MAX_AGE_SEC", "86400") or "0"))
+    interval = max(0.0, float(os.getenv("AMO_STORAGE_CACHE_CLEANUP_INTERVAL_SEC", "60") or "0"))
+    return max_bytes, max_age, interval
 
 
-def cleanup_cache(*, force: bool = False) -> None:
+def cleanup_cache(*, force: bool = False, reserve_bytes: int = 0, protected: Path | None = None) -> dict[str, int]:
+    """Bound the ephemeral object cache by age and total bytes.
+
+    Files named ``amo-upload-*`` or ``*.downloading`` are active staging files
+    and are never selected for eviction. Cleanup is rate-limited by default so
+    request paths do not repeatedly scan the cache directory.
+    """
+
     global _LAST_CACHE_CLEANUP
     root = cache_root()
-    if not root.exists():
-        return
-    now_mono = time.monotonic()
+    root.mkdir(parents=True, exist_ok=True)
+    max_bytes, max_age, interval = _cache_limits()
+    now = time.time()
+    if not force and interval and now - _LAST_CACHE_CLEANUP < interval:
+        return {"removed": 0, "bytes_removed": 0}
+
+    removed = 0
+    bytes_removed = 0
+    protected_resolved = protected.resolve() if protected is not None else None
     with _CACHE_CLEANUP_LOCK:
-        if not force and now_mono - _LAST_CACHE_CLEANUP < 60:
-            return
-        _LAST_CACHE_CLEANUP = now_mono
-        max_bytes, max_age = _cache_limits()
         now = time.time()
-        files: list[tuple[float, int, Path]] = []
-        total = 0
-        for path in root.iterdir():
-            if not path.is_file() or path.name.startswith("amo-upload-") or path.name.endswith(".downloading"):
+        if not force and interval and now - _LAST_CACHE_CLEANUP < interval:
+            return {"removed": 0, "bytes_removed": 0}
+        _LAST_CACHE_CLEANUP = now
+        files: list[tuple[Path, os.stat_result]] = []
+        for item in root.iterdir():
+            if not item.is_file() or item.name.startswith("amo-upload-") or item.name.endswith(".downloading"):
                 continue
             try:
-                stat = path.stat()
-            except FileNotFoundError:
+                resolved = item.resolve()
+                stat = item.stat()
+            except OSError:
                 continue
-            if now - stat.st_mtime > max_age:
-                path.unlink(missing_ok=True)
+            if protected_resolved is not None and resolved == protected_resolved:
+                files.append((item, stat))
                 continue
-            total += stat.st_size
-            files.append((stat.st_mtime, stat.st_size, path))
-        if total <= max_bytes:
-            return
-        for _mtime, size, path in sorted(files):
-            path.unlink(missing_ok=True)
-            total -= size
-            if total <= max_bytes:
-                break
+            if max_age and now - stat.st_mtime > max_age:
+                item.unlink(missing_ok=True)
+                removed += 1
+                bytes_removed += stat.st_size
+                continue
+            files.append((item, stat))
+
+        if max_bytes:
+            target = max(0, max_bytes - max(0, reserve_bytes))
+            candidates = [(item, stat) for item, stat in files if protected_resolved is None or item.resolve() != protected_resolved]
+            total = sum(stat.st_size for _, stat in candidates)
+            for item, stat in sorted(candidates, key=lambda pair: pair[1].st_mtime):
+                if total <= target:
+                    break
+                item.unlink(missing_ok=True)
+                total -= stat.st_size
+                removed += 1
+                bytes_removed += stat.st_size
+    return {"removed": removed, "bytes_removed": bytes_removed}
 
 
 @dataclass(frozen=True)
@@ -186,7 +214,7 @@ def put_file(path: str | Path, *, key: str, content_type: str | None = None) -> 
         except ValueError as exc:
             raise ValueError("Storage key escapes configured local root") from exc
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f".{target.name}.{uuid4().hex}.uploading")
+        temporary = target.with_name(f".{target.name}.uploading")
         shutil.copyfile(source, temporary)
         os.replace(temporary, target)
         return StoredObject(uri=str(target), key=clean, backend="local", size_bytes=target.stat().st_size)
@@ -194,10 +222,7 @@ def put_file(path: str | Path, *, key: str, content_type: str | None = None) -> 
     validate_storage_configuration()
     full_key = _full_key(clean)
     args = _extra_args(content_type)
-    if args:
-        _client().upload_file(str(source), bucket_name(), full_key, ExtraArgs=args)
-    else:
-        _client().upload_file(str(source), bucket_name(), full_key)
+    _client().upload_file(str(source), bucket_name(), full_key, ExtraArgs=args or None)
     head = _client().head_object(Bucket=bucket_name(), Key=full_key)
     return StoredObject(
         uri=f"s3://{bucket_name()}/{full_key}",
@@ -212,11 +237,9 @@ def put_stream(stream: BinaryIO, *, key: str, content_type: str | None = None) -
     root = cache_root()
     root.mkdir(parents=True, exist_ok=True)
     cleanup_cache()
-    fd, raw_path = tempfile.mkstemp(prefix="amo-upload-", dir=str(root))
-    os.close(fd)
-    path = Path(raw_path)
+    path = root / f"amo-upload-{uuid4().hex}"
     try:
-        with path.open("wb") as handle:
+        with path.open("xb") as handle:
             shutil.copyfileobj(stream, handle, length=1024 * 1024)
         return put_file(path, key=key, content_type=content_type)
     finally:
@@ -257,13 +280,13 @@ def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
                 pass
             return target
         target.unlink(missing_ok=True)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.downloading")
+    temporary = target.with_name(f".{target.name}.downloading")
     try:
         _client().download_file(bucket, key, str(temporary))
         if expected_sha256 and _sha256(temporary) != expected_sha256:
             raise IOError("Object checksum verification failed")
+        cleanup_cache(force=True, reserve_bytes=temporary.stat().st_size, protected=temporary)
         os.replace(temporary, target)
-        cleanup_cache(force=True)
         return target
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -308,17 +331,17 @@ def exists(uri: str) -> bool:
 
 def health_check() -> dict[str, object]:
     config = validate_storage_configuration()
-    probe_name = f".amo-storage-probe-{os.getpid()}-{uuid4().hex}"
     if _backend() == "local":
         root = local_root()
-        probe = root / probe_name
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / ".amo-storage-probe"
         try:
             probe.write_bytes(b"ok")
             ok = probe.read_bytes() == b"ok"
             return {**config, "ok": ok, "detail": str(root)}
         finally:
             probe.unlink(missing_ok=True)
-    key = _full_key(f"health/{probe_name}.txt")
+    key = _full_key("health/probe.txt")
     try:
         _client().put_object(Bucket=bucket_name(), Key=key, Body=b"ok", **_extra_args("text/plain"))
         body = _client().get_object(Bucket=bucket_name(), Key=key)["Body"].read(2)
