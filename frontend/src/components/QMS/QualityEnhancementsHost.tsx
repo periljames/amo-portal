@@ -11,6 +11,33 @@ import "../../styles/qms-text-scale-override.css";
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
+const QualityChecklistExecutionGovernanceHost = lazy(
+  () => import("./QualityChecklistExecutionGovernanceHost"),
+);
+const QualityAuditGovernancePanelHost = lazy(
+  () => import("./QualityAuditGovernancePanelHost"),
+);
+const QualityAuditPreparationContextHost = lazy(
+  () => import("./QualityAuditPreparationContextHost"),
+);
+const QualityAuditReportCloseoutHost = lazy(
+  () => import("./QualityAuditReportCloseoutHost"),
+);
+const QualityChecklistTemplateHost = lazy(
+  () => import("./QualityChecklistTemplateHost"),
+);
+const QualityAuditHandoffHost = lazy(
+  () => import("./QualityAuditHandoffHost"),
+);
+const QualityEffectivenessResponseHost = lazy(
+  () => import("./QualityEffectivenessResponseHost"),
+);
+const QualityPlannerStrategicHost = lazy(
+  () => import("./QualityPlannerStrategicHost"),
+);
+const QualityProgrammeOccurrenceHost = lazy(
+  () => import("./QualityProgrammeOccurrenceHost"),
+);
 
 type AuditRoute = {
   amoCode: string;
@@ -18,14 +45,26 @@ type AuditRoute = {
   activeTab: string;
 };
 
+function useQualityAmoCode(): string | null {
+  const location = useLocation();
+  return useMemo(() => {
+    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)(?:\/|$)/i);
+    return match ? decodeURIComponent(match[1]) : null;
+  }, [location.pathname]);
+}
+
 function useAuditRoute(): AuditRoute | null {
   const location = useLocation();
   return useMemo(() => {
-    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/quality\/audits\/([^/]+)/i);
+    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)\/audits\/([^/]+)/i);
     if (!match) return null;
+    const auditKey = decodeURIComponent(match[2]);
+    if (["dashboard", "program", "programme", "schedule", "plan", "register", "checklists", "reports", "templates", "new", "bin", "schedules"].includes(auditKey.toLowerCase())) {
+      return null;
+    }
     return {
       amoCode: decodeURIComponent(match[1]),
-      auditKey: decodeURIComponent(match[2]),
+      auditKey,
       activeTab: new URLSearchParams(location.search).get("tab") || "war-room",
     };
   }, [location.pathname, location.search]);
@@ -55,6 +94,60 @@ const CarInviteResponsiveStyleLoader: React.FC = () => {
     return () => {
       cancelled = true;
       observer?.disconnect();
+    };
+  }, []);
+  return null;
+};
+
+const QualityDialogFocusRestorer: React.FC = () => {
+  useEffect(() => {
+    let activeDialog: HTMLElement | null = null;
+    let opener: HTMLElement | null = null;
+    let lastExternalFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('[role="dialog"][aria-modal="true"]')) return;
+      lastExternalFocus = target;
+    };
+
+    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => {
+      if (dialog.classList.contains("qms-planner-create-modal")) {
+        return document.querySelector<HTMLElement>(".qms-planner-quick-schedule");
+      }
+      return null;
+    };
+
+    const observer = new MutationObserver(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      if (dialog && !activeDialog) {
+        activeDialog = dialog;
+        const canonicalOpener = canonicalDialogOpener(dialog);
+        opener = canonicalOpener?.isConnected
+          ? canonicalOpener
+          : lastExternalFocus?.isConnected
+            ? lastExternalFocus
+            : null;
+        return;
+      }
+      if (!dialog && activeDialog) {
+        const restoreTarget = opener;
+        activeDialog = null;
+        opener = null;
+        window.requestAnimationFrame(() => {
+          if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
+        });
+        return;
+      }
+      if (dialog) activeDialog = dialog;
+    });
+
+    document.addEventListener("focusin", onFocusIn, true);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      observer.disconnect();
     };
   }, []);
   return null;
@@ -106,26 +199,48 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
 
 const QualityEnhancementsHost: React.FC = () => {
   const location = useLocation();
+  const amoCode = useQualityAmoCode();
   const route = useAuditRoute();
 
   if (/^\/car-invite\/?$/i.test(location.pathname)) {
     return <CarInviteResponsiveStyleLoader />;
   }
 
-  const auditEnhancement = route && route.activeTab === "checklist" ? (
-    <Suspense fallback={null}>
-      <QualityChecklistPdfFormEditorHost />
-    </Suspense>
-  ) : route ? (
-    <WorkflowIntegrityGuard route={route} />
-  ) : null;
-
   return (
     <>
       <PortalTextScaleManager />
       <QualityContextTabs />
       <QualityDataFreshnessCoordinator />
-      {auditEnhancement}
+      <QualityDialogFocusRestorer />
+
+      {amoCode ? (
+        <Suspense fallback={null}>
+          <QualityAuditHandoffHost amoCode={amoCode} />
+          <QualityEffectivenessResponseHost amoCode={amoCode} />
+          <QualityPlannerStrategicHost amoCode={amoCode} />
+          <QualityProgrammeOccurrenceHost amoCode={amoCode} />
+          <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={route?.activeTab} />
+        </Suspense>
+      ) : null}
+
+      {route ? (
+        <>
+          <WorkflowIntegrityGuard route={route} />
+          <Suspense fallback={null}>
+            <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
+            <QualityAuditPreparationContextHost amoCode={route.amoCode} auditKey={route.auditKey} />
+            {route.activeTab === "report" || route.activeTab === "closeout" ? (
+              <QualityAuditReportCloseoutHost amoCode={route.amoCode} auditKey={route.auditKey} />
+            ) : null}
+          </Suspense>
+          {route.activeTab === "checklist" ? (
+            <Suspense fallback={null}>
+              <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
+              <QualityChecklistPdfFormEditorHost />
+            </Suspense>
+          ) : null}
+        </>
+      ) : null}
     </>
   );
 };

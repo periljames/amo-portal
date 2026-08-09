@@ -1,16 +1,15 @@
 import React, { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
-  BrainCircuit,
-  CalendarPlus,
+  CalendarClock,
   CheckCircle2,
-  GitBranch,
+  DatabaseZap,
   RefreshCw,
   ShieldCheck,
-  Target,
+  Sparkles,
+  UserRoundCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -21,11 +20,15 @@ import QmsDiagnosticsDrawer from "./components/QmsDiagnosticsDrawer";
 import QmsMyWork from "./components/QmsMyWork";
 import QmsPerformanceSummary from "./components/QmsPerformanceSummary";
 import QmsUpcomingObligations from "./components/QmsUpcomingObligations";
-import { buildQmsOverviewRoutes, deriveQmsOverviewHealth, qmsTimestampLabel } from "./qmsOverviewModel";
-import "../../styles/qms-operational-control-centre.css";
+import { buildQmsOverviewRoutes, qmsTimestampLabel } from "./qmsOverviewModel";
+import "../../styles/qms-assurance-control-room.css";
 
 function countQueue(items: Array<{ count: number }>): number {
   return items.reduce((total, item) => total + Math.max(0, Number(item.count) || 0), 0);
+}
+
+function sumKnownCounts(values: Record<string, number | null> | undefined): number {
+  return Object.values(values || {}).reduce<number>((total, value) => total + Math.max(0, Number(value) || 0), 0);
 }
 
 const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode }) => {
@@ -47,121 +50,136 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
   });
 
   const dashboard = dashboardQuery.data;
-  const health = deriveQmsOverviewHealth(dashboard);
   const queueCount = countQueue(dashboard?.action_queue || []);
-  const sourceHealthy = dashboard?.source_health.status === "healthy";
+  const regulatorySignals = (dashboard?.action_queue || []).filter((item) => Boolean(item.regulatory_consequence?.trim()));
+  const regulatoryExposureCount = countQueue(regulatorySignals);
+  const unassignedCount = sumKnownCounts(dashboard?.unassigned_counts);
+  const availableKpis = (dashboard?.performance_kpis || []).filter((item) => item.data_status === "available").length;
+  const deterioratingKpis = (dashboard?.performance_kpis || []).filter((item) => item.data_status === "available" && item.direction === "deteriorating").length;
+  const sourceStatus = dashboard?.source_health.status || "unavailable";
+  const sourceLabel = sourceStatus === "healthy" ? "Healthy" : sourceStatus === "partial" ? "Partial" : "Unavailable";
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["qms-operational-dashboard-v2", amoCode] });
   };
 
   return (
-    <main className="qms-control-centre" aria-label="Quality operational control centre">
-      <header className="qms-control-centre__header">
-        <div className="qms-control-centre__identity">
-          <span className="qms-control-centre__eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Quality operations</span>
-          <div>
-            <h1>Control Centre</h1>
-            <p>Prioritised work, obligations and performance. Open the governed source workflow to investigate or act.</p>
-          </div>
+    <main className="qms-assurance-room" aria-label="Quality Assurance Control Room">
+      <header className="qms-assurance-room__header">
+        <div>
+          <span className="qms-assurance-room__eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Quality assurance operating picture</span>
+          <h1>Control Room</h1>
+          <p>Prioritise emerging assurance signals, decisions and obligations without duplicating the operational records that own the evidence.</p>
         </div>
-        <div className="qms-control-centre__header-actions">
-          <span className={`qms-control-centre__posture qms-tone--${health.tone}`}>
-            <span className="qms-control-centre__posture-dot" aria-hidden="true" />
-            <strong>{health.label}</strong>
-            <small>{dashboard ? qmsTimestampLabel(dashboard.as_of) : "Refreshing live sources"}</small>
+        <div className="qms-assurance-room__header-actions">
+          <span className={`qms-assurance-room__source qms-source--${sourceStatus}`}>
+            <DatabaseZap size={14} aria-hidden="true" />
+            <span><strong>{sourceLabel}</strong><small>{dashboard ? qmsTimestampLabel(dashboard.as_of) : "Refreshing sources"}</small></span>
           </span>
-          <button type="button" className="qms-control-centre__button" onClick={() => void refresh()} disabled={dashboardQuery.isFetching}>
+          <button type="button" className="qms-assurance-room__button" onClick={() => void refresh()} disabled={dashboardQuery.isFetching}>
             <RefreshCw size={15} className={dashboardQuery.isFetching ? "is-spinning" : ""} aria-hidden="true" /> Refresh
           </button>
-          <Link className="qms-control-centre__button is-primary" to={routes.auditSchedule}>
-            <CalendarPlus size={15} aria-hidden="true" /> Open audit plan
+          <Link className="qms-assurance-room__button is-primary" to={routes.calendar}>
+            <CalendarClock size={15} aria-hidden="true" /> Open planner
           </Link>
         </div>
       </header>
 
-      <nav className="qms-control-centre__nav" aria-label="Quality control centre workspaces">
-        <Link className="is-active" to={routes.root}><Activity size={15} /> Operations</Link>
-        <Link to={`${routes.root}?hub=controls`}><Target size={15} /> Controls</Link>
-        <Link to={`${routes.root}?hub=evidence`}><GitBranch size={15} /> Evidence</Link>
-        <Link to={`${routes.root}?hub=intelligence`}><BrainCircuit size={15} /> Intelligence</Link>
-      </nav>
-
       {dashboardQuery.isLoading && !dashboard ? (
-        <section className="qms-control-centre__loading" role="status">
-          <RefreshCw size={18} className="is-spinning" aria-hidden="true" /> Building the operational picture…
+        <section className="qms-assurance-room__loading" role="status">
+          <RefreshCw size={18} className="is-spinning" aria-hidden="true" /> Building the assurance picture…
         </section>
       ) : null}
 
       {dashboardQuery.error ? (
-        <section className="qms-control-centre__alert" role="alert">
+        <section className="qms-assurance-room__alert" role="alert">
           <AlertTriangle size={18} aria-hidden="true" />
-          <div><strong>Operational dashboard unavailable</strong><p>{dashboardQuery.error instanceof Error ? dashboardQuery.error.message : "The current QMS operational picture could not be loaded."}</p></div>
+          <div><strong>Assurance picture unavailable</strong><p>{dashboardQuery.error instanceof Error ? dashboardQuery.error.message : "The current Quality operating picture could not be loaded."}</p></div>
           <button type="button" onClick={() => void dashboardQuery.refetch()}>Retry</button>
         </section>
       ) : null}
 
       {dashboard ? (
         <>
-          <section className="qms-control-centre__summary" aria-label="Quality operating summary">
-            <article className={`qms-control-centre__summary-lead qms-tone--${health.tone}`}>
-              <span>Operating posture</span>
-              <strong>{health.label}</strong>
-              <p>{health.summary}</p>
-            </article>
+          <section className="qms-assurance-room__summary" aria-label="Quality assurance summary">
             <Link to={routes.myWork}>
-              <span>Assigned to me</span>
+              <span>My decisions & work</span>
               <strong>{dashboard.my_work.length.toLocaleString()}</strong>
-              <small>approval, review and verification items</small>
+              <small>items currently assigned to the logged-in user</small>
             </Link>
+            <article>
+              <span>Priority signals</span>
+              <strong>{dashboard.action_queue.length.toLocaleString()}</strong>
+              <small>{queueCount.toLocaleString()} underlying exception{queueCount === 1 ? "" : "s"}</small>
+            </article>
+            <article className={regulatoryExposureCount ? "is-attention" : ""}>
+              <span>Regulatory consequence</span>
+              <strong>{regulatorySignals.length.toLocaleString()}</strong>
+              <small>{regulatoryExposureCount ? `${regulatoryExposureCount.toLocaleString()} records carry an explicit consequence` : "No explicit regulatory consequence returned"}</small>
+            </article>
             <Link to={routes.calendar}>
               <span>Next 30 days</span>
               <strong>{dashboard.upcoming_obligations.length.toLocaleString()}</strong>
-              <small>scheduled obligations returned</small>
+              <small>scheduled obligations in the current feed</small>
             </Link>
-            <Link to={routes.myWork}>
-              <span>Ranked exposure</span>
-              <strong>{queueCount.toLocaleString()}</strong>
-              <small>{dashboard.action_queue.length.toLocaleString()} action categories</small>
-            </Link>
-            <button type="button" className="qms-control-centre__source-card" onClick={() => document.getElementById("qms-control-centre-diagnostics")?.scrollIntoView({ behavior: "smooth", block: "nearest" })}>
-              <span>Source coverage</span>
-              <strong>{sourceHealthy ? "Healthy" : dashboard.source_health.status.replaceAll("_", " ")}</strong>
-              <small>{dashboard.source_health.error_count ? `${dashboard.source_health.error_count} source issue${dashboard.source_health.error_count === 1 ? "" : "s"}` : "No source errors returned"}</small>
-            </button>
           </section>
 
-          <div className="qms-control-centre__primary-grid">
+          <section className="qms-assurance-room__section-heading">
+            <div><Sparkles size={16} aria-hidden="true" /><span><strong>Attention now</strong><small>Signals are ranked from authoritative source records. Open the governed source to investigate or act.</small></span></div>
+          </section>
+
+          <div className="qms-assurance-room__primary-grid">
             <QmsActionQueue amoCode={amoCode} items={dashboard.action_queue} fallbackRoute={routes.myWork} />
-            <QmsMyWork amoCode={amoCode} items={dashboard.my_work} fallbackRoute={routes.myWork} />
+            <QmsUpcomingObligations amoCode={amoCode} items={dashboard.upcoming_obligations} fallbackRoute={routes.calendar} />
           </div>
 
-          <details className="qms-control-centre__disclosure">
-            <summary>
-              <span><strong>Forward view and performance</strong><small>Open when planning workload or investigating trends.</small></span>
-              <ArrowRight size={16} aria-hidden="true" />
-            </summary>
-            <div className="qms-control-centre__secondary-grid">
-              <QmsUpcomingObligations amoCode={amoCode} items={dashboard.upcoming_obligations} fallbackRoute={routes.calendar} />
-              <QmsPerformanceSummary amoCode={amoCode} items={dashboard.performance_kpis} fallbackRoute={routes.reports} />
-            </div>
-          </details>
+          <div className="qms-assurance-room__secondary-grid">
+            <QmsMyWork amoCode={amoCode} items={dashboard.my_work} fallbackRoute={routes.myWork} />
+            <QmsPerformanceSummary amoCode={amoCode} items={dashboard.performance_kpis} fallbackRoute={routes.reports} />
+          </div>
 
-          <section className="qms-control-centre__review-lane" aria-label="Assurance review guidance">
+          <section className="qms-assurance-room__control-health" aria-label="Assurance control health">
+            <header>
+              <div><ShieldCheck size={16} aria-hidden="true" /><span><strong>Assurance health</strong><small>Coverage and data conditions that affect the confidence of this view.</small></span></div>
+              <Link to={routes.reports}>Open intelligence <ArrowRight size={14} aria-hidden="true" /></Link>
+            </header>
             <div>
-              <span>Human-governed assurance</span>
-              <strong>Use the workspace navigation above to review controls, evidence and recommendations.</strong>
-              <p>AI may rank and explain exposure, but acceptance, approval, verification and closure remain explicit human actions in the governed source record.</p>
+              <article className={`qms-source--${sourceStatus}`}>
+                <span>Source coverage</span>
+                <strong>{sourceLabel}</strong>
+                <small>{dashboard.source_health.error_count ? `${dashboard.source_health.error_count} source issue${dashboard.source_health.error_count === 1 ? "" : "s"}` : "No source errors returned"}</small>
+              </article>
+              <article className={unassignedCount ? "is-attention" : ""}>
+                <span>Unassigned exposure</span>
+                <strong>{unassignedCount.toLocaleString()}</strong>
+                <small>{unassignedCount ? "items have no explicit owner in returned source counts" : "No unassigned source count returned"}</small>
+              </article>
+              <article className={deterioratingKpis ? "is-attention" : ""}>
+                <span>Performance drift</span>
+                <strong>{deterioratingKpis.toLocaleString()}</strong>
+                <small>{availableKpis ? `${availableKpis} KPI${availableKpis === 1 ? "" : "s"} have usable data` : "No performance KPI data available"}</small>
+              </article>
+              <article>
+                <span>Evidence freshness</span>
+                <strong>{dashboard.data_freshness?.generated_at ? qmsTimestampLabel(dashboard.data_freshness.generated_at) : "Not reported"}</strong>
+                <small>{dashboard.data_freshness?.counter_source || "Dashboard source timestamp"}</small>
+              </article>
             </div>
           </section>
 
           {!dashboard.action_queue.length && !dashboard.my_work.length ? (
-            <div className="qms-control-centre__quiet" role="status"><CheckCircle2 size={18} /><span>No ranked exception or assigned work was returned. Scheduled surveillance remains visible in the forward view.</span></div>
+            <div className="qms-assurance-room__quiet" role="status"><CheckCircle2 size={18} /><span>No ranked signal or assigned work was returned. Scheduled assurance obligations and performance remain visible above.</span></div>
           ) : null}
 
-          <div id="qms-control-centre-diagnostics">
+          <section className="qms-assurance-room__governance-note">
+            <UserRoundCheck size={17} aria-hidden="true" />
+            <div><strong>Human-governed assurance</strong><span>Analytics may rank, compare and explain. Acceptance, authorization, root-cause approval, effectiveness verification and closure remain explicit human decisions in the governed source workflow.</span></div>
+          </section>
+
+          <details className="qms-assurance-room__diagnostics" id="qms-control-centre-diagnostics">
+            <summary>Data health & diagnostics</summary>
             <QmsDiagnosticsDrawer dashboard={dashboard} authorized={diagnosticsAuthorized} />
-          </div>
+          </details>
         </>
       ) : null}
     </main>

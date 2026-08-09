@@ -13,6 +13,7 @@ import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
+const QmsAuditProgrammeSchedulePage = lazy(() => import("./pages/qms/QmsAuditProgrammeSchedulePage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
@@ -83,7 +84,10 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   const view = parts[1] || route.module.defaultView;
 
   if (route.module.id === "calendar" || route.module.id === "evidence-vault" || route.module.id === "aerodoc") return false;
-  if (route.module.id === "audits") return ["program", "programme", "checklists", "reports", "templates"].includes(view);
+  // Programme/programme are governed specialist Audit Operations routes owned by
+  // PortalRouteSurface. Only the remaining shallow audit registers stay on the
+  // generic register shortcut.
+  if (route.module.id === "audits") return ["checklists", "reports", "templates"].includes(view);
   // CAR/CAPA has a governed specialist owner in PortalRouteSurface. Keeping it
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
@@ -100,6 +104,22 @@ function isSupportedDocumentReaderPath(pathname: string): boolean {
   const reader = relative.length === 6 && relative[1] === "reader" && relative[2] && relative[3] === "revisions" && relative[4] && relative[5] === "view";
   const revision = relative.length === 5 && relative[1] && relative[2] === "revisions" && relative[3] && relative[4] === "view";
   return Boolean(reader || revision);
+}
+
+function isSupportedAuditProgrammeSchedulePath(pathname: string): boolean {
+  const parts = pathSegments(pathname);
+  const qualityIndex = parts.indexOf("quality");
+  if (qualityIndex < 0) return false;
+  const relative = parts.slice(qualityIndex + 1);
+  return Boolean(
+    relative.length === 6 &&
+    relative[0] === "audits" &&
+    relative[1] === "program" &&
+    relative[2] &&
+    relative[3] === "items" &&
+    relative[4] &&
+    relative[5] === "schedule"
+  );
 }
 
 function rosteringWorkforceRedirect(pathname: string): string | null {
@@ -200,6 +220,14 @@ function QmsNotFoundRouteSurface() {
   );
 }
 
+function QmsAuditProgrammeScheduleRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading audit programme scheduler…</div></div>}>
+      <WorkspaceRequireAuth><QmsAuditProgrammeSchedulePage /></WorkspaceRequireAuth>
+    </Suspense>
+  );
+}
+
 function ProcurementRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Procurement & Supply Chain…</div></div>}>
@@ -281,9 +309,14 @@ export const AppRouter: React.FC = () => {
   if (qmsRoute.kind === "legacy" && qmsRoute.canonicalTarget) {
     return <Navigate to={`${qmsRoute.canonicalTarget}${location.search}${location.hash}`} replace state={location.state} />;
   }
+  if (isSupportedAuditProgrammeSchedulePath(location.pathname)) return <QmsAuditProgrammeScheduleRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
-  if (qmsRoute.kind === "unknown" && !isSupportedDocumentReaderPath(location.pathname)) return <QmsNotFoundRouteSurface />;
+  if (
+    qmsRoute.kind === "unknown" &&
+    !isSupportedDocumentReaderPath(location.pathname) &&
+    !isSupportedAuditProgrammeSchedulePath(location.pathname)
+  ) return <QmsNotFoundRouteSurface />;
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;

@@ -1,0 +1,630 @@
+.qms-missions,
+.qms-mission-detail {
+  --qms-surface: var(--surface, #fff);
+  --qms-border: color-mix(in srgb, var(--border-color, #cbd5e1) 78%, transparent);
+  --qms-text: var(--text-primary, #0f172a);
+  --qms-muted: var(--text-muted, #64748b);
+  --qms-primary: var(--primary, #1d4ed8);
+  min-height: calc(100vh - 132px);
+  padding: 10px;
+  background: color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #fff);
+}
+
+.qms-missions {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.qms-missions__header,
+.qms-missions__create,
+.qms-missions__metrics,
+.qms-missions__portfolio,
+.qms-mission-detail__header,
+.qms-mission-detail__summary,
+.qms-mission-detail__gates,
+.qms-mission-detail__lower-grid > section {
+  background: var(--qms-surface);
+  border: 1px solid var(--qms-border);
+  border-radius: 10px;
+}
+
+.qms-missions__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.qms-missions__header > div:first-child > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--qms-primary);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.qms-missions__header h1,
+.qms-mission-detail__title h1 {
+  margin: 3px 0;
+  color: var(--qms-text);
+  font-size: clamp(24px, 2vw, 31px);
+  line-height: 1.05;
+}
+
+.qms-missions__header p,
+.qms-mission-detail__title p {
+  margin: 0;
+  max-width: 820px;
+  color: var(--qms-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.qms-missions__header > div:last-child {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.qms-missions button,
+.qms-mission-detail button,
+.qms-missions select,
+.qms-missions input,
+.qms-missions textarea {
+  font: inherit;
+}
+
+.qms-missions__header button,
+.qms-missions__create button,
+.qms-mission-detail__back,
+.qms-missions__state button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--qms-text);
+  background: var(--qms-surface);
+  border: 1px solid var(--qms-border);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.qms-missions button.is-primary,
+.qms-missions__create button.is-primary {
+  color: #fff;
+  border-color: var(--qms-primary);
+  background: var(--qms-primary);
+}
+
+.qms-missions button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.qms-missions__create {
+  padding: 12px 14px;
+}
+
+.qms-missions__create > header,
+.qms-missions__create > footer,
+.qms-missions__portfolio > header,
+.qms-missions__portfolio > footer,
+.qms-mission-detail__gates > header,
+.qms-mission-detail__lower-grid section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qms-missions__create > header > div,
+.qms-missions__portfolio > header > div,
+.qms-mission-detail__gates > header > div,
+.qms-mission-detail__lower-grid section > header {
+  min-width: 0;
+}
+
+.qms-missions__create header strong,
+.qms-missions__portfolio header strong,
+.qms-mission-detail__gates header strong,
+.qms-mission-detail__lower-grid header strong {
+  display: block;
+  color: var(--qms-text);
+  font-size: 11px;
+}
+
+.qms-missions__create header small,
+.qms-missions__portfolio header small,
+.qms-mission-detail__gates header small,
+.qms-mission-detail__lower-grid header small,
+.qms-missions__create footer small {
+  color: var(--qms-muted);
+  font-size: 9px;
+}
+
+.qms-missions__create > div {
+  display: grid;
+  grid-template-columns: 1.4fr 1.4fr .8fr .7fr;
+  gap: 9px;
+  margin: 12px 0;
+}
+
+.qms-missions__create label,
+.qms-missions__portfolio label {
+  display: grid;
+  gap: 4px;
+}
+
+.qms-missions__create label > span,
+.qms-missions__portfolio label > span {
+  color: var(--qms-muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.qms-missions__create label.is-wide {
+  grid-column: 1 / -1;
+}
+
+.qms-missions__create input,
+.qms-missions__create select,
+.qms-missions__create textarea,
+.qms-missions__portfolio select {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  color: var(--qms-text);
+  background: var(--qms-surface);
+  border: 1px solid var(--qms-border);
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.qms-missions__create textarea {
+  resize: vertical;
+}
+
+.qms-missions__create-error {
+  margin: 0 0 8px;
+  color: #b91c1c;
+  font-size: 10px;
+}
+
+.qms-missions__metrics,
+.qms-mission-detail__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.qms-missions__metrics article,
+.qms-mission-detail__summary article {
+  display: grid;
+  gap: 3px;
+  min-height: 78px;
+  padding: 11px 13px;
+  border-right: 1px solid var(--qms-border);
+}
+
+.qms-missions__metrics article:last-child,
+.qms-mission-detail__summary article:last-child {
+  border-right: 0;
+}
+
+.qms-missions__metrics article.is-attention {
+  box-shadow: inset 3px 0 0 #b91c1c;
+}
+
+.qms-missions__metrics span,
+.qms-mission-detail__summary span {
+  color: var(--qms-muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.qms-missions__metrics strong,
+.qms-mission-detail__summary strong {
+  color: var(--qms-text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.qms-missions__metrics small,
+.qms-mission-detail__summary small {
+  color: var(--qms-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.qms-missions__portfolio {
+  overflow: hidden;
+}
+
+.qms-missions__portfolio > header,
+.qms-missions__portfolio > footer {
+  padding: 10px 12px;
+}
+
+.qms-missions__portfolio > header {
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-missions__portfolio > footer {
+  color: var(--qms-muted);
+  border-top: 1px solid var(--qms-border);
+  font-size: 9px;
+}
+
+.qms-missions__row {
+  display: grid;
+  grid-template-columns: 180px minmax(260px, 1.5fr) 170px 90px 150px 24px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--qms-text);
+  text-align: left;
+  background: var(--qms-surface);
+  border: 0;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+button.qms-missions__row {
+  cursor: pointer;
+}
+
+button.qms-missions__row:hover,
+button.qms-missions__row:focus-visible {
+  background: color-mix(in srgb, var(--qms-primary) 4%, var(--qms-surface));
+}
+
+.qms-missions__row-head {
+  min-height: 30px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  color: var(--qms-muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.qms-missions__row > span:not(.qms-missions__tone) {
+  min-width: 0;
+}
+
+.qms-missions__row strong,
+.qms-missions__row small {
+  display: block;
+}
+
+.qms-missions__row strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-missions__row small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--qms-muted);
+  font-size: 8.5px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-missions__row-ref strong {
+  color: var(--qms-primary);
+}
+
+.qms-missions__tone,
+.qms-mission-detail__badges span {
+  justify-self: start;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.qms-missions__tone.is-danger,
+.qms-mission-detail__badges .is-danger {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.qms-missions__tone.is-warning,
+.qms-mission-detail__badges .is-warning {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.qms-missions__tone.is-positive,
+.qms-mission-detail__badges .is-positive {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.qms-missions__state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 70px;
+  padding: 14px;
+  color: var(--qms-muted);
+  font-size: 10px;
+}
+
+.qms-missions__state.is-error {
+  color: #991b1b;
+}
+
+.qms-mission-detail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.qms-mission-detail__header {
+  padding: 12px 14px 14px;
+}
+
+.qms-mission-detail__back {
+  min-height: 28px !important;
+  margin-bottom: 8px;
+  padding: 0 7px !important;
+}
+
+.qms-mission-detail__title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.qms-mission-detail__title > div:first-child > span {
+  color: var(--qms-primary);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.qms-mission-detail__badges {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.qms-mission-detail__badges > span:first-child {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+
+.qms-mission-detail__gates {
+  overflow: hidden;
+}
+
+.qms-mission-detail__gates > header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-mission-detail__gates > header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qms-mission-detail__gates > header > span {
+  color: #92400e;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.qms-mission-detail__gates > header > span.is-ready {
+  color: #166534;
+}
+
+.qms-mission-detail__gate-head,
+.qms-mission-detail__gate {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) 130px minmax(180px, .9fr) minmax(260px, 1.2fr) 100px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+}
+
+.qms-mission-detail__gate-head {
+  color: var(--qms-muted);
+  background: color-mix(in srgb, var(--qms-text) 2%, var(--qms-surface));
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.qms-mission-detail__gate {
+  min-height: 58px;
+  border-top: 1px solid var(--qms-border);
+  font-size: 9px;
+}
+
+.qms-mission-detail__gate:first-of-type {
+  border-top: 0;
+}
+
+.qms-mission-detail__gate.is-pass {
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.qms-mission-detail__gate.is-fail,
+.qms-mission-detail__gate.is-blocked {
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.qms-mission-detail__gate-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.qms-mission-detail__gate strong,
+.qms-mission-detail__gate small {
+  display: block;
+}
+
+.qms-mission-detail__gate strong {
+  color: var(--qms-text);
+  font-size: 9px;
+}
+
+.qms-mission-detail__gate small {
+  margin-top: 2px;
+  color: var(--qms-muted);
+  font-size: 8px;
+  line-height: 1.3;
+}
+
+.qms-mission-detail__gate a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--qms-primary);
+  font-size: 8px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.qms-mission-detail__lower-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.qms-mission-detail__lower-grid > section {
+  overflow: hidden;
+}
+
+.qms-mission-detail__lower-grid section > header {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-mission-detail__lower-grid article {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-mission-detail__lower-grid article:last-child {
+  border-bottom: 0;
+}
+
+.qms-mission-detail__lower-grid article span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.qms-mission-detail__lower-grid article p,
+.qms-mission-detail__empty {
+  margin: 4px 0;
+  color: var(--qms-muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.qms-mission-detail__lower-grid article small {
+  color: var(--qms-muted);
+  font-size: 8px;
+}
+
+.qms-mission-detail dl {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  margin: 0;
+  padding: 10px 11px;
+  font-size: 9px;
+}
+
+.qms-mission-detail dt,
+.qms-mission-detail dd {
+  margin: 0;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-mission-detail dt {
+  color: var(--qms-muted);
+  font-weight: 800;
+}
+
+.qms-mission-detail dd {
+  color: var(--qms-text);
+}
+
+@media (max-width: 1180px) {
+  .qms-missions__create > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qms-missions__row,
+  .qms-mission-detail__gate-head,
+  .qms-mission-detail__gate {
+    min-width: 980px;
+  }
+
+  .qms-missions__portfolio,
+  .qms-mission-detail__gates {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .qms-missions,
+  .qms-mission-detail {
+    padding: 7px;
+  }
+
+  .qms-missions__header,
+  .qms-mission-detail__title,
+  .qms-missions__create > header,
+  .qms-missions__create > footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qms-missions__create > div,
+  .qms-missions__metrics,
+  .qms-mission-detail__summary,
+  .qms-mission-detail__lower-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-missions__metrics article,
+  .qms-mission-detail__summary article {
+    border-right: 0;
+    border-bottom: 1px solid var(--qms-border);
+  }
+
+  .qms-missions__metrics article:last-child,
+  .qms-mission-detail__summary article:last-child {
+    border-bottom: 0;
+  }
+}
