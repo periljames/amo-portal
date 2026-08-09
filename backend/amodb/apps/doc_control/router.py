@@ -11,6 +11,7 @@ from .knowledge_access_router import workspace_tree_router
 from .knowledge_resolution_router import router as knowledge_resolution_router
 from .router_legacy import router as legacy_router
 from .knowledge_assistant_router import router as knowledge_assistant_router
+from .knowledge_assistant_runtime_guard import install as install_knowledge_assistant_runtime_guard
 from .knowledge_records_router import router as knowledge_records_router
 from .knowledge_workspace_router import router as knowledge_workspace_router
 from .workspace_access import enforce_workspace_access
@@ -43,6 +44,8 @@ from .workspace_workflow_create_router import router as workspace_workflow_creat
 from .workspace_workflow_review_router import router as workspace_workflow_review_router
 from .workspace_workflow_router import router as workspace_workflow_router
 
+
+install_knowledge_assistant_runtime_guard()
 
 router = APIRouter()
 router.include_router(legacy_router)
