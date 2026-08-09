@@ -12,6 +12,7 @@ import {
   issueChecklistRevision,
   listChecklistBindings,
   listChecklistTemplates,
+  type ChecklistFindingTrigger,
   type ChecklistTemplateItem,
 } from "../../services/qmsChecklistTemplates";
 import "../../styles/qms-checklist-templates.css";
@@ -29,10 +30,19 @@ const EMPTY_ITEM: ChecklistTemplateItem = {
   manual_source_ref: "",
   prompt: "",
   expected_evidence: "",
-  response_type: "COMPLIANT_NONCOMPLIANT_NA",
+  response_type: "COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED",
   applicability: "ALL",
+  mandatory: true,
+  finding_trigger: "NONCOMPLIANT",
   sort_order: 10,
 };
+
+const FINDING_TRIGGER_OPTIONS: Array<{ value: ChecklistFindingTrigger; label: string }> = [
+  { value: "NONE", label: "No governed trigger" },
+  { value: "NONCOMPLIANT", label: "Noncompliant response" },
+  { value: "OBSERVATION", label: "Observation response" },
+  { value: "ADVERSE_RESPONSE", label: "Noncompliant or observation" },
+];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Checklist governance action could not be completed.";
@@ -170,14 +180,19 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "", auditKey,
             <div className="qms-checklist-template-grid"><label>Requirement ref<input value={item.requirement_ref || ""} onChange={(event) => patchItem(index, { requirement_ref: event.target.value })} /></label><label>Checklist ref<input value={item.checklist_ref || ""} onChange={(event) => patchItem(index, { checklist_ref: event.target.value })} /></label></div>
             <div className="qms-checklist-template-grid"><label>Regulatory source<input value={item.regulatory_source_ref || ""} onChange={(event) => patchItem(index, { regulatory_source_ref: event.target.value })} /></label><label>Manual source<input value={item.manual_source_ref || ""} onChange={(event) => patchItem(index, { manual_source_ref: event.target.value })} /></label></div>
             <label>Expected evidence<textarea value={item.expected_evidence || ""} onChange={(event) => patchItem(index, { expected_evidence: event.target.value })} /></label>
-            <div className="qms-checklist-template-grid"><label>Response type<select value={item.response_type} onChange={(event) => patchItem(index, { response_type: event.target.value })}><option value="COMPLIANT_NONCOMPLIANT_NA">Compliant / Noncompliant / N/A</option><option value="YES_NO_NA">Yes / No / N/A</option><option value="TEXT">Text evidence</option></select></label><label>Applicability<input value={item.applicability} onChange={(event) => patchItem(index, { applicability: event.target.value })} /></label></div>
+            <div className="qms-checklist-template-grid"><label>Response type<select value={item.response_type} onChange={(event) => patchItem(index, { response_type: event.target.value })}><option value="COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED">Compliance / observation / N/A / not verified</option><option value="COMPLIANT_NONCOMPLIANT_NA">Compliant / Noncompliant / N/A</option><option value="YES_NO_NA">Yes / No / N/A</option><option value="TEXT">Text evidence</option></select></label><label>Applicability<input value={item.applicability} onChange={(event) => patchItem(index, { applicability: event.target.value })} /></label></div>
+            <div className="qms-checklist-template-grid">
+              <label className="qms-checklist-template-checkbox"><input type="checkbox" checked={item.mandatory ?? true} onChange={(event) => patchItem(index, { mandatory: event.target.checked })} /> Mandatory item</label>
+              <label>Finding trigger<select value={item.finding_trigger || "NONE"} onChange={(event) => patchItem(index, { finding_trigger: event.target.value as ChecklistFindingTrigger })}>{FINDING_TRIGGER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            </div>
+            <small>A finding trigger identifies when the War Room must prompt for auditor judgment. It does not auto-finalize a finding or fabricate evidence.</small>
           </article>)}</div>
           <div className="qms-checklist-template-actions"><button type="button" onClick={() => setItems((current) => [...current, { ...EMPTY_ITEM, sort_order: (current.length + 1) * 10 }])}><Plus size={15} /> Add item</button><button type="button" className="is-primary" onClick={() => createRevisionMutation.mutate()} disabled={pending || !selectedTemplateId || !validItems || revisionReason.trim().length < 8}>Create draft revision</button>{latestDraft ? <button type="button" className="is-primary" onClick={() => issueMutation.mutate()} disabled={pending || revisionReason.trim().length < 8}>Issue revision {latestDraft.revision_no}</button> : null}</div>
         </section>
 
         <section className="qms-checklist-template-card">
           <header><History size={17} /><strong>Revision history</strong></header>
-          {revisions.length ? <ol>{revisions.slice().sort((a, b) => b.revision_no - a.revision_no).map((row) => <li key={row.id}><strong>Rev {row.revision_no} · {row.status}</strong><span>{row.items.length} item(s) · SHA {row.content_sha256.slice(0, 12)}…</span><small>{row.change_reason}</small></li>)}</ol> : <p>No revisions are recorded for the selected template.</p>}
+          {revisions.length ? <ol>{revisions.slice().sort((a, b) => b.revision_no - a.revision_no).map((row) => <li key={row.id}><strong>Rev {row.revision_no} · {row.status}</strong><span>{row.items.length} item(s) · {row.items.filter((item) => item.mandatory ?? true).length} mandatory · SHA {row.content_sha256.slice(0, 12)}…</span><small>{row.change_reason}</small></li>)}</ol> : <p>No revisions are recorded for the selected template.</p>}
         </section>
 
         {auditChecklist ? <section className="qms-checklist-template-card">
