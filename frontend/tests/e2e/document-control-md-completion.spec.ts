@@ -94,7 +94,12 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(page).toHaveURL(/view=recently-revised/);
     await expect(library).toContainText("Permission-filtered discovery");
 
-    await expect(page.getByText("Controlled information search", { exact: true })).toBeVisible();
+    const assistantHeading = page.getByRole("heading", { name: "Controlled information search", exact: true });
+    await expect(assistantHeading).toHaveCount(0);
+    await page.getByRole("button", { name: "Open assisted search", exact: true }).click();
+    await expect(assistantHeading).toBeVisible();
+    await expect(page.getByText("Searches only documents this session is permitted to read.", { exact: true })).toBeVisible();
+    await expect(page.getByText("The controlled source remains authoritative.", { exact: true })).toBeVisible();
   });
 
   test("Reports exposes the complete bounded evidence catalogue", async ({ page }) => {
