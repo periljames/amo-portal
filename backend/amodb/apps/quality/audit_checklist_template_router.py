@@ -39,6 +39,12 @@ class ChecklistTemplateItem(BaseModel):
     expected_evidence: str | None = Field(default=None, max_length=4000)
     response_type: str = Field(default="COMPLIANCE", max_length=64)
     applicability: str = Field(default="APPLICABLE", max_length=64)
+    mandatory: bool = True
+    finding_trigger: str = Field(
+        default="NONE",
+        pattern=r"^(NONE|NONCOMPLIANT|OBSERVATION|ADVERSE_RESPONSE)$",
+        description="Governed trigger policy only; a triggered response still requires auditor judgment before a finding is finalized.",
+    )
     sort_order: int = Field(default=0, ge=0, le=100000)
 
 
