@@ -11,6 +11,9 @@ import "../../styles/qms-text-scale-override.css";
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
+const QualityChecklistExecutionGovernanceHost = lazy(
+  () => import("./QualityChecklistExecutionGovernanceHost"),
+);
 const QualityAuditGovernancePanelHost = lazy(
   () => import("./QualityAuditGovernancePanelHost"),
 );
@@ -232,6 +235,7 @@ const QualityEnhancementsHost: React.FC = () => {
           </Suspense>
           {route.activeTab === "checklist" ? (
             <Suspense fallback={null}>
+              <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
               <QualityChecklistPdfFormEditorHost />
             </Suspense>
           ) : null}
