@@ -18,6 +18,7 @@ from .workspace_administration_router import router as workspace_administration_
 from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
 from .workspace_compliance_portfolio_router import router as workspace_compliance_portfolio_router
+from .workspace_copy_incident_router import router as workspace_copy_incident_router
 from .workspace_copy_router import router as workspace_copy_router
 from .workspace_dashboard_router import router as workspace_dashboard_router
 from .workspace_distribution_portfolio_router import router as workspace_distribution_portfolio_router
@@ -48,7 +49,7 @@ router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
 # verification, controlled change assessment, authority evidence, controlled-copy
-# custody, distribution integrity, external-source currency/assessment,
+# custody/incidents, distribution integrity, external-source currency/assessment,
 # periodic-review follow-up, profile-owner tenancy, terminal temporary-revision
 # immutability, accountable approval authority, decision evidence,
 # active-recipient publication, server-derived workflow impact, governed
@@ -65,6 +66,7 @@ router.include_router(workspace_reports_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_reports_register_router, prefix="/doc-control")
 router.include_router(workspace_administration_router, prefix="/doc-control")
 router.include_router(workspace_external_assessment_router, prefix="/doc-control")
+router.include_router(workspace_copy_incident_router, prefix="/doc-control")
 router.include_router(workspace_library_discovery_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
