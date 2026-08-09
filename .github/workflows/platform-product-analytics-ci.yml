@@ -8,6 +8,7 @@ on:
       - "frontend/src/services/workOrders.ts"
       - "frontend/src/services/qmsAuditHubActions.ts"
       - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/ehm.ts"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - ".github/workflows/platform-product-analytics-ci.yml"
   push:
@@ -18,6 +19,7 @@ on:
       - "frontend/src/services/workOrders.ts"
       - "frontend/src/services/qmsAuditHubActions.ts"
       - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/ehm.ts"
       - "frontend/src/app/PortalRouteSurface.tsx"
       - ".github/workflows/platform-product-analytics-ci.yml"
 
@@ -49,6 +51,7 @@ jobs:
           grep -q 'trackProductWorkflow' frontend/src/services/workOrders.ts
           grep -q 'trackProductWorkflow' frontend/src/services/qmsAuditHubActions.ts
           grep -q 'trackProductWorkflow' frontend/src/services/documentControlReports.ts
+          grep -q 'trackProductWorkflow' frontend/src/services/ehm.ts
           if grep -E 'tenant_id|user_id|document_id|work_order_id|aircraft_serial_number|signature_hash' frontend/src/services/productAnalytics.ts; then
             echo "Sensitive or high-cardinality identifiers must not enter the product analytics transport contract." >&2
             exit 1
