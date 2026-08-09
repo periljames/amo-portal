@@ -59,6 +59,60 @@ export type IntegratedLibraryFilters = {
   perPage?: number;
 };
 
+export type LibraryDiscoveryView =
+  | "all"
+  | "my-documents"
+  | "favorites"
+  | "recently-opened"
+  | "recently-revised"
+  | "awaiting-my-review"
+  | "external-technical-data"
+  | "due-for-review"
+  | "superseded"
+  | "archived";
+
+export type LibraryDiscoveryItem = {
+  id: string;
+  code: string;
+  title: string;
+  manual_type: string;
+  lifecycle_status: string;
+  document_class: string;
+  owner: { id?: string | null; name?: string | null; department?: string | null };
+  node: { type: string; path?: string | null };
+  current_revision?: {
+    id: string;
+    issue_number?: string | null;
+    revision_number: string;
+    status?: string | null;
+    effective_date?: string | null;
+    created_at?: string | null;
+    source_filename?: string | null;
+    page_count?: number | null;
+  } | null;
+  latest_revision?: {
+    id: string;
+    issue_number?: string | null;
+    revision_number: string;
+    status?: string | null;
+    effective_date?: string | null;
+    created_at?: string | null;
+    source_filename?: string | null;
+    page_count?: number | null;
+  } | null;
+  read_target_revision_id?: string | null;
+  next_review_due?: string | null;
+  last_opened_at?: string | null;
+  favorite: boolean;
+};
+
+export type LibraryDiscoveryResponse = {
+  view: LibraryDiscoveryView;
+  items: LibraryDiscoveryItem[];
+  capabilities: { read: boolean; control: boolean };
+  pagination: { page: number; per_page: number; total: number; returned: number };
+};
+
 export type PhysicalCopyRegisterItem = ControlledCopy & {
   document: { id: string; code: string; title: string; manual_type: string };
   revision: { id: string; issue_number?: string | null; revision_number: string; status: string };
@@ -163,6 +217,18 @@ export function listIntegratedLibrary(
     superseded_referenced: filters.supersededReferenced,
     sort: filters.sort || "code",
     direction: filters.direction || "asc",
+    page: filters.page || 1,
+    per_page: filters.perPage || 50,
+  })}`);
+}
+
+export function discoverLibrary(
+  tenant: string,
+  filters: { view?: LibraryDiscoveryView; q?: string; page?: number; perPage?: number } = {},
+): Promise<LibraryDiscoveryResponse> {
+  return api(`${workspacePath(tenant, "/library-discovery")}${queryString({
+    view: filters.view || "all",
+    q: filters.q,
     page: filters.page || 1,
     per_page: filters.perPage || 50,
   })}`);
