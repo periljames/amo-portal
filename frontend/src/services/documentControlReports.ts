@@ -10,6 +10,29 @@ export type DocumentControlSettings = {
   configured: boolean;
 };
 
+export type DocumentControlAdministration = DocumentControlSettings & {
+  document_classes: string[];
+  workflow_policy: {
+    technical_review_required: boolean;
+    quality_review_required: boolean;
+    management_approval_required: boolean;
+    authority_routing: "WHEN_REQUIRED" | "ALWAYS" | "NEVER";
+  };
+  retention_classes: Array<{ code?: string; label?: string; years?: number; [key: string]: unknown }>;
+  indexing_policy: {
+    auto_index_on_publish: boolean;
+    require_source_hash: boolean;
+    retry_limit: number;
+  };
+  integration_modules: string[];
+  physical_copy_policy: {
+    default_due_days: number;
+    custody_acknowledgement_required: boolean;
+    location_verification_required: boolean;
+    recall_on_supersession: boolean;
+  };
+};
+
 export type ArchiveRegister = {
   items: Array<{
     manual: { id: string; code: string; title: string };
@@ -67,6 +90,17 @@ export function updateDocumentControlSettings(
   payload: Omit<DocumentControlSettings, "tenant_id" | "configured">,
 ): Promise<DocumentControlSettings> {
   return request(workspacePath(tenant, "/settings"), { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export function getDocumentControlAdministration(tenant: string): Promise<DocumentControlAdministration> {
+  return request(workspacePath(tenant, "/administration"));
+}
+
+export function updateDocumentControlAdministration(
+  tenant: string,
+  payload: Omit<DocumentControlAdministration, "tenant_id" | "configured">,
+): Promise<DocumentControlAdministration> {
+  return request(workspacePath(tenant, "/administration"), { method: "PUT", body: JSON.stringify(payload) });
 }
 
 export function updateDocumentMetadata(
