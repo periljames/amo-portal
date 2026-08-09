@@ -125,7 +125,29 @@ async function prepare(page: Page): Promise<void> {
           factors: [{ code: "MANDATORY", label: "Mandatory surveillance", value: true, hard_requirement: true, source: "audit universe", rule: "must remain scheduled" }],
           explanation: "Deterministic ordering only. This is not a predictive probability or automated compliance conclusion.",
         }],
-        method: { type: "DETERMINISTIC_RULES", statement: "No predictive or probabilistic risk score is generated. Mandatory surveillance remains a hard requirement." },
+        method: { type: "DETERMINISTIC_RULES", statement: "Deterministic source rules order human review; they do not declare compliance or calculate a predictive probability." },
+      }) });
+      return;
+    }
+    if (path.endsWith("/quality/audit-programmes/risk-context")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        as_of: "2026-08-08T12:00:00Z",
+        items: [{
+          universe_item_id: "univ-1", label: "Maintenance Department", entity_type: "DEPARTMENT",
+          source_owner_module: "workforce", source_type: "DEPARTMENT", source_id: "maintenance",
+          source_route: "/maintenance/tenant-a/workforce", mandatory_surveillance: true,
+          risk_classification: "HIGH", regulatory_criticality: "HIGH", programme_states: ["SCHEDULED"], planning_order: 13301,
+          factors: [
+            { code: "MANDATORY_SURVEILLANCE", label: "Mandatory surveillance", value: true, source: "audit-universe", hard_requirement: true, rationale: "Mandatory surveillance remains a hard requirement." },
+            { code: "OVERDUE_CARS", label: "Overdue corrective actions", value: 1, source: "quality", hard_requirement: false, rationale: "Overdue corrective actions increase assurance demand." },
+          ],
+          method: "Deterministic ordering from governed universe properties plus attributable authoritative-source pressures; not a probability or automated compliance conclusion.",
+        }],
+        global_factors: [{ code: "OVERDUE_CARS", label: "Overdue corrective actions", value: 1, source: "quality", hard_requirement: false, rationale: "Overdue corrective actions are an explicit assurance exposure." }],
+        authoritative_metrics: { overdue_cars: 1, open_findings: 2 },
+        reliability: { high_critical_events_90d: 1, repeat_events_90d: 0, recurring_findings: 0, open_high_recommendations: 0 },
+        source_warnings: [],
+        method: { type: "DETERMINISTIC_SOURCE_ATTRIBUTION", statement: "Mandatory surveillance remains a hard obligation. Other factors order planning attention only; they do not declare compliance or calculate a predictive probability." },
       }) });
       return;
     }
@@ -211,10 +233,12 @@ test("Intelligence workspace is deterministic and exposes the approval evidence 
   await page.goto("/maintenance/tenant-a/quality?workspace=intelligence", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Assurance signals & approval impact" })).toBeVisible();
-  await expect(page.getByText(/No predictive or probabilistic risk score is generated/i)).toBeVisible();
+  await expect(page.getByText(/No predictive compliance score is generated/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cross-source assurance pressure" })).toBeVisible();
+  await expect(page.getByText(/do not declare compliance or calculate a predictive probability/i)).toBeVisible();
   await expect(page.getByText("Approval Digital Twin", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "STALE" })).toBeVisible();
-  await expect(page.getByText("Maintenance Department", { exact: true })).toBeVisible();
+  await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tool calibration procedure", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/does not declare regulatory compliance/i)).toBeVisible();
 });
