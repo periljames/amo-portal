@@ -11,6 +11,9 @@ import "../../styles/qms-text-scale-override.css";
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
+const QualityAuditGovernancePanelHost = lazy(
+  () => import("./QualityAuditGovernancePanelHost"),
+);
 
 type AuditRoute = {
   amoCode: string;
@@ -166,21 +169,25 @@ const QualityEnhancementsHost: React.FC = () => {
     return <CarInviteResponsiveStyleLoader />;
   }
 
-  const auditEnhancement = route && route.activeTab === "checklist" ? (
-    <Suspense fallback={null}>
-      <QualityChecklistPdfFormEditorHost />
-    </Suspense>
-  ) : route ? (
-    <WorkflowIntegrityGuard route={route} />
-  ) : null;
-
   return (
     <>
       <PortalTextScaleManager />
       <QualityContextTabs />
       <QualityDataFreshnessCoordinator />
       <QualityDialogFocusRestorer />
-      {auditEnhancement}
+      {route ? (
+        <>
+          <WorkflowIntegrityGuard route={route} />
+          <Suspense fallback={null}>
+            <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
+          </Suspense>
+          {route.activeTab === "checklist" ? (
+            <Suspense fallback={null}>
+              <QualityChecklistPdfFormEditorHost />
+            </Suspense>
+          ) : null}
+        </>
+      ) : null}
     </>
   );
 };
