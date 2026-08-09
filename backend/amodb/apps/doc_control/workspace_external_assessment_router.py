@@ -23,7 +23,7 @@ ASSESSMENT_REQUIRED_STATUSES = {"PENDING", "UNVERIFIED"}
 
 class ExternalAssessmentIn(BaseModel):
     receipt_id: str = Field(min_length=1, max_length=36)
-    applicability_status: Literal["APPLICABLE", "PARTIALLY_APPLICABLE", "NOT_APPLICABLE"]
+    applicability_status: Literal["APPLICABLE", "PARTIAL", "NOT_APPLICABLE"]
     notes: str = Field(default="", max_length=4000)
 
 
