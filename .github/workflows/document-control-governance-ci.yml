@@ -8,6 +8,7 @@ name: Document Control Governance CI
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/scripts/seed_document_roles_e2e.py"
+      - "backend/amodb/scripts/seed_document_external_assessment_e2e.py"
       - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
       - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
@@ -48,6 +49,7 @@ name: Document Control Governance CI
       - "backend/amodb/jobs/document_governance_backfill.py"
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "backend/amodb/scripts/seed_document_roles_e2e.py"
+      - "backend/amodb/scripts/seed_document_external_assessment_e2e.py"
       - "backend/amodb/scripts/seed_document_reader_scale_e2e.py"
       - "backend/amodb/scripts/benchmark_document_control_library_scale.py"
       - "backend/amodb/alembic/versions/docgov_*.py"
@@ -134,6 +136,7 @@ jobs:
           amodb/jobs/document_governance_backfill.py
           amodb/scripts/seed_document_governance_e2e.py
           amodb/scripts/seed_document_roles_e2e.py
+          amodb/scripts/seed_document_external_assessment_e2e.py
           amodb/scripts/seed_document_reader_scale_e2e.py
           amodb/scripts/benchmark_document_control_library_scale.py
       - name: Verify one Alembic head and merged ancestry
@@ -311,6 +314,8 @@ jobs:
       E2E_DMS_ROLE_PASSWORD: DmsRoles!2026-Local
       E2E_DMS_CANDIDATE_REVISION_ID: 00000000-0000-4000-8000-000000000500
       E2E_DMS_WORKFLOW_ID: 00000000-0000-4000-8000-000000000501
+      E2E_DMS_EXTERNAL_SOURCE_ID: 00000000-0000-4000-8000-000000000494
+      E2E_DMS_EXTERNAL_RECEIPT_ID: 00000000-0000-4000-8000-000000000506
     steps:
       - uses: actions/checkout@v6
         with:
@@ -337,6 +342,9 @@ jobs:
       - name: Seed reader, reviewer and management responsibility fixtures
         working-directory: backend
         run: python amodb/scripts/seed_document_roles_e2e.py
+      - name: Seed external revision assessment fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_document_external_assessment_e2e.py
       - name: Replace browser fixture with real 2000-page PDF source
         working-directory: backend
         run: python amodb/scripts/seed_document_reader_scale_e2e.py
