@@ -28,17 +28,23 @@ def slo_summary(
     server_errors = 0
     timeouts = 0
     worst_p95: float | None = None
-    by_route: dict[str, dict[str, float]] = defaultdict(lambda: {"requests": 0.0, "errors": 0.0, "timeouts": 0.0, "p95": 0.0})
+    worst_p99: float | None = None
+    by_route: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"requests": 0.0, "errors": 0.0, "timeouts": 0.0, "p95": 0.0, "p99": 0.0}
+    )
     for row in rows:
         count = int(row.get("request_count") or 0)
         errors = int(row.get("server_error_count") or 0)
         row_timeouts = int(row.get("timeout_count") or 0)
         p95 = row.get("p95_latency_ms")
+        p99 = row.get("p99_latency_ms")
         requests += count
         server_errors += errors
         timeouts += row_timeouts
         if isinstance(p95, (int, float)):
             worst_p95 = float(p95) if worst_p95 is None else max(worst_p95, float(p95))
+        if isinstance(p99, (int, float)):
+            worst_p99 = float(p99) if worst_p99 is None else max(worst_p99, float(p99))
         route = str(row.get("route") or "unknown")
         item = by_route[route]
         item["requests"] += count
@@ -46,13 +52,18 @@ def slo_summary(
         item["timeouts"] += row_timeouts
         if isinstance(p95, (int, float)):
             item["p95"] = max(item["p95"], float(p95))
+        if isinstance(p99, (int, float)):
+            item["p99"] = max(item["p99"], float(p99))
 
     failures = server_errors + timeouts
-    availability = 1.0 - safe_ratio(failures, requests)
-    allowed_failure_ratio = max(0.0, 1.0 - availability_target)
-    consumed_failure_ratio = safe_ratio(failures, requests)
-    budget_consumed = safe_ratio(consumed_failure_ratio, allowed_failure_ratio) if allowed_failure_ratio else 0.0
-    budget_remaining = max(0.0, 1.0 - budget_consumed)
+    error_rate = safe_ratio(failures, requests)
+    availability = 1.0 - error_rate
+    error_budget_ratio = max(0.0, 1.0 - availability_target)
+    burn_rate = safe_ratio(error_rate, error_budget_ratio) if error_budget_ratio else 0.0
+    # Backwards-compatible field retained for existing clients. This is a windowed
+    # burn multiple, not a month-to-date percentage of budget consumed.
+    budget_consumed = burn_rate
+    budget_remaining = max(0.0, 1.0 - burn_rate)
 
     routes = []
     for route, values in by_route.items():
@@ -65,23 +76,42 @@ def slo_summary(
                 "requests": route_requests,
                 "error_rate": route_error_rate,
                 "p95_latency_ms": values["p95"] or None,
+                "p99_latency_ms": values["p99"] or None,
                 "latency_target_ms": latency_target_ms,
-                "status": "CRITICAL" if route_error_rate >= 0.05 else "WARN" if route_error_rate >= 0.01 or values["p95"] > latency_target_ms else "HEALTHY",
+                "status": "CRITICAL"
+                if route_error_rate >= 0.05
+                else "WARN"
+                if route_error_rate >= 0.01 or values["p95"] > latency_target_ms
+                else "HEALTHY",
             }
         )
-    routes.sort(key=lambda item: (item["status"] != "CRITICAL", item["status"] != "WARN", -item["error_rate"], -(item["p95_latency_ms"] or 0)))
+    routes.sort(
+        key=lambda item: (
+            item["status"] != "CRITICAL",
+            item["status"] != "WARN",
+            -item["error_rate"],
+            -(item["p95_latency_ms"] or 0),
+        )
+    )
 
     return {
         "availability_target": availability_target,
+        "error_budget_ratio": error_budget_ratio,
         "availability": availability,
         "requests": requests,
         "failures": failures,
-        "error_rate": safe_ratio(failures, requests),
+        "error_rate": error_rate,
+        "burn_rate": burn_rate,
         "error_budget_consumed": budget_consumed,
         "error_budget_remaining": budget_remaining,
         "latency_target_ms": latency_target_ms,
         "p95_latency_ms": worst_p95,
-        "status": "CRITICAL" if availability < availability_target or budget_consumed >= 1 else "WARN" if budget_consumed >= 0.5 or (worst_p95 or 0) > latency_target_ms else "HEALTHY",
+        "p99_latency_ms": worst_p99,
+        "status": "CRITICAL"
+        if availability < availability_target or burn_rate >= 6
+        else "WARN"
+        if burn_rate >= 2 or (worst_p95 or 0) > latency_target_ms
+        else "HEALTHY",
         "routes": routes[:25],
     }
 
