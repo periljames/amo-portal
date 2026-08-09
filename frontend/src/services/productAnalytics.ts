@@ -1,4 +1,4 @@
-import { getToken, isAuthenticated } from "./auth";
+import { getToken } from "./auth";
 
 const ALLOWED_EVENTS = new Set([
   "module_opened",
@@ -40,8 +40,8 @@ export async function emitProductEvent(input: {
   duration_ms?: number;
   metadata?: Record<string, unknown>;
 }): Promise<boolean> {
-  if (!isAuthenticated() || !ALLOWED_EVENTS.has(input.event_type)) return false;
   const token = getToken();
+  if (!token || !ALLOWED_EVENTS.has(input.event_type)) return false;
   try {
     const response = await fetch("/platform/product-events", {
       method: "POST",
@@ -50,7 +50,7 @@ export async function emitProductEvent(input: {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         event_type: input.event_type,
