@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -16,6 +17,7 @@ from .workspace_service import audit, require_control_user, resolve_tenant
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Administration"])
 ADMIN_SETTINGS_KEY = "document_control_admin"
+ADMIN_AUDIT_LIMIT = 25
 DEFAULT_DOCUMENT_CLASSES = ["INTERNAL", "EXTERNAL", "RECORD"]
 DEFAULT_RETENTION_CLASSES = [
     {"code": "STANDARD", "label": "Standard controlled record", "years": 5},
@@ -101,6 +103,37 @@ def _settings_payload(tenant, row) -> dict:
     }
 
 
+def _audit_history(db: Session, tenant) -> list[dict]:
+    rows = (
+        db.query(manual_models.ManualAuditLog)
+        .filter(
+            manual_models.ManualAuditLog.tenant_id == tenant.id,
+            manual_models.ManualAuditLog.entity_type == "document_control_administration",
+        )
+        .order_by(manual_models.ManualAuditLog.at.desc(), manual_models.ManualAuditLog.id.desc())
+        .limit(ADMIN_AUDIT_LIMIT)
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "action": row.action,
+            "actor_id": row.actor_id,
+            "at": row.at.isoformat() if row.at else None,
+            "changes": dict(row.diff_json or {}),
+        }
+        for row in rows
+    ]
+
+
+def _administration_payload(db: Session, tenant, row) -> dict:
+    return {
+        **_settings_payload(tenant, row),
+        "audit_history": _audit_history(db, tenant),
+        "audit_history_limit": ADMIN_AUDIT_LIMIT,
+    }
+
+
 @router.get("/t/{tenant_slug}/administration")
 def get_administration(
     tenant_slug: str,
@@ -110,7 +143,7 @@ def get_administration(
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = db.query(legacy_models.DocControlSettings).filter(legacy_models.DocControlSettings.tenant_id == tenant.amo_id).first()
-    return _settings_payload(tenant, row)
+    return _administration_payload(db, tenant, row)
 
 
 @router.put("/t/{tenant_slug}/administration")
@@ -149,4 +182,4 @@ def update_administration(
     after = _settings_payload(tenant, row)
     audit(db, tenant, request, "document.administration.updated", "document_control_administration", tenant.amo_id, {"before": before, "after": after})
     db.commit()
-    return after
+    return _administration_payload(db, tenant, row)
