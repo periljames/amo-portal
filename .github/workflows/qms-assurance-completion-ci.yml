@@ -9,10 +9,13 @@ on:
       - "frontend/src/components/QMS/**"
       - "frontend/src/pages/qms/**"
       - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsChecklist*.ts"
       - "frontend/src/services/qmsIntelligence.ts"
       - "frontend/src/styles/qms-audit-*.css"
+      - "frontend/src/styles/qms-checklist-*.css"
       - "frontend/src/styles/qms-intelligence.css"
       - "frontend/tests/e2e/qms-assurance-*.spec.ts"
+      - "frontend/tests/e2e/qms-checklist-*.spec.ts"
       - ".github/workflows/qms-assurance-completion-ci.yml"
   workflow_dispatch:
 
@@ -103,6 +106,8 @@ jobs:
         run: python -m amodb.apps.quality.tests.postgres_assurance_os_probe
       - name: Prove custom and risk-triggered occurrence RLS and immutability
         run: python -m amodb.apps.quality.tests.postgres_programme_occurrence_probe
+      - name: Prove checklist execution RLS and append-only history
+        run: python -m amodb.apps.quality.tests.postgres_checklist_execution_probe
 
   frontend-completion:
     runs-on: ubuntu-24.04
@@ -125,10 +130,12 @@ jobs:
           npx eslint
           src/components/QMS/QualityAuditGovernancePanelHost.tsx
           src/components/QMS/QualityAuditReportCloseoutHost.tsx
+          src/components/QMS/QualityChecklistExecutionGovernanceHost.tsx
           src/components/QMS/QualityEnhancementsHost.tsx
           src/pages/qms/QmsIntelligencePage.tsx
           src/services/qmsAuditGovernance.ts
           src/services/qmsAuditCloseout.ts
+          src/services/qmsChecklistExecutionGovernance.ts
           src/services/qmsIntelligence.ts
       - name: Production frontend build
         run: npm run build
