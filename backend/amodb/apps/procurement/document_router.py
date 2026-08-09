@@ -13,6 +13,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 
 from . import document_models, document_schemas, document_service, service
+from . import document_shared_storage
 
 
 router = APIRouter(
@@ -170,16 +171,20 @@ def procurement_document_link(
         is_quality_evidence=is_quality_evidence,
         qms_reference=qms_reference,
         )
+        if record.stored_path:
+            document_shared_storage.promote_document_file(record)
         response = _serialize(record, amo_code)
         db.commit()
     except HTTPException:
         db.rollback()
         if record is not None:
+            document_shared_storage.discard_promoted_file(record)
             document_service.discard_document_file(record)
         raise
     except Exception as exc:
         db.rollback()
         if record is not None:
+            document_shared_storage.discard_promoted_file(record)
             document_service.discard_document_file(record)
         raise HTTPException(status_code=500, detail="The document evidence could not be committed.") from exc
     return response
@@ -194,7 +199,7 @@ def procurement_document_download(
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     record = document_service.get_document(db, amo_id=amo_id, document_id=document_id)
-    path = document_service.get_document_file(record)
+    path = document_shared_storage.materialize_document_file(record)
     return FileResponse(
         path=path,
         media_type=record.mime_type or "application/octet-stream",
