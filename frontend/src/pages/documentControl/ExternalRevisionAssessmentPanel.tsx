@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   assessExternalRevision,
   getExternalAssessmentContext,
+  type ExternalApplicabilityDecision,
   type ExternalAssessmentContext,
 } from "../../services/documentControlCompliancePortfolio";
 import { DocumentControlError, DocumentControlLoading, DocumentControlStatus } from "./DocumentControlShell";
@@ -17,7 +18,7 @@ export default function ExternalRevisionAssessmentPanel({ sourceId, onClose, onC
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState<"APPLICABLE" | "PARTIALLY_APPLICABLE" | "NOT_APPLICABLE">("APPLICABLE");
+  const [status, setStatus] = useState<ExternalApplicabilityDecision>("APPLICABLE");
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export default function ExternalRevisionAssessmentPanel({ sourceId, onClose, onC
       if (!active) return;
       setContext(payload);
       const existing = payload.received_revision?.applicability_status;
-      if (existing === "APPLICABLE" || existing === "PARTIALLY_APPLICABLE" || existing === "NOT_APPLICABLE") setStatus(existing);
+      if (existing === "APPLICABLE" || existing === "PARTIAL" || existing === "NOT_APPLICABLE") setStatus(existing);
       setNotes(payload.received_revision?.notes || "");
     }).catch((caught) => active && setError(caught instanceof Error ? caught.message : "Assessment context could not be loaded.")).finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -73,7 +74,7 @@ export default function ExternalRevisionAssessmentPanel({ sourceId, onClose, onC
       </section>
 
       {context.received_revision ? <section className="dms-external-assessment__decision">
-        <label><span>Applicability decision</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="APPLICABLE">Applicable</option><option value="PARTIALLY_APPLICABLE">Partially applicable</option><option value="NOT_APPLICABLE">Not applicable</option></select></label>
+        <label><span>Applicability decision</span><select value={status} onChange={(event) => setStatus(event.target.value as ExternalApplicabilityDecision)}><option value="APPLICABLE">Applicable</option><option value="PARTIAL">Partially applicable</option><option value="NOT_APPLICABLE">Not applicable</option></select></label>
         <label><span>Assessment evidence / rationale</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={5} placeholder="Record the applicability reasoning, impacted manuals/processes and follow-up required." /></label>
         <div className="dms-external-assessment__actions"><button type="button" className="dc-button dc-button--primary" disabled={saving} onClick={() => void save()}>{saving ? "Recording…" : "Record assessment"}</button>{context.source.access_url ? <a className="dc-button" href={context.source.access_url} target="_blank" rel="noreferrer">Open provider source <ExternalLink size={14} /></a> : null}</div>
       </section> : null}
