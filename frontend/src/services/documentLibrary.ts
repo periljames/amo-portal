@@ -147,6 +147,7 @@ export type ControlledCopyScan = {
     from_location?: string | null;
     to_location?: string | null;
     reason?: string | null;
+    evidence?: Array<Record<string, unknown>>;
     created_at?: string | null;
   }>;
   reader_path: string;
@@ -158,6 +159,16 @@ export type ControlledCopyScan = {
     print_label: boolean;
   };
 };
+
+export type ControlledCopyCustodian = {
+  id: string;
+  name: string;
+  email: string;
+  staff_code?: string | null;
+  department_id?: string | null;
+};
+
+export type ControlledCopyEventType = "TRANSFER" | "LOCATION_CHANGE" | "RECALL" | "RETURN" | "WITHDRAW" | "DESTROY";
 
 function workspacePath(tenant: string, suffix: string): string {
   return `/doc-control/workspace/t/${encodeURIComponent(tenant.toLowerCase())}${suffix}`;
@@ -176,8 +187,6 @@ function serverUtcDate(value?: string | null): string | null | undefined {
   if (!value) return value;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  // Existing Document Control date columns use UTC-naive service timestamps.
-  // Preserve the actual instant while avoiding aware/naive comparison failures.
   return parsed.toISOString().replace(/Z$/, "");
 }
 
@@ -199,10 +208,7 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function listIntegratedLibrary(
-  tenant: string,
-  filters: IntegratedLibraryFilters = {},
-): Promise<IntegratedLibraryResponse> {
+export function listIntegratedLibrary(tenant: string, filters: IntegratedLibraryFilters = {}): Promise<IntegratedLibraryResponse> {
   return api(`${workspacePath(tenant, "/documents")}${queryString({
     q: filters.q,
     node_type: filters.nodeType,
@@ -222,10 +228,7 @@ export function listIntegratedLibrary(
   })}`);
 }
 
-export function discoverLibrary(
-  tenant: string,
-  filters: { view?: LibraryDiscoveryView; q?: string; page?: number; perPage?: number } = {},
-): Promise<LibraryDiscoveryResponse> {
+export function discoverLibrary(tenant: string, filters: { view?: LibraryDiscoveryView; q?: string; page?: number; perPage?: number } = {}): Promise<LibraryDiscoveryResponse> {
   return api(`${workspacePath(tenant, "/library-discovery")}${queryString({
     view: filters.view || "all",
     q: filters.q,
@@ -287,6 +290,40 @@ export function circulatePhysicalCopy(
     method: "POST",
     body: JSON.stringify({ ...payload, due_back_at: serverUtcDate(payload.due_back_at) }),
   });
+}
+
+export function listControlledCopyCustodians(tenant: string, q?: string): Promise<ControlledCopyCustodian[]> {
+  return api(`${workspacePath(tenant, "/controlled-copy-custodians")}${queryString({ q, limit: 75 })}`);
+}
+
+export async function recordPhysicalCopyEvent(
+  tenant: string,
+  copyId: string,
+  payload: {
+    event_type: ControlledCopyEventType;
+    to_holder_user_id?: string | null;
+    to_location?: string | null;
+    reason?: string | null;
+    evidence?: Array<Record<string, unknown>>;
+  },
+): Promise<ControlledCopyScan> {
+  await api(workspacePath(tenant, `/controlled-copies/${encodeURIComponent(copyId)}/events`), {
+    method: "POST",
+    body: JSON.stringify({ ...payload, evidence: payload.evidence || [] }),
+  });
+  return scanPhysicalCopy(tenant, copyId);
+}
+
+export async function recordPhysicalCopyIncident(
+  tenant: string,
+  copyId: string,
+  payload: { incident_type: "DAMAGE" | "LOSS"; reason: string; evidence: Array<Record<string, unknown>> },
+): Promise<ControlledCopyScan> {
+  await api(workspacePath(tenant, `/controlled-copies/${encodeURIComponent(copyId)}/incidents`), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return scanPhysicalCopy(tenant, copyId);
 }
 
 export async function downloadPhysicalCopyLabel(tenant: string, copyId: string, filename: string): Promise<void> {
