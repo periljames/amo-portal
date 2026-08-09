@@ -1,4 +1,5 @@
-import { Settings2, UsersRound } from "lucide-react";
+import { useState } from "react";
+import { Settings2, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
@@ -37,17 +38,29 @@ export default function DocumentControlRecordActions({
   const capabilities = detail.capabilities as RoleAwareCapabilities;
   const canControl = Boolean(capabilities.control);
   const canReview = Boolean(capabilities.review);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
 
   if (compact) {
     if (!canControl && !canReview) return null;
     if (canReview && !canControl) {
-      return <button
-        type="button"
-        className="dc-button dc-button--primary"
-        onClick={() => navigate(`${basePath}/library/${detail.document.id}?tab=workflow`)}
-      >
-        Review assigned change
-      </button>;
+      return <>
+        <button
+          type="button"
+          className="dc-button dc-button--primary"
+          onClick={() => setReviewDialogOpen(true)}
+        >
+          Review assigned change
+        </button>
+        {reviewDialogOpen ? <div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewDialogOpen(false); }}>
+          <section className="publications-upload-dialog" role="dialog" aria-modal="true" aria-label="Assigned document review">
+            <header>
+              <div><h2>Assigned document review</h2><p>Only decisions granted by the effective governed responsibility are available.</p></div>
+              <button type="button" onClick={() => setReviewDialogOpen(false)} aria-label="Close assigned review"><X size={18} /></button>
+            </header>
+            <DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="workflow" onChanged={() => { onChanged(); setReviewDialogOpen(false); }} />
+          </section>
+        </div> : null}
+      </>;
     }
     return <>
       <DocumentControlPrimaryActions detail={detail} tenant={tenant} basePath={basePath} onChanged={onChanged} />
