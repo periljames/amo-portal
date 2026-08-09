@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 from threading import RLock
 from typing import Any, Iterator, Mapping
 
 import resend
 from svix.webhooks import Webhook
+
+from amodb.observability import operation_span, record_provider_call
 
 
 _SDK_LOCK = RLock()
@@ -92,12 +95,24 @@ def send_email(
     if idempotency_key:
         options = {"idempotency_key": idempotency_key[:256]}
 
-    with configured_sdk(api_key=api_key, api_url=api_url):
-        response = resend.Emails.send(params, options)
-    message_id = str(response.get("id") or "").strip()
-    if not message_id:
-        raise RuntimeError("Resend accepted the request without returning an email id.")
-    return {"provider": "resend", "message_id": message_id}
+    started = time.perf_counter()
+    outcome = "ERROR"
+    try:
+        with operation_span("provider.resend.send", provider="RESEND", operation="SEND"):
+            with configured_sdk(api_key=api_key, api_url=api_url):
+                response = resend.Emails.send(params, options)
+        message_id = str(response.get("id") or "").strip()
+        if not message_id:
+            raise RuntimeError("Resend accepted the request without returning an email id.")
+        outcome = "SUCCESS"
+        return {"provider": "resend", "message_id": message_id}
+    finally:
+        record_provider_call(
+            provider="RESEND",
+            operation="SEND",
+            status=outcome,
+            duration_seconds=time.perf_counter() - started,
+        )
 
 
 def check_api_key(*, api_key: str, api_url: str | None = None) -> dict[str, Any]:
@@ -108,30 +123,43 @@ def check_api_key(*, api_key: str, api_url: str | None = None) -> dict[str, Any]
     email remains the authoritative end-to-end delivery check.
     """
 
-    with configured_sdk(api_key=api_key, api_url=api_url):
-        try:
-            response = resend.Domains.list()
-        except Exception as exc:
-            code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-            text = str(exc)
-            if str(code) == "403" or "permission" in text.lower() or "restricted" in text.lower():
-                return {
-                    "ok": True,
-                    "provider": "resend",
-                    "credential_status": "AUTHENTICATED",
-                    "access": "sending_only_or_restricted",
-                    "detail": "The key authenticated but cannot list domains. Run an explicit test email to confirm sending.",
-                }
-            raise RuntimeError(f"Resend API key health check failed: {text}") from exc
-    domains = response.get("data") if isinstance(response, dict) else None
-    return {
-        "ok": True,
-        "provider": "resend",
-        "credential_status": "AUTHENTICATED",
-        "access": "full",
-        "domain_count": len(domains or []),
-        "detail": "Resend authentication and domain API access passed. Run an explicit test email to confirm delivery.",
-    }
+    started = time.perf_counter()
+    outcome = "ERROR"
+    try:
+        with operation_span("provider.resend.health", provider="RESEND", operation="HEALTH"):
+            with configured_sdk(api_key=api_key, api_url=api_url):
+                try:
+                    response = resend.Domains.list()
+                except Exception as exc:
+                    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                    text = str(exc)
+                    if str(code) == "403" or "permission" in text.lower() or "restricted" in text.lower():
+                        outcome = "SUCCESS"
+                        return {
+                            "ok": True,
+                            "provider": "resend",
+                            "credential_status": "AUTHENTICATED",
+                            "access": "sending_only_or_restricted",
+                            "detail": "The key authenticated but cannot list domains. Run an explicit test email to confirm sending.",
+                        }
+                    raise RuntimeError(f"Resend API key health check failed: {text}") from exc
+        domains = response.get("data") if isinstance(response, dict) else None
+        outcome = "SUCCESS"
+        return {
+            "ok": True,
+            "provider": "resend",
+            "credential_status": "AUTHENTICATED",
+            "access": "full",
+            "domain_count": len(domains or []),
+            "detail": "Resend authentication and domain API access passed. Run an explicit test email to confirm delivery.",
+        }
+    finally:
+        record_provider_call(
+            provider="RESEND",
+            operation="HEALTH",
+            status=outcome,
+            duration_seconds=time.perf_counter() - started,
+        )
 
 
 def verify_webhook(*, payload: bytes, headers: Mapping[str, str], signing_secret: str) -> dict[str, Any]:
