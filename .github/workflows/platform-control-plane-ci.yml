@@ -7,6 +7,7 @@ on:
       - "backend/amodb/platform_ops_main.py"
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
+      - "backend/amodb/storage.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
@@ -15,6 +16,7 @@ on:
       - "ops/load/**"
       - "frontend/src/pages/platform/**"
       - "frontend/src/services/platformOperations.ts"
+      - "frontend/src/services/platformEnvironment.ts"
       - "frontend/src/portalRoutes.tsx"
       - ".github/workflows/platform-control-plane-ci.yml"
   push:
@@ -24,9 +26,11 @@ on:
       - "backend/amodb/platform_ops_main.py"
       - "backend/amodb/platform_ops_worker_main.py"
       - "backend/amodb/observability.py"
+      - "backend/amodb/storage.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
+      - "backend/requirements.txt"
       - "docker-compose.prod.yml"
       - "ops/load/**"
       - ".github/workflows/platform-control-plane-ci.yml"
@@ -37,7 +41,7 @@ permissions:
 jobs:
   broker-and-scale-contracts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
@@ -62,6 +66,10 @@ jobs:
             backend/amodb/apps/platform/ops_worker.py \
             backend/amodb/apps/platform/ops_query_registry.py \
             backend/amodb/apps/platform/ops_api_router.py \
+            backend/amodb/apps/platform/ops_metric_router.py \
+            backend/amodb/apps/platform/ops_slo_router.py \
+            backend/amodb/apps/platform/ops_scale_router.py \
+            backend/amodb/apps/platform/ops_capacity_router.py \
             backend/amodb/apps/platform/ops_data_models.py \
             backend/amodb/apps/platform/ops_management_router.py \
             backend/amodb/apps/platform/product_analytics.py \
@@ -70,6 +78,7 @@ jobs:
             backend/amodb/platform_ops_main.py \
             backend/amodb/platform_ops_worker_main.py \
             backend/amodb/observability.py \
+            backend/amodb/storage.py \
             backend/amodb/database.py
       - name: Prove browser fan-out does not multiply refresh work
         run: pytest -q backend/amodb/apps/platform/tests/test_ops_broker.py
@@ -78,16 +87,18 @@ jobs:
           pytest -q \
             backend/amodb/apps/platform/tests/test_saas_queue_fencing.py \
             backend/amodb/apps/platform/tests/test_platform_command_queue.py
-      - name: Prove bounded query registry and analytics privacy contracts
+      - name: Prove bounded query registry analytics and shared-storage contracts
         run: |
           pytest -q \
             backend/amodb/apps/platform/tests/test_ops_query_registry.py \
-            backend/amodb/apps/platform/tests/test_product_analytics.py
+            backend/amodb/apps/platform/tests/test_product_analytics.py \
+            backend/amodb/apps/platform/tests/test_shared_storage.py
       - name: Prove mounted console and versioned Operations API contracts
         run: |
           PYTHONPATH=backend python - <<'PY'
           from amodb.apps.platform import router
           from amodb.platform_ops_main import app
+
           mounted = [
               (getattr(r, "path", ""), getattr(getattr(r, "endpoint", None), "__module__", ""))
               for r in router.routes
@@ -106,11 +117,19 @@ jobs:
               ("GET", "/ops/v1/live"),
               ("GET", "/ops/v1/nodes"),
               ("GET", "/ops/v1/nodes/{node_id}/timeseries"),
+              ("GET", "/ops/v1/infrastructure/summary"),
               ("GET", "/ops/v1/database"),
+              ("GET", "/ops/v1/database/health"),
               ("GET", "/ops/v1/queues"),
               ("GET", "/ops/v1/slo"),
+              ("GET", "/ops/v1/slo/windows"),
               ("GET", "/ops/v1/capacity"),
               ("GET", "/ops/v1/tenant-health"),
+              ("GET", "/ops/v1/tenant-fleet"),
+              ("GET", "/ops/v1/tenant-360/{tenant_id}"),
+              ("GET", "/ops/v1/users/v2"),
+              ("POST", "/ops/v1/users/v2/bulk"),
+              ("GET", "/ops/v1/commercial"),
               ("GET", "/ops/v1/product-analytics/rollups"),
               ("GET", "/ops/v1/incident-center"),
           }
@@ -154,11 +173,11 @@ jobs:
           docker compose -f docker-compose.prod.yml config >/tmp/platform-compose.yml
           grep -q "platform-ops-gateway:" /tmp/platform-compose.yml
           grep -q "platform-ops-worker:" /tmp/platform-compose.yml
-          if grep -A55 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
+          if grep -A70 "platform-ops-gateway:" /tmp/platform-compose.yml | grep -q '0.0.0.0:8090'; then
             echo "Platform ops gateway must not be published on a wildcard host address" >&2
             exit 1
           fi
-          grep -A30 "frontend:" /tmp/platform-compose.yml | grep -q "platform-ops-gateway"
+          grep -A35 "frontend:" /tmp/platform-compose.yml | grep -q "platform-ops-gateway"
       - name: Build production frontend
         working-directory: frontend
         run: |
@@ -167,7 +186,7 @@ jobs:
 
   clean-postgres-and-failure-isolation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -193,6 +212,8 @@ jobs:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:59998"
       OTEL_EXPORT_TIMEOUT_SEC: "0.5"
       OTEL_METRIC_EXPORT_INTERVAL_MS: "5000"
+      DB_STATEMENT_TIMEOUT_MS: "15000"
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: "30000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -209,7 +230,25 @@ jobs:
         working-directory: backend
         run: |
           alembic -c amodb/alembic.ini upgrade heads
-          alembic -c amodb/alembic.ini current | grep -q "platform_ops_20260808_control_data"
+          alembic -c amodb/alembic.ini current | grep -q "platform_ops_20260809_incident_lifecycle"
+      - name: Prove transaction-local database guards
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from amodb.database import ReadSessionLocal, WriteSessionLocal
+
+          db = WriteSessionLocal()
+          statement_timeout = db.execute(text("SHOW statement_timeout")).scalar()
+          idle_timeout = db.execute(text("SHOW idle_in_transaction_session_timeout")).scalar()
+          assert statement_timeout not in {"0", "0ms"}, statement_timeout
+          assert idle_timeout not in {"0", "0ms"}, idle_timeout
+          db.rollback(); db.close()
+
+          read_db = ReadSessionLocal()
+          read_db.execute(text("SELECT 1"))
+          read_db.rollback(); read_db.close()
+          PY
       - name: Prove product analytics batch and rollups on PostgreSQL
         working-directory: backend
         run: |
