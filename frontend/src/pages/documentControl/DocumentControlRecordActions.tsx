@@ -19,6 +19,8 @@ export type DocumentWorkspaceView =
   | "relationships"
   | "history";
 
+type RoleAwareCapabilities = DocumentDetailResponse["capabilities"] & { review?: boolean };
+
 export default function DocumentControlRecordActions({
   detail,
   onChanged,
@@ -32,8 +34,21 @@ export default function DocumentControlRecordActions({
 }) {
   const navigate = useNavigate();
   const { tenant, basePath } = useDocumentControlRoute();
+  const capabilities = detail.capabilities as RoleAwareCapabilities;
+  const canControl = Boolean(capabilities.control);
+  const canReview = Boolean(capabilities.review);
 
   if (compact) {
+    if (!canControl && !canReview) return null;
+    if (canReview && !canControl) {
+      return <button
+        type="button"
+        className="dc-button dc-button--primary"
+        onClick={() => navigate(`${basePath}/library/${detail.document.id}?tab=workflow`)}
+      >
+        Review assigned change
+      </button>;
+    }
     return <>
       <DocumentControlPrimaryActions detail={detail} tenant={tenant} basePath={basePath} onChanged={onChanged} />
       <button
@@ -54,6 +69,19 @@ export default function DocumentControlRecordActions({
   }
 
   if (activeView === "history") return null;
+
+  if (canReview && !canControl) {
+    if (activeView !== "workflow") return null;
+    return (
+      <div id="document-control-record-actions" className="dc-record-control-stack">
+        <DocumentControlSection title="Assigned review decision" description="Only the workflow actions authorized by this document's effective governed responsibility are available.">
+          <div className="dc-section__body"><DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="workflow" onChanged={onChanged} /></div>
+        </DocumentControlSection>
+      </div>
+    );
+  }
+
+  if (!canControl) return null;
 
   return (
     <div id="document-control-record-actions" className="dc-record-control-stack">
