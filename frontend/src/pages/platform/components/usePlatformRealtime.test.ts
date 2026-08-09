@@ -8,8 +8,8 @@ describe("Platform realtime ownership", () => {
     expect(shouldUseShellOperationsStream(true, "/platform/security")).toBe(true);
   });
 
-  it("yields stream ownership to the Operations page", () => {
-    expect(shouldUseShellOperationsStream(true, "/platform/operations")).toBe(false);
+  it("keeps the shell as the sole stream owner on Operations", () => {
+    expect(shouldUseShellOperationsStream(true, "/platform/operations")).toBe(true);
   });
 
   it("does not connect before Platform access is allowed", () => {
