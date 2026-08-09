@@ -64,6 +64,7 @@ jobs:
       - name: Run Assurance OS completion contracts
         run: |
           pytest -q amodb/apps/quality/tests/test_assurance_operating_system_completion.py
+          pytest -q amodb/apps/quality/tests/test_audit_risk_planning_factor_contract.py
           pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
           pytest -q amodb/apps/quality/tests/test_mission_contract.py
 
