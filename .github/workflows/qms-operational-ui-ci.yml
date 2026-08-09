@@ -1,0 +1,102 @@
+name: QMS Operational UI CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/docs/quality/QMS_FRONTEND_OPERATIONAL_WIREFRAMES_20260809.md"
+      - "frontend/src/pages/qms/**"
+      - "frontend/src/pages/QualityCarsPage.tsx"
+      - "frontend/src/services/qms*.ts"
+      - "frontend/src/styles/qms*.css"
+      - "frontend/scripts/check-qms-operational-ui.mjs"
+      - "frontend/tests/e2e/qms-*.spec.ts"
+      - "frontend/src/styles/index.css"
+      - ".github/workflows/qms-operational-ui-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-operational-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-operational-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "QMS operational UI dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+
+      - name: Enforce QMS operational UI contract
+        run: node scripts/check-qms-operational-ui.mjs
+
+      - name: Typecheck and production build
+        run: npm run build
+
+      - name: Lint redesigned QMS frontend
+        run: >-
+          npm exec -- eslint
+          src/pages/qms/QmsPeoplePage.tsx
+          src/pages/qms/QmsIntelligencePage.tsx
+          src/pages/qms/QmsRegisterPage.tsx
+          src/services/qmsIntelligence.ts
+          tests/e2e/qms-assurance-operating-system.spec.ts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-operational-ui-preview.log 2>&1 &
+          echo $! > /tmp/qms-operational-ui-preview.pid
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-operational-ui-preview.log
+          exit 1
+
+      - name: Browser - People Assurance Intelligence 1080p
+        run: npx playwright test tests/e2e/qms-assurance-operating-system.spec.ts --workers=1
+
+      - name: Browser - Missions portfolio and drawer
+        if: always()
+        run: npx playwright test tests/e2e/qms-missions.spec.ts --workers=1
+
+      - name: Browser - Control Room
+        if: always()
+        run: npx playwright test tests/e2e/qms-excellence-cockpit.spec.ts --workers=1
+
+      - name: Browser - My Quality Work and bounded registers
+        if: always()
+        run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
+
+      - name: Browser - CAR usability
+        if: always()
+        run: npx playwright test tests/e2e/qms-usability-enhancements.spec.ts --workers=1
+
+      - name: Browser - Planner
+        if: always()
+        run: npx playwright test tests/e2e/qms-modern-planner-live.spec.ts --workers=1
