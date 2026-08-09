@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { getToken } from "../../services/auth";
+import {
+  persistPlatformDataMode,
+  readPlatformDataMode,
+  replaceLocationDataMode,
+} from "../../services/platformEnvironment";
 import {
   operationsStreamUrl,
   platformOperationsApi,
@@ -26,13 +32,11 @@ const sections = [
   "Jobs",
 ] as const;
 type Section = (typeof sections)[number];
-
 type FleetFilters = { q: string; health: string; sort: "health" | "name" | "traffic" | "users" };
 
 function pct(value: unknown, digits = 2) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "—";
-  return `${(number * 100).toFixed(digits)}%`;
+  const n = Number(value);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(digits)}%` : "—";
 }
 
 function number(value: unknown) {
@@ -51,10 +55,13 @@ function bytes(value: unknown) {
 }
 
 function metricValue(payload: any): string {
-  const item = payload?.items?.[0];
-  if (!item || item.value == null) return payload?.stale ? "Stale / unavailable" : "—";
-  const suffix = payload?.unit === "percent" ? "%" : payload?.unit === "bytes_per_second" ? " B/s" : payload?.unit === "bytes" ? " B" : "";
-  return `${Number(item.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
+  const item = payload?.items?.[0] || payload?.series?.[0];
+  const raw = item?.value;
+  const value = Array.isArray(raw) ? raw[1] : raw;
+  if (value == null) return payload?.stale ? "Stale / unavailable" : "—";
+  const unit = payload?.unit;
+  const suffix = unit === "percent" ? "%" : unit === "bytes_per_second" ? " B/s" : unit === "bytes" ? " B" : unit === "milliseconds" ? " ms" : "";
+  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
 function forecastValue(payload: any): string {
@@ -88,7 +95,7 @@ async function stream(mode: DataMode, signal: AbortSignal, onSnapshot: (snapshot
         try {
           const parsed = JSON.parse(data);
           if (parsed?.snapshot) onSnapshot(parsed.snapshot as OpsSnapshot);
-        } catch { /* malformed frame is isolated */ }
+        } catch { /* isolate malformed frames */ }
       }
       boundary = buffer.indexOf("\n\n");
     }
@@ -104,10 +111,14 @@ const Table: React.FC<{ headers: string[]; rows: React.ReactNode[][] }> = ({ hea
   </div>
 );
 
-const Toolbar: React.FC<{ children: React.ReactNode }> = ({ children }) => <div className="platform-toolbar-actions" style={{ flexWrap: "wrap", justifyContent: "flex-start", marginBottom: 12 }}>{children}</div>;
+const Toolbar: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="platform-toolbar-actions" style={{ flexWrap: "wrap", justifyContent: "flex-start", marginBottom: 12 }}>{children}</div>
+);
 
 export default function PlatformOperationsPage() {
-  const [mode, setMode] = useState<DataMode>("REAL");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<DataMode>(() => readPlatformDataMode(location.search) as DataMode);
   const [section, setSection] = useState<Section>("NOC");
   const [snapshot, setSnapshot] = useState<OpsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +140,21 @@ export default function PlatformOperationsPage() {
   const [userQuery, setUserQuery] = useState("");
   const [userOffset, setUserOffset] = useState(0);
   const generation = useRef(0);
+
+  useEffect(() => {
+    const selected = readPlatformDataMode(location.search) as DataMode;
+    persistPlatformDataMode(selected);
+    if (selected !== mode) setMode(selected);
+  }, [location.search, mode]);
+
+  const selectMode = (next: DataMode) => {
+    persistPlatformDataMode(next);
+    setMode(next);
+    setFleetCursor(null);
+    setFleetCursorHistory([]);
+    setSelectedTenantIds([]);
+    navigate(replaceLocationDataMode(location.pathname, location.search, next), { replace: true });
+  };
 
   useEffect(() => {
     const current = ++generation.current;
@@ -157,15 +183,26 @@ export default function PlatformOperationsPage() {
       try {
         let next: Record<string, any> = {};
         if (section === "Infrastructure") {
-          const [nodes, services, queues] = await Promise.all([platformOperationsApi.nodes(), platformOperationsApi.services(), platformOperationsApi.queues(mode)]);
-          next = { nodes, services, queues };
+          const [summary, nodes, queues] = await Promise.all([
+            platformOperationsApi.infrastructureSummary(), platformOperationsApi.nodes(), platformOperationsApi.queues(mode),
+          ]);
+          next = { summary, nodes, queues };
         } else if (section === "Database") {
-          const [database, checkedOut] = await Promise.all([platformOperationsApi.database(mode), platformOperationsApi.databaseTimeseries("db_pool_checked_out", "1h")]);
-          next = { database, checkedOut };
+          const [health, activeConnections, capacity] = await Promise.all([
+            platformOperationsApi.databaseHealth(),
+            platformOperationsApi.metricTimeseries("db_active_connections", "1h"),
+            platformOperationsApi.database(mode),
+          ]);
+          next = { health, activeConnections, capacity };
         } else if (section === "Network") {
-          next = await platformOperationsApi.network();
+          next = (await platformOperationsApi.infrastructureSummary()).network || {};
         } else if (section === "Storage") {
-          next = await platformOperationsApi.storage();
+          next = (await platformOperationsApi.infrastructureSummary()).storage || {};
+        } else if (section === "SLOs") {
+          const [windows, slow, errors] = await Promise.all([
+            platformOperationsApi.sloWindows(mode), platformOperationsApi.slowRoutes(mode), platformOperationsApi.errorRoutes(mode),
+          ]);
+          next = { windows, slow, errors };
         } else if (section === "Capacity") {
           const [capacity, forecast] = await Promise.all([platformOperationsApi.capacity(mode), platformOperationsApi.capacityForecast("7d")]);
           next = { capacity, forecast };
@@ -223,38 +260,26 @@ export default function PlatformOperationsPage() {
         platformOperationsApi.nodeTimeseries(nodeId, "host_cpu_utilization", "1h"),
       ]);
       setNodeDetail({ node, trend });
-    } catch (reason) {
-      setDetailError(reason instanceof Error ? reason.message : "Unable to load node detail");
-    }
+    } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to load node detail"); }
   };
 
   const openTenant = async (tenantId: string) => {
     setSelectedTenant({ loading: true, tenant_id: tenantId });
-    try {
-      const value = await platformOperationsApi.tenant360(tenantId, mode);
-      setSelectedTenant(value);
-    } catch (reason) {
-      setDetailError(reason instanceof Error ? reason.message : "Unable to load Tenant 360");
-      setSelectedTenant(null);
-    }
+    try { setSelectedTenant(await platformOperationsApi.tenant360(tenantId, mode)); }
+    catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to load Tenant 360"); setSelectedTenant(null); }
   };
 
   const openIncident = async (incidentId: string) => {
-    try {
-      setSelectedIncident(await platformOperationsApi.incidentDetail(incidentId));
-    } catch (reason) {
-      setDetailError(reason instanceof Error ? reason.message : "Unable to load incident timeline");
-    }
+    try { setSelectedIncident(await platformOperationsApi.incidentDetail(incidentId)); }
+    catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to load incident timeline"); }
   };
 
   const createIncident = async () => {
     const title = window.prompt("Incident title");
     if (!title) return;
     const severity = (window.prompt("Severity: INFO, LOW, MEDIUM, HIGH or CRITICAL", "HIGH") || "HIGH").toUpperCase();
-    try {
-      await platformOperationsApi.createIncident({ title, severity, source: "superadmin-console" });
-      refresh();
-    } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to create incident"); }
+    try { await platformOperationsApi.createIncident({ title, severity, source: "superadmin-console" }); refresh(); }
+    catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to create incident"); }
   };
 
   const transitionIncident = async (incidentId: string, target: string) => {
@@ -271,32 +296,24 @@ export default function PlatformOperationsPage() {
     const reason = window.prompt(`Reason for ${commandName} on ${selectedTenantIds.length} tenant(s)`);
     if (!reason) return;
     try {
-      await platformOperationsApi.bulk({
-        command_name: commandName,
-        reason,
-        tenant_ids: selectedTenantIds,
-        data_mode: mode,
-        dry_run: dryRun,
-        idempotency_key: `${commandName}-${Date.now()}`,
-      });
+      await platformOperationsApi.bulk({ command_name: commandName, reason, tenant_ids: selectedTenantIds, data_mode: mode, dry_run: dryRun, idempotency_key: `${commandName}-${Date.now()}` });
       setSelectedTenantIds([]);
       refresh();
-    } catch (reasonValue) { setDetailError(reasonValue instanceof Error ? reasonValue.message : "Unable to queue bulk operation"); }
+    } catch (errorValue) { setDetailError(errorValue instanceof Error ? errorValue.message : "Unable to queue bulk operation"); }
   };
 
   const approveJob = async (jobId: string) => {
     const reason = window.prompt("Approval reason. Approval must be by a different platform superuser.");
     if (!reason) return;
-    try { await platformOperationsApi.approve(jobId, reason); refresh(); } catch (reasonValue) { setDetailError(reasonValue instanceof Error ? reasonValue.message : "Unable to approve job"); }
+    try { await platformOperationsApi.approve(jobId, reason); refresh(); }
+    catch (errorValue) { setDetailError(errorValue instanceof Error ? errorValue.message : "Unable to approve job"); }
   };
 
   const saveCurrentFleetView = async () => {
     const name = window.prompt("Saved view name");
     if (!name) return;
-    try {
-      await platformOperationsApi.saveView({ scope: "tenant_fleet", name, filters: fleetFilters });
-      refresh();
-    } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to save view"); }
+    try { await platformOperationsApi.saveView({ scope: "tenant_fleet", name, filters: fleetFilters }); refresh(); }
+    catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to save view"); }
   };
 
   const createChangeMarker = async () => {
@@ -304,27 +321,27 @@ export default function PlatformOperationsPage() {
     const title = window.prompt("Change title");
     if (!kind || !title) return;
     const reference = window.prompt("Reference (commit, PR, release or ticket)") || undefined;
-    try { await platformOperationsApi.createChangeMarker({ kind, title, reference }); refresh(); } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to record change marker"); }
+    try { await platformOperationsApi.createChangeMarker({ kind, title, reference }); refresh(); }
+    catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Unable to record change marker"); }
   };
 
   const fleetItems = detail.fleet?.items || [];
   const fleetViews = detail.views?.items || [];
   const incidentItems = detail.items || [];
   const userItems = detail.items || [];
+  const infra = detail.summary || {};
+  const sloWindows = detail.windows?.windows || {};
+  const burn = detail.windows?.burn || {};
 
   return (
-    <PlatformShell
-      title="Operations Control Center"
-      subtitle={subtitle}
-      actions={
-        <div className="platform-toolbar-actions">
-          <StatusBadge value={connection === "live" ? (stale ? "STALE" : "LIVE") : connection === "connecting" ? "CONNECTING" : "DEGRADED"} />
-          <button className={`platform-btn ${mode === "REAL" ? "primary" : ""}`} onClick={() => { setMode("REAL"); setFleetCursor(null); setFleetCursorHistory([]); }}>REAL</button>
-          <button className={`platform-btn ${mode === "DEMO" ? "primary" : ""}`} onClick={() => { setMode("DEMO"); setFleetCursor(null); setFleetCursorHistory([]); }}>DEMO</button>
-          <button className="platform-btn" onClick={refresh}>Refresh view</button>
-        </div>
-      }
-    >
+    <PlatformShell title="Operations Control Center" subtitle={subtitle} actions={
+      <div className="platform-toolbar-actions">
+        <StatusBadge value={connection === "live" ? (stale ? "STALE" : "LIVE") : connection === "connecting" ? "CONNECTING" : "DEGRADED"} />
+        <button className={`platform-btn ${mode === "REAL" ? "primary" : ""}`} onClick={() => selectMode("REAL")}>REAL</button>
+        <button className={`platform-btn ${mode === "DEMO" ? "primary" : ""}`} onClick={() => selectMode("DEMO")}>DEMO</button>
+        <button className="platform-btn" onClick={refresh}>Refresh view</button>
+      </div>
+    }>
       {error ? <section className="platform-card"><strong>Operations gateway degraded.</strong><p>{error}</p><p>Tenant application traffic is independent of this gateway. The last prepared snapshot remains visible when available.</p></section> : null}
       {detailError ? <section className="platform-card"><strong>View request failed.</strong><p>{detailError}</p></section> : null}
       {stale ? <section className="platform-card"><strong>Stale telemetry.</strong><p>Showing last-known data. Snapshot age: {number(snapshot?.freshness?.age_seconds)} seconds.</p></section> : null}
@@ -332,7 +349,6 @@ export default function PlatformOperationsPage() {
       <div className="platform-tabs" role="tablist" aria-label="Operations views">
         {sections.map((item) => <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>)}
       </div>
-
       {detailLoading ? <section className="platform-card"><p>Loading bounded operations data…</p></section> : null}
 
       {section === "NOC" && <>
@@ -340,36 +356,64 @@ export default function PlatformOperationsPage() {
           <MetricCard label="Platform status" value={<StatusBadge value={overview.platform_status || slo.status || "UNKNOWN"} />} caption="Prepared state; browser count does not multiply DB refresh work" tone="green" />
           <MetricCard label="Host CPU" value={overview.cpu_percent == null ? "No Prometheus sample" : `${Number(overview.cpu_percent).toFixed(1)}%`} caption="Bare-metal/node telemetry" tone="blue" />
           <MetricCard label="Host memory" value={overview.memory_percent == null ? "No Prometheus sample" : `${Number(overview.memory_percent).toFixed(1)}%`} tone="purple" />
-          <MetricCard label="Error budget remaining" value={pct(slo.error_budget_remaining)} caption={`Availability target ${pct(slo.availability_target, 3)}`} tone={Number(slo.error_budget_remaining || 0) < 0.5 ? "red" : "green"} />
+          <MetricCard label="SLO burn rate" value={`${Number(slo.burn_rate || 0).toFixed(2)}×`} caption={`Availability target ${pct(slo.availability_target, 3)}`} tone={Number(slo.burn_rate || 0) >= 2 ? "red" : "green"} />
           <MetricCard label="Active tenants" value={number(overview.active_tenants)} caption={`${number(fleet.critical)} critical · ${number(fleet.warning)} warning`} />
           <MetricCard label="Durable work queue" value={number(overview.queue_depth)} caption="High-risk work requires second-person approval" tone="amber" />
         </div>
-        <section className="platform-card"><h2>Immediate attention</h2><Table headers={["Tenant", "Health", "Users", "Requests", "p95", "Quota"]} rows={(fleet.items || []).slice(0, 20).map((item) => [<button className="platform-btn" onClick={() => void openTenant(item.tenant_id)}>{item.name || item.amo_code}</button>, <StatusBadge value={item.health?.status} />, number(item.users), number(item.requests_window), item.p95_latency_ms == null ? "—" : `${Number(item.p95_latency_ms).toFixed(0)} ms`, item.quota_percent == null ? "—" : `${Number(item.quota_percent).toFixed(1)}%`])} /></section>
+        <section className="platform-card"><h2>Immediate attention</h2><Table headers={["Tenant", "Health", "Users", "Requests", "p95", "Quota"]} rows={(fleet.items || []).slice(0, 20).map((item: any) => [<button className="platform-btn" onClick={() => void openTenant(item.tenant_id)}>{item.name || item.amo_code}</button>, <StatusBadge value={item.health?.status} />, number(item.users), number(item.requests_window), item.p95_latency_ms == null ? "—" : `${Number(item.p95_latency_ms).toFixed(0)} ms`, item.quota_percent == null ? "—" : `${Number(item.quota_percent).toFixed(1)}%`])} /></section>
       </>}
 
       {section === "Infrastructure" && <>
         <div className="platform-metric-grid">
           <MetricCard label="Nodes discovered" value={number(detail.nodes?.items?.length)} />
-          <MetricCard label="Container CPU series" value={number(detail.services?.cpu?.items?.length)} />
-          <MetricCard label="Container memory series" value={number(detail.services?.memory?.items?.length)} />
-          <MetricCard label="Queue depth" value={metricValue(detail.queues?.depth_metric)} />
+          <MetricCard label="CPU user" value={metricValue(infra.host?.host_cpu_user)} />
+          <MetricCard label="CPU system" value={metricValue(infra.host?.host_cpu_system)} />
+          <MetricCard label="Load 5m" value={metricValue(infra.host?.host_load_5m)} />
+          <MetricCard label="Runnable processes" value={metricValue(infra.host?.host_procs_running)} />
+          <MetricCard label="OOM kills" value={metricValue(infra.host?.host_oom_kills)} tone="amber" />
+          <MetricCard label="Container restarts · 1h" value={metricValue(infra.containers?.container_restarts_1h)} tone="amber" />
+          <MetricCard label="Queue depth" value={metricValue(infra.workers?.queue_depth)} />
         </div>
         <section className="platform-card"><h2>Node fleet</h2><Table headers={["Node", "CPU", "Memory", "Load 1m", "I/O wait", "Targets", "Inspect"]} rows={(detail.nodes?.items || []).map((item: any) => [item.node_id, item.host_cpu_utilization == null ? "—" : `${Number(item.host_cpu_utilization).toFixed(1)}%`, item.host_memory_utilization == null ? "—" : `${Number(item.host_memory_utilization).toFixed(1)}%`, number(item.host_load_1m), item.host_cpu_iowait == null ? "—" : `${Number(item.host_cpu_iowait).toFixed(1)}%`, (item.targets || []).map((target: any) => `${target.job}:${Number(target.up) === 1 ? "up" : "down"}`).join(", ") || "—", <button className="platform-btn" onClick={() => void openNode(item.node_id)}>Details</button>])} /></section>
         {selectedNode && <section className="platform-card"><h2>Node detail · {selectedNode}</h2><p>CPU: {metricValue(nodeDetail?.node?.metrics?.host_cpu_utilization)} · Memory: {metricValue(nodeDetail?.node?.metrics?.host_memory_utilization)} · Swap: {metricValue(nodeDetail?.node?.metrics?.host_swap_utilization)} · Ingress: {metricValue(nodeDetail?.node?.metrics?.network_ingress)} · Egress: {metricValue(nodeDetail?.node?.metrics?.network_egress)}</p><Table headers={["Time", "CPU %"]} rows={((nodeDetail?.trend?.series?.[0]?.values || []).slice(-12)).map((value: any[]) => [new Date(Number(value[0]) * 1000).toLocaleTimeString(), Number(value[1]).toFixed(2)])} /></section>}
       </>}
 
       {section === "Database" && <>
-        <div className="platform-metric-grid"><MetricCard label="Checked-out connections" value={metricValue(detail.database?.checked_out)} /><MetricCard label="Idle connections" value={metricValue(detail.database?.idle)} /><MetricCard label="Connection utilisation" value={pct(detail.database?.capacity?.db_connection_utilisation)} /><MetricCard label="Capacity state" value={<StatusBadge value={detail.database?.capacity?.status || "UNKNOWN"} />} /></div>
-        <section className="platform-card"><h2>Checked-out connection history · 1 hour</h2><Table headers={["Time", "Connections"]} rows={((detail.checkedOut?.series?.[0]?.values || []).slice(-20)).map((value: any[]) => [new Date(Number(value[0]) * 1000).toLocaleTimeString(), Number(value[1]).toFixed(0)])} /></section>
+        <div className="platform-metric-grid">
+          <MetricCard label="Active connections" value={metricValue(detail.health?.metrics?.db_active_connections)} />
+          <MetricCard label="Connection utilisation" value={metricValue(detail.health?.metrics?.db_connection_utilization)} />
+          <MetricCard label="Waiting connections" value={metricValue(detail.health?.metrics?.db_waiting_connections)} tone="amber" />
+          <MetricCard label="Lock waiters" value={metricValue(detail.health?.metrics?.db_lock_waiters)} tone="amber" />
+          <MetricCard label="Long queries" value={metricValue(detail.health?.metrics?.db_long_queries)} tone="amber" />
+          <MetricCard label="Database size" value={metricValue(detail.health?.metrics?.db_size)} />
+          <MetricCard label="Replica lag" value={metricValue(detail.health?.metrics?.db_replica_lag)} />
+          <MetricCard label="Transaction rate" value={metricValue(detail.health?.metrics?.db_transaction_rate)} />
+        </div>
+        <section className="platform-card"><h2>Active connection history · 1 hour</h2><Table headers={["Time", "Connections"]} rows={((detail.activeConnections?.series?.[0]?.values || []).slice(-20)).map((value: any[]) => [new Date(Number(value[0]) * 1000).toLocaleTimeString(), Number(value[1]).toFixed(0)])} /></section>
       </>}
 
-      {section === "Network" && <div className="platform-metric-grid"><MetricCard label="Ingress" value={metricValue(detail.network_ingress)} /><MetricCard label="Egress" value={metricValue(detail.network_egress)} /><MetricCard label="Errors/sec" value={metricValue(detail.network_errors)} tone="amber" /><MetricCard label="Drops/sec" value={metricValue(detail.network_drops)} tone="amber" /></div>}
+      {section === "Network" && <div className="platform-metric-grid">
+        <MetricCard label="Ingress" value={metricValue(detail.network_ingress)} /><MetricCard label="Egress" value={metricValue(detail.network_egress)} />
+        <MetricCard label="Errors/sec" value={metricValue(detail.network_errors)} tone="amber" /><MetricCard label="Drops/sec" value={metricValue(detail.network_drops)} tone="amber" />
+        <MetricCard label="TCP established" value={metricValue(detail.tcp_established)} /><MetricCard label="TCP in use" value={metricValue(detail.tcp_inuse)} /><MetricCard label="TIME_WAIT" value={metricValue(detail.tcp_timewait)} />
+      </div>}
 
-      {section === "Storage" && <><div className="platform-metric-grid"><MetricCard label="Filesystem utilisation" value={metricValue(detail.filesystem_utilization)} /><MetricCard label="Filesystem free" value={metricValue(detail.filesystem_free)} /><MetricCard label="Inode utilisation" value={metricValue(detail.filesystem_inode_utilization)} /></div><section className="platform-card"><p>Filesystem telemetry is read from the approved query registry. The browser cannot submit arbitrary PromQL.</p></section></>}
+      {section === "Storage" && <>
+        <div className="platform-metric-grid">
+          <MetricCard label="Filesystem utilisation" value={metricValue(detail.filesystem_utilization)} /><MetricCard label="Filesystem free" value={metricValue(detail.filesystem_free)} /><MetricCard label="Inode utilisation" value={metricValue(detail.filesystem_inode_utilization)} />
+          <MetricCard label="Disk read" value={metricValue(detail.disk_read_throughput)} /><MetricCard label="Disk write" value={metricValue(detail.disk_write_throughput)} /><MetricCard label="Read latency" value={metricValue(detail.disk_read_latency)} /><MetricCard label="Write latency" value={metricValue(detail.disk_write_latency)} />
+        </div>
+        <section className="platform-card"><p>All storage telemetry is read from the server-owned query registry. The browser cannot submit arbitrary PromQL.</p></section>
+      </>}
 
       {section === "SLOs" && <>
-        <div className="platform-metric-grid"><MetricCard label="Availability" value={pct(slo.availability, 3)} caption={`Target ${pct(slo.availability_target, 3)}`} tone={slo.status === "CRITICAL" ? "red" : "green"} /><MetricCard label="Error rate" value={pct(slo.error_rate)} caption={`${number(slo.failures)} failed / ${number(slo.requests)} requests`} /><MetricCard label="p95 latency" value={slo.p95_latency_ms == null ? "—" : `${Number(slo.p95_latency_ms).toFixed(0)} ms`} caption={`Target ${number(slo.latency_target_ms)} ms`} /><MetricCard label="Budget consumed" value={pct(slo.error_budget_consumed)} /></div>
-        <section className="platform-card"><h2>Route SLOs</h2><Table headers={["Route", "Status", "Requests", "Error rate", "p95"]} rows={(slo.routes || []).map((item: any) => [item.route, <StatusBadge value={item.status} />, number(item.requests), pct(item.error_rate), item.p95_latency_ms == null ? "—" : `${Number(item.p95_latency_ms).toFixed(0)} ms`])} /></section>
+        <div className="platform-metric-grid">
+          <MetricCard label="Current availability" value={pct(slo.availability, 3)} caption={`Target ${pct(slo.availability_target, 3)}`} tone={slo.status === "CRITICAL" ? "red" : "green"} />
+          <MetricCard label="p95 latency" value={slo.p95_latency_ms == null ? "—" : `${Number(slo.p95_latency_ms).toFixed(0)} ms`} /><MetricCard label="p99 latency" value={slo.p99_latency_ms == null ? "—" : `${Number(slo.p99_latency_ms).toFixed(0)} ms`} />
+          <MetricCard label="Burn policy" value={<StatusBadge value={burn.status || "UNKNOWN"} />} caption={burn.fast ? "Fast burn detected" : burn.sustained ? "Sustained burn detected" : "Within burn policy"} />
+          <MetricCard label="5m burn" value={`${Number(sloWindows["5m"]?.burn_rate || 0).toFixed(2)}×`} /><MetricCard label="1h burn" value={`${Number(sloWindows["1h"]?.burn_rate || 0).toFixed(2)}×`} /><MetricCard label="6h burn" value={`${Number(sloWindows["6h"]?.burn_rate || 0).toFixed(2)}×`} />
+        </div>
+        <section className="platform-card"><h2>Slow routes</h2><Table headers={["Route", "Status", "Requests", "Error rate", "p95", "p99"]} rows={(detail.slow?.items || slo.routes || []).map((item: any) => [item.route, <StatusBadge value={item.status} />, number(item.requests), pct(item.error_rate), item.p95_latency_ms == null ? "—" : `${Number(item.p95_latency_ms).toFixed(0)} ms`, item.p99_latency_ms == null ? "—" : `${Number(item.p99_latency_ms).toFixed(0)} ms`])} /></section>
       </>}
 
       {section === "Capacity" && <>
@@ -392,12 +436,12 @@ export default function PlatformOperationsPage() {
           <Table headers={["Select", "Tenant", "Mode", "Health", "Users", "Requests", "p95", "Quota", "Telemetry"]} rows={fleetItems.map((item: any) => [<input type="checkbox" checked={selectedTenantIds.includes(item.tenant_id)} onChange={(event) => setSelectedTenantIds((current) => event.target.checked ? [...current, item.tenant_id] : current.filter((id) => id !== item.tenant_id))} />, <button className="platform-btn" onClick={() => void openTenant(item.tenant_id)}>{item.name || item.amo_code}</button>, item.data_mode, <StatusBadge value={item.health?.status} />, `${number(item.active_users)} / ${number(item.users)}`, number(item.requests_window), item.p95_latency_ms == null ? "—" : `${Number(item.p95_latency_ms).toFixed(0)} ms`, item.quota_percent == null ? "—" : `${Number(item.quota_percent).toFixed(1)}%`, item.last_telemetry_at ? new Date(item.last_telemetry_at).toLocaleString() : "—"]) } />
           <Toolbar><button className="platform-btn" disabled={!fleetCursorHistory.length} onClick={() => { const history = [...fleetCursorHistory]; const previous = history.pop() ?? null; setFleetCursorHistory(history); setFleetCursor(previous); }}>Previous</button><button className="platform-btn" disabled={!detail.fleet?.next_cursor} onClick={() => { setFleetCursorHistory((current) => [...current, fleetCursor]); setFleetCursor(detail.fleet.next_cursor); }}>Next</button><span>{number(detail.fleet?.total)} matching tenants</span></Toolbar>
         </section>
-        {selectedTenant && <section className="platform-card"><h2>Tenant 360</h2>{selectedTenant.loading ? <p>Loading tenant…</p> : <><p><strong>{selectedTenant.tenant?.name || selectedTenant.tenant?.amo_code}</strong> · {selectedTenant.tenant?.country || "—"} · <StatusBadge value={selectedTenant.tenant?.is_active ? "ACTIVE" : "INACTIVE"} /></p><div className="platform-metric-grid"><MetricCard label="Users" value={number(selectedTenant.users?.total ?? selectedTenant.user_count)} /><MetricCard label="Storage" value={bytes(selectedTenant.resources?.storage_used_bytes ?? selectedTenant.storage_used_bytes)} /><MetricCard label="24h error rate" value={pct(selectedTenant.operations?.slo_24h?.error_rate)} /><MetricCard label="24h p95" value={selectedTenant.operations?.slo_24h?.p95_latency_ms == null ? "—" : `${Number(selectedTenant.operations.slo_24h.p95_latency_ms).toFixed(0)} ms`} /></div><Table headers={["Recent action", "Reason", "Time"]} rows={(selectedTenant.operations?.audit || []).slice(0, 20).map((item: any) => [item.action, item.reason || "—", item.created_at ? new Date(item.created_at).toLocaleString() : "—"])} /></>}</section>}
+        {selectedTenant && <section className="platform-card"><h2>Tenant 360</h2>{selectedTenant.loading ? <p>Loading tenant…</p> : <><p><strong>{selectedTenant.tenant?.name || selectedTenant.tenant?.amo_code}</strong> · {selectedTenant.tenant?.country || "—"} · <StatusBadge value={selectedTenant.tenant?.is_active ? "ACTIVE" : "INACTIVE"} /></p><div className="platform-metric-grid"><MetricCard label="Users" value={number(selectedTenant.users?.total ?? selectedTenant.user_count)} /><MetricCard label="Storage" value={bytes(selectedTenant.resources?.storage_used_bytes ?? selectedTenant.resource_usage?.storage_used_bytes)} /><MetricCard label="24h error rate" value={pct(selectedTenant.operations?.slo_24h?.error_rate)} /><MetricCard label="24h p95" value={selectedTenant.operations?.slo_24h?.p95_latency_ms == null ? "—" : `${Number(selectedTenant.operations.slo_24h.p95_latency_ms).toFixed(0)} ms`} /></div><Table headers={["Recent action", "Reason", "Time"]} rows={(selectedTenant.operations?.audit || []).slice(0, 20).map((item: any) => [item.action, item.reason || "—", item.created_at ? new Date(item.created_at).toLocaleString() : "—"])} /></>}</section>}
       </>}
 
       {section === "Incidents" && <>
         <section className="platform-card"><Toolbar><button className="platform-btn primary" onClick={() => void createIncident()}>Create incident</button><span>{number(detail.total)} incidents</span></Toolbar><Table headers={["Severity", "State", "Title", "Source", "Started", "Open"]} rows={incidentItems.map((item: any) => [<StatusBadge value={item.severity} />, <StatusBadge value={item.state} />, item.title, item.source, item.started_at ? new Date(item.started_at).toLocaleString() : "—", <button className="platform-btn" onClick={() => void openIncident(item.id)}>Timeline</button>])} /></section>
-        {selectedIncident && <section className="platform-card"><h2>{selectedIncident.title}</h2><p>{selectedIncident.summary || "No summary recorded."}</p><Toolbar>{selectedIncident.state === "DETECTED" && <button className="platform-btn" onClick={() => void transitionIncident(selectedIncident.id, "ACKNOWLEDGED")}>Acknowledge</button>}{selectedIncident.state === "ACKNOWLEDGED" && <button className="platform-btn" onClick={() => void transitionIncident(selectedIncident.id, "MITIGATED")}>Mark mitigated</button>}{selectedIncident.state === "MITIGATED" && <button className="platform-btn primary" onClick={() => void transitionIncident(selectedIncident.id, "RESOLVED")}>Resolve</button>}</Toolbar><Table headers={["State", "Message", "Actor", "Time"]} rows={(selectedIncident.timeline || []).map((item: any) => [<StatusBadge value={item.event_type} />, item.message || "—", item.actor_user_id || "system", item.created_at ? new Date(item.created_at).toLocaleString() : "—"])} /></section>}
+        {selectedIncident && <section className="platform-card"><h2>{selectedIncident.title}</h2><p>{selectedIncident.summary || "No summary recorded."}</p><Toolbar>{selectedIncident.state === "OPEN" && <button className="platform-btn" onClick={() => void transitionIncident(selectedIncident.id, "ACKNOWLEDGED")}>Acknowledge</button>}{selectedIncident.state === "ACKNOWLEDGED" && <button className="platform-btn" onClick={() => void transitionIncident(selectedIncident.id, "INVESTIGATING")}>Start investigation</button>}{selectedIncident.state === "INVESTIGATING" && <button className="platform-btn" onClick={() => void transitionIncident(selectedIncident.id, "MITIGATED")}>Mark mitigated</button>}{selectedIncident.state === "MITIGATED" && <button className="platform-btn primary" onClick={() => void transitionIncident(selectedIncident.id, "RESOLVED")}>Resolve</button>}</Toolbar><Table headers={["State", "Message", "Actor", "Time"]} rows={(selectedIncident.timeline || []).map((item: any) => [<StatusBadge value={item.event_type} />, item.message || "—", item.actor_user_id || "system", item.created_at ? new Date(item.created_at).toLocaleString() : "—"])} /></section>}
       </>}
 
       {section === "Product" && <>
@@ -409,9 +453,9 @@ export default function PlatformOperationsPage() {
 
       {section === "Commercial" && <div className="platform-metric-grid"><MetricCard label="MRR" value={`${commercial.currency || overview.currency || ""} ${number((Number(commercial.mrr || 0)) / 100)}`} /><MetricCard label="ARR" value={`${commercial.currency || overview.currency || ""} ${number((Number(commercial.arr || 0)) / 100)}`} /><MetricCard label="Active subscriptions" value={number(commercial.active_subscriptions)} /><MetricCard label="Trials" value={number(commercial.trial_subscriptions)} /><MetricCard label="Overdue invoices" value={number(commercial.overdue_invoices)} tone="amber" /><MetricCard label="Grace-period tenants" value={number(commercial.grace_period_tenants)} /></div>}
 
-      {section === "Changes" && <><section className="platform-card"><Toolbar><button className="platform-btn primary" onClick={() => void createChangeMarker()}>Record change</button></Toolbar><h2>Change markers</h2><Table headers={["Kind", "Reference", "Title", "Time"]} rows={(detail.items || []).map((item: any) => [<StatusBadge value={item.kind} />, item.reference || "—", item.title, item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "—"])} /></section><section className="platform-card"><h2>Maintenance windows</h2><Table headers={["Title", "State", "Impact", "Starts", "Ends"]} rows={(changes.maintenance || []).map((item) => [item.title, <StatusBadge value={item.status} />, item.impact_level, item.starts_at ? new Date(item.starts_at).toLocaleString() : "—", item.ends_at ? new Date(item.ends_at).toLocaleString() : "—"])} /></section></>}
+      {section === "Changes" && <><section className="platform-card"><Toolbar><button className="platform-btn primary" onClick={() => void createChangeMarker()}>Record change</button></Toolbar><h2>Change markers</h2><Table headers={["Kind", "Reference", "Title", "Time"]} rows={(detail.items || []).map((item: any) => [<StatusBadge value={item.kind} />, item.reference || "—", item.title, item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "—"])} /></section><section className="platform-card"><h2>Maintenance windows</h2><Table headers={["Title", "State", "Impact", "Starts", "Ends"]} rows={(changes.maintenance || []).map((item: any) => [item.title, <StatusBadge value={item.status} />, item.impact_level, item.starts_at ? new Date(item.starts_at).toLocaleString() : "—", item.ends_at ? new Date(item.ends_at).toLocaleString() : "—"])} /></section></>}
 
-      {section === "Jobs" && <section className="platform-card"><h2>Durable operations jobs</h2><p>Side effects execute only from the lease-fenced worker. High-risk jobs require a different platform superuser to approve them.</p><Table headers={["Command", "Risk", "State", "Tenant", "Dry run", "Attempts", "Created", "Action"]} rows={jobItems.map((item) => [item.command_name, <StatusBadge value={item.risk_level} />, <StatusBadge value={item.status} />, item.tenant_id || "Platform", item.dry_run ? "Yes" : "No", number(item.attempt_count), item.created_at ? new Date(item.created_at).toLocaleString() : "—", item.status === "NEEDS_APPROVAL" ? <button className="platform-btn" onClick={() => void approveJob(item.id)}>Approve</button> : "—"]) } /></section>}
+      {section === "Jobs" && <section className="platform-card"><h2>Durable operations jobs</h2><p>Side effects execute only from the lease-fenced worker. High-risk jobs require a different platform superuser to approve them.</p><Table headers={["Command", "Risk", "State", "Tenant", "Dry run", "Attempts", "Created", "Action"]} rows={jobItems.map((item: any) => [item.command_name, <StatusBadge value={item.risk_level} />, <StatusBadge value={item.status} />, item.tenant_id || "Platform", item.dry_run ? "Yes" : "No", number(item.attempt_count), item.created_at ? new Date(item.created_at).toLocaleString() : "—", item.status === "NEEDS_APPROVAL" ? <button className="platform-btn" onClick={() => void approveJob(item.id)}>Approve</button> : "—"]) } /></section>}
     </PlatformShell>
   );
 }
