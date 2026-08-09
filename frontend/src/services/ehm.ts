@@ -1,6 +1,7 @@
 // src/services/ehm.ts
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { trackProductWorkflow } from "./productAnalytics";
 
 const API_BASE = getApiBaseUrl();
 
@@ -158,39 +159,46 @@ export async function uploadEhmLog(payload: {
   source?: string | null;
   notes?: string | null;
 }): Promise<EhmLog> {
-  const token = getToken();
-  const form = new FormData();
-  form.append("file", payload.file);
-  form.append("aircraft_serial_number", payload.aircraft_serial_number);
-  form.append("engine_position", payload.engine_position);
-  if (payload.engine_serial_number) {
-    form.append("engine_serial_number", payload.engine_serial_number);
-  }
-  if (payload.source) {
-    form.append("source", payload.source);
-  }
-  if (payload.notes) {
-    form.append("notes", payload.notes);
-  }
+  return trackProductWorkflow({
+    module: "engine-health-monitoring",
+    workflow: "ehm-log-upload",
+    source: "reliability",
+    operation: async () => {
+      const token = getToken();
+      const form = new FormData();
+      form.append("file", payload.file);
+      form.append("aircraft_serial_number", payload.aircraft_serial_number);
+      form.append("engine_position", payload.engine_position);
+      if (payload.engine_serial_number) {
+        form.append("engine_serial_number", payload.engine_serial_number);
+      }
+      if (payload.source) {
+        form.append("source", payload.source);
+      }
+      if (payload.notes) {
+        form.append("notes", payload.notes);
+      }
 
-  const res = await fetch(`${API_BASE}/reliability/ehm/logs/upload`, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      const res = await fetch(`${API_BASE}/reliability/ehm/logs/upload`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: form,
+        credentials: "include",
+      });
+
+      if (res.status === 401) {
+        handleAuthFailure("expired");
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Upload failed (${res.status})`);
+      }
+      const data = (await res.json()) as { log: EhmLog };
+      return data.log;
     },
-    body: form,
-    credentials: "include",
   });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Upload failed (${res.status})`);
-  }
-  const data = (await res.json()) as { log: EhmLog };
-  return data.log;
 }
 
 export async function listEngineTrendStatus(): Promise<EngineTrendStatus[]> {
