@@ -69,4 +69,5 @@ jobs:
           tests/e2e/qms-planner-audit-handoff.spec.ts
           tests/e2e/qms-usability-enhancements.spec.ts
           tests/e2e/qms-audit-governed-lifecycle.spec.ts
+          tests/e2e/qms-checklist-execution-governance.spec.ts
           --workers=1
