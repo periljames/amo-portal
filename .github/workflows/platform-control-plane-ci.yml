@@ -35,7 +35,6 @@ on:
       - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/tests/test_observability_operation_span.py"
       - "backend/amodb/database.py"
-      - "backend/amodb/alembic/versions/**"
       - "backend/requirements.txt"
       - "docker-compose.prod.yml"
       - "ops/load/**"
@@ -242,7 +241,7 @@ jobs:
         working-directory: backend
         run: |
           alembic -c amodb/alembic.ini upgrade heads
-          alembic -c amodb/alembic.ini current | grep -q "platform_rel_20260809_merge"
+          alembic -c amodb/alembic.ini current | grep -q "plat_qms_260809_merge"
       - name: Prove transaction-local database guards
         working-directory: backend
         run: |
