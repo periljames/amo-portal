@@ -13,6 +13,7 @@ import {
   verifyCurrentPlatformUser,
 } from "../../../services/platformAccess";
 import { platformConsoleApi, type PlatformConsoleSearchResult } from "../../../services/platformConsole";
+import { persistPlatformDataMode, readPlatformDataMode, withPlatformDataMode } from "../../../services/platformEnvironment";
 import "../../../styles/platform-control.css";
 import { platformNavSections, type PlatformNavItem } from "./platformNavigation";
 import { usePlatformRealtime, type PlatformConsoleSnapshot } from "./usePlatformRealtime";
@@ -21,11 +22,11 @@ export const StatusBadge: React.FC<{ value?: unknown }> = ({ value }) => {
   const text = String(value ?? "UNKNOWN");
   const v = text.toUpperCase();
   const cls =
-    v.includes("ACTIVE") || v.includes("HEALTHY") || v.includes("SUCCEEDED") || v === "OPEN" || v === "LIVE"
+    v.includes("ACTIVE") || v.includes("HEALTHY") || v.includes("SUCCEEDED") || v === "OPEN" || v === "LIVE" || v === "REAL"
       ? "ok"
       : v.includes("FAIL") || v.includes("CRITICAL") || v.includes("LOCK") || v.includes("ERROR") || v.includes("DENIED") || v.includes("OFFLINE")
         ? "bad"
-        : v.includes("WARN") || v.includes("PENDING") || v.includes("DEGRADED") || v.includes("TRIAL") || v.includes("CONNECTING")
+        : v.includes("WARN") || v.includes("PENDING") || v.includes("DEGRADED") || v.includes("TRIAL") || v.includes("CONNECTING") || v === "DEMO"
           ? "warn"
           : "neutral";
   return <span className={`platform-badge ${cls}`}>{text}</span>;
@@ -146,6 +147,7 @@ export const PlatformShell: React.FC<{
 }> = ({ title, subtitle, actions, children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const platformMode = readPlatformDataMode(location.search);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const searchRequestRef = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -171,6 +173,10 @@ export const PlatformShell: React.FC<{
     "--platform-accent": accent,
     "--platform-accent-rgb": accentRgb(accent),
   } as React.CSSProperties;
+
+  useEffect(() => {
+    persistPlatformDataMode(platformMode);
+  }, [platformMode]);
 
   useEffect(() => {
     let active = true;
@@ -317,7 +323,7 @@ export const PlatformShell: React.FC<{
   const selectSearchResult = (result: PlatformConsoleSearchResult) => {
     setQuery("");
     setResults([]);
-    navigate(result.path);
+    navigate(withPlatformDataMode(result.path, platformMode));
   };
 
   return (
@@ -338,7 +344,7 @@ export const PlatformShell: React.FC<{
                 return (
                   <Link
                     key={item.to}
-                    to={item.to}
+                    to={withPlatformDataMode(item.to, platformMode)}
                     className={active ? "active" : undefined}
                     title={item.description}
                     onClick={() => setSidebarOpen(false)}
@@ -387,6 +393,7 @@ export const PlatformShell: React.FC<{
           </div>
 
           <div className="platform-global-actions">
+            <StatusBadge value={platformMode} />
             <div className="platform-theme-control">
               <button className="platform-btn compact" onClick={() => setThemeOpen((open) => !open)}>◐ Theme <span>⌄</span></button>
               {themeOpen ? (
@@ -407,7 +414,7 @@ export const PlatformShell: React.FC<{
               ) : null}
             </div>
             <button className="platform-icon-btn" aria-label="Reconnect live updates" title="Reconnect live updates" onClick={realtime.reconnect}>↻</button>
-            <button className="platform-icon-btn platform-notification-btn" aria-label="Open security alerts" title="Open security alerts" onClick={() => navigate("/platform/security")}>♢<span>{snapshot?.critical_security_alerts ? String(snapshot.critical_security_alerts) : ""}</span></button>
+            <button className="platform-icon-btn platform-notification-btn" aria-label="Open security alerts" title="Open security alerts" onClick={() => navigate(withPlatformDataMode("/platform/security", platformMode))}>♢<span>{snapshot?.critical_security_alerts ? String(snapshot.critical_security_alerts) : ""}</span></button>
             <div className="platform-profile-chip" title={user.email || "Platform user"}>
               <span>{initials}</span>
               <small><strong>{user.email || "Platform user"}</strong><em>Superadmin</em></small>
