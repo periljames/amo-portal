@@ -1,4 +1,38 @@
 groups:
+  - name: amo-platform-observability-thresholds
+    interval: 30s
+    rules:
+      # Central defaults. Operators may change these values in the Git-managed
+      # deployment configuration without changing application code.
+      - record: amo_ops_threshold_host_cpu_percent
+        expr: vector(85)
+      - record: amo_ops_threshold_host_memory_percent
+        expr: vector(90)
+      - record: amo_ops_threshold_host_swap_percent
+        expr: vector(20)
+      - record: amo_ops_threshold_filesystem_warning_percent
+        expr: vector(85)
+      - record: amo_ops_threshold_filesystem_critical_percent
+        expr: vector(95)
+      - record: amo_ops_threshold_disk_latency_seconds
+        expr: vector(0.05)
+      - record: amo_ops_threshold_db_connection_percent
+        expr: vector(85)
+      - record: amo_ops_threshold_db_replica_lag_seconds
+        expr: vector(30)
+      - record: amo_ops_threshold_queue_depth
+        expr: vector(100)
+      - record: amo_ops_threshold_queue_oldest_age_seconds
+        expr: vector(300)
+      - record: amo_ops_threshold_worker_stale_seconds
+        expr: vector(90)
+      - record: amo_ops_threshold_api_p95_ms
+        expr: vector(750)
+      - record: amo_ops_threshold_api_p99_ms
+        expr: vector(1500)
+      - record: amo_ops_slo_error_budget_ratio
+        expr: vector(0.001)
+
   - name: amo-platform-observability-foundation
     rules:
       - alert: AMOObservabilityNodeExporterDown
@@ -30,3 +64,245 @@ groups:
         annotations:
           summary: "OpenTelemetry hub metrics exporter is unavailable"
           description: "Application telemetry ingestion or export may be degraded. Tenant traffic must remain independent of this condition."
+
+  - name: amo-platform-host-capacity
+    rules:
+      - alert: AMOHostHighCPU
+        expr: (100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > scalar(amo_ops_threshold_host_cpu_percent)
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Sustained host CPU pressure on {{ $labels.instance }}"
+          description: "CPU utilisation has remained above the configured threshold for 10 minutes."
+
+      - alert: AMOHostHighLoadPerCore
+        expr: node_load5 / clamp_min(count without(cpu,mode) (node_cpu_seconds_total{mode="idle"}), 1) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host runnable load is high on {{ $labels.instance }}"
+          description: "Five-minute load average exceeds 1.5 runnable tasks per CPU core."
+
+      - alert: AMOHostHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > scalar(amo_ops_threshold_host_memory_percent)
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host memory pressure on {{ $labels.instance }}"
+          description: "Memory utilisation has remained above the configured threshold for 10 minutes."
+
+      - alert: AMOHostSwapPressure
+        expr: ((1 - (node_memory_SwapFree_bytes / clamp_min(node_memory_SwapTotal_bytes, 1))) * 100 > scalar(amo_ops_threshold_host_swap_percent)) and on(instance) ((rate(node_vmstat_pswpin[5m]) + rate(node_vmstat_pswpout[5m])) > 0)
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Active swap pressure on {{ $labels.instance }}"
+          description: "Swap utilisation is elevated and the kernel is actively paging."
+
+      - alert: AMOHostOOMKillDetected
+        expr: increase(node_vmstat_oom_kill[10m]) > 0
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "Kernel OOM kill detected on {{ $labels.instance }}"
+          description: "At least one process was killed by the out-of-memory killer in the last 10 minutes."
+
+      - alert: AMOFilesystemSpaceWarning
+        expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > scalar(amo_ops_threshold_filesystem_warning_percent)
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Filesystem space is low on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem utilisation is above the warning threshold."
+
+      - alert: AMOFilesystemSpaceCritical
+        expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > scalar(amo_ops_threshold_filesystem_critical_percent)
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "Filesystem space is critically low on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem utilisation is above the critical threshold."
+
+      - alert: AMODiskReadLatencyHigh
+        expr: (sum by(instance) (rate(node_disk_read_time_seconds_total{device!~"loop.*|ram.*"}[5m])) / clamp_min(sum by(instance) (rate(node_disk_reads_completed_total{device!~"loop.*|ram.*"}[5m])), 0.001)) > scalar(amo_ops_threshold_disk_latency_seconds)
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Disk read latency elevated on {{ $labels.instance }}"
+          description: "Average block-device read service time is above the configured threshold."
+
+      - alert: AMODiskWriteLatencyHigh
+        expr: (sum by(instance) (rate(node_disk_write_time_seconds_total{device!~"loop.*|ram.*"}[5m])) / clamp_min(sum by(instance) (rate(node_disk_writes_completed_total{device!~"loop.*|ram.*"}[5m])), 0.001)) > scalar(amo_ops_threshold_disk_latency_seconds)
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Disk write latency elevated on {{ $labels.instance }}"
+          description: "Average block-device write service time is above the configured threshold."
+
+      - alert: AMONetworkErrorsOrDrops
+        expr: sum by(instance) (rate(node_network_receive_errs_total{device!="lo"}[5m]) + rate(node_network_transmit_errs_total{device!="lo"}[5m]) + rate(node_network_receive_drop_total{device!="lo"}[5m]) + rate(node_network_transmit_drop_total{device!="lo"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Network errors or drops on {{ $labels.instance }}"
+          description: "The host is reporting more than one network error/drop per second."
+
+  - name: amo-platform-database-workers-slo
+    rules:
+      - alert: AMODatabaseConnectionPressure
+        expr: 100 * amo_db_active_connections / clamp_min(amo_db_max_connections, 1) > scalar(amo_ops_threshold_db_connection_percent)
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "PostgreSQL connection pressure is high"
+          description: "Active database connections exceed the configured percentage of max_connections."
+
+      - alert: AMODatabasePoolPressure
+        expr: 100 * amo_db_pool_checked_out / clamp_min(amo_db_pool_size + clamp_min(amo_db_pool_overflow, 0), 1) > scalar(amo_ops_threshold_db_connection_percent)
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Application database pool pressure is high"
+          description: "Checked-out SQLAlchemy connections exceed the configured pool threshold."
+
+      - alert: AMODatabaseLockWaiters
+        expr: amo_db_lock_waiters > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "PostgreSQL lock waiters detected"
+          description: "One or more sessions have been waiting on database locks for at least two minutes."
+
+      - alert: AMODatabaseDeadlockDetected
+        expr: increase(amo_db_deadlocks_total[10m]) > 0
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL deadlock detected"
+          description: "The current database reported a deadlock during the last 10 minutes."
+
+      - alert: AMODatabaseReplicaLagHigh
+        expr: amo_db_replica_lag_seconds > scalar(amo_ops_threshold_db_replica_lag_seconds)
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database replica lag is high"
+          description: "Observed replication lag is above the configured threshold."
+
+      - alert: AMODatabaseLongRunningQueries
+        expr: amo_db_long_running_queries > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Multiple long-running PostgreSQL queries detected"
+          description: "More than five active queries have exceeded the bounded long-query threshold."
+
+      - alert: AMOQueueBacklogHigh
+        expr: amo_job_queue_depth > scalar(amo_ops_threshold_queue_depth)
+        for: 5m
+        labels:
+          severity: warning
+          component: worker
+        annotations:
+          summary: "Background queue backlog is high"
+          description: "A durable work queue exceeds the configured backlog threshold."
+
+      - alert: AMOQueueOldestJobStale
+        expr: amo_job_queue_oldest_age_seconds > scalar(amo_ops_threshold_queue_oldest_age_seconds)
+        for: 5m
+        labels:
+          severity: warning
+          component: worker
+        annotations:
+          summary: "Old background work is waiting too long"
+          description: "The oldest queued/running work item exceeds the configured age threshold."
+
+      - alert: AMOWorkerHeartbeatStale
+        expr: amo_worker_last_seen_age_seconds > scalar(amo_ops_threshold_worker_stale_seconds)
+        for: 3m
+        labels:
+          severity: critical
+          component: worker
+        annotations:
+          summary: "Worker heartbeat is stale"
+          description: "A worker class has not reported within the configured freshness threshold."
+
+      - alert: AMOAPIHighP95Latency
+        expr: amo_api_p95_latency_ms{window="5m"} > scalar(amo_ops_threshold_api_p95_ms)
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API p95 latency exceeds target"
+          description: "Five-minute p95 API latency is above the configured latency objective."
+
+      - alert: AMOAPIHighP99Latency
+        expr: amo_api_p99_latency_ms{window="5m"} > scalar(amo_ops_threshold_api_p99_ms)
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API p99 latency exceeds target"
+          description: "Five-minute p99 API latency is above the configured latency objective."
+
+      - alert: AMOAPIFastErrorBudgetBurn
+        expr: (amo_api_error_rate{window="5m"} / scalar(amo_ops_slo_error_budget_ratio) > 14.4) and ignoring(window) (amo_api_error_rate{window="1h"} / scalar(amo_ops_slo_error_budget_ratio) > 6)
+        for: 2m
+        labels:
+          severity: critical
+          component: slo
+        annotations:
+          summary: "API error budget is burning rapidly"
+          description: "Short and long error-rate windows indicate a fast SLO burn."
+
+      - alert: AMOAPISustainedErrorBudgetBurn
+        expr: amo_api_error_rate{window="1h"} / scalar(amo_ops_slo_error_budget_ratio) > 2
+        for: 30m
+        labels:
+          severity: warning
+          component: slo
+        annotations:
+          summary: "API error budget burn is sustained"
+          description: "The one-hour API error rate is consuming error budget at more than twice the sustainable rate."
+
+      - alert: AMOProviderFailureRateHigh
+        expr: sum by(job_type) (rate(amo_job_result_total{job_status=~"FAILED|ERROR|UNSUPPORTED"}[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: provider
+        annotations:
+          summary: "Provider/background job failures are elevated for {{ $labels.job_type }}"
+          description: "Failure throughput for a bounded provider/job class is above the operational threshold."
