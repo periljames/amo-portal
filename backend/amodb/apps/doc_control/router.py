@@ -14,6 +14,7 @@ from .knowledge_assistant_router import router as knowledge_assistant_router
 from .knowledge_records_router import router as knowledge_records_router
 from .knowledge_workspace_router import router as knowledge_workspace_router
 from .workspace_access import enforce_workspace_access
+from .workspace_administration_router import router as workspace_administration_router
 from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
 from .workspace_compliance_portfolio_router import router as workspace_compliance_portfolio_router
@@ -51,15 +52,16 @@ router.include_router(legacy_router)
 # accountable approval authority, decision evidence, active-recipient publication,
 # server-derived workflow impact, governed hierarchy/reference integrity, generated
 # record custody, permission-filtered assisted search, bounded library discovery,
-# bounded operating portfolios, bounded evidence registers, and release safeguards.
-# They must precede the compatibility workspace router because Starlette resolves
-# matching routes in declaration order.
+# bounded operating portfolios, bounded evidence registers, governed administration,
+# and release safeguards. They must precede the compatibility workspace router
+# because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_distribution_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_compliance_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_reports_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_reports_register_router, prefix="/doc-control")
+router.include_router(workspace_administration_router, prefix="/doc-control")
 router.include_router(workspace_library_discovery_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
