@@ -19,6 +19,9 @@ processors:
 exporters:
   prometheus:
     endpoint: 0.0.0.0:9465
+    # Keep repository-owned semantic metric names stable. The application names
+    # explicit unit/total suffixes when they are part of the public Ops contract.
+    translation_strategy: UnderscoreEscapingWithoutSuffixes
     resource_to_telemetry_conversion:
       enabled: true
 
