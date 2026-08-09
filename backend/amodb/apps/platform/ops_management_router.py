@@ -16,8 +16,12 @@ from .router import require_platform_superuser
 router = APIRouter(prefix="/ops/v1", tags=["platform-operations-management"])
 
 _ALLOWED_VIEW_SCOPES = {"tenant_fleet", "users", "incidents", "product_analytics", "commercial"}
-_ALLOWED_FLEET_FILTERS = {"health", "active", "q", "min_users", "max_users", "sort", "country", "plan", "module", "billing", "security", "integration"}
-_INCIDENT_STATES = ("DETECTED", "ACKNOWLEDGED", "MITIGATED", "RESOLVED")
+_ALLOWED_FLEET_FILTERS = {
+    "health", "active", "q", "min_users", "max_users", "sort", "country", "plan", "module",
+    "billing", "security", "integration", "lifecycle", "support", "recent_activity_hours",
+    "min_assets", "max_assets",
+}
+_INCIDENT_STATES = ("OPEN", "ACKNOWLEDGED", "INVESTIGATING", "MITIGATED", "RESOLVED")
 _INCIDENT_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 _CHANGE_KINDS = {"DEPLOYMENT", "FEATURE_FLAG", "MAINTENANCE", "INCIDENT", "CONFIGURATION", "MIGRATION"}
 
@@ -41,7 +45,14 @@ def _bounded_list(value: Any, *, limit: int = 200) -> list[str]:
 
 
 def _view_payload(row: ops_models.PlatformSavedView) -> dict[str, Any]:
-    return {"id": row.id, "scope": row.scope, "name": row.name, "filters": row.filters_json or {}, "created_at": _iso(row.created_at), "updated_at": _iso(row.updated_at)}
+    return {
+        "id": row.id,
+        "scope": row.scope,
+        "name": row.name,
+        "filters": row.filters_json or {},
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+    }
 
 
 def _incident_payload(row: ops_models.PlatformIncident) -> dict[str, Any]:
@@ -61,6 +72,7 @@ def _incident_payload(row: ops_models.PlatformIncident) -> dict[str, Any]:
         "external_ref": row.external_ref,
         "started_at": _iso(row.started_at),
         "acknowledged_at": _iso(row.acknowledged_at),
+        "investigated_at": _iso(row.investigated_at),
         "mitigated_at": _iso(row.mitigated_at),
         "resolved_at": _iso(row.resolved_at),
         "created_at": _iso(row.created_at),
@@ -91,7 +103,10 @@ def saved_views(
         raise HTTPException(status_code=422, detail="Unsupported saved-view scope")
     rows = (
         db.query(ops_models.PlatformSavedView)
-        .filter(ops_models.PlatformSavedView.platform_user_id == _actor(user), ops_models.PlatformSavedView.scope == scope)
+        .filter(
+            ops_models.PlatformSavedView.platform_user_id == _actor(user),
+            ops_models.PlatformSavedView.scope == scope,
+        )
         .order_by(ops_models.PlatformSavedView.updated_at.desc())
         .limit(100)
         .all()
@@ -112,14 +127,24 @@ def save_view(payload: dict[str, Any], db: Session = Depends(get_write_db), user
         unknown = set(filters) - _ALLOWED_FLEET_FILTERS
         if unknown:
             raise HTTPException(status_code=422, detail=f"Unsupported tenant fleet filters: {', '.join(sorted(unknown))}")
-    safe_filters = {str(key)[:64]: value for key, value in filters.items() if isinstance(value, (str, int, float, bool)) or value is None}
+    safe_filters = {
+        str(key)[:64]: value
+        for key, value in filters.items()
+        if isinstance(value, (str, int, float, bool)) or value is None
+    }
     row = (
         db.query(ops_models.PlatformSavedView)
-        .filter(ops_models.PlatformSavedView.platform_user_id == _actor(user), ops_models.PlatformSavedView.scope == scope, ops_models.PlatformSavedView.name == name)
+        .filter(
+            ops_models.PlatformSavedView.platform_user_id == _actor(user),
+            ops_models.PlatformSavedView.scope == scope,
+            ops_models.PlatformSavedView.name == name,
+        )
         .first()
     )
     if row is None:
-        row = ops_models.PlatformSavedView(platform_user_id=_actor(user), scope=scope, name=name, filters_json=safe_filters)
+        row = ops_models.PlatformSavedView(
+            platform_user_id=_actor(user), scope=scope, name=name, filters_json=safe_filters
+        )
         db.add(row)
     else:
         row.filters_json = safe_filters
@@ -150,12 +175,24 @@ def list_incidents(
 ):
     query = db.query(ops_models.PlatformIncident)
     if state:
-        query = query.filter(ops_models.PlatformIncident.state == state.strip().upper())
+        requested_state = state.strip().upper()
+        if requested_state not in _INCIDENT_STATES:
+            raise HTTPException(status_code=422, detail="Unsupported incident state")
+        query = query.filter(ops_models.PlatformIncident.state == requested_state)
     if severity:
-        query = query.filter(ops_models.PlatformIncident.severity == severity.strip().upper())
+        requested_severity = severity.strip().upper()
+        if requested_severity not in _INCIDENT_SEVERITIES:
+            raise HTTPException(status_code=422, detail="Unsupported incident severity")
+        query = query.filter(ops_models.PlatformIncident.severity == requested_severity)
     total = query.count()
     rows = query.order_by(ops_models.PlatformIncident.started_at.desc()).offset(offset).limit(limit).all()
-    return {"items": [_incident_payload(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+    return {
+        "items": [_incident_payload(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "states": list(_INCIDENT_STATES),
+    }
 
 
 @router.post("/incident-center", status_code=status.HTTP_201_CREATED)
@@ -168,7 +205,7 @@ def create_incident(payload: dict[str, Any], db: Session = Depends(get_write_db)
         title=title,
         summary=str(payload.get("summary") or "")[:4000] or None,
         severity=severity,
-        state="DETECTED",
+        state="OPEN",
         source=str(payload.get("source") or "manual")[:64],
         components_json=_bounded_list(payload.get("components")),
         affected_nodes_json=_bounded_list(payload.get("affected_nodes")),
@@ -181,7 +218,15 @@ def create_incident(payload: dict[str, Any], db: Session = Depends(get_write_db)
     )
     db.add(row)
     db.flush()
-    db.add(ops_models.PlatformIncidentEvent(incident_id=row.id, event_type="DETECTED", message="Incident detected/created.", actor_user_id=_actor(user), data_json={"severity": severity}))
+    db.add(
+        ops_models.PlatformIncidentEvent(
+            incident_id=row.id,
+            event_type="OPEN",
+            message="Incident opened.",
+            actor_user_id=_actor(user),
+            data_json={"severity": severity},
+        )
+    )
     db.commit()
     db.refresh(row)
     return _incident_payload(row)
@@ -192,12 +237,37 @@ def incident_detail(incident_id: str, db: Session = Depends(get_read_db), user=D
     row = db.get(ops_models.PlatformIncident, incident_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    events = db.query(ops_models.PlatformIncidentEvent).filter(ops_models.PlatformIncidentEvent.incident_id == incident_id).order_by(ops_models.PlatformIncidentEvent.created_at.asc()).limit(1000).all()
-    return {**_incident_payload(row), "timeline": [{"id": item.id, "event_type": item.event_type, "message": item.message, "actor_user_id": item.actor_user_id, "data": item.data_json or {}, "created_at": _iso(item.created_at)} for item in events]}
+    events = (
+        db.query(ops_models.PlatformIncidentEvent)
+        .filter(ops_models.PlatformIncidentEvent.incident_id == incident_id)
+        .order_by(ops_models.PlatformIncidentEvent.created_at.asc())
+        .limit(1000)
+        .all()
+    )
+    return {
+        **_incident_payload(row),
+        "states": list(_INCIDENT_STATES),
+        "timeline": [
+            {
+                "id": item.id,
+                "event_type": item.event_type,
+                "message": item.message,
+                "actor_user_id": item.actor_user_id,
+                "data": item.data_json or {},
+                "created_at": _iso(item.created_at),
+            }
+            for item in events
+        ],
+    }
 
 
 @router.post("/incident-center/{incident_id}/transition")
-def transition_incident(incident_id: str, payload: dict[str, Any], db: Session = Depends(get_write_db), user=Depends(require_platform_superuser)):
+def transition_incident(
+    incident_id: str,
+    payload: dict[str, Any],
+    db: Session = Depends(get_write_db),
+    user=Depends(require_platform_superuser),
+):
     target = str(payload.get("state") or "").strip().upper()
     message = str(payload.get("message") or "").strip()[:4000]
     row = db.get(ops_models.PlatformIncident, incident_id)
@@ -205,17 +275,25 @@ def transition_incident(incident_id: str, payload: dict[str, Any], db: Session =
         raise HTTPException(status_code=404, detail="Incident not found")
     if target not in _INCIDENT_STATES:
         raise HTTPException(status_code=422, detail="Unsupported incident state")
-    current_index = _INCIDENT_STATES.index(row.state) if row.state in _INCIDENT_STATES else 0
+    current = "OPEN" if row.state == "DETECTED" else row.state
+    current_index = _INCIDENT_STATES.index(current) if current in _INCIDENT_STATES else 0
     target_index = _INCIDENT_STATES.index(target)
     if target_index < current_index or target_index > current_index + 1:
         raise HTTPException(status_code=409, detail="Incident transitions must advance one state at a time")
     if target_index == current_index:
+        if row.state != current:
+            row.state = current
+            db.commit()
         return _incident_payload(row)
+
     now = datetime.now(timezone.utc)
     row.state = target
     if target == "ACKNOWLEDGED":
         row.acknowledged_at = now
         row.acknowledged_by = _actor(user)
+    elif target == "INVESTIGATING":
+        row.investigated_at = now
+        row.investigated_by = _actor(user)
     elif target == "MITIGATED":
         row.mitigated_at = now
         row.mitigated_by = _actor(user)
@@ -223,7 +301,15 @@ def transition_incident(incident_id: str, payload: dict[str, Any], db: Session =
         row.resolved_at = now
         row.resolved_by = _actor(user)
     row.updated_at = now
-    db.add(ops_models.PlatformIncidentEvent(incident_id=row.id, event_type=target, message=message or f"Incident moved to {target}.", actor_user_id=_actor(user), data_json={}))
+    db.add(
+        ops_models.PlatformIncidentEvent(
+            incident_id=row.id,
+            event_type=target,
+            message=message or f"Incident moved to {target}.",
+            actor_user_id=_actor(user),
+            data_json={"from": current, "to": target},
+        )
+    )
     db.commit()
     return _incident_payload(row)
 
@@ -239,7 +325,20 @@ def change_markers(
     if kind:
         query = query.filter(ops_models.PlatformChangeMarker.kind == kind.strip().upper())
     rows = query.order_by(ops_models.PlatformChangeMarker.occurred_at.desc()).limit(limit).all()
-    return {"items": [{"id": row.id, "kind": row.kind, "reference": row.reference, "title": row.title, "details": row.details_json or {}, "actor_user_id": row.actor_user_id, "occurred_at": _iso(row.occurred_at)} for row in rows]}
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "kind": row.kind,
+                "reference": row.reference,
+                "title": row.title,
+                "details": row.details_json or {},
+                "actor_user_id": row.actor_user_id,
+                "occurred_at": _iso(row.occurred_at),
+            }
+            for row in rows
+        ]
+    }
 
 
 @router.post("/change-markers", status_code=status.HTTP_201_CREATED)
@@ -249,9 +348,26 @@ def create_change_marker(payload: dict[str, Any], db: Session = Depends(get_writ
     if kind not in _CHANGE_KINDS or not title:
         raise HTTPException(status_code=422, detail="Valid kind and title are required")
     details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
-    safe_details = {str(key)[:64]: str(value)[:512] for key, value in details.items() if not isinstance(value, (dict, list, tuple, set))}
-    row = ops_models.PlatformChangeMarker(kind=kind, reference=str(payload.get("reference") or "")[:255] or None, title=title, details_json=safe_details, actor_user_id=_actor(user))
+    safe_details = {
+        str(key)[:64]: str(value)[:512]
+        for key, value in details.items()
+        if not isinstance(value, (dict, list, tuple, set))
+    }
+    row = ops_models.PlatformChangeMarker(
+        kind=kind,
+        reference=str(payload.get("reference") or "")[:255] or None,
+        title=title,
+        details_json=safe_details,
+        actor_user_id=_actor(user),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return {"id": row.id, "kind": row.kind, "reference": row.reference, "title": row.title, "details": row.details_json or {}, "occurred_at": _iso(row.occurred_at)}
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "reference": row.reference,
+        "title": row.title,
+        "details": row.details_json or {},
+        "occurred_at": _iso(row.occurred_at),
+    }
