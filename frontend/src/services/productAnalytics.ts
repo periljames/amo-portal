@@ -75,28 +75,48 @@ export async function trackProductWorkflow<T>(input: {
   operation: () => Promise<T>;
 }): Promise<T> {
   const startedAt = Date.now();
+  const metadata = {
+    workflow: input.workflow,
+    source: input.source,
+    feature: input.feature,
+  };
+
+  let operationPromise: Promise<T>;
+  try {
+    // Invoke the authoritative business operation first. Analytics is secondary
+    // and must not become the first network side effect or alter domain request
+    // ordering, mocking contracts, idempotency, or failure semantics.
+    operationPromise = input.operation();
+  } catch (error) {
+    void emitProductEvent({
+      event_type: "workflow_started",
+      module: input.module,
+      metadata,
+    });
+    void emitProductEvent({
+      event_type: "workflow_failed",
+      module: input.module,
+      outcome: "FAILED",
+      duration_ms: Date.now() - startedAt,
+      metadata,
+    });
+    throw error;
+  }
+
   void emitProductEvent({
     event_type: "workflow_started",
     module: input.module,
-    metadata: {
-      workflow: input.workflow,
-      source: input.source,
-      feature: input.feature,
-    },
+    metadata,
   });
 
   try {
-    const result = await input.operation();
+    const result = await operationPromise;
     void emitProductEvent({
       event_type: "workflow_completed",
       module: input.module,
       outcome: "SUCCESS",
       duration_ms: Date.now() - startedAt,
-      metadata: {
-        workflow: input.workflow,
-        source: input.source,
-        feature: input.feature,
-      },
+      metadata,
     });
     return result;
   } catch (error) {
@@ -105,11 +125,7 @@ export async function trackProductWorkflow<T>(input: {
       module: input.module,
       outcome: "FAILED",
       duration_ms: Date.now() - startedAt,
-      metadata: {
-        workflow: input.workflow,
-        source: input.source,
-        feature: input.feature,
-      },
+      metadata,
     });
     throw error;
   }
