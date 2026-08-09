@@ -6,12 +6,14 @@ import {
   evaluateQmsSignals,
   getQmsApprovalGraph,
   getQmsApprovalTwin,
+  getQmsAuditRiskPlanningContext,
   getQmsIntelligenceOverview,
   listQmsSignalRules,
   listQmsSignals,
   type QmsApprovalTwin,
   type QmsIntelligenceOverview,
   type QmsRequirementNode,
+  type QmsRiskPlanningContext,
   type QmsSignalObservation,
   type QmsSignalRule,
 } from "../../services/qmsIntelligence";
@@ -29,6 +31,7 @@ function pct(value: number | null): string {
 
 const QmsIntelligencePage: React.FC<Props> = ({ amoCode }) => {
   const [overview, setOverview] = useState<QmsIntelligenceOverview | null>(null);
+  const [riskContext, setRiskContext] = useState<QmsRiskPlanningContext | null>(null);
   const [rules, setRules] = useState<QmsSignalRule[]>([]);
   const [signals, setSignals] = useState<QmsSignalObservation[]>([]);
   const [twin, setTwin] = useState<QmsApprovalTwin | null>(null);
@@ -41,14 +44,16 @@ const QmsIntelligencePage: React.FC<Props> = ({ amoCode }) => {
     setLoading(true);
     setError("");
     try {
-      const [nextOverview, ruleResponse, signalResponse, nextTwin, graph] = await Promise.all([
+      const [nextOverview, nextRiskContext, ruleResponse, signalResponse, nextTwin, graph] = await Promise.all([
         getQmsIntelligenceOverview(amoCode, signal),
+        getQmsAuditRiskPlanningContext(amoCode, signal),
         listQmsSignalRules(amoCode, signal),
         listQmsSignals(amoCode, signal),
         getQmsApprovalTwin(amoCode, signal),
         getQmsApprovalGraph(amoCode, signal),
       ]);
       setOverview(nextOverview);
+      setRiskContext(nextRiskContext);
       setRules(ruleResponse.items);
       setSignals(signalResponse.items);
       setTwin(nextTwin);
@@ -101,11 +106,17 @@ const QmsIntelligencePage: React.FC<Props> = ({ amoCode }) => {
       </header>
 
       {error ? <div className="qms-intelligence__error" role="alert"><AlertTriangle size={17} aria-hidden="true" /> {error}</div> : null}
+      {riskContext?.source_warnings.length ? (
+        <div className="qms-intelligence__error" role="status">
+          <AlertTriangle size={17} aria-hidden="true" />
+          {riskContext.source_warnings.length} authoritative source warning(s). Missing source data is surfaced rather than treated as zero exposure.
+        </div>
+      ) : null}
 
       <section className="qms-intelligence__metrics" aria-label="Assurance operating metrics">
         <article><strong>{pct(overview?.programme.completion.value ?? null)}</strong><span>Programme completion</span><small>{overview?.programme.completion.numerator ?? 0}/{overview?.programme.completion.denominator ?? 0} governed requirements</small></article>
         <article><strong>{overview?.assurance.open_cases ?? 0}</strong><span>Open assurance cases</span><small>{overview?.assurance.overdue_cases ?? 0} past due</small></article>
-        <article><strong>{overview?.controls.stale_or_expired_evidence_links ?? 0}</strong><span>Stale evidence links</span><small>{overview?.controls.overdue_control_tests ?? 0} overdue control tests</small></article>
+        <article><strong>{riskContext?.reliability.high_critical_events_90d ?? 0}</strong><span>High/critical reliability events</span><small>authoritative 90-day event ledger</small></article>
         <article><strong>{overview?.people.expiring_within_60_days ?? 0}</strong><span>Privileges expiring ≤60d</span><small>{overview?.people.active_privileges ?? 0} active privileges</small></article>
       </section>
 
@@ -128,7 +139,26 @@ const QmsIntelligencePage: React.FC<Props> = ({ amoCode }) => {
       </section>
 
       <section className="qms-intelligence__panel">
-        <header><div><span>Targeted surveillance</span><h2>Explainable attention order</h2></div><ScanSearch size={20} aria-hidden="true" /></header>
+        <header><div><span>Risk-based audit planning</span><h2>Cross-source assurance pressure</h2></div><ScanSearch size={20} aria-hidden="true" /></header>
+        <p className="qms-intelligence__note">{riskContext?.method.statement || "Loading source-attributed planning context…"}</p>
+        {riskContext?.global_factors.length ? (
+          <div className="qms-intelligence__factor-list" aria-label="Global assurance pressures">
+            {riskContext.global_factors.map((factor) => <span key={factor.code}>{factor.label}: {String(factor.value)} · {factor.source}</span>)}
+          </div>
+        ) : null}
+        <div className="qms-intelligence__surveillance">
+          {riskContext?.items.length ? riskContext.items.map((item) => <article key={item.universe_item_id}>
+            <div><strong>{item.label}</strong><span>{item.entity_type} · {item.source_owner_module}</span></div>
+            <div className="qms-intelligence__factor-list">{item.factors.map((factor) => <span key={`${item.universe_item_id}-${factor.code}`} className={factor.hard_requirement ? "is-hard" : ""}>{factor.hard_requirement ? "HARD · " : ""}{factor.label}: {String(factor.value)}</span>)}</div>
+            <p>{item.method}</p>
+            {item.source_route ? <a href={item.source_route}>Authoritative source</a> : null}
+          </article>) : <p>{loading ? "Loading cross-source risk context…" : "No active Audit Universe items are configured."}</p>}
+        </div>
+        {riskContext?.source_warnings.length ? <details><summary>Source availability warnings</summary><ul>{riskContext.source_warnings.map((warning, index) => <li key={`${warning.source}-${index}`}><strong>{warning.source}</strong>: {warning.message}</li>)}</ul></details> : null}
+      </section>
+
+      <section className="qms-intelligence__panel">
+        <header><div><span>Targeted surveillance</span><h2>Programme-specific attention order</h2></div><ScanSearch size={20} aria-hidden="true" /></header>
         <div className="qms-intelligence__surveillance">
           {overview?.targeted_surveillance.length ? overview.targeted_surveillance.map((item) => <article key={item.universe_item_id}><div><strong>{item.label}</strong><span>{item.entity_type} · {item.source_owner_module}</span></div><div className="qms-intelligence__factor-list">{item.factors.map((factor) => <span key={factor.code} className={factor.hard_requirement ? "is-hard" : ""}>{factor.hard_requirement ? "HARD · " : ""}{factor.label}: {String(factor.value)}</span>)}</div><p>{item.explanation}</p>{item.source_route ? <a href={item.source_route}>Authoritative source</a> : null}</article>) : <p>{loading ? "Loading surveillance factors…" : "No governed surveillance factor currently requires ranked attention."}</p>}
         </div>
