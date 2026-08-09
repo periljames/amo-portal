@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ClipboardCheck, History, PanelRightClose, PanelRightOpen, Save, ShieldAlert } from "lucide-react";
 
@@ -48,6 +48,15 @@ function parseEvidence(value: string): Array<Record<string, unknown> | string> {
   });
 }
 
+function draftFromRow(row: ChecklistExecutionGovernanceRow): Draft {
+  return {
+    status: row.canonical_response_status,
+    notes: row.auditor_notes || "",
+    evidence: evidenceText(row),
+    reason: "Record attributable checklist execution evidence and auditor judgment.",
+  };
+}
+
 const QualityChecklistExecutionGovernanceHost: React.FC<Props> = ({ amoCode, auditKey, activeTab }) => {
   const [open, setOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -68,23 +77,6 @@ const QualityChecklistExecutionGovernanceHost: React.FC<Props> = ({ amoCode, aud
     enabled: Boolean(open && auditId),
   });
   const rows = useMemo(() => executionQuery.data?.items || [], [executionQuery.data?.items]);
-
-  useEffect(() => {
-    if (!rows.length) return;
-    setDrafts((current) => {
-      const next = { ...current };
-      rows.forEach((row) => {
-        if (next[row.checklist_item_id]) return;
-        next[row.checklist_item_id] = {
-          status: row.canonical_response_status,
-          notes: row.auditor_notes || "",
-          evidence: evidenceText(row),
-          reason: "Record attributable checklist execution evidence and auditor judgment.",
-        };
-      });
-      return next;
-    });
-  }, [rows]);
 
   const updateMutation = useMutation({
     mutationFn: ({ row, draft }: { row: ChecklistExecutionGovernanceRow; draft: Draft }) => updateChecklistExecutionGovernance(
@@ -111,9 +103,9 @@ const QualityChecklistExecutionGovernanceHost: React.FC<Props> = ({ amoCode, aud
   });
 
   if (!shouldRender || !amoCode || !auditKey) return null;
-  const setDraft = (itemId: string, patch: Partial<Draft>) => setDrafts((current) => ({
+  const setDraft = (row: ChecklistExecutionGovernanceRow, patch: Partial<Draft>) => setDrafts((current) => ({
     ...current,
-    [itemId]: { ...(current[itemId] || { status: "NOT_VERIFIED", notes: "", evidence: "", reason: "" }), ...patch },
+    [row.checklist_item_id]: { ...(current[row.checklist_item_id] || draftFromRow(row)), ...patch },
   }));
 
   return <>
@@ -133,22 +125,17 @@ const QualityChecklistExecutionGovernanceHost: React.FC<Props> = ({ amoCode, aud
         {auditQuery.isLoading || executionQuery.isLoading ? <p>Loading authoritative checklist execution rows…</p> : null}
         {!executionQuery.isLoading && !rows.length ? <div className="qms-checklist-execution-empty"><ClipboardCheck size={20} /><span>No checklist execution rows are available yet. Apply or create the audit checklist first.</span></div> : null}
         {rows.map((row, index) => {
-          const draft = drafts[row.checklist_item_id] || {
-            status: row.canonical_response_status,
-            notes: row.auditor_notes || "",
-            evidence: evidenceText(row),
-            reason: "Record attributable checklist execution evidence and auditor judgment.",
-          };
+          const draft = drafts[row.checklist_item_id] || draftFromRow(row);
           return <article className="qms-checklist-execution-row" key={row.checklist_item_id}>
             <header><div><span>{row.section || "Checklist"} · {row.checklist_ref || `Item ${index + 1}`}</span><strong>{row.prompt}</strong></div><span className={`qms-checklist-execution-status is-${draft.status.toLowerCase()}`}>{draft.status.replaceAll("_", " ")}</span></header>
             <div className="qms-checklist-execution-grid">
-              <label>Canonical response<select value={draft.status} onChange={(event) => setDraft(row.checklist_item_id, { status: event.target.value as CanonicalChecklistResponse })}>{RESPONSE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+              <label>Canonical response<select value={draft.status} onChange={(event) => setDraft(row, { status: event.target.value as CanonicalChecklistResponse })}>{RESPONSE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
               <label>Requirement / reference<input value={row.requirement_ref || ""} readOnly /></label>
             </div>
             <label>Objective evidence from authoritative row<textarea value={row.objective_evidence || ""} readOnly placeholder="No objective-evidence narrative has been recorded on the audit checklist row." /></label>
-            <label>Auditor notes<textarea value={draft.notes} onChange={(event) => setDraft(row.checklist_item_id, { notes: event.target.value })} placeholder="Record the auditor's controlled judgment, limitations or verification note." /></label>
-            <label>Evidence attachments / references<textarea value={draft.evidence} onChange={(event) => setDraft(row.checklist_item_id, { evidence: event.target.value })} placeholder={'One reference per line, e.g. DMS:DOC-123@REV-4\n{"source_type":"PHOTO","source_id":"evidence-88"}'} /></label>
-            <label>Change reason<input value={draft.reason} onChange={(event) => setDraft(row.checklist_item_id, { reason: event.target.value })} /></label>
+            <label>Auditor notes<textarea value={draft.notes} onChange={(event) => setDraft(row, { notes: event.target.value })} placeholder="Record the auditor's controlled judgment, limitations or verification note." /></label>
+            <label>Evidence attachments / references<textarea value={draft.evidence} onChange={(event) => setDraft(row, { evidence: event.target.value })} placeholder={'One reference per line, e.g. DMS:DOC-123@REV-4\n{"source_type":"PHOTO","source_id":"evidence-88"}'} /></label>
+            <label>Change reason<input value={draft.reason} onChange={(event) => setDraft(row, { reason: event.target.value })} /></label>
             <div className="qms-checklist-execution-actions"><span><History size={14} /> {row.events.length} governed change event{row.events.length === 1 ? "" : "s"}</span><button type="button" onClick={() => updateMutation.mutate({ row, draft })} disabled={updateMutation.isPending || draft.reason.trim().length < 8}><Save size={15} /> Save governed execution</button></div>
           </article>;
         })}
