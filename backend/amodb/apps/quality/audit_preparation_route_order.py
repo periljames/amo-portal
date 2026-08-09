@@ -27,3 +27,8 @@ def _promote(api_router: APIRouter) -> None:
 
 _promote(router)
 _promote(legacy_router)
+
+# Audit Notice governance is registered through this already-imported audit
+# extension point so notice routes and models are available without widening
+# the central Quality bootstrap surface.
+from . import audit_notice_route_order as _audit_notice_route_order  # noqa: F401,E402
