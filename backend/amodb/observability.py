@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 logger = logging.getLogger(__name__)
@@ -14,8 +14,12 @@ _METER = None
 _JOB_DURATION = None
 _JOB_RESULT = None
 _JOB_RETRY = None
+_PROVIDER_DURATION = None
+_PROVIDER_RESULT = None
 _QUEUE_CACHE_LOCK = threading.Lock()
 _QUEUE_CACHE: tuple[float, dict] = (0.0, {})
+_RUNTIME_CACHE_LOCK = threading.Lock()
+_RUNTIME_CACHE: tuple[float, dict] = (0.0, {})
 
 _ALLOWED_JOB_TYPES = {
     "PLATFORM_COMMAND_JOB",
@@ -28,6 +32,8 @@ _ALLOWED_JOB_TYPES = {
     "WEBHOOK_DELIVERY",
     "BILLING_RECONCILIATION",
 }
+_ALLOWED_PROVIDERS = {"STRIPE", "ETIMS", "SMTP", "RESEND", "WEBHOOK", "PUSH", "AI", "STORAGE", "OTHER"}
+_ALLOWED_PROVIDER_OPERATIONS = {"SEND", "DELIVER", "VERIFY", "FISCALIZE", "FETCH", "STORE", "DELETE", "HEALTH", "OTHER"}
 _ALLOWED_DB_OPERATIONS = {"SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "CALL", "DDL", "OTHER"}
 
 
@@ -50,6 +56,16 @@ def _signal_endpoint(signal: str) -> str:
 def _bounded_job_type(value: object) -> str:
     text = str(value or "").strip().upper()
     return text if text in _ALLOWED_JOB_TYPES else "OTHER"
+
+
+def _bounded_provider(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text in _ALLOWED_PROVIDERS else "OTHER"
+
+
+def _bounded_provider_operation(value: object) -> str:
+    text = str(value or "").strip().upper()
+    return text if text in _ALLOWED_PROVIDER_OPERATIONS else "OTHER"
 
 
 def _db_operation(statement: object) -> str:
@@ -117,8 +133,95 @@ def _queue_snapshot() -> dict:
     return result
 
 
+def _runtime_snapshot() -> dict:
+    """Return bounded PostgreSQL and API SLO telemetry from one cached DB read.
+
+    No query text, actor, tenant or business-object identity is returned. PostgreSQL
+    catalog access is fail-open and skipped on SQLite/other dialects.
+    """
+
+    global _RUNTIME_CACHE
+    ttl = max(5.0, float(os.getenv("OTEL_RUNTIME_METRIC_CACHE_SEC", "10") or "10"))
+    now_mono = time.monotonic()
+    with _RUNTIME_CACHE_LOCK:
+        if now_mono - _RUNTIME_CACHE[0] <= ttl and _RUNTIME_CACHE[1]:
+            return _RUNTIME_CACHE[1]
+
+    result: dict = {"postgres": {}, "api": {}}
+    db = None
+    try:
+        from sqlalchemy import func, text
+        from amodb.database import ReadSessionLocal, close_session_safely
+        from amodb.apps.platform import models as platform_models
+
+        db = ReadSessionLocal()
+        now = datetime.now(timezone.utc)
+        for minutes, label in ((5, "5m"), (60, "1h")):
+            row = (
+                db.query(
+                    func.coalesce(func.sum(platform_models.PlatformRouteMetric1m.request_count), 0),
+                    func.coalesce(func.sum(platform_models.PlatformRouteMetric1m.server_error_count + platform_models.PlatformRouteMetric1m.timeout_count), 0),
+                    func.max(platform_models.PlatformRouteMetric1m.p95_latency_ms),
+                    func.max(platform_models.PlatformRouteMetric1m.p99_latency_ms),
+                )
+                .filter(platform_models.PlatformRouteMetric1m.bucket_start >= now - timedelta(minutes=minutes))
+                .one()
+            )
+            requests = int(row[0] or 0)
+            failures = int(row[1] or 0)
+            result["api"][label] = {
+                "request_rate_per_second": requests / float(minutes * 60),
+                "error_rate": 0.0 if requests <= 0 else failures / float(requests),
+                "p95_latency_ms": float(row[2] or 0.0),
+                "p99_latency_ms": float(row[3] or 0.0),
+            }
+
+        bind = getattr(db, "bind", None)
+        if bind is not None and getattr(bind.dialect, "name", "") == "postgresql":
+            long_query_seconds = max(1, min(3600, int(os.getenv("OTEL_DB_LONG_QUERY_SECONDS", "5") or "5")))
+            stats = db.execute(
+                text(
+                    """
+                    SELECT
+                      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database())::double precision AS active_connections,
+                      current_setting('max_connections')::double precision AS max_connections,
+                      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type IS NOT NULL)::double precision AS waiting_connections,
+                      (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock')::double precision AS lock_waiters,
+                      COALESCE((SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()), 0)::double precision AS deadlocks_total,
+                      COALESCE((SELECT xact_commit FROM pg_stat_database WHERE datname = current_database()), 0)::double precision AS commits_total,
+                      COALESCE((SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()), 0)::double precision AS rollbacks_total,
+                      pg_database_size(current_database())::double precision AS size_bytes,
+                      (SELECT count(*) FROM pg_stat_activity
+                         WHERE datname = current_database()
+                           AND state = 'active'
+                           AND query_start IS NOT NULL
+                           AND now() - query_start > make_interval(secs => :long_query_seconds))::double precision AS long_running_queries
+                    """
+                ),
+                {"long_query_seconds": long_query_seconds},
+            ).mappings().one()
+            result["postgres"].update({key: float(value or 0.0) for key, value in stats.items()})
+            lag = db.execute(
+                text("SELECT COALESCE(MAX(EXTRACT(EPOCH FROM replay_lag)), 0)::double precision AS replica_lag_seconds FROM pg_stat_replication")
+            ).mappings().one()
+            result["postgres"]["replica_lag_seconds"] = float(lag.get("replica_lag_seconds") or 0.0)
+    except Exception:
+        logger.debug("Unable to refresh bounded PostgreSQL/API telemetry", exc_info=True)
+    finally:
+        try:
+            if db is not None:
+                from amodb.database import close_session_safely
+                close_session_safely(db)
+        except Exception:
+            pass
+
+    with _RUNTIME_CACHE_LOCK:
+        _RUNTIME_CACHE = (now_mono, result)
+    return result
+
+
 def _configure_metrics(*, resource, endpoint: str, engines: tuple[object, ...]):
-    global _METER, _JOB_DURATION, _JOB_RESULT, _JOB_RETRY
+    global _METER, _JOB_DURATION, _JOB_RESULT, _JOB_RETRY, _PROVIDER_DURATION, _PROVIDER_RESULT
     if not endpoint:
         logger.warning("No OTLP metrics endpoint configured; trace export can continue without metrics.")
         return None
@@ -150,13 +253,13 @@ def _configure_metrics(*, resource, endpoint: str, engines: tuple[object, ...]):
             description="Process CPU utilisation.",
         )
         meter.create_observable_gauge(
-            "amo.process.memory.rss",
+            "amo.process.memory.rss.bytes",
             callbacks=[lambda _options: [Observation(float(process.memory_info().rss), {})]],
             unit="By",
             description="Process resident memory.",
         )
         meter.create_observable_gauge(
-            "amo.process.start_time",
+            "amo.process.start_time.seconds",
             callbacks=[lambda _options: [Observation(float(process.create_time()), {})]],
             unit="s",
             description="Process start time as Unix epoch seconds.",
@@ -201,13 +304,52 @@ def _configure_metrics(*, resource, endpoint: str, engines: tuple[object, ...]):
         meter.create_observable_gauge("amo.job.queue_oldest_age_seconds", callbacks=[queue_age], unit="s")
         meter.create_observable_gauge("amo.worker.last_seen_age_seconds", callbacks=[worker_age], unit="s")
 
-        _JOB_DURATION = meter.create_histogram("amo.job.duration", unit="s", description="Background job execution duration.")
-        _JOB_RESULT = meter.create_counter("amo.job.result", unit="{job}", description="Background job outcomes.")
-        _JOB_RETRY = meter.create_counter("amo.job.retry", unit="{retry}", description="Background job retry attempts.")
+        postgres_fields = {
+            "amo.db.active_connections": "active_connections",
+            "amo.db.max_connections": "max_connections",
+            "amo.db.waiting_connections": "waiting_connections",
+            "amo.db.lock_waiters": "lock_waiters",
+            "amo.db.size.bytes": "size_bytes",
+            "amo.db.replica_lag_seconds": "replica_lag_seconds",
+            "amo.db.long_running_queries": "long_running_queries",
+        }
+        for instrument_name, field in postgres_fields.items():
+            meter.create_observable_gauge(
+                instrument_name,
+                callbacks=[lambda _options, _field=field: [Observation(float(_runtime_snapshot().get("postgres", {}).get(_field, 0.0)), {})]],
+            )
+
+        postgres_counters = {
+            "amo.db.deadlocks.total": "deadlocks_total",
+            "amo.db.commits.total": "commits_total",
+            "amo.db.rollbacks.total": "rollbacks_total",
+        }
+        for instrument_name, field in postgres_counters.items():
+            meter.create_observable_counter(
+                instrument_name,
+                callbacks=[lambda _options, _field=field: [Observation(float(_runtime_snapshot().get("postgres", {}).get(_field, 0.0)), {})]],
+            )
+
+        def api_observations(field: str):
+            rows = []
+            for window, values in _runtime_snapshot().get("api", {}).items():
+                rows.append(Observation(float(values.get(field, 0.0)), {"window": window}))
+            return rows
+
+        meter.create_observable_gauge("amo.api.request_rate_per_second", callbacks=[lambda _options: api_observations("request_rate_per_second")])
+        meter.create_observable_gauge("amo.api.error_rate", callbacks=[lambda _options: api_observations("error_rate")])
+        meter.create_observable_gauge("amo.api.p95_latency_ms", callbacks=[lambda _options: api_observations("p95_latency_ms")], unit="ms")
+        meter.create_observable_gauge("amo.api.p99_latency_ms", callbacks=[lambda _options: api_observations("p99_latency_ms")], unit="ms")
+
+        _JOB_DURATION = meter.create_histogram("amo.job.duration.seconds", unit="s", description="Background job execution duration.")
+        _JOB_RESULT = meter.create_counter("amo.job.result.total", unit="{job}", description="Background job outcomes.")
+        _JOB_RETRY = meter.create_counter("amo.job.retry.total", unit="{retry}", description="Background job retry attempts.")
+        _PROVIDER_DURATION = meter.create_histogram("amo.provider.duration.seconds", unit="s", description="Bounded external provider operation latency.")
+        _PROVIDER_RESULT = meter.create_counter("amo.provider.result.total", unit="{operation}", description="Bounded external provider operation outcomes.")
 
         try:
             from sqlalchemy import event
-            db_histogram = meter.create_histogram("amo.db.query.duration", unit="ms", description="DB statement latency by bounded operation class.")
+            db_histogram = meter.create_histogram("amo.db.query.duration.ms", unit="ms", description="DB statement latency by bounded operation class.")
             for role, engine in unique_engines:
                 @event.listens_for(engine, "before_cursor_execute")
                 def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany, _role=role):
@@ -327,6 +469,22 @@ def record_job_execution(*, job_type: object, status: str, duration_seconds: flo
             _JOB_RETRY.add(int(retry_count), {"job.type": attrs["job.type"]})
     except Exception:
         logger.debug("Unable to record worker telemetry", exc_info=True)
+
+
+def record_provider_call(*, provider: object, operation: object, status: str, duration_seconds: float) -> None:
+    """Record a bounded external-provider outcome without provider payload data."""
+    try:
+        attrs = {
+            "provider": _bounded_provider(provider),
+            "operation": _bounded_provider_operation(operation),
+            "status": str(status or "UNKNOWN").strip().upper()[:32],
+        }
+        if _PROVIDER_DURATION is not None:
+            _PROVIDER_DURATION.record(max(0.0, float(duration_seconds)), attrs)
+        if _PROVIDER_RESULT is not None:
+            _PROVIDER_RESULT.add(1, attrs)
+    except Exception:
+        logger.debug("Unable to record provider telemetry", exc_info=True)
 
 
 @contextmanager
