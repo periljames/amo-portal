@@ -55,8 +55,12 @@ install_platform_metrics_lifecycle(router)
 # process. The isolated Ops gateway sets this flag false before importing the
 # Platform package so its failure domain and import graph remain independent.
 if (os.getenv("AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING") or "true").strip().lower() in {"1", "true", "yes", "on"}:
+    from amodb import storage as _storage  # noqa: E402
     from .storage_route_hardening import install_shared_storage_route_hardening  # noqa: E402
 
+    # Production can explicitly require replica-safe object storage. Validate at
+    # import/startup instead of discovering a missing bucket on the first upload.
+    _storage.validate_storage_configuration()
     install_shared_storage_route_hardening()
 
 __all__ = ["router"]
