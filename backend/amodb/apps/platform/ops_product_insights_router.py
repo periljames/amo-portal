@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -105,7 +105,8 @@ def product_insights(
     activity_rows = (
         db.query(
             ops_models.PlatformProductRollup.tenant_id,
-            func.max(ops_models.PlatformProductRollup.bucket_start),
+            func.max(case((ops_models.PlatformProductRollup.bucket_start >= current_start, 1), else_=0)).label("current_active"),
+            func.max(case((ops_models.PlatformProductRollup.bucket_start < current_start, 1), else_=0)).label("previous_active"),
         )
         .filter(
             ops_models.PlatformProductRollup.bucket_kind == "day",
@@ -113,31 +114,11 @@ def product_insights(
             ops_models.PlatformProductRollup.bucket_start >= previous_start,
         )
         .group_by(ops_models.PlatformProductRollup.tenant_id)
+        .limit(20000)
         .all()
     )
-    current: set[str] = set()
-    previous: set[str] = set()
-    for tenant_id, _last in activity_rows:
-        rows = (
-            db.query(ops_models.PlatformProductRollup.bucket_start)
-            .filter(
-                ops_models.PlatformProductRollup.bucket_kind == "day",
-                ops_models.PlatformProductRollup.tenant_id == tenant_id,
-                ops_models.PlatformProductRollup.bucket_start >= previous_start,
-            )
-            .distinct()
-            .limit(days * 2 + 5)
-            .all()
-        )
-        for (bucket_start,) in rows:
-            if bucket_start is None:
-                continue
-            if bucket_start.tzinfo is None:
-                bucket_start = bucket_start.replace(tzinfo=timezone.utc)
-            if bucket_start >= current_start:
-                current.add(str(tenant_id))
-            elif bucket_start >= previous_start:
-                previous.add(str(tenant_id))
+    current = {str(tenant_id) for tenant_id, current_active, _previous_active in activity_rows if int(current_active or 0) > 0}
+    previous = {str(tenant_id) for tenant_id, _current_active, previous_active in activity_rows if int(previous_active or 0) > 0}
 
     last_activity_rows = (
         db.query(
