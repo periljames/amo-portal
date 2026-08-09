@@ -1,0 +1,420 @@
+@import "./qms-operational-control-centre.css";
+
+.qms-assurance-room {
+  --qms-surface: var(--surface, #ffffff);
+  --qms-border: color-mix(in srgb, var(--border-color, #cbd5e1) 78%, transparent);
+  --qms-muted: var(--text-muted, #64748b);
+  --qms-text: var(--text-primary, #0f172a);
+  --qms-primary: var(--primary, #1d4ed8);
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #ffffff);
+  min-height: calc(100vh - 132px);
+}
+
+.qms-assurance-room__header,
+.qms-assurance-room__summary,
+.qms-assurance-room__control-health,
+.qms-assurance-room__governance-note,
+.qms-assurance-room__diagnostics,
+.qms-assurance-room__loading,
+.qms-assurance-room__alert {
+  background: var(--qms-surface);
+  border: 1px solid var(--qms-border);
+  border-radius: 10px;
+}
+
+.qms-assurance-room__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 16px;
+}
+
+.qms-assurance-room__header > div:first-child {
+  min-width: 0;
+}
+
+.qms-assurance-room__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--qms-primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.qms-assurance-room__header h1 {
+  margin: 3px 0 1px;
+  color: var(--qms-text);
+  font-size: clamp(22px, 2vw, 30px);
+  line-height: 1.05;
+}
+
+.qms-assurance-room__header p {
+  margin: 0;
+  max-width: 850px;
+  color: var(--qms-muted);
+  font-size: 12px;
+}
+
+.qms-assurance-room__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qms-assurance-room__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--qms-border);
+  border-radius: 8px;
+}
+
+.qms-assurance-room__source > span {
+  display: grid;
+  gap: 1px;
+}
+
+.qms-assurance-room__source strong,
+.qms-assurance-room__source small {
+  line-height: 1.05;
+}
+
+.qms-assurance-room__source strong {
+  font-size: 11px;
+}
+
+.qms-assurance-room__source small {
+  color: var(--qms-muted);
+  font-size: 9px;
+}
+
+.qms-source--healthy { color: #166534; }
+.qms-source--partial { color: #a16207; }
+.qms-source--unavailable { color: #b91c1c; }
+
+.qms-assurance-room__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 11px;
+  color: var(--qms-text);
+  background: var(--qms-surface);
+  border: 1px solid var(--qms-border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.qms-assurance-room__button.is-primary {
+  color: #ffffff;
+  background: var(--qms-primary);
+  border-color: var(--qms-primary);
+}
+
+.qms-assurance-room__button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.qms-assurance-room__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.qms-assurance-room__summary > a,
+.qms-assurance-room__summary > article {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-height: 92px;
+  padding: 12px 14px;
+  color: var(--qms-text);
+  text-decoration: none;
+  border-right: 1px solid var(--qms-border);
+}
+
+.qms-assurance-room__summary > :last-child {
+  border-right: 0;
+}
+
+.qms-assurance-room__summary span,
+.qms-assurance-room__control-health article span {
+  color: var(--qms-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.qms-assurance-room__summary strong {
+  font-size: 25px;
+  line-height: 1;
+}
+
+.qms-assurance-room__summary small,
+.qms-assurance-room__control-health article small {
+  color: var(--qms-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.qms-assurance-room__summary .is-attention,
+.qms-assurance-room__control-health .is-attention {
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
+.qms-assurance-room__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 0;
+}
+
+.qms-assurance-room__section-heading > div,
+.qms-assurance-room__control-health header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qms-assurance-room__section-heading span,
+.qms-assurance-room__control-health header span {
+  display: grid;
+  gap: 1px;
+}
+
+.qms-assurance-room__section-heading strong,
+.qms-assurance-room__control-health header strong {
+  font-size: 12px;
+}
+
+.qms-assurance-room__section-heading small,
+.qms-assurance-room__control-health header small {
+  color: var(--qms-muted);
+  font-size: 10px;
+}
+
+.qms-assurance-room__primary-grid,
+.qms-assurance-room__secondary-grid {
+  display: grid;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.qms-assurance-room__primary-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+}
+
+.qms-assurance-room__secondary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qms-assurance-room .qms-overview-section {
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.qms-assurance-room .qms-overview-section__header {
+  padding: 10px 12px;
+}
+
+.qms-assurance-room .qms-action-table__row,
+.qms-assurance-room .qms-action-table__head {
+  grid-template-columns: minmax(210px, 1.4fr) 70px 90px 140px minmax(180px, 1fr);
+}
+
+.qms-assurance-room__control-health {
+  overflow: hidden;
+}
+
+.qms-assurance-room__control-health > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-assurance-room__control-health > header a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--qms-primary);
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.qms-assurance-room__control-health > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.qms-assurance-room__control-health article {
+  display: grid;
+  gap: 4px;
+  min-height: 84px;
+  padding: 11px 12px;
+  border-right: 1px solid var(--qms-border);
+}
+
+.qms-assurance-room__control-health article:last-child {
+  border-right: 0;
+}
+
+.qms-assurance-room__control-health article strong {
+  font-size: 15px;
+}
+
+.qms-assurance-room__quiet,
+.qms-assurance-room__governance-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  color: var(--qms-text);
+  font-size: 10px;
+}
+
+.qms-assurance-room__governance-note > div {
+  display: grid;
+  gap: 2px;
+}
+
+.qms-assurance-room__governance-note span {
+  color: var(--qms-muted);
+}
+
+.qms-assurance-room__diagnostics {
+  padding: 0;
+  overflow: hidden;
+}
+
+.qms-assurance-room__diagnostics > summary {
+  padding: 9px 12px;
+  color: var(--qms-muted);
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.qms-assurance-room__diagnostics > :not(summary) {
+  border-top: 1px solid var(--qms-border);
+}
+
+.qms-assurance-room__loading,
+.qms-assurance-room__alert {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px;
+  font-size: 11px;
+}
+
+.qms-assurance-room__alert {
+  color: #991b1b;
+}
+
+.qms-assurance-room__alert > div {
+  flex: 1;
+}
+
+.qms-assurance-room__alert p {
+  margin: 2px 0 0;
+  color: var(--qms-muted);
+}
+
+.qms-assurance-room__alert button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .qms-assurance-room__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qms-assurance-room__header-actions {
+    justify-content: flex-start;
+  }
+
+  .qms-assurance-room__primary-grid,
+  .qms-assurance-room__secondary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-assurance-room__summary,
+  .qms-assurance-room__control-health > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qms-assurance-room__summary > :nth-child(2),
+  .qms-assurance-room__control-health article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .qms-assurance-room__summary > :nth-child(-n + 2),
+  .qms-assurance-room__control-health article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--qms-border);
+  }
+}
+
+@media (max-width: 720px) {
+  .qms-assurance-room {
+    padding: 7px;
+  }
+
+  .qms-assurance-room__summary,
+  .qms-assurance-room__control-health > div {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-assurance-room__summary > a,
+  .qms-assurance-room__summary > article,
+  .qms-assurance-room__control-health article {
+    border-right: 0;
+    border-bottom: 1px solid var(--qms-border);
+  }
+
+  .qms-assurance-room__summary > :last-child,
+  .qms-assurance-room__control-health article:last-child {
+    border-bottom: 0;
+  }
+
+  .qms-assurance-room .qms-action-table {
+    overflow-x: auto;
+  }
+
+  .qms-assurance-room .qms-action-table__row,
+  .qms-assurance-room .qms-action-table__head {
+    min-width: 760px;
+  }
+}

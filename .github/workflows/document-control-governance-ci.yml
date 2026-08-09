@@ -118,7 +118,7 @@ jobs:
           script = ScriptDirectory.from_config(config)
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["docgov_rel_20260807_merge"], heads
+          assert len(heads) == 1, f"Expected one repository Alembic head, got {heads}"
           ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
           required = {
               "docgov_20260806_governance",
@@ -129,6 +129,7 @@ jobs:
               "docgov_merge_20260807_qms",
               "docgov_20260807_qms_audit_runtime",
               "rel_20260807_main_merge",
+              "docgov_rel_20260807_merge",
           }
           missing = required - ancestry
           assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
