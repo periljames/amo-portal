@@ -55,7 +55,7 @@ jobs:
           from alembic.config import Config
           from alembic.script import ScriptDirectory
           heads = ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads()
-          assert heads == ["quality_260809_effect_response"], heads
+          assert heads == ["quality_260809_checklist_exec"], heads
           print("single Alembic head:", heads[0])
           PY
       - name: Run Assurance OS completion contracts
