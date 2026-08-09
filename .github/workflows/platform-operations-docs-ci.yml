@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "docs/platform/**"
+      - "docs/DEPLOY_RUNBOOK.md"
       - "backend/amodb/apps/platform/ops_api_router.py"
       - "backend/amodb/apps/platform/ops_logic.py"
       - "backend/amodb/apps/platform/ops_management_router.py"
@@ -12,13 +13,17 @@ on:
       - "backend/amodb/apps/platform/ops_slo_router.py"
       - "backend/amodb/apps/platform/ops_capacity_router.py"
       - "backend/amodb/apps/platform/product_analytics.py"
+      - "backend/amodb/apps/platform/change_markers.py"
+      - "backend/scripts/record_platform_deployment.py"
       - "backend/amodb/database.py"
       - "backend/amodb/storage.py"
+      - "scripts/deploy.sh"
       - ".github/workflows/platform-operations-docs-ci.yml"
   push:
     branches: [main]
     paths:
       - "docs/platform/**"
+      - "docs/DEPLOY_RUNBOOK.md"
       - "backend/amodb/apps/platform/ops_api_router.py"
       - "backend/amodb/apps/platform/ops_logic.py"
       - "backend/amodb/apps/platform/ops_management_router.py"
@@ -27,8 +32,11 @@ on:
       - "backend/amodb/apps/platform/ops_slo_router.py"
       - "backend/amodb/apps/platform/ops_capacity_router.py"
       - "backend/amodb/apps/platform/product_analytics.py"
+      - "backend/amodb/apps/platform/change_markers.py"
+      - "backend/scripts/record_platform_deployment.py"
       - "backend/amodb/database.py"
       - "backend/amodb/storage.py"
+      - "scripts/deploy.sh"
       - ".github/workflows/platform-operations-docs-ci.yml"
 
 permissions:
@@ -113,4 +121,24 @@ jobs:
               assert token in database and token in docs, token
           for token in ('AMO_STORAGE_BACKEND', 'AMO_REQUIRE_SHARED_STORAGE', 'AMO_STORAGE_S3_BUCKET'):
               assert token in storage and token in docs, token
+          PY
+
+      - name: Prove successful deploys emit non-blocking Platform deployment markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          deploy = Path('scripts/deploy.sh').read_text(encoding='utf-8')
+          cli = Path('backend/scripts/record_platform_deployment.py').read_text(encoding='utf-8')
+          service = Path('backend/amodb/apps/platform/change_markers.py').read_text(encoding='utf-8')
+          runbook = Path('docs/DEPLOY_RUNBOOK.md').read_text(encoding='utf-8')
+
+          health = deploy.index('curl -fsS http://127.0.0.1:8080/healthz')
+          marker = deploy.index('record_platform_deployment.py')
+          assert health < marker, 'deployment marker must be written only after tenant health validation'
+          assert 'PLATFORM_DEPLOYMENT_REFERENCE' in deploy
+          assert 'WARNING: deployment succeeded but the Platform deployment marker could not be recorded' in deploy
+          assert 'record_deployment_marker' in cli
+          assert 'PlatformChangeMarker.kind == "DEPLOYMENT"' in service
+          assert 'PlatformChangeMarker.actor_user_id.is_(None)' in service
+          assert 'best effort' in runbook.lower()
           PY
