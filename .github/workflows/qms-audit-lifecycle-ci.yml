@@ -1,0 +1,69 @@
+name: Audit lifecycle Playwright
+
+on:
+  pull_request:
+    paths:
+      - "frontend/src/pages/QualityAudit*.tsx"
+      - "frontend/src/pages/qualityAudits/**"
+      - "frontend/src/pages/qms/**"
+      - "frontend/src/components/QMS/**"
+      - "frontend/src/services/qms*.ts"
+      - "frontend/src/styles/qms*.css"
+      - "frontend/tests/e2e/qms-*.spec.ts"
+      - "frontend/src/router.tsx"
+      - "frontend/src/portalRoutes.tsx"
+      - ".github/workflows/qms-audit-lifecycle-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-audit-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-lifecycle-playwright:
+    name: Audit lifecycle Playwright — governed acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start QMS preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-audit-lifecycle-preview.log 2>&1 &
+          echo $! > /tmp/qms-audit-lifecycle-preview.pid
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-audit-lifecycle-preview.log
+          exit 1
+      - name: Audit lifecycle Playwright — 18-scenario acceptance
+        run: >-
+          npx playwright test
+          tests/e2e/qms-audit-programme.spec.ts
+          tests/e2e/qms-modern-planner-live.spec.ts
+          tests/e2e/qms-planner-lifecycle.spec.ts
+          tests/e2e/qms-planner-audit-handoff.spec.ts
+          tests/e2e/qms-usability-enhancements.spec.ts
+          tests/e2e/qms-audit-governed-lifecycle.spec.ts
+          --workers=1
