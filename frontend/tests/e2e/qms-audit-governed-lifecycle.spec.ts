@@ -351,7 +351,7 @@ test.describe("governed audit lifecycle", () => {
     await panel.getByRole("button", { name: "ISSUE" }).click();
     await expect(panel).toContainText("Rev 1 · ISSUED");
 
-    await panel.getByRole("button", { name: "Closeout" }).click();
+    await panel.getByRole("button", { name: "Closeout", exact: true }).click();
     await expect(panel).toContainText("Execution close evidence is ready.");
     await panel.getByRole("button", { name: "Record execution closed" }).click();
     await expect(panel).toContainText("CLOSED");
