@@ -10,6 +10,7 @@ import {
   Link2,
   RefreshCw,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Target,
 } from "lucide-react";
@@ -27,8 +28,10 @@ import DocumentControlShell, {
   DocumentControlLoading,
   DocumentControlStatus,
 } from "./DocumentControlShell";
+import ExternalRevisionAssessmentPanel from "./ExternalRevisionAssessmentPanel";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./dmsCompliancePortfolio.css";
+import "./dmsExternalAssessment.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
 
@@ -67,7 +70,7 @@ function detailCells(item: CompliancePortfolioItem) {
   </>;
   if (item.kind === "EXTERNAL_SOURCE") return <>
     <td><strong>{item.provider}</strong><small>{item.authority || item.update_method || "External provider"}</small></td>
-    <td><DocumentControlStatus status={item.status} kind={statusKind(item.status)} /><small>{item.received_revision ? `Received ${item.received_revision}` : "No received revision recorded"}</small></td>
+    <td><DocumentControlStatus status={item.status} kind={statusKind(item.status)} /><small>{item.received_revision ? `Received ${item.received_revision}` : "No received revision recorded"}{item.applicability_status ? ` · ${item.applicability_status.replaceAll("_", " ")}` : ""}</small></td>
     <td><strong>{formatDate(item.next_check_due_at)}</strong><small>{item.last_checked_at ? `Last checked ${formatDate(item.last_checked_at)}` : "Not checked"}</small></td>
   </>;
   if (item.kind === "RELATIONSHIP") return <>
@@ -103,6 +106,7 @@ export default function DocumentControlCompliancePortfolioPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [assessmentSourceId, setAssessmentSourceId] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
   const view = normalizedView(params);
   const page = Math.max(1, Number(params.get("page") || 1));
@@ -190,7 +194,7 @@ export default function DocumentControlCompliancePortfolioPage() {
 
       {!loading && data?.items.length ? <div className="dc-table-wrap dms-compliance__table-wrap"><table className="dc-table dms-compliance__table">
         <thead><tr><th>Document</th><th>{view === "reviews" ? "Owner / outcome" : view === "external-sources" ? "Source" : view === "applicability" ? "Rule / target" : view === "superseded-references" ? "Referenced document" : "Relationship"}</th><th>Status</th><th>{view === "reviews" ? "Due" : view === "external-sources" ? "Currency check" : view === "applicability" ? "Effectivity" : "Location"}</th><th>Action</th></tr></thead>
-        <tbody>{data.items.map((item) => <tr key={`${item.kind}:${item.id}`}><td>{documentCell(item)}</td>{detailCells(item)}<td><button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>Open context <ArrowRight size={14} /></button></td></tr>)}</tbody>
+        <tbody>{data.items.map((item) => <tr key={`${item.kind}:${item.id}`}><td>{documentCell(item)}</td>{detailCells(item)}<td>{item.kind === "EXTERNAL_SOURCE" ? <div className="dms-compliance__row-actions"><button type="button" className={`dc-button ${item.status === "ASSESSMENT_REQUIRED" ? "dc-button--primary" : ""}`} onClick={() => setAssessmentSourceId(item.id)}>{item.status === "ASSESSMENT_REQUIRED" ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />}{item.status === "ASSESSMENT_REQUIRED" ? "Assess revision" : "Review source"}</button><button type="button" className="dc-button" onClick={() => navigate(item.target_path)}>Document <ArrowRight size={14} /></button></div> : <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>Open context <ArrowRight size={14} /></button>}</td></tr>)}</tbody>
       </table></div> : null}
 
       {data ? <footer className="dms-compliance__pagination">
@@ -201,5 +205,6 @@ export default function DocumentControlCompliancePortfolioPage() {
         <button type="button" disabled={data.pagination.page >= totalPages || refreshing} onClick={() => update("page", String(data.pagination.page + 1))}>Next <ChevronRight size={14} /></button>
       </footer> : null}
     </section>
+    {assessmentSourceId ? <ExternalRevisionAssessmentPanel sourceId={assessmentSourceId} onClose={() => setAssessmentSourceId(null)} onChanged={() => void load()} /> : null}
   </DocumentControlShell>;
 }
