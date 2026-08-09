@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  UserRound,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -31,6 +32,7 @@ import "./dmsChangesPortfolio.css";
 const SEARCH_DEBOUNCE_MS = 320;
 
 const VIEWS: Array<{ id: ChangesPortfolioView; label: string; icon: typeof FileDiff }> = [
+  { id: "my-changes", label: "My Changes", icon: UserRound },
   { id: "requests", label: "Requests", icon: ClipboardList },
   { id: "draft", label: "Draft", icon: FileDiff },
   { id: "in-review", label: "In Review", icon: FileDiff },
@@ -69,7 +71,8 @@ export default function DocumentControlChangesPortfolioPage() {
   const [error, setError] = useState("");
   const hasLoadedRef = useRef(false);
 
-  const view = (params.get("view") as ChangesPortfolioView) || "in-review";
+  const requestedView = params.get("view") as ChangesPortfolioView | null;
+  const view: ChangesPortfolioView = VIEWS.some((candidate) => candidate.id === requestedView) ? requestedView as ChangesPortfolioView : "my-changes";
   const page = Math.max(1, Number(params.get("page") || 1));
   const perPage = Math.min(100, Math.max(25, Number(params.get("per_page") || 50)));
 
@@ -114,13 +117,14 @@ export default function DocumentControlChangesPortfolioPage() {
 
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
+    if (key === "view") next.delete("status");
     if (value) next.set(key, value); else next.delete(key);
     if (key !== "page") next.set("page", "1");
     setParams(next);
   };
 
   const totalPages = data ? Math.max(1, Math.ceil(data.pagination.total / data.pagination.per_page)) : 1;
-  const viewMeta = useMemo(() => VIEWS.find((item) => item.id === view) || VIEWS[2], [view]);
+  const viewMeta = useMemo(() => VIEWS.find((item) => item.id === view) || VIEWS[0], [view]);
 
   return <DocumentControlShell
     title="Changes"
