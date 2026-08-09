@@ -31,6 +31,40 @@ export type QmsIntelligenceOverview = {
   method: { type: string; statement: string };
 };
 
+export type QmsRiskPlanningFactor = {
+  code: string;
+  label: string;
+  value: unknown;
+  source: string;
+  hard_requirement: boolean;
+  rationale: string;
+};
+
+export type QmsRiskPlanningContext = {
+  as_of: string;
+  items: Array<{
+    universe_item_id: string;
+    label: string;
+    entity_type: string;
+    source_owner_module: string;
+    source_type: string;
+    source_id: string;
+    source_route?: string | null;
+    mandatory_surveillance: boolean;
+    risk_classification: string;
+    regulatory_criticality: string;
+    programme_states: string[];
+    planning_order: number;
+    factors: QmsRiskPlanningFactor[];
+    method: string;
+  }>;
+  global_factors: QmsRiskPlanningFactor[];
+  authoritative_metrics: Record<string, number>;
+  reliability: Record<string, number>;
+  source_warnings: Array<{ source: string; message: string; type: string }>;
+  method: { type: string; statement: string };
+};
+
 export type QmsSignalRule = {
   id: string;
   rule_code: string;
@@ -92,6 +126,10 @@ function jsonOptions(method: string, body?: unknown): RequestInit {
 
 export function getQmsIntelligenceOverview(amoCode: string, signal?: AbortSignal): Promise<QmsIntelligenceOverview> {
   return apiRequest<QmsIntelligenceOverview>(qmsPath(amoCode, "/intelligence/overview"), { timeoutMs: 20_000, cacheTtlMs: 5_000, signal });
+}
+
+export function getQmsAuditRiskPlanningContext(amoCode: string, signal?: AbortSignal): Promise<QmsRiskPlanningContext> {
+  return apiRequest<QmsRiskPlanningContext>(qmsPath(amoCode, "/audit-programmes/risk-context?limit=100"), { timeoutMs: 20_000, cacheTtlMs: 5_000, signal });
 }
 
 export function listQmsSignalRules(amoCode: string, signal?: AbortSignal): Promise<{ items: QmsSignalRule[] }> {
