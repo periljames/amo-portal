@@ -70,4 +70,5 @@ jobs:
           tests/e2e/qms-usability-enhancements.spec.ts
           tests/e2e/qms-audit-governed-lifecycle.spec.ts
           tests/e2e/qms-checklist-execution-governance.spec.ts
+          tests/e2e/qms-audit-lifecycle-traceability.spec.ts
           --workers=1
