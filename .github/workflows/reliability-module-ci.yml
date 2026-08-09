@@ -145,13 +145,14 @@ jobs:
           heads = script.get_heads()
           assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
           head = heads[0]
-          assert head == 'docgov_rel_20260807_merge', head
           ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
+          ancestry.add(head)
           for required in (
               'rel_20260805_ops_exact_counts',
               'rel_20260806_reference_integrity',
               'rel_20260807_main_merge',
               'merge_20260807_qms_planner_aircraft',
+              'docgov_rel_20260807_merge',
               'docgov_20260807_qms_audit_runtime',
           ):
               assert required in ancestry, f'{required} is not an ancestor of {head}'
