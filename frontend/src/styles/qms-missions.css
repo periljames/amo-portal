@@ -1,20 +1,29 @@
 .qms-missions,
 .qms-mission-detail {
   --qms-surface: var(--surface, #fff);
-  --qms-border: color-mix(in srgb, var(--border-color, #cbd5e1) 78%, transparent);
-  --qms-text: var(--text-primary, #0f172a);
-  --qms-muted: var(--text-muted, #64748b);
+  --qms-surface-soft: var(--surface-secondary, #f7f9fc);
+  --qms-border: color-mix(in srgb, var(--border-color, #cbd5e1) 82%, transparent);
+  --qms-text: var(--text-primary, #172033);
+  --qms-muted: var(--text-muted, #667085);
   --qms-primary: var(--primary, #1d4ed8);
+  --qms-danger: #b42318;
+  --qms-warning: #a15c00;
+  --qms-success: #137333;
+  box-sizing: border-box;
+  width: min(100%, 1680px);
   min-height: calc(100vh - 132px);
-  padding: 10px;
+  margin: 0 auto;
+  padding: 20px;
+  color: var(--qms-text);
   background: color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #fff);
+  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 
-.qms-missions {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
+.qms-missions { display: grid; align-content: start; gap: 16px; }
+.qms-mission-detail { display: grid; align-content: start; gap: 16px; }
+
+.qms-missions *,
+.qms-mission-detail * { box-sizing: border-box; }
 
 .qms-missions__header,
 .qms-missions__create,
@@ -26,58 +35,63 @@
 .qms-mission-detail__lower-grid > section {
   background: var(--qms-surface);
   border: 1px solid var(--qms-border);
-  border-radius: 10px;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
 }
 
 .qms-missions__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
+  gap: 24px;
+  padding: 22px 24px;
 }
 
-.qms-missions__header > div:first-child > span {
+.qms-missions__header > div:first-child { min-width: 0; }
+.qms-missions__header > div:first-child > span,
+.qms-mission-detail__title > div:first-child > span {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   color: var(--qms-primary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
-  letter-spacing: .06em;
+  letter-spacing: .055em;
   text-transform: uppercase;
 }
 
 .qms-missions__header h1,
 .qms-mission-detail__title h1 {
-  margin: 3px 0;
+  margin: 6px 0 5px;
   color: var(--qms-text);
-  font-size: clamp(24px, 2vw, 31px);
-  line-height: 1.05;
+  font-size: clamp(28px, 2.25vw, 34px);
+  font-weight: 750;
+  line-height: 1.08;
+  letter-spacing: -.02em;
 }
 
 .qms-missions__header p,
 .qms-mission-detail__title p {
   margin: 0;
-  max-width: 820px;
+  max-width: 840px;
   color: var(--qms-muted);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
-.qms-missions__header > div:last-child {
+.qms-missions__header > div:last-child,
+.qms-mission-detail__badges {
   display: flex;
-  gap: 7px;
+  gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .qms-missions button,
 .qms-mission-detail button,
 .qms-missions select,
 .qms-missions input,
-.qms-missions textarea {
-  font: inherit;
-}
+.qms-missions textarea { font: inherit; }
 
 .qms-missions__header button,
 .qms-missions__create button,
@@ -86,16 +100,21 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 10px;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 13px;
   color: var(--qms-text);
   background: var(--qms-surface);
   border: 1px solid var(--qms-border);
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 750;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
+}
+
+.qms-missions button:hover:not(:disabled),
+.qms-mission-detail button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--qms-primary) 60%, var(--qms-border));
 }
 
 .qms-missions button.is-primary,
@@ -105,13 +124,20 @@
   background: var(--qms-primary);
 }
 
-.qms-missions button:disabled {
-  opacity: .55;
-  cursor: wait;
-}
+.qms-missions button:disabled { opacity: .55; cursor: wait; }
 
+/* Creation is a secondary workflow, not the landing-page hero. */
 .qms-missions__create {
-  padding: 12px 14px;
+  position: fixed;
+  z-index: 1300;
+  top: max(24px, env(safe-area-inset-top));
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: min(620px, calc(100vw - 48px));
+  padding: 0;
+  overflow: auto;
+  box-shadow: 0 26px 80px rgba(15, 23, 42, .28), 0 0 0 100vmax rgba(15, 23, 42, .30);
+  clip-path: inset(-100vmax 0 -100vmax -100vmax);
 }
 
 .qms-missions__create > header,
@@ -123,14 +149,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
-.qms-missions__create > header > div,
-.qms-missions__portfolio > header > div,
-.qms-mission-detail__gates > header > div,
-.qms-mission-detail__lower-grid section > header {
-  min-width: 0;
+.qms-missions__create > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 20px 22px;
+  background: var(--qms-surface);
+  border-bottom: 1px solid var(--qms-border);
+}
+
+.qms-missions__create > footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 16px 22px;
+  background: color-mix(in srgb, var(--qms-surface) 94%, var(--qms-surface-soft));
+  border-top: 1px solid var(--qms-border);
 }
 
 .qms-missions__create header strong,
@@ -139,7 +176,8 @@
 .qms-mission-detail__lower-grid header strong {
   display: block;
   color: var(--qms-text);
-  font-size: 11px;
+  font-size: 16px;
+  line-height: 1.25;
 }
 
 .qms-missions__create header small,
@@ -147,59 +185,51 @@
 .qms-mission-detail__gates header small,
 .qms-mission-detail__lower-grid header small,
 .qms-missions__create footer small {
+  display: block;
+  margin-top: 3px;
   color: var(--qms-muted);
-  font-size: 9px;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .qms-missions__create > div {
   display: grid;
-  grid-template-columns: 1.4fr 1.4fr .8fr .7fr;
-  gap: 9px;
-  margin: 12px 0;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 22px;
 }
 
 .qms-missions__create label,
-.qms-missions__portfolio label {
-  display: grid;
-  gap: 4px;
-}
+.qms-missions__portfolio label { display: grid; gap: 7px; }
 
 .qms-missions__create label > span,
 .qms-missions__portfolio label > span {
   color: var(--qms-muted);
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: .05em;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .035em;
   text-transform: uppercase;
 }
 
-.qms-missions__create label.is-wide {
-  grid-column: 1 / -1;
-}
+.qms-missions__create label.is-wide { grid-column: 1 / -1; }
 
 .qms-missions__create input,
 .qms-missions__create select,
 .qms-missions__create textarea,
 .qms-missions__portfolio select {
   width: 100%;
-  min-height: 34px;
-  padding: 7px 9px;
+  min-height: 42px;
+  padding: 9px 11px;
   color: var(--qms-text);
   background: var(--qms-surface);
   border: 1px solid var(--qms-border);
-  border-radius: 7px;
-  font-size: 10px;
+  border-radius: 9px;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
-.qms-missions__create textarea {
-  resize: vertical;
-}
-
-.qms-missions__create-error {
-  margin: 0 0 8px;
-  color: #b91c1c;
-  font-size: 10px;
-}
+.qms-missions__create textarea { min-height: 104px; resize: vertical; }
+.qms-missions__create-error { margin: 0 22px 12px; color: var(--qms-danger); font-size: 13px; }
 
 .qms-missions__metrics,
 .qms-mission-detail__summary {
@@ -211,70 +241,54 @@
 .qms-missions__metrics article,
 .qms-mission-detail__summary article {
   display: grid;
-  gap: 3px;
-  min-height: 78px;
-  padding: 11px 13px;
+  align-content: start;
+  gap: 6px;
+  min-height: 106px;
+  padding: 18px 20px;
   border-right: 1px solid var(--qms-border);
 }
 
 .qms-missions__metrics article:last-child,
-.qms-mission-detail__summary article:last-child {
-  border-right: 0;
-}
-
-.qms-missions__metrics article.is-attention {
-  box-shadow: inset 3px 0 0 #b91c1c;
-}
+.qms-mission-detail__summary article:last-child { border-right: 0; }
+.qms-missions__metrics article.is-attention { box-shadow: inset 4px 0 0 var(--qms-danger); }
 
 .qms-missions__metrics span,
 .qms-mission-detail__summary span {
   color: var(--qms-muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
-  letter-spacing: .05em;
+  letter-spacing: .04em;
   text-transform: uppercase;
 }
 
 .qms-missions__metrics strong,
 .qms-mission-detail__summary strong {
   color: var(--qms-text);
-  font-size: 20px;
-  line-height: 1.1;
+  font-size: 26px;
+  font-weight: 750;
+  line-height: 1.08;
 }
 
 .qms-missions__metrics small,
 .qms-mission-detail__summary small {
   color: var(--qms-muted);
-  font-size: 9px;
-  line-height: 1.35;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
-.qms-missions__portfolio {
-  overflow: hidden;
-}
-
+.qms-missions__portfolio { overflow: hidden; }
 .qms-missions__portfolio > header,
-.qms-missions__portfolio > footer {
-  padding: 10px 12px;
-}
-
-.qms-missions__portfolio > header {
-  border-bottom: 1px solid var(--qms-border);
-}
-
-.qms-missions__portfolio > footer {
-  color: var(--qms-muted);
-  border-top: 1px solid var(--qms-border);
-  font-size: 9px;
-}
+.qms-missions__portfolio > footer { padding: 15px 18px; }
+.qms-missions__portfolio > header { border-bottom: 1px solid var(--qms-border); }
+.qms-missions__portfolio > footer { color: var(--qms-muted); border-top: 1px solid var(--qms-border); font-size: 12px; }
 
 .qms-missions__row {
   display: grid;
-  grid-template-columns: 180px minmax(260px, 1.5fr) 170px 90px 150px 24px;
+  grid-template-columns: 170px minmax(280px, 1.6fr) 170px 110px 180px 28px;
   align-items: center;
-  gap: 9px;
+  gap: 14px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 14px 18px;
   color: var(--qms-text);
   text-align: left;
   background: var(--qms-surface);
@@ -282,349 +296,155 @@
   border-bottom: 1px solid var(--qms-border);
 }
 
-button.qms-missions__row {
-  cursor: pointer;
-}
-
+button.qms-missions__row { cursor: pointer; }
 button.qms-missions__row:hover,
-button.qms-missions__row:focus-visible {
-  background: color-mix(in srgb, var(--qms-primary) 4%, var(--qms-surface));
-}
+button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qms-primary) 4%, var(--qms-surface)); }
 
 .qms-missions__row-head {
-  min-height: 30px;
-  padding-top: 7px;
-  padding-bottom: 7px;
+  min-height: 38px;
+  padding-top: 9px;
+  padding-bottom: 9px;
   color: var(--qms-muted);
-  font-size: 8px;
+  background: var(--qms-surface-soft);
+  font-size: 11.5px;
   font-weight: 800;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
 
-.qms-missions__row > span:not(.qms-missions__tone) {
-  min-width: 0;
-}
-
+.qms-missions__row > span:not(.qms-missions__tone) { min-width: 0; }
 .qms-missions__row strong,
-.qms-missions__row small {
-  display: block;
-}
-
-.qms-missions__row strong {
-  overflow: hidden;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qms-missions__row small {
-  margin-top: 2px;
-  overflow: hidden;
-  color: var(--qms-muted);
-  font-size: 8.5px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qms-missions__row-ref strong {
-  color: var(--qms-primary);
-}
+.qms-missions__row small { display: block; }
+.qms-missions__row strong { overflow: hidden; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.qms-missions__row small { margin-top: 3px; overflow: hidden; color: var(--qms-muted); font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.qms-missions__row-ref strong { color: var(--qms-primary); }
 
 .qms-missions__tone,
 .qms-mission-detail__badges span {
   justify-self: start;
-  padding: 4px 7px;
+  padding: 5px 9px;
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 11.5px;
   font-weight: 800;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .qms-missions__tone.is-danger,
-.qms-mission-detail__badges .is-danger {
-  color: #991b1b;
-  background: #fee2e2;
-}
-
+.qms-mission-detail__badges .is-danger { color: #991b1b; background: #fee2e2; }
 .qms-missions__tone.is-warning,
-.qms-mission-detail__badges .is-warning {
-  color: #92400e;
-  background: #fef3c7;
-}
-
+.qms-mission-detail__badges .is-warning { color: #92400e; background: #fef3c7; }
 .qms-missions__tone.is-positive,
-.qms-mission-detail__badges .is-positive {
-  color: #166534;
-  background: #dcfce7;
-}
+.qms-mission-detail__badges .is-positive { color: #166534; background: #dcfce7; }
 
 .qms-missions__state {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 70px;
-  padding: 14px;
-  color: var(--qms-muted);
-  font-size: 10px;
-}
-
-.qms-missions__state.is-error {
-  color: #991b1b;
-}
-
-.qms-mission-detail {
-  display: grid;
-  align-content: start;
   gap: 10px;
+  min-height: 96px;
+  padding: 20px;
+  color: var(--qms-muted);
+  font-size: 14px;
 }
+.qms-missions__state.is-error { color: #991b1b; }
 
-.qms-mission-detail__header {
-  padding: 12px 14px 14px;
-}
+.qms-mission-detail__header { padding: 18px 20px 22px; }
+.qms-mission-detail__back { min-height: 36px !important; margin-bottom: 12px; padding: 0 10px !important; }
+.qms-mission-detail__title { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.qms-mission-detail__badges > span:first-child { color: #1e3a8a; background: #dbeafe; }
 
-.qms-mission-detail__back {
-  min-height: 28px !important;
-  margin-bottom: 8px;
-  padding: 0 7px !important;
-}
-
-.qms-mission-detail__title {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.qms-mission-detail__title > div:first-child > span {
-  color: var(--qms-primary);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.qms-mission-detail__badges {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.qms-mission-detail__badges > span:first-child {
-  color: #1e3a8a;
-  background: #dbeafe;
-}
-
-.qms-mission-detail__gates {
-  overflow: hidden;
-}
-
-.qms-mission-detail__gates > header {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--qms-border);
-}
-
-.qms-mission-detail__gates > header > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.qms-mission-detail__gates > header > span {
-  color: #92400e;
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.qms-mission-detail__gates > header > span.is-ready {
-  color: #166534;
-}
+.qms-mission-detail__gates { overflow: hidden; }
+.qms-mission-detail__gates > header { padding: 16px 18px; border-bottom: 1px solid var(--qms-border); }
+.qms-mission-detail__gates > header > div { display: flex; align-items: center; gap: 10px; }
+.qms-mission-detail__gates > header > span { color: #92400e; font-size: 12.5px; font-weight: 800; }
+.qms-mission-detail__gates > header > span.is-ready { color: #166534; }
 
 .qms-mission-detail__gate-head,
 .qms-mission-detail__gate {
   display: grid;
-  grid-template-columns: minmax(220px, 1.25fr) 130px minmax(180px, .9fr) minmax(260px, 1.2fr) 100px;
+  grid-template-columns: minmax(240px, 1.25fr) 150px minmax(200px, .95fr) minmax(260px, 1.2fr) 130px;
   align-items: center;
-  gap: 9px;
-  padding: 8px 12px;
+  gap: 14px;
+  padding: 12px 18px;
 }
 
 .qms-mission-detail__gate-head {
   color: var(--qms-muted);
-  background: color-mix(in srgb, var(--qms-text) 2%, var(--qms-surface));
-  font-size: 8px;
+  background: var(--qms-surface-soft);
+  font-size: 11.5px;
   font-weight: 800;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
 
-.qms-mission-detail__gate {
-  min-height: 58px;
-  border-top: 1px solid var(--qms-border);
-  font-size: 9px;
-}
-
-.qms-mission-detail__gate:first-of-type {
-  border-top: 0;
-}
-
-.qms-mission-detail__gate.is-pass {
-  box-shadow: inset 3px 0 0 #16a34a;
-}
-
+.qms-mission-detail__gate { min-height: 74px; border-top: 1px solid var(--qms-border); font-size: 13px; }
+.qms-mission-detail__gate:first-of-type { border-top: 0; }
+.qms-mission-detail__gate.is-pass { box-shadow: inset 4px 0 0 #16a34a; }
 .qms-mission-detail__gate.is-fail,
-.qms-mission-detail__gate.is-blocked {
-  box-shadow: inset 3px 0 0 #dc2626;
-}
-
-.qms-mission-detail__gate-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
+.qms-mission-detail__gate.is-blocked { box-shadow: inset 4px 0 0 #dc2626; }
+.qms-mission-detail__gate-title { display: flex; align-items: flex-start; gap: 9px; }
 .qms-mission-detail__gate strong,
-.qms-mission-detail__gate small {
-  display: block;
-}
+.qms-mission-detail__gate small { display: block; }
+.qms-mission-detail__gate strong { color: var(--qms-text); font-size: 13.5px; line-height: 1.35; }
+.qms-mission-detail__gate small { margin-top: 3px; color: var(--qms-muted); font-size: 12px; line-height: 1.4; }
+.qms-mission-detail__gate a { display: inline-flex; align-items: center; gap: 5px; color: var(--qms-primary); font-size: 12.5px; font-weight: 750; text-decoration: none; }
 
-.qms-mission-detail__gate strong {
-  color: var(--qms-text);
-  font-size: 9px;
-}
-
-.qms-mission-detail__gate small {
-  margin-top: 2px;
-  color: var(--qms-muted);
-  font-size: 8px;
-  line-height: 1.3;
-}
-
-.qms-mission-detail__gate a {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--qms-primary);
-  font-size: 8px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.qms-mission-detail__lower-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.qms-mission-detail__lower-grid > section {
-  overflow: hidden;
-}
-
-.qms-mission-detail__lower-grid section > header {
-  padding: 9px 11px;
-  border-bottom: 1px solid var(--qms-border);
-}
-
-.qms-mission-detail__lower-grid article {
-  padding: 9px 11px;
-  border-bottom: 1px solid var(--qms-border);
-}
-
-.qms-mission-detail__lower-grid article:last-child {
-  border-bottom: 0;
-}
-
-.qms-mission-detail__lower-grid article span {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
+.qms-mission-detail__lower-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.qms-mission-detail__lower-grid > section { overflow: hidden; }
+.qms-mission-detail__lower-grid section > header { padding: 14px 16px; border-bottom: 1px solid var(--qms-border); }
+.qms-mission-detail__lower-grid article { padding: 14px 16px; border-bottom: 1px solid var(--qms-border); }
+.qms-mission-detail__lower-grid article:last-child { border-bottom: 0; }
+.qms-mission-detail__lower-grid article span { display: flex; justify-content: space-between; gap: 10px; }
 .qms-mission-detail__lower-grid article p,
-.qms-mission-detail__empty {
-  margin: 4px 0;
-  color: var(--qms-muted);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.qms-mission-detail__lower-grid article small {
-  color: var(--qms-muted);
-  font-size: 8px;
-}
-
-.qms-mission-detail dl {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  margin: 0;
-  padding: 10px 11px;
-  font-size: 9px;
-}
-
+.qms-mission-detail__empty { margin: 6px 0; color: var(--qms-muted); font-size: 13px; line-height: 1.5; }
+.qms-mission-detail__lower-grid article small { color: var(--qms-muted); font-size: 12px; }
+.qms-mission-detail dl { display: grid; grid-template-columns: 180px minmax(0, 1fr); margin: 0; padding: 12px 16px; font-size: 13px; }
 .qms-mission-detail dt,
-.qms-mission-detail dd {
-  margin: 0;
-  padding: 5px 0;
-  border-bottom: 1px solid var(--qms-border);
-}
+.qms-mission-detail dd { margin: 0; padding: 8px 0; border-bottom: 1px solid var(--qms-border); }
+.qms-mission-detail dt { color: var(--qms-muted); font-weight: 750; }
+.qms-mission-detail dd { color: var(--qms-text); }
 
-.qms-mission-detail dt {
-  color: var(--qms-muted);
-  font-weight: 800;
-}
-
-.qms-mission-detail dd {
-  color: var(--qms-text);
+.qms-missions :where(button, input, select, textarea, a):focus-visible,
+.qms-mission-detail :where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--qms-primary);
+  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {
-  .qms-missions__create > div {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
+  .qms-missions__metrics,
+  .qms-mission-detail__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-missions__metrics article:nth-child(2),
+  .qms-mission-detail__summary article:nth-child(2) { border-right: 0; }
+  .qms-missions__metrics article:nth-child(-n+2),
+  .qms-mission-detail__summary article:nth-child(-n+2) { border-bottom: 1px solid var(--qms-border); }
   .qms-missions__row,
   .qms-mission-detail__gate-head,
-  .qms-mission-detail__gate {
-    min-width: 980px;
-  }
-
+  .qms-mission-detail__gate { min-width: 1060px; }
   .qms-missions__portfolio,
-  .qms-mission-detail__gates {
-    overflow-x: auto;
-  }
+  .qms-mission-detail__gates { overflow-x: auto; }
 }
 
 @media (max-width: 760px) {
   .qms-missions,
-  .qms-mission-detail {
-    padding: 7px;
-  }
-
+  .qms-mission-detail { padding: 12px; gap: 12px; }
   .qms-missions__header,
   .qms-mission-detail__title,
   .qms-missions__create > header,
-  .qms-missions__create > footer {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
+  .qms-missions__create > footer { align-items: flex-start; flex-direction: column; }
+  .qms-missions__header { padding: 18px; }
+  .qms-missions__header > div:last-child { width: 100%; }
+  .qms-missions__header button { flex: 1; }
+  .qms-missions__create { inset: 0; width: 100%; max-width: none; border-radius: 0; clip-path: none; }
   .qms-missions__create > div,
   .qms-missions__metrics,
   .qms-mission-detail__summary,
-  .qms-mission-detail__lower-grid {
-    grid-template-columns: 1fr;
-  }
-
+  .qms-mission-detail__lower-grid { grid-template-columns: 1fr; }
+  .qms-missions__create label.is-wide { grid-column: auto; }
   .qms-missions__metrics article,
-  .qms-mission-detail__summary article {
-    border-right: 0;
-    border-bottom: 1px solid var(--qms-border);
-  }
-
+  .qms-mission-detail__summary article { border-right: 0; border-bottom: 1px solid var(--qms-border); }
   .qms-missions__metrics article:last-child,
-  .qms-mission-detail__summary article:last-child {
-    border-bottom: 0;
-  }
+  .qms-mission-detail__summary article:last-child { border-bottom: 0; }
+  .qms-mission-detail dl { grid-template-columns: 1fr; }
+  .qms-mission-detail dt { border-bottom: 0; padding-bottom: 2px; }
+  .qms-mission-detail dd { padding-top: 2px; }
 }
