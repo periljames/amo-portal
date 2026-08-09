@@ -15,7 +15,7 @@ All listed browser files are executed by `.github/workflows/qms-audit-lifecycle-
 | 3 | Schedule audit | `frontend/tests/e2e/qms-audit-programme.spec.ts` | Schedules a programme requirement through the authoritative Quality Planner and verifies schedule lineage is committed only after the scheduling contract succeeds. |
 | 4 | Create via quick planner handoff | `frontend/tests/e2e/qms-planner-audit-handoff.spec.ts` | Uses the Planner quick audit handoff and verifies the authoritative audit/schedule request rather than a local-only calendar event. |
 | 5 | Detect scheduling conflict | `frontend/tests/e2e/qms-audit-programme.spec.ts`; `frontend/tests/e2e/qms-planner-lifecycle.spec.ts` | Receives deterministic conflict evidence, blocks the unapproved write, and proves controlled override behavior rather than silent collision. |
-| 6 | Change auditor | `frontend/tests/e2e/qms-audit-lifecycle-traceability.spec.ts` | Opens schedule detail, edits the team, selects a different lead auditor, persists `lead_auditor_user_id`, and confirms the returned authoritative participant state. |
+| 6 | Change auditor | `frontend/tests/e2e/qms-audit-lifecycle-traceability.spec.ts` | Opens schedule detail, edits the team, selects a different lead auditor, persists `lead_auditor_user_id`, and confirms the retained authoritative participant selection. |
 | 7 | Controlled reschedule | `frontend/tests/e2e/qms-modern-planner-live.spec.ts`; `frontend/tests/e2e/qms-planner-lifecycle.spec.ts` | Reschedules through the authoritative mutation with expected old date/version context and reason/controlled lifecycle behavior. |
 | 8 | Generate notice | `frontend/tests/e2e/qms-audit-governed-lifecycle.spec.ts` | Exercises notice governance through `DRAFT → UNDER_REVIEW → APPROVED → GENERATED → DELIVERED → ACKNOWLEDGED`. |
 | 9 | Open audit preparation | `frontend/tests/e2e/qms-audit-governed-lifecycle.spec.ts` | Creates and issues a governed preparation revision and verifies the issued immutable state is returned after mutation. |
@@ -48,16 +48,24 @@ The canonical response, auditor notes, structured evidence references and append
 
 ## Risk-planning acceptance linkage
 
-Browser lifecycle evidence is complemented by `backend/amodb/apps/quality/tests/test_audit_risk_planning_factor_contract.py`, which proves that deterministic risk planning recognizes:
+Browser lifecycle evidence is complemented by `backend/amodb/apps/quality/tests/test_audit_risk_planning_factor_contract.py`, which proves deterministic source attribution for:
 
 - time since last attributable audit;
 - historical audit finding exposure;
 - repeat requirement findings across distinct attributable audits;
 - governed `INEFFECTIVE` corrective-action effectiveness conclusions;
+- new capability additions/changes from governed Mission types;
+- aircraft-type exposure only from explicit Mission scope keys;
 - only explicit `safety / SAFETY_OCCURRENCE` source references for Safety occurrences;
-- exact source-id targeting when a Safety occurrence or ineffective action explicitly identifies an Audit Universe source.
+- exact source-id targeting when Safety, effectiveness, capability or aircraft-type evidence explicitly identifies an Audit Universe source;
+- factor explainability fields including source-record reference, source/observation date and rationale.
 
-Generic risk records are deliberately not relabelled as Safety occurrences.
+Negative-contract assertions prove that:
+
+- generic risk records are not relabelled as Safety occurrences;
+- free-text Mission titles are not parsed as aircraft-type evidence.
+
+Mandatory surveillance remains a hard requirement outside the factor-weight total and cannot be averaged away.
 
 ## Acceptance rule
 
