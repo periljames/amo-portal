@@ -7,16 +7,20 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlparse
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
 _SAFE_KEY = re.compile(r"[^A-Za-z0-9._/\-]+")
 _CLIENT_LOCK = threading.Lock()
 _CLIENT = None
+_CACHE_CLEANUP_LOCK = threading.Lock()
+_LAST_CACHE_CLEANUP = 0.0
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -117,6 +121,47 @@ def _extra_args(content_type: str | None = None) -> dict:
     return args
 
 
+def _cache_limits() -> tuple[int, int]:
+    max_bytes = max(64 * 1024 * 1024, int(os.getenv("AMO_STORAGE_CACHE_MAX_BYTES", str(2 * 1024 * 1024 * 1024)) or str(2 * 1024 * 1024 * 1024)))
+    max_age = max(300, int(os.getenv("AMO_STORAGE_CACHE_MAX_AGE_SEC", str(24 * 3600)) or str(24 * 3600)))
+    return max_bytes, max_age
+
+
+def cleanup_cache(*, force: bool = False) -> None:
+    global _LAST_CACHE_CLEANUP
+    root = cache_root()
+    if not root.exists():
+        return
+    now_mono = time.monotonic()
+    with _CACHE_CLEANUP_LOCK:
+        if not force and now_mono - _LAST_CACHE_CLEANUP < 60:
+            return
+        _LAST_CACHE_CLEANUP = now_mono
+        max_bytes, max_age = _cache_limits()
+        now = time.time()
+        files: list[tuple[float, int, Path]] = []
+        total = 0
+        for path in root.iterdir():
+            if not path.is_file() or path.name.startswith("amo-upload-") or path.name.endswith(".downloading"):
+                continue
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                continue
+            if now - stat.st_mtime > max_age:
+                path.unlink(missing_ok=True)
+                continue
+            total += stat.st_size
+            files.append((stat.st_mtime, stat.st_size, path))
+        if total <= max_bytes:
+            return
+        for _mtime, size, path in sorted(files):
+            path.unlink(missing_ok=True)
+            total -= size
+            if total <= max_bytes:
+                break
+
+
 @dataclass(frozen=True)
 class StoredObject:
     uri: str
@@ -141,7 +186,7 @@ def put_file(path: str | Path, *, key: str, content_type: str | None = None) -> 
         except ValueError as exc:
             raise ValueError("Storage key escapes configured local root") from exc
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f".{target.name}.uploading")
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.uploading")
         shutil.copyfile(source, temporary)
         os.replace(temporary, target)
         return StoredObject(uri=str(target), key=clean, backend="local", size_bytes=target.stat().st_size)
@@ -149,7 +194,10 @@ def put_file(path: str | Path, *, key: str, content_type: str | None = None) -> 
     validate_storage_configuration()
     full_key = _full_key(clean)
     args = _extra_args(content_type)
-    _client().upload_file(str(source), bucket_name(), full_key, ExtraArgs=args or None)
+    if args:
+        _client().upload_file(str(source), bucket_name(), full_key, ExtraArgs=args)
+    else:
+        _client().upload_file(str(source), bucket_name(), full_key)
     head = _client().head_object(Bucket=bucket_name(), Key=full_key)
     return StoredObject(
         uri=f"s3://{bucket_name()}/{full_key}",
@@ -161,8 +209,10 @@ def put_file(path: str | Path, *, key: str, content_type: str | None = None) -> 
 
 
 def put_stream(stream: BinaryIO, *, key: str, content_type: str | None = None) -> StoredObject:
-    cache_root().mkdir(parents=True, exist_ok=True)
-    fd, raw_path = tempfile.mkstemp(prefix="amo-upload-", dir=str(cache_root()))
+    root = cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    cleanup_cache()
+    fd, raw_path = tempfile.mkstemp(prefix="amo-upload-", dir=str(root))
     os.close(fd)
     path = Path(raw_path)
     try:
@@ -195,19 +245,25 @@ def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
     bucket, key = _parse_s3(uri)
     root = cache_root()
     root.mkdir(parents=True, exist_ok=True)
+    cleanup_cache()
     suffix = Path(key).suffix[:16]
     digest = hashlib.sha256(uri.encode()).hexdigest()
     target = root / f"{digest}{suffix}"
     if target.is_file():
         if not expected_sha256 or _sha256(target) == expected_sha256:
+            try:
+                os.utime(target, None)
+            except OSError:
+                pass
             return target
         target.unlink(missing_ok=True)
-    temporary = target.with_name(f".{target.name}.downloading")
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.downloading")
     try:
         _client().download_file(bucket, key, str(temporary))
         if expected_sha256 and _sha256(temporary) != expected_sha256:
             raise IOError("Object checksum verification failed")
         os.replace(temporary, target)
+        cleanup_cache(force=True)
         return target
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -252,16 +308,17 @@ def exists(uri: str) -> bool:
 
 def health_check() -> dict[str, object]:
     config = validate_storage_configuration()
+    probe_name = f".amo-storage-probe-{os.getpid()}-{uuid4().hex}"
     if _backend() == "local":
         root = local_root()
-        probe = root / ".amo-storage-probe"
+        probe = root / probe_name
         try:
             probe.write_bytes(b"ok")
             ok = probe.read_bytes() == b"ok"
             return {**config, "ok": ok, "detail": str(root)}
         finally:
             probe.unlink(missing_ok=True)
-    key = _full_key("health/probe.txt")
+    key = _full_key(f"health/{probe_name}.txt")
     try:
         _client().put_object(Bucket=bucket_name(), Key=key, Body=b"ok", **_extra_args("text/plain"))
         body = _client().get_object(Bucket=bucket_name(), Key=key)["Body"].read(2)
