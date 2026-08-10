@@ -59,7 +59,7 @@ async function transitionAsCurrentUser(page: Page, action: string, expectedVersi
         action,
         expected_version: expectedVersion,
         comments: `Deterministic role-matrix acceptance: ${action}`,
-        evidence: [],
+        evidence: [{ reference: `role-matrix:${action.toLowerCase()}` }],
       },
     },
   );
@@ -112,6 +112,8 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve technical review", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve Quality review", exact: true })).toHaveCount(0);
+    await dialog.getByLabel("Review comments").fill("Technical review completed against the controlled source and assigned change.");
+    await dialog.getByLabel("Evidence asset IDs").fill("E2E-TECH-REVIEW-EVIDENCE");
     const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve technical review", exact: true }));
     expect(result.state).toBe("TECHNICAL_APPROVED");
     expect(result.version).toBe(2);
@@ -134,6 +136,8 @@ test.describe.serial("DMS authoritative role matrix", () => {
     const dialog = page.getByRole("dialog", { name: "Assigned document review" });
     await expect(dialog.getByRole("button", { name: "Approve Quality review", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve technical review", exact: true })).toHaveCount(0);
+    await dialog.getByLabel("Review comments").fill("Quality review completed and governance evidence retained.");
+    await dialog.getByLabel("Evidence asset IDs").fill("E2E-QUALITY-REVIEW-EVIDENCE");
     const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve Quality review", exact: true }));
     expect(result.state).toBe("QUALITY_APPROVED");
     expect(result.version).toBe(4);
@@ -154,6 +158,8 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await page.getByRole("button", { name: "Review assigned change", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Assigned document review" });
     await expect(dialog.getByRole("button", { name: "Approve for management", exact: true })).toBeVisible();
+    await dialog.getByLabel("Review comments").fill("Management approval completed with retained decision evidence.");
+    await dialog.getByLabel("Evidence asset IDs").fill("E2E-MANAGEMENT-APPROVAL-EVIDENCE");
     const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve for management", exact: true }));
     expect(result.state).toBe("SCHEDULED_FOR_EFFECTIVITY");
     expect(result.version).toBe(6);
@@ -173,7 +179,7 @@ async function workflowForControllerOnly(page: Page) {
         action: "APPROVE_TECHNICAL",
         expected_version: 1,
         comments: "Reader must never be allowed to review",
-        evidence: [],
+        evidence: [{ reference: "role-matrix:reader-forbidden" }],
       },
     },
   );
