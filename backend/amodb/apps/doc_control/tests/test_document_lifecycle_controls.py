@@ -37,7 +37,8 @@ def test_lifecycle_router_protects_controlled_history_from_hard_delete() -> None
     assert 'protected_statuses = {"PUBLISHED", "SUPERSEDED", "ARCHIVED"}' in source
     assert "Published controlled documents cannot be permanently deleted" in source
     assert "DocumentationRecord.template_manual_id == manual.id" in source
-    assert 'audit(db, tenant, request, "document.deleted"' in source
+    assert '"document.deleted"' in source
+    assert '"revision_ids": [revision.id for revision in revisions]' in source
 
 
 def test_daily_use_shell_exposes_primary_document_lifecycle_actions() -> None:
