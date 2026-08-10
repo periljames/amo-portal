@@ -11,6 +11,7 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_publication_distribution import ensure_automatic_publication_distribution
+from .workspace_responsibility_access import require_workflow_action
 from .workspace_service import get_manual, get_revision, resolve_tenant
 from .workspace_workflow_authority_router import (
     transition_workflow_with_authority_alignment as _transition,
@@ -206,11 +207,17 @@ def transition_workflow_with_codex_review_guards(
     if not workflow:
         raise HTTPException(status_code=404, detail="Document workflow not found")
 
-    # This layer validates retained decision evidence only. Authorization is
-    # deliberately enforced by ``require_workflow_action`` in the downstream
-    # workflow router, where confirmed reviewer/approver responsibilities are
-    # evaluated per action. Requiring the generic accountable-role policy here
-    # would incorrectly block assigned technical and Quality reviewers.
+    # Enforce the assignment-aware action boundary before validating decision
+    # evidence. This preserves 403 for unauthorized actors without leaking the
+    # evidence contract, while still allowing confirmed technical, Quality and
+    # management reviewers to perform only their assigned approval action.
+    require_workflow_action(
+        db,
+        workflow=workflow,
+        user=current_user,
+        action=payload.action,
+    )
+
     if payload.action in _DECISION_EVIDENCE_ACTIONS:
         validate_decision_evidence(payload)
     if payload.action == "PUBLISH":
