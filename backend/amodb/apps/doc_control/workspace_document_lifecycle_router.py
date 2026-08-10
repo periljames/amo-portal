@@ -15,7 +15,12 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import knowledge_models as km
-from .knowledge_service import _default_group_code, _node_path, normalize_code
+from .knowledge_service import (
+    _default_group_code,
+    _node_path,
+    normalize_code,
+    reconcile_documentation_hierarchy,
+)
 from .workspace_service import (
     audit,
     get_manual,
@@ -149,9 +154,6 @@ def _move_node_to_type_group(
 ) -> None:
     node = _document_node(db, tenant_id=tenant_id, manual_id=manual.id)
     if not node:
-        # Upload indexing creates the hierarchy node asynchronously. Persisting the
-        # structural token on Manual.manual_type makes that later reconciliation
-        # deterministic even when no node exists yet.
         return
 
     node.node_type = document_type
@@ -263,6 +265,15 @@ def update_document_type(
     profile.metadata_json = metadata
     profile.version = int(profile.version or 0) + 1
     manual.manual_type = TYPE_STORAGE_VALUE[document_type]
+
+    # A controller's classification decision must be visible in the library in the
+    # same transaction. Draft uploads do not always have an indexed hierarchy node
+    # yet, so reconcile synchronously before moving/stamping the document node.
+    reconcile_documentation_hierarchy(
+        db,
+        manual_tenant=tenant,
+        actor_id=str(current_user.id),
+    )
     _move_node_to_type_group(
         db,
         tenant_id=tenant.amo_id,
