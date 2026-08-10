@@ -11,6 +11,7 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_publication_distribution import ensure_automatic_publication_distribution
+from .workspace_responsibility_access import require_workflow_action
 from .workspace_service import get_manual, get_revision, resolve_tenant
 from .workspace_workflow_authority_router import (
     transition_workflow_with_authority_alignment as _transition,
@@ -206,10 +207,16 @@ def transition_workflow_with_codex_review_guards(
     if not workflow:
         raise HTTPException(status_code=404, detail="Document workflow not found")
 
-    # Authorization belongs to the release-guard layer, which evaluates the
-    # effective governed responsibility for the exact workflow action. Applying a
-    # blanket accountable-approver gate here would incorrectly reject confirmed
-    # Technical/Quality/management reviewers before their assignment is checked.
+    # Evaluate the exact workflow action before evidence validation or publication
+    # side effects. Confirmed technical/quality/management responsibility may grant
+    # only its assigned decision; controller and accountable permissions continue
+    # to govern handoff, publication, scheduling and archive operations.
+    require_workflow_action(
+        db,
+        workflow=workflow,
+        user=current_user,
+        action=payload.action,
+    )
     if payload.action in _DECISION_EVIDENCE_ACTIONS:
         validate_decision_evidence(payload)
     if payload.action == "PUBLISH":
