@@ -59,8 +59,16 @@ export default function DocumentControlReviewerLifecycleActions({
   }
 
   const transition = async (item: ReviewerAction) => {
-    if (item.action === "REQUEST_CORRECTIONS" && !comments.trim()) {
-      setError("Record the correction reason before returning the revision.");
+    const comment = comments.trim();
+    const retainedEvidence = evidenceFrom(evidence);
+    if (!comment) {
+      setError(item.action === "REQUEST_CORRECTIONS"
+        ? "Record the correction reason before returning the revision."
+        : "Record the basis for the approval decision.");
+      return;
+    }
+    if (item.action !== "REQUEST_CORRECTIONS" && !retainedEvidence.length) {
+      setError("Add at least one retained evidence reference before approving this revision.");
       return;
     }
     setBusy(true);
@@ -68,8 +76,8 @@ export default function DocumentControlReviewerLifecycleActions({
     try {
       await transitionDocumentWorkflow(tenant, workflow.id, {
         action: item.action,
-        comments: comments.trim() || null,
-        evidence: evidenceFrom(evidence),
+        comments: comment,
+        evidence: retainedEvidence,
         expected_version: workflow.version,
       });
       onChanged();
@@ -89,7 +97,7 @@ export default function DocumentControlReviewerLifecycleActions({
       </div>
     </div>
     <label className="wide"><span>Review comments</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Record the basis for the decision or correction request." /></label>
-    <label className="wide"><span>Evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Optional retained evidence references, one per line" /></label>
+    <label className="wide"><span>Evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Retained evidence references, one per line; required for approvals" /></label>
     {error ? <div className="dc-form__error">{error}</div> : null}
     <div className="dc-form__actions">
       {actions.map((item) => <button
