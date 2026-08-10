@@ -5,7 +5,12 @@ import type { ServerOptions } from 'node:https'
 import { defineConfig, loadEnv, type Plugin, type ResolvedConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-import { DEV_API_PROXY_PATTERN, shouldServePlatformSpa } from './src/services/devProxyRouting'
+import {
+  DEV_API_PROXY_PATTERN,
+  PLATFORM_OPS_DEV_PROXY_PATTERN,
+  resolveDevProxyTargets,
+  shouldServePlatformSpa,
+} from './src/services/devProxyRouting'
 
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
@@ -152,11 +157,16 @@ const platformSpaNavigationPlugin = (): Plugin => ({
 })
 
 const resolveDevProxy = (env: Record<string, string>) => {
-  const target = env.VITE_API_PROXY_TARGET?.trim() || env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:8080'
+  const { apiTarget, platformOpsTarget } = resolveDevProxyTargets(env)
 
   return {
+    [PLATFORM_OPS_DEV_PROXY_PATTERN]: {
+      target: platformOpsTarget,
+      changeOrigin: true,
+      secure: false,
+    },
     [DEV_API_PROXY_PATTERN]: {
-      target,
+      target: apiTarget,
       changeOrigin: true,
       secure: false,
     },
