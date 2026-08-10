@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 from urllib.parse import quote
 
@@ -61,14 +62,19 @@ def audit_assist_safely(
     source_ids: list[str],
     warning: str | None,
 ) -> None:
-    """Persist document-scoped assistant audit events without nullable manual IDs.
+    """Persist document-scoped assistant audit events using the audit-table contract.
 
-    ManualAIHookEvent requires ``manual_id``. Library-wide assisted search may have
-    no requested document context, so one event is emitted for each authorised
-    manual represented in the returned sources. A no-result query touches no
-    controlled document and therefore creates no invalid synthetic manual event.
+    ``ManualAIHookEvent`` stores tenant/revision identity as relational columns.
+    Manual and actor context are retained in ``payload_json`` rather than being
+    passed as undeclared ORM constructor keywords. Library-wide assisted search
+    emits one event for each authorised manual represented in returned sources; a
+    no-result query touches no controlled document and therefore emits no event.
     """
     manual_ids = _source_manual_ids(context, request_payload, source_ids)
+    query_sha256 = hashlib.sha256(
+        request_payload.query.strip().lower().encode("utf-8")
+    ).hexdigest()
+
     for manual_id in manual_ids:
         relevant_source_ids: list[str] = []
         for source_id in source_ids:
@@ -90,16 +96,16 @@ def audit_assist_safely(
         db.add(
             manual_models.ManualAIHookEvent(
                 tenant_id=context.tenant.id,
-                manual_id=manual_id,
                 revision_id=revision_id,
                 event_name="documentation.assisted_search",
                 payload_json={
                     "actor_id": str(current_user.id),
-                    "query_sha256": __import__("hashlib").sha256(request_payload.query.strip().lower().encode("utf-8")).hexdigest(),
+                    "query_sha256": query_sha256,
                     "query_length": len(request_payload.query),
                     "requested_mode": request_payload.mode,
                     "provider_mode": provider_mode,
                     "manual_context_id": request_payload.manual_id,
+                    "source_manual_id": manual_id,
                     "page_context": request_payload.page_number,
                     "source_ids": relevant_source_ids,
                     "source_count": len(relevant_source_ids),
@@ -107,7 +113,6 @@ def audit_assist_safely(
                     "fallback_warning": warning,
                     "scope": "DOCUMENT" if request_payload.manual_id else "LIBRARY_RESULT_DOCUMENT",
                 },
-                actor_contact_id=getattr(current_user, "contact_id", None),
             )
         )
 
