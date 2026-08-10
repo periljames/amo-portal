@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
+import DocumentLifecycleHeaderActions from "./DocumentLifecycleHeaderActions";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
@@ -144,6 +145,9 @@ export default function DocumentControlShell({
   const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
   const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
   const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
+  const lifecycleActions = canControl && tenant
+    ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
+    : null;
 
   const body = (
     <div className="dc-workspace">
@@ -153,7 +157,7 @@ export default function DocumentControlShell({
           <h1>{title}</h1>
           <span>{subtitle}</span>
         </div>
-        {actions ? <div className="dc-workspace__header-actions">{actions}</div> : null}
+        {actions || lifecycleActions ? <div className="dc-workspace__header-actions">{lifecycleActions}{actions}</div> : null}
       </header>
 
       <nav className="dc-workspace__nav dc-workspace__nav--primary" aria-label="Document Control">
