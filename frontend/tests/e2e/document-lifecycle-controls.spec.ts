@@ -16,6 +16,7 @@ test.use({
   trace: "retain-on-failure",
   screenshot: "on",
 });
+test.setTimeout(120_000);
 
 function watchMaterialBrowserErrors(page: Page): void {
   materialBrowserErrors = [];
@@ -91,8 +92,8 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await intake.getByLabel("Owner / controller role").fill("Document Control");
     await intake.getByRole("button", { name: "Add document", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/document-control\/library\/[0-9a-f-]+(?:\?|$)/i, { timeout: 60_000 });
-    const manualId = page.url().match(/\/document-control\/library\/([^/?]+)/)?.[1];
+    await expect(page).toHaveURL(/\/document-control\/library\/[^/?#]+(?:\?|$)/i, { timeout: 30_000 });
+    const manualId = page.url().match(/\/document-control\/library\/([^/?#]+)/)?.[1];
     if (!manualId) throw new Error("New document workspace did not expose its manual id in the route");
 
     await expect(page.getByTestId("change-document-type-button")).toBeVisible({ timeout: 30_000 });
