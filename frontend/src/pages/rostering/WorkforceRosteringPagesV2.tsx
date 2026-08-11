@@ -20,8 +20,8 @@ const LazyRosterOperationsWorkspace = lazy(() => import("./components/RosterOper
   .then((module) => ({ default: module.RosterOperationsWorkspace })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
-const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspace")
-  .then((module) => ({ default: module.RosteringSetupWorkspace })));
+const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspaceWithCodeRegistry")
+  .then((module) => ({ default: module.RosteringSetupWorkspaceWithCodeRegistry })));
 const LazyWorkforceHrWorkspace = lazy(() => import("./components/WorkforceHrWorkspaceV2")
   .then((module) => ({ default: module.WorkforceHrWorkspaceV2 })));
 
@@ -139,7 +139,7 @@ export function RosterSettingsPage() {
     <RosterShell
       eyebrow="Guided setup"
       title="Roster setup"
-      description="Check readiness, configure future periods and draft rotations, manage shifts and patterns, and review controlled policy."
+      description="Check readiness, configure tenant roster codes, future periods and draft rotations, manage shifts and patterns, and review controlled policy."
     >
       <DeferredWorkspace label="Opening roster setup…"><LazyRosteringSetupWorkspace /></DeferredWorkspace>
     </RosterShell>
