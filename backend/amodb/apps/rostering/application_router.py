@@ -9,7 +9,9 @@ prefixes `/rostering` and `/workforce`.
 from fastapi import APIRouter
 
 from . import router as rostering_route_module
+from .aircraft_allocation_router import router as aircraft_allocation_router
 from .automation_router import router as automation_router
+from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
 from ..workforce.bulk_router import router as workforce_bulk_router
 from ..workforce.governance_router import router as workforce_governance_router
@@ -19,6 +21,8 @@ from ..workforce.selection_router import router as workforce_selection_router
 
 router = APIRouter()
 router.include_router(rostering_route_module.router)
+router.include_router(code_registry_router)
+router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
 router.include_router(commitments_router)
 router.include_router(workforce_router)
