@@ -1,0 +1,170 @@
+name: QMS CAR Control Loop CI
+
+on:
+  push:
+    branches:
+      - agent/qms-car-control-loop
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/car_control_loop*.py"
+      - "backend/amodb/apps/quality/tests/test_car_control_loop.py"
+      - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
+      - "backend/amodb/apps/quality/__init__.py"
+      - "backend/amodb/alembic/versions/quality_260811_car_loop.py"
+      - "frontend/src/services/qmsCarControlLoop.ts"
+      - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
+      - "frontend/src/pages/qms/QmsCanonicalPage.tsx"
+      - "frontend/src/components/panels/ActionPanel.tsx"
+      - "frontend/tests/e2e/qms-car-control-loop.spec.ts"
+      - ".github/workflows/qms-car-control-loop-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-car-control-loop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: qms-car-control-loop-contract-secret
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Verify migration is the single Alembic head
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          revision = script.get_revision("quality_260811_car_loop")
+          assert revision is not None
+          assert revision.down_revision == "docctl_ai_audit_260809"
+          assert script.get_heads() == ["quality_260811_car_loop"], script.get_heads()
+          PY
+      - name: Compile and configure Quality mappers
+        run: |
+          python -m compileall -q \
+            amodb/apps/quality/car_control_loop.py \
+            amodb/apps/quality/car_control_loop_models.py \
+            amodb/apps/quality/car_control_loop_router.py \
+            amodb/apps/quality/car_control_loop_route_order.py \
+            amodb/alembic/versions/quality_260811_car_loop.py
+          python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
+      - name: Run deterministic health and closure contract
+        run: pytest -q amodb/apps/quality/tests/test_car_control_loop.py
+
+  postgres-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_car_control_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_car_control_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop PostgreSQL dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Run migration, constraint and RLS probe
+        env:
+          APP_ENV: test
+          SECRET_KEY: qms-car-control-loop-postgres-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_car_control_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_car_control_test
+        run: python -m amodb.apps.quality.tests.postgres_car_control_loop_probe
+
+  frontend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Lint CAR control-loop surfaces
+        run: >-
+          npm exec -- eslint
+          src/services/qmsCarControlLoop.ts
+          src/pages/qms/QmsCarControlLoopPage.tsx
+          src/pages/qms/QmsCanonicalPage.tsx
+          src/components/panels/ActionPanel.tsx
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-car-preview.log 2>&1 &
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-car-preview.log
+          exit 1
+      - name: Browser - staged CAR control loop
+        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts --workers=1
