@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     JSON,
     String,
     Text,
@@ -82,7 +83,7 @@ class QualityCARMilestone(Base):
     profile_id = Column(UUID(as_uuid=True), ForeignKey("quality_car_control_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False, index=True)
     milestone_key = Column(String(40), nullable=False)
-    phase_order = Column(String(4), nullable=False)
+    phase_order = Column(Integer, nullable=False)
     title = Column(String(160), nullable=False)
     owner_user_id = Column(String(36), _user_fk(), nullable=True, index=True)
     original_due_date = Column(Date, nullable=False)
