@@ -73,6 +73,7 @@ jobs:
             amodb/apps/quality/car_control_loop.py \
             amodb/apps/quality/car_control_loop_models.py \
             amodb/apps/quality/car_control_loop_router.py \
+            amodb/apps/quality/car_control_loop_guard_router.py \
             amodb/apps/quality/car_control_loop_route_order.py \
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
