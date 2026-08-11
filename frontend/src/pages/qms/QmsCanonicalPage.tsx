@@ -1,9 +1,10 @@
 import React from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import QualityCarsPage from "../QualityCarsPage";
 import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
 import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
+import QmsCarControlLoopPage from "./QmsCarControlLoopPage";
 import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
 
@@ -12,13 +13,22 @@ import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
  *
  * Active list workspaces should have one owner. Calendar belongs to the planner,
  * the governed Audit Programme owns /audits/program, evidence-vault list views
- * use the bounded register workspace, CAR routes stay on the established specialist
- * CAR workflow, and remaining legacy/detail paths stay on the compatibility surface
- * until their specialist replacement is wired.
+ * use the bounded register workspace, CAR routes stay on specialist workflows,
+ * and remaining legacy/detail paths stay on the compatibility surface until
+ * their specialist replacement is wired.
  */
 export default function QmsCanonicalPage(): React.ReactElement {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const pathname = location.pathname.toLowerCase();
+
+  // Staged RCA/CAPA governance is intentionally entered from the established
+  // CAR register through ?control=<car UUID>. Keeping it on the canonical CAR
+  // route avoids a duplicate register while giving the control loop a dedicated
+  // operational workspace.
+  if (searchParams.get("control") && (pathname.includes("/quality/cars") || pathname.includes("/qms/cars"))) {
+    return <QmsCarControlLoopPage />;
+  }
 
   // CAR/CAPA has a governed specialist workspace with creation, assignment,
   // auditee response, evidence, Quality review and closeout controls. Never let
