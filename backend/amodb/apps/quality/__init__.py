@@ -15,6 +15,7 @@ from . import people_models as _people_models  # noqa: F401,E402
 from . import assurance_case_models as _assurance_case_models  # noqa: F401,E402
 from . import intelligence_models as _intelligence_models  # noqa: F401,E402
 from . import audit_preparation_models as _audit_preparation_models  # noqa: F401,E402
+from . import car_control_loop_models as _car_control_loop_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded only after the compatibility router is complete.
@@ -71,6 +72,7 @@ from . import intelligence_governance_router as _intelligence_governance_router 
 from . import audit_preparation_router as _audit_preparation_router  # noqa: F401,E402
 from . import planner_assignment_guard_router as _planner_assignment_guard_router  # noqa: F401,E402
 from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycle_guard  # noqa: F401,E402
+from . import car_control_loop_router as _car_control_loop_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -228,6 +230,20 @@ _include_once(
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
 _canonical_router.legacy_router.include_router(_planner_assignment_guard_router.router)
 
+# CAR/CAPA control-loop records are an additive governance layer over the
+# authoritative quality_cars register. Both canonical aliases receive the same
+# staged ownership, deadline, dependency, escalation and closeout contract.
+_include_once(
+    _canonical_router.router,
+    _car_control_loop_router.router,
+    "/api/maintenance/{amo_code}/quality/cars/{car_id}/control-loop",
+)
+_include_once(
+    _canonical_router.legacy_router,
+    _car_control_loop_router.router,
+    "/api/maintenance/{amo_code}/qms/cars/{car_id}/control-loop",
+)
+
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
@@ -238,3 +254,4 @@ from . import assurance_case_route_order as _assurance_case_route_order  # noqa:
 from . import intelligence_route_order as _intelligence_route_order  # noqa: F401,E402
 from . import audit_preparation_route_order as _audit_preparation_route_order  # noqa: F401,E402
 from . import planner_assignment_guard_route_order as _planner_assignment_guard_route_order  # noqa: F401,E402
+from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
