@@ -241,7 +241,21 @@ jobs:
         working-directory: backend
         run: |
           alembic -c amodb/alembic.ini upgrade heads
-          alembic -c amodb/alembic.ini current | grep -q "plat_qms_260809_merge"
+          python - <<'PY'
+          import os
+          from alembic.config import Config
+          from alembic.runtime.migration import MigrationContext
+          from alembic.script import ScriptDirectory
+          from sqlalchemy import create_engine
+
+          config = Config("amodb/alembic.ini")
+          expected = set(ScriptDirectory.from_config(config).get_heads())
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              current = set(MigrationContext.configure(connection).get_current_heads())
+          assert current == expected, {"current": sorted(current), "expected": sorted(expected)}
+          print("Alembic current heads:", ", ".join(sorted(current)))
+          PY
       - name: Prove transaction-local database guards
         working-directory: backend
         run: |
