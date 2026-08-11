@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
+from amodb.apps.doc_control import workspace_access
 from amodb.apps.doc_control import workspace_authority_router as authority
 from amodb.apps.doc_control import workspace_responsibility_access as responsibility_access
 from amodb.apps.doc_control import workspace_schemas as schemas
@@ -13,6 +15,22 @@ from amodb.apps.doc_control import workspace_service
 from amodb.apps.doc_control import workspace_tr_terminal_router as tr_terminal
 from amodb.apps.doc_control import workspace_workflow_review_router as workflow_review
 from amodb.apps.doc_control.workspace_decision_policy import is_decision_approver
+
+
+def _request(method: str, path: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("utf-8"),
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+    )
 
 
 def test_quality_inspector_is_controller_without_decision_authority() -> None:
@@ -50,6 +68,36 @@ def test_empty_evidence_objects_do_not_satisfy_decision_evidence() -> None:
     assert caught.value.status_code == 409
     assert caught.value.detail["code"] == "DECISION_EVIDENCE_REQUIRED"
     assert caught.value.detail["invalid_evidence_indexes"] == [0, 1]
+
+
+def test_workflow_transition_bypasses_only_the_coarse_controller_gate() -> None:
+    assigned_reviewer = SimpleNamespace(
+        id="reviewer-1",
+        is_superuser=False,
+        is_amo_admin=False,
+        role="TECHNICIAN",
+        department_id=None,
+    )
+
+    # The route-level dependency must defer transition authority to
+    # require_workflow_action; otherwise a valid governed reviewer is rejected
+    # before the assignment-aware endpoint can evaluate their exact action.
+    workspace_access.enforce_workspace_access(
+        _request(
+            "POST",
+            "/doc-control/workspace/t/tenant-1/workflows/workflow-1/transition",
+        ),
+        assigned_reviewer,
+    )
+
+    # The same reviewer still cannot enter unrelated controller surfaces.
+    with pytest.raises(HTTPException) as caught:
+        workspace_access.enforce_workspace_access(
+            _request("POST", "/doc-control/workspace/t/tenant-1/controlled-copies"),
+            assigned_reviewer,
+        )
+    assert caught.value.status_code == 403
+    assert caught.value.detail == "Document Control privileges required"
 
 
 def test_assigned_reviewer_authority_is_not_overridden_by_accountable_role_policy(monkeypatch) -> None:

@@ -17,6 +17,7 @@ from . import router_legacy as _legacy
 from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
+from .legacy_contract_override_router import router as _legacy_contract_override_router
 from .pdf_reader_form_override_router import router as _pdf_reader_form_override_router
 from .pdf_reader_precomputed_router import router as _pdf_reader_precomputed_router
 from .pdf_reader_router import router as _pdf_reader_router
@@ -34,10 +35,11 @@ for _route in _pdf_reader_form_override_router.routes:
 
 
 router = APIRouter()
-# Guards and precomputed capability routes precede compatibility routes because
-# Starlette resolves identical paths in declaration order. The legacy override
-# remains mounted for flatten/submit routes that are not replaced.
+# Guards, stable legacy-contract overrides and precomputed capability routes precede
+# compatibility routes because Starlette resolves identical paths in declaration
+# order. The legacy router remains mounted for endpoints that are not replaced.
 router.include_router(_upload_guard_router)
+router.include_router(_legacy_contract_override_router)
 router.include_router(_pdf_reader_precomputed_router)
 router.include_router(_pdf_reader_form_override_router)
 router.include_router(_pdf_reader_router)

@@ -10,7 +10,7 @@ from amodb.security import get_current_active_user
 from .workspace_service import require_control_user
 
 
-_PUBLIC_WORKSPACE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+_ENDPOINT_AUTHORIZED_WORKSPACE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "GET",
         re.compile(r"^/doc-control/workspace/t/[^/]+/dashboard/?$"),
@@ -47,6 +47,12 @@ _PUBLIC_WORKSPACE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"^/doc-control/workspace/t/[^/]+/distribution-campaigns/[^/]+/acknowledge/?$"
         ),
     ),
+    (
+        "POST",
+        re.compile(
+            r"^/doc-control/workspace/t/[^/]+/workflows/[^/]+/transition/?$"
+        ),
+    ),
 )
 
 
@@ -54,19 +60,18 @@ def enforce_workspace_access(
     request: Request,
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> None:
-    """Protect controller worklists independently of frontend visibility.
+    """Apply the coarse controller gate without overriding endpoint authority.
 
-    The Library, permitted document detail/read target, documented-information
-    hierarchy, permission-filtered assisted search, reader-originated change request,
-    and a recipient's acknowledgement action remain available to normal active tenant
-    users. Every other workspace route is a governance/control surface and therefore
-    fails closed unless the actor has Document Control privileges. Endpoint-specific
-    tenant, document, workflow, recipient, and restricted-content checks still run
-    after this coarse route gate.
+    Reader/library routes and workflow transitions have their own authoritative
+    access checks. Workflow transition endpoints use ``require_workflow_action``
+    so confirmed technical, Quality and management reviewers can perform only
+    their assigned decision while unassigned users still receive 403. Every other
+    workspace route remains a governance/control surface and fails closed unless
+    the actor has Document Control privileges.
     """
     method = request.method.upper()
     path = request.url.path
-    for allowed_method, pattern in _PUBLIC_WORKSPACE_RULES:
+    for allowed_method, pattern in _ENDPOINT_AUTHORIZED_WORKSPACE_RULES:
         if method == allowed_method and pattern.fullmatch(path):
             return
     require_control_user(current_user)
