@@ -73,6 +73,7 @@ from . import audit_preparation_router as _audit_preparation_router  # noqa: F40
 from . import planner_assignment_guard_router as _planner_assignment_guard_router  # noqa: F401,E402
 from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycle_guard  # noqa: F401,E402
 from . import car_control_loop_router as _car_control_loop_router  # noqa: F401,E402
+from . import car_control_loop_guard_router as _car_control_loop_guard_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -243,6 +244,11 @@ _include_once(
     _car_control_loop_router.router,
     "/api/maintenance/{amo_code}/qms/cars/{car_id}/control-loop",
 )
+
+# Deadline decisions and escalation evaluation deliberately override selected
+# broad control-loop endpoints with stricter sequence and stale-request guards.
+_canonical_router.router.include_router(_car_control_loop_guard_router.router)
+_canonical_router.legacy_router.include_router(_car_control_loop_guard_router.router)
 
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.
