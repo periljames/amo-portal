@@ -159,10 +159,13 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     localStorage.setItem("amo_code", "AMO-A");
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
+    localStorage.setItem("amo_color_scheme", "light");
     localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "quality-user-a",
       amo_id: "amo-a",
+      department_id: "department-quality",
+      staff_code: "QMS-001",
       email: "quality@tenant-a.test",
       first_name: "Quality",
       last_name: "Manager",
@@ -171,7 +174,7 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
       position_title: "Head of Quality",
       is_active: true,
       is_superuser: false,
-      is_amo_admin: true,
+      is_amo_admin: false,
       must_change_password: false,
     }));
   }, { storedToken: token });
@@ -212,7 +215,11 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   };
 
-  await page.route("**/*", fulfil);
+  // Intercept only backend/API traffic. Intercepting every request also replaces
+  // the preview server's JS/CSS assets, preventing the React route from loading.
+  await page.route("**/api/**", fulfil);
+  await page.route("**/auth/**", fulfil);
+  await page.route("**/accounts/**", fulfil);
   return { evaluateCalls: () => evaluations };
 }
 
