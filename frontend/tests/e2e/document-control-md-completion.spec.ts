@@ -253,7 +253,9 @@ test.describe.serial("DMS MD completion acceptance", () => {
     const download = await downloadPromise;
     expect(await download.suggestedFilename()).toMatch(/\.pdf$/i);
 
-    await scan.getByLabel("Return due").fill("2026-08-10T12:00");
+    const returnDue = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const returnDueValue = new Date(returnDue.getTime() - returnDue.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    await scan.getByLabel("Return due").fill(returnDueValue);
     await scan.getByLabel(/I accept custody/).check();
     await scan.getByRole("button", { name: "Check out to me", exact: true }).click();
     await expect(scan).toContainText("ISSUED", { timeout: 30_000 });
