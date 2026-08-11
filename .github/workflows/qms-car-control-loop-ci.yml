@@ -168,4 +168,4 @@ jobs:
           cat /tmp/qms-car-preview.log
           exit 1
       - name: Browser - staged CAR control loop
-        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts --workers=1
+        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts --workers=1 --reporter=github,line
