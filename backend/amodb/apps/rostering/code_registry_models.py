@@ -31,18 +31,37 @@ class RosterCalendarMode(str, Enum):
     HIDDEN = "HIDDEN"
 
 
-class RosterShiftTemplatePolicy(Base):
-    """Tenant-owned policy layered on a reusable ShiftTemplate.
+class RosterDutySemantic(str, Enum):
+    DUTY = "DUTY"
+    STANDBY = "STANDBY"
+    TRAINING = "TRAINING"
+    REST = "REST"
+    OFF = "OFF"
+    LEAVE = "LEAVE"
+    SICK = "SICK"
+    OTHER = "OTHER"
 
-    ShiftTemplate continues to answer *when* a person works. This policy stores
-    roster-specific presentation/payroll metadata that should not be inferred
-    from department, base, work-centre or aircraft codes.
+
+class RosterCodeVerificationStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    UNRESOLVED = "UNRESOLVED"
+
+
+class RosterShiftTemplatePolicy(Base):
+    """Tenant-owned governance layered on a reusable ShiftTemplate.
+
+    ShiftTemplate answers *when* a person works. This policy records the
+    roster semantic, source confidence and presentation rules without turning
+    bases, work centres or aircraft identifiers into shift codes. Published
+    rosters are protected separately by immutable publication snapshots.
     """
 
     __tablename__ = "roster_shift_template_policies"
     __table_args__ = (
         UniqueConstraint("shift_template_id", name="uq_roster_shift_policy_template"),
         Index("ix_roster_shift_policy_amo", "amo_id", "shift_template_id"),
+        Index("ix_roster_shift_policy_verification", "amo_id", "verification_status"),
         CheckConstraint("unpaid_break_minutes >= 0", name="ck_roster_shift_policy_break_nonneg"),
         CheckConstraint(
             "effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from",
@@ -63,6 +82,17 @@ class RosterShiftTemplatePolicy(Base):
         SAEnum(RosterCalendarMode, name="roster_calendar_mode_enum", native_enum=False),
         nullable=False,
         default=RosterCalendarMode.TIMED,
+    )
+    duty_semantic = Column(
+        SAEnum(RosterDutySemantic, name="roster_duty_semantic_enum", native_enum=False),
+        nullable=False,
+        default=RosterDutySemantic.DUTY,
+    )
+    verification_status = Column(
+        SAEnum(RosterCodeVerificationStatus, name="roster_code_verification_status_enum", native_enum=False),
+        nullable=False,
+        default=RosterCodeVerificationStatus.UNRESOLVED,
+        index=True,
     )
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
