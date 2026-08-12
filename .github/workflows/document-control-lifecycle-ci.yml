@@ -88,6 +88,8 @@ jobs:
           amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
           amodb/apps/doc_control/tests/test_reports_export_contract.py
           amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_job_contract.py
           amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
           amodb/apps/doc_control/tests/test_change_source_contract.py
           amodb/apps/doc_control/tests/test_applicability_target_contract.py
@@ -150,6 +152,7 @@ jobs:
           src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
           src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
           src/pages/documentControl/DocumentEvidencePicker.tsx
+          src/pages/documentControl/DocumentEvidencePackAction.tsx
           src/pages/documentControl/reviewerDecisionEvidence.ts
           src/pages/documentControl/reviewerDecisionEvidence.test.ts
           src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
@@ -181,8 +184,8 @@ jobs:
             sleep 1
           done
           sleep 2
-          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed|Document Control automatic reminder cycle failed" /tmp/dms-lifecycle-backend.log; then
-            echo "::error::Backend startup reported an ORM/schema or automatic reminder integration failure"
+          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed|Document Control automatic reminder cycle failed|Document Control evidence-pack worker cycle failed" /tmp/dms-lifecycle-backend.log; then
+            echo "::error::Backend startup reported an ORM/schema or Document Control background-worker integration failure"
             cat /tmp/dms-lifecycle-backend.log
             exit 1
           fi
@@ -199,8 +202,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn|Document Control automatic reminder cycle failed" /tmp/dms-lifecycle-frontend.log /tmp/dms-lifecycle-backend.log 2>/dev/null; then
-            echo "::error::Material runtime, development-server or Document Control reminder noise detected during lifecycle acceptance"
+          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn|Document Control automatic reminder cycle failed|Document Control evidence-pack worker cycle failed" /tmp/dms-lifecycle-frontend.log /tmp/dms-lifecycle-backend.log 2>/dev/null; then
+            echo "::error::Material runtime, development-server or Document Control background-worker noise detected during lifecycle acceptance"
             cat /tmp/dms-lifecycle-frontend.log 2>/dev/null || true
             cat /tmp/dms-lifecycle-backend.log 2>/dev/null || true
             exit 1
