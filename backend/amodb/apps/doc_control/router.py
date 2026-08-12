@@ -18,6 +18,7 @@ from .knowledge_workspace_router import router as knowledge_workspace_router
 from .reminder_lifecycle_router import router as reminder_lifecycle_router
 from .workspace_access import enforce_workspace_access
 from .workspace_administration_router import router as workspace_administration_router
+from .workspace_applicability_router import router as workspace_applicability_router
 from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
 from .workspace_compliance_portfolio_router import router as workspace_compliance_portfolio_router
@@ -59,16 +60,16 @@ router.include_router(reminder_lifecycle_router)
 router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
-# verification, controlled change assessment, authority evidence, controlled-copy
-# custody/incidents, distribution integrity, external-source currency/assessment,
-# periodic-review follow-up, profile-owner tenancy, terminal temporary-revision
-# immutability, accountable approval authority, decision evidence,
-# active-recipient publication, server-derived workflow impact, governed
-# hierarchy/reference integrity, generated record custody, permission-filtered
-# assisted search, bounded library discovery, bounded operating portfolios,
-# bounded evidence registers/exports, immutable evidence attachments, governed
-# reminders/escalations, administration, document lifecycle controls, and release
-# safeguards.
+# verification, controlled change assessment, verified applicability, authority
+# evidence, controlled-copy custody/incidents, distribution integrity,
+# external-source currency/assessment, periodic-review follow-up, profile-owner
+# tenancy, terminal temporary-revision immutability, accountable approval authority,
+# decision evidence, active-recipient publication, server-derived workflow impact,
+# governed hierarchy/reference integrity, generated record custody,
+# permission-filtered assisted search, bounded library discovery, bounded operating
+# portfolios, bounded evidence registers/exports, immutable evidence attachments,
+# governed reminders/escalations, administration, document lifecycle controls, and
+# release safeguards.
 # They must precede the compatibility workspace router because Starlette resolves
 # matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
@@ -136,6 +137,11 @@ router.include_router(
 )
 router.include_router(
     workspace_change_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_applicability_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
