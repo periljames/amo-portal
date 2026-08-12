@@ -8,7 +8,7 @@ prefixes `/rostering` and `/workforce`.
 """
 from fastapi import APIRouter
 
-from . import roster_control
+from . import lineage, roster_control
 from . import router as rostering_route_module
 from .aircraft_allocation_router import router as aircraft_allocation_router
 from .automation_router import router as automation_router
@@ -32,6 +32,11 @@ rostering_route_module.router.routes = [
     for route in rostering_route_module.router.routes
     if getattr(route, "path", None) not in _LEGACY_CALENDAR_PATHS
 ]
+
+# Preserve calendar event identity across copied/amended roster versions. This
+# stronger implementation inherits lineage by source_reference_id first, so an
+# amended time/base/shift does not create a duplicate event downstream.
+roster_control.ensure_assignment_lineages = lineage.ensure_assignment_lineages
 
 # Install lifecycle/export policy at application import time. The public
 # service facade remains the compatibility boundary used by the existing
