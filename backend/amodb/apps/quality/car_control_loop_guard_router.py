@@ -41,6 +41,21 @@ _RESOLVED_DEPENDENCY_STATUSES = {"RESOLVED", "MITIGATED", "ACCEPTED_RISK", "CANC
 _TERMINAL_MILESTONE_STATUSES = {"ACCEPTED", "COMPLETED", "WAIVED"}
 
 
+def _synchronize_authoritative_car_deadline(
+    db: Session,
+    *,
+    car: models.CorrectiveActionRequest,
+    approved_due_date: date,
+) -> None:
+    """Keep register, target and reminder deadline sources in one transaction."""
+
+    car.due_date = approved_due_date
+    car.target_closure_date = approved_due_date
+    from .router import _seed_car_reminders
+
+    _seed_car_reminders(db, car)
+
+
 def _milestone_extension_ceiling(db: Session, *, amo_id: str, car_id: UUID, milestone_id: UUID) -> date | None:
     rows = _milestones(db, amo_id=amo_id, car_id=car_id)
     for index, row in enumerate(rows):
@@ -207,13 +222,11 @@ def decide_deadline_change_guarded(
             if row.previous_due_date != profile.current_due_date:
                 raise HTTPException(status_code=409, detail="The final CAR deadline changed after this request was created. Submit a new controlled deadline request.")
             profile.current_due_date = row.requested_due_date
-            car.due_date = row.requested_due_date
-            car.target_closure_date = row.requested_due_date
-            # Keep the established CAR reminder path aligned to the approved
-            # authoritative due date in the same transaction.
-            from .router import _seed_car_reminders
-
-            _seed_car_reminders(db, car)
+            _synchronize_authoritative_car_deadline(
+                db,
+                car=car,
+                approved_due_date=row.requested_due_date,
+            )
         row.status = "APPROVED"
     else:
         row.status = "REJECTED"
