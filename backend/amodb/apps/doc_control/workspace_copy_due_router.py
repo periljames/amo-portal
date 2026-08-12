@@ -10,7 +10,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import workspace_schemas as schemas
-from .workspace_copy_router import create_guarded_controlled_copy as _create_copy
+from .workspace_copy_router import register_controlled_copy as _create_copy
 from .workspace_service import require_control_user, resolve_tenant, utcnow
 
 
