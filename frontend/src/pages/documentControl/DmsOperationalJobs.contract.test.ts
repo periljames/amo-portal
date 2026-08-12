@@ -7,6 +7,7 @@ const jobs = readFileSync(new URL("./documentControlJobs.ts", import.meta.url), 
 const library = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
 const home = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const homeService = readFileSync(new URL("../../services/documentControlHome.ts", import.meta.url), "utf-8");
+const compliance = readFileSync(new URL("./DocumentControlCompliancePortfolioPage.tsx", import.meta.url), "utf-8");
 const integrationService = readFileSync(new URL("../../services/documentControlIntegrationCatalog.ts", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
 const integrationActions = readFileSync(new URL("./DocumentControlIntegrationActions.tsx", import.meta.url), "utf-8");
@@ -52,12 +53,16 @@ describe("DMS operational job contract", () => {
     expect(library).toContain("selectedJob.selectLabel");
   });
 
-  it("surfaces authority, temporary revision and controlled-copy obligations in My Work", () => {
-    for (const kind of ["AUTHORITY_ACTION", "TEMPORARY_REVISION", "CONTROLLED_COPY"]) {
+  it("surfaces specialist obligations in My Work including owned external-source assessment", () => {
+    for (const kind of ["AUTHORITY_ACTION", "TEMPORARY_REVISION", "CONTROLLED_COPY", "EXTERNAL_SOURCE_ACTION"]) {
       expect(homeService).toContain(`"${kind}"`);
       expect(home).toContain(`kind === "${kind}"`);
     }
-    expect(home).toContain("authority response, temporary revision or controlled-copy custody action");
+    expect(homeService).toContain('fetchWorkFeed(tenant, "external-source-work")');
+    expect(home).toContain("external-source assessment");
+    expect(compliance).toContain('params.get("assessment_source")');
+    expect(compliance).toContain('next.set("assessment_source", sourceId)');
+    expect(compliance).toContain("ExternalRevisionAssessmentPanel");
   });
 
   it("uses named tenant users for periodic review ownership", () => {
