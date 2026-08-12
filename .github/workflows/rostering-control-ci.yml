@@ -97,6 +97,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Run controlled rostering frontend contracts
+        working-directory: frontend
+        run: npx vitest run src/pages/rostering/rosterControlContract.test.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
