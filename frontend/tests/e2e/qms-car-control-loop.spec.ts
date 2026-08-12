@@ -241,7 +241,7 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
   await page.goto(`/maintenance/tenant-a/quality/cars?control=${CAR_ID}`, { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: /QMS-CAR-026/ })).toBeVisible();
-  await expect(page.getByText("At Risk · 55/100")).toBeVisible();
+  await expect(page.locator(".page-header").getByText("At Risk · 55/100")).toBeVisible();
 
   const lifecycleSection = page.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");
   await expect(lifecycleSection).toBeVisible();
