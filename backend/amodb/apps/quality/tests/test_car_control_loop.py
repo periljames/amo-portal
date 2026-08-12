@@ -179,6 +179,27 @@ def test_closure_readiness_accepts_complete_control_chain() -> None:
     assert readiness == {"ready": True, "blockers": []}
 
 
+def test_closure_readiness_requires_explicit_rca_and_cap_acceptance() -> None:
+    today = date(2026, 8, 11)
+    milestones = _complete_milestones(today)
+    milestones[0]["status"] = "COMPLETED"
+    milestones[1]["status"] = "WAIVED"
+
+    readiness = closure_readiness(
+        milestones=milestones,
+        dependencies=[],
+        effectiveness_required=True,
+    )
+
+    assert readiness["ready"] is False
+    blocked_keys = {
+        blocker["milestone_key"]
+        for blocker in readiness["blockers"]
+        if blocker["code"] == "MILESTONE_NOT_ACCEPTED"
+    }
+    assert blocked_keys == {"RCA_SUBMISSION", "CAP_APPROVAL"}
+
+
 def test_closure_readiness_blocks_missing_evidence_and_open_dependency() -> None:
     today = date(2026, 8, 11)
     milestones = _complete_milestones(today)
@@ -276,6 +297,19 @@ def test_public_invite_report_requires_matching_issued_revision() -> None:
     assert _issued_revision_matches_path(draft, report_path) is False
     assert _issued_revision_matches_path(issued, report_path) is True
     assert _issued_revision_matches_path(different_issued, report_path) is False
+
+
+def test_public_invite_report_sets_forced_rls_tenant_context() -> None:
+    from amodb.apps.quality.public_invite_extensions import _set_public_tenant_context
+
+    db = MagicMock()
+    db.get_bind.return_value.dialect.name = "postgresql"
+
+    _set_public_tenant_context(db, amo_id="amo-tenant-1")
+
+    db.execute.assert_called_once()
+    _, params = db.execute.call_args.args
+    assert params == {"amo_id": "amo-tenant-1"}
 
 
 def test_sent_reminder_stage_is_archived_before_reseeding_extended_deadline() -> None:
