@@ -19,6 +19,12 @@ replace_once(
 )
 
 replace_once(
+    "frontend/tests/e2e/qms-car-control-loop.spec.ts",
+    '  await expect(page.getByDisplayValue("Engineering approval required before implementation evidence can be accepted.")).toBeVisible();\n',
+    '  await expect(page.getByRole("heading", { name: "Dependency detail editor" }).locator("xpath=ancestor::section[1]").locator("textarea").first()).toHaveValue("Engineering approval required before implementation evidence can be accepted.");\n',
+)
+
+replace_once(
     "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx",
     '  const allCars = reportQuery.data?.items ?? [];\n',
     '  const allCars = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);\n',
@@ -33,7 +39,7 @@ replace_once(
 replace_once(
     "frontend/tests/e2e/qms-car-performance-report.spec.ts",
     '''  await page.route("**/api/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
-    '''  await page.route("**/api/**", async (route) => {\n    if (route.request().url().includes("/quality/cars/register/paged")) {\n      await route.fallback();\n      return;\n    }\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
+    '''  // Do not install a broad /api catch-all here: the CAR register service is\n  // tenant-scoped under /api and must reach the specific paged-register mock above.\n''',
 )
 
 print("QMS CAR reporting browser follow-up applied")
