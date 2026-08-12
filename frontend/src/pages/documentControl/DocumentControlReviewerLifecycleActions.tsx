@@ -6,6 +6,8 @@ import {
   type DocumentDetailResponse,
   type DocumentWorkflow,
 } from "../../services/documentControl";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
+import DocumentEvidencePicker from "./DocumentEvidencePicker";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 import { buildReviewerDecisionEvidence } from "./reviewerDecisionEvidence";
 
@@ -45,7 +47,7 @@ export default function DocumentControlReviewerLifecycleActions({
     .map((action) => REVIEWER_ACTIONS[action])
     .filter((action): action is ReviewerAction => Boolean(action));
   const [comments, setComments] = useState("");
-  const [evidence, setEvidence] = useState("");
+  const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -56,6 +58,9 @@ export default function DocumentControlReviewerLifecycleActions({
   if (!actions.length) {
     return <DocumentControlEmpty title="Awaiting another workflow role" message="This account can read the lifecycle evidence, but the current stage is assigned to another controlled responsibility." />;
   }
+
+  const reviewedRevision = detail.revisions.find((revision) => revision.id === workflow.revision_id);
+  const retainsSourceChecksum = Boolean(reviewedRevision?.source_sha256?.trim());
 
   const transition = async (item: ReviewerAction) => {
     const decisionComments = comments.trim();
@@ -68,8 +73,8 @@ export default function DocumentControlReviewerLifecycleActions({
         : "Record the correction reason before returning the revision.");
       return;
     }
-    if (isApproval && !retainedEvidence.length) {
-      setError("No retained source checksum is available for this revision. Add a controlled evidence reference before approving.");
+    if (isApproval && !retainsSourceChecksum && !retainedEvidence.length) {
+      setError("This revision has no retained source checksum. Upload supporting controlled evidence before approving.");
       return;
     }
 
@@ -90,9 +95,6 @@ export default function DocumentControlReviewerLifecycleActions({
     }
   };
 
-  const reviewedRevision = detail.revisions.find((revision) => revision.id === workflow.revision_id);
-  const retainsSourceChecksum = Boolean(reviewedRevision?.source_sha256?.trim());
-
   return <div className="dc-form" data-testid="assigned-reviewer-actions">
     <div className="dc-callout">
       <CheckCircle2 size={17} />
@@ -102,11 +104,21 @@ export default function DocumentControlReviewerLifecycleActions({
       </div>
     </div>
     <label className="wide"><span>Review comments</span><textarea required value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Required: record the basis for the decision or correction request." /></label>
-    <label className="wide"><span>Additional evidence references</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Checklist, attachment, ticket or other retained reference, one per line" /></label>
+    <DocumentEvidencePicker
+      tenant={tenant}
+      manualId={detail.document.id}
+      revisionId={workflow.revision_id}
+      category="REVIEW"
+      purpose={`REVIEW_${workflow.state}`}
+      value={evidence}
+      onChange={setEvidence}
+      label="Supporting review evidence"
+      help="Attach checklists, review sheets, correspondence or other retained files. The server independently records the exact reviewed revision checksum."
+    />
     <div className="dc-form__hint">
       {retainsSourceChecksum
-        ? "The reviewed revision ID and source checksum are retained automatically with approval decisions."
-        : "This revision has no retained source checksum; add a controlled evidence reference before approving."}
+        ? "The reviewed revision ID and source checksum will be appended to the decision by the server."
+        : "This revision has no retained source checksum; supporting controlled evidence is required before approval."}
     </div>
     {error ? <div className="dc-form__error">{error}</div> : null}
     <div className="dc-form__actions">
