@@ -8,7 +8,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import catalog, common, models, schemas
-from .code_registry_models import RosterCalendarMode, RosterShiftTemplatePolicy
+from .code_registry_models import (
+    RosterCalendarMode,
+    RosterCodeVerificationStatus,
+    RosterDutySemantic,
+    RosterShiftTemplatePolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -22,23 +27,24 @@ class StarterShift:
     counts_as_duty: bool
     unpaid_break_minutes: int
     calendar_mode: RosterCalendarMode
+    duty_semantic: RosterDutySemantic
     description: str
 
 
 AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
-    StarterShift("DY", "Day Duty", models.ShiftTemplateKind.DAY, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, "General day duty. Work centre, base and aircraft remain separate roster dimensions."),
-    StarterShift("AM", "Morning Duty", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, "Early day duty."),
-    StarterShift("PM", "Afternoon / Late Duty", models.ShiftTemplateKind.DAY, None, None, None, True, 60, RosterCalendarMode.TIMED, "Tenant-configured afternoon or late duty; set local times before operational use."),
-    StarterShift("XD", "Extended Day", models.ShiftTemplateKind.DAY, "06:00", "18:00", 720, True, 60, RosterCalendarMode.TIMED, "Extended daytime duty."),
-    StarterShift("WD", "Weekend Day", models.ShiftTemplateKind.DAY, "08:00", "18:00", 600, True, 60, RosterCalendarMode.TIMED, "Weekend daytime duty."),
-    StarterShift("NT", "Night Duty", models.ShiftTemplateKind.NIGHT, None, None, None, True, 60, RosterCalendarMode.TIMED, "Tenant-configured night duty; set local times before operational use."),
-    StarterShift("F1", "Flight Duty - Early", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, "Early Flight Engineering coverage. Allocate the aircraft separately."),
-    StarterShift("F2", "Flight Duty - Late", models.ShiftTemplateKind.DAY, "12:00", "21:00", 540, True, 60, RosterCalendarMode.TIMED, "Late Flight Engineering coverage. Allocate the aircraft separately."),
-    StarterShift("FD", "Full Flight Duty", models.ShiftTemplateKind.DAY, "06:00", "21:00", 900, True, 60, RosterCalendarMode.TIMED, "Full Flight Engineering coverage; operational end may be amended to the actual last-flight return."),
-    StarterShift("SB", "Standby", models.ShiftTemplateKind.STANDBY, None, None, None, True, 0, RosterCalendarMode.TIMED, "Tenant-configured standby window."),
-    StarterShift("TR", "Training / Course", models.ShiftTemplateKind.TRAINING, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, "Training occupies working time and participates in duty/rest validation."),
-    StarterShift("OF", "Off Duty", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, "Protected non-duty day."),
-    StarterShift("RD", "Rest Day", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, "Protected rostered rest day."),
+    StarterShift("DY", "Day Duty", models.ShiftTemplateKind.DAY, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "General day duty. Work centre, base and aircraft remain separate roster dimensions."),
+    StarterShift("AM", "Morning Duty", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Early day duty."),
+    StarterShift("PM", "Afternoon / Late Duty", models.ShiftTemplateKind.DAY, None, None, None, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Tenant-configured afternoon or late duty; assignment times remain explicit."),
+    StarterShift("XD", "Extended Day", models.ShiftTemplateKind.DAY, "06:00", "18:00", 720, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Extended daytime duty."),
+    StarterShift("WD", "Weekend Day", models.ShiftTemplateKind.DAY, "08:00", "18:00", 600, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Weekend daytime duty."),
+    StarterShift("NT", "Night Duty", models.ShiftTemplateKind.NIGHT, None, None, None, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Tenant-configured night duty; assignment times remain explicit."),
+    StarterShift("F1", "Flight Duty - Early", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Early Flight Engineering coverage. Allocate the aircraft separately."),
+    StarterShift("F2", "Flight Duty - Late", models.ShiftTemplateKind.DAY, "12:00", "21:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Late Flight Engineering coverage. Allocate the aircraft separately."),
+    StarterShift("FD", "Full Flight Duty", models.ShiftTemplateKind.DAY, "06:00", "21:00", 900, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Full Flight Engineering coverage; operational end may be amended to the actual last-flight return."),
+    StarterShift("SB", "Standby", models.ShiftTemplateKind.STANDBY, None, None, None, True, 0, RosterCalendarMode.TIMED, RosterDutySemantic.STANDBY, "Tenant-configured standby window."),
+    StarterShift("TR", "Training / Course", models.ShiftTemplateKind.TRAINING, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.TRAINING, "Training occupies working time and participates in duty/rest validation."),
+    StarterShift("OF", "Off Duty", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, RosterDutySemantic.OFF, "Protected non-duty day."),
+    StarterShift("RD", "Rest Day", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, RosterDutySemantic.REST, "Protected rostered rest day."),
 )
 
 STARTER_CODES = tuple(item.code for item in AMO_STARTER_SHIFTS)
@@ -108,8 +114,6 @@ def update_shift_template(
 def _implicit_seed_disabled(
     db: Session, *, amo_id: str, actor_user_id: Optional[str] = None
 ) -> None:
-    # Deliberately no-op. Starter codes are installed only by the explicit
-    # /shift-templates/starter-pack action.
     return None
 
 
@@ -128,11 +132,7 @@ def install_starter_pack(
     amo_id: str,
     actor_user_id: str,
 ) -> tuple[list[models.ShiftTemplate], list[str]]:
-    """Install missing recommended AMO codes only when explicitly requested.
-
-    Existing tenant records are never overwritten. Re-running the starter pack
-    is therefore idempotent and cannot silently change local definitions.
-    """
+    """Install missing recommended AMO codes only when explicitly requested."""
 
     existing = {
         row.code.upper(): row
@@ -171,6 +171,8 @@ def install_starter_pack(
             shift_template_id=template.id,
             unpaid_break_minutes=item.unpaid_break_minutes,
             calendar_mode=item.calendar_mode,
+            duty_semantic=item.duty_semantic,
+            verification_status=RosterCodeVerificationStatus.CONFIRMED,
             source_reference="AMO Portal recommended starter pack; tenant-owned after installation.",
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
