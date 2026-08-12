@@ -6,15 +6,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
-from . import common, controlled_exports, models, roster_control, services
-from .roster_control_models import RosterControlledDocumentSettings, RosterShiftAlias
+from . import calendar_subscriptions, common, controlled_exports, models, roster_control, services
 
 router = APIRouter(prefix="/rostering", tags=["rostering-control"])
 
@@ -106,9 +105,8 @@ def _subscription_link(request: Request, row, raw_token: str) -> CalendarSubscri
     feed_path = f"/rostering/calendar/feed/{raw_token}.ics"
     https_url = str(request.base_url).rstrip("/") + feed_path
     webcal_url = "webcal://" + https_url.split("://", 1)[-1]
-    base = _subscription_payload(row).model_dump()
     return CalendarSubscriptionLink(
-        **base,
+        **_subscription_payload(row).model_dump(),
         https_url=https_url,
         webcal_url=webcal_url,
         feed_path=feed_path,
@@ -245,14 +243,28 @@ def controlled_roster_xlsx(
     )
 
 
-@router.get("/calendar/subscription", response_model=CalendarSubscriptionStatus)
-def personal_calendar_subscription_status(
+@router.get("/calendar/subscription", response_model=CalendarSubscriptionLink)
+def personal_calendar_subscription(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    """Return the owner's stable subscription URL without rotating it.
+
+    The bearer token is random, stored encrypted at rest, and looked up by hash.
+    This keeps the existing self-service calendar UI compatible while still
+    allowing explicit rotate/revoke operations.
+    """
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
-    row = roster_control.subscription_status(db, amo_id=_amo(current_user), user_id=current_user.id)
-    return _subscription_payload(row)
+    row, raw_token = calendar_subscriptions.get_or_issue_active_subscription(
+        db,
+        amo_id=_amo(current_user),
+        user_id=current_user.id,
+        actor_user_id=current_user.id,
+    )
+    db.commit()
+    db.refresh(row)
+    return _subscription_link(request, row, raw_token)
 
 
 @router.post("/calendar/subscription", response_model=CalendarSubscriptionLink, status_code=status.HTTP_201_CREATED)
@@ -262,7 +274,7 @@ def create_personal_calendar_subscription(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
-    row, raw_token = roster_control.issue_calendar_subscription(
+    row, raw_token = calendar_subscriptions.get_or_issue_active_subscription(
         db,
         amo_id=_amo(current_user),
         user_id=current_user.id,
@@ -280,7 +292,7 @@ def rotate_personal_calendar_subscription(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
-    row, raw_token = roster_control.issue_calendar_subscription(
+    row, raw_token = calendar_subscriptions.issue_calendar_subscription(
         db,
         amo_id=_amo(current_user),
         user_id=current_user.id,
@@ -297,7 +309,7 @@ def revoke_personal_calendar_subscription(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
-    roster_control.revoke_calendar_subscription(
+    calendar_subscriptions.revoke_calendar_subscription(
         db,
         amo_id=_amo(current_user),
         user_id=current_user.id,
@@ -312,7 +324,7 @@ def personal_calendar_feed(
     token: str,
     db: Session = Depends(get_db),
 ):
-    row = roster_control.resolve_calendar_subscription(db, raw_token=token)
+    row = calendar_subscriptions.resolve_calendar_subscription(db, raw_token=token)
     if not row:
         raise HTTPException(status_code=404, detail="Calendar subscription is invalid or revoked")
     try:
