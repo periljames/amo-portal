@@ -4,6 +4,9 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+from fastapi import HTTPException
+
 from amodb.apps.quality.car_control_loop import closure_readiness, compute_car_health
 
 
@@ -115,6 +118,32 @@ def test_critical_dependency_drives_critical_health() -> None:
     assert any(factor["code"] == "OPEN_DEPENDENCY" for factor in health.factors)
 
 
+def test_low_risk_nonblocking_dependency_becomes_overdue_when_its_due_date_passes() -> None:
+    today = date(2026, 8, 11)
+    health = compute_car_health(
+        today=today,
+        car_status="IN_PROGRESS",
+        final_due_date=today + timedelta(days=30),
+        accountable_owner_user_id="user-1",
+        milestones=[],
+        dependencies=[
+            {
+                "id": "dep-low",
+                "title": "Purchase order response",
+                "status": "OPEN",
+                "risk_level": "LOW",
+                "blocks_closure": False,
+                "due_date": today - timedelta(days=2),
+            }
+        ],
+    )
+
+    assert health.state == "OVERDUE"
+    overdue = next(factor for factor in health.factors if factor["code"] == "DEPENDENCY_OVERDUE")
+    assert overdue["dependency_id"] == "dep-low"
+    assert overdue["overdue_days"] == 2
+
+
 def test_closure_readiness_accepts_complete_control_chain() -> None:
     today = date(2026, 8, 11)
     readiness = closure_readiness(
@@ -211,6 +240,28 @@ def test_public_invite_persistence_preserves_full_detailed_response() -> None:
     assert len(car.preventive_action) == 8000
 
 
+def test_sent_reminder_stage_is_archived_before_reseeding_extended_deadline() -> None:
+    from amodb.apps.quality.car_control_loop_guard_router import _archive_sent_car_reminders_before_reseed
+
+    old_due = date(2026, 8, 20)
+    reminder = SimpleNamespace(
+        id="12345678-reminder",
+        due_date=old_due,
+        milestone_key="CAR_DUE_7_DAYS",
+    )
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = [reminder]
+
+    _archive_sent_car_reminders_before_reseed(
+        db,
+        car=SimpleNamespace(id="car-1", amo_id="amo-1"),
+        approved_due_date=date(2026, 9, 5),
+    )
+
+    assert reminder.milestone_key.startswith("CAR_DUE_7_DAYS@2026-08-20:12345678")
+    db.flush.assert_called_once()
+
+
 def test_authoritative_deadline_sync_updates_dates_and_rebuilds_pending_reminders() -> None:
     from amodb.apps.quality.car_control_loop_guard_router import _synchronize_authoritative_car_deadline
 
@@ -222,7 +273,11 @@ def test_authoritative_deadline_sync_updates_dates_and_rebuilds_pending_reminder
         due_date=old_due,
         target_closure_date=old_due,
     )
+    historical_query = MagicMock()
+    historical_query.filter.return_value.all.return_value = []
+    pending_query = MagicMock()
     db = MagicMock()
+    db.query.side_effect = [historical_query, pending_query]
 
     with patch("amodb.apps.quality.router._seed_car_reminders") as seed_reminders:
         _synchronize_authoritative_car_deadline(
@@ -233,5 +288,23 @@ def test_authoritative_deadline_sync_updates_dates_and_rebuilds_pending_reminder
 
     assert car.due_date == approved_due
     assert car.target_closure_date == approved_due
-    db.query.return_value.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
+    pending_query.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
     seed_reminders.assert_called_once_with(db, car)
+
+
+def test_closure_evidence_reference_is_capped_at_authoritative_car_column() -> None:
+    from amodb.apps.quality.car_control_loop_guard_router import _validated_closure_evidence_ref
+    from amodb.apps.quality.car_control_loop_router import CloseControlLoop
+
+    accepted = _validated_closure_evidence_ref(
+        CloseControlLoop(evidence_ref="x" * 512, closure_reason="Verified complete"),
+        [],
+    )
+    assert len(accepted) == 512
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validated_closure_evidence_ref(
+            CloseControlLoop(evidence_ref="x" * 513, closure_reason="Verified complete"),
+            [],
+        )
+    assert exc_info.value.status_code == 422
