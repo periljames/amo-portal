@@ -7,6 +7,9 @@ const jobs = readFileSync(new URL("./documentControlJobs.ts", import.meta.url), 
 const library = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
 const home = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const homeService = readFileSync(new URL("../../services/documentControlHome.ts", import.meta.url), "utf-8");
+const integrationService = readFileSync(new URL("../../services/documentControlIntegrationCatalog.ts", import.meta.url), "utf-8");
+const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
+const integrationActions = readFileSync(new URL("./DocumentControlIntegrationActions.tsx", import.meta.url), "utf-8");
 const guardedLifecycle = readFileSync(new URL("./DocumentControlLifecycleActionsGuarded.tsx", import.meta.url), "utf-8");
 const reviewActions = readFileSync(new URL("./DocumentControlReviewActions.tsx", import.meta.url), "utf-8");
 const temporaryRevisionActions = readFileSync(new URL("./DocumentControlTemporaryRevisionActions.tsx", import.meta.url), "utf-8");
@@ -74,5 +77,16 @@ describe("DMS operational job contract", () => {
     expect(temporaryRevisionActions).toContain("Select published permanent revision");
     expect(temporaryRevisionActions).not.toContain("Issued campaign ID");
     expect(temporaryRevisionActions).not.toContain("Incorporating permanent revision ID");
+  });
+
+  it("replaces canonical integration ID entry with tenant-scoped record discovery", () => {
+    expect(recordActions).toContain("DocumentControlIntegrationActions");
+    expect(integrationService).toContain("integration-catalog/search");
+    expect(integrationActions).toContain("Select portal module");
+    expect(integrationActions).toContain("Select governed record type");
+    expect(integrationActions).toContain("Canonical record");
+    expect(integrationActions).toContain("Verify and link record");
+    expect(integrationActions).toContain("source_table: selectedRecord.source_table");
+    expect(integrationActions).not.toContain("Canonical entity ID");
   });
 });
