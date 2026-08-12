@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
+import DocumentControlExternalSourceActions from "./DocumentControlExternalSourceActions";
 import DocumentControlIntegrationActions from "./DocumentControlIntegrationActions";
 import DocumentControlLifecycleActions from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
@@ -136,8 +137,10 @@ export default function DocumentControlRecordActions({
         <DocumentControlSection title="Periodic review controls" description="Schedule and complete continued-applicability reviews against the controlled document.">
           <div className="dc-section__body"><DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="reviews" onChanged={onChanged} /></div>
         </DocumentControlSection>
+        <DocumentControlSection title="External technical-data controls" description="Register governed OEM/authority sources, retain received revision files, establish currency and create the downstream applicability-assessment obligation.">
+          <div className="dc-section__body"><DocumentControlExternalSourceActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
         <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="applicability" />
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="external" />
       </> : null}
 
       {activeView === "relationships" ? (
