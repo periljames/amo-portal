@@ -10,15 +10,14 @@ import {
 import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
 import DocumentControlApproverLifecycleActions from "./DocumentControlApproverLifecycleActions";
 import DocumentControlControllerLifecycleActions from "./DocumentControlControllerLifecycleActions";
-import DocumentControlLifecycleActions, {
-  type LifecycleView,
-} from "./DocumentControlLifecycleActions";
 import DocumentControlReviewActions from "./DocumentControlReviewActions";
 import DocumentControlReviewerLifecycleActions from "./DocumentControlReviewerLifecycleActions";
 import DocumentControlTemporaryRevisionActions from "./DocumentControlTemporaryRevisionActions";
 import DocumentEvidencePicker from "./DocumentEvidencePicker";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
+
+export type LifecycleView = "workflow" | "authority" | "temporary-revisions" | "copies" | "reviews";
 
 type Props = {
   detail: DocumentDetailResponse;
@@ -169,8 +168,6 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
   </div>;
 }
 
-export type { LifecycleView };
-
 export default function DocumentControlLifecycleActionsGuarded(props: Props) {
   const capabilities = (props.detail as DetailWithPeople).capabilities;
   const canApprove = Boolean(capabilities?.approve);
@@ -199,5 +196,5 @@ export default function DocumentControlLifecycleActionsGuarded(props: Props) {
   if (!canApprove && DECISION_SEPARATED_VIEWS.has(props.activeView)) {
     return <DocumentControlControllerLifecycleActions {...props} />;
   }
-  return <DocumentControlLifecycleActions {...props} />;
+  return <DocumentControlEmpty title="No governed action" message="This lifecycle view has no active production action for the current role. Legacy raw-ID forms are intentionally not reachable." />;
 }
