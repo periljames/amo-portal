@@ -102,12 +102,17 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run guided workflow contract
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
       - name: Lint lifecycle acceptance and surfaces
         working-directory: frontend
         run: >-
           npm exec -- eslint
           src/pages/documentControl/DocumentLifecycleHeaderActions.tsx
           src/pages/documentControl/DocumentControlShell.tsx
+          src/pages/documentControl/DocumentWorkflowGuide.tsx
+          src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
           src/services/documentLifecycle.ts
           tests/e2e/document-lifecycle-controls.spec.ts
       - name: Build production frontend
