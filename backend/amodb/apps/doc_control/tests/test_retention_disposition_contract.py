@@ -110,7 +110,8 @@ def test_frontend_exposes_retention_as_an_accountable_operating_workflow() -> No
     assert "Request disposition" in actions
     assert "Approve disposition" in actions
     assert "Record disposition with evidence" in actions
-    assert "detail.capabilities.approve" in actions
+    assert 'type RetentionCapabilities = DocumentDetailResponse["capabilities"] & { approve?: boolean }' in actions
+    assert "const canApprove = Boolean((detail.capabilities as RetentionCapabilities).approve)" in actions
     assert "listDocumentRetentionApprovers" in actions
     assert "Assigned disposition approver" in actions
     assert 'params.get("retention")' in actions
