@@ -212,16 +212,16 @@ export function updateCarDependency(
   carId: string,
   dependencyId: string,
   payload: Partial<{
-    milestone_id: string;
+    milestone_id: string | null;
     title: string;
-    description: string;
+    description: string | null;
     dependency_type: CarDependencyType;
-    owner_user_id: string;
-    due_date: string;
+    owner_user_id: string | null;
+    due_date: string | null;
     risk_level: CarDependencyRisk;
     status: CarDependencyStatus;
     blocks_closure: boolean;
-    mitigation_plan: string;
+    mitigation_plan: string | null;
   }>,
 ): Promise<CarControlLoop> {
   return apiRequest<CarControlLoop>(controlPath(amoCode, carId, `/dependencies/${encodeURIComponent(dependencyId)}`), jsonOptions("PATCH", payload));

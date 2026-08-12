@@ -188,6 +188,18 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(controlLoopPayload()) });
       return;
     }
+    if (url.includes(`/quality/cars/${CAR_ID}/responses`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "response-1", car_id: CAR_ID, containment_action: "Containment completed and immediate exposure controlled.", root_cause: "The process lacked a staged ownership checkpoint and dependency escalation control.", corrective_action: "Introduce accountable milestone ownership and verify implementation before closure.", preventive_action: "Trend repeat findings during management review and verify effectiveness in subsequent audits.", evidence_ref: "EVID-026", submitted_by_name: "Head of Base Maintenance", submitted_by_email: "hbm@tenant-a.test", submitted_at: "2026-08-21T07:30:00Z", status: "SUBMITTED", is_latest: true }]) });
+      return;
+    }
+    if (url.includes(`/quality/cars/${CAR_ID}/attachments`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "attachment-1", car_id: CAR_ID, filename: "implementation-evidence.pdf", description: "Approved implementation evidence", content_type: "application/pdf", size_bytes: 125000, sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uploaded_at: "2026-08-21T08:15:00Z", download_url: "/quality/cars/attachment-1/download" }]) });
+      return;
+    }
+    if (url.includes(`/quality/cars/${CAR_ID}/invite`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ car_id: CAR_ID, invite_token: "invite-1", invite_url: "/car-invite?token=invite-1", car_form_download_url: "/quality/cars/invite/invite-1/form", next_reminder_at: null, car_number: "QMS-CAR-026", title: "Close repeat audit findings", summary: "Restore staged ownership, evidence and effectiveness controls for corrective actions.", priority: "HIGH", status: "IN_PROGRESS", due_date: "2026-09-20", target_closure_date: "2026-09-30", submitted_at: "2026-08-21T07:30:00Z", submitted_by_name: "Head of Base Maintenance", root_cause_status: "ACCEPTED", capa_status: "ACCEPTED", root_cause_review_note: "RCA accepted after causal and contributing factors were addressed.", capa_review_note: "CAP accepted subject to implementation evidence.", finding_id: "finding-1", finding_ref: "QAR/MO/26/026-F01", finding_description: "Previous audit findings exceeded agreed closure controls.", audit_id: "audit-1", audit_ref: "QAR/MO/26/026", audit_title: "Line Maintenance Audit" }) });
+      return;
+    }
     if (url.includes("/quality/cars/assignees")) {
       await route.fulfill({
         status: 200,
@@ -236,6 +248,18 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
   await expect(lifecycleSection.getByText("1. Root cause analysis submitted", { exact: true })).toBeVisible();
   await expect(lifecycleSection.getByText("3. Corrective actions implemented", { exact: true })).toBeVisible();
 
+  await expect(page.getByRole("heading", { name: "Next required action" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Corrective action response" })).toBeVisible();
+  await expect(page.getByText("The process lacked a staged ownership checkpoint and dependency escalation control.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Objective evidence" })).toBeVisible();
+  await expect(page.getByText("implementation-evidence.pdf")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dependency detail editor" })).toBeVisible();
+  await expect(page.getByDisplayValue("Engineering approval required before implementation evidence can be accepted.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evidence & report package" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Print CAR package" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export CAR CSV" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Evidence pack" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CAR performance" })).toBeVisible();
   await expect(page.getByText("Facility modification approval", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Controlled deadline changes" })).toBeVisible();
   await expect(page.getByText("Sep 20, 2026").first()).toBeVisible();

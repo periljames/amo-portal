@@ -76,7 +76,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     segment: "intelligence",
     label: "Intelligence",
     shortLabel: "Intelligence",
-    permission: "qms.report.view",
+    permission: "qms.reports.view",
     description: "Performance, risk, trends, regulatory impact, approval readiness and management-review intelligence.",
     activePrefixes: ["intelligence", "risk", "management-review", "reports", "system"],
   },

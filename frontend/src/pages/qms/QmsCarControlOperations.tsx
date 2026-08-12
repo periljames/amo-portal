@@ -1,29 +1,4 @@
-from __future__ import annotations
-
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-
-
-def read(rel: str) -> str:
-    return (ROOT / rel).read_text(encoding="utf-8")
-
-
-def write(rel: str, content: str) -> None:
-    path = ROOT / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def replace_once(rel: str, old: str, new: str) -> None:
-    content = read(rel)
-    count = content.count(old)
-    if count != 1:
-        raise RuntimeError(f"Expected exactly one match in {rel}, found {count}: {old[:120]!r}")
-    write(rel, content.replace(old, new, 1))
-
-
-operations_component = r'''import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
@@ -174,7 +149,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     setDependencyDrafts(next);
   }, [control.dependencies]);
 
-  const responses = responsesQuery.data ?? [];
+  const responses = useMemo(() => responsesQuery.data ?? [], [responsesQuery.data]);
   const attachments = attachmentsQuery.data ?? [];
   const latestResponse = useMemo<CARResponseOut | null>(() => {
     const explicitlyLatest = responses.find((item) => item.is_latest);
@@ -243,7 +218,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   };
 
   const handleDelete = async (attachment: CARAttachmentOut) => {
-    if (!window.confirm(`Remove evidence file ${attachment.filename}? The action remains attributable in the CAR history.`)) return;
+    if (!window.confirm(`Remove evidence file ${attachment.filename} from the current CAR evidence set?`)) return;
     setActionBusy(`delete-${attachment.id}`);
     setLocalError(null);
     try {
@@ -349,11 +324,12 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 
   const printPackage = () => {
     const source = inviteQuery.data;
-    const popup = window.open("", "_blank", "noopener,noreferrer,width=1100,height=850");
+    const popup = window.open("", "_blank", "width=1100,height=850");
     if (!popup) {
       setLocalError("The browser blocked the printable CAR package window. Allow pop-ups for this portal and try again.");
       return;
     }
+    popup.opener = null;
     const response = latestResponse || source;
     const milestoneRows = control.milestones.map((item) => `<tr><td>${item.phase_order}. ${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.original_due_date))}</td><td>${escapeHtml(formatDate(item.current_due_date))}</td><td>${escapeHtml(item.evidence_ref || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("");
     const dependencyRows = control.dependencies.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.dependency_type))}</td><td>${escapeHtml(humanize(item.risk_level))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.due_date))}</td><td>${item.blocks_closure ? "Yes" : "No"}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.mitigation_plan || "")}</td></tr>`).join("");
@@ -466,157 +442,3 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 };
 
 export default QmsCarControlOperations;
-'''
-
-write("frontend/src/pages/qms/QmsCarControlOperations.tsx", operations_component)
-
-# Main CAR control workspace: expose initial milestone planning, complete dependency
-# capture, and mount the operational evidence/report surface.
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    'import { qmsListCarAssignees, type CARAssignee } from "../../services/qms";\n',
-    'import { qmsListCarAssignees, type CARAssignee } from "../../services/qms";\nimport QmsCarControlOperations from "./QmsCarControlOperations";\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    'const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];\n',
-    'const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];\nconst INITIAL_MILESTONES = [\n  { key: "RCA_SUBMISSION", label: "Root cause analysis submitted" },\n  { key: "CAP_APPROVAL", label: "Corrective action plan approved" },\n  { key: "IMPLEMENTATION_COMPLETE", label: "Corrective actions implemented" },\n  { key: "EVIDENCE_COMPLETE", label: "Closure evidence complete" },\n  { key: "EFFECTIVENESS_REVIEW", label: "Effectiveness review complete" },\n] as const;\ntype InitialMilestoneKey = (typeof INITIAL_MILESTONES)[number]["key"];\ntype InitialMilestoneDraft = { owner_user_id: string; due_date: string };\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '  const [effectivenessRequired, setEffectivenessRequired] = useState(true);\n',
-    '  const [effectivenessRequired, setEffectivenessRequired] = useState(true);\n  const [initialMilestones, setInitialMilestones] = useState<Record<InitialMilestoneKey, InitialMilestoneDraft>>(() => Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: "", due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '  const [dependencyTitle, setDependencyTitle] = useState("");\n',
-    '  const [dependencyTitle, setDependencyTitle] = useState("");\n  const [dependencyDescription, setDependencyDescription] = useState("");\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '      setInitOwner(control.car.assigned_to_user_id || "");\n      setInitDue(control.car.target_closure_date || control.car.due_date || "");\n      return;\n',
-    '      const defaultOwner = control.car.assigned_to_user_id || "";\n      setInitOwner(defaultOwner);\n      setInitDue(control.car.target_closure_date || control.car.due_date || "");\n      setInitialMilestones(Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: defaultOwner, due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);\n      return;\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '                <label className="checkbox-row"><input type="checkbox" checked={effectivenessRequired} onChange={(event) => setEffectivenessRequired(event.target.checked)} /> Effectiveness review required before closure</label>\n                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>\n',
-    '                <div style={{ gridColumn: "1 / -1" }}>\n                  <strong>Lifecycle milestone plan</strong>\n                  <p className="muted">Set the accountable person and planned control date for RCA, CAP acceptance, implementation, evidence and effectiveness. Blank dates use the governed default schedule.</p>\n                  <div className="table-wrap"><table className="table"><thead><tr><th>Stage</th><th>Owner</th><th>Planned due</th></tr></thead><tbody>{INITIAL_MILESTONES.map((item, index) => { const draft = initialMilestones[item.key]; return <tr key={item.key}><td><strong>{index + 1}. {item.label}</strong></td><td><select className="input" value={draft.owner_user_id} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], owner_user_id: event.target.value } }))}><option value="">Unassigned</option>{assigneeOptions.map((person) => <option key={person.id} value={person.id}>{person.full_name || person.email}{person.department_name ? ` · ${person.department_name}` : ""}</option>)}</select></td><td><input className="input" type="date" value={draft.due_date} max={initDue || undefined} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], due_date: event.target.value } }))} /></td></tr>; })}</tbody></table></div>\n                </div>\n                <label className="checkbox-row"><input type="checkbox" checked={effectivenessRequired} onChange={(event) => setEffectivenessRequired(event.target.checked)} /> Effectiveness review required before closure</label>\n                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired, milestones: INITIAL_MILESTONES.map((item) => ({ milestone_key: item.key, owner_user_id: initialMilestones[item.key].owner_user_id || undefined, due_date: initialMilestones[item.key].due_date || undefined })) }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '            <section className="card">\n              <div className="card__header"><div><h2>Staged CAR lifecycle</h2><p>Each stage has a named owner, immutable original deadline, current approved deadline, governed status and evidence.</p></div></div>\n',
-    '            <QmsCarControlOperations amoCode={amoCode} carId={carId} control={control} assignees={assignees} canManage={canManage} onControlChange={(next) => queryClient.setQueryData(["qms-car-control-loop", amoCode, carId], next)} />\n\n            <section className="card">\n              <div className="card__header"><div><h2>Staged CAR lifecycle</h2><p>Each stage has a named owner, immutable original deadline, current approved deadline, governed status and evidence.</p></div></div>\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    '                  <label>Dependency title<input className="input" value={dependencyTitle} onChange={(event) => setDependencyTitle(event.target.value)} placeholder="e.g. Facility modification approval" /></label>\n',
-    '                  <label>Dependency title<input className="input" value={dependencyTitle} onChange={(event) => setDependencyTitle(event.target.value)} placeholder="e.g. Facility modification approval" /></label>\n                  <label>Description<textarea className="input" rows={3} value={dependencyDescription} onChange={(event) => setDependencyDescription(event.target.value)} placeholder="What must be delivered, approved or completed before this CAR can progress?" /></label>\n',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    'createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined })',
-    'createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), description: dependencyDescription.trim() || undefined, dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined })',
-)
-replace_once(
-    "frontend/src/pages/qms/QmsCarControlLoopPage.tsx",
-    'setDependencyTitle(""); setDependencyMitigation("");',
-    'setDependencyTitle(""); setDependencyDescription(""); setDependencyMitigation("");',
-)
-
-# Allow explicit clearing from the complete dependency editor.
-replace_once(
-    "frontend/src/services/qmsCarControlLoop.ts",
-    '    milestone_id: string;\n    title: string;\n    description: string;\n    dependency_type: CarDependencyType;\n    owner_user_id: string;\n    due_date: string;\n',
-    '    milestone_id: string | null;\n    title: string;\n    description: string | null;\n    dependency_type: CarDependencyType;\n    owner_user_id: string | null;\n    due_date: string | null;\n',
-)
-replace_once(
-    "frontend/src/services/qmsCarControlLoop.ts",
-    '    mitigation_plan: string;\n',
-    '    mitigation_plan: string | null;\n',
-)
-
-# The manual requires real causal-factor/human-factor analysis and actionable CAP
-# detail. The ORM already stores these as TEXT; remove the 500-character UI/API
-# bottleneck while preserving the evidence-ref bound.
-replace_once(
-    "backend/amodb/apps/quality/schemas.py",
-    'class CARInviteUpdate(BaseModel):\n    containment_action: Optional[str] = Field(default=None, max_length=500)\n    root_cause: Optional[str] = Field(default=None, max_length=500)\n    corrective_action: Optional[str] = Field(default=None, max_length=500)\n    preventive_action: Optional[str] = Field(default=None, max_length=500)\n    evidence_ref: Optional[str] = Field(default=None, max_length=500)\n',
-    'class CARInviteUpdate(BaseModel):\n    containment_action: Optional[str] = Field(default=None, max_length=8000)\n    root_cause: Optional[str] = Field(default=None, max_length=8000)\n    corrective_action: Optional[str] = Field(default=None, max_length=8000)\n    preventive_action: Optional[str] = Field(default=None, max_length=8000)\n    evidence_ref: Optional[str] = Field(default=None, max_length=500)\n',
-)
-replace_once(
-    "frontend/src/pages/PublicCarInvitePage.tsx",
-    'const MAX_RESPONSE_CHARS = 500;\n',
-    'const MAX_RESPONSE_CHARS = 8000;\n',
-)
-replace_once(
-    "frontend/src/pages/PublicCarInvitePage.tsx",
-    '  { id: "analysis", label: "Root cause", help: "State why the issue happened, not only what was seen." },\n  { id: "corrective", label: "Corrective action", help: "State what will change, who owns it, and when it will be done." },\n',
-    '  { id: "analysis", label: "Root cause", help: "Explain what, how and why the deficiency occurred. Address causal/contributing factors and relevant human, process, procedure, supervision, training, equipment, environment, resource or management-control factors." },\n  { id: "corrective", label: "Corrective action", help: "Separate immediate correction/containment from the long-term corrective or preventive/systemic action. State what changes, who owns it, when it will be complete, and what evidence will prove implementation." },\n',
-)
-
-# Frontend route permissions used singular qms.report.view while the backend uses
-# qms.reports.view. Align the route/navigation contract so authorised users can
-# actually reach the report surfaces.
-for rel in [
-    "frontend/src/app/routeGuards.ts",
-    "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts",
-    "frontend/src/pages/qms/routes/qmsRouteRegistry.ts",
-]:
-    content = read(rel)
-    if "qms.report.view" not in content:
-        raise RuntimeError(f"Expected qms.report.view in {rel}")
-    write(rel, content.replace("qms.report.view", "qms.reports.view"))
-
-# Browser acceptance: return real response/evidence records and assert the new
-# operational surfaces are reachable in the same CAR workspace.
-replace_once(
-    "frontend/tests/e2e/qms-car-control-loop.spec.ts",
-    '    if (url.includes("/quality/cars/assignees")) {\n',
-    '    if (url.includes(`/quality/cars/${CAR_ID}/responses`)) {\n      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "response-1", car_id: CAR_ID, containment_action: "Containment completed and immediate exposure controlled.", root_cause: "The process lacked a staged ownership checkpoint and dependency escalation control.", corrective_action: "Introduce accountable milestone ownership and verify implementation before closure.", preventive_action: "Trend repeat findings during management review and verify effectiveness in subsequent audits.", evidence_ref: "EVID-026", submitted_by_name: "Head of Base Maintenance", submitted_by_email: "hbm@tenant-a.test", submitted_at: "2026-08-21T07:30:00Z", status: "SUBMITTED", is_latest: true }]) });\n      return;\n    }\n    if (url.includes(`/quality/cars/${CAR_ID}/attachments`)) {\n      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "attachment-1", car_id: CAR_ID, filename: "implementation-evidence.pdf", description: "Approved implementation evidence", content_type: "application/pdf", size_bytes: 125000, sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uploaded_at: "2026-08-21T08:15:00Z", download_url: "/quality/cars/attachment-1/download" }]) });\n      return;\n    }\n    if (url.includes(`/quality/cars/${CAR_ID}/invite`)) {\n      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ car_id: CAR_ID, invite_token: "invite-1", invite_url: "/car-invite?token=invite-1", car_form_download_url: "/quality/cars/invite/invite-1/form", next_reminder_at: null, car_number: "QMS-CAR-026", title: "Close repeat audit findings", summary: "Restore staged ownership, evidence and effectiveness controls for corrective actions.", priority: "HIGH", status: "IN_PROGRESS", due_date: "2026-09-20", target_closure_date: "2026-09-30", submitted_at: "2026-08-21T07:30:00Z", submitted_by_name: "Head of Base Maintenance", root_cause_status: "ACCEPTED", capa_status: "ACCEPTED", root_cause_review_note: "RCA accepted after causal and contributing factors were addressed.", capa_review_note: "CAP accepted subject to implementation evidence.", finding_id: "finding-1", finding_ref: "QAR/MO/26/026-F01", finding_description: "Previous audit findings exceeded agreed closure controls.", audit_id: "audit-1", audit_ref: "QAR/MO/26/026", audit_title: "Line Maintenance Audit" }) });\n      return;\n    }\n    if (url.includes("/quality/cars/assignees")) {\n',
-)
-replace_once(
-    "frontend/tests/e2e/qms-car-control-loop.spec.ts",
-    '  await expect(page.getByText("Facility modification approval", { exact: true })).toBeVisible();\n',
-    '  await expect(page.getByRole("heading", { name: "Next required action" })).toBeVisible();\n  await expect(page.getByRole("heading", { name: "Corrective action response" })).toBeVisible();\n  await expect(page.getByText("The process lacked a staged ownership checkpoint and dependency escalation control.")).toBeVisible();\n  await expect(page.getByRole("heading", { name: "Objective evidence" })).toBeVisible();\n  await expect(page.getByText("implementation-evidence.pdf")).toBeVisible();\n  await expect(page.getByRole("heading", { name: "Dependency detail editor" })).toBeVisible();\n  await expect(page.getByDisplayValue("Engineering approval required before implementation evidence can be accepted.")).toBeVisible();\n  await expect(page.getByRole("heading", { name: "Evidence & report package" })).toBeVisible();\n  await expect(page.getByRole("button", { name: "Print CAR package" })).toBeVisible();\n  await expect(page.getByRole("button", { name: "Export CAR CSV" })).toBeVisible();\n  await expect(page.getByRole("button", { name: "Evidence pack" })).toBeVisible();\n  await expect(page.getByRole("button", { name: "CAR performance" })).toBeVisible();\n  await expect(page.getByText("Facility modification approval", { exact: true })).toBeVisible();\n',
-)
-
-# Focused CI follows the newly modified frontend and schema surfaces.
-replace_once(
-    ".github/workflows/qms-car-control-loop-ci.yml",
-    '      - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"\n',
-    '      - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"\n      - "frontend/src/pages/qms/QmsCarControlOperations.tsx"\n      - "frontend/src/pages/PublicCarInvitePage.tsx"\n      - "frontend/src/app/routeGuards.ts"\n      - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"\n      - "frontend/src/pages/qms/routes/qmsRouteRegistry.ts"\n      - "backend/amodb/apps/quality/schemas.py"\n',
-)
-replace_once(
-    ".github/workflows/qms-car-control-loop-ci.yml",
-    '            amodb/apps/quality/car_control_loop_route_order.py \\\n            amodb/alembic/versions/quality_260811_car_loop.py\n',
-    '            amodb/apps/quality/car_control_loop_route_order.py \\\n            amodb/apps/quality/schemas.py \\\n            amodb/alembic/versions/quality_260811_car_loop.py\n',
-)
-replace_once(
-    ".github/workflows/qms-car-control-loop-ci.yml",
-    '          src/pages/qms/QmsCarControlLoopPage.tsx\n          src/pages/qms/QmsCanonicalPage.tsx\n          src/components/panels/ActionPanel.tsx\n',
-    '          src/pages/qms/QmsCarControlLoopPage.tsx\n          src/pages/qms/QmsCarControlOperations.tsx\n          src/pages/PublicCarInvitePage.tsx\n          src/app/routeGuards.ts\n          src/pages/qms/routes/qmsWorkspaceRegistry.ts\n          src/pages/qms/routes/qmsRouteRegistry.ts\n          src/pages/qms/QmsCanonicalPage.tsx\n          src/components/panels/ActionPanel.tsx\n',
-)
-
-# A focused contract guards the manual-driven increase in narrative depth.
-test_file = "backend/amodb/apps/quality/tests/test_car_control_loop.py"
-test_content = read(test_file)
-if "test_car_invite_accepts_detailed_quality_response" not in test_content:
-    test_content += r'''
-
-
-def test_car_invite_accepts_detailed_quality_response() -> None:
-    from amodb.apps.quality.schemas import CARInviteUpdate
-
-    detailed = "x" * 8000
-    payload = CARInviteUpdate(
-        containment_action=detailed,
-        root_cause=detailed,
-        corrective_action=detailed,
-        preventive_action=detailed,
-    )
-    assert len(payload.root_cause or "") == 8000
-    assert len(payload.corrective_action or "") == 8000
-'''
-    write(test_file, test_content.rstrip() + "\n")
-
-print("QMS manual-driven CAR frontend completeness patch applied")

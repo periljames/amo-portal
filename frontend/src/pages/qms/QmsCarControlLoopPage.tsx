@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getCachedUser, getContext } from "../../services/auth";
 import { qmsListCarAssignees, type CARAssignee } from "../../services/qms";
+import QmsCarControlOperations from "./QmsCarControlOperations";
 import {
   closeCarControlLoop,
   createCarDependency,
@@ -34,6 +35,15 @@ const MILESTONE_STATUSES: CarControlMilestoneStatus[] = [
 ];
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
 const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+const INITIAL_MILESTONES = [
+  { key: "RCA_SUBMISSION", label: "Root cause analysis submitted" },
+  { key: "CAP_APPROVAL", label: "Corrective action plan approved" },
+  { key: "IMPLEMENTATION_COMPLETE", label: "Corrective actions implemented" },
+  { key: "EVIDENCE_COMPLETE", label: "Closure evidence complete" },
+  { key: "EFFECTIVENESS_REVIEW", label: "Effectiveness review complete" },
+] as const;
+type InitialMilestoneKey = (typeof INITIAL_MILESTONES)[number]["key"];
+type InitialMilestoneDraft = { owner_user_id: string; due_date: string };
 
 function humanize(value: string | null | undefined): string {
   if (!value) return "—";
@@ -92,6 +102,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   const [initOwner, setInitOwner] = useState("");
   const [initDue, setInitDue] = useState("");
   const [effectivenessRequired, setEffectivenessRequired] = useState(true);
+  const [initialMilestones, setInitialMilestones] = useState<Record<InitialMilestoneKey, InitialMilestoneDraft>>(() => Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: "", due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);
   const [milestoneDrafts, setMilestoneDrafts] = useState<Record<string, MilestoneDraft>>({});
   const [profileOwner, setProfileOwner] = useState("");
   const [profileEffectiveness, setProfileEffectiveness] = useState(true);
@@ -101,6 +112,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   const [deadlineImpact, setDeadlineImpact] = useState("");
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [dependencyTitle, setDependencyTitle] = useState("");
+  const [dependencyDescription, setDependencyDescription] = useState("");
   const [dependencyType, setDependencyType] = useState<CarDependencyType>("OTHER");
   const [dependencyRisk, setDependencyRisk] = useState<CarDependencyRisk>("MEDIUM");
   const [dependencyOwner, setDependencyOwner] = useState("");
@@ -133,8 +145,10 @@ const QmsCarControlLoopPage: React.FC = () => {
   useEffect(() => {
     if (!control) return;
     if (!control.initialized) {
-      setInitOwner(control.car.assigned_to_user_id || "");
+      const defaultOwner = control.car.assigned_to_user_id || "";
+      setInitOwner(defaultOwner);
       setInitDue(control.car.target_closure_date || control.car.due_date || "");
+      setInitialMilestones(Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: defaultOwner, due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);
       return;
     }
     if (control.profile) {
@@ -244,8 +258,13 @@ const QmsCarControlLoopPage: React.FC = () => {
                 <label>Controlled final due date
                   <input className="input" type="date" value={initDue} onChange={(event) => setInitDue(event.target.value)} />
                 </label>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Lifecycle milestone plan</strong>
+                  <p className="muted">Set the accountable person and planned control date for RCA, CAP acceptance, implementation, evidence and effectiveness. Blank dates use the governed default schedule.</p>
+                  <div className="table-wrap"><table className="table"><thead><tr><th>Stage</th><th>Owner</th><th>Planned due</th></tr></thead><tbody>{INITIAL_MILESTONES.map((item, index) => { const draft = initialMilestones[item.key]; return <tr key={item.key}><td><strong>{index + 1}. {item.label}</strong></td><td><select className="input" value={draft.owner_user_id} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], owner_user_id: event.target.value } }))}><option value="">Unassigned</option>{assigneeOptions.map((person) => <option key={person.id} value={person.id}>{person.full_name || person.email}{person.department_name ? ` · ${person.department_name}` : ""}</option>)}</select></td><td><input className="input" type="date" value={draft.due_date} max={initDue || undefined} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], due_date: event.target.value } }))} /></td></tr>; })}</tbody></table></div>
+                </div>
                 <label className="checkbox-row"><input type="checkbox" checked={effectivenessRequired} onChange={(event) => setEffectivenessRequired(event.target.checked)} /> Effectiveness review required before closure</label>
-                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
+                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired, milestones: INITIAL_MILESTONES.map((item) => ({ milestone_key: item.key, owner_user_id: initialMilestones[item.key].owner_user_id || undefined, due_date: initialMilestones[item.key].due_date || undefined })) }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
               </div>
             )}
           </section>
@@ -272,6 +291,8 @@ const QmsCarControlLoopPage: React.FC = () => {
                 </div>
               ) : null}
             </section>
+
+            <QmsCarControlOperations amoCode={amoCode} carId={carId} control={control} assignees={assignees} canManage={canManage} onControlChange={(next) => queryClient.setQueryData(["qms-car-control-loop", amoCode, carId], next)} />
 
             <section className="card">
               <div className="card__header"><div><h2>Staged CAR lifecycle</h2><p>Each stage has a named owner, immutable original deadline, current approved deadline, governed status and evidence.</p></div></div>
@@ -303,6 +324,7 @@ const QmsCarControlLoopPage: React.FC = () => {
               {canManage ? (
                 <div className="form-grid">
                   <label>Dependency title<input className="input" value={dependencyTitle} onChange={(event) => setDependencyTitle(event.target.value)} placeholder="e.g. Facility modification approval" /></label>
+                  <label>Description<textarea className="input" rows={3} value={dependencyDescription} onChange={(event) => setDependencyDescription(event.target.value)} placeholder="What must be delivered, approved or completed before this CAR can progress?" /></label>
                   <label>Type<select className="input" value={dependencyType} onChange={(event) => setDependencyType(event.target.value as CarDependencyType)}>{DEPENDENCY_TYPES.map((item) => <option key={item} value={item}>{humanize(item)}</option>)}</select></label>
                   <label>Risk<select className="input" value={dependencyRisk} onChange={(event) => setDependencyRisk(event.target.value as CarDependencyRisk)}>{DEPENDENCY_RISKS.map((item) => <option key={item} value={item}>{humanize(item)}</option>)}</select></label>
                   <label>Owner<select className="input" value={dependencyOwner} onChange={(event) => setDependencyOwner(event.target.value)}><option value="">Unassigned</option>{assigneeOptions.map((person) => <option key={person.id} value={person.id}>{person.full_name || person.email}</option>)}</select></label>
@@ -310,7 +332,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                   <label>Due date<input className="input" type="date" value={dependencyDue} onChange={(event) => setDependencyDue(event.target.value)} /></label>
                   <label>Mitigation<input className="input" value={dependencyMitigation} onChange={(event) => setDependencyMitigation(event.target.value)} placeholder="Mitigation / recovery plan" /></label>
                   <label className="checkbox-row"><input type="checkbox" checked={dependencyBlocksClosure} onChange={(event) => setDependencyBlocksClosure(event.target.checked)} /> Blocks CAR closure</label>
-                  <div><button className="btn btn--primary" type="button" disabled={dependencyTitle.trim().length < 3 || busy !== null} onClick={() => void runAction("dependency-create", () => createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined }), "Dependency recorded.").then((succeeded) => { if (succeeded) { setDependencyTitle(""); setDependencyMitigation(""); } })}>Add dependency</button></div>
+                  <div><button className="btn btn--primary" type="button" disabled={dependencyTitle.trim().length < 3 || busy !== null} onClick={() => void runAction("dependency-create", () => createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), description: dependencyDescription.trim() || undefined, dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined }), "Dependency recorded.").then((succeeded) => { if (succeeded) { setDependencyTitle(""); setDependencyDescription(""); setDependencyMitigation(""); } })}>Add dependency</button></div>
                 </div>
               ) : null}
               <div className="table-wrap">

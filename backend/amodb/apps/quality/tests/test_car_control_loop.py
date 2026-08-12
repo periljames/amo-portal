@@ -167,3 +167,18 @@ def test_nullable_owner_payloads_distinguish_omitted_from_explicit_clear() -> No
     assert "accountable_owner_user_id" in ControlProfileUpdate(accountable_owner_user_id=None).model_fields_set
     assert "owner_user_id" not in MilestoneUpdate().model_fields_set
     assert "owner_user_id" in MilestoneUpdate(owner_user_id=None).model_fields_set
+
+
+
+def test_car_invite_accepts_detailed_quality_response() -> None:
+    from amodb.apps.quality.schemas import CARInviteUpdate
+
+    detailed = "x" * 8000
+    payload = CARInviteUpdate(
+        containment_action=detailed,
+        root_cause=detailed,
+        corrective_action=detailed,
+        preventive_action=detailed,
+    )
+    assert len(payload.root_cause or "") == 8000
+    assert len(payload.corrective_action or "") == 8000

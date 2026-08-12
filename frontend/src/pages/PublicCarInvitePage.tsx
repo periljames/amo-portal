@@ -40,7 +40,7 @@ import {
 import { getApiBaseUrl } from "../services/config";
 import "../styles/car-invite.css";
 
-const MAX_RESPONSE_CHARS = 500;
+const MAX_RESPONSE_CHARS = 8000;
 const MAX_INVITE_EVIDENCE_BYTES = 100 * 1024 * 1024;
 const INVITE_EVIDENCE_ACCEPT = [
   "image/*",
@@ -184,8 +184,8 @@ const STATUS_LABELS: Record<CARStatus, string> = {
 const INVITE_STEPS: Array<{ id: InviteStepId; label: string; help: string }> = [
   { id: "identity", label: "Responder", help: "Confirm who is submitting this response." },
   { id: "containment", label: "Containment", help: "State the immediate action taken to control the issue." },
-  { id: "analysis", label: "Root cause", help: "State why the issue happened, not only what was seen." },
-  { id: "corrective", label: "Corrective action", help: "State what will change, who owns it, and when it will be done." },
+  { id: "analysis", label: "Root cause", help: "Explain what, how and why the deficiency occurred. Address causal/contributing factors and relevant human, process, procedure, supervision, training, equipment, environment, resource or management-control factors." },
+  { id: "corrective", label: "Corrective action", help: "Separate immediate correction/containment from the long-term corrective or preventive/systemic action. State what changes, who owns it, when it will be complete, and what evidence will prove implementation." },
   { id: "evidence", label: "Evidence", help: "Attach proof and reference supporting records." },
   { id: "review", label: "Preview", help: "Check the response before final submission." },
 ];
@@ -429,10 +429,10 @@ const InviteQr: React.FC<{ value: string }> = ({ value }) => {
       };
       const width = matrix.getWidth();
       const height = matrix.getHeight();
-      const cells: React.ReactNode[] = [];
+      const cells: Array<{ x: number; y: number }> = [];
       for (let y = 0; y < height; y += 1) {
         for (let x = 0; x < width; x += 1) {
-          if (matrix.get(x, y)) cells.push(<rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />);
+          if (matrix.get(x, y)) cells.push({ x, y });
         }
       }
       return { width, height, cells };
@@ -446,7 +446,7 @@ const InviteQr: React.FC<{ value: string }> = ({ value }) => {
   return (
     <svg className="car-invite-qr" viewBox={`0 0 ${qr.width} ${qr.height}`} role="img" aria-label="QR code for phone capture">
       <rect width={qr.width} height={qr.height} fill="white" />
-      <g fill="black">{qr.cells}</g>
+      <g fill="black">{qr.cells.map((cell) => <rect key={`${cell.x}-${cell.y}`} x={cell.x} y={cell.y} width="1" height="1" />)}</g>
     </svg>
   );
 };
