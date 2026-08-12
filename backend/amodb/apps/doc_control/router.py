@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 # Bind hardened knowledge-graph implementations before route modules copy service
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
+from .evidence_pack_runtime_guard import install as install_evidence_pack_runtime_guard
 from .governance_router import router as governance_router
 from .governance_runtime_guard import install as install_governance_runtime_guard
 from .reader_governance_router import router as reader_governance_router
@@ -59,6 +60,7 @@ from .workspace_workflow_router import router as workspace_workflow_router
 
 install_knowledge_assistant_runtime_guard()
 install_governance_runtime_guard()
+install_evidence_pack_runtime_guard()
 
 router = APIRouter()
 router.include_router(reminder_lifecycle_router)
