@@ -3,6 +3,7 @@ import { Settings2, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
+import DocumentControlChangeRequestActions from "./DocumentControlChangeRequestActions";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
 import DocumentControlExternalSourceActions from "./DocumentControlExternalSourceActions";
 import DocumentControlIntegrationActions from "./DocumentControlIntegrationActions";
@@ -109,7 +110,9 @@ export default function DocumentControlRecordActions({
       ) : null}
 
       {activeView === "changes" ? <>
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="changes" />
+        <DocumentControlSection title="Raise a controlled change" description="Create the change against this document and, when applicable, select the live portal record that caused it rather than entering implementation IDs.">
+          <div className="dc-section__body"><DocumentControlChangeRequestActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
         <DocumentControlSection title="Temporary revision controls" description="Create, approve, place in force, incorporate or withdraw a temporary revision without leaving this document lifecycle.">
           <div className="dc-section__body"><DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="temporary-revisions" onChanged={onChanged} /></div>
         </DocumentControlSection>
