@@ -16,6 +16,7 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import knowledge_models as km
 from .knowledge_service import (
+    EXECUTABLE_NODE_TYPES,
     _default_group_code,
     _node_path,
     normalize_code,
@@ -266,6 +267,22 @@ def update_document_type(
     profile.version = int(profile.version or 0) + 1
     manual.manual_type = TYPE_STORAGE_VALUE[document_type]
 
+    # Execution metadata belongs only to executable Forms, Checklists and Registers.
+    # Reclassification to a non-executable type must remove the stale profile before
+    # hierarchy reconciliation so the document cannot remain exposed as a template.
+    if document_type not in EXECUTABLE_NODE_TYPES:
+        execution_profile = (
+            db.query(km.DocumentationExecutionProfile)
+            .filter(
+                km.DocumentationExecutionProfile.tenant_id == tenant.amo_id,
+                km.DocumentationExecutionProfile.manual_id == manual.id,
+            )
+            .first()
+        )
+        if execution_profile:
+            db.delete(execution_profile)
+            db.flush()
+
     # A controller's classification decision must be visible in the library in the
     # same transaction. Draft uploads do not always have an indexed hierarchy node
     # yet, so reconcile synchronously before moving/stamping the document node.
@@ -317,11 +334,12 @@ def delete_document(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    """Permanently delete a never-published document and its draft revisions.
+    """Permanently delete only an unreviewed, never-published draft document.
 
-    Published, superseded, or archived controlled information is deliberately not
-    hard-deletable. Its audit/history obligations must be handled through the
-    controlled archive/withdrawal workflow instead.
+    Once a revision enters governed review or accumulates workflow decisions, its
+    comments and evidence become controlled history even before publication. Those
+    records must be retained and handled through the controlled archive/withdrawal
+    workflow instead of cascade deletion.
     """
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
@@ -331,7 +349,28 @@ def delete_document(
         .filter(manual_models.ManualRevision.manual_id == manual.id)
         .all()
     )
-    protected_statuses = {"PUBLISHED", "SUPERSEDED", "ARCHIVED"}
+    protected_statuses = {
+        "DEPARTMENT_REVIEW",
+        "QUALITY_APPROVAL",
+        "REGULATOR_SIGNOFF",
+        "PUBLISHED",
+        "SUPERSEDED",
+        "ARCHIVED",
+    }
+    workflows = (
+        db.query(dm.DocumentWorkflowInstance)
+        .filter(
+            dm.DocumentWorkflowInstance.tenant_id == tenant.amo_id,
+            dm.DocumentWorkflowInstance.manual_id == manual.id,
+        )
+        .all()
+    )
+    workflow_ids = [workflow.id for workflow in workflows]
+    workflow_decision_count = (
+        db.query(dm.DocumentWorkflowDecision)
+        .filter(dm.DocumentWorkflowDecision.workflow_id.in_(workflow_ids or ["-"]))
+        .count()
+    )
     has_controlled_history = bool(
         manual.current_published_rev_id
         or any(
@@ -340,11 +379,13 @@ def delete_document(
             or bool(revision.immutable_locked)
             for revision in revisions
         )
+        or any(str(workflow.state or "").upper() != "DRAFT" for workflow in workflows)
+        or workflow_decision_count
     )
     if has_controlled_history:
         raise HTTPException(
             status_code=409,
-            detail="Published controlled documents cannot be permanently deleted. Archive or withdraw the controlled document instead so revision and audit history are retained.",
+            detail="Reviewed or published controlled documents cannot be permanently deleted. Archive or withdraw the controlled document instead so workflow decisions, revision history and audit evidence are retained.",
         )
 
     record_count = (
