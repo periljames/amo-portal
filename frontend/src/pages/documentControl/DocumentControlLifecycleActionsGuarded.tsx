@@ -8,6 +8,7 @@ import {
   type PersonSummary,
 } from "../../services/documentControl";
 import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
+import DocumentControlApproverLifecycleActions from "./DocumentControlApproverLifecycleActions";
 import DocumentControlControllerLifecycleActions from "./DocumentControlControllerLifecycleActions";
 import DocumentControlLifecycleActions, {
   type LifecycleView,
@@ -191,6 +192,9 @@ export default function DocumentControlLifecycleActionsGuarded(props: Props) {
   }
   if (props.activeView === "temporary-revisions" && canApprove) {
     return <DocumentControlTemporaryRevisionActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
+  }
+  if (canApprove && (props.activeView === "workflow" || props.activeView === "authority")) {
+    return <DocumentControlApproverLifecycleActions {...props} />;
   }
   if (!canApprove && DECISION_SEPARATED_VIEWS.has(props.activeView)) {
     return <DocumentControlControllerLifecycleActions {...props} />;
