@@ -34,9 +34,9 @@ export type DocumentControlMyWorkResponse = {
   limit: number;
 };
 
-export async function getDocumentControlMyWork(tenant: string): Promise<DocumentControlMyWorkResponse> {
+async function fetchWorkFeed(tenant: string, suffix: string): Promise<DocumentControlMyWorkResponse> {
   const response = await fetch(
-    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/my-work`,
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/${suffix}`,
     {
       headers: authHeaders(),
       credentials: "same-origin",
@@ -55,4 +55,37 @@ export async function getDocumentControlMyWork(tenant: string): Promise<Document
     throw new Error(message);
   }
   return response.json() as Promise<DocumentControlMyWorkResponse>;
+}
+
+function dueTime(item: DocumentControlMyWorkItem): number {
+  if (!item.due_at) return Number.POSITIVE_INFINITY;
+  const parsed = new Date(item.due_at).getTime();
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+}
+
+const PRIORITY_ORDER: Record<string, number> = {
+  OVERDUE: 0,
+  ACTION: 1,
+  CRITICAL: 1,
+  HIGH: 2,
+  DUE: 3,
+  NORMAL: 4,
+  LOW: 5,
+};
+
+export async function getDocumentControlMyWork(tenant: string): Promise<DocumentControlMyWorkResponse> {
+  const [core, external] = await Promise.all([
+    fetchWorkFeed(tenant, "my-work"),
+    fetchWorkFeed(tenant, "external-source-work"),
+  ]);
+  const items = [...core.items, ...external.items]
+    .sort((left, right) => {
+      const priority = (PRIORITY_ORDER[left.priority] ?? 9) - (PRIORITY_ORDER[right.priority] ?? 9);
+      if (priority !== 0) return priority;
+      const due = dueTime(left) - dueTime(right);
+      if (Number.isFinite(due) && due !== 0) return due;
+      return left.id.localeCompare(right.id);
+    })
+    .slice(0, 30);
+  return { items, limit: 30 };
 }
