@@ -11,6 +11,7 @@ name: Document Control Lifecycle CI
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/services/documentLifecycle.ts"
       - "frontend/src/services/documentControlHome.ts"
+      - "frontend/src/services/documentControlIntegrationCatalog.ts"
       - "frontend/src/services/publications.ts"
       - "frontend/tests/e2e/document-lifecycle-controls.spec.ts"
       - ".github/workflows/document-control-lifecycle-ci.yml"
@@ -75,9 +76,12 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run attributable My Work contract
+      - name: Run operating attribution and integration contracts
         working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
+        run: >-
+          pytest -q
+          amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
+          amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
@@ -125,13 +129,16 @@ jobs:
           src/pages/documentControl/documentControlJobs.ts
           src/pages/documentControl/DocumentLibraryHubPage.tsx
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DocumentControlRecordActions.tsx
           src/pages/documentControl/DocumentControlReviewActions.tsx
           src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
+          src/pages/documentControl/DocumentControlIntegrationActions.tsx
           src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
           src/pages/documentControl/DmsOperationalJobs.contract.test.ts
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/services/documentLifecycle.ts
           src/services/documentControlHome.ts
+          src/services/documentControlIntegrationCatalog.ts
           tests/e2e/document-lifecycle-controls.spec.ts
       - name: Build production frontend
         working-directory: frontend
