@@ -91,11 +91,11 @@ def _context(db: Session, tenant_id: str, source: dm.ExternalDocumentSource) -> 
     latest = receipts[0] if receipts else None
     current = next((row for row in receipts if row.currency_status == "CURRENT"), None)
     affected = _affected_internal_documents(db, tenant_id, source.manual_id)
+    # Applicability assessment and source-currency verification are distinct
+    # governed controls. Once a permitted applicability decision is retained,
+    # an UNVERIFIED currency status must not reopen the applicability work item.
     assessment_required = bool(
-        latest and (
-            latest.applicability_status in ASSESSMENT_REQUIRED_STATUSES
-            or latest.currency_status == "UNVERIFIED"
-        )
+        latest and latest.applicability_status in ASSESSMENT_REQUIRED_STATUSES
     )
     return {
         "source": {

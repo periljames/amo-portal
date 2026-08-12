@@ -66,7 +66,7 @@ export default function ExternalRevisionAssessmentPanel({ sourceId, onClose, onC
         <div><small>Work item</small><DocumentControlStatus status={context.work_item_status} kind={context.assessment_required ? "warning" : "success"} /></div>
       </section>
 
-      {context.assessment_required ? <div className="dms-external-assessment__alert"><ShieldAlert size={18} /><div><strong>NEW REVISION REQUIRES ASSESSMENT</strong><p>Determine whether the received source revision applies to the AMO and record the decision against the retained receipt.</p></div></div> : <div className="dms-external-assessment__complete"><CheckCircle2 size={18} /> Latest receipt has a recorded applicability assessment.</div>}
+      {context.assessment_required ? <div className="dms-external-assessment__alert"><ShieldAlert size={18} /><div><strong>Applicability assessment required</strong><p>Determine whether the received source revision applies to the AMO and record the decision against the retained receipt.</p></div></div> : <div className="dms-external-assessment__complete"><CheckCircle2 size={18} /> Latest receipt has a recorded applicability assessment.</div>}
 
       <section>
         <header className="dms-external-assessment__section-head"><div><strong>Affected internal documents</strong><span>{context.affected_internal_documents.length} confirmed governed relationship{context.affected_internal_documents.length === 1 ? "" : "s"}</span></div></header>

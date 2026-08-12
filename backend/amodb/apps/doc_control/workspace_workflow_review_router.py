@@ -207,16 +207,17 @@ def transition_workflow_with_codex_review_guards(
     if not workflow:
         raise HTTPException(status_code=404, detail="Document workflow not found")
 
-    # Evaluate the exact workflow action before evidence validation or publication
-    # side effects. Confirmed technical/quality/management responsibility may grant
-    # only its assigned decision; controller and accountable permissions continue
-    # to govern handoff, publication, scheduling and archive operations.
+    # Enforce the assignment-aware action boundary before validating decision
+    # evidence. This preserves 403 for unauthorized actors without leaking the
+    # evidence contract, while still allowing confirmed technical, Quality and
+    # management reviewers to perform only their assigned approval action.
     require_workflow_action(
         db,
         workflow=workflow,
         user=current_user,
         action=payload.action,
     )
+
     if payload.action in _DECISION_EVIDENCE_ACTIONS:
         validate_decision_evidence(payload)
     if payload.action == "PUBLISH":

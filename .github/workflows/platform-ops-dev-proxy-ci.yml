@@ -1,0 +1,44 @@
+name: Platform Ops Dev Proxy CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/platform-ops-dev-proxy-ci.yml"
+      - "frontend/vite.config.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/devProxyRouting.test.ts"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/platform-ops-dev-proxy-ci.yml"
+      - "frontend/vite.config.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/devProxyRouting.test.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-proxy-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Prove dedicated Platform Operations dev proxy routing
+        working-directory: frontend
+        run: npx vitest run src/services/devProxyRouting.test.ts
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
