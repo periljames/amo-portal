@@ -68,7 +68,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     expect(materialBrowserErrors, materialBrowserErrors.join("\n")).toEqual([]);
   });
 
-  test("controller can add, classify, reclassify and delete a never-published document", async ({ page }) => {
+  test("controller can add, classify, follow the guided workflow and delete a never-published document", async ({ page }) => {
     const suffix = Date.now().toString(36).toUpperCase();
     const code = `DMS-LIFE-${suffix}`;
     const title = `Lifecycle Work Instruction ${suffix}`;
@@ -96,6 +96,15 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     const manualId = page.url().match(/\/document-control\/library\/([^/?#]+)/)?.[1];
     if (!manualId) throw new Error("New document workspace did not expose its manual id in the route");
 
+    const workflowGuide = page.getByTestId("document-workflow-guide");
+    await expect(workflowGuide).toBeVisible({ timeout: 30_000 });
+    await expect(workflowGuide).toContainText("Start the revision workflow");
+    await expect(workflowGuide).toContainText("Inputs & forms");
+    await expect(workflowGuide).toContainText("Outputs & evidence");
+    await page.getByTestId("document-next-action").click();
+    await expect(page).toHaveURL(/tab=workflow/);
+    await expect(page.getByRole("button", { name: "Start revision workflow", exact: true })).toBeVisible();
+
     await expect(page.getByTestId("change-document-type-button")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("delete-document-button")).toBeVisible();
     expect(await documentTypeFromApi(page, manualId)).toMatchObject({ document_type: "FORM", source: "OVERRIDE" });
@@ -115,6 +124,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await expect(row).toContainText("CHECKLIST");
     await row.getByRole("button", { name: "Open workspace", exact: true }).click();
 
+    await expect(page.getByTestId("document-workflow-guide")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("delete-document-button").click();
     const deleteDialog = page.getByRole("dialog", { name: "Delete draft document" });
     await expect(deleteDialog.getByText("This cannot be undone.", { exact: true })).toBeVisible();
@@ -129,6 +139,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
 
   test("published controlled history cannot be permanently deleted", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library/${PUBLISHED_DOCUMENT_ID}`);
+    await expect(page.getByTestId("document-workflow-guide")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("delete-document-button")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("delete-document-button").click();
 
