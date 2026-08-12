@@ -22,6 +22,7 @@ export type DocumentRetentionRecord = {
   certificate_evidence_asset_id: string | null;
   created_by_user_id: string | null;
   requested_by_user_id: string | null;
+  approver_user_id: string | null;
   approved_by_user_id: string | null;
   disposed_by_user_id: string | null;
   requested_at: string | null;
@@ -30,6 +31,42 @@ export type DocumentRetentionRecord = {
   created_at: string | null;
   updated_at: string | null;
   metadata: Record<string, unknown>;
+};
+
+export type DocumentRetentionApprover = {
+  id: string;
+  label: string;
+  email: string;
+  role: string;
+};
+
+export type DocumentRetentionSourceItem = {
+  id: string;
+  label: string;
+  status?: string | null;
+  revision_id?: string | null;
+  sha256?: string | null;
+};
+
+export type DocumentRetentionSourceCatalogue = {
+  document: { id: string; label: string };
+  revisions: DocumentRetentionSourceItem[];
+  evidence_assets: DocumentRetentionSourceItem[];
+  generated_records: DocumentRetentionSourceItem[];
+  bounded: boolean;
+  per_type_limit: number;
+};
+
+export type DocumentRetentionWorkItem = {
+  id: string;
+  kind: "RETENTION_APPROVAL" | "RETENTION_EXECUTION";
+  title: string;
+  detail: string;
+  status: string;
+  priority: string;
+  manual_id: string;
+  target_path: string;
+  due_at: string | null;
 };
 
 function basePath(tenant: string): string {
@@ -68,6 +105,20 @@ export async function listDocumentRetention(tenant: string, manualId: string): P
   return Array.isArray(payload.items) ? payload.items : [];
 }
 
+export function getDocumentRetentionSources(tenant: string, manualId: string): Promise<DocumentRetentionSourceCatalogue> {
+  return request(tenant, `/documents/${encodeURIComponent(manualId)}/retention-sources`);
+}
+
+export async function listDocumentRetentionApprovers(tenant: string): Promise<DocumentRetentionApprover[]> {
+  const payload = await request<{ items?: DocumentRetentionApprover[] }>(tenant, "/retention-approvers");
+  return Array.isArray(payload.items) ? payload.items : [];
+}
+
+export async function listDocumentRetentionWork(tenant: string): Promise<DocumentRetentionWorkItem[]> {
+  const payload = await request<{ items?: DocumentRetentionWorkItem[] }>(tenant, "/retention-work");
+  return Array.isArray(payload.items) ? payload.items : [];
+}
+
 export function createDocumentRetention(
   tenant: string,
   payload: {
@@ -97,11 +148,12 @@ export function updateDocumentRetentionHold(
 export function requestDocumentDisposition(
   tenant: string,
   retentionId: string,
+  approverUserId: string,
   justification: string,
 ): Promise<DocumentRetentionRecord> {
   return request(tenant, `/retention/${encodeURIComponent(retentionId)}/request-disposition`, {
     method: "POST",
-    body: JSON.stringify({ justification }),
+    body: JSON.stringify({ approver_user_id: approverUserId, justification }),
   });
 }
 
