@@ -144,6 +144,30 @@ def test_low_risk_nonblocking_dependency_becomes_overdue_when_its_due_date_passe
     assert overdue["overdue_days"] == 2
 
 
+def test_health_ignores_disabled_effectiveness_milestone() -> None:
+    today = date(2026, 8, 11)
+    effectiveness = SimpleNamespace(
+        milestone_key="EFFECTIVENESS_REVIEW",
+        current_due_date=today - timedelta(days=10),
+        status="PLANNED",
+        owner_user_id="user-1",
+        evidence_ref=None,
+        profile=SimpleNamespace(effectiveness_required=False),
+    )
+
+    health = compute_car_health(
+        today=today,
+        car_status="IN_PROGRESS",
+        final_due_date=today + timedelta(days=30),
+        accountable_owner_user_id="user-1",
+        milestones=[effectiveness],
+        dependencies=[],
+    )
+
+    assert health.state == "HEALTHY"
+    assert not any(factor.get("milestone_key") == "EFFECTIVENESS_REVIEW" for factor in health.factors)
+
+
 def test_closure_readiness_accepts_complete_control_chain() -> None:
     today = date(2026, 8, 11)
     readiness = closure_readiness(
@@ -289,6 +313,25 @@ def test_authoritative_deadline_sync_updates_dates_and_rebuilds_pending_reminder
     assert car.due_date == approved_due
     assert car.target_closure_date == approved_due
     pending_query.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
+    seed_reminders.assert_called_once_with(db, car)
+
+
+def test_initial_authoritative_deadline_sets_both_dates_and_reminder_plan() -> None:
+    from amodb.apps.quality.car_control_loop_guard_router import _prepare_initial_authoritative_deadline
+
+    initial_due = date(2026, 9, 5)
+    car = SimpleNamespace(due_date=None, target_closure_date=None)
+    db = MagicMock()
+
+    with patch("amodb.apps.quality.router._seed_car_reminders") as seed_reminders:
+        _prepare_initial_authoritative_deadline(
+            db,
+            car=car,
+            final_due_date=initial_due,
+        )
+
+    assert car.due_date == initial_due
+    assert car.target_closure_date == initial_due
     seed_reminders.assert_called_once_with(db, car)
 
 
