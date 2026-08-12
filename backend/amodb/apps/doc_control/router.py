@@ -15,6 +15,7 @@ from .knowledge_assistant_router import router as knowledge_assistant_router
 from .knowledge_assistant_runtime_guard import install as install_knowledge_assistant_runtime_guard
 from .knowledge_records_router import router as knowledge_records_router
 from .knowledge_workspace_router import router as knowledge_workspace_router
+from .reminder_lifecycle_router import router as reminder_lifecycle_router
 from .workspace_access import enforce_workspace_access
 from .workspace_administration_router import router as workspace_administration_router
 from .workspace_authority_router import router as workspace_authority_router
@@ -54,6 +55,7 @@ install_knowledge_assistant_runtime_guard()
 install_governance_runtime_guard()
 
 router = APIRouter()
+router.include_router(reminder_lifecycle_router)
 router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
@@ -65,7 +67,8 @@ router.include_router(legacy_router)
 # hierarchy/reference integrity, generated record custody, permission-filtered
 # assisted search, bounded library discovery, bounded operating portfolios,
 # bounded evidence registers/exports, immutable evidence attachments, governed
-# administration, document lifecycle controls, and release safeguards.
+# reminders/escalations, administration, document lifecycle controls, and release
+# safeguards.
 # They must precede the compatibility workspace router because Starlette resolves
 # matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
