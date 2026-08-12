@@ -20,6 +20,7 @@ from .workspace_administration_router import router as workspace_administration_
 from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
 from .workspace_compliance_portfolio_router import router as workspace_compliance_portfolio_router
+from .workspace_copy_evidence_router import router as workspace_copy_evidence_router
 from .workspace_copy_incident_router import router as workspace_copy_incident_router
 from .workspace_copy_router import router as workspace_copy_router
 from .workspace_dashboard_router import router as workspace_dashboard_router
@@ -137,6 +138,11 @@ router.include_router(
 )
 router.include_router(
     workspace_authority_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_copy_evidence_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
