@@ -3,25 +3,39 @@ import { addDays } from "date-fns";
 import {
   BarChart3,
   Download,
+  FileCheck2,
   FileDown,
   FileSpreadsheet,
   RefreshCw,
   UsersRound,
 } from "lucide-react";
 
-import { exportRosterReport, getRosterReportSummary } from "../../../services/rostering";
-import type { RosterReportSummary } from "../../../types/rostering";
+import {
+  exportRosterReport,
+  getRosterReportSummary,
+  listRosterPeriods,
+} from "../../../services/rostering";
+import { downloadControlledRoster } from "../../../services/rosteringControl";
+import type { RosterPeriodRead, RosterReportSummary, RosterVersionRead } from "../../../types/rostering";
 import { errorMessage, hoursLabel, isoDate } from "../rosterUi";
-import { EmptyState, MetricCard, RosterError, RosterLoading } from "./RosterShell";
+import { EmptyState, MetricCard, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 
 function defaults() {
   const from = new Date();
   return { from: isoDate(from), to: isoDate(addDays(from, 30)) };
 }
 
+function latestVersion(period: RosterPeriodRead | null): RosterVersionRead | null {
+  if (!period?.versions?.length) return null;
+  return [...period.versions].sort((left, right) => right.version_no - left.version_no)[0] || null;
+}
+
 export function RosterReports() {
   const [range, setRange] = useState(defaults);
   const [data, setData] = useState<RosterReportSummary | null>(null);
+  const [periods, setPeriods] = useState<RosterPeriodRead[]>([]);
+  const [periodId, setPeriodId] = useState("");
+  const [versionId, setVersionId] = useState("");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +44,16 @@ export function RosterReports() {
     setLoading(true);
     setError(null);
     try {
-      setData(await getRosterReportSummary(range));
+      const [summary, rosterPeriods] = await Promise.all([
+        getRosterReportSummary(range),
+        listRosterPeriods({ from: range.from, to: range.to }),
+      ]);
+      setData(summary);
+      setPeriods(rosterPeriods);
+      setPeriodId((current) => {
+        if (current && rosterPeriods.some((period) => period.id === current)) return current;
+        return rosterPeriods[0]?.id || "";
+      });
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -40,11 +63,47 @@ export function RosterReports() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const selectedPeriod = useMemo(
+    () => periods.find((period) => period.id === periodId) || null,
+    [periodId, periods],
+  );
+  const versions = useMemo(
+    () => [...(selectedPeriod?.versions || [])].sort((left, right) => right.version_no - left.version_no),
+    [selectedPeriod],
+  );
+  const selectedVersion = useMemo(
+    () => versions.find((version) => version.id === versionId) || latestVersion(selectedPeriod),
+    [selectedPeriod, versionId, versions],
+  );
+
+  useEffect(() => {
+    setVersionId((current) => {
+      if (current && versions.some((version) => version.id === current)) return current;
+      return versions[0]?.id || "";
+    });
+  }, [versions]);
+
   const download = async (format: "csv" | "xlsx" | "pdf" | "ics") => {
     setExporting(format);
     setError(null);
     try {
       await exportRosterReport({ ...range, format });
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const downloadControlled = async (format: "pdf" | "xlsx") => {
+    if (!selectedVersion) {
+      setError("Select a roster version before exporting a controlled roster.");
+      return;
+    }
+    setExporting(`controlled:${format}`);
+    setError(null);
+    try {
+      await downloadControlledRoster(selectedVersion.id, format);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -72,6 +131,39 @@ export function RosterReports() {
         </div>
       </section>
       {error ? <div className="wr-inline-error" role="alert">{error}</div> : null}
+
+      <section className="wr-panel">
+        <div className="wr-section-heading">
+          <div>
+            <span className="wr-eyebrow">Controlled roster document</span>
+            <h2><FileCheck2 size={19} /> Version-scoped print export</h2>
+            <p>Select the exact roster period and version. Published versions render from their immutable publication snapshot; draft versions carry a DRAFT — NOT CONTROLLED watermark.</p>
+          </div>
+          {selectedVersion ? <StatusPill value={selectedVersion.status} /> : null}
+        </div>
+        {periods.length ? (
+          <div className="wr-filter-bar">
+            <label>
+              <span>Roster period</span>
+              <select value={selectedPeriod?.id || ""} onChange={(event) => { setPeriodId(event.target.value); setVersionId(""); }}>
+                {periods.map((period) => <option key={period.id} value={period.id}>{period.period_code} — {period.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Version</span>
+              <select value={selectedVersion?.id || ""} onChange={(event) => setVersionId(event.target.value)} disabled={!versions.length}>
+                {versions.map((version) => <option key={version.id} value={version.id}>v{version.version_no} — {version.status}{version.title ? ` — ${version.title}` : ""}</option>)}
+              </select>
+            </label>
+            <div className="wr-export-group" aria-label="Export controlled roster version">
+              <button type="button" onClick={() => void downloadControlled("pdf")} disabled={!selectedVersion || !!exporting}><Download size={15} /> Controlled PDF</button>
+              <button type="button" onClick={() => void downloadControlled("xlsx")} disabled={!selectedVersion || !!exporting}><FileSpreadsheet size={15} /> Controlled XLSX</button>
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="No roster period in this range" description="Create a roster period and version before producing a controlled monthly roster." />
+        )}
+      </section>
 
       <section className="wr-metric-grid">
         <MetricCard label="Planned" value={hoursLabel(data.planned_minutes)} detail={`${data.assignment_count} assignments`} tone="info" />
