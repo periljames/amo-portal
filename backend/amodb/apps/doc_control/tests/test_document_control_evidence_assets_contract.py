@@ -71,16 +71,20 @@ def test_assigned_reviewer_upload_is_narrower_than_controller_upload() -> None:
     assert '_REVIEW_UPLOAD_ACTIONS' in source
 
 
-def test_workflow_and_authority_routes_normalize_evidence_server_side() -> None:
+def test_workflow_authority_copy_and_external_routes_normalize_evidence_server_side() -> None:
     workflow = _text(APP / "workspace_workflow_review_router.py")
     authority = _text(APP / "workspace_authority_router.py")
     copy_guard = _text(APP / "workspace_copy_evidence_router.py")
+    external = _text(APP / "workspace_external_router.py")
     assert 'validate_evidence_references' in workflow
     assert '_server_revision_evidence' in workflow
     assert 'CONTROLLED_REVISION_SOURCE' in workflow
     assert 'WAIVER_EVIDENCE_REQUIRED' in workflow
     assert 'validate_evidence_references' in authority
+    assert '_merge_asset_evidence' in authority
     assert 'validate_evidence_references' in copy_guard
+    assert 'validate_evidence_references' in external
+    assert 'manual_id=source.manual_id' in external
 
 
 def test_file_signature_allowlist_rejects_disguised_uploads() -> None:
@@ -95,11 +99,13 @@ def test_file_signature_allowlist_rejects_disguised_uploads() -> None:
     assert unsupported.value.status_code == 415
 
 
-def test_frontend_uses_picker_in_active_decision_surfaces() -> None:
+def test_frontend_uses_picker_in_active_decision_and_external_source_surfaces() -> None:
     picker = _text(FRONTEND / "DocumentEvidencePicker.tsx")
     guarded = _text(FRONTEND / "DocumentControlLifecycleActionsGuarded.tsx")
     approver = _text(FRONTEND / "DocumentControlApproverLifecycleActions.tsx")
     reviewer = _text(FRONTEND / "DocumentControlReviewerLifecycleActions.tsx")
+    external = _text(FRONTEND / "DocumentControlExternalSourceActions.tsx")
+    record_actions = _text(FRONTEND / "DocumentControlRecordActions.tsx")
     client = _text(SERVICES / "documentControlEvidence.ts")
     assert "uploadDocumentEvidenceAsset" in picker
     assert "SHA-256" in picker
@@ -109,3 +115,9 @@ def test_frontend_uses_picker_in_active_decision_surfaces() -> None:
     assert "DocumentEvidencePicker" in reviewer
     assert "Evidence asset IDs" not in approver
     assert "evidence-assets" in client
+    assert "createExternalRevisionReceipt" in external
+    assert "DocumentEvidencePicker" in external
+    assert "checksum_sha256: primary?.sha256 || null" in external
+    assert 'applicability_status: "PENDING"' in external
+    assert "DocumentControlExternalSourceActions" in record_actions
+    assert 'activeView="external"' not in record_actions
