@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -262,6 +263,19 @@ def test_public_invite_persistence_preserves_full_detailed_response() -> None:
     assert len(car.root_cause) == 8000
     assert len(car.corrective_action) == 8000
     assert len(car.preventive_action) == 8000
+
+
+def test_public_invite_report_requires_matching_issued_revision() -> None:
+    from amodb.apps.quality.public_invite_extensions import _issued_revision_matches_path
+
+    report_path = Path("/controlled/reports/audit-report.pdf")
+    draft = SimpleNamespace(status="DRAFT", file_ref=str(report_path))
+    issued = SimpleNamespace(status="ISSUED", file_ref=str(report_path))
+    different_issued = SimpleNamespace(status="ISSUED", file_ref="/controlled/reports/other.pdf")
+
+    assert _issued_revision_matches_path(draft, report_path) is False
+    assert _issued_revision_matches_path(issued, report_path) is True
+    assert _issued_revision_matches_path(different_issued, report_path) is False
 
 
 def test_sent_reminder_stage_is_archived_before_reseeding_extended_deadline() -> None:
