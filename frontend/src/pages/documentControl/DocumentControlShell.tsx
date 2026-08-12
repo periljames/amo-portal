@@ -15,6 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
 import DocumentLifecycleHeaderActions from "./DocumentLifecycleHeaderActions";
+import DocumentWorkflowGuide from "./DocumentWorkflowGuide";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
@@ -148,6 +149,9 @@ export default function DocumentControlShell({
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
     : null;
+  const workflowGuide = tenant && assistantDocumentId
+    ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
+    : null;
 
   const body = (
     <div className="dc-workspace">
@@ -159,6 +163,8 @@ export default function DocumentControlShell({
         </div>
         {actions || lifecycleActions ? <div className="dc-workspace__header-actions">{lifecycleActions}{actions}</div> : null}
       </header>
+
+      {workflowGuide}
 
       <nav className="dc-workspace__nav dc-workspace__nav--primary" aria-label="Document Control">
         {visibleWorkspaces.map((workspace) => {
