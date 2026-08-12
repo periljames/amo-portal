@@ -438,11 +438,19 @@ def initialize_control_loop(
     if existing is not None:
         return _result(db, car=car, profile=existing)
 
-    owner = payload.accountable_owner_user_id or car.assigned_to_user_id
+    owner = payload.accountable_owner_user_id if "accountable_owner_user_id" in payload.model_fields_set else car.assigned_to_user_id
     _assert_user(db, amo_id=ctx.amo_id, user_id=owner)
-    final_due = payload.final_due_date or car.target_closure_date or car.due_date
+    authoritative_due = car.target_closure_date or car.due_date
+    if payload.final_due_date is not None and authoritative_due is not None and payload.final_due_date != authoritative_due:
+        raise HTTPException(
+            status_code=422,
+            detail="The staged control loop must initialize from the authoritative CAR deadline. Use the governed CAR extension workflow to revise an existing deadline.",
+        )
+    final_due = authoritative_due or payload.final_due_date
     if final_due is None:
         raise HTTPException(status_code=422, detail="A controlled final due date is required to initialize the CAR control loop.")
+    if authoritative_due is None:
+        car.target_closure_date = final_due
     opened_on = car.created_at.date() if car.created_at else date.today()
     if final_due < opened_on:
         raise HTTPException(status_code=422, detail="The controlled final due date cannot precede the CAR creation date.")
@@ -514,7 +522,7 @@ def update_control_profile(
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    if payload.accountable_owner_user_id is not None:
+    if "accountable_owner_user_id" in payload.model_fields_set:
         _assert_user(db, amo_id=ctx.amo_id, user_id=payload.accountable_owner_user_id)
         profile.accountable_owner_user_id = payload.accountable_owner_user_id
     if payload.effectiveness_required is not None:
@@ -539,7 +547,7 @@ def update_milestone(
     profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     row = _assert_milestone(db, amo_id=ctx.amo_id, car_id=car_id, milestone_id=milestone_id, lock=True)
 
-    if payload.owner_user_id is not None:
+    if "owner_user_id" in payload.model_fields_set:
         _assert_user(db, amo_id=ctx.amo_id, user_id=payload.owner_user_id)
         row.owner_user_id = payload.owner_user_id
     if payload.notes is not None:
@@ -947,8 +955,13 @@ def close_control_loop(
             target_status=target,
             evidence_ref=evidence_ref if target in {"PENDING_VERIFICATION", "CLOSED"} else None,
         )
-    car.closed_at = car.closed_at or _utcnow()
     car.evidence_ref = evidence_ref
+    # Preserve the canonical accepted-close side effects used by the existing
+    # Quality CAR workflow (authoritative RCA/CAPA acceptance, evidence
+    # verification, linked finding/CAP closeout and related task closure).
+    from .router import _close_accepted_car_workflow
+
+    _close_accepted_car_workflow(db, car, actor_user_id=ctx.user_id)
     _add_event(
         db,
         car=car,

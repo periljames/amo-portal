@@ -124,7 +124,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   });
 
   const control = controlQuery.data;
-  const assignees = assigneesQuery.data ?? [];
+  const assignees = useMemo(() => assigneesQuery.data ?? [], [assigneesQuery.data]);
   const assigneeOptions = useMemo(
     () => [...assignees].sort((left, right) => (left.full_name || left.email || "").localeCompare(right.full_name || right.email || "")),
     [assignees],
@@ -153,7 +153,7 @@ const QmsCarControlLoopPage: React.FC = () => {
     setMilestoneDrafts(nextDrafts);
   }, [control]);
 
-  async function runAction(label: string, action: () => Promise<CarControlLoop>, success: string): Promise<void> {
+  async function runAction(label: string, action: () => Promise<CarControlLoop>, success: string): Promise<boolean> {
     setBusy(label);
     setActionError(null);
     setActionMessage(null);
@@ -161,8 +161,10 @@ const QmsCarControlLoopPage: React.FC = () => {
       const next = await action();
       queryClient.setQueryData(["qms-car-control-loop", amoCode, carId], next);
       setActionMessage(success);
+      return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "The governed CAR action could not be completed.");
+      return false;
     } finally {
       setBusy(null);
     }
@@ -243,7 +245,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                   <input className="input" type="date" value={initDue} onChange={(event) => setInitDue(event.target.value)} />
                 </label>
                 <label className="checkbox-row"><input type="checkbox" checked={effectivenessRequired} onChange={(event) => setEffectivenessRequired(event.target.checked)} /> Effectiveness review required before closure</label>
-                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || undefined, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
+                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
               </div>
             )}
           </section>
@@ -266,7 +268,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                     </select>
                   </label>
                   <label className="checkbox-row"><input type="checkbox" checked={profileEffectiveness} onChange={(event) => setProfileEffectiveness(event.target.checked)} /> Require effectiveness verification</label>
-                  <div><button className="btn" type="button" disabled={busy !== null} onClick={() => void runAction("profile", () => updateCarControlProfile(amoCode, carId, { accountable_owner_user_id: profileOwner || undefined, effectiveness_required: profileEffectiveness }), "CAR accountability controls updated.")}>Save profile controls</button></div>
+                  <div><button className="btn" type="button" disabled={busy !== null} onClick={() => void runAction("profile", () => updateCarControlProfile(amoCode, carId, { accountable_owner_user_id: profileOwner || null, effectiveness_required: profileEffectiveness }), "CAR accountability controls updated.")}>Save profile controls</button></div>
                 </div>
               ) : null}
             </section>
@@ -287,7 +289,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                           <td>{formatDate(milestone.current_due_date)}</td>
                           <td>{canManage ? <select className="input" value={draft.status} onChange={(event) => setMilestoneDrafts((current) => ({ ...current, [milestone.id]: { ...draft, status: event.target.value as CarControlMilestoneStatus } }))}>{MILESTONE_STATUSES.map((item) => <option key={item} value={item}>{humanize(item)}</option>)}</select> : <span className={`badge ${toneClass(milestone.status)}`}>{humanize(milestone.status)}</span>}</td>
                           <td>{canManage ? <div className="stack"><input className="input" value={draft.evidence_ref} onChange={(event) => setMilestoneDrafts((current) => ({ ...current, [milestone.id]: { ...draft, evidence_ref: event.target.value } }))} placeholder="Evidence reference" /><input className="input" value={draft.notes} onChange={(event) => setMilestoneDrafts((current) => ({ ...current, [milestone.id]: { ...draft, notes: event.target.value } }))} placeholder="Control note" /></div> : <><div>{milestone.evidence_ref || "—"}</div><div className="muted">{milestone.notes || ""}</div></>}</td>
-                          <td>{canManage ? <button className="btn btn--small" type="button" disabled={busy !== null} onClick={() => void runAction(`milestone-${milestone.id}`, () => updateCarControlMilestone(amoCode, carId, milestone.id, { owner_user_id: draft.owner_user_id || undefined, status: draft.status, notes: draft.notes, evidence_ref: draft.evidence_ref }), `${milestone.title} updated.`)}>Save</button> : null}</td>
+                          <td>{canManage ? <button className="btn btn--small" type="button" disabled={busy !== null} onClick={() => void runAction(`milestone-${milestone.id}`, () => updateCarControlMilestone(amoCode, carId, milestone.id, { owner_user_id: draft.owner_user_id || null, status: draft.status, notes: draft.notes, evidence_ref: draft.evidence_ref }), `${milestone.title} updated.`)}>Save</button> : null}</td>
                         </tr>
                       );
                     })}
@@ -308,7 +310,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                   <label>Due date<input className="input" type="date" value={dependencyDue} onChange={(event) => setDependencyDue(event.target.value)} /></label>
                   <label>Mitigation<input className="input" value={dependencyMitigation} onChange={(event) => setDependencyMitigation(event.target.value)} placeholder="Mitigation / recovery plan" /></label>
                   <label className="checkbox-row"><input type="checkbox" checked={dependencyBlocksClosure} onChange={(event) => setDependencyBlocksClosure(event.target.checked)} /> Blocks CAR closure</label>
-                  <div><button className="btn btn--primary" type="button" disabled={dependencyTitle.trim().length < 3 || busy !== null} onClick={() => void runAction("dependency-create", () => createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined }), "Dependency recorded.").then(() => { setDependencyTitle(""); setDependencyMitigation(""); })}>Add dependency</button></div>
+                  <div><button className="btn btn--primary" type="button" disabled={dependencyTitle.trim().length < 3 || busy !== null} onClick={() => void runAction("dependency-create", () => createCarDependency(amoCode, carId, { title: dependencyTitle.trim(), dependency_type: dependencyType, risk_level: dependencyRisk, owner_user_id: dependencyOwner || undefined, milestone_id: dependencyMilestone || undefined, due_date: dependencyDue || undefined, blocks_closure: dependencyBlocksClosure, mitigation_plan: dependencyMitigation || undefined }), "Dependency recorded.").then((succeeded) => { if (succeeded) { setDependencyTitle(""); setDependencyMitigation(""); } })}>Add dependency</button></div>
                 </div>
               ) : null}
               <div className="table-wrap">
@@ -335,7 +337,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                   <label>Requested new date<input className="input" type="date" value={deadlineDate} onChange={(event) => setDeadlineDate(event.target.value)} /></label>
                   <label>Reason<input className="input" value={deadlineReason} onChange={(event) => setDeadlineReason(event.target.value)} placeholder="Why the current deadline cannot be met" /></label>
                   <label>Impact statement<input className="input" value={deadlineImpact} onChange={(event) => setDeadlineImpact(event.target.value)} placeholder="Operational / compliance impact and recovery" /></label>
-                  <div><button className="btn" type="button" disabled={!deadlineDate || deadlineReason.trim().length < 8 || busy !== null} onClick={() => void runAction("deadline-request", () => requestCarDeadlineChange(amoCode, carId, { milestone_id: deadlineMilestone || undefined, requested_due_date: deadlineDate, reason: deadlineReason.trim(), impact_statement: deadlineImpact || undefined }), "Deadline change submitted for governed decision.").then(() => { setDeadlineDate(""); setDeadlineReason(""); setDeadlineImpact(""); })}>Request deadline change</button></div>
+                  <div><button className="btn" type="button" disabled={!deadlineDate || deadlineReason.trim().length < 8 || busy !== null} onClick={() => void runAction("deadline-request", () => requestCarDeadlineChange(amoCode, carId, { milestone_id: deadlineMilestone || undefined, requested_due_date: deadlineDate, reason: deadlineReason.trim(), impact_statement: deadlineImpact || undefined }), "Deadline change submitted for governed decision.").then((succeeded) => { if (succeeded) { setDeadlineDate(""); setDeadlineReason(""); setDeadlineImpact(""); } })}>Request deadline change</button></div>
                 </div>
               ) : null}
               <div className="table-wrap"><table className="table"><thead><tr><th>Scope</th><th>Previous</th><th>Requested</th><th>Reason</th><th>Status / decision</th></tr></thead><tbody>

@@ -163,7 +163,7 @@ export function initializeCarControlLoop(
   amoCode: string,
   carId: string,
   payload: {
-    accountable_owner_user_id?: string;
+    accountable_owner_user_id?: string | null;
     final_due_date?: string;
     effectiveness_required: boolean;
     milestones?: Array<{ milestone_key: string; due_date?: string; owner_user_id?: string }>;
@@ -175,7 +175,7 @@ export function initializeCarControlLoop(
 export function updateCarControlProfile(
   amoCode: string,
   carId: string,
-  payload: { accountable_owner_user_id?: string; effectiveness_required?: boolean },
+  payload: { accountable_owner_user_id?: string | null; effectiveness_required?: boolean },
 ): Promise<CarControlLoop> {
   return apiRequest<CarControlLoop>(controlPath(amoCode, carId, "/profile"), jsonOptions("PATCH", payload));
 }
@@ -184,7 +184,7 @@ export function updateCarControlMilestone(
   amoCode: string,
   carId: string,
   milestoneId: string,
-  payload: { owner_user_id?: string; status?: CarControlMilestoneStatus; notes?: string; evidence_ref?: string },
+  payload: { owner_user_id?: string | null; status?: CarControlMilestoneStatus; notes?: string; evidence_ref?: string },
 ): Promise<CarControlLoop> {
   return apiRequest<CarControlLoop>(controlPath(amoCode, carId, `/milestones/${encodeURIComponent(milestoneId)}`), jsonOptions("PATCH", payload));
 }
