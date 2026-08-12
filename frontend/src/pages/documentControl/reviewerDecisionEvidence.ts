@@ -2,33 +2,19 @@ import type {
   DocumentDetailResponse,
   DocumentWorkflow,
 } from "../../services/documentControl";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
 
-export type ReviewerDecisionEvidence = Record<string, string>;
+export type ReviewerDecisionEvidence = DocumentEvidenceReference;
 
-export function parseAdditionalEvidenceReferences(value: string): ReviewerDecisionEvidence[] {
-  return value
-    .split(/[\n,;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((reference) => ({ reference }));
-}
-
+/**
+ * Browser clients submit only governed evidence assets selected from the DMS.
+ * The reviewed revision ID and source checksum are appended by the server from
+ * authoritative revision data; the browser must never manufacture that evidence.
+ */
 export function buildReviewerDecisionEvidence(
-  detail: DocumentDetailResponse,
-  workflow: DocumentWorkflow,
-  additionalReferences: string,
+  _detail: DocumentDetailResponse,
+  _workflow: DocumentWorkflow,
+  controlledAssets: DocumentEvidenceReference[],
 ): ReviewerDecisionEvidence[] {
-  const revision = detail.revisions.find((item) => item.id === workflow.revision_id);
-  const checksum = revision?.source_sha256?.trim();
-  const evidence: ReviewerDecisionEvidence[] = [];
-
-  if (checksum) {
-    evidence.push({
-      reference: `manual-revision:${workflow.revision_id}`,
-      checksum_sha256: checksum,
-    });
-  }
-
-  evidence.push(...parseAdditionalEvidenceReferences(additionalReferences));
-  return evidence;
+  return controlledAssets.map((item) => ({ ...item }));
 }
