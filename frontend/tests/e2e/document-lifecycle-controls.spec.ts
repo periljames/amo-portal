@@ -167,7 +167,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     const dialog = page.getByRole("dialog", { name: "Retire controlled document" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Permanent deletion is blocked.", { exact: true })).toBeVisible();
-    await expect(dialog.getByText(/Published, superseded and archived revisions are controlled records/)).toBeVisible();
+    await expect(dialog.getByText(/Reviewed, published, superseded and archived lifecycle evidence is controlled history/)).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Delete permanently", exact: true })).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: /Archive document|Open lifecycle/ })).toBeVisible();
   });
