@@ -75,6 +75,9 @@ function workKindLabel(kind: DocumentControlMyWorkItem["kind"]): string {
   if (kind === "CHANGE_REQUEST") return "Change request";
   if (kind === "PERIODIC_REVIEW") return "Periodic review";
   if (kind === "ACKNOWLEDGEMENT") return "Acknowledgement";
+  if (kind === "AUTHORITY_ACTION") return "Authority response";
+  if (kind === "TEMPORARY_REVISION") return "Temporary revision";
+  if (kind === "CONTROLLED_COPY") return "Controlled copy custody";
   return "Workflow decision";
 }
 
@@ -182,7 +185,7 @@ export default function DocumentGovernanceDashboardPage() {
 
           <DocumentControlSection
             title="My Work"
-            description="Only obligations attributable to you through direct ownership, recipient assignment or confirmed document responsibility."
+            description="Only obligations attributable to you through direct ownership, recipient/custody assignment, authority submission, TR creation or confirmed document responsibility."
             actions={<span className="dms-home__count">{myWork.length}</span>}
           >
             {myWork.length ? (
@@ -200,7 +203,7 @@ export default function DocumentGovernanceDashboardPage() {
                   ))}</tbody>
                 </table>
               </div>
-            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement or confirmed workflow decision assigned to you." />}
+            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement, workflow decision, authority response, temporary revision or controlled-copy custody action attributable to you." />}
           </DocumentControlSection>
 
           {canControl ? (
