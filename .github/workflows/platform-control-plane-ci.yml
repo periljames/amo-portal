@@ -241,7 +241,10 @@ jobs:
         working-directory: backend
         run: |
           alembic -c amodb/alembic.ini upgrade heads
-          alembic -c amodb/alembic.ini current | grep -q "plat_qms_260809_merge"
+          EXPECTED_HEADS="$(alembic -c amodb/alembic.ini heads | awk 'NF {print $1}')"
+          CURRENT_HEADS="$(alembic -c amodb/alembic.ini current | awk 'NF {print $1}')"
+          test "$(printf '%s\n' "$EXPECTED_HEADS" | sed '/^$/d' | wc -l)" -eq 1
+          test "$CURRENT_HEADS" = "$EXPECTED_HEADS"
       - name: Prove transaction-local database guards
         working-directory: backend
         run: |
