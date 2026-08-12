@@ -10,7 +10,7 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import evidence_models as em
-from .workspace_service import get_manual, require_control_user, resolve_tenant
+from .workspace_service import get_manual, require_control_user, resolve_tenant, status_value
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Retention Sources"])
@@ -78,8 +78,8 @@ def retention_sources(
         "revisions": [
             {
                 "id": row.id,
-                "label": f"Revision {row.revision_number}",
-                "status": row.status,
+                "label": f"Revision {row.rev_number}",
+                "status": status_value(row),
                 "revision_id": row.id,
             }
             for row in revisions
