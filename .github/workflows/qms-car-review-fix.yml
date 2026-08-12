@@ -62,7 +62,7 @@ jobs:
           addition = "\n\ndef test_nullable_owner_payloads_distinguish_omitted_from_explicit_clear() -> None:\n    from amodb.apps.quality.car_control_loop_router import ControlLoopInitialize, ControlProfileUpdate, MilestoneUpdate\n\n    assert \"accountable_owner_user_id\" not in ControlLoopInitialize(effectiveness_required=True).model_fields_set\n    assert \"accountable_owner_user_id\" in ControlLoopInitialize(accountable_owner_user_id=None, effectiveness_required=True).model_fields_set\n    assert \"accountable_owner_user_id\" not in ControlProfileUpdate().model_fields_set\n    assert \"accountable_owner_user_id\" in ControlProfileUpdate(accountable_owner_user_id=None).model_fields_set\n    assert \"owner_user_id\" not in MilestoneUpdate().model_fields_set\n    assert \"owner_user_id\" in MilestoneUpdate(owner_user_id=None).model_fields_set\n"
           if "test_nullable_owner_payloads_distinguish_omitted_from_explicit_clear" in tests:
               raise SystemExit("Regression test already present unexpectedly")
-          test_file.write_text(tests.rstrip() + addition + "\n")
+          test_file.write_text(tests.rstrip() + addition.rstrip() + "\n")
 
           for path, needles in {
               router: ["from .router import _close_accepted_car_workflow", "_close_accepted_car_workflow(db, car, actor_user_id=ctx.user_id)", 'if "accountable_owner_user_id" in payload.model_fields_set:', 'if "owner_user_id" in payload.model_fields_set:', "Use the governed CAR extension workflow to revise an existing deadline."],
