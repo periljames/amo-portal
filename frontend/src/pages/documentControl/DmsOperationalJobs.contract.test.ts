@@ -1,0 +1,78 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const shell = readFileSync(new URL("./DocumentControlShell.tsx", import.meta.url), "utf-8");
+const launcher = readFileSync(new URL("./DocumentControlJobLauncher.tsx", import.meta.url), "utf-8");
+const jobs = readFileSync(new URL("./documentControlJobs.ts", import.meta.url), "utf-8");
+const library = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
+const home = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
+const homeService = readFileSync(new URL("../../services/documentControlHome.ts", import.meta.url), "utf-8");
+const guardedLifecycle = readFileSync(new URL("./DocumentControlLifecycleActionsGuarded.tsx", import.meta.url), "utf-8");
+const reviewActions = readFileSync(new URL("./DocumentControlReviewActions.tsx", import.meta.url), "utf-8");
+const temporaryRevisionActions = readFileSync(new URL("./DocumentControlTemporaryRevisionActions.tsx", import.meta.url), "utf-8");
+
+describe("DMS operational job contract", () => {
+  it("exposes one persistent controller work launcher rather than relying on tab discovery", () => {
+    expect(shell).toContain("DocumentControlJobLauncher");
+    expect(launcher).toContain('data-testid="document-control-start-work"');
+    expect(launcher).toContain("Start Document Control work");
+    for (const group of ["Change & approval", "Issue & custody", "Assurance & applicability"]) expect(launcher).toContain(group);
+  });
+
+  it("defines the major controlled jobs as reusable library-selection flows", () => {
+    for (const id of [
+      "raise-change",
+      "start-workflow",
+      "temporary-revision",
+      "authority-submission",
+      "distribute",
+      "controlled-copy",
+      "schedule-review",
+      "external-source",
+      "applicability",
+      "integration",
+    ]) expect(jobs).toContain(`"${id}"`);
+    expect(jobs).toContain("documentJobSelectionPath");
+    expect(jobs).toContain("documentJobTarget");
+    expect(library).toContain("documentControlJob");
+    expect(library).toContain("jobEligibility");
+    expect(library).toContain("requiresPublished");
+    expect(library).toContain("externalOnly");
+  });
+
+  it("preserves the proven raise-change selector while generalizing document selection", () => {
+    expect(library).toContain('params.get("action") === "raise-change"');
+    expect(library).toContain("Select a document for the change request");
+    expect(library).toContain("Select for change");
+    expect(library).toContain('navigate(`${basePath}/library/${item.id}?tab=changes`)');
+    expect(library).toContain("selectForJob");
+    expect(library).toContain("selectedJob.selectLabel");
+  });
+
+  it("surfaces authority, temporary revision and controlled-copy obligations in My Work", () => {
+    for (const kind of ["AUTHORITY_ACTION", "TEMPORARY_REVISION", "CONTROLLED_COPY"]) {
+      expect(homeService).toContain(`"${kind}"`);
+      expect(home).toContain(`kind === "${kind}"`);
+    }
+    expect(home).toContain("authority response, temporary revision or controlled-copy custody action");
+  });
+
+  it("uses named tenant users for periodic review ownership", () => {
+    expect(guardedLifecycle).toContain("DocumentControlReviewActions");
+    expect(reviewActions).toContain("Select active tenant user");
+    expect(reviewActions).toContain("owner_user_id: ownerId");
+    expect(reviewActions).not.toContain("Owner active tenant user ID");
+    expect(reviewActions).toContain("non-continuation outcome requires at least one finding and one resulting action");
+  });
+
+  it("uses real campaign and revision records for temporary revision terminal dependencies", () => {
+    expect(guardedLifecycle).toContain("DocumentControlTemporaryRevisionActions");
+    expect(temporaryRevisionActions).toContain("eligibleCampaigns");
+    expect(temporaryRevisionActions).toContain('campaign.temporary_revision_id === selected.id');
+    expect(temporaryRevisionActions).toContain("eligibleIncorporatingRevisions");
+    expect(temporaryRevisionActions).toContain("Select issued campaign");
+    expect(temporaryRevisionActions).toContain("Select published permanent revision");
+    expect(temporaryRevisionActions).not.toContain("Issued campaign ID");
+    expect(temporaryRevisionActions).not.toContain("Incorporating permanent revision ID");
+  });
+});
