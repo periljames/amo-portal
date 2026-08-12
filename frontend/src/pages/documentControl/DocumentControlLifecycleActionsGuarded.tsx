@@ -13,6 +13,7 @@ import DocumentControlLifecycleActions, {
 } from "./DocumentControlLifecycleActions";
 import DocumentControlReviewActions from "./DocumentControlReviewActions";
 import DocumentControlReviewerLifecycleActions from "./DocumentControlReviewerLifecycleActions";
+import DocumentControlTemporaryRevisionActions from "./DocumentControlTemporaryRevisionActions";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
 
@@ -179,6 +180,9 @@ export default function DocumentControlLifecycleActionsGuarded(props: Props) {
   }
   if (props.activeView === "reviews") {
     return <DocumentControlReviewActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
+  }
+  if (props.activeView === "temporary-revisions" && canApprove) {
+    return <DocumentControlTemporaryRevisionActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
   }
   if (!canApprove && DECISION_SEPARATED_VIEWS.has(props.activeView)) {
     return <DocumentControlControllerLifecycleActions {...props} />;
