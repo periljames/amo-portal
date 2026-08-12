@@ -157,6 +157,7 @@ def test_effectiveness_milestone_can_be_optional_by_governed_profile() -> None:
     )
     assert readiness["ready"] is True
 
+
 def test_nullable_owner_payloads_distinguish_omitted_from_explicit_clear() -> None:
     from amodb.apps.quality.car_control_loop_router import ControlLoopInitialize, ControlProfileUpdate, MilestoneUpdate
 
