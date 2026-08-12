@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Apply deterministic reporting browser follow-up
+      - name: Apply route-agnostic reporting browser follow-up
         run: python .github/scripts/qms_car_reporting_followup.py
 
       - uses: actions/setup-node@v6
@@ -80,7 +80,7 @@ jobs:
       - name: Commit source follow-up
         run: |
           git rm .github/scripts/qms_car_reporting_followup.py
-          git add frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx frontend/tests/e2e/qms-car-control-loop.spec.ts
+          git add frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx frontend/tests/e2e/qms-car-control-loop.spec.ts frontend/tests/e2e/qms-car-performance-report.spec.ts
           git diff --cached --check
           git config user.name "amo-portal-qms-bot"
           git config user.email "actions@users.noreply.github.com"
