@@ -10,6 +10,7 @@ name: Document Control Lifecycle CI
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/services/documentLifecycle.ts"
+      - "frontend/src/services/documentControlEvidence.ts"
       - "frontend/src/services/documentControlHome.ts"
       - "frontend/src/services/documentControlIntegrationCatalog.ts"
       - "frontend/src/services/documentControlReportsPortfolio.ts"
@@ -77,7 +78,7 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run operating attribution, integration and evidence-export contracts
+      - name: Run operating attribution, integration, export and evidence contracts
         working-directory: backend
         run: >-
           pytest -q
@@ -85,6 +86,7 @@ jobs:
           amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
           amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
           amodb/apps/doc_control/tests/test_reports_export_contract.py
+          amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
@@ -120,6 +122,7 @@ jobs:
           src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
           src/pages/documentControl/DmsOperationalJobs.contract.test.ts
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/documentControl/reviewerDecisionEvidence.test.ts
       - name: Lint lifecycle acceptance and operating surfaces
         working-directory: frontend
         run: >-
@@ -136,12 +139,18 @@ jobs:
           src/pages/documentControl/DocumentControlReviewActions.tsx
           src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
           src/pages/documentControl/DocumentControlIntegrationActions.tsx
+          src/pages/documentControl/DocumentControlApproverLifecycleActions.tsx
           src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
+          src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
+          src/pages/documentControl/DocumentEvidencePicker.tsx
+          src/pages/documentControl/reviewerDecisionEvidence.ts
+          src/pages/documentControl/reviewerDecisionEvidence.test.ts
           src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
           src/pages/documentControl/DocumentControlReportsPage.tsx
           src/pages/documentControl/DmsOperationalJobs.contract.test.ts
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/services/documentLifecycle.ts
+          src/services/documentControlEvidence.ts
           src/services/documentControlHome.ts
           src/services/documentControlIntegrationCatalog.ts
           src/services/documentControlReportsPortfolio.ts
