@@ -10,6 +10,8 @@ name: Document Control Operating Foundations CI
       - "frontend/src/services/documentControlEvidence.ts"
       - "frontend/src/services/documentControlIntegrationCatalog.ts"
       - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/documentControlRetention.ts"
+      - "frontend/src/services/documentControlHome.ts"
       - ".github/workflows/document-control-operating-foundations-ci.yml"
   workflow_dispatch:
 
@@ -68,10 +70,16 @@ jobs:
         run: >-
           python -m py_compile
           amodb/apps/doc_control/evidence_models.py
+          amodb/apps/doc_control/evidence_pack_runtime_guard.py
           amodb/apps/doc_control/reminder_models.py
           amodb/apps/doc_control/reminder_policy.py
           amodb/apps/doc_control/reminder_service.py
+          amodb/apps/doc_control/reminder_runtime_guard.py
           amodb/apps/doc_control/reminder_lifecycle_router.py
+          amodb/apps/doc_control/retention_models.py
+          amodb/apps/doc_control/workspace_retention_router.py
+          amodb/apps/doc_control/workspace_retention_accountability_router.py
+          amodb/apps/doc_control/workspace_retention_sources_router.py
           amodb/apps/doc_control/workspace_evidence_router.py
           amodb/apps/doc_control/workspace_evidence_pack_router.py
           amodb/apps/doc_control/workspace_copy_evidence_router.py
@@ -89,6 +97,7 @@ jobs:
           amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
           amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
           amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
+          amodb/apps/doc_control/tests/test_retention_disposition_contract.py
           amodb/apps/doc_control/tests/test_change_source_contract.py
           amodb/apps/doc_control/tests/test_applicability_target_contract.py
           amodb/apps/doc_control/tests/test_controlled_copy_due_contract.py
@@ -100,7 +109,7 @@ jobs:
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
 
-      - name: Verify evidence and reminder tables exist
+      - name: Verify DMS foundation schema exists
         working-directory: backend
         run: |
           python - <<'PY'
@@ -108,12 +117,20 @@ jobs:
           from amodb.database import WriteSessionLocal
           db = WriteSessionLocal()
           try:
-              tables = set(inspect(db.get_bind()).get_table_names())
-              required = {"document_evidence_assets", "document_reminder_deliveries"}
+              inspector = inspect(db.get_bind())
+              tables = set(inspector.get_table_names())
+              required = {
+                  "document_evidence_assets",
+                  "document_reminder_deliveries",
+                  "document_retention_dispositions",
+              }
               missing = sorted(required - tables)
               if missing:
                   raise SystemExit(f"Missing DMS foundation tables after upgrade: {missing}")
-              print("DMS foundation tables present")
+              retention_columns = {column["name"] for column in inspector.get_columns("document_retention_dispositions")}
+              if "approver_user_id" not in retention_columns:
+                  raise SystemExit("Retention schema is missing approver_user_id")
+              print("DMS foundation tables and retention approver column present")
           finally:
               db.close()
           PY
@@ -145,11 +162,15 @@ jobs:
           src/pages/documentControl/DocumentControlExternalSourceActions.tsx
           src/pages/documentControl/DocumentControlApproverLifecycleActions.tsx
           src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
+          src/pages/documentControl/DocumentControlRetentionActions.tsx
+          src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
           src/pages/documentControl/DocumentEvidencePicker.tsx
           src/pages/documentControl/DocumentEvidencePackAction.tsx
           src/pages/documentControl/DocumentControlAdministrationPage.tsx
           src/services/documentControlEvidence.ts
           src/services/documentControlReports.ts
+          src/services/documentControlRetention.ts
+          src/services/documentControlHome.ts
 
       - name: Build production frontend
         working-directory: frontend
