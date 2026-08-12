@@ -36,6 +36,18 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
+def _merge_asset_evidence(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in [*existing, *incoming]:
+        asset_id = str((item or {}).get("asset_id") or "").strip()
+        if not asset_id or asset_id in seen:
+            continue
+        seen.add(asset_id)
+        merged.append(dict(item))
+    return merged
+
+
 def validate_authority_update(
     row: dm.DocumentAuthoritySubmission,
     payload: schemas.AuthoritySubmissionUpdate,
@@ -174,14 +186,28 @@ def update_authority_submission_with_guards(
     if not row:
         raise HTTPException(status_code=404, detail="Authority submission not found")
 
+    existing_evidence = validate_evidence_references(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=row.manual_id,
+        evidence=list(row.evidence_json or []),
+    ) if row.evidence_json else []
     normalized_evidence = None
-    if payload.evidence is not None or payload.status in {"SUBMITTED", "APPROVED"}:
-        normalized_evidence = validate_evidence_references(
+    if payload.evidence is not None:
+        incoming = validate_evidence_references(
             db,
             tenant_id=tenant.amo_id,
             manual_id=row.manual_id,
-            evidence=list(payload.evidence) if payload.evidence is not None else list(row.evidence_json or []),
+            evidence=list(payload.evidence),
         )
+        if row.status == "DRAFT" and payload.status == "DRAFT":
+            normalized_evidence = incoming
+        else:
+            normalized_evidence = _merge_asset_evidence(existing_evidence, incoming)
+    elif payload.status in {"SUBMITTED", "APPROVED"}:
+        normalized_evidence = existing_evidence
+
+    if normalized_evidence is not None:
         payload = payload.model_copy(update={"evidence": normalized_evidence})
 
     validate_authority_update(row, payload)
