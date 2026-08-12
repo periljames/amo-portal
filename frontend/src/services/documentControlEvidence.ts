@@ -53,7 +53,7 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
 }
 
 function attachmentFilename(response: Response, fallback: string): string {
-  const disposition = response.headers.get("Content-Disposition") || "";
+  const disposition = response.headers.get("content-disposition") || "";
   const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   if (encoded) {
     try {
@@ -140,12 +140,12 @@ export async function downloadDocumentEvidencePack(
     { headers: authHeaders(), credentials: "same-origin" },
   );
   if (!response.ok) throw new Error(await errorMessage(response, "Document evidence pack could not be generated"));
-  const attachmentHeader = response.headers.get("X-Evidence-Pack-Attachments");
+  const attachmentHeader = response.headers.get("x-evidence-pack-attachments");
   const parsedAttachments = attachmentHeader === null ? Number.NaN : Number.parseInt(attachmentHeader, 10);
   return {
     blob: await response.blob(),
     filename: attachmentFilename(response, "document-evidence-pack.zip"),
-    sha256: response.headers.get("X-Evidence-Pack-SHA256"),
+    sha256: response.headers.get("x-evidence-pack-sha256"),
     attachmentCount: Number.isFinite(parsedAttachments) ? parsedAttachments : null,
   };
 }
