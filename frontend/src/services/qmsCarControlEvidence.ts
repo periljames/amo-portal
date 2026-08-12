@@ -1,10 +1,19 @@
 import { apiRequest, qmsPath } from "./apiClient";
-import { getToken, handleAuthFailure } from "./auth";
+import { getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { CARAttachmentOut } from "./qms";
 
-function evidencePath(amoCode: string, carId: string, suffix = ""): string {
-  return qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/control-loop/attachments${suffix}`);
+export type { CARAttachmentOut } from "./qms";
+
+function activeAmoCode(): string {
+  const context = getContext();
+  const value = context.amoSlug || context.amoCode;
+  if (!value) throw new Error("No active AMO context is available for governed CAR evidence.");
+  return value;
+}
+
+function evidencePath(carId: string, suffix = ""): string {
+  return qmsPath(activeAmoCode(), `/cars/${encodeURIComponent(carId)}/control-loop/attachments${suffix}`);
 }
 
 function requestHeaders(): HeadersInit {
@@ -23,14 +32,14 @@ async function assertResponse(response: Response): Promise<void> {
   }
 }
 
-export function listCarControlEvidence(amoCode: string, carId: string): Promise<CARAttachmentOut[]> {
-  return apiRequest<CARAttachmentOut[]>(evidencePath(amoCode, carId), { cacheTtlMs: 2_000 });
+export function qmsListCarAttachments(carId: string): Promise<CARAttachmentOut[]> {
+  return apiRequest<CARAttachmentOut[]>(evidencePath(carId), { cacheTtlMs: 2_000 });
 }
 
-export async function uploadCarControlEvidence(amoCode: string, carId: string, file: File): Promise<CARAttachmentOut> {
+export async function qmsUploadCarAttachment(carId: string, file: File): Promise<CARAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${getApiBaseUrl()}${evidencePath(amoCode, carId)}`, {
+  const response = await fetch(`${getApiBaseUrl()}${evidencePath(carId)}`, {
     method: "POST",
     headers: requestHeaders(),
     body: formData,
@@ -40,9 +49,9 @@ export async function uploadCarControlEvidence(amoCode: string, carId: string, f
   return (await response.json()) as CARAttachmentOut;
 }
 
-export async function downloadCarControlEvidence(amoCode: string, carId: string, attachmentId: string): Promise<Blob> {
+export async function qmsDownloadCarAttachmentBlob(carId: string, attachmentId: string): Promise<Blob> {
   const response = await fetch(
-    `${getApiBaseUrl()}${evidencePath(amoCode, carId, `/${encodeURIComponent(attachmentId)}/download`)}`,
+    `${getApiBaseUrl()}${evidencePath(carId, `/${encodeURIComponent(attachmentId)}/download`)}`,
     {
       method: "GET",
       headers: requestHeaders(),
@@ -53,6 +62,6 @@ export async function downloadCarControlEvidence(amoCode: string, carId: string,
   return response.blob();
 }
 
-export async function deleteCarControlEvidence(amoCode: string, carId: string, attachmentId: string): Promise<void> {
-  await apiRequest<void>(evidencePath(amoCode, carId, `/${encodeURIComponent(attachmentId)}`), { method: "DELETE" });
+export async function qmsDeleteCarAttachment(carId: string, attachmentId: string): Promise<void> {
+  await apiRequest<void>(evidencePath(carId, `/${encodeURIComponent(attachmentId)}`), { method: "DELETE" });
 }
