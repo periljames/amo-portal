@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Apply explicit report route follow-up
+      - name: Apply diagnostic report route follow-up
         run: python .github/scripts/qms_car_reporting_followup.py
       - uses: actions/setup-node@v6
         with:
@@ -33,19 +33,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: >-
-          python ../.github/scripts/retry_transient.py --attempts 4
-          --label "CAR reporting follow-up dependency install"
-          -- npm ci --prefer-offline --no-audit --fund=false
-          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Lint focused report and browser surfaces
+          python ../.github/scripts/retry_transient.py --attempts 4 --label "CAR reporting dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false --fetch-retries=5
+      - name: Lint focused surfaces
         working-directory: frontend
-        run: >-
-          npm exec -- eslint
-          src/pages/qms/QmsCarPerformanceReportPage.tsx
-          src/pages/qms/QmsCanonicalPage.tsx
-          tests/e2e/qms-car-control-loop.spec.ts
-          tests/e2e/qms-car-performance-report.spec.ts
-      - name: Typecheck and production build including portal route
+        run: npm exec -- eslint src/pages/qms/QmsCarPerformanceReportPage.tsx src/pages/qms/QmsCanonicalPage.tsx tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts
+      - name: Production build
         working-directory: frontend
         run: npm run build
       - name: Install Chromium
@@ -54,13 +47,9 @@ jobs:
       - name: Start preview server
         working-directory: frontend
         run: |
-          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-car-reporting-preview.log 2>&1 &
-          for attempt in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:4173 >/dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat /tmp/qms-car-reporting-preview.log
-          exit 1
+          npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/qms-car-reporting-preview.log 2>&1 &
+          for attempt in $(seq 1 45); do if curl -fsS http://127.0.0.1:4173 >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/qms-car-reporting-preview.log; exit 1
       - name: Browser acceptance
         working-directory: frontend
         run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line
