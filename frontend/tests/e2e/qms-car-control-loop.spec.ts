@@ -212,7 +212,7 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
   };
 
   // Intercept only backend/API traffic. Intercepting every request also replaces
