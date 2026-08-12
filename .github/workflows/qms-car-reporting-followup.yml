@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Apply reporting browser follow-up
+      - name: Apply deterministic reporting browser follow-up
         run: python .github/scripts/qms_car_reporting_followup.py
 
       - uses: actions/setup-node@v6
