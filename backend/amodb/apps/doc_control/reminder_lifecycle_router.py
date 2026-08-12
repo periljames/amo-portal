@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .reminder_runtime_guard import install as install_reminder_runtime_guard
 from .reminder_service import (
     start_document_control_reminder_scheduler,
     stop_document_control_reminder_scheduler,
 )
 
 
+install_reminder_runtime_guard()
 router = APIRouter()
 
 
