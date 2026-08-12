@@ -233,8 +233,8 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
 
   const lifecycleSection = page.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");
   await expect(lifecycleSection).toBeVisible();
-  await expect(lifecycleSection.getByText("Root cause analysis submitted", { exact: true })).toBeVisible();
-  await expect(lifecycleSection.getByText("Corrective actions implemented", { exact: true })).toBeVisible();
+  await expect(lifecycleSection.getByText("1. Root cause analysis submitted", { exact: true })).toBeVisible();
+  await expect(lifecycleSection.getByText("3. Corrective actions implemented", { exact: true })).toBeVisible();
 
   await expect(page.getByText("Facility modification approval", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Controlled deadline changes" })).toBeVisible();
