@@ -8,6 +8,8 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { getCurrentWorkforcePermissions } from "../../services/workforce";
 import { RosterError, RosterLoading, RosterShell } from "./components/RosterShell";
 
+const LazyCalendarSubscriptionSecurityPanel = lazy(() => import("./components/CalendarSubscriptionSecurityPanel")
+  .then((module) => ({ default: module.CalendarSubscriptionSecurityPanel })));
 const LazyComplianceImpact = lazy(() => import("./components/ComplianceImpact")
   .then((module) => ({ default: module.ComplianceImpact })));
 const LazyDutyLocationAssistant = lazy(() => import("./components/DutyLocationAssistant")
@@ -78,6 +80,7 @@ export function MyRosterPage() {
   return (
     <RosterShell eyebrow="Employee self-service" title="My duty and time" description="Review published duty, acknowledge changes, request leave, capture attendance and inspect timesheet reconciliation.">
       <DeferredWorkspace label="Checking private duty-location guidance…"><LazyDutyLocationAssistant /></DeferredWorkspace>
+      <DeferredWorkspace label="Checking calendar subscription security…"><LazyCalendarSubscriptionSecurityPanel /></DeferredWorkspace>
       <DeferredWorkspace label="Opening your duty workspace…"><LazyMyRosterWorkspace /></DeferredWorkspace>
     </RosterShell>
   );
