@@ -399,3 +399,65 @@ def test_closure_evidence_reference_is_capped_at_authoritative_car_column() -> N
             [],
         )
     assert exc_info.value.status_code == 422
+
+
+def test_control_loop_context_is_restored_on_new_postgres_transaction() -> None:
+    from amodb.apps.quality.car_control_loop_session_context import (
+        _CONTEXT_KEY,
+        _restore_control_loop_context_after_begin,
+    )
+
+    session = MagicMock()
+    session.info = {_CONTEXT_KEY: ("amo-1", "user-1")}
+    connection = MagicMock()
+    connection.dialect.name = "postgresql"
+
+    _restore_control_loop_context_after_begin(session, None, connection)
+
+    assert connection.execute.call_count == 2
+    assert connection.execute.call_args_list[0].args[1] == {"amo_id": "amo-1"}
+    assert connection.execute.call_args_list[1].args[1] == {"user_id": "user-1"}
+
+
+def test_milestone_acceptance_uses_canonical_reviewer_authority() -> None:
+    from amodb.apps.quality.car_control_loop_authority_guard import _require_milestone_review_authority
+
+    db = MagicMock()
+    current_user = SimpleNamespace(id="user-1")
+    db.query.return_value.filter.return_value.first.return_value = current_user
+    ctx = SimpleNamespace(user_id="user-1", amo_id="amo-1")
+    car = SimpleNamespace(id="car-1")
+
+    with patch("amodb.apps.quality.router._require_car_review_access") as review_gate:
+        _require_milestone_review_authority(
+            db,
+            ctx=ctx,
+            car=car,
+            requested_status="ACCEPTED",
+        )
+    review_gate.assert_called_once_with(db, current_user, car)
+
+
+def test_controlled_close_requires_distinct_close_capability() -> None:
+    from amodb.apps.quality import car_control_loop_authority_guard as authority
+    from amodb.apps.quality.car_control_loop_router import CloseControlLoop
+
+    db = MagicMock()
+    ctx = SimpleNamespace(amo_id="amo-1", user_id="user-1")
+    payload = CloseControlLoop(evidence_ref="evidence://closure", closure_reason="Verified complete")
+
+    with (
+        patch.object(authority, "assert_quality_permission") as permission_gate,
+        patch.object(authority, "set_postgres_tenant_context"),
+        patch.object(authority, "_close_control_loop_guarded", return_value={"ok": True}) as delegated_close,
+    ):
+        result = authority.close_control_loop_with_close_authority(
+            car_id="00000000-0000-0000-0000-000000000001",
+            payload=payload,
+            ctx=ctx,
+            db=db,
+        )
+
+    assert result == {"ok": True}
+    permission_gate.assert_called_once_with(db, ctx, "qms.car.close")
+    delegated_close.assert_called_once()
