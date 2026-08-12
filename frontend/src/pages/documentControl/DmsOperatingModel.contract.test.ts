@@ -17,6 +17,7 @@ const distributionPortfolio = readFileSync(new URL("./DocumentControlDistributio
 const distributionService = readFileSync(new URL("../../services/documentControlDistributionPortfolio.ts", import.meta.url), "utf-8");
 const compliancePortfolio = readFileSync(new URL("./DocumentControlCompliancePortfolioPage.tsx", import.meta.url), "utf-8");
 const complianceService = readFileSync(new URL("../../services/documentControlCompliancePortfolio.ts", import.meta.url), "utf-8");
+const externalActions = readFileSync(new URL("./DocumentControlExternalSourceActions.tsx", import.meta.url), "utf-8");
 const reportsPage = readFileSync(new URL("./DocumentControlReportsPage.tsx", import.meta.url), "utf-8");
 const reportsService = readFileSync(new URL("../../services/documentControlReportsPortfolio.ts", import.meta.url), "utf-8");
 const administrationPage = readFileSync(new URL("./DocumentControlAdministrationPage.tsx", import.meta.url), "utf-8");
@@ -193,7 +194,10 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain('activeView="copies"');
     expect(recordActions).toContain('activeView === "compliance"');
     expect(recordActions).toContain('activeView="reviews"');
-    expect(recordActions).toContain('activeView="external"');
+    expect(recordActions).toContain("DocumentControlExternalSourceActions");
+    expect(recordActions).not.toContain('activeView="external"');
+    expect(externalActions).toContain("createExternalRevisionReceipt");
+    expect(externalActions).toContain('applicability_status: "PENDING"');
     expect(recordActions).toContain('activeView === "relationships"');
     expect(recordActions).toContain("DocumentControlIntegrationActions");
   });
