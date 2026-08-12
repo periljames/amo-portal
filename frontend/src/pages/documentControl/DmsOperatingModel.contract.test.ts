@@ -125,7 +125,8 @@ describe("DMS frontend operating-model contract", () => {
     expect(homePage).toContain("/compliance?view=external-sources");
     expect(homePage).not.toContain("/compliance?view=external\"");
     expect(compliancePortfolio).toContain('if (raw === "external") return "external-sources"');
-    expect(compliancePortfolio).toContain('if (key === "view") next.delete("status")');
+    expect(compliancePortfolio).toMatch(/if \(key === "view"\) \{\s*next\.delete\("status"\)/);
+    expect(compliancePortfolio).toContain('if (value !== "external-sources") next.delete("assessment_source")');
   });
 
   it("makes Reports a bounded controlled-evidence catalogue instead of a master-register-only page", () => {
