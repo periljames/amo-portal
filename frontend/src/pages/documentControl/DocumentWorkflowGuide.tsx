@@ -70,6 +70,16 @@ function nextGuide(detail: DocumentDetailResponse): PrimaryGuide {
     };
   }
 
+  if (!workflow && detail.document.read_target.kind === "PUBLISHED") {
+    return {
+      eyebrow: "Effective publication",
+      title: "Read the current controlled issue",
+      description: "This published revision is the controlled reading target. Lifecycle decisions remain with authorized Document Control users.",
+      label: "Read current issue",
+      tab: "content",
+    };
+  }
+
   if (!workflow) {
     return {
       eyebrow: "Next lifecycle step",
@@ -260,6 +270,7 @@ export default function DocumentWorkflowGuide({
   const workflow: DocumentWorkflow | undefined = detail?.workflows[0];
   const capabilities = (detail?.capabilities || {}) as GuideCapabilities;
   const canAct = Boolean(capabilities.control || capabilities.review || capabilities.approve || capabilities.publish || capabilities.upload_revision);
+  const isPublishedReaderProjection = Boolean(detail && !workflow && detail.document.read_target.kind === "PUBLISHED");
 
   const open = (tab: GuideTab, focusActions = true) => {
     const query = tab === "history" ? "tab=history" : `tab=${tab}`;
@@ -287,6 +298,13 @@ export default function DocumentWorkflowGuide({
     ["Compliance evidence", "compliance"],
   ];
 
+  const stage = workflow?.state
+    || (detail.document.read_target.kind === "PUBLISHED"
+      ? "PUBLISHED"
+      : detail.document.latest_revision
+        ? "NOT_STARTED"
+        : "NO_REVISION");
+
   return <section className={`dc-flow-guide ${primary.blocked ? "dc-flow-guide--blocked" : ""}`} data-testid="document-workflow-guide">
     <div className="dc-flow-guide__primary">
       <span className="dc-flow-guide__icon">{primary.blocked ? <AlertTriangle size={19} /> : <ShieldCheck size={19} />}</span>
@@ -295,13 +313,13 @@ export default function DocumentWorkflowGuide({
         <strong>{primary.title}</strong>
         <p>{primary.description}</p>
       </div>
-      <button type="button" className="dc-button dc-button--primary" disabled={!canAct && primary.tab !== "distribution" && primary.tab !== "compliance"} onClick={() => open(primary.tab)} data-testid="document-next-action">
+      <button type="button" className="dc-button dc-button--primary" disabled={!canAct && !isPublishedReaderProjection && primary.tab !== "distribution" && primary.tab !== "compliance"} onClick={() => open(primary.tab)} data-testid="document-next-action">
         {primary.label} <ArrowRight size={14} />
       </button>
     </div>
 
     <div className="dc-flow-guide__readiness-row" aria-label="Workflow readiness">
-      <ReadinessItem label="Stage" value={workflow?.state || (detail.document.latest_revision ? "NOT_STARTED" : "NO_REVISION")} />
+      <ReadinessItem label="Stage" value={stage} />
       <ReadinessItem label="Training" value={workflow?.training_readiness_status} />
       <ReadinessItem label="QMS" value={workflow?.qms_readiness_status} />
       <ReadinessItem label="Distribution" value={workflow?.distribution_readiness_status} />
