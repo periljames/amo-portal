@@ -208,6 +208,8 @@ def compute_car_health(
         risk_level = str(_value(dependency, "risk_level", "MEDIUM") or "MEDIUM").upper()
         blocks_closure = bool(_value(dependency, "blocks_closure", False))
         title = str(_value(dependency, "title", "Dependency") or "Dependency")
+        dependency_id = str(_value(dependency, "id", ""))
+        due_date = _value(dependency, "due_date")
         points = {"LOW": 4, "MEDIUM": 10, "HIGH": 20, "CRITICAL": 35}.get(risk_level, 10)
         if blocks_closure:
             points += 10
@@ -217,12 +219,48 @@ def compute_car_health(
             points,
             f"Open dependency: {title}.",
             severity=severity,
-            dependency_id=str(_value(dependency, "id", "")),
+            dependency_id=dependency_id,
             risk_level=risk_level,
             blocks_closure=blocks_closure,
+            due_date=_iso(due_date) if isinstance(due_date, date) else None,
         )
         if risk_level == "CRITICAL":
             critical = True
+
+        if isinstance(due_date, date):
+            days = (due_date - today).days
+            if days < 0:
+                any_overdue = True
+                overdue_days = abs(days)
+                add_factor(
+                    "DEPENDENCY_OVERDUE",
+                    15 if overdue_days <= 7 else 25,
+                    f"Dependency {title} is overdue by {overdue_days} day(s).",
+                    severity="OVERDUE",
+                    dependency_id=dependency_id,
+                    risk_level=risk_level,
+                    due_date=_iso(due_date),
+                    overdue_days=overdue_days,
+                )
+            elif days <= 3:
+                add_factor(
+                    "DEPENDENCY_DUE_IMMINENT",
+                    10,
+                    f"Dependency {title} is due in {days} day(s).",
+                    severity="AT_RISK",
+                    dependency_id=dependency_id,
+                    risk_level=risk_level,
+                    due_date=_iso(due_date),
+                )
+            elif days <= 7:
+                add_factor(
+                    "DEPENDENCY_DUE_SOON",
+                    6,
+                    f"Dependency {title} is due in {days} day(s).",
+                    dependency_id=dependency_id,
+                    risk_level=risk_level,
+                    due_date=_iso(due_date),
+                )
 
     score = min(100, score)
     if critical:
