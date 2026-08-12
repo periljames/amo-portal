@@ -20,6 +20,7 @@ import {
   type DocumentControlJob,
   type DocumentControlJobId,
 } from "./documentControlJobs";
+import "./documentControlJobLauncher.css";
 
 const ICONS: Record<DocumentControlJobId, typeof ClipboardList> = {
   "raise-change": ClipboardList,
