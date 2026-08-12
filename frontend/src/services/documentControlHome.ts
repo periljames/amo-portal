@@ -1,9 +1,18 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
+export type DocumentControlMyWorkKind =
+  | "CHANGE_REQUEST"
+  | "PERIODIC_REVIEW"
+  | "ACKNOWLEDGEMENT"
+  | "WORKFLOW_DECISION"
+  | "AUTHORITY_ACTION"
+  | "TEMPORARY_REVISION"
+  | "CONTROLLED_COPY";
+
 export type DocumentControlMyWorkItem = {
   id: string;
-  kind: "CHANGE_REQUEST" | "PERIODIC_REVIEW" | "ACKNOWLEDGEMENT" | "WORKFLOW_DECISION";
+  kind: DocumentControlMyWorkKind;
   manual_id: string;
   entity_id: string;
   title: string;
