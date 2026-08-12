@@ -54,6 +54,7 @@ def compute_car_health(
     accountable_owner_user_id: str | None,
     milestones: Iterable[Mapping[str, Any] | object],
     dependencies: Iterable[Mapping[str, Any] | object],
+    effectiveness_required: bool | None = None,
 ) -> CARHealth:
     normalized_status = str(getattr(car_status, "value", car_status) or "").upper()
     days_to_final_due = (final_due_date - today).days if final_due_date else None
@@ -127,6 +128,18 @@ def compute_car_health(
         key = str(_value(milestone, "milestone_key", "UNKNOWN") or "UNKNOWN").upper()
         owner = _value(milestone, "owner_user_id")
         due_date = _value(milestone, "current_due_date")
+
+        if key == "EFFECTIVENESS_REVIEW":
+            gate_required = effectiveness_required
+            if gate_required is None:
+                milestone_profile = _value(milestone, "profile")
+                gate_required = (
+                    bool(_value(milestone_profile, "effectiveness_required", True))
+                    if milestone_profile is not None
+                    else True
+                )
+            if not gate_required:
+                continue
 
         if status in TERMINAL_MILESTONE_STATUSES:
             continue
