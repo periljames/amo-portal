@@ -22,7 +22,7 @@ def test_reminder_thresholds_are_staged_and_repeat_overdue_by_policy_bucket() ->
     policy = DocumentReminderPolicy()
     today = date(2026, 8, 12)
     cases = {
-        date(2026, 9, 12): None,       # 31 days
+        date(2026, 9, 12): None,
         date(2026, 9, 11): "DUE_30",
         date(2026, 9, 1): "DUE_30",
         date(2026, 8, 26): "DUE_14",
@@ -61,6 +61,7 @@ def test_reminder_ledger_is_durable_and_idempotent_per_obligation_recipient_stag
 
 def test_reminder_engine_covers_each_owned_daily_dms_obligation() -> None:
     source = _text(APP / "reminder_service.py")
+    guard = _text(APP / "reminder_runtime_guard.py")
     for obligation in (
         'obligation_type="PERIODIC_REVIEW"',
         'obligation_type="TEMPORARY_REVISION_EXPIRY"',
@@ -70,11 +71,23 @@ def test_reminder_engine_covers_each_owned_daily_dms_obligation() -> None:
         'obligation_type="DISTRIBUTION_ACKNOWLEDGEMENT"',
     ):
         assert obligation in source
+    assert 'obligation_type="RETENTION_DUE"' in guard
+    assert 'DocumentRetentionDisposition.retention_until.isnot(None)' in guard
+    assert 'row.created_by_user_id or service._profile_owner' in guard
     assert 'row.owner_user_id' in source
     assert 'row.holder_user_id' in source
     assert 'row.submitted_by_user_id or _profile_owner' in source
     assert 'recipient.recipient_user_id' in source
     assert '_profile_owner' in source
+
+
+def test_duplicate_delivery_claim_uses_savepoint_not_full_cycle_rollback() -> None:
+    guard = _text(APP / "reminder_runtime_guard.py")
+    lifecycle = _text(APP / "reminder_lifecycle_router.py")
+    assert 'with db.begin_nested():' in guard
+    assert 'except IntegrityError:' in guard
+    assert 'db.rollback()' not in guard
+    assert 'install_reminder_runtime_guard()' in lifecycle
 
 
 def test_scheduler_is_single_writer_and_escalates_only_after_policy_thresholds() -> None:
