@@ -15,6 +15,7 @@ on:
       - "frontend/src/services/qmsCarControlLoop.ts"
       - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
       - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
+      - "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx"
       - "frontend/src/pages/PublicCarInvitePage.tsx"
       - "frontend/src/app/routeGuards.ts"
       - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"
@@ -22,6 +23,7 @@ on:
       - "frontend/src/pages/qms/QmsCanonicalPage.tsx"
       - "frontend/src/components/panels/ActionPanel.tsx"
       - "frontend/tests/e2e/qms-car-control-loop.spec.ts"
+      - "frontend/tests/e2e/qms-car-performance-report.spec.ts"
       - ".github/workflows/qms-car-control-loop-ci.yml"
   workflow_dispatch:
 
@@ -152,18 +154,21 @@ jobs:
           --label "CAR control-loop frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Lint CAR control-loop surfaces
+      - name: Lint CAR control-loop and reporting surfaces
         run: >-
           npm exec -- eslint
           src/services/qmsCarControlLoop.ts
           src/pages/qms/QmsCarControlLoopPage.tsx
           src/pages/qms/QmsCarControlOperations.tsx
+          src/pages/qms/QmsCarPerformanceReportPage.tsx
           src/pages/PublicCarInvitePage.tsx
           src/app/routeGuards.ts
           src/pages/qms/routes/qmsWorkspaceRegistry.ts
           src/pages/qms/routes/qmsRouteRegistry.ts
           src/pages/qms/QmsCanonicalPage.tsx
           src/components/panels/ActionPanel.tsx
+          tests/e2e/qms-car-control-loop.spec.ts
+          tests/e2e/qms-car-performance-report.spec.ts
       - name: Typecheck and production build
         run: npm run build
       - name: Install Chromium
@@ -179,5 +184,5 @@ jobs:
           done
           cat /tmp/qms-car-preview.log
           exit 1
-      - name: Browser - staged CAR control loop
-        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts --workers=1 --reporter=github,line
+      - name: Browser - staged CAR control loop and live CAR performance report
+        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line
