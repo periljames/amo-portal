@@ -194,7 +194,7 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain('activeView="reviews"');
     expect(recordActions).toContain('activeView="external"');
     expect(recordActions).toContain('activeView === "relationships"');
-    expect(recordActions).toContain('activeView="integrations"');
+    expect(recordActions).toContain("DocumentControlIntegrationActions");
   });
 
   it("retains the proven Publications reader and exposes Standard, Immersive, Fullscreen and Review Changes", () => {
