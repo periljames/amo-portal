@@ -1,0 +1,105 @@
+name: Rostering Control CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/rostering/**"
+      - "backend/amodb/alembic/versions/rostering_*"
+      - "frontend/src/pages/rostering/**"
+      - "frontend/src/services/rostering*.ts"
+      - "frontend/src/types/rostering.ts"
+      - ".github/workflows/rostering-control-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/apps/rostering/**"
+      - "backend/amodb/alembic/versions/rostering_*"
+      - "frontend/src/pages/rostering/**"
+      - "frontend/src/services/rostering*.ts"
+      - "frontend/src/types/rostering.ts"
+      - ".github/workflows/rostering-control-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backend-controlled-roster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amo
+          POSTGRES_PASSWORD: amo_ci_password
+          POSTGRES_DB: amodb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amo -d amodb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: ci-only-rostering-key
+      DATABASE_URL: postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb
+      DATABASE_WRITE_URL: postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb
+      DATABASE_READ_URL: postgresql+psycopg2://amo:amo_ci_password@127.0.0.1:5432/amodb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile controlled rostering modules
+        run: |
+          python -m py_compile \
+            backend/amodb/apps/rostering/application_router.py \
+            backend/amodb/apps/rostering/aircraft_allocation.py \
+            backend/amodb/apps/rostering/aircraft_allocation_router.py \
+            backend/amodb/apps/rostering/calendar_feed.py \
+            backend/amodb/apps/rostering/calendar_subscriptions.py \
+            backend/amodb/apps/rostering/code_registry.py \
+            backend/amodb/apps/rostering/code_registry_models.py \
+            backend/amodb/apps/rostering/code_registry_router.py \
+            backend/amodb/apps/rostering/controlled_exports.py \
+            backend/amodb/apps/rostering/lineage.py \
+            backend/amodb/apps/rostering/roster_control.py \
+            backend/amodb/apps/rostering/roster_control_models.py \
+            backend/amodb/apps/rostering/roster_control_router.py
+      - name: Upgrade clean PostgreSQL schema
+        working-directory: backend
+        run: |
+          alembic -c amodb/alembic.ini upgrade heads
+          alembic -c amodb/alembic.ini current
+      - name: Run controlled rostering regressions
+        env:
+          PYTHONPATH: backend
+        run: |
+          pytest -q \
+            backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
+            backend/amodb/apps/rostering/tests/test_roster_control_contract.py
+
+  frontend-controlled-roster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Check rostering performance contract
+        working-directory: frontend
+        run: npm run perf:rostering
