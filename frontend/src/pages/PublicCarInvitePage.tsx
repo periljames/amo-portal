@@ -41,6 +41,7 @@ import { getApiBaseUrl } from "../services/config";
 import "../styles/car-invite.css";
 
 const MAX_RESPONSE_CHARS = 8000;
+const MAX_EVIDENCE_REFERENCE_CHARS = 500;
 const MAX_INVITE_EVIDENCE_BYTES = 100 * 1024 * 1024;
 const INVITE_EVIDENCE_ACCEPT = [
   "image/*",
@@ -162,6 +163,7 @@ type StructuredTextFieldProps = {
   onChange: (value: string) => void;
   note?: string | null;
   toolbarActions?: React.ReactNode;
+  maxChars?: number;
 };
 
 const PRIORITY_LABELS: Record<CARPriority, string> = {
@@ -203,6 +205,7 @@ const emptyForm = (): InviteForm => ({
 });
 
 const clampResponseText = (value: string): string => value.slice(0, MAX_RESPONSE_CHARS);
+const clampEvidenceReference = (value: string): string => value.slice(0, MAX_EVIDENCE_REFERENCE_CHARS);
 
 const toForm = (invite: CARInviteOut): InviteForm => ({
   submitted_by_name: invite.submitted_by_name ?? "",
@@ -211,7 +214,7 @@ const toForm = (invite: CARInviteOut): InviteForm => ({
   root_cause: clampResponseText(invite.root_cause ?? ""),
   corrective_action: clampResponseText(invite.corrective_action ?? ""),
   preventive_action: clampResponseText(invite.preventive_action ?? ""),
-  evidence_ref: clampResponseText(invite.evidence_ref ?? ""),
+  evidence_ref: clampEvidenceReference(invite.evidence_ref ?? ""),
   due_date: invite.due_date ?? "",
   target_closure_date: invite.target_closure_date ?? "",
 });
@@ -357,9 +360,9 @@ const nextListPrefix = (line: string): string | null => {
   return null;
 };
 
-const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value, required, disabled, placeholder, onChange, note, toolbarActions }) => {
+const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value, required, disabled, placeholder, onChange, note, toolbarActions, maxChars = MAX_RESPONSE_CHARS }) => {
   const ref = useRef<HTMLTextAreaElement | null>(null);
-  const remaining = MAX_RESPONSE_CHARS - value.length;
+  const remaining = maxChars - value.length;
 
   const insertListMarker = (marker: "• " | "1. " | "i. ") => {
     if (disabled) return;
@@ -369,10 +372,12 @@ const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value,
     const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
     const prefix = start === lineStart || value.slice(lineStart, start).trim() === "" ? marker : `\n${marker}`;
     const { value: next, cursor } = insertAtSelection(value, prefix, start, end);
-    onChange(next);
+    const bounded = next.slice(0, maxChars);
+    onChange(bounded);
     window.setTimeout(() => {
       textarea?.focus();
-      textarea?.setSelectionRange(cursor, cursor);
+      const boundedCursor = Math.min(cursor, bounded.length);
+      textarea?.setSelectionRange(boundedCursor, boundedCursor);
     }, 0);
   };
 
@@ -387,8 +392,12 @@ const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value,
     if (!prefix) return;
     event.preventDefault();
     const { value: next, cursor } = insertAtSelection(value, `\n${prefix}`, start, end);
-    onChange(next);
-    window.setTimeout(() => textarea.setSelectionRange(cursor, cursor), 0);
+    const bounded = next.slice(0, maxChars);
+    onChange(bounded);
+    window.setTimeout(() => {
+      const boundedCursor = Math.min(cursor, bounded.length);
+      textarea.setSelectionRange(boundedCursor, boundedCursor);
+    }, 0);
   };
 
   return (
@@ -407,8 +416,8 @@ const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value,
           className="car-invite-textarea"
           value={value}
           disabled={disabled}
-          maxLength={MAX_RESPONSE_CHARS}
-          onChange={(event) => onChange(clampResponseText(event.target.value))}
+          maxLength={maxChars}
+          onChange={(event) => onChange(event.target.value.slice(0, maxChars))}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           required={required}
@@ -532,9 +541,11 @@ const PublicCarInvitePage: React.FC = () => {
   };
 
   const updateFormField = (tokenValue: string, field: keyof InviteForm, value: string) => {
-    const nextValue = (["containment_action", "root_cause", "corrective_action", "preventive_action", "evidence_ref"] as string[]).includes(field)
-      ? clampResponseText(value)
-      : value;
+    const nextValue = field === "evidence_ref"
+      ? clampEvidenceReference(value)
+      : (["containment_action", "root_cause", "corrective_action", "preventive_action"] as string[]).includes(field)
+        ? clampResponseText(value)
+        : value;
     updateEntry(tokenValue, (entry) => ({ ...entry, form: { ...entry.form, [field]: nextValue } }));
   };
 
@@ -716,7 +727,7 @@ const PublicCarInvitePage: React.FC = () => {
         root_cause: clampResponseText(current.form.root_cause.trim()),
         corrective_action: clampResponseText(current.form.corrective_action.trim()),
         preventive_action: clampResponseText(current.form.preventive_action.trim()),
-        evidence_ref: clampResponseText(current.form.evidence_ref.trim()),
+        evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim()),
         due_date: current.form.due_date || null,
         target_closure_date: current.form.target_closure_date || null,
       });
@@ -1150,6 +1161,7 @@ const PublicCarInvitePage: React.FC = () => {
                                     <StructuredTextField
                                       label="Evidence reference"
                                       value={entry.form.evidence_ref}
+                                      maxChars={MAX_EVIDENCE_REFERENCE_CHARS}
                                       disabled={locked}
                                       onChange={(value) => updateFormField(entry.token, "evidence_ref", value)}
                                       placeholder="Reference the uploaded file, record, work order, photo, video, or signed offline CAR form."
