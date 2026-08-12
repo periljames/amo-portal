@@ -29,6 +29,9 @@ jobs:
         run: |
           python .github/scripts/qms_car_frontend_completeness.py
           python .github/scripts/qms_car_frontend_lint_followup.py
+          # Workflow files are maintained through the authenticated repository API,
+          # not by the Actions token. Keep this source-delivery commit workflow-neutral.
+          git checkout -- .github/workflows/qms-car-control-loop-ci.yml
 
       - name: Validate patch formatting and Python syntax
         run: |
@@ -72,7 +75,6 @@ jobs:
       - name: Commit completed frontend advancement
         run: |
           git rm \
-            .github/workflows/qms-car-frontend-completeness.yml \
             .github/scripts/qms_car_frontend_completeness.py \
             .github/scripts/qms_car_frontend_lint_followup.py
           git add -A
