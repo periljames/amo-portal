@@ -3,7 +3,16 @@ import { getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { CARAttachmentOut } from "./qms";
 
-export type { CARAttachmentOut } from "./qms";
+export {
+  downloadCarEvidencePack,
+  qmsGetCarInvite,
+  qmsListCarResponses,
+} from "./qms";
+export type {
+  CARAssignee,
+  CARAttachmentOut,
+  CARResponseOut,
+} from "./qms";
 
 function activeAmoCode(): string {
   const context = getContext();
