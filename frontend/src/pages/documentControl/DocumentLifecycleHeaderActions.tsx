@@ -39,6 +39,10 @@ type Detection = {
   reason: string;
 };
 
+type WorkflowWithActions = DocumentDetailResponse["workflows"][number] & {
+  allowed_actions?: string[];
+};
+
 function clean(value?: string | null): string {
   return String(value || "").replaceAll("_", " ").trim();
 }
@@ -157,10 +161,12 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
   const [revision, setRevision] = useState("0");
   const [effectiveDate, setEffectiveDate] = useState("");
   const [ownerRole, setOwnerRole] = useState("Document Control");
+  const [createdManualId, setCreatedManualId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const inspect = async (selected: File | null) => {
+    if (createdManualId) return;
     setFile(selected);
     setPreview(null);
     setDetection(null);
@@ -187,7 +193,7 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!file || !preview) return;
+    if (!file || !preview || createdManualId) return;
     setBusy(true);
     setError("");
     try {
@@ -202,7 +208,14 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
         change_log: "Initial controlled document intake",
         file,
       });
-      await updateDocumentType(tenant, uploaded.manual_id, documentType);
+      try {
+        await updateDocumentType(tenant, uploaded.manual_id, documentType);
+      } catch (caught) {
+        setCreatedManualId(uploaded.manual_id);
+        const reason = caught instanceof Error ? ` ${caught.message}` : "";
+        setError(`The document was created, but its structural type could not be applied.${reason} Open the created document and use Change type; do not upload it again.`);
+        return;
+      }
       onClose();
       navigate(`${basePath}/library/${uploaded.manual_id}`);
     } catch (caught) {
@@ -212,9 +225,15 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
     }
   };
 
+  const openCreatedDocument = () => {
+    if (!createdManualId) return;
+    onClose();
+    navigate(`${basePath}/library/${createdManualId}`);
+  };
+
   return <Modal title="Add controlled document" description="Upload the first PDF or DOCX revision. The portal inspects the source, proposes a document type, and always lets you override it before saving." busy={busy} onClose={onClose}>
     <form className="dclife-form" onSubmit={submit}>
-      <label className="wide"><span>Source document</span><input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void inspect(event.target.files?.[0] || null)} required /></label>
+      <label className="wide"><span>Source document</span><input type="file" disabled={Boolean(createdManualId)} accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void inspect(event.target.files?.[0] || null)} required /></label>
       {preview ? <div className="dclife-detection wide" data-confidence={detection?.confidence || "LOW"}>
         <FileSearch2 size={18} />
         <div><strong>Detected as {TYPE_LABELS[detection?.type || "MANUAL"]} · {detection?.confidence.toLowerCase()} confidence</strong><span>{detection?.reason}</span><small>Detection is advisory. Your selection below is authoritative.</small></div>
@@ -228,7 +247,7 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
       <label><span>Owner / controller role</span><input value={ownerRole} onChange={(event) => setOwnerRole(event.target.value)} required /></label>
       {preview?.metadata.manual_type ? <div className="dclife-note wide"><strong>Detected publication family:</strong> {clean(preview.metadata.manual_type)}. This is retained separately from the DMS document type.</div> : null}
       {error ? <div className="dc-form__error wide" role="alert">{error}</div> : null}
-      <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy || !file || !preview}>{busy ? "Saving…" : <><UploadCloud size={14} /> Add document</>}</button></div>
+      {createdManualId ? <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Close</button><button type="button" className="dc-button dc-button--primary" onClick={openCreatedDocument} disabled={busy}><FileSearch2 size={14} /> Open created document</button></div> : <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy || !file || !preview}>{busy ? "Saving…" : <><UploadCloud size={14} /> Add document</>}</button></div>}
     </form>
   </Modal>;
 }
@@ -300,9 +319,11 @@ function DeleteDocumentDialog({ tenant, basePath, manualId, onClose }: { tenant:
 
   const controlledHistory = useMemo(() => Boolean(detail && (
     detail.document.current_published_revision_id ||
-    detail.revisions.some((revision) => ["PUBLISHED", "SUPERSEDED", "ARCHIVED"].includes(revision.status) || revision.immutable || revision.published_at)
+    detail.revisions.some((revision) => ["DEPARTMENT_REVIEW", "QUALITY_APPROVAL", "REGULATOR_SIGNOFF", "PUBLISHED", "SUPERSEDED", "ARCHIVED"].includes(revision.status) || revision.immutable || revision.published_at) ||
+    detail.workflows.some((workflow) => workflow.state !== "DRAFT" || Boolean(workflow.decisions?.length))
   )), [detail]);
-  const publishedWorkflow = detail?.workflows.find((workflow) => workflow.state === "PUBLISHED");
+  const publishedWorkflow = detail?.workflows.find((workflow) => workflow.state === "PUBLISHED") as WorkflowWithActions | undefined;
+  const canArchive = Boolean(publishedWorkflow?.allowed_actions?.includes("ARCHIVE"));
 
   const remove = async () => {
     if (!detail || confirmation.trim() !== detail.document.code) return;
@@ -320,7 +341,7 @@ function DeleteDocumentDialog({ tenant, basePath, manualId, onClose }: { tenant:
   };
 
   const archive = async () => {
-    if (!publishedWorkflow) return;
+    if (!publishedWorkflow || !canArchive) return;
     setBusy(true);
     setError("");
     try {
@@ -339,15 +360,15 @@ function DeleteDocumentDialog({ tenant, basePath, manualId, onClose }: { tenant:
     }
   };
 
-  return <Modal title={controlledHistory ? "Retire controlled document" : "Delete draft document"} description={controlledHistory ? "Published controlled information is retained for auditability and cannot be erased. Use the governed archive workflow instead." : "Never-published draft documents can be permanently removed, including their draft revisions."} busy={busy} onClose={onClose}>
+  return <Modal title={controlledHistory ? "Retire controlled document" : "Delete draft document"} description={controlledHistory ? "Reviewed or published controlled information is retained for auditability and cannot be erased. Use the governed lifecycle instead." : "Never-reviewed, never-published draft documents can be permanently removed, including their draft revisions."} busy={busy} onClose={onClose}>
     <div className="dclife-form">
       {detail ? <div className="dclife-document-card wide"><strong>{detail.document.code} · {detail.document.title}</strong><span>{detail.revisions.length} revision{detail.revisions.length === 1 ? "" : "s"} · {detail.document.status}</span></div> : null}
       {controlledHistory ? <>
-        <div className="dclife-warning wide"><Archive size={18} /><div><strong>Permanent deletion is blocked.</strong><span>Published, superseded and archived revisions are controlled records. Removing them would destroy the required audit trail.</span></div></div>
-        {publishedWorkflow ? <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="dc-button dc-button--danger" onClick={() => void archive()} disabled={busy}><Archive size={14} /> Archive document</button></div> : <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Close</button><button type="button" className="dc-button" onClick={() => { onClose(); navigate(`${basePath}/library/${manualId}?view=workflow`); }}><Archive size={14} /> Open lifecycle</button></div>}
+        <div className="dclife-warning wide"><Archive size={18} /><div><strong>Permanent deletion is blocked.</strong><span>Reviewed, published, superseded and archived lifecycle evidence is controlled history. Removing it would destroy the required audit trail.</span></div></div>
+        {publishedWorkflow && canArchive ? <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="dc-button dc-button--danger" onClick={() => void archive()} disabled={busy}><Archive size={14} /> Archive document</button></div> : <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Close</button><button type="button" className="dc-button" onClick={() => { onClose(); navigate(`${basePath}/library/${manualId}?view=workflow`); }}><Archive size={14} /> Open lifecycle</button></div>}
       </> : <>
         <label className="wide"><span>Type <strong>{detail?.document.code || "the document code"}</strong> to confirm permanent deletion</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" /></label>
-        <div className="dclife-warning wide"><Trash2 size={18} /><div><strong>This cannot be undone.</strong><span>The draft document, draft revisions and tenant-scoped draft data are removed. Local uploaded source files are purged when they are inside the managed manual-upload store.</span></div></div>
+        <div className="dclife-warning wide"><Trash2 size={18} /><div><strong>This cannot be undone.</strong><span>The unreviewed draft document, draft revisions and tenant-scoped draft data are removed. Local uploaded source files are purged when they are inside the managed manual-upload store.</span></div></div>
         <div className="dclife-actions wide"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="dc-button dc-button--danger" onClick={() => void remove()} disabled={busy || !detail || confirmation.trim() !== detail.document.code}><Trash2 size={14} /> Delete permanently</button></div>
       </>}
       {error ? <div className="dc-form__error wide" role="alert">{error}</div> : null}
