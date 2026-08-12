@@ -28,6 +28,7 @@ from .workspace_copy_due_router import router as workspace_copy_due_router
 from .workspace_copy_evidence_router import router as workspace_copy_evidence_router
 from .workspace_copy_incident_router import router as workspace_copy_incident_router
 from .workspace_copy_router import router as workspace_copy_router
+from .workspace_compatibility_guard import quarantine_legacy_copy_mutations
 from .workspace_dashboard_router import router as workspace_dashboard_router
 from .workspace_distribution_portfolio_router import router as workspace_distribution_portfolio_router
 from .workspace_distribution_router import router as workspace_distribution_router
@@ -63,6 +64,7 @@ from .workspace_workflow_router import router as workspace_workflow_router
 install_knowledge_assistant_runtime_guard()
 install_governance_runtime_guard()
 install_evidence_pack_runtime_guard()
+quarantine_legacy_copy_mutations(workspace_router)
 
 router = APIRouter()
 router.include_router(reminder_lifecycle_router)

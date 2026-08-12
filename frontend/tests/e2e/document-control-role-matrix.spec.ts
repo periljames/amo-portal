@@ -112,7 +112,7 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve technical review", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Approve Quality review", exact: true })).toHaveCount(0);
-    await expect(dialog.getByText(/reviewed revision ID and source checksum are retained automatically/i)).toBeVisible();
+    await expect(dialog.getByText(/reviewed revision ID and source checksum will be appended to the decision by the server/i)).toBeVisible();
     await dialog.getByLabel("Review comments").fill("Technical review completed against the retained candidate revision.");
     const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve technical review", exact: true }));
     expect(result.state).toBe("TECHNICAL_APPROVED");
