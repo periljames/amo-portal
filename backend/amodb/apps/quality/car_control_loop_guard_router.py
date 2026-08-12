@@ -207,7 +207,13 @@ def decide_deadline_change_guarded(
             if row.previous_due_date != profile.current_due_date:
                 raise HTTPException(status_code=409, detail="The final CAR deadline changed after this request was created. Submit a new controlled deadline request.")
             profile.current_due_date = row.requested_due_date
+            car.due_date = row.requested_due_date
             car.target_closure_date = row.requested_due_date
+            # Keep the established CAR reminder path aligned to the approved
+            # authoritative due date in the same transaction.
+            from .router import _seed_car_reminders
+
+            _seed_car_reminders(db, car)
         row.status = "APPROVED"
     else:
         row.status = "REJECTED"
