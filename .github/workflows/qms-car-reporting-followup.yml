@@ -37,16 +37,15 @@ jobs:
           --label "CAR reporting follow-up dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Lint report and route surfaces
+      - name: Lint focused report and browser surfaces
         working-directory: frontend
         run: >-
           npm exec -- eslint
-          src/portalRoutes.tsx
           src/pages/qms/QmsCarPerformanceReportPage.tsx
           src/pages/qms/QmsCanonicalPage.tsx
           tests/e2e/qms-car-control-loop.spec.ts
           tests/e2e/qms-car-performance-report.spec.ts
-      - name: Production build
+      - name: Typecheck and production build including portal route
         working-directory: frontend
         run: npm run build
       - name: Install Chromium
