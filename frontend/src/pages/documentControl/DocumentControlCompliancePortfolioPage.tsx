@@ -106,7 +106,7 @@ export default function DocumentControlCompliancePortfolioPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [assessmentSourceId, setAssessmentSourceId] = useState<string | null>(null);
+  const assessmentSourceId = params.get("assessment_source");
   const hasLoadedRef = useRef(false);
   const view = normalizedView(params);
   const page = Math.max(1, Number(params.get("page") || 1));
@@ -152,10 +152,26 @@ export default function DocumentControlCompliancePortfolioPage() {
 
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
-    if (key === "view") next.delete("status");
+    if (key === "view") {
+      next.delete("status");
+      if (value !== "external-sources") next.delete("assessment_source");
+    }
     if (value) next.set(key, value); else next.delete(key);
     if (key !== "page") next.set("page", "1");
     setParams(next);
+  };
+
+  const openAssessment = (sourceId: string) => {
+    const next = new URLSearchParams(params);
+    next.set("view", "external-sources");
+    next.set("assessment_source", sourceId);
+    setParams(next, { replace: true });
+  };
+
+  const closeAssessment = () => {
+    const next = new URLSearchParams(params);
+    next.delete("assessment_source");
+    setParams(next, { replace: true });
   };
 
   const totalPages = data ? Math.max(1, Math.ceil(data.pagination.total / data.pagination.per_page)) : 1;
@@ -194,7 +210,7 @@ export default function DocumentControlCompliancePortfolioPage() {
 
       {!loading && data?.items.length ? <div className="dc-table-wrap dms-compliance__table-wrap"><table className="dc-table dms-compliance__table">
         <thead><tr><th>Document</th><th>{view === "reviews" ? "Owner / outcome" : view === "external-sources" ? "Source" : view === "applicability" ? "Rule / target" : view === "superseded-references" ? "Referenced document" : "Relationship"}</th><th>Status</th><th>{view === "reviews" ? "Due" : view === "external-sources" ? "Currency check" : view === "applicability" ? "Effectivity" : "Location"}</th><th>Action</th></tr></thead>
-        <tbody>{data.items.map((item) => <tr key={`${item.kind}:${item.id}`}><td>{documentCell(item)}</td>{detailCells(item)}<td>{item.kind === "EXTERNAL_SOURCE" ? <div className="dms-compliance__row-actions"><button type="button" className={`dc-button ${item.status === "ASSESSMENT_REQUIRED" ? "dc-button--primary" : ""}`} onClick={() => setAssessmentSourceId(item.id)}>{item.status === "ASSESSMENT_REQUIRED" ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />}{item.status === "ASSESSMENT_REQUIRED" ? "Assess revision" : "Review source"}</button><button type="button" className="dc-button" onClick={() => navigate(item.target_path)}>Document <ArrowRight size={14} /></button></div> : <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>Open context <ArrowRight size={14} /></button>}</td></tr>)}</tbody>
+        <tbody>{data.items.map((item) => <tr key={`${item.kind}:${item.id}`}><td>{documentCell(item)}</td>{detailCells(item)}<td>{item.kind === "EXTERNAL_SOURCE" ? <div className="dms-compliance__row-actions"><button type="button" className={`dc-button ${item.status === "ASSESSMENT_REQUIRED" ? "dc-button--primary" : ""}`} onClick={() => openAssessment(item.id)}>{item.status === "ASSESSMENT_REQUIRED" ? <ShieldAlert size={14} /> : <ShieldCheck size={14} />}{item.status === "ASSESSMENT_REQUIRED" ? "Assess revision" : "Review source"}</button><button type="button" className="dc-button" onClick={() => navigate(item.target_path)}>Document <ArrowRight size={14} /></button></div> : <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>Open context <ArrowRight size={14} /></button>}</td></tr>)}</tbody>
       </table></div> : null}
 
       {data ? <footer className="dms-compliance__pagination">
@@ -205,6 +221,6 @@ export default function DocumentControlCompliancePortfolioPage() {
         <button type="button" disabled={data.pagination.page >= totalPages || refreshing} onClick={() => update("page", String(data.pagination.page + 1))}>Next <ChevronRight size={14} /></button>
       </footer> : null}
     </section>
-    {assessmentSourceId ? <ExternalRevisionAssessmentPanel sourceId={assessmentSourceId} onClose={() => setAssessmentSourceId(null)} onChanged={() => void load()} /> : null}
+    {assessmentSourceId ? <ExternalRevisionAssessmentPanel sourceId={assessmentSourceId} onClose={closeAssessment} onChanged={() => void load()} /> : null}
   </DocumentControlShell>;
 }
