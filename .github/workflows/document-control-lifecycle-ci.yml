@@ -13,6 +13,7 @@ name: Document Control Lifecycle CI
       - "frontend/src/services/documentControlEvidence.ts"
       - "frontend/src/services/documentControlHome.ts"
       - "frontend/src/services/documentControlIntegrationCatalog.ts"
+      - "frontend/src/services/documentControlReports.ts"
       - "frontend/src/services/documentControlReportsPortfolio.ts"
       - "frontend/src/services/publications.ts"
       - "frontend/tests/e2e/document-lifecycle-controls.spec.ts"
@@ -78,7 +79,7 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run operating attribution, integration, export and evidence contracts
+      - name: Run operating attribution, integration, export, evidence and reminder contracts
         working-directory: backend
         run: >-
           pytest -q
@@ -87,6 +88,7 @@ jobs:
           amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
           amodb/apps/doc_control/tests/test_reports_export_contract.py
           amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
+          amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
@@ -148,12 +150,14 @@ jobs:
           src/pages/documentControl/reviewerDecisionEvidence.test.ts
           src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
           src/pages/documentControl/DocumentControlReportsPage.tsx
+          src/pages/documentControl/DocumentControlAdministrationPage.tsx
           src/pages/documentControl/DmsOperationalJobs.contract.test.ts
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/services/documentLifecycle.ts
           src/services/documentControlEvidence.ts
           src/services/documentControlHome.ts
           src/services/documentControlIntegrationCatalog.ts
+          src/services/documentControlReports.ts
           src/services/documentControlReportsPortfolio.ts
           tests/e2e/document-lifecycle-controls.spec.ts
       - name: Build production frontend
@@ -173,8 +177,8 @@ jobs:
             sleep 1
           done
           sleep 2
-          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed" /tmp/dms-lifecycle-backend.log; then
-            echo "::error::Backend startup reported an ORM/schema integration failure"
+          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed|Document Control automatic reminder cycle failed" /tmp/dms-lifecycle-backend.log; then
+            echo "::error::Backend startup reported an ORM/schema or automatic reminder integration failure"
             cat /tmp/dms-lifecycle-backend.log
             exit 1
           fi
@@ -191,8 +195,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn" /tmp/dms-lifecycle-frontend.log /tmp/dms-lifecycle-backend.log 2>/dev/null; then
-            echo "::error::Material runtime or development-server noise detected during lifecycle acceptance"
+          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn|Document Control automatic reminder cycle failed" /tmp/dms-lifecycle-frontend.log /tmp/dms-lifecycle-backend.log 2>/dev/null; then
+            echo "::error::Material runtime, development-server or Document Control reminder noise detected during lifecycle acceptance"
             cat /tmp/dms-lifecycle-frontend.log 2>/dev/null || true
             cat /tmp/dms-lifecycle-backend.log 2>/dev/null || true
             exit 1
