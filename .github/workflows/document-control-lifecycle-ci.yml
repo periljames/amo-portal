@@ -139,6 +139,7 @@ jobs:
           src/pages/documentControl/DocumentControlReviewActions.tsx
           src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
           src/pages/documentControl/DocumentControlIntegrationActions.tsx
+          src/pages/documentControl/DocumentControlExternalSourceActions.tsx
           src/pages/documentControl/DocumentControlApproverLifecycleActions.tsx
           src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
           src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
