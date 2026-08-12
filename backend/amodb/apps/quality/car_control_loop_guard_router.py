@@ -47,10 +47,26 @@ def _synchronize_authoritative_car_deadline(
     car: models.CorrectiveActionRequest,
     approved_due_date: date,
 ) -> None:
-    """Keep register, target and reminder deadline sources in one transaction."""
+    """Keep register, target and pending reminder deadlines synchronized."""
 
     car.due_date = approved_due_date
     car.target_closure_date = approved_due_date
+
+    # Preserve reminder history that has already been sent or escalated, but
+    # remove the obsolete pending schedule so the approved date becomes the
+    # only active reminder plan for this CAR.
+    (
+        db.query(models.QualityReminderMilestone)
+        .filter(
+            models.QualityReminderMilestone.amo_id == car.amo_id,
+            models.QualityReminderMilestone.entity_type == "quality_car",
+            models.QualityReminderMilestone.entity_id == str(car.id),
+            models.QualityReminderMilestone.sent_at.is_(None),
+            models.QualityReminderMilestone.escalated_at.is_(None),
+        )
+        .delete(synchronize_session=False)
+    )
+
     from .router import _seed_car_reminders
 
     _seed_car_reminders(db, car)
