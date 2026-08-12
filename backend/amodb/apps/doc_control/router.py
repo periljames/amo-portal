@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 # Bind hardened knowledge-graph implementations before route modules copy service
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
+from .evidence_pack_job_lifecycle_router import router as evidence_pack_job_lifecycle_router
 from .evidence_pack_runtime_guard import install as install_evidence_pack_runtime_guard
 from .governance_router import router as governance_router
 from .governance_runtime_guard import install as install_governance_runtime_guard
@@ -31,6 +32,7 @@ from .workspace_dashboard_router import router as workspace_dashboard_router
 from .workspace_distribution_portfolio_router import router as workspace_distribution_portfolio_router
 from .workspace_distribution_router import router as workspace_distribution_router
 from .workspace_document_lifecycle_router import router as workspace_document_lifecycle_router
+from .workspace_evidence_pack_job_router import router as workspace_evidence_pack_job_router
 from .workspace_evidence_pack_router import router as workspace_evidence_pack_router
 from .workspace_evidence_router import router as workspace_evidence_router
 from .workspace_external_assessment_router import router as workspace_external_assessment_router
@@ -64,6 +66,7 @@ install_evidence_pack_runtime_guard()
 
 router = APIRouter()
 router.include_router(reminder_lifecycle_router)
+router.include_router(evidence_pack_job_lifecycle_router)
 router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
@@ -75,7 +78,7 @@ router.include_router(legacy_router)
 # governed hierarchy/reference integrity, generated record custody,
 # permission-filtered assisted search, bounded library discovery, bounded operating
 # portfolios, bounded evidence registers/exports, immutable evidence attachments,
-# document-level evidence packs, governed reminders/escalations,
+# document-level evidence packs and durable large-pack jobs, governed reminders/escalations,
 # retention/disposition and retention-source discovery, administration, document
 # lifecycle controls, and release safeguards.
 # They must precede the compatibility workspace router because Starlette resolves
@@ -140,6 +143,11 @@ router.include_router(
 )
 router.include_router(
     workspace_evidence_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_evidence_pack_job_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
