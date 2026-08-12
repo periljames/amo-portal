@@ -8,7 +8,8 @@ export type DocumentControlMyWorkKind =
   | "WORKFLOW_DECISION"
   | "AUTHORITY_ACTION"
   | "TEMPORARY_REVISION"
-  | "CONTROLLED_COPY";
+  | "CONTROLLED_COPY"
+  | "EXTERNAL_SOURCE_ACTION";
 
 export type DocumentControlMyWorkItem = {
   id: string;
