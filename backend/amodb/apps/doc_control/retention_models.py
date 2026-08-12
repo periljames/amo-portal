@@ -36,6 +36,7 @@ class DocumentRetentionDisposition(Base):
         ),
         Index("ix_document_retention_tenant_status", "tenant_id", "status", "retention_until"),
         Index("ix_document_retention_manual", "tenant_id", "manual_id", "created_at"),
+        Index("ix_document_retention_approver", "tenant_id", "approver_user_id", "status"),
     )
 
     id = Column(String(36), primary_key=True, default=_uuid)
@@ -63,6 +64,7 @@ class DocumentRetentionDisposition(Base):
 
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     requested_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approver_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     disposed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
