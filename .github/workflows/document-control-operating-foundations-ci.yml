@@ -71,6 +71,8 @@ jobs:
           python -m py_compile
           amodb/apps/doc_control/evidence_models.py
           amodb/apps/doc_control/evidence_pack_runtime_guard.py
+          amodb/apps/doc_control/evidence_pack_job_service.py
+          amodb/apps/doc_control/evidence_pack_job_lifecycle_router.py
           amodb/apps/doc_control/reminder_models.py
           amodb/apps/doc_control/reminder_policy.py
           amodb/apps/doc_control/reminder_service.py
@@ -82,6 +84,7 @@ jobs:
           amodb/apps/doc_control/workspace_retention_sources_router.py
           amodb/apps/doc_control/workspace_evidence_router.py
           amodb/apps/doc_control/workspace_evidence_pack_router.py
+          amodb/apps/doc_control/workspace_evidence_pack_job_router.py
           amodb/apps/doc_control/workspace_copy_evidence_router.py
           amodb/apps/doc_control/workspace_copy_due_router.py
           amodb/apps/doc_control/workspace_external_router.py
@@ -90,77 +93,21 @@ jobs:
           amodb/apps/doc_control/workspace_authority_router.py
           amodb/apps/doc_control/router.py
 
-      - name: Evidence asset contract
-        id: evidence_assets
-        continue-on-error: true
+      - name: Run all DMS foundation contracts
         working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
-      - name: Reminder contract
-        id: reminders
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
-      - name: Evidence pack contract
-        id: evidence_pack
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
-      - name: Retention contract
-        id: retention
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_retention_disposition_contract.py
-      - name: Change source contract
-        id: change_source
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_change_source_contract.py
-      - name: Applicability target contract
-        id: applicability
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_applicability_target_contract.py
-      - name: Controlled copy due contract
-        id: copy_due
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_controlled_copy_due_contract.py
-      - name: Integration catalogue contract
-        id: integration
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
-      - name: External source work contract
-        id: external_work
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
-      - name: My Work attribution contract
-        id: my_work
-        continue-on-error: true
-        working-directory: backend
-        run: pytest -q amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
-      - name: Enforce all foundation contracts
-        if: always()
-        run: |
-          failures=0
-          for outcome in \
-            "${{ steps.evidence_assets.outcome }}" \
-            "${{ steps.reminders.outcome }}" \
-            "${{ steps.evidence_pack.outcome }}" \
-            "${{ steps.retention.outcome }}" \
-            "${{ steps.change_source.outcome }}" \
-            "${{ steps.applicability.outcome }}" \
-            "${{ steps.copy_due.outcome }}" \
-            "${{ steps.integration.outcome }}" \
-            "${{ steps.external_work.outcome }}" \
-            "${{ steps.my_work.outcome }}"; do
-            if [ "$outcome" != "success" ]; then failures=$((failures + 1)); fi
-          done
-          if [ "$failures" -ne 0 ]; then
-            echo "$failures Document Control foundation contract group(s) failed."
-            exit 1
-          fi
+        run: >-
+          pytest -q
+          amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
+          amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_job_contract.py
+          amodb/apps/doc_control/tests/test_retention_disposition_contract.py
+          amodb/apps/doc_control/tests/test_change_source_contract.py
+          amodb/apps/doc_control/tests/test_applicability_target_contract.py
+          amodb/apps/doc_control/tests/test_controlled_copy_due_contract.py
+          amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
+          amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
+          amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
 
       - name: Upgrade clean PostgreSQL database through current Alembic head
         working-directory: backend
@@ -180,6 +127,7 @@ jobs:
                   "document_evidence_assets",
                   "document_reminder_deliveries",
                   "document_retention_dispositions",
+                  "saas_jobs",
               }
               missing = sorted(required - tables)
               if missing:
@@ -187,7 +135,7 @@ jobs:
               retention_columns = {column["name"] for column in inspector.get_columns("document_retention_dispositions")}
               if "approver_user_id" not in retention_columns:
                   raise SystemExit("Retention schema is missing approver_user_id")
-              print("DMS foundation tables and retention approver column present")
+              print("DMS foundation tables, durable job queue and retention approver column present")
           finally:
               db.close()
           PY
