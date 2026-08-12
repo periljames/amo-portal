@@ -39,11 +39,14 @@ describe("DMS production form contract", () => {
   });
 
   it("resolves change, applicability, integration and retention targets instead of asking for database IDs", () => {
-    expect(changeActions).toContain("source catalogue");
+    expect(changeActions).toContain("Governed source record");
+    expect(changeActions).toContain("Do not paste database IDs");
     expect(changeActions).not.toContain("Source entity ID</span><input");
     expect(applicabilityActions).toContain("GLOBAL");
+    expect(applicabilityActions).toContain("Target database IDs are never typed manually");
     expect(applicabilityActions).not.toContain("Target ID</span><input");
-    expect(integrationActions).toContain("Search live records");
+    expect(integrationActions).toContain("Link a real portal record");
+    expect(integrationActions).toContain("Find record");
     expect(integrationActions).not.toContain("Canonical entity ID</span><input");
     expect(retentionActions).toContain("Select controlled source");
     expect(retentionActions).not.toContain("Source ID</span><input");
