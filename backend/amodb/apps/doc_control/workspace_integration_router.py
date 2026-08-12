@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -45,6 +45,19 @@ _ALLOWED_TABLE_RULES: dict[str, tuple[str, ...]] = {
     "STORES": ("inventory_", "stores_", "stock_", "part_", "tool_", "supplier", "purchase_", "goods_"),
     "TECHNICAL_RECORDS": ("technical_", "records_", "crs_", "maintenance_record", "work_order"),
 }
+
+_DISPLAY_COLUMN_PRIORITY = (
+    "code",
+    "reference",
+    "number",
+    "title",
+    "name",
+    "description",
+    "email",
+    "registration",
+    "part_number",
+    "serial_number",
+)
 
 
 def _safe_identifier(value: str) -> str:
@@ -134,6 +147,54 @@ def _column(table: sa.Table, preferred: list[str], explicit: Any = None) -> sa.C
     )
 
 
+def _tenant_column(table: sa.Table) -> sa.Column:
+    for name in ("amo_id", "tenant_id"):
+        if name in table.c:
+            return table.c[name]
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": "INTEGRATION_SOURCE_NOT_TENANT_SCOPED",
+            "message": f"The source table {table.name} has no AMO or tenant boundary.",
+        },
+    )
+
+
+def _status_column(table: sa.Table, explicit: Any = None) -> sa.Column | None:
+    if explicit:
+        name = _safe_identifier(str(explicit))
+        if name not in table.c:
+            raise HTTPException(status_code=422, detail=f"Status column {name!r} does not exist on {table.name}")
+        return table.c[name]
+    for name in ("status", "state", "lifecycle_status", "verification_status", "is_active"):
+        if name in table.c:
+            return table.c[name]
+    return None
+
+
+def _display_columns(table: sa.Table) -> list[sa.Column]:
+    return [table.c[name] for name in _DISPLAY_COLUMN_PRIORITY if name in table.c][:4]
+
+
+def _catalog_table(source_module: str, source_table: str) -> sa.Table:
+    module = str(source_module or "").strip().upper()
+    if module not in _ALLOWED_TABLE_RULES:
+        raise HTTPException(status_code=422, detail="Unsupported integration source module")
+    name = _safe_identifier(source_table)
+    table = Base.metadata.tables.get(name)
+    if table is None or not _table_allowed(module, table.name):
+        raise HTTPException(status_code=422, detail="The requested source table is not permitted for this module")
+    _tenant_column(table)
+    _column(table, ["id", "entity_id", "record_id", "course_id", "work_order_id"])
+    return table
+
+
+def _display_value(row: sa.RowMapping, columns: list[sa.Column], fallback: str) -> str:
+    values = [str(row.get(column.name) or "").strip() for column in columns]
+    values = [value for value in values if value]
+    return " · ".join(values[:3]) or fallback
+
+
 def verify_source_entity(
     db: Session,
     *,
@@ -146,20 +207,7 @@ def verify_source_entity(
     metadata = dict(metadata or {})
     table = _resolve_source_table(source_module, entity_type, metadata)
     id_column = _column(table, ["id", "entity_id", "record_id", "course_id", "work_order_id"], metadata.get("id_column"))
-
-    tenant_column = None
-    for name in ("amo_id", "tenant_id"):
-        if name in table.c:
-            tenant_column = table.c[name]
-            break
-    if tenant_column is None:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "INTEGRATION_SOURCE_NOT_TENANT_SCOPED",
-                "message": f"The source table {table.name} has no AMO or tenant boundary.",
-            },
-        )
+    tenant_column = _tenant_column(table)
 
     tenant_values = {str(tenant.amo_id), str(tenant.id)}
     statement = sa.select(table).where(sa.cast(id_column, sa.String) == str(entity_id))
@@ -169,19 +217,7 @@ def verify_source_entity(
     if str(row.get(tenant_column.name)) not in tenant_values:
         raise HTTPException(status_code=403, detail="The linked source record belongs to another tenant")
 
-    status_column = None
-    explicit_status = metadata.get("status_column")
-    if explicit_status:
-        name = _safe_identifier(str(explicit_status))
-        if name not in table.c:
-            raise HTTPException(status_code=422, detail=f"Status column {name!r} does not exist on {table.name}")
-        status_column = table.c[name]
-    else:
-        for name in ("status", "state", "lifecycle_status", "verification_status", "is_active"):
-            if name in table.c:
-                status_column = table.c[name]
-                break
-
+    status_column = _status_column(table, metadata.get("status_column"))
     raw_status = row.get(status_column.name) if status_column is not None else None
     if isinstance(raw_status, bool):
         live_status = "ACTIVE" if raw_status else "INACTIVE"
@@ -198,6 +234,91 @@ def verify_source_entity(
     }
 
 
+@router.get("/t/{tenant_slug}/integration-catalog")
+def get_integration_catalog(
+    tenant_slug: str,
+    source_module: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    resolve_tenant(db, tenant_slug, current_user)
+    requested_module = str(source_module or "").strip().upper()
+    if requested_module and requested_module not in _ALLOWED_TABLE_RULES:
+        raise HTTPException(status_code=422, detail="Unsupported integration source module")
+
+    modules = [requested_module] if requested_module else sorted(_ALLOWED_TABLE_RULES)
+    result: list[dict[str, Any]] = []
+    for module in modules:
+        tables: list[dict[str, Any]] = []
+        for table in sorted(Base.metadata.tables.values(), key=lambda item: item.name):
+            if not _table_allowed(module, table.name):
+                continue
+            try:
+                id_column = _column(table, ["id", "entity_id", "record_id", "course_id", "work_order_id"])
+                tenant_column = _tenant_column(table)
+            except HTTPException:
+                continue
+            tables.append({
+                "name": table.name,
+                "entity_type": table.name,
+                "id_column": id_column.name,
+                "tenant_column": tenant_column.name,
+                "display_columns": [column.name for column in _display_columns(table)],
+            })
+        result.append({"module": module, "tables": tables})
+    return {"modules": result}
+
+
+@router.get("/t/{tenant_slug}/integration-catalog/search")
+def search_integration_catalog(
+    tenant_slug: str,
+    source_module: str,
+    source_table: str,
+    q: str = "",
+    limit: int = Query(default=25, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    module = source_module.strip().upper()
+    table = _catalog_table(module, source_table)
+    id_column = _column(table, ["id", "entity_id", "record_id", "course_id", "work_order_id"])
+    tenant_column = _tenant_column(table)
+    display_columns = _display_columns(table)
+    status_column = _status_column(table)
+    tenant_values = [str(tenant.amo_id), str(tenant.id)]
+
+    statement = sa.select(table).where(sa.cast(tenant_column, sa.String).in_(tenant_values))
+    query = q.strip()
+    if query and display_columns:
+        search_term = f"%{query}%"
+        statement = statement.where(sa.or_(*[sa.cast(column, sa.String).ilike(search_term) for column in display_columns]))
+    statement = statement.limit(limit)
+    rows = db.execute(statement).mappings().all()
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        entity_id = str(row.get(id_column.name) or "")
+        if not entity_id:
+            continue
+        raw_status = row.get(status_column.name) if status_column is not None else None
+        if isinstance(raw_status, bool):
+            status_value = "ACTIVE" if raw_status else "INACTIVE"
+        else:
+            status_value = str(getattr(raw_status, "value", raw_status or "VERIFIED")).upper()
+        items.append({
+            "id": entity_id,
+            "label": _display_value(row, display_columns, entity_id),
+            "status": status_value,
+            "source_module": module,
+            "source_table": table.name,
+            "entity_type": table.name,
+        })
+    return {"items": items, "limit": limit, "source_module": module, "source_table": table.name}
+
+
 def refresh_integration_link(db: Session, tenant, link: dm.DocumentIntegrationLink) -> dict[str, Any]:
     verification = verify_source_entity(
         db,
@@ -208,9 +329,6 @@ def refresh_integration_link(db: Session, tenant, link: dm.DocumentIntegrationLi
         metadata=dict(link.metadata_json or {}),
     )
     link.status_snapshot = verification["status_snapshot"]
-    # verified_at is persisted inside metadata_json. DocumentIntegrationLink has no
-    # mapped updated_at column, so assigning one dynamically would create a false
-    # appearance of durable state without writing it to PostgreSQL.
     link.metadata_json = {**dict(link.metadata_json or {}), **verification}
     return verification
 
