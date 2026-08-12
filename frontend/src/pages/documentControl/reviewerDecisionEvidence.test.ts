@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { DocumentDetailResponse, DocumentWorkflow } from "../../services/documentControl";
-import {
-  buildReviewerDecisionEvidence,
-  parseAdditionalEvidenceReferences,
-} from "./reviewerDecisionEvidence";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
+import { buildReviewerDecisionEvidence } from "./reviewerDecisionEvidence";
 
 function fixture() {
   const workflow = {
@@ -37,36 +35,30 @@ function fixture() {
   return { detail, workflow };
 }
 
+const asset: DocumentEvidenceReference = {
+  asset_id: "asset-1",
+  filename: "technical-review-checklist.pdf",
+  mime_type: "application/pdf",
+  sha256: "1".repeat(64),
+  size_bytes: 1250,
+  category: "REVIEW",
+};
+
 describe("reviewer decision evidence", () => {
-  it("retains the exact reviewed revision and source checksum", () => {
+  it("does not manufacture the reviewed revision checksum in the browser", () => {
     const { detail, workflow } = fixture();
-
-    expect(buildReviewerDecisionEvidence(detail, workflow, "")).toEqual([
-      {
-        reference: "manual-revision:revision-2",
-        checksum_sha256: "abc123",
-      },
-    ]);
+    expect(buildReviewerDecisionEvidence(detail, workflow, [])).toEqual([]);
   });
 
-  it("preserves additional controlled evidence references without inventing asset IDs", () => {
+  it("preserves only governed evidence assets selected from the DMS", () => {
     const { detail, workflow } = fixture();
-
-    expect(buildReviewerDecisionEvidence(detail, workflow, "QMS-CHK-42\nATT-9001")).toEqual([
-      {
-        reference: "manual-revision:revision-2",
-        checksum_sha256: "abc123",
-      },
-      { reference: "QMS-CHK-42" },
-      { reference: "ATT-9001" },
-    ]);
+    expect(buildReviewerDecisionEvidence(detail, workflow, [asset])).toEqual([asset]);
   });
 
-  it("requires an entered retained reference when the reviewed source has no checksum", () => {
+  it("returns defensive copies rather than mutating the picker selection", () => {
     const { detail, workflow } = fixture();
-    detail.revisions[0].source_sha256 = null;
-
-    expect(buildReviewerDecisionEvidence(detail, workflow, "")).toEqual([]);
-    expect(parseAdditionalEvidenceReferences("CR-17")).toEqual([{ reference: "CR-17" }]);
+    const result = buildReviewerDecisionEvidence(detail, workflow, [asset]);
+    expect(result[0]).not.toBe(asset);
+    expect(result[0]).toEqual(asset);
   });
 });
