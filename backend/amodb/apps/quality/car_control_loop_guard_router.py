@@ -15,6 +15,7 @@ from .car_control_loop import compute_car_health
 from .car_control_loop_models import QualityCARDeadlineChange
 from .car_control_loop_router import (
     CloseControlLoop,
+    ControlLoopInitialize,
     DeadlineChangeCreate,
     DeadlineChangeDecision,
     _add_event,
@@ -23,11 +24,13 @@ from .car_control_loop_router import (
     _enum_value,
     _event_exists,
     _load_car,
+    _load_profile,
     _milestones,
     _require_profile,
     _result,
     _utcnow,
     close_control_loop as _close_control_loop_base,
+    initialize_control_loop as _initialize_control_loop_base,
 )
 from .tenant_security import (
     TenantContext,
@@ -112,6 +115,21 @@ def _synchronize_authoritative_car_deadline(
     _seed_car_reminders(db, car)
 
 
+def _prepare_initial_authoritative_deadline(
+    db: Session,
+    *,
+    car: models.CorrectiveActionRequest,
+    final_due_date: date,
+) -> None:
+    """Establish both legacy and staged deadline sources before initialization commits."""
+
+    car.due_date = final_due_date
+    car.target_closure_date = final_due_date
+    from .router import _seed_car_reminders
+
+    _seed_car_reminders(db, car)
+
+
 def _validated_closure_evidence_ref(payload: CloseControlLoop, milestones: list[Any]) -> str:
     evidence_ref = (payload.evidence_ref or "").strip()
     if not evidence_ref:
@@ -191,6 +209,31 @@ def _notify_control_owner(
             entity_id=str(car.id),
         )
     )
+
+
+@router.post("/initialize", status_code=status.HTTP_201_CREATED)
+def initialize_control_loop_guarded(
+    car_id: UUID,
+    payload: ControlLoopInitialize,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    existing = _load_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+
+    if existing is None and car.target_closure_date is None and car.due_date is None and payload.final_due_date is not None:
+        opened_on = car.created_at.date() if car.created_at else date.today()
+        if payload.final_due_date < opened_on:
+            raise HTTPException(status_code=422, detail="The controlled final due date cannot precede the CAR creation date.")
+        _prepare_initial_authoritative_deadline(
+            db,
+            car=car,
+            final_due_date=payload.final_due_date,
+        )
+
+    return _initialize_control_loop_base(str(car_id), payload, ctx, db)
 
 
 @router.post("/deadline-changes", status_code=status.HTTP_201_CREATED)
@@ -362,6 +405,8 @@ def evaluate_control_loop_guarded(
     dependencies = _dependencies(db, amo_id=ctx.amo_id, car_id=car_id)
 
     for milestone in milestones:
+        if milestone.milestone_key == "EFFECTIVENESS_REVIEW" and not profile.effectiveness_required:
+            continue
         if milestone.status in _TERMINAL_MILESTONE_STATUSES:
             continue
         days = (milestone.current_due_date - today).days
@@ -490,6 +535,7 @@ def evaluate_control_loop_guarded(
         accountable_owner_user_id=profile.accountable_owner_user_id,
         milestones=milestones,
         dependencies=dependencies,
+        effectiveness_required=profile.effectiveness_required,
     )
     current = str(_enum_value(car.status))
     if health.state in {"OVERDUE", "CRITICAL"} and current not in {"CLOSED", "CANCELLED", "ESCALATED"}:
