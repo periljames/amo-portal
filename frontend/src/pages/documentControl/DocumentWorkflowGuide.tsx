@@ -244,10 +244,15 @@ export default function DocumentWorkflowGuide({
 
   useEffect(() => {
     let active = true;
-    setError("");
     void getDocumentControlDocument(tenant, manualId)
-      .then((result) => { if (active) setDetail(result); })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Workflow guidance could not be loaded."); });
+      .then((result) => {
+        if (!active) return;
+        setDetail(result);
+        setError("");
+      })
+      .catch((caught) => {
+        if (active) setError(caught instanceof Error ? caught.message : "Workflow guidance could not be loaded.");
+      });
     return () => { active = false; };
   }, [manualId, refreshKey, tenant]);
 
