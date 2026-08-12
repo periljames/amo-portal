@@ -135,13 +135,13 @@ async function prepare(page: Page): Promise<void> {
     });
   });
 
-  await page.route("**/auth/**", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  await page.route("**/auth/portal-preferences/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-12T08:00:00Z" }) });
   });
-  await page.route("**/accounts/**", async (route) => {
+  await page.route("**/accounts/admin/admin-profile/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
   });
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/quality/notifications**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
   });
 }
@@ -158,8 +158,9 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await expect(page.getByText("QMS-CAR-001")).toBeVisible();
   await expect(page.getByText("QMS-CAR-002")).toBeVisible();
   await expect(page.getByText("QMS-CAR-003")).toBeVisible();
-  await expect(page.getByText("Engineering", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Quality", { exact: true }).first()).toBeVisible();
+  const departmentSection = page.getByRole("heading", { name: "Department performance" }).locator("xpath=ancestor::section[1]");
+  await expect(departmentSection.getByText("Engineering", { exact: true })).toBeVisible();
+  await expect(departmentSection.getByText("Quality", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Export CSV" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Print report" })).toBeVisible();
 });

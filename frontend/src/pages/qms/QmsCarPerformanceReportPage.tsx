@@ -162,12 +162,9 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     staleTime: 30_000,
   });
 
-  const allCars = reportQuery.data?.items ?? [];
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const generatedAt = useMemo(
-    () => new Date(reportQuery.dataUpdatedAt || Date.now()),
-    [reportQuery.dataUpdatedAt],
-  );
+  const allCars = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
+  const generatedAt = useMemo(() => new Date(reportQuery.dataUpdatedAt || 0), [reportQuery.dataUpdatedAt]);
+  const today = generatedAt.toISOString().slice(0, 10);
 
   const departments = useMemo(
     () => Array.from(new Set(allCars.map(departmentLabel))).sort((left, right) => left.localeCompare(right)),

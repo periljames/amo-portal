@@ -227,11 +227,13 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
   };
 
-  // Intercept only backend/API traffic. Intercepting every request also replaces
-  // the preview server's JS/CSS assets, preventing the React route from loading.
-  await page.route("**/api/**", fulfil);
-  await page.route("**/auth/**", fulfil);
-  await page.route("**/accounts/**", fulfil);
+  await page.route("**/*", async (route) => {
+    const url = route.request().url();
+    const isQmsData = url.includes("/quality/cars/") || url.includes("/quality/notifications");
+    const isPortalData = url.includes("/auth/") || url.includes("/accounts/") || url.includes("/api/maintenance/");
+    if (isQmsData || isPortalData) { await fulfil(route); return; }
+    await route.continue();
+  });
   return { evaluateCalls: () => evaluations };
 }
 
@@ -254,7 +256,7 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
   await expect(page.getByRole("heading", { name: "Objective evidence" })).toBeVisible();
   await expect(page.getByText("implementation-evidence.pdf")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Dependency detail editor" })).toBeVisible();
-  await expect(page.getByDisplayValue("Engineering approval required before implementation evidence can be accepted.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dependency detail editor" }).locator("xpath=ancestor::section[1]").locator("textarea").first()).toHaveValue("Engineering approval required before implementation evidence can be accepted.");
   await expect(page.getByRole("heading", { name: "Evidence & report package" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Print CAR package" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Export CAR CSV" })).toBeVisible();
