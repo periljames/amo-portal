@@ -38,8 +38,8 @@ replace_once(
 
 replace_once(
     "frontend/tests/e2e/qms-car-performance-report.spec.ts",
-    '''  await page.route("**/api/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
-    '''  // Do not install a broad /api catch-all here: the CAR register service is\n  // tenant-scoped under /api and must reach the specific paged-register mock above.\n''',
+    '''  await page.route("**/auth/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });\n  });\n  await page.route("**/accounts/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });\n  });\n  await page.route("**/api/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
+    '''  await page.route("**/auth/portal-preferences/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-12T08:00:00Z" }) });\n  });\n  await page.route("**/accounts/admin/admin-profile/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });\n  });\n  await page.route("**/quality/notifications**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
 )
 
 print("QMS CAR reporting browser follow-up applied")
