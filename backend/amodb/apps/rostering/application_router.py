@@ -8,7 +8,7 @@ prefixes `/rostering` and `/workforce`.
 """
 from fastapi import APIRouter
 
-from . import lineage, roster_control
+from . import calendar_subscriptions, lineage, roster_control
 from . import router as rostering_route_module
 from .aircraft_allocation_router import router as aircraft_allocation_router
 from .automation_router import router as automation_router
@@ -37,6 +37,14 @@ rostering_route_module.router.routes = [
 # stronger implementation inherits lineage by source_reference_id first, so an
 # amended time/base/shift does not create a duplicate event downstream.
 roster_control.ensure_assignment_lineages = lineage.ensure_assignment_lineages
+
+# Eliminate accidental use of the original deterministic subscription helpers.
+# Callers reaching the roster-control facade are redirected to the encrypted,
+# random, hash-indexed and revocable subscription implementation.
+roster_control.subscription_status = calendar_subscriptions.subscription_status
+roster_control.issue_calendar_subscription = calendar_subscriptions.issue_calendar_subscription
+roster_control.revoke_calendar_subscription = calendar_subscriptions.revoke_calendar_subscription
+roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_calendar_subscription
 
 # Install lifecycle/export policy at application import time. The public
 # service facade remains the compatibility boundary used by the existing
