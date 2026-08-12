@@ -7,6 +7,7 @@ import {
   type DocumentWorkflow,
 } from "../../services/documentControl";
 import { DocumentControlEmpty } from "./DocumentControlShell";
+import { buildReviewerDecisionEvidence } from "./reviewerDecisionEvidence";
 
 
 type ReviewWorkflow = DocumentWorkflow & { allowed_actions?: string[] };
@@ -24,13 +25,11 @@ const REVIEWER_ACTIONS: Record<string, ReviewerAction> = {
   REQUEST_CORRECTIONS: { action: "REQUEST_CORRECTIONS", label: "Return with comments", danger: true },
 };
 
-function evidenceFrom(value: string): Array<{ asset_id: string }> {
-  return value
-    .split(/[\n,;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((asset_id) => ({ asset_id }));
-}
+const APPROVAL_ACTIONS = new Set([
+  "APPROVE_TECHNICAL",
+  "APPROVE_QUALITY",
+  "APPROVE_ACCOUNTABLE_MANAGER",
+]);
 
 export default function DocumentControlReviewerLifecycleActions({
   detail,
@@ -59,17 +58,28 @@ export default function DocumentControlReviewerLifecycleActions({
   }
 
   const transition = async (item: ReviewerAction) => {
-    if (item.action === "REQUEST_CORRECTIONS" && !comments.trim()) {
-      setError("Record the correction reason before returning the revision.");
+    const decisionComments = comments.trim();
+    const retainedEvidence = buildReviewerDecisionEvidence(detail, workflow, evidence);
+    const isApproval = APPROVAL_ACTIONS.has(item.action);
+
+    if (!decisionComments) {
+      setError(isApproval
+        ? "Record the basis for the approval decision before continuing."
+        : "Record the correction reason before returning the revision.");
       return;
     }
+    if (isApproval && !retainedEvidence.length) {
+      setError("No retained source checksum is available for this revision. Add a controlled evidence reference before approving.");
+      return;
+    }
+
     setBusy(true);
     setError("");
     try {
       await transitionDocumentWorkflow(tenant, workflow.id, {
         action: item.action,
-        comments: comments.trim() || null,
-        evidence: evidenceFrom(evidence),
+        comments: decisionComments,
+        evidence: isApproval ? retainedEvidence : [],
         expected_version: workflow.version,
       });
       onChanged();
@@ -80,6 +90,9 @@ export default function DocumentControlReviewerLifecycleActions({
     }
   };
 
+  const reviewedRevision = detail.revisions.find((revision) => revision.id === workflow.revision_id);
+  const retainsSourceChecksum = Boolean(reviewedRevision?.source_sha256?.trim());
+
   return <div className="dc-form" data-testid="assigned-reviewer-actions">
     <div className="dc-callout">
       <CheckCircle2 size={17} />
@@ -88,8 +101,13 @@ export default function DocumentControlReviewerLifecycleActions({
         <div>{workflow.state.replaceAll("_", " ")} · only actions authorized by the effective governed responsibility are shown.</div>
       </div>
     </div>
-    <label className="wide"><span>Review comments</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Record the basis for the decision or correction request." /></label>
-    <label className="wide"><span>Evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Optional retained evidence references, one per line" /></label>
+    <label className="wide"><span>Review comments</span><textarea required value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Required: record the basis for the decision or correction request." /></label>
+    <label className="wide"><span>Additional evidence references</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="Checklist, attachment, ticket or other retained reference, one per line" /></label>
+    <div className="dc-form__hint">
+      {retainsSourceChecksum
+        ? "The reviewed revision ID and source checksum are retained automatically with approval decisions."
+        : "This revision has no retained source checksum; add a controlled evidence reference before approving."}
+    </div>
     {error ? <div className="dc-form__error">{error}</div> : null}
     <div className="dc-form__actions">
       {actions.map((item) => <button

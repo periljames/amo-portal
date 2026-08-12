@@ -13,6 +13,64 @@ The production architecture separates four responsibilities:
 
 The browser reaches the Operations gateway through the frontend origin under `/ops/`. Prometheus is never exposed directly to the browser and arbitrary PromQL is not accepted.
 
+## Local development
+
+Local development preserves the same browser contract as production: the frontend uses same-origin `/ops/*` URLs, while Vite proxies those requests to the dedicated Platform Operations Gateway instead of the tenant API.
+
+Run the tenant API and Operations Gateway as separate processes:
+
+```bash
+cd backend
+python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 --reload
+```
+
+In a second terminal:
+
+```bash
+cd backend
+python -m uvicorn amodb.platform_ops_main:app --host 127.0.0.1 --port 8090 --reload
+```
+
+Then run the frontend normally:
+
+```bash
+cd frontend
+npm run dev
+```
+
+The Vite defaults are:
+
+```text
+normal API proxy target     http://127.0.0.1:8080
+Platform Ops proxy target   http://127.0.0.1:8090
+```
+
+Override them only when the local topology differs:
+
+```text
+VITE_API_PROXY_TARGET=http://127.0.0.1:8080
+VITE_PLATFORM_OPS_PROXY_TARGET=http://127.0.0.1:8090
+VITE_PLATFORM_OPS_BASE_URL=
+```
+
+Keep `VITE_PLATFORM_OPS_BASE_URL` blank for same-origin development. This avoids mixed-content and CORS problems when the frontend is reached through HTTPS or a Tailscale hostname.
+
+Verify the dedicated gateway directly before debugging the browser:
+
+```bash
+curl -fsS http://127.0.0.1:8090/healthz
+curl -fsS http://127.0.0.1:8090/readyz
+```
+
+The Platform Operations Worker is required when testing durable control-plane commands:
+
+```bash
+cd backend
+python -m amodb.platform_ops_worker_main
+```
+
+Prometheus/Node Exporter/cAdvisor are not required merely to prove `/ops/v1` routing, but host CPU, memory, disk, network and historical telemetry remain unavailable until the observability plane is running and `PLATFORM_OPS_PROMETHEUS_URL` points to it.
+
 ## Production prerequisites
 
 - Ubuntu host(s) approved for the AMO Portal workload.
