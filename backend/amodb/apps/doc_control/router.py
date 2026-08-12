@@ -44,6 +44,7 @@ from .workspace_reports_export_router import router as workspace_reports_export_
 from .workspace_reports_portfolio_router import router as workspace_reports_portfolio_router
 from .workspace_reports_register_router import router as workspace_reports_register_router
 from .workspace_reports_router import router as workspace_reports_router
+from .workspace_retention_accountability_router import router as workspace_retention_accountability_router
 from .workspace_retention_router import router as workspace_retention_router
 from .workspace_retention_sources_router import router as workspace_retention_sources_router
 from .workspace_review_router import router as workspace_review_router
@@ -227,6 +228,11 @@ router.include_router(
 )
 router.include_router(
     workspace_retention_sources_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_retention_accountability_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
