@@ -149,6 +149,11 @@ def install() -> None:
     global _installed
     if _installed:
         return
+    # The canonical ManualRevision field is ``rev_number``. The first evidence-pack
+    # route used the older ``revision_number`` spelling for display-only labels.
+    # Keep that legacy route safe without changing the persistence model.
+    if not hasattr(manual_models.ManualRevision, "revision_number"):
+        manual_models.ManualRevision.revision_number = property(lambda row: row.rev_number)  # type: ignore[attr-defined]
     pack._manual_audit_rows = _manual_audit_rows
     pack._read_verified_file = _read_verified_file
     pack._datasets = _datasets
