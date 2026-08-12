@@ -1,5 +1,5 @@
 /* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookOpen,
   ClipboardList,
@@ -149,8 +149,17 @@ export default function DocumentControlShell({
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
     : null;
+  const actionRef = useRef(actions);
+  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (actionRef.current === actions) return;
+    actionRef.current = actions;
+    setWorkflowRefreshKey((value) => value + 1);
+  }, [actions]);
+
   const workflowGuide = tenant && assistantDocumentId
-    ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
+    ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} refreshKey={workflowRefreshKey} />
     : null;
 
   const body = (
