@@ -79,7 +79,7 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run operating attribution, integration, export, evidence, reminder and source contracts
+      - name: Run operating attribution, integration, export, evidence, reminder, source and applicability contracts
         working-directory: backend
         run: >-
           pytest -q
@@ -90,6 +90,7 @@ jobs:
           amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
           amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
           amodb/apps/doc_control/tests/test_change_source_contract.py
+          amodb/apps/doc_control/tests/test_applicability_target_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
@@ -140,6 +141,7 @@ jobs:
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
           src/pages/documentControl/DocumentControlRecordActions.tsx
           src/pages/documentControl/DocumentControlChangeRequestActions.tsx
+          src/pages/documentControl/DocumentControlApplicabilityActions.tsx
           src/pages/documentControl/DocumentControlReviewActions.tsx
           src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
           src/pages/documentControl/DocumentControlIntegrationActions.tsx
