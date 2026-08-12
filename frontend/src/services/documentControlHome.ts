@@ -1,5 +1,6 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { listDocumentRetentionWork } from "./documentControlRetention";
 
 export type DocumentControlMyWorkKind =
   | "CHANGE_REQUEST"
@@ -9,7 +10,9 @@ export type DocumentControlMyWorkKind =
   | "AUTHORITY_ACTION"
   | "TEMPORARY_REVISION"
   | "CONTROLLED_COPY"
-  | "EXTERNAL_SOURCE_ACTION";
+  | "EXTERNAL_SOURCE_ACTION"
+  | "RETENTION_APPROVAL"
+  | "RETENTION_EXECUTION";
 
 export type DocumentControlMyWorkItem = {
   id: string;
@@ -74,11 +77,33 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 export async function getDocumentControlMyWork(tenant: string): Promise<DocumentControlMyWorkResponse> {
-  const [core, external] = await Promise.all([
+  const [core, external, retention] = await Promise.all([
     fetchWorkFeed(tenant, "my-work"),
     fetchWorkFeed(tenant, "external-source-work"),
+    listDocumentRetentionWork(tenant),
   ]);
-  const items = [...core.items, ...external.items]
+  const retentionItems: DocumentControlMyWorkItem[] = retention.map((item) => {
+    const parts = item.title.split(" · ");
+    const code = parts.length > 1 ? parts[parts.length - 1] : "Document";
+    return {
+      id: `retention:${item.id}:${item.kind}`,
+      kind: item.kind,
+      manual_id: item.manual_id,
+      entity_id: item.id,
+      title: item.title,
+      status: item.status,
+      priority: item.priority,
+      due_at: item.due_at,
+      action_label: item.kind === "RETENTION_APPROVAL" ? "Review disposition" : "Record disposition",
+      target_path: item.target_path,
+      document: {
+        id: item.manual_id,
+        code,
+        title: item.detail,
+      },
+    };
+  });
+  const items = [...core.items, ...external.items, ...retentionItems]
     .sort((left, right) => {
       const priority = (PRIORITY_ORDER[left.priority] ?? 9) - (PRIORITY_ORDER[right.priority] ?? 9);
       if (priority !== 0) return priority;
