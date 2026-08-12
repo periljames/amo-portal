@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from amodb.apps.quality.car_control_loop import closure_readiness, compute_car_health
 
@@ -169,7 +171,6 @@ def test_nullable_owner_payloads_distinguish_omitted_from_explicit_clear() -> No
     assert "owner_user_id" in MilestoneUpdate(owner_user_id=None).model_fields_set
 
 
-
 def test_car_invite_accepts_detailed_quality_response() -> None:
     from amodb.apps.quality.schemas import CARInviteUpdate
 
@@ -182,3 +183,49 @@ def test_car_invite_accepts_detailed_quality_response() -> None:
     )
     assert len(payload.root_cause or "") == 8000
     assert len(payload.corrective_action or "") == 8000
+
+
+def test_public_invite_persistence_preserves_full_detailed_response() -> None:
+    from amodb.apps.quality.public_invite_extensions import _persist_detailed_response_fields
+    from amodb.apps.quality.schemas import CARInviteUpdate
+
+    detailed = "x" * 8000
+    payload = CARInviteUpdate(
+        containment_action=detailed,
+        root_cause=detailed,
+        corrective_action=detailed,
+        preventive_action=detailed,
+    )
+    car = SimpleNamespace(
+        containment_action=None,
+        root_cause=None,
+        corrective_action=None,
+        preventive_action=None,
+    )
+
+    _persist_detailed_response_fields(car, payload)
+
+    assert len(car.containment_action) == 8000
+    assert len(car.root_cause) == 8000
+    assert len(car.corrective_action) == 8000
+    assert len(car.preventive_action) == 8000
+
+
+def test_authoritative_deadline_sync_updates_both_dates_and_reminders() -> None:
+    from amodb.apps.quality.car_control_loop_guard_router import _synchronize_authoritative_car_deadline
+
+    old_due = date(2026, 8, 20)
+    approved_due = date(2026, 9, 5)
+    car = SimpleNamespace(due_date=old_due, target_closure_date=old_due)
+    db = object()
+
+    with patch("amodb.apps.quality.router._seed_car_reminders") as seed_reminders:
+        _synchronize_authoritative_car_deadline(
+            db,
+            car=car,
+            approved_due_date=approved_due,
+        )
+
+    assert car.due_date == approved_due
+    assert car.target_closure_date == approved_due
+    seed_reminders.assert_called_once_with(db, car)
