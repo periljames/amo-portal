@@ -11,18 +11,24 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_controlled_copy_creation_gets_governed_default_due_date() -> None:
+def test_custodied_copy_creation_gets_governed_default_due_date() -> None:
     source = _text(APP / "workspace_copy_due_router.py")
     assert 'policy_payload.get("default_due_days", 30)' in source
     assert "max(1, min(days, 3650))" in source
-    assert "if not payload.due_back_at:" in source
+    assert "if not payload.due_back_at and payload.holder_user_id:" in source
     assert 'update={"due_back_at": utcnow() + timedelta(days=_default_due_days(tenant))}' in source
+
+
+def test_shelf_copy_does_not_get_a_return_due_date_before_custody() -> None:
+    source = _text(APP / "workspace_copy_due_router.py")
+    body = source.split("def create_controlled_copy_with_due_policy", 1)[1]
+    assert "if not payload.due_back_at and payload.holder_user_id:" in body
 
 
 def test_explicit_copy_due_date_is_not_overwritten() -> None:
     source = _text(APP / "workspace_copy_due_router.py")
     body = source.split("def create_controlled_copy_with_due_policy", 1)[1]
-    assert "if not payload.due_back_at:" in body
+    assert "if not payload.due_back_at and payload.holder_user_id:" in body
     assert "return _create_copy(" in body
 
 
