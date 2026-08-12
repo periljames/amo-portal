@@ -122,8 +122,12 @@ def _datasets(db: Session, *, tenant_id: str, manual_id: str, revision_id: str |
         manual_id=manual_id,
         revision_id=revision_id,
     )
+    tenant = db.query(manual_models.Tenant).filter(manual_models.Tenant.id == tenant_id).first()
+    if not tenant:
+        result["retention_dispositions"] = []
+        return result
     query = db.query(retention_models.DocumentRetentionDisposition).filter(
-        retention_models.DocumentRetentionDisposition.tenant_id == tenant_id,
+        retention_models.DocumentRetentionDisposition.tenant_id == tenant.amo_id,
         retention_models.DocumentRetentionDisposition.manual_id == manual_id,
     )
     if revision_id:
