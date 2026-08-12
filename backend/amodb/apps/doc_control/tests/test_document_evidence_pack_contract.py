@@ -21,10 +21,12 @@ def test_pack_is_registered_and_controller_governed() -> None:
     assert 'require_manual_access(current_user, profile)' in source
     assert 'workspace_evidence_pack_router' in router
     assert 'router.include_router(\n    workspace_evidence_pack_router' in router
+    assert 'install_evidence_pack_runtime_guard()' in router
 
 
 def test_pack_contains_complete_operating_lifecycle_datasets() -> None:
     source = _text(APP / "workspace_evidence_pack_router.py")
+    guard = _text(APP / "evidence_pack_runtime_guard.py")
     for dataset in (
         '"change_requests"',
         '"workflows"',
@@ -42,6 +44,7 @@ def test_pack_contains_complete_operating_lifecycle_datasets() -> None:
         '"integration_links"',
     ):
         assert dataset in source
+    assert '"retention_dispositions"' in guard
     assert '"data/audit_history.json"' in source
     assert '"data/evidence_assets.json"' in source
     assert '"data/revisions.json"' in source
@@ -49,15 +52,29 @@ def test_pack_contains_complete_operating_lifecycle_datasets() -> None:
 
 def test_pack_verifies_all_retained_file_hashes_and_never_silently_truncates() -> None:
     source = _text(APP / "workspace_evidence_pack_router.py")
-    assert 'EVIDENCE_PACK_CHECKSUM_MISMATCH' in source
-    assert 'EVIDENCE_PACK_FILE_MISSING' in source
+    guard = _text(APP / "evidence_pack_runtime_guard.py")
+    assert 'EVIDENCE_PACK_CHECKSUM_MISMATCH' in guard
+    assert 'EVIDENCE_PACK_FILE_MISSING' in guard
+    assert 'EVIDENCE_PACK_STORAGE_BOUNDARY_VIOLATION' in guard
     assert 'EVIDENCE_PACK_TOO_LARGE' in source
     assert 'EVIDENCE_PACK_TOO_MANY_ATTACHMENTS' in source
     assert 'EVIDENCE_PACK_DATASET_TOO_LARGE' in source
     assert 'MAX_PACK_FILE_BYTES' in source
     assert 'MAX_PACK_ATTACHMENTS' in source
     assert 'MAX_PACK_ROWS_PER_DATASET' in source
-    assert 'hashlib.sha256(content).hexdigest()' in source
+    assert 'hashlib.sha256(content).hexdigest()' in guard
+    assert 'EVIDENCE_ROOT' in guard
+    assert 'MANUAL_ROOT' in guard
+
+
+def test_pack_audit_history_is_document_scoped_before_bound_is_applied() -> None:
+    guard = _text(APP / "evidence_pack_runtime_guard.py")
+    assert "_known_lifecycle_entity_ids" in guard
+    assert "ManualAuditLog.entity_id.in_(entity_ids)" in guard
+    assert "cast(manual_models.ManualAuditLog.diff_json, String).like" in guard
+    filter_at = guard.index(".filter(\n            manual_models.ManualAuditLog.tenant_id")
+    limit_at = guard.index(".limit(pack.MAX_PACK_ROWS_PER_DATASET + 1)", filter_at)
+    assert filter_at < limit_at
 
 
 def test_pack_manifest_and_server_response_are_integrity_identifiable() -> None:
