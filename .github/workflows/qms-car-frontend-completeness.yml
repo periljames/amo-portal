@@ -26,13 +26,16 @@ jobs:
           python-version: "3.12"
 
       - name: Apply manual-driven frontend completeness patch
-        run: python .github/scripts/qms_car_frontend_completeness.py
+        run: |
+          python .github/scripts/qms_car_frontend_completeness.py
+          python .github/scripts/qms_car_frontend_lint_followup.py
 
       - name: Validate patch formatting and Python syntax
         run: |
           git diff --check
           python -m py_compile \
             .github/scripts/qms_car_frontend_completeness.py \
+            .github/scripts/qms_car_frontend_lint_followup.py \
             backend/amodb/apps/quality/schemas.py
 
       - uses: actions/setup-node@v6
@@ -68,7 +71,10 @@ jobs:
 
       - name: Commit completed frontend advancement
         run: |
-          git rm .github/workflows/qms-car-frontend-completeness.yml .github/scripts/qms_car_frontend_completeness.py
+          git rm \
+            .github/workflows/qms-car-frontend-completeness.yml \
+            .github/scripts/qms_car_frontend_completeness.py \
+            .github/scripts/qms_car_frontend_lint_followup.py
           git add -A
           git diff --cached --check
           git config user.name "amo-portal-qms-bot"
