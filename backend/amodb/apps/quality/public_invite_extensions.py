@@ -3,7 +3,8 @@
 This module is imported after the main Quality compatibility router has finished
 loading. It replaces the original token-read route so existing public invite
 URLs gain an audit-report link while retaining the same CAR payload and state
-machine.
+machine. It also replaces the token PATCH adapter so the expanded CAR narrative
+contract is preserved without changing the established submission workflow.
 """
 from __future__ import annotations
 
@@ -22,8 +23,15 @@ from amodb.apps.audit import services as audit_services
 from amodb.database import get_db
 
 from . import models
-from .router import AUDIT_REPORT_DIR, _car_invite_payload, public_router
-from .schemas import CARInviteOut
+from .router import (
+    AUDIT_REPORT_DIR,
+    _car_invite_payload,
+    _limit_car_invite_text,
+    _require_public_car_invite_editable,
+    public_router,
+    submit_car_from_invite as _submit_car_from_invite_base,
+)
+from .schemas import CARInviteOut, CARInviteUpdate, CAROut
 
 
 class CARInviteWithAuditReportOut(CARInviteOut):
@@ -33,6 +41,13 @@ class CARInviteWithAuditReportOut(CARInviteOut):
 
 
 _extension_router = APIRouter(prefix="/quality", tags=["Quality / Public CAR"])
+_DETAILED_RESPONSE_FIELDS = (
+    "containment_action",
+    "root_cause",
+    "corrective_action",
+    "preventive_action",
+)
+_DETAILED_RESPONSE_MAX_LENGTH = 8000
 
 
 def _car_for_token(db: Session, invite_token: str) -> models.CorrectiveActionRequest:
@@ -72,6 +87,27 @@ def _approved_report_path(value: object) -> Optional[Path]:
     return candidate if candidate.is_file() else None
 
 
+def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, payload: CARInviteUpdate) -> None:
+    """Apply the schema-supported 8k narrative fields before base submission.
+
+    The compatibility submit handler historically defaults text trimming to 500
+    characters because legacy evidence/reference fields remain capped there.
+    These four governed response narratives now have an 8,000-character schema
+    contract, so the active public PATCH adapter persists them explicitly at that
+    limit and delegates every other validation, response, audit and notification
+    side effect to the established handler.
+    """
+
+    for field in _DETAILED_RESPONSE_FIELDS:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(
+                car,
+                field,
+                _limit_car_invite_text(value, max_length=_DETAILED_RESPONSE_MAX_LENGTH),
+            )
+
+
 @_extension_router.get("/cars/invite/{invite_token}", response_model=CARInviteWithAuditReportOut)
 def get_car_invite_with_report(
     invite_token: str,
@@ -86,6 +122,27 @@ def get_car_invite_with_report(
         f"/quality/cars/invite/{car.invite_token}/audit-report" if report_path is not None else None
     )
     return payload
+
+
+@_extension_router.patch("/cars/invite/{invite_token}", response_model=CAROut)
+def submit_car_invite_with_detailed_response(
+    invite_token: str,
+    payload: CARInviteUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    car = _car_for_token(db, invite_token)
+    _require_public_car_invite_editable(db, car)
+    _persist_detailed_response_fields(car, payload)
+
+    # Prevent the compatibility handler from re-applying its historical 500
+    # character default to the four narrative fields. The same SQLAlchemy session
+    # retains the values above while the base function executes all established
+    # submission validation, evidence, review-state, audit and notification work.
+    delegated_payload = payload.model_copy(
+        update={field: None for field in _DETAILED_RESPONSE_FIELDS}
+    )
+    return _submit_car_from_invite_base(invite_token, delegated_payload, request, db)
 
 
 @_extension_router.get("/cars/invite/{invite_token}/audit-report", response_class=FileResponse)
@@ -132,17 +189,17 @@ def download_invited_audit_report(
     )
 
 
-# Remove only the original token-read operation. The extension preserves its
-# behaviour and adds report metadata, while all update/upload/history routes stay
-# on their established handlers. Avoiding duplicate path+method registrations is
-# important for deterministic routing and OpenAPI generation.
+# Replace the original token read and update operations with the focused
+# extension handlers. Upload/history/recall routes remain on their established
+# implementations. Avoiding duplicate path+method registrations is important for
+# deterministic routing and OpenAPI generation.
 _original_token_path = "/quality/cars/invite/{invite_token}"
 public_router.routes[:] = [
     route
     for route in public_router.routes
     if not (
         str(getattr(route, "path", "")) == _original_token_path
-        and "GET" in (getattr(route, "methods", None) or set())
+        and ({"GET", "PATCH"} & (getattr(route, "methods", None) or set()))
     )
 ]
 public_router.routes[0:0] = list(_extension_router.routes)
