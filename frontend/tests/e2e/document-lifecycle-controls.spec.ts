@@ -68,6 +68,27 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     expect(materialBrowserErrors, materialBrowserErrors.join("\n")).toEqual([]);
   });
 
+  test("controller can start a governed job without discovering the destination tab", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/distribution`);
+    const startWork = page.getByTestId("document-control-start-work");
+    await expect(startWork).toBeVisible({ timeout: 30_000 });
+    await startWork.click();
+
+    const launcher = page.getByRole("dialog", { name: "Start Document Control work" });
+    await expect(launcher).toContainText("Change & approval");
+    await expect(launcher).toContainText("Issue & custody");
+    await expect(launcher).toContainText("Assurance & applicability");
+    await launcher.getByRole("button", { name: /Create distribution/ }).click();
+
+    await expect(page).toHaveURL(/\/document-control\/library\?action=distribute/);
+    await expect(page.getByText("Select the published document to distribute.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const select = page.getByRole("button", { name: "Select to distribute", exact: true }).first();
+    await expect(select).toBeVisible({ timeout: 30_000 });
+    await select.click();
+    await expect(page).toHaveURL(/\/document-control\/library\/[^/?#]+\?tab=distribution#document-control-record-actions/);
+    await expect(page.getByText("Digital distribution controls", { exact: true })).toBeVisible({ timeout: 30_000 });
+  });
+
   test("controller can add, classify, follow the guided workflow and delete a never-published document", async ({ page }) => {
     const suffix = Date.now().toString(36).toUpperCase();
     const code = `DMS-LIFE-${suffix}`;
