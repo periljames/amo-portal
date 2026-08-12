@@ -3,6 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .canonical_router import legacy_router, router
+from . import car_control_loop_session_context as _car_control_loop_session_context  # noqa: F401,E402
+from . import car_control_loop_authority_guard as _car_control_loop_authority_guard  # noqa: E402
+
+
+# Reviewer/closure authority routes are registered after the base and sequence
+# guards so the route-order pass below retains these stricter handlers for the
+# overlapping milestone-decision and close operations.
+router.include_router(_car_control_loop_authority_guard.router)
+legacy_router.include_router(_car_control_loop_authority_guard.router)
 
 
 def _is_control_loop_route(route_item) -> bool:
