@@ -160,7 +160,7 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
     localStorage.setItem("amo_color_scheme", "light");
-    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "quality-user-a",
       amo_id: "amo-a",
