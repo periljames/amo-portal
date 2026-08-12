@@ -34,11 +34,13 @@ def _require_milestone_review_authority(
 ) -> None:
     if requested_status not in {"ACCEPTED", "REJECTED"}:
         return
+    # Tenant membership/support-session validation is already represented by
+    # TenantContext. Resolve by identity rather than amo_id so a global platform
+    # superuser operating through an approved support session is not discarded.
     current_user = (
         db.query(account_models.User)
         .filter(
             account_models.User.id == ctx.user_id,
-            account_models.User.amo_id == ctx.amo_id,
             account_models.User.is_active.is_(True),
         )
         .first()
