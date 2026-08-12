@@ -40,6 +40,24 @@ export type DocumentEvidencePackDownload = {
   attachmentCount: number | null;
 };
 
+export type DocumentEvidencePackJob = {
+  job_id: string;
+  status: "PENDING" | "RUNNING" | "RETRY" | "SUCCEEDED" | "FAILED" | "DEAD" | "CANCELLED";
+  manual_id: string;
+  revision_id: string | null;
+  requested_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  error: string | null;
+  filename: string | null;
+  sha256: string | null;
+  size_bytes: number | null;
+  attachments: number | null;
+  download_url: string | null;
+};
+
 async function errorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const payload = await response.clone().json();
@@ -140,6 +158,55 @@ export async function downloadDocumentEvidencePack(
     { headers: authHeaders(), credentials: "same-origin" },
   );
   if (!response.ok) throw new Error(await errorMessage(response, "Document evidence pack could not be generated"));
+  const attachmentHeader = response.headers.get("x-evidence-pack-attachments");
+  const parsedAttachments = attachmentHeader === null ? Number.NaN : Number.parseInt(attachmentHeader, 10);
+  return {
+    blob: await response.blob(),
+    filename: attachmentFilename(response, "document-evidence-pack.zip"),
+    sha256: response.headers.get("x-evidence-pack-sha256"),
+    attachmentCount: Number.isFinite(parsedAttachments) ? parsedAttachments : null,
+  };
+}
+
+export async function queueDocumentEvidencePackJob(
+  tenant: string,
+  manualId: string,
+  revisionId?: string | null,
+): Promise<DocumentEvidencePackJob> {
+  const query = new URLSearchParams();
+  if (revisionId) query.set("revision_id", revisionId);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs${suffix}`,
+    { method: "POST", headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(await errorMessage(response, "Large evidence pack job could not be queued"));
+  return response.json() as Promise<DocumentEvidencePackJob>;
+}
+
+export async function getDocumentEvidencePackJob(
+  tenant: string,
+  manualId: string,
+  jobId: string,
+): Promise<DocumentEvidencePackJob> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs/${encodeURIComponent(jobId)}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(await errorMessage(response, "Evidence pack job status could not be loaded"));
+  return response.json() as Promise<DocumentEvidencePackJob>;
+}
+
+export async function downloadDocumentEvidencePackJob(
+  tenant: string,
+  manualId: string,
+  jobId: string,
+): Promise<DocumentEvidencePackDownload> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs/${encodeURIComponent(jobId)}/download`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(await errorMessage(response, "Completed evidence pack could not be downloaded"));
   const attachmentHeader = response.headers.get("x-evidence-pack-attachments");
   const parsedAttachments = attachmentHeader === null ? Number.NaN : Number.parseInt(attachmentHeader, 10);
   return {
