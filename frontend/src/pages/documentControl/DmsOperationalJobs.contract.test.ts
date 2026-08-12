@@ -12,6 +12,7 @@ const integrationService = readFileSync(new URL("../../services/documentControlI
 const reportsService = readFileSync(new URL("../../services/documentControlReportsPortfolio.ts", import.meta.url), "utf-8");
 const reportsPage = readFileSync(new URL("./DocumentControlReportsPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
+const changeActions = readFileSync(new URL("./DocumentControlChangeRequestActions.tsx", import.meta.url), "utf-8");
 const integrationActions = readFileSync(new URL("./DocumentControlIntegrationActions.tsx", import.meta.url), "utf-8");
 const guardedLifecycle = readFileSync(new URL("./DocumentControlLifecycleActionsGuarded.tsx", import.meta.url), "utf-8");
 const reviewActions = readFileSync(new URL("./DocumentControlReviewActions.tsx", import.meta.url), "utf-8");
@@ -53,6 +54,17 @@ describe("DMS operational job contract", () => {
     expect(library).toContain('navigate(`${basePath}/library/${item.id}?tab=changes`)');
     expect(library).toContain("selectForJob");
     expect(library).toContain("selectedJob.selectLabel");
+  });
+
+  it("uses governed portal discovery instead of raw source entity IDs when raising a change", () => {
+    expect(recordActions).toContain("DocumentControlChangeRequestActions");
+    expect(recordActions).not.toContain('activeView="changes"');
+    expect(changeActions).toContain("getDocumentIntegrationCatalog");
+    expect(changeActions).toContain("searchDocumentIntegrationCatalog");
+    expect(changeActions).toContain("Select governed record type");
+    expect(changeActions).toContain("Do not paste database IDs");
+    expect(changeActions).toContain("source_entity_type: selected?.source_table || null");
+    expect(changeActions).toContain("source_entity_id: selected?.id || null");
   });
 
   it("surfaces specialist obligations in My Work including owned external-source assessment", () => {
