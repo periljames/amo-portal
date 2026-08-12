@@ -30,5 +30,9 @@ def test_guarded_controlled_copy_mutations_are_authoritative() -> None:
     ]
     assert "create_controlled_copy" not in register_names
 
-    assert len(event_routes) == 1, [route.endpoint.__name__ for route in event_routes]
-    assert event_routes[0].endpoint.__name__ == "create_guarded_copy_event"
+    event_names = [route.endpoint.__name__ for route in event_routes]
+    assert event_names[:2] == [
+        "create_copy_event_with_governed_evidence",
+        "create_guarded_copy_event",
+    ]
+    assert "create_copy_event" not in event_names
