@@ -37,7 +37,11 @@ replace_once(
     '''  await page.route("**/auth/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });\n  });\n  await page.route("**/accounts/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });\n  });\n  await page.route("**/api/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
     '''  await page.route("**/auth/portal-preferences/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-12T08:00:00Z" }) });\n  });\n  await page.route("**/accounts/admin/admin-profile/**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });\n  });\n  await page.route("**/quality/notifications**", async (route) => {\n    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });\n  });\n''',
 )
-
+replace_once(
+    "frontend/tests/e2e/qms-car-performance-report.spec.ts",
+    '''  await expect(page.getByText("Engineering", { exact: true }).first()).toBeVisible();\n  await expect(page.getByText("Quality", { exact: true }).first()).toBeVisible();\n''',
+    '''  const departmentSection = page.getByRole("heading", { name: "Department performance" }).locator("xpath=ancestor::section[1]");\n  await expect(departmentSection.getByText("Engineering", { exact: true })).toBeVisible();\n  await expect(departmentSection.getByText("Quality", { exact: true })).toBeVisible();\n''',
+)
 replace_once(
     "frontend/src/router.tsx",
     'const QmsAuditProgrammeSchedulePage = lazy(() => import("./pages/qms/QmsAuditProgrammeSchedulePage"));\n',
