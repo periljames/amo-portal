@@ -5,6 +5,7 @@ on:
     branches: [agent/qms-car-control-loop]
     paths:
       - .github/workflows/pr499-car-evidence-client-fix.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
