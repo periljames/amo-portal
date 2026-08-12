@@ -11,6 +11,7 @@ import DocumentControlControllerLifecycleActions from "./DocumentControlControll
 import DocumentControlLifecycleActions, {
   type LifecycleView,
 } from "./DocumentControlLifecycleActions";
+import DocumentControlReviewActions from "./DocumentControlReviewActions";
 import DocumentControlReviewerLifecycleActions from "./DocumentControlReviewerLifecycleActions";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
@@ -175,6 +176,9 @@ export default function DocumentControlLifecycleActionsGuarded(props: Props) {
 
   if (props.activeView === "copies") {
     return <ControlledCopyCanonicalActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
+  }
+  if (props.activeView === "reviews") {
+    return <DocumentControlReviewActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
   }
   if (!canApprove && DECISION_SEPARATED_VIEWS.has(props.activeView)) {
     return <DocumentControlControllerLifecycleActions {...props} />;
