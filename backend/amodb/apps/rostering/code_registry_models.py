@@ -92,7 +92,6 @@ class RosterShiftTemplatePolicy(Base):
         SAEnum(RosterCodeVerificationStatus, name="roster_code_verification_status_enum", native_enum=False),
         nullable=False,
         default=RosterCodeVerificationStatus.UNRESOLVED,
-        index=True,
     )
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
