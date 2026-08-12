@@ -10,9 +10,15 @@ on:
       - "backend/amodb/apps/quality/tests/test_car_control_loop.py"
       - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
       - "backend/amodb/apps/quality/__init__.py"
+      - "backend/amodb/apps/quality/schemas.py"
       - "backend/amodb/alembic/versions/quality_260811_car_loop.py"
       - "frontend/src/services/qmsCarControlLoop.ts"
       - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
+      - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
+      - "frontend/src/pages/PublicCarInvitePage.tsx"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"
+      - "frontend/src/pages/qms/routes/qmsRouteRegistry.ts"
       - "frontend/src/pages/qms/QmsCanonicalPage.tsx"
       - "frontend/src/components/panels/ActionPanel.tsx"
       - "frontend/tests/e2e/qms-car-control-loop.spec.ts"
@@ -75,6 +81,7 @@ jobs:
             amodb/apps/quality/car_control_loop_router.py \
             amodb/apps/quality/car_control_loop_guard_router.py \
             amodb/apps/quality/car_control_loop_route_order.py \
+            amodb/apps/quality/schemas.py \
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
       - name: Run deterministic health and closure contract
@@ -150,6 +157,11 @@ jobs:
           npm exec -- eslint
           src/services/qmsCarControlLoop.ts
           src/pages/qms/QmsCarControlLoopPage.tsx
+          src/pages/qms/QmsCarControlOperations.tsx
+          src/pages/PublicCarInvitePage.tsx
+          src/app/routeGuards.ts
+          src/pages/qms/routes/qmsWorkspaceRegistry.ts
+          src/pages/qms/routes/qmsRouteRegistry.ts
           src/pages/qms/QmsCanonicalPage.tsx
           src/components/panels/ActionPanel.tsx
       - name: Typecheck and production build
