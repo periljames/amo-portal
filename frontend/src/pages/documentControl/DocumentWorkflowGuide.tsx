@@ -231,12 +231,12 @@ export default function DocumentWorkflowGuide({
   tenant,
   basePath,
   manualId,
-  refreshKey = 0,
+  refreshKey,
 }: {
   tenant: string;
   basePath: string;
   manualId: string;
-  refreshKey?: number;
+  refreshKey?: object;
 }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
