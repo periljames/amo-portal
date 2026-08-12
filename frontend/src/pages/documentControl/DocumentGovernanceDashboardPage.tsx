@@ -67,7 +67,7 @@ function statusKind(value?: string | null): "success" | "warning" | "danger" | "
   if (["CURRENT", "COMPLETED", "ACKNOWLEDGED", "READY"].includes(status)) return "success";
   if (["OVERDUE", "FAILED", "BLOCKED", "SUPERSEDED", "RECALLED"].includes(status)) return "danger";
   if (["PENDING", "DUE", "OPEN", "CORRECTIONS_REQUIRED"].includes(status)) return "warning";
-  if (["ACTION", "TECHNICAL_REVIEW", "QUALITY_REVIEW", "ACCOUNTABLE_MANAGER_APPROVAL", "AUTHORITY_SUBMITTED"].includes(status)) return "info";
+  if (["ACTION", "TECHNICAL_REVIEW", "QUALITY_REVIEW", "ACCOUNTABLE_MANAGER_APPROVAL", "AUTHORITY_SUBMITTED", "NEW_REVISION_REQUIRES_ASSESSMENT"].includes(status)) return "info";
   return "neutral";
 }
 
@@ -78,6 +78,7 @@ function workKindLabel(kind: DocumentControlMyWorkItem["kind"]): string {
   if (kind === "AUTHORITY_ACTION") return "Authority response";
   if (kind === "TEMPORARY_REVISION") return "Temporary revision";
   if (kind === "CONTROLLED_COPY") return "Controlled copy custody";
+  if (kind === "EXTERNAL_SOURCE_ACTION") return "External technical data";
   return "Workflow decision";
 }
 
@@ -203,7 +204,7 @@ export default function DocumentGovernanceDashboardPage() {
                   ))}</tbody>
                 </table>
               </div>
-            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement, workflow decision, authority response, temporary revision or controlled-copy custody action attributable to you." />}
+            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement, workflow decision, authority response, temporary revision, external-source assessment or controlled-copy custody action attributable to you." />}
           </DocumentControlSection>
 
           {canControl ? (
