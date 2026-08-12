@@ -69,11 +69,11 @@ def _source_revision_id(
         if len(parts) >= 3 and parts[0] == "document" and parts[1] == manual_id:
             revision = context.revisions.get(parts[2])
             if revision and revision.manual_id == manual_id:
-                return revision.id
+                return parts[2]
         if len(parts) >= 3 and parts[0] == "section":
             revision = context.revisions.get(parts[1])
             if revision and revision.manual_id == manual_id:
-                return revision.id
+                return parts[1]
     return None
 
 
@@ -118,6 +118,7 @@ def audit_assist_safely(
                     "actor_id": str(current_user.id),
                     "actor_contact_id": getattr(current_user, "contact_id", None),
                     "manual_id": manual_id,
+                    "source_manual_id": manual_id,
                     "query_sha256": hashlib.sha256(request_payload.query.strip().lower().encode("utf-8")).hexdigest(),
                     "query_length": len(request_payload.query),
                     "requested_mode": request_payload.mode,
