@@ -16,6 +16,13 @@ MILESTONE_ORDER: tuple[str, ...] = (
 TERMINAL_MILESTONE_STATUSES = {"ACCEPTED", "COMPLETED", "WAIVED"}
 ACTIVE_MILESTONE_STATUSES = {"PLANNED", "IN_PROGRESS", "SUBMITTED", "REJECTED", "BLOCKED"}
 CLOSED_CAR_STATUSES = {"CLOSED", "CANCELLED"}
+REQUIRED_CLOSURE_STATUSES: dict[str, set[str]] = {
+    "RCA_SUBMISSION": {"ACCEPTED"},
+    "CAP_APPROVAL": {"ACCEPTED"},
+    "IMPLEMENTATION_COMPLETE": {"COMPLETED", "ACCEPTED"},
+    "EVIDENCE_COMPLETE": {"COMPLETED", "ACCEPTED"},
+    "EFFECTIVENESS_REVIEW": {"ACCEPTED"},
+}
 
 
 @dataclass(frozen=True)
@@ -323,13 +330,20 @@ def closure_readiness(
         required = key != "EFFECTIVENESS_REVIEW" or effectiveness_required
         if not required:
             continue
-        if status not in TERMINAL_MILESTONE_STATUSES:
+
+        allowed_statuses = REQUIRED_CLOSURE_STATUSES.get(key, {"ACCEPTED", "COMPLETED"})
+        if status not in allowed_statuses:
+            acceptance_stage = key in {"RCA_SUBMISSION", "CAP_APPROVAL", "EFFECTIVENESS_REVIEW"}
             blockers.append({
-                "code": "MILESTONE_INCOMPLETE",
+                "code": "MILESTONE_NOT_ACCEPTED" if acceptance_stage else "MILESTONE_INCOMPLETE",
                 "milestone_key": key,
-                "message": f"{key.replace('_', ' ').title()} is not accepted or complete.",
+                "message": (
+                    f"{key.replace('_', ' ').title()} requires explicit Quality acceptance before closure."
+                    if acceptance_stage
+                    else f"{key.replace('_', ' ').title()} is not complete for closure."
+                ),
             })
-        if key in {"EVIDENCE_COMPLETE", "EFFECTIVENESS_REVIEW"} and status != "WAIVED" and not evidence_ref:
+        if key in {"EVIDENCE_COMPLETE", "EFFECTIVENESS_REVIEW"} and not evidence_ref:
             blockers.append({
                 "code": "MILESTONE_EVIDENCE_MISSING",
                 "milestone_key": key,
