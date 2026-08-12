@@ -8,9 +8,10 @@ on:
     paths:
       - "backend/amodb/apps/quality/car_control_loop*.py"
       - "backend/amodb/apps/quality/tests/test_car_control_loop.py"
-      - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
       - "backend/amodb/apps/quality/__init__.py"
       - "backend/amodb/apps/quality/schemas.py"
+      - "backend/amodb/apps/quality/public_invite_extensions.py"
+      - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
       - "backend/amodb/alembic/versions/quality_260811_car_loop.py"
       - "frontend/src/services/qmsCarControlLoop.ts"
       - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
@@ -83,6 +84,7 @@ jobs:
             amodb/apps/quality/car_control_loop_router.py \
             amodb/apps/quality/car_control_loop_guard_router.py \
             amodb/apps/quality/car_control_loop_route_order.py \
+            amodb/apps/quality/public_invite_extensions.py \
             amodb/apps/quality/schemas.py \
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
@@ -169,6 +171,25 @@ jobs:
           src/components/panels/ActionPanel.tsx
           tests/e2e/qms-car-control-loop.spec.ts
           tests/e2e/qms-car-performance-report.spec.ts
+      - name: Verify public CAR response length contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/pages/PublicCarInvitePage.tsx").read_text(encoding="utf-8")
+          required = [
+              "const MAX_RESPONSE_CHARS = 8000;",
+              "const MAX_EVIDENCE_REFERENCE_CHARS = 500;",
+              'evidence_ref: clampEvidenceReference(invite.evidence_ref ?? "")',
+              "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())",
+              "maxChars={MAX_EVIDENCE_REFERENCE_CHARS}",
+              "maxLength={maxChars}",
+          ]
+          missing = [value for value in required if value not in source]
+          assert not missing, f"Public CAR invite length contract missing: {missing}"
+          assert 'evidence_ref: clampResponseText(invite.evidence_ref ?? "")' not in source
+          assert "evidence_ref: clampResponseText(current.form.evidence_ref.trim())" not in source
+          PY
       - name: Typecheck and production build
         run: npm run build
       - name: Install Chromium
