@@ -76,6 +76,7 @@ class RosterCalendarSubscription(Base):
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, index=True)
+    token_encrypted = Column(Text, nullable=False)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     rotated_at = Column(DateTime(timezone=True), nullable=True)
