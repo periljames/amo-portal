@@ -5,6 +5,7 @@ import os
 import re
 import uuid
 import zipfile
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -118,7 +119,12 @@ def validate_evidence_references(
     manual_id: str,
     evidence: list[dict] | None,
 ) -> list[dict]:
-    """Validate and normalize evidence references used by controlled decisions."""
+    """Validate browser-supplied evidence against immutable DMS assets.
+
+    Browser clients may only submit ``asset_id`` references. System-generated
+    evidence such as the effective revision checksum is appended server-side by
+    controlled decision routes and therefore does not pass through here.
+    """
     items = list(evidence or [])
     if not items:
         return []
@@ -130,7 +136,7 @@ def validate_evidence_references(
                 status_code=422,
                 detail={
                     "code": "CONTROLLED_EVIDENCE_ASSET_REQUIRED",
-                    "message": "Controlled evidence entries must reference an uploaded Document Control evidence asset.",
+                    "message": "Supporting evidence must reference an uploaded Document Control evidence asset.",
                 },
             )
         asset_ids.append(asset_id)
@@ -219,7 +225,7 @@ async def upload_document_evidence_asset(
     filename = _safe_filename(artifact.filename)
     mime_type = _validate_file_signature(filename, content)
     sha256 = hashlib.sha256(content).hexdigest()
-    date_token = __import__("datetime").datetime.utcnow().strftime("%Y%m%d")
+    date_token = datetime.utcnow().strftime("%Y%m%d")
     target_dir = EVIDENCE_ROOT / tenant.slug.lower() / manual.id / date_token
     target_dir.mkdir(parents=True, exist_ok=True)
     path = (target_dir / f"{uuid.uuid4().hex}_{filename}").resolve()
