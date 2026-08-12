@@ -23,6 +23,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.database import get_db
 
 from . import models
+from .audit_report_governance_models import QualityAuditReportRevision
 from .router import (
     AUDIT_REPORT_DIR,
     _car_invite_payload,
@@ -75,7 +76,7 @@ def _safe_report_filename(audit: models.QMSAudit, file_path: Path) -> str:
     return f"{audit_ref}_issued-audit-report{suffix}"
 
 
-def _approved_report_path(value: object) -> Optional[Path]:
+def _controlled_report_path(value: object) -> Optional[Path]:
     if not value:
         return None
     report_root = AUDIT_REPORT_DIR.resolve()
@@ -85,6 +86,48 @@ def _approved_report_path(value: object) -> Optional[Path]:
     except ValueError:
         return None
     return candidate if candidate.is_file() else None
+
+
+def _issued_revision_matches_path(revision: object, file_path: Path) -> bool:
+    if str(getattr(revision, "status", "") or "").upper() != "ISSUED":
+        return False
+    file_ref = getattr(revision, "file_ref", None)
+    if not file_ref:
+        return False
+    try:
+        return Path(str(file_ref)).resolve() == file_path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _issued_report_path(db: Session, audit: models.QMSAudit | None) -> Optional[Path]:
+    """Return the compatibility report only when it is a governed ISSUED revision.
+
+    ``QMSAudit.report_file_ref`` can point at a newly uploaded first revision before
+    that revision has passed internal review, approval and issue. Public CAR invite
+    holders must never see that draft projection. A prior issued report remains
+    eligible while a later revision is being governed because the audit compatibility
+    pointer is deliberately restored to that prior issued file.
+    """
+
+    if audit is None:
+        return None
+    candidate = _controlled_report_path(getattr(audit, "report_file_ref", None))
+    if candidate is None:
+        return None
+
+    revisions = (
+        db.query(QualityAuditReportRevision)
+        .filter(
+            QualityAuditReportRevision.amo_id == audit.amo_id,
+            QualityAuditReportRevision.audit_id == audit.id,
+            QualityAuditReportRevision.status == "ISSUED",
+        )
+        .order_by(QualityAuditReportRevision.revision_no.desc())
+        .limit(20)
+        .all()
+    )
+    return candidate if any(_issued_revision_matches_path(row, candidate) for row in revisions) else None
 
 
 def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, payload: CARInviteUpdate) -> None:
@@ -117,7 +160,7 @@ def get_car_invite_with_report(
     car = _car_for_token(db, invite_token)
     payload = _car_invite_payload(car, request=request, db=db)
     audit = _audit_for_car(car)
-    report_path = _approved_report_path(getattr(audit, "report_file_ref", None) if audit is not None else None)
+    report_path = _issued_report_path(db, audit)
     payload["audit_report_download_url"] = (
         f"/quality/cars/invite/{car.invite_token}/audit-report" if report_path is not None else None
     )
@@ -153,12 +196,9 @@ def download_invited_audit_report(
 ):
     car = _car_for_token(db, invite_token)
     audit = _audit_for_car(car)
-    if audit is None or not getattr(audit, "report_file_ref", None):
-        raise HTTPException(status_code=404, detail="The issued audit report is not available for this CAR invitation.")
-
-    report_path = _approved_report_path(audit.report_file_ref)
+    report_path = _issued_report_path(db, audit)
     if report_path is None:
-        raise HTTPException(status_code=404, detail="The issued audit report file is unavailable.")
+        raise HTTPException(status_code=404, detail="The issued audit report is not available for this CAR invitation.")
 
     audit_services.log_event(
         db,
