@@ -7,13 +7,14 @@ on:
   pull_request:
     paths:
       - "backend/amodb/apps/quality/car_control_loop*.py"
-      - "backend/amodb/apps/quality/tests/test_car_control_loop.py"
+      - "backend/amodb/apps/quality/tests/test_car_control_loop*.py"
       - "backend/amodb/apps/quality/__init__.py"
       - "backend/amodb/apps/quality/schemas.py"
       - "backend/amodb/apps/quality/public_invite_extensions.py"
       - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
       - "backend/amodb/alembic/versions/quality_260811_car_loop.py"
       - "frontend/src/services/qmsCarControlLoop.ts"
+      - "frontend/src/services/qmsCarControlEvidence.ts"
       - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
       - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
       - "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx"
@@ -83,13 +84,16 @@ jobs:
             amodb/apps/quality/car_control_loop_models.py \
             amodb/apps/quality/car_control_loop_router.py \
             amodb/apps/quality/car_control_loop_guard_router.py \
+            amodb/apps/quality/car_control_loop_authority_guard.py \
+            amodb/apps/quality/car_control_loop_session_context.py \
+            amodb/apps/quality/car_control_loop_evidence_guard.py \
             amodb/apps/quality/car_control_loop_route_order.py \
             amodb/apps/quality/public_invite_extensions.py \
             amodb/apps/quality/schemas.py \
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
-      - name: Run deterministic health and closure contract
-        run: pytest -q amodb/apps/quality/tests/test_car_control_loop.py
+      - name: Run deterministic health, closure and governance contracts
+        run: pytest -q amodb/apps/quality/tests/test_car_control_loop.py amodb/apps/quality/tests/test_car_control_loop_governance.py
 
   postgres-contract:
     runs-on: ubuntu-latest
@@ -160,6 +164,7 @@ jobs:
         run: >-
           npm exec -- eslint
           src/services/qmsCarControlLoop.ts
+          src/services/qmsCarControlEvidence.ts
           src/pages/qms/QmsCarControlLoopPage.tsx
           src/pages/qms/QmsCarControlOperations.tsx
           src/pages/qms/QmsCarPerformanceReportPage.tsx
@@ -189,6 +194,19 @@ jobs:
           assert not missing, f"Public CAR invite length contract missing: {missing}"
           assert 'evidence_ref: clampResponseText(invite.evidence_ref ?? "")' not in source
           assert "evidence_ref: clampResponseText(current.form.evidence_ref.trim())" not in source
+          PY
+      - name: Verify CAR workspace uses governed evidence client
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          operations = Path("src/pages/qms/QmsCarControlOperations.tsx").read_text(encoding="utf-8")
+          service = Path("src/services/qmsCarControlEvidence.ts").read_text(encoding="utf-8")
+          assert '} from "../../services/qmsCarControlEvidence";' in operations
+          assert '/control-loop/attachments' in service
+          assert 'qmsUploadCarAttachment' in service
+          assert 'qmsDeleteCarAttachment' in service
+          assert 'qmsDownloadCarAttachmentBlob' in service
           PY
       - name: Typecheck and production build
         run: npm run build
