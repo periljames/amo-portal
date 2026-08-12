@@ -33,6 +33,13 @@ export type DocumentEvidenceReference = Pick<
   "asset_id" | "filename" | "mime_type" | "sha256" | "size_bytes" | "category"
 >;
 
+export type DocumentEvidencePackDownload = {
+  blob: Blob;
+  filename: string;
+  sha256: string | null;
+  attachmentCount: number | null;
+};
+
 async function errorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const payload = await response.clone().json();
@@ -43,6 +50,19 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
     // Preserve the operational fallback.
   }
   return `${fallback} (${response.status}).`;
+}
+
+function attachmentFilename(response: Response, fallback: string): string {
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ""));
+    } catch {
+      return encoded.replace(/^"|"$/g, "");
+    }
+  }
+  return disposition.match(/filename="([^"]+)"/i)?.[1] || fallback;
 }
 
 export async function listDocumentEvidenceAssets(
@@ -103,6 +123,38 @@ export async function downloadDocumentEvidenceAsset(asset: DocumentEvidenceAsset
   const anchor = document.createElement("a");
   anchor.href = href;
   anchor.download = asset.filename;
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
+
+export async function downloadDocumentEvidencePack(
+  tenant: string,
+  manualId: string,
+  revisionId?: string | null,
+): Promise<DocumentEvidencePackDownload> {
+  const query = new URLSearchParams();
+  if (revisionId) query.set("revision_id", revisionId);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack.zip${suffix}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(await errorMessage(response, "Document evidence pack could not be generated"));
+  const attachmentHeader = response.headers.get("X-Evidence-Pack-Attachments");
+  const parsedAttachments = attachmentHeader === null ? Number.NaN : Number.parseInt(attachmentHeader, 10);
+  return {
+    blob: await response.blob(),
+    filename: attachmentFilename(response, "document-evidence-pack.zip"),
+    sha256: response.headers.get("X-Evidence-Pack-SHA256"),
+    attachmentCount: Number.isFinite(parsedAttachments) ? parsedAttachments : null,
+  };
+}
+
+export function saveDocumentEvidencePack(result: DocumentEvidencePackDownload): void {
+  const href = URL.createObjectURL(result.blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = result.filename;
   anchor.click();
   URL.revokeObjectURL(href);
 }
