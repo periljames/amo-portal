@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
+import DocumentControlIntegrationActions from "./DocumentControlIntegrationActions";
 import DocumentControlLifecycleActions from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
@@ -140,7 +141,9 @@ export default function DocumentControlRecordActions({
       </> : null}
 
       {activeView === "relationships" ? (
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="integrations" />
+        <DocumentControlSection title="Governed module relationships" description="Search live tenant-scoped records from QMS, Training, Workforce, Planning and other portal domains, then create a server-verified relationship.">
+          <div className="dc-section__body"><DocumentControlIntegrationActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
       ) : null}
     </div>
   );
