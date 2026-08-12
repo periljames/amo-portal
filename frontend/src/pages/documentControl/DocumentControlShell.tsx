@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
+import DocumentControlJobLauncher from "./DocumentControlJobLauncher";
 import DocumentLifecycleHeaderActions from "./DocumentLifecycleHeaderActions";
 import DocumentWorkflowGuide from "./DocumentWorkflowGuide";
 import { useDocumentControlRoute } from "./documentControlRoute";
@@ -76,11 +77,6 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
   { id: "administration", label: "Administration", path: "/administration", icon: Settings, controlOnly: true },
 ];
 
-/**
- * During migration, legacy routes illuminate the primary workspace that owns
- * their job-to-be-done. This preserves deep links without preserving the old
- * navigation model.
- */
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
   if (
     pathname.includes("/drafts") ||
@@ -149,6 +145,7 @@ export default function DocumentControlShell({
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
     : null;
+  const startWork = canControl ? <DocumentControlJobLauncher basePath={basePath} /> : null;
   const workflowRefreshKey = useMemo(() => ({ actions }), [actions]);
   const workflowGuide = tenant && assistantDocumentId
     ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} refreshKey={workflowRefreshKey} />
@@ -162,7 +159,7 @@ export default function DocumentControlShell({
           <h1>{title}</h1>
           <span>{subtitle}</span>
         </div>
-        {actions || lifecycleActions ? <div className="dc-workspace__header-actions">{lifecycleActions}{actions}</div> : null}
+        {actions || lifecycleActions || startWork ? <div className="dc-workspace__header-actions">{startWork}{lifecycleActions}{actions}</div> : null}
       </header>
 
       {workflowGuide}
