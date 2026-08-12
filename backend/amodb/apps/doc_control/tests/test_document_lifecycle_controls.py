@@ -30,15 +30,36 @@ def test_document_type_choices_have_reconciliation_safe_storage_tokens() -> None
     assert STRUCTURAL_STORAGE_VALUES == set(TYPE_STORAGE_VALUE.values())
 
 
-def test_lifecycle_router_protects_controlled_history_from_hard_delete() -> None:
+def test_lifecycle_router_protects_reviewed_and_published_history_from_hard_delete() -> None:
     root = Path(__file__).resolve().parents[5]
     source = (root / "backend/amodb/apps/doc_control/workspace_document_lifecycle_router.py").read_text(encoding="utf-8")
     assert '@router.delete("/t/{tenant_slug}/documents/{manual_id}")' in source
-    assert 'protected_statuses = {"PUBLISHED", "SUPERSEDED", "ARCHIVED"}' in source
-    assert "Published controlled documents cannot be permanently deleted" in source
+    for protected_status in (
+        "DEPARTMENT_REVIEW",
+        "QUALITY_APPROVAL",
+        "REGULATOR_SIGNOFF",
+        "PUBLISHED",
+        "SUPERSEDED",
+        "ARCHIVED",
+    ):
+        assert f'"{protected_status}"' in source
+    assert "dm.DocumentWorkflowInstance" in source
+    assert "dm.DocumentWorkflowDecision" in source
+    assert "workflow_decision_count" in source
+    assert "Reviewed or published controlled documents cannot be permanently deleted" in source
     assert "DocumentationRecord.template_manual_id == manual.id" in source
     assert '"document.deleted"' in source
     assert '"revision_ids": [revision.id for revision in revisions]' in source
+
+
+def test_non_executable_reclassification_removes_stale_execution_profile() -> None:
+    root = Path(__file__).resolve().parents[5]
+    source = (root / "backend/amodb/apps/doc_control/workspace_document_lifecycle_router.py").read_text(encoding="utf-8")
+    assert "EXECUTABLE_NODE_TYPES" in source
+    assert "document_type not in EXECUTABLE_NODE_TYPES" in source
+    assert "km.DocumentationExecutionProfile" in source
+    assert "db.delete(execution_profile)" in source
+    assert "reconcile_documentation_hierarchy" in source
 
 
 def test_daily_use_shell_exposes_primary_document_lifecycle_actions() -> None:
@@ -56,11 +77,34 @@ def test_daily_use_shell_exposes_primary_document_lifecycle_actions() -> None:
     assert "Archive document" in actions
 
 
-def test_add_document_flow_separates_publication_family_from_structural_type() -> None:
+def test_add_document_flow_separates_publication_family_and_recovers_partial_intake() -> None:
     root = Path(__file__).resolve().parents[5]
     actions = (root / "frontend/src/pages/documentControl/DocumentLifecycleHeaderActions.tsx").read_text(encoding="utf-8")
     lifecycle = (root / "backend/amodb/apps/doc_control/workspace_document_lifecycle_router.py").read_text(encoding="utf-8")
     assert 'manual_type: preview.metadata.manual_type || "GENERAL"' in actions
     assert "await updateDocumentType(tenant, uploaded.manual_id, documentType)" in actions
+    assert "createdManualId" in actions
+    assert "The document was created, but its structural type could not be applied." in actions
+    assert "Open created document" in actions
+    assert "do not upload it again" in actions
     assert 'metadata["publication_family"] = previous_manual_type' in lifecycle
     assert 'metadata["document_type_override"] = document_type' in lifecycle
+
+
+def test_archive_action_is_gated_by_server_authorized_workflow_actions() -> None:
+    root = Path(__file__).resolve().parents[5]
+    actions = (root / "frontend/src/pages/documentControl/DocumentLifecycleHeaderActions.tsx").read_text(encoding="utf-8")
+    assert "allowed_actions?: string[]" in actions
+    assert 'allowed_actions?.includes("ARCHIVE")' in actions
+    assert "publishedWorkflow && canArchive" in actions
+    assert "if (!publishedWorkflow || !canArchive) return" in actions
+
+
+def test_reader_projection_keeps_published_workflow_guidance_read_only() -> None:
+    root = Path(__file__).resolve().parents[5]
+    guide = (root / "frontend/src/pages/documentControl/DocumentWorkflowGuide.tsx").read_text(encoding="utf-8")
+    assert 'detail.document.read_target.kind === "PUBLISHED"' in guide
+    assert 'title: "Read the current controlled issue"' in guide
+    assert 'label: "Read current issue"' in guide
+    assert "isPublishedReaderProjection" in guide
+    assert '? "PUBLISHED"' in guide
