@@ -5,6 +5,7 @@ import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
 import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
 import QmsCarControlLoopPage from "./QmsCarControlLoopPage";
+import QmsCarPerformanceReportPage from "./QmsCarPerformanceReportPage";
 import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
 
@@ -47,6 +48,13 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   if (pathname.includes("/quality/calendar") || pathname.includes("/qms/calendar")) {
     return <QmsPlannerLivePage />;
+  }
+
+  // CAR performance is a live management-review and QPI surface, not a generic
+  // report-export register. Keep the manual-driven closure KPI and actionable
+  // department drill-down on a specialist workspace.
+  if (/\/(?:quality|qms)\/reports\/car-performance\/?$/i.test(location.pathname)) {
+    return <QmsCarPerformanceReportPage />;
   }
 
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
