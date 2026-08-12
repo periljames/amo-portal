@@ -11,6 +11,8 @@ import DocumentControlIntegrationActions from "./DocumentControlIntegrationActio
 import DocumentControlLifecycleActions from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
+import DocumentControlRetentionActions from "./DocumentControlRetentionActions";
+import DocumentEvidencePackAction from "./DocumentEvidencePackAction";
 import { DocumentControlSection } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
 
@@ -102,9 +104,15 @@ export default function DocumentControlRecordActions({
 
   return (
     <div id="document-control-record-actions" className="dc-record-control-stack">
-      {activeView === "overview" ? (
+      {activeView === "overview" ? <>
         <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="overview" />
-      ) : null}
+        <DocumentControlSection title="Retention & disposition" description="Govern retention periods, legal holds and independently approved disposition without deleting the controlled history that proves what happened.">
+          <div className="dc-section__body"><DocumentControlRetentionActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
+        <DocumentControlSection title="Audit evidence pack" description="Generate a server-built, integrity-identifiable package of this document's controlled lifecycle, evidence and retained source files.">
+          <div className="dc-section__body"><DocumentEvidencePackAction detail={detail} tenant={tenant} /></div>
+        </DocumentControlSection>
+      </> : null}
 
       {activeView === "content" ? (
         <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="revisions" />
