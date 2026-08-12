@@ -1,0 +1,77 @@
+.dc-job-launcher {
+  width: min(980px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: auto;
+}
+
+.dc-job-launcher__groups {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+}
+
+.dc-job-launcher__groups > section {
+  display: grid;
+  gap: 10px;
+}
+
+.dc-job-launcher__groups h3,
+.dc-job-launcher__groups p {
+  margin: 0;
+}
+
+.dc-job-launcher__groups h3 {
+  font-size: 15px;
+}
+
+.dc-job-launcher__groups p {
+  margin-top: 3px;
+  color: var(--text-muted, #64748b);
+  font-size: 12px;
+}
+
+.dc-job-launcher__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.dc-job-launcher__job {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--border-color, #dbe3ec);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+
+.dc-job-launcher__job:hover,
+.dc-job-launcher__job:focus-visible {
+  border-color: var(--primary-color, #2563eb);
+  outline: none;
+}
+
+.dc-job-launcher__job span {
+  display: grid;
+  gap: 3px;
+}
+
+.dc-job-launcher__job strong {
+  font-size: 13px;
+}
+
+.dc-job-launcher__job small {
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .dc-job-launcher__grid {
+    grid-template-columns: 1fr;
+  }
+}
