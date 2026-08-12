@@ -150,6 +150,7 @@ jobs:
           src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
           src/pages/documentControl/DmsOperationalJobs.contract.test.ts
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/documentControl/DmsProductionForms.contract.test.ts
           src/pages/documentControl/reviewerDecisionEvidence.test.ts
 
       - name: Lint new operating surfaces
@@ -157,6 +158,8 @@ jobs:
         run: >-
           npm exec -- eslint
           src/pages/documentControl/DocumentControlRecordActions.tsx
+          src/pages/documentControl/DocumentControlPrimaryActions.tsx
+          src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
           src/pages/documentControl/DocumentControlChangeRequestActions.tsx
           src/pages/documentControl/DocumentControlApplicabilityActions.tsx
           src/pages/documentControl/DocumentControlExternalSourceActions.tsx
@@ -164,6 +167,7 @@ jobs:
           src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
           src/pages/documentControl/DocumentControlRetentionActions.tsx
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DmsProductionForms.contract.test.ts
           src/pages/documentControl/DocumentEvidencePicker.tsx
           src/pages/documentControl/DocumentEvidencePackAction.tsx
           src/pages/documentControl/DocumentControlAdministrationPage.tsx
