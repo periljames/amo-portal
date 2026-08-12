@@ -34,6 +34,7 @@ from .workspace_library_router import router as workspace_library_router
 from .workspace_portfolio_router import router as workspace_portfolio_router
 from .workspace_profile_router import router as workspace_profile_router
 from .workspace_record_router import router as workspace_record_router
+from .workspace_reports_export_router import router as workspace_reports_export_router
 from .workspace_reports_portfolio_router import router as workspace_reports_portfolio_router
 from .workspace_reports_register_router import router as workspace_reports_register_router
 from .workspace_reports_router import router as workspace_reports_router
@@ -61,8 +62,8 @@ router.include_router(legacy_router)
 # active-recipient publication, server-derived workflow impact, governed
 # hierarchy/reference integrity, generated record custody, permission-filtered
 # assisted search, bounded library discovery, bounded operating portfolios,
-# bounded evidence registers, governed administration, document lifecycle controls,
-# and release safeguards.
+# bounded evidence registers/exports, governed administration, document lifecycle
+# controls, and release safeguards.
 # They must precede the compatibility workspace router because Starlette resolves
 # matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
@@ -71,6 +72,7 @@ router.include_router(workspace_distribution_portfolio_router, prefix="/doc-cont
 router.include_router(workspace_compliance_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_reports_portfolio_router, prefix="/doc-control")
 router.include_router(workspace_reports_register_router, prefix="/doc-control")
+router.include_router(workspace_reports_export_router, prefix="/doc-control")
 router.include_router(workspace_administration_router, prefix="/doc-control")
 router.include_router(workspace_external_assessment_router, prefix="/doc-control")
 router.include_router(workspace_copy_incident_router, prefix="/doc-control")
