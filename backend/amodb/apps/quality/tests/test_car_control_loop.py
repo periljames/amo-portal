@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from amodb.apps.quality.car_control_loop import closure_readiness, compute_car_health
 
@@ -211,13 +211,18 @@ def test_public_invite_persistence_preserves_full_detailed_response() -> None:
     assert len(car.preventive_action) == 8000
 
 
-def test_authoritative_deadline_sync_updates_both_dates_and_reminders() -> None:
+def test_authoritative_deadline_sync_updates_dates_and_rebuilds_pending_reminders() -> None:
     from amodb.apps.quality.car_control_loop_guard_router import _synchronize_authoritative_car_deadline
 
     old_due = date(2026, 8, 20)
     approved_due = date(2026, 9, 5)
-    car = SimpleNamespace(due_date=old_due, target_closure_date=old_due)
-    db = object()
+    car = SimpleNamespace(
+        id="car-1",
+        amo_id="amo-1",
+        due_date=old_due,
+        target_closure_date=old_due,
+    )
+    db = MagicMock()
 
     with patch("amodb.apps.quality.router._seed_car_reminders") as seed_reminders:
         _synchronize_authoritative_car_deadline(
@@ -228,4 +233,5 @@ def test_authoritative_deadline_sync_updates_both_dates_and_reminders() -> None:
 
     assert car.due_date == approved_due
     assert car.target_closure_date == approved_due
+    db.query.return_value.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
     seed_reminders.assert_called_once_with(db, car)
