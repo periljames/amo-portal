@@ -13,6 +13,7 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from .workspace_evidence_router import validate_evidence_references
 from .workspace_router import (
     create_external_revision_receipt as _create_external_revision_receipt,
     create_external_source as _create_external_source,
@@ -129,6 +130,13 @@ def create_evidenced_external_revision_receipt(
     )
     if not source:
         raise HTTPException(status_code=404, detail="External document source not found")
+    normalized_evidence = validate_evidence_references(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=source.manual_id,
+        evidence=list(payload.evidence or []),
+    )
+    payload = payload.model_copy(update={"evidence": normalized_evidence})
     validate_external_receipt(source, payload)
     if payload.checksum_sha256:
         payload = payload.model_copy(
