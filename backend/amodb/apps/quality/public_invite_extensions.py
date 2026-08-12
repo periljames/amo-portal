@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
@@ -100,6 +101,18 @@ def _issued_revision_matches_path(revision: object, file_path: Path) -> bool:
         return False
 
 
+def _set_public_tenant_context(db: Session, *, amo_id: str) -> None:
+    """Set the token-resolved tenant for forced-RLS public Quality reads."""
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT set_config('app.tenant_id', :amo_id, true)"),
+        {"amo_id": str(amo_id)},
+    )
+
+
 def _issued_report_path(db: Session, audit: models.QMSAudit | None) -> Optional[Path]:
     """Return the compatibility report only when it is a governed ISSUED revision.
 
@@ -116,6 +129,7 @@ def _issued_report_path(db: Session, audit: models.QMSAudit | None) -> Optional[
     if candidate is None:
         return None
 
+    _set_public_tenant_context(db, amo_id=str(audit.amo_id))
     revisions = (
         db.query(QualityAuditReportRevision)
         .filter(
