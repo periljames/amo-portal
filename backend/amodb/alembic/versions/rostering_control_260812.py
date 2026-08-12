@@ -121,6 +121,7 @@ def upgrade() -> None:
         sa.Column("amo_id", sa.String(length=36), nullable=False),
         sa.Column("user_id", sa.String(length=36), nullable=False),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
+        sa.Column("token_encrypted", sa.Text(), nullable=False),
         sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("rotated_at", sa.DateTime(timezone=True), nullable=True),
