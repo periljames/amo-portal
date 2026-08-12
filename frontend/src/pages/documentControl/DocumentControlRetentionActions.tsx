@@ -25,6 +25,7 @@ import {
 
 
 type Props = { tenant: string; detail: DocumentDetailResponse; onChanged: () => void };
+type RetentionCapabilities = DocumentDetailResponse["capabilities"] & { approve?: boolean };
 
 function dateText(value?: string | null): string {
   if (!value) return "No disposal date set";
@@ -35,7 +36,7 @@ function dateText(value?: string | null): string {
 export default function DocumentControlRetentionActions({ tenant, detail, onChanged }: Props) {
   const [params] = useSearchParams();
   const retentionFocusId = params.get("retention") || "";
-  const canApprove = Boolean(detail.capabilities.approve);
+  const canApprove = Boolean((detail.capabilities as RetentionCapabilities).approve);
   const [items, setItems] = useState<DocumentRetentionRecord[]>([]);
   const [sources, setSources] = useState<DocumentRetentionSourceCatalogue | null>(null);
   const [approvers, setApprovers] = useState<DocumentRetentionApprover[]>([]);
