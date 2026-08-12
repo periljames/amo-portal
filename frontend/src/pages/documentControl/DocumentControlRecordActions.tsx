@@ -3,6 +3,7 @@ import { Settings2, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
+import DocumentControlApplicabilityActions from "./DocumentControlApplicabilityActions";
 import DocumentControlChangeRequestActions from "./DocumentControlChangeRequestActions";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
 import DocumentControlExternalSourceActions from "./DocumentControlExternalSourceActions";
@@ -143,7 +144,9 @@ export default function DocumentControlRecordActions({
         <DocumentControlSection title="External technical-data controls" description="Register governed OEM/authority sources, retain received revision files, establish currency and create the downstream applicability-assessment obligation.">
           <div className="dc-section__body"><DocumentControlExternalSourceActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
         </DocumentControlSection>
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="applicability" />
+        <DocumentControlSection title="Applicability controls" description="Create global inclusion/exclusion or select a live tenant record as the target. Target identifiers are server-verified before persistence.">
+          <div className="dc-section__body"><DocumentControlApplicabilityActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
       </> : null}
 
       {activeView === "relationships" ? (
