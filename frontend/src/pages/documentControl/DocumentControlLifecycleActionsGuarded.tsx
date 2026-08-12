@@ -7,6 +7,7 @@ import {
   type DocumentDetailResponse,
   type PersonSummary,
 } from "../../services/documentControl";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
 import DocumentControlControllerLifecycleActions from "./DocumentControlControllerLifecycleActions";
 import DocumentControlLifecycleActions, {
   type LifecycleView,
@@ -14,6 +15,7 @@ import DocumentControlLifecycleActions, {
 import DocumentControlReviewActions from "./DocumentControlReviewActions";
 import DocumentControlReviewerLifecycleActions from "./DocumentControlReviewerLifecycleActions";
 import DocumentControlTemporaryRevisionActions from "./DocumentControlTemporaryRevisionActions";
+import DocumentEvidencePicker from "./DocumentEvidencePicker";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
 
@@ -42,14 +44,6 @@ const DECISION_SEPARATED_VIEWS = new Set<LifecycleView>([
   "temporary-revisions",
 ]);
 
-function evidenceFrom(value: string): Array<{ asset_id: string }> {
-  return value
-    .split(/[\n,;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((asset_id) => ({ asset_id }));
-}
-
 function ErrorMessage({ message }: { message: string }) {
   return message ? <div className="dc-form__error">{message}</div> : null;
 }
@@ -76,7 +70,7 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
   const [toHolderUserId, setToHolderUserId] = useState("");
   const [toLocation, setToLocation] = useState("");
   const [reason, setReason] = useState("");
-  const [evidence, setEvidence] = useState("");
+  const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -113,7 +107,7 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
     setToHolderUserId("");
     setToLocation("");
     setReason("");
-    setEvidence("");
+    setEvidence([]);
   };
 
   const addEvent = () => {
@@ -126,12 +120,16 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
       setError("Record the new controlled location for this custody event.");
       return;
     }
+    if (["WITHDRAW", "DESTROY"].includes(eventType) && !evidence.length) {
+      setError(`${eventType === "DESTROY" ? "Destruction" : "Withdrawal"} evidence must be retained before this custody event can be recorded.`);
+      return;
+    }
     void run(() => createControlledCopyEvent(tenant, selected.id, {
       event_type: eventType,
       to_holder_user_id: toHolderUserId || null,
       to_location: toLocation.trim() || null,
       reason: reason.trim() || null,
-      evidence: evidenceFrom(evidence),
+      evidence,
     }));
   };
 
@@ -153,7 +151,17 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
       <label><span>Receiving active tenant user</span><select value={toHolderUserId} onChange={(event) => setToHolderUserId(event.target.value)}><option value="">No holder change</option>{activeUsers.map((person) => <option key={person.id} value={person.id}>{personLabel(person)}</option>)}</select></label>
       <label><span>New controlled location</span><input value={toLocation} onChange={(event) => setToLocation(event.target.value)} /></label>
       <label className="wide"><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-      <label className="wide"><span>Disposition evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} /></label>
+      <DocumentEvidencePicker
+        tenant={tenant}
+        manualId={detail.document.id}
+        revisionId={selected.revision_id}
+        category="CONTROLLED_COPY"
+        purpose={eventType ? `CONTROLLED_COPY_${eventType}` : "CONTROLLED_COPY_EVENT"}
+        value={evidence}
+        onChange={setEvidence}
+        label="Custody / disposition evidence"
+        help="Attach transfer, return, withdrawal or destruction evidence. Destruction and withdrawal require at least one retained file."
+      />
       <ErrorMessage message={error || userDirectoryError} />
       <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || !eventType || !activeUsers.length} onClick={addEvent}><Archive size={14} /> Record custody event</button></div>
     </div> : <DocumentControlEmpty title="No numbered copy" message="Issue a copy only from the effective published revision and assign it to an active tenant user." />}
