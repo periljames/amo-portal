@@ -23,8 +23,12 @@ def test_guarded_controlled_copy_mutations_are_authoritative() -> None:
     register_routes = _post_routes(REGISTER_PATH)
     event_routes = _post_routes(EVENT_PATH)
 
-    assert len(register_routes) == 1, [route.endpoint.__name__ for route in register_routes]
-    assert register_routes[0].endpoint.__name__ == "register_controlled_copy"
+    register_names = [route.endpoint.__name__ for route in register_routes]
+    assert register_names[:2] == [
+        "create_controlled_copy_with_due_policy",
+        "register_controlled_copy",
+    ]
+    assert "create_controlled_copy" not in register_names
 
     assert len(event_routes) == 1, [route.endpoint.__name__ for route in event_routes]
     assert event_routes[0].endpoint.__name__ == "create_guarded_copy_event"

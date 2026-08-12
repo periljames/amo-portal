@@ -9,8 +9,10 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
-from . import workspace_schemas as schemas
-from .workspace_copy_router import register_controlled_copy as _create_copy
+from .workspace_copy_router import (
+    ControlledCopyRegisterCreate,
+    register_controlled_copy as _create_copy,
+)
 from .workspace_service import require_control_user, resolve_tenant, utcnow
 
 
@@ -36,7 +38,7 @@ def _default_due_days(tenant) -> int:
 )
 def create_controlled_copy_with_due_policy(
     tenant_slug: str,
-    payload: schemas.ControlledCopyCreate,
+    payload: ControlledCopyRegisterCreate,
     request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -45,10 +47,12 @@ def create_controlled_copy_with_due_policy(
 
     Controllers may supply an explicit due date. When they do not, the server
     derives it from the tenant's governed Document Control physical-copy policy.
+    Shelf registration remains valid without fabricating a custodian; custody is
+    established later through the controlled circulation workflow.
     """
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
-    if not payload.due_back_at:
+    if not payload.due_back_at and payload.holder_user_id:
         payload = payload.model_copy(
             update={"due_back_at": utcnow() + timedelta(days=_default_due_days(tenant))}
         )
