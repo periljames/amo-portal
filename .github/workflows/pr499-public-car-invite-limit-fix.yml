@@ -1,0 +1,123 @@
+name: PR499 Public CAR Invite Limit Fix
+
+on:
+  push:
+    branches:
+      - agent/qms-car-control-loop
+    paths:
+      - .github/workflows/pr499-public-car-invite-limit-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/qms-car-control-loop
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply focused evidence-reference limit fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/pages/PublicCarInvitePage.tsx")
+          source = path.read_text(encoding="utf-8")
+
+          if "MAX_EVIDENCE_REFERENCE_CHARS" not in source:
+              replacements = [
+                  (
+                      'const MAX_RESPONSE_CHARS = 8000;\n',
+                      'const MAX_RESPONSE_CHARS = 8000;\nconst MAX_EVIDENCE_REFERENCE_CHARS = 500;\n',
+                  ),
+                  (
+                      '  toolbarActions?: React.ReactNode;\n};',
+                      '  toolbarActions?: React.ReactNode;\n  maxChars?: number;\n};',
+                  ),
+                  (
+                      'const clampResponseText = (value: string): string => value.slice(0, MAX_RESPONSE_CHARS);\n',
+                      'const clampResponseText = (value: string): string => value.slice(0, MAX_RESPONSE_CHARS);\nconst clampEvidenceReference = (value: string): string => value.slice(0, MAX_EVIDENCE_REFERENCE_CHARS);\n',
+                  ),
+                  (
+                      '  evidence_ref: clampResponseText(invite.evidence_ref ?? ""),',
+                      '  evidence_ref: clampEvidenceReference(invite.evidence_ref ?? ""),',
+                  ),
+                  (
+                      'const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value, required, disabled, placeholder, onChange, note, toolbarActions }) => {\n  const ref = useRef<HTMLTextAreaElement | null>(null);\n  const remaining = MAX_RESPONSE_CHARS - value.length;',
+                      'const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value, required, disabled, placeholder, onChange, note, toolbarActions, maxChars = MAX_RESPONSE_CHARS }) => {\n  const ref = useRef<HTMLTextAreaElement | null>(null);\n  const remaining = maxChars - value.length;',
+                  ),
+                  (
+                      '    const { value: next, cursor } = insertAtSelection(value, prefix, start, end);\n    onChange(next);\n    window.setTimeout(() => {\n      textarea?.focus();\n      textarea?.setSelectionRange(cursor, cursor);\n    }, 0);',
+                      '    const { value: next, cursor } = insertAtSelection(value, prefix, start, end);\n    const bounded = next.slice(0, maxChars);\n    onChange(bounded);\n    window.setTimeout(() => {\n      textarea?.focus();\n      const boundedCursor = Math.min(cursor, bounded.length);\n      textarea?.setSelectionRange(boundedCursor, boundedCursor);\n    }, 0);',
+                  ),
+                  (
+                      '    const { value: next, cursor } = insertAtSelection(value, `\\n${prefix}`, start, end);\n    onChange(next);\n    window.setTimeout(() => textarea.setSelectionRange(cursor, cursor), 0);',
+                      '    const { value: next, cursor } = insertAtSelection(value, `\\n${prefix}`, start, end);\n    const bounded = next.slice(0, maxChars);\n    onChange(bounded);\n    window.setTimeout(() => {\n      const boundedCursor = Math.min(cursor, bounded.length);\n      textarea.setSelectionRange(boundedCursor, boundedCursor);\n    }, 0);',
+                  ),
+                  (
+                      '          maxLength={MAX_RESPONSE_CHARS}\n          onChange={(event) => onChange(clampResponseText(event.target.value))}',
+                      '          maxLength={maxChars}\n          onChange={(event) => onChange(event.target.value.slice(0, maxChars))}',
+                  ),
+                  (
+                      '    const nextValue = (["containment_action", "root_cause", "corrective_action", "preventive_action", "evidence_ref"] as string[]).includes(field)\n      ? clampResponseText(value)\n      : value;',
+                      '    const nextValue = field === "evidence_ref"\n      ? clampEvidenceReference(value)\n      : (["containment_action", "root_cause", "corrective_action", "preventive_action"] as string[]).includes(field)\n        ? clampResponseText(value)\n        : value;',
+                  ),
+                  (
+                      '        evidence_ref: clampResponseText(current.form.evidence_ref.trim()),',
+                      '        evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim()),',
+                  ),
+                  (
+                      '                                      value={entry.form.evidence_ref}\n                                      disabled={locked}',
+                      '                                      value={entry.form.evidence_ref}\n                                      maxChars={MAX_EVIDENCE_REFERENCE_CHARS}\n                                      disabled={locked}',
+                  ),
+              ]
+
+              for old, new in replacements:
+                  count = source.count(old)
+                  if count != 1:
+                      raise SystemExit(f"Expected exactly one match, found {count}: {old[:100]!r}")
+                  source = source.replace(old, new, 1)
+
+              required = [
+                  "const MAX_EVIDENCE_REFERENCE_CHARS = 500;",
+                  "evidence_ref: clampEvidenceReference(invite.evidence_ref ?? \"\")",
+                  "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())",
+                  "maxChars={MAX_EVIDENCE_REFERENCE_CHARS}",
+                  "maxLength={maxChars}",
+              ]
+              missing = [value for value in required if value not in source]
+              if missing:
+                  raise SystemExit(f"Focused Public CAR invite contract fix incomplete: {missing}")
+              path.write_text(source, encoding="utf-8")
+          else:
+              print("Public CAR invite evidence-reference limit is already present; leaving page unchanged.")
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Lint focused page
+        working-directory: frontend
+        run: npm exec -- eslint src/pages/PublicCarInvitePage.tsx
+      - name: Typecheck and production build
+        working-directory: frontend
+        run: npm run build
+      - name: Commit focused fix and remove one-shot workflow
+        run: |
+          rm -f .github/workflows/pr499-public-car-invite-limit-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/PublicCarInvitePage.tsx .github/workflows/pr499-public-car-invite-limit-fix.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "fix(quality): align public CAR evidence reference limit"
+          git push origin HEAD:agent/qms-car-control-loop
