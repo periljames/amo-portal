@@ -231,10 +231,12 @@ export default function DocumentWorkflowGuide({
   tenant,
   basePath,
   manualId,
+  refreshKey = 0,
 }: {
   tenant: string;
   basePath: string;
   manualId: string;
+  refreshKey?: number;
 }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
@@ -247,7 +249,7 @@ export default function DocumentWorkflowGuide({
       .then((result) => { if (active) setDetail(result); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Workflow guidance could not be loaded."); });
     return () => { active = false; };
-  }, [manualId, tenant]);
+  }, [manualId, refreshKey, tenant]);
 
   const primary = useMemo(() => detail ? nextGuide(detail) : null, [detail]);
   const workflow: DocumentWorkflow | undefined = detail?.workflows[0];
