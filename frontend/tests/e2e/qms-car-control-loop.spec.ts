@@ -225,8 +225,13 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
 
 test("CAR staged control loop exposes accountability, deadlines, blockers and governed events", async ({ page }) => {
   const state = await prepare(page);
+  page.on("pageerror", (error) => console.log(`[car-control-loop] pageerror=${error.message}`));
+  page.on("requestfailed", (request) => console.log(`[car-control-loop] requestfailed=${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`));
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/maintenance/tenant-a/quality/cars?control=${CAR_ID}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(750);
+  console.log(`[car-control-loop] url=${page.url()}`);
+  console.log(`[car-control-loop] body=${(await page.locator("body").innerText()).slice(0, 4000)}`);
 
   await expect(page.getByRole("heading", { name: /QMS-CAR-026/ })).toBeVisible();
   await expect(page.getByText("At Risk · 55/100")).toBeVisible();
