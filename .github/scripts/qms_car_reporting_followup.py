@@ -24,4 +24,10 @@ replace_once(
     '  const allCars = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);\n',
 )
 
+replace_once(
+    "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx",
+    '''  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);\n  const generatedAt = useMemo(\n    () => new Date(reportQuery.dataUpdatedAt || Date.now()),\n    [reportQuery.dataUpdatedAt],\n  );\n''',
+    '''  const generatedAt = useMemo(\n    () => new Date(reportQuery.dataUpdatedAt || 0),\n    [reportQuery.dataUpdatedAt],\n  );\n  const today = generatedAt.toISOString().slice(0, 10);\n''',
+)
+
 print("QMS CAR reporting browser follow-up applied")
