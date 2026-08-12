@@ -12,7 +12,12 @@ from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
 from . import code_registry, common, models, services
-from .code_registry_models import RosterCalendarMode, RosterShiftTemplatePolicy
+from .code_registry_models import (
+    RosterCalendarMode,
+    RosterCodeVerificationStatus,
+    RosterDutySemantic,
+    RosterShiftTemplatePolicy,
+)
 
 router = APIRouter(prefix="/rostering", tags=["rostering-code-registry"])
 
@@ -22,6 +27,8 @@ class ShiftPolicyRead(BaseModel):
 
     unpaid_break_minutes: int = 0
     calendar_mode: RosterCalendarMode = RosterCalendarMode.TIMED
+    duty_semantic: RosterDutySemantic = RosterDutySemantic.DUTY
+    verification_status: RosterCodeVerificationStatus = RosterCodeVerificationStatus.UNRESOLVED
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     source_reference: Optional[str] = None
@@ -30,6 +37,8 @@ class ShiftPolicyRead(BaseModel):
 class ShiftPolicyUpdate(BaseModel):
     unpaid_break_minutes: Optional[int] = Field(default=None, ge=0, le=24 * 60)
     calendar_mode: Optional[RosterCalendarMode] = None
+    duty_semantic: Optional[RosterDutySemantic] = None
+    verification_status: Optional[RosterCodeVerificationStatus] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     source_reference: Optional[str] = Field(default=None, max_length=4000)
@@ -86,9 +95,26 @@ def _template_or_404(db: Session, *, amo_id: str, template_id: str) -> models.Sh
     return row
 
 
+def _default_semantic(row: models.ShiftTemplate) -> RosterDutySemantic:
+    if row.kind == models.ShiftTemplateKind.STANDBY:
+        return RosterDutySemantic.STANDBY
+    if row.kind == models.ShiftTemplateKind.TRAINING:
+        return RosterDutySemantic.TRAINING
+    if row.kind == models.ShiftTemplateKind.OFF:
+        return RosterDutySemantic.OFF
+    if row.kind == models.ShiftTemplateKind.LEAVE:
+        return RosterDutySemantic.LEAVE
+    return RosterDutySemantic.DUTY
+
+
 def _default_policy(row: models.ShiftTemplate) -> ShiftPolicyRead:
     mode = RosterCalendarMode.ALL_DAY if row.kind in {models.ShiftTemplateKind.OFF, models.ShiftTemplateKind.LEAVE} else RosterCalendarMode.TIMED
-    return ShiftPolicyRead(unpaid_break_minutes=0, calendar_mode=mode)
+    return ShiftPolicyRead(
+        unpaid_break_minutes=0,
+        calendar_mode=mode,
+        duty_semantic=_default_semantic(row),
+        verification_status=RosterCodeVerificationStatus.UNRESOLVED,
+    )
 
 
 @router.get("/shift-templates/code-registry", response_model=list[RosterCodeRegistryEntry])
@@ -171,13 +197,16 @@ def update_shift_policy(
 ):
     _require_manage(db, current_user)
     amo_id = _amo(current_user)
-    _template_or_404(db, amo_id=amo_id, template_id=template_id)
+    template = _template_or_404(db, amo_id=amo_id, template_id=template_id)
     row = code_registry.policy_for_template(db, amo_id=amo_id, template_id=template_id)
     before = None
     if row is None:
         row = RosterShiftTemplatePolicy(
             amo_id=amo_id,
             shift_template_id=template_id,
+            calendar_mode=RosterCalendarMode.ALL_DAY if template.kind in {models.ShiftTemplateKind.OFF, models.ShiftTemplateKind.LEAVE} else RosterCalendarMode.TIMED,
+            duty_semantic=_default_semantic(template),
+            verification_status=RosterCodeVerificationStatus.UNRESOLVED,
             created_by_user_id=current_user.id,
             updated_by_user_id=current_user.id,
         )
@@ -186,6 +215,8 @@ def update_shift_policy(
         before = {
             "unpaid_break_minutes": row.unpaid_break_minutes,
             "calendar_mode": str(getattr(row.calendar_mode, "value", row.calendar_mode)),
+            "duty_semantic": str(getattr(row.duty_semantic, "value", row.duty_semantic)),
+            "verification_status": str(getattr(row.verification_status, "value", row.verification_status)),
             "effective_from": row.effective_from.isoformat() if row.effective_from else None,
             "effective_to": row.effective_to.isoformat() if row.effective_to else None,
             "source_reference": row.source_reference,
@@ -210,6 +241,8 @@ def update_shift_policy(
             "shift_template_id": template_id,
             "unpaid_break_minutes": row.unpaid_break_minutes,
             "calendar_mode": str(getattr(row.calendar_mode, "value", row.calendar_mode)),
+            "duty_semantic": str(getattr(row.duty_semantic, "value", row.duty_semantic)),
+            "verification_status": str(getattr(row.verification_status, "value", row.verification_status)),
             "effective_from": row.effective_from.isoformat() if row.effective_from else None,
             "effective_to": row.effective_to.isoformat() if row.effective_to else None,
             "source_reference": row.source_reference,
