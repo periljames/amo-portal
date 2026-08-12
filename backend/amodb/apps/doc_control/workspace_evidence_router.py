@@ -17,13 +17,15 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
+from . import domain_models as dm
 from . import evidence_models as em
+from .workspace_responsibility_access import workflow_actions_for_user
 from .workspace_service import (
     audit,
     get_manual,
     get_profile,
     get_revision,
-    require_control_user,
+    is_control_user,
     require_manual_access,
     resolve_tenant,
 )
@@ -55,6 +57,7 @@ MIME_BY_EXTENSION = {
     ".csv": "text/csv",
     ".eml": "message/rfc822",
 }
+_REVIEW_UPLOAD_ACTIONS = {"APPROVE_TECHNICAL", "APPROVE_QUALITY", "APPROVE_ACCOUNTABLE_MANAGER", "REQUEST_CORRECTIONS"}
 
 
 def _safe_filename(value: str | None) -> str:
@@ -173,6 +176,36 @@ def validate_evidence_references(
     ]
 
 
+def _require_evidence_upload_permission(
+    db: Session,
+    *,
+    tenant_id: str,
+    manual_id: str,
+    revision_id: str | None,
+    category: str,
+    user: account_models.User,
+) -> None:
+    if is_control_user(user):
+        return
+    if category != "REVIEW" or not revision_id:
+        raise HTTPException(status_code=403, detail="Document Control privileges are required to upload this evidence category")
+    workflow = (
+        db.query(dm.DocumentWorkflowInstance)
+        .filter(
+            dm.DocumentWorkflowInstance.tenant_id == tenant_id,
+            dm.DocumentWorkflowInstance.manual_id == manual_id,
+            dm.DocumentWorkflowInstance.revision_id == revision_id,
+        )
+        .order_by(dm.DocumentWorkflowInstance.updated_at.desc(), dm.DocumentWorkflowInstance.id.desc())
+        .first()
+    )
+    if not workflow:
+        raise HTTPException(status_code=403, detail="No active governed review assignment permits evidence upload for this revision")
+    allowed = set(workflow_actions_for_user(db, workflow=workflow, user=user))
+    if not allowed.intersection(_REVIEW_UPLOAD_ACTIONS):
+        raise HTTPException(status_code=403, detail="The current user is not assigned to this document review decision")
+
+
 @router.get("/t/{tenant_slug}/documents/{manual_id}/evidence-assets")
 def list_document_evidence_assets(
     tenant_slug: str,
@@ -208,7 +241,6 @@ async def upload_document_evidence_asset(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     manual = get_manual(db, tenant, manual_id)
     require_manual_access(current_user, get_profile(db, tenant, manual.id))
@@ -217,6 +249,14 @@ async def upload_document_evidence_asset(
     normalized_category = str(category or "GENERAL").strip().upper()
     if normalized_category not in ALLOWED_CATEGORIES:
         raise HTTPException(status_code=422, detail="Unsupported Document Control evidence category")
+    _require_evidence_upload_permission(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=manual.id,
+        revision_id=revision_id,
+        category=normalized_category,
+        user=current_user,
+    )
     content = await artifact.read(MAX_EVIDENCE_BYTES + 1)
     if not content:
         raise HTTPException(status_code=422, detail="Evidence file is empty")
