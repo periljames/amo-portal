@@ -10,6 +10,7 @@ name: Document Control Lifecycle CI
       - "backend/amodb/scripts/seed_document_governance_e2e.py"
       - "frontend/src/pages/documentControl/**"
       - "frontend/src/services/documentLifecycle.ts"
+      - "frontend/src/services/documentControlHome.ts"
       - "frontend/src/services/publications.ts"
       - "frontend/tests/e2e/document-lifecycle-controls.spec.ts"
       - ".github/workflows/document-control-lifecycle-ci.yml"
@@ -24,7 +25,7 @@ concurrency:
 
 jobs:
   authenticated-lifecycle:
-    name: Add, classify, reclassify and safely delete controlled documents
+    name: Add, classify, guide and execute controlled document work
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
@@ -74,6 +75,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Run attributable My Work contract
+        working-directory: backend
+        run: pytest -q amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade head
@@ -102,10 +106,14 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --prefer-offline --no-audit --fund=false
-      - name: Run guided workflow contract
+      - name: Run operational workflow contracts
         working-directory: frontend
-        run: npm exec -- vitest run src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
-      - name: Lint lifecycle acceptance and surfaces
+        run: >-
+          npm exec -- vitest run
+          src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+          src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
+      - name: Lint lifecycle acceptance and operating surfaces
         working-directory: frontend
         run: >-
           npm exec -- eslint
@@ -113,7 +121,17 @@ jobs:
           src/pages/documentControl/DocumentControlShell.tsx
           src/pages/documentControl/DocumentWorkflowGuide.tsx
           src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+          src/pages/documentControl/DocumentControlJobLauncher.tsx
+          src/pages/documentControl/documentControlJobs.ts
+          src/pages/documentControl/DocumentLibraryHubPage.tsx
+          src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DocumentControlReviewActions.tsx
+          src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
+          src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
+          src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/services/documentLifecycle.ts
+          src/services/documentControlHome.ts
           tests/e2e/document-lifecycle-controls.spec.ts
       - name: Build production frontend
         working-directory: frontend
