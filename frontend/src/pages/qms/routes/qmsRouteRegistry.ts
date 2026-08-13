@@ -208,7 +208,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     segment: "management-review",
     label: "Management Review",
     navigationLabel: "Management Review",
-    permission: "qms.review.view",
+    permission: "qms.management_review.view",
     section: "reporting",
     defaultView: "dashboard",
     validViews: ["dashboard", "meetings", "actions", "open-actions", "closed-actions"],

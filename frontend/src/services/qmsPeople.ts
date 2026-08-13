@@ -69,6 +69,45 @@ export type QmsEligibility = {
   active_privilege?: Record<string, unknown> | null;
 };
 
+export type QmsAuditorAssignmentRole = "LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR";
+
+export type QmsAuditorAssignmentAssessment = {
+  rule_id: string;
+  privilege_code: string;
+  privilege_type: string;
+  hard_gates: Record<string, boolean>;
+  active_privilege?: {
+    id: string;
+    scope_key?: string | null;
+    effective_from?: string | null;
+    expires_on?: string | null;
+  } | null;
+  training: {
+    required: string[];
+    satisfied: string[];
+    missing: string[];
+    records: Array<Record<string, unknown>>;
+    passed: boolean;
+  };
+  capacity: Record<string, unknown> & { passed?: boolean };
+  independence: Record<string, unknown> & { passed?: boolean; pending?: boolean; message?: string };
+  eligible: boolean;
+};
+
+export type QmsAuditorEligibilityPreflight = {
+  eligible: boolean;
+  governance_configured: boolean;
+  mode: "GOVERNED" | "LEGACY_COMPATIBILITY" | string;
+  assignment_role: QmsAuditorAssignmentRole;
+  user_id: string;
+  reason?: string;
+  rule_id?: string;
+  privilege_code?: string;
+  independence_pending?: boolean;
+  assessment?: QmsAuditorAssignmentAssessment;
+  assessments: QmsAuditorAssignmentAssessment[];
+};
+
 function jsonOptions(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
@@ -143,6 +182,25 @@ export function getQmsEligibility(
   if (input.contextType) params.set("context_type", input.contextType);
   if (input.contextId) params.set("context_id", input.contextId);
   return apiRequest<QmsEligibility>(qmsPath(amoCode, `/people/eligibility?${params.toString()}`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+}
+
+export function preflightQmsAuditorAssignment(
+  amoCode: string,
+  payload: {
+    user_id: string;
+    assignment_role: QmsAuditorAssignmentRole;
+    assignment_date: string;
+    assignment_scope_key: string;
+    context_type?: "AUDIT" | "AUDIT_SCHEDULE" | "PROGRAMME_ITEM" | "ASSURANCE_CASE" | "MISSION" | "OTHER";
+    context_id?: string;
+    enforce_independence?: boolean;
+    exclude_schedule_id?: string;
+  },
+): Promise<QmsAuditorEligibilityPreflight> {
+  return apiRequest<QmsAuditorEligibilityPreflight>(
+    qmsPath(amoCode, "/integrations/calendar/auditor-eligibility"),
+    jsonOptions("POST", payload),
+  );
 }
 
 export function declareQmsIndependence(

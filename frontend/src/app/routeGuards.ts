@@ -1,6 +1,10 @@
 // src/app/routeGuards.ts
 import { getCachedUser, type PortalUser } from "../services/auth";
 
+// Keep this read surface aligned with backend/apps/quality/assurance_permissions.py.
+// QUALITY_INSPECTOR and AUDITOR receive these additional view-only permissions
+// so the Control Room and its supporting governed workspaces are inspectable
+// without granting their corresponding mutation permissions.
 const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.dashboard.view",
   "qms.inbox.view",
@@ -13,8 +17,15 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.document.view",
   "qms.evidence.view",
   "qms.evidence.download",
+  "qms.management_review.view",
+  "qms.supplier.view",
+  "qms.equipment.view",
+  "qms.risk.view",
+  "qms.change.view",
+  "qms.training.view",
 ]);
 
+// Keep this set aligned with backend/apps/quality/tenant_security.py VIEW_ONLY.
 const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.dashboard.view",
   "qms.inbox.view",
@@ -28,9 +39,10 @@ const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.supplier.view",
   "qms.equipment.view",
   "qms.external.view",
-  "qms.review.view",
+  "qms.management_review.view",
   "qms.reports.view",
   "qms.evidence.view",
+  "qms.evidence.download",
   "qms.training.view",
 ]);
 
