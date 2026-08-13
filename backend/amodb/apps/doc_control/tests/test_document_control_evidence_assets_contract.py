@@ -71,6 +71,18 @@ def test_assigned_reviewer_upload_is_narrower_than_controller_upload() -> None:
     assert '_REVIEW_UPLOAD_ACTIONS' in source
 
 
+def test_retained_evidence_read_scope_excludes_ordinary_document_readers() -> None:
+    source = _text(APP / "workspace_evidence_router.py")
+    picker = _text(FRONTEND / "DocumentEvidencePicker.tsx")
+    assert '_require_evidence_read_permission' in source
+    assert 'DOCUMENT_EVIDENCE_LIFECYCLE_ACCESS_REQUIRED' in source
+    assert 'DOCUMENT_EVIDENCE_REVISION_SCOPE_REQUIRED' in source
+    assert 'has_confirmed_responsibility' in source
+    assert '_REVIEW_READ_RESPONSIBILITIES' in source
+    assert 'em.DocumentEvidenceAsset.category == "REVIEW"' in source
+    assert 'listDocumentEvidenceAssets(tenant, manualId, revisionId)' in picker
+
+
 def test_workflow_authority_copy_and_external_routes_normalize_evidence_server_side() -> None:
     workflow = _text(APP / "workspace_workflow_review_router.py")
     authority = _text(APP / "workspace_authority_router.py")
@@ -79,6 +91,8 @@ def test_workflow_authority_copy_and_external_routes_normalize_evidence_server_s
     assert 'validate_evidence_references' in workflow
     assert '_server_revision_evidence' in workflow
     assert 'CONTROLLED_REVISION_SOURCE' in workflow
+    assert 'CONTROLLED_LEGACY_REVISION_RECORD' in workflow
+    assert 'allow_record_fallback=payload.action == "ARCHIVE"' in workflow
     assert 'WAIVER_EVIDENCE_REQUIRED' in workflow
     assert 'validate_evidence_references' in authority
     assert '_merge_asset_evidence' in authority
