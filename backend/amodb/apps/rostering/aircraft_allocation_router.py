@@ -62,7 +62,42 @@ def _assignment_or_404(db: Session, *, amo_id: str, assignment_id: str) -> model
     return row
 
 
+def _can_edit(db: Session, user: account_models.User, assignment: models.RosterAssignment) -> bool:
+    return workforce_permissions.has_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_EDIT,
+        department_id=assignment.department_id,
+        base_station_id=assignment.base_station_id,
+    )
+
+
 def _require_view(db: Session, user: account_models.User, assignment: models.RosterAssignment) -> None:
+    if workforce_permissions.has_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
+        department_id=assignment.department_id,
+        base_station_id=assignment.base_station_id,
+    ):
+        return
+    if workforce_permissions.has_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT,
+        department_id=assignment.department_id,
+        base_station_id=assignment.base_station_id,
+    ):
+        return
+    if str(assignment.user_id) == str(user.id):
+        workforce_permissions.require_permission(
+            db,
+            user=user,
+            permission=workforce_permissions.PermissionCode.ROSTER_VIEW_OWN,
+            department_id=assignment.department_id,
+            base_station_id=assignment.base_station_id,
+        )
+        return
     workforce_permissions.require_permission(
         db,
         user=user,
@@ -153,7 +188,11 @@ def list_aircraft_allocations(
         serial: _aircraft_or_404(db, amo_id=amo_id, serial_number=serial, active_only=False)
         for serial in sorted({row.aircraft_serial_number for row in rows})
     }
-    can_delete = bool(assignment.version and assignment.version.status == models.RosterVersionStatus.DRAFT)
+    can_delete = bool(
+        assignment.version
+        and assignment.version.status == models.RosterVersionStatus.DRAFT
+        and _can_edit(db, current_user, assignment)
+    )
     return [_serialize(row, aircraft_by_serial[row.aircraft_serial_number], can_delete=can_delete) for row in rows]
 
 
