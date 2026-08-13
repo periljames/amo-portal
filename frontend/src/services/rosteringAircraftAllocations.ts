@@ -2,7 +2,7 @@ import { apiJson, jsonBody } from "./typedApi";
 
 export type RosterAircraftAllocationType =
   | "FLIGHT_ENGINEERING"
-  | "MAINTENANCE_SUPPORT"
+  | "LINE_SUPPORT"
   | "OTHER";
 
 export type RosterAircraftAllocationRead = {
