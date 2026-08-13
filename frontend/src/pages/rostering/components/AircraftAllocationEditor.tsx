@@ -18,7 +18,7 @@ type Props = {
 
 const ALLOCATION_TYPES: Array<{ value: RosterAircraftAllocationType; label: string }> = [
   { value: "FLIGHT_ENGINEERING", label: "Flight engineering" },
-  { value: "MAINTENANCE_SUPPORT", label: "Maintenance support" },
+  { value: "LINE_SUPPORT", label: "Line support" },
   { value: "OTHER", label: "Other" },
 ];
 
