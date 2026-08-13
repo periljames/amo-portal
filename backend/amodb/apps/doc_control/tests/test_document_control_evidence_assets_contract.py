@@ -35,7 +35,7 @@ def test_evidence_model_and_migration_are_document_and_tenant_scoped() -> None:
         "uploaded_by_user_id",
     ):
         assert token in model
-    assert 'down_revision = "docctl_ai_audit_260809"' in migration
+    assert 'down_revision = "quality_260811_car_loop"' in migration
     assert '"document_evidence_assets"' in migration
     assert 'ondelete="CASCADE"' in migration
     assert 'ondelete="SET NULL"' in migration
