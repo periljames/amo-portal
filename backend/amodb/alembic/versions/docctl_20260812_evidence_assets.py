@@ -1,7 +1,7 @@
 """Add immutable governed Document Control evidence assets.
 
 Revision ID: docctl_20260812_evidence_assets
-Revises: docctl_ai_audit_260809
+Revises: quality_260811_car_loop
 Create Date: 2026-08-12
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "docctl_20260812_evidence_assets"
-down_revision = "docctl_ai_audit_260809"
+down_revision = "quality_260811_car_loop"
 branch_labels = None
 depends_on = None
 
