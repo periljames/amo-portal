@@ -19,7 +19,8 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import evidence_models as em
-from .workspace_responsibility_access import workflow_actions_for_user
+from .workspace_decision_policy import is_decision_approver
+from .workspace_responsibility_access import has_confirmed_responsibility, workflow_actions_for_user
 from .workspace_service import (
     audit,
     get_manual,
@@ -58,6 +59,7 @@ MIME_BY_EXTENSION = {
     ".eml": "message/rfc822",
 }
 _REVIEW_UPLOAD_ACTIONS = {"APPROVE_TECHNICAL", "APPROVE_QUALITY", "APPROVE_ACCOUNTABLE_MANAGER", "REQUEST_CORRECTIONS"}
+_REVIEW_READ_RESPONSIBILITIES = ("TECHNICAL_REVIEWER", "QUALITY_REVIEWER", "APPROVER")
 
 
 def _safe_filename(value: str | None) -> str:
@@ -176,6 +178,75 @@ def validate_evidence_references(
     ]
 
 
+def _workflow_for_revision(
+    db: Session,
+    *,
+    tenant_id: str,
+    manual_id: str,
+    revision_id: str,
+) -> dm.DocumentWorkflowInstance | None:
+    return (
+        db.query(dm.DocumentWorkflowInstance)
+        .filter(
+            dm.DocumentWorkflowInstance.tenant_id == tenant_id,
+            dm.DocumentWorkflowInstance.manual_id == manual_id,
+            dm.DocumentWorkflowInstance.revision_id == revision_id,
+        )
+        .order_by(dm.DocumentWorkflowInstance.updated_at.desc(), dm.DocumentWorkflowInstance.id.desc())
+        .first()
+    )
+
+
+def _require_evidence_read_permission(
+    db: Session,
+    *,
+    tenant_id: str,
+    manual_id: str,
+    revision_id: str | None,
+    category: str,
+    user: account_models.User,
+) -> None:
+    """Keep internal lifecycle evidence separate from ordinary published reading.
+
+    Controllers retain document-wide evidence access. Non-controller lifecycle
+    participants may read only REVIEW evidence for the exact revision to which a
+    confirmed review/approval responsibility applies. Publication readability by
+    itself never grants access to retained internal approval or authority files.
+    """
+    if is_control_user(user):
+        return
+    if category != "REVIEW" or not revision_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "DOCUMENT_EVIDENCE_LIFECYCLE_ACCESS_REQUIRED",
+                "message": "Retained internal evidence is limited to Document Control and assigned lifecycle participants.",
+            },
+        )
+    workflow = _workflow_for_revision(
+        db,
+        tenant_id=tenant_id,
+        manual_id=manual_id,
+        revision_id=revision_id,
+    )
+    if not workflow:
+        raise HTTPException(status_code=403, detail="No governed lifecycle assignment permits access to this retained evidence")
+    if is_decision_approver(user) or has_confirmed_responsibility(
+        db,
+        workflow=workflow,
+        user=user,
+        responsibility_types=_REVIEW_READ_RESPONSIBILITIES,
+    ):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "DOCUMENT_EVIDENCE_LIFECYCLE_ACCESS_REQUIRED",
+            "message": "The current user is not assigned to the governed review lifecycle for this revision.",
+        },
+    )
+
+
 def _require_evidence_upload_permission(
     db: Session,
     *,
@@ -189,15 +260,11 @@ def _require_evidence_upload_permission(
         return
     if category != "REVIEW" or not revision_id:
         raise HTTPException(status_code=403, detail="Document Control privileges are required to upload this evidence category")
-    workflow = (
-        db.query(dm.DocumentWorkflowInstance)
-        .filter(
-            dm.DocumentWorkflowInstance.tenant_id == tenant_id,
-            dm.DocumentWorkflowInstance.manual_id == manual_id,
-            dm.DocumentWorkflowInstance.revision_id == revision_id,
-        )
-        .order_by(dm.DocumentWorkflowInstance.updated_at.desc(), dm.DocumentWorkflowInstance.id.desc())
-        .first()
+    workflow = _workflow_for_revision(
+        db,
+        tenant_id=tenant_id,
+        manual_id=manual_id,
+        revision_id=revision_id,
     )
     if not workflow:
         raise HTTPException(status_code=403, detail="No active governed review assignment permits evidence upload for this revision")
@@ -223,6 +290,28 @@ def list_document_evidence_assets(
     )
     if revision_id:
         get_revision(db, manual, revision_id)
+    if not is_control_user(current_user):
+        if not revision_id:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "DOCUMENT_EVIDENCE_REVISION_SCOPE_REQUIRED",
+                    "message": "Assigned lifecycle participants must request retained evidence for their exact revision.",
+                },
+            )
+        _require_evidence_read_permission(
+            db,
+            tenant_id=tenant.amo_id,
+            manual_id=manual.id,
+            revision_id=revision_id,
+            category="REVIEW",
+            user=current_user,
+        )
+        query = query.filter(
+            em.DocumentEvidenceAsset.revision_id == revision_id,
+            em.DocumentEvidenceAsset.category == "REVIEW",
+        )
+    elif revision_id:
         query = query.filter(em.DocumentEvidenceAsset.revision_id == revision_id)
     rows = query.order_by(em.DocumentEvidenceAsset.created_at.desc(), em.DocumentEvidenceAsset.id.desc()).limit(200).all()
     return {"items": [_serialize(tenant.slug, row) for row in rows], "max_items": 200}
@@ -340,6 +429,14 @@ def download_document_evidence_asset(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Document Control evidence asset not found")
+    _require_evidence_read_permission(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=manual.id,
+        revision_id=row.revision_id,
+        category=row.category,
+        user=current_user,
+    )
     path = Path(row.storage_path).resolve()
     if EVIDENCE_ROOT not in path.parents or not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="The retained evidence file is unavailable")
