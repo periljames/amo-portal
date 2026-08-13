@@ -1,0 +1,246 @@
+name: QMS CAR Control Loop CI
+
+on:
+  push:
+    branches:
+      - agent/qms-car-control-loop
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/car_control_loop*.py"
+      - "backend/amodb/apps/quality/tests/test_car_control_loop*.py"
+      - "backend/amodb/apps/quality/__init__.py"
+      - "backend/amodb/apps/quality/schemas.py"
+      - "backend/amodb/apps/quality/public_invite_extensions.py"
+      - "backend/amodb/apps/quality/tests/postgres_car_control_loop_probe.py"
+      - "backend/amodb/alembic/versions/quality_260811_car_loop.py"
+      - "frontend/src/services/qmsCarControlLoop.ts"
+      - "frontend/src/services/qmsCarControlEvidence.ts"
+      - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
+      - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
+      - "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx"
+      - "frontend/src/pages/PublicCarInvitePage.tsx"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"
+      - "frontend/src/pages/qms/routes/qmsRouteRegistry.ts"
+      - "frontend/src/pages/qms/QmsCanonicalPage.tsx"
+      - "frontend/src/components/panels/ActionPanel.tsx"
+      - "frontend/tests/e2e/qms-car-control-loop.spec.ts"
+      - "frontend/tests/e2e/qms-car-performance-report.spec.ts"
+      - ".github/workflows/qms-car-control-loop-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-car-control-loop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: qms-car-control-loop-contract-secret
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Verify migration remains in the single Alembic lineage
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          revision = script.get_revision("quality_260811_car_loop")
+          assert revision is not None
+          assert revision.down_revision == "docctl_ai_audit_260809"
+
+          heads = script.get_heads()
+          assert len(heads) == 1, heads
+
+          pending = [script.get_revision(heads[0])]
+          lineage = set()
+          while pending:
+              cursor = pending.pop()
+              if cursor is None or cursor.revision in lineage:
+                  continue
+              lineage.add(cursor.revision)
+              parents = cursor.down_revision
+              if not parents:
+                  continue
+              if isinstance(parents, str):
+                  parents = (parents,)
+              for parent in parents:
+                  pending.append(script.get_revision(parent))
+
+          assert "quality_260811_car_loop" in lineage, lineage
+          PY
+      - name: Compile and configure Quality mappers
+        run: |
+          python -m compileall -q \
+            amodb/apps/quality/car_control_loop.py \
+            amodb/apps/quality/car_control_loop_models.py \
+            amodb/apps/quality/car_control_loop_router.py \
+            amodb/apps/quality/car_control_loop_guard_router.py \
+            amodb/apps/quality/car_control_loop_authority_guard.py \
+            amodb/apps/quality/car_control_loop_session_context.py \
+            amodb/apps/quality/car_control_loop_evidence_guard.py \
+            amodb/apps/quality/car_control_loop_route_order.py \
+            amodb/apps/quality/public_invite_extensions.py \
+            amodb/apps/quality/schemas.py \
+            amodb/alembic/versions/quality_260811_car_loop.py
+          python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
+      - name: Run deterministic health, closure and governance contracts
+        run: pytest -q amodb/apps/quality/tests/test_car_control_loop.py amodb/apps/quality/tests/test_car_control_loop_governance.py
+
+  postgres-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_car_control_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_car_control_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop PostgreSQL dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Run migration, constraint and RLS probe
+        env:
+          APP_ENV: test
+          SECRET_KEY: qms-car-control-loop-postgres-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_car_control_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_car_control_test
+        run: python -m amodb.apps.quality.tests.postgres_car_control_loop_probe
+
+  frontend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "CAR control-loop frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Lint CAR control-loop and reporting surfaces
+        run: >-
+          npm exec -- eslint
+          src/services/qmsCarControlLoop.ts
+          src/services/qmsCarControlEvidence.ts
+          src/pages/qms/QmsCarControlLoopPage.tsx
+          src/pages/qms/QmsCarControlOperations.tsx
+          src/pages/qms/QmsCarPerformanceReportPage.tsx
+          src/pages/PublicCarInvitePage.tsx
+          src/app/routeGuards.ts
+          src/pages/qms/routes/qmsWorkspaceRegistry.ts
+          src/pages/qms/routes/qmsRouteRegistry.ts
+          src/pages/qms/QmsCanonicalPage.tsx
+          src/components/panels/ActionPanel.tsx
+          tests/e2e/qms-car-control-loop.spec.ts
+          tests/e2e/qms-car-performance-report.spec.ts
+      - name: Verify public CAR response length contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/pages/PublicCarInvitePage.tsx").read_text(encoding="utf-8")
+          required = [
+              "const MAX_RESPONSE_CHARS = 8000;",
+              "const MAX_EVIDENCE_REFERENCE_CHARS = 500;",
+              'evidence_ref: clampEvidenceReference(invite.evidence_ref ?? "")',
+              "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())",
+              "maxChars={MAX_EVIDENCE_REFERENCE_CHARS}",
+              "maxLength={maxChars}",
+          ]
+          missing = [value for value in required if value not in source]
+          assert not missing, f"Public CAR invite length contract missing: {missing}"
+          assert 'evidence_ref: clampResponseText(invite.evidence_ref ?? "")' not in source
+          assert "evidence_ref: clampResponseText(current.form.evidence_ref.trim())" not in source
+          PY
+      - name: Verify CAR workspace uses governed evidence client
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          operations = Path("src/pages/qms/QmsCarControlOperations.tsx").read_text(encoding="utf-8")
+          service = Path("src/services/qmsCarControlEvidence.ts").read_text(encoding="utf-8")
+          assert '} from "../../services/qmsCarControlEvidence";' in operations
+          assert '/control-loop/attachments' in service
+          assert 'qmsUploadCarAttachment' in service
+          assert 'qmsDeleteCarAttachment' in service
+          assert 'qmsDownloadCarAttachmentBlob' in service
+          PY
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-car-preview.log 2>&1 &
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-car-preview.log
+          exit 1
+      - name: Browser - staged CAR control loop and live CAR performance report
+        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line

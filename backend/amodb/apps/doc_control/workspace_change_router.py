@@ -9,7 +9,7 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
-from .workspace_integration_router import refresh_integration_link
+from .workspace_integration_router import refresh_integration_link, verify_source_entity
 from .workspace_router import (
     create_change_request as _create_change_request,
     update_change_request as _update_change_request,
@@ -138,6 +138,43 @@ def validate_change_update(
         )
 
 
+def _verify_change_source(db: Session, *, tenant, payload: schemas.ChangeRequestCreate) -> schemas.ChangeRequestCreate:
+    source_module = str(payload.source_module or "DOCUMENT_CONTROL").strip().upper()
+    entity_type = str(payload.source_entity_type or "").strip()
+    entity_id = str(payload.source_entity_id or "").strip()
+    if bool(entity_type) != bool(entity_id):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANGE_SOURCE_INCOMPLETE",
+                "message": "Select a complete governed source record or leave the source record blank.",
+            },
+        )
+    if not entity_type:
+        return payload.model_copy(update={"source_module": source_module, "source_entity_type": None, "source_entity_id": None})
+    if source_module in {"DOCUMENT_CONTROL", "READER_FEEDBACK"}:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANGE_SOURCE_NOT_DISCOVERABLE",
+                "message": "Document Control and reader-feedback changes do not accept arbitrary source IDs. Use a governed portal source module or leave the source record blank.",
+            },
+        )
+    verification = verify_source_entity(
+        db,
+        tenant=tenant,
+        source_module=source_module,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        metadata={},
+    )
+    return payload.model_copy(update={
+        "source_module": source_module,
+        "source_entity_type": verification["source_table"],
+        "source_entity_id": entity_id,
+    })
+
+
 @router.post("/t/{tenant_slug}/change-requests", include_in_schema=False)
 def create_role_appropriate_change_request(
     tenant_slug: str,
@@ -146,15 +183,20 @@ def create_role_appropriate_change_request(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
     if not is_control_user(current_user):
         payload = payload.model_copy(
             update={
                 "source_module": "READER_FEEDBACK",
+                "source_entity_type": None,
+                "source_entity_id": None,
                 "owner_user_id": None,
                 "training_impact_required": False,
                 "qms_blocking": False,
             }
         )
+    else:
+        payload = _verify_change_source(db, tenant=tenant, payload=payload)
     return _create_change_request(
         tenant_slug=tenant_slug,
         payload=payload,

@@ -44,6 +44,15 @@ export type DocumentControlAdministration = DocumentControlSettings & {
     location_verification_required: boolean;
     recall_on_supersession: boolean;
   };
+  reminder_policy: {
+    enabled: boolean;
+    lead_days: number[];
+    overdue_repeat_days: number;
+    owner_escalation_days: number;
+    quality_escalation_days: number;
+    portal_notifications_enabled: boolean;
+    email_notifications_enabled: boolean;
+  };
   audit_history?: DocumentControlAdministrationAudit[];
   audit_history_limit?: number;
 };

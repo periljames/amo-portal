@@ -51,16 +51,8 @@ def _reader_dashboard(
         .filter(manual_models.Manual.tenant_id == tenant.id)
         .all()
     )
-    visible = [
-        manual
-        for manual, profile in candidates
-        if can_read_manual(current_user, profile)
-    ]
-    effective = [
-        manual
-        for manual in visible
-        if manual.current_published_rev_id is not None
-    ]
+    visible = [manual for manual, profile in candidates if can_read_manual(current_user, profile)]
+    effective = [manual for manual in visible if manual.current_published_rev_id is not None]
     metrics = {
         "document_records": len(visible),
         "revision_records": len(effective),
@@ -103,34 +95,22 @@ def _controller_control_gaps(
             (dm.DocumentControlProfile.manual_id == manual_models.Manual.id)
             & (dm.DocumentControlProfile.tenant_id == tenant.amo_id),
         )
-        .filter(
-            manual_models.Manual.tenant_id == tenant.id,
-            dm.DocumentControlProfile.id.is_(None),
-        )
+        .filter(manual_models.Manual.tenant_id == tenant.id, dm.DocumentControlProfile.id.is_(None))
         .count()
     )
     owners_unassigned = (
         db.query(dm.DocumentControlProfile)
-        .filter(
-            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
-            dm.DocumentControlProfile.owner_user_id.is_(None),
-        )
+        .filter(dm.DocumentControlProfile.tenant_id == tenant.amo_id, dm.DocumentControlProfile.owner_user_id.is_(None))
         .count()
     )
     review_dates_missing = (
         db.query(dm.DocumentControlProfile)
-        .filter(
-            dm.DocumentControlProfile.tenant_id == tenant.amo_id,
-            dm.DocumentControlProfile.next_review_due.is_(None),
-        )
+        .filter(dm.DocumentControlProfile.tenant_id == tenant.amo_id, dm.DocumentControlProfile.next_review_due.is_(None))
         .count()
     )
     documents_without_effective_issue = (
         db.query(manual_models.Manual)
-        .filter(
-            manual_models.Manual.tenant_id == tenant.id,
-            manual_models.Manual.current_published_rev_id.is_(None),
-        )
+        .filter(manual_models.Manual.tenant_id == tenant.id, manual_models.Manual.current_published_rev_id.is_(None))
         .count()
     )
     critical_acknowledgement_gaps = (
@@ -216,6 +196,16 @@ def _without_internal_sort(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if key != "_sort_at"}
 
 
+def _naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+def _date_sort(value: date | None) -> datetime | None:
+    return datetime.combine(value, datetime.min.time()) if value else None
+
+
 def _my_work(
     db: Session,
     *,
@@ -224,12 +214,13 @@ def _my_work(
 ) -> list[dict[str, Any]]:
     """Return bounded work attributable to the current user.
 
-    Tenant totals are deliberately excluded. Workflow work is included only when
-    a confirmed, currently effective responsibility assignment matches the user,
-    their department, or their account role.
+    Tenant totals are deliberately excluded. Tasks enter this queue only when
+    ownership/custody is explicit or a confirmed responsibility assignment maps
+    the current workflow decision to the user, their department, or their role.
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     now = datetime.utcnow()
+    today = date.today()
     tasks: list[dict[str, Any]] = []
     manual_ids: set[str] = set()
 
@@ -246,7 +237,7 @@ def _my_work(
     )
     for row in changes:
         manual_ids.add(row.manual_id)
-        due = row.due_at.replace(tzinfo=None) if row.due_at and row.due_at.tzinfo else row.due_at
+        due = _naive(row.due_at)
         tasks.append({
             "id": f"change:{row.id}",
             "kind": "CHANGE_REQUEST",
@@ -274,7 +265,7 @@ def _my_work(
     )
     for row in reviews:
         manual_ids.add(row.manual_id)
-        due = row.due_at.replace(tzinfo=None) if row.due_at.tzinfo else row.due_at
+        due = _naive(row.due_at)
         tasks.append({
             "id": f"review:{row.id}",
             "kind": "PERIODIC_REVIEW",
@@ -282,10 +273,10 @@ def _my_work(
             "entity_id": row.id,
             "title": "Periodic document review",
             "status": row.status,
-            "priority": "OVERDUE" if due < now else "DUE",
+            "priority": "OVERDUE" if due and due < now else "DUE",
             "due_at": row.due_at.isoformat(),
             "action_label": "Open review",
-            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?view=reviews",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=compliance#document-control-record-actions",
             "_sort_at": due,
         })
 
@@ -303,7 +294,7 @@ def _my_work(
     )
     for recipient, campaign in acknowledgements:
         manual_ids.add(campaign.manual_id)
-        due = recipient.due_at.replace(tzinfo=None) if recipient.due_at and recipient.due_at.tzinfo else recipient.due_at
+        due = _naive(recipient.due_at)
         tasks.append({
             "id": f"acknowledgement:{recipient.id}",
             "kind": "ACKNOWLEDGEMENT",
@@ -315,6 +306,92 @@ def _my_work(
             "due_at": recipient.due_at.isoformat() if recipient.due_at else campaign.due_at.isoformat() if campaign.due_at else None,
             "action_label": "Read and acknowledge",
             "target_path": f"/maintenance/{tenant_slug}/publications/{campaign.manual_id}/rev/{campaign.revision_id}/read",
+            "_sort_at": due,
+        })
+
+    authority_rows = (
+        db.query(dm.DocumentAuthoritySubmission)
+        .filter(
+            dm.DocumentAuthoritySubmission.tenant_id == tenant.amo_id,
+            dm.DocumentAuthoritySubmission.submitted_by_user_id == current_user.id,
+            dm.DocumentAuthoritySubmission.status.in_(["SUBMITTED", "IN_REVIEW", "QUERY_RECEIVED"]),
+        )
+        .order_by(dm.DocumentAuthoritySubmission.response_due_at.asc().nullslast(), dm.DocumentAuthoritySubmission.updated_at.asc())
+        .limit(20)
+        .all()
+    )
+    for row in authority_rows:
+        manual_ids.add(row.manual_id)
+        due = _naive(row.response_due_at)
+        query_received = row.status == "QUERY_RECEIVED"
+        tasks.append({
+            "id": f"authority:{row.id}",
+            "kind": "AUTHORITY_ACTION",
+            "manual_id": row.manual_id,
+            "entity_id": row.id,
+            "title": "Authority query requires response" if query_received else f"Authority submission {row.submission_reference}",
+            "status": row.status,
+            "priority": "OVERDUE" if due and due < now else "ACTION" if query_received else "DUE",
+            "due_at": row.response_due_at.isoformat() if row.response_due_at else None,
+            "action_label": "Answer authority query" if query_received else "Track authority response",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=workflow#document-control-record-actions",
+            "_sort_at": due,
+        })
+
+    temporary_revisions = (
+        db.query(dm.DocumentTemporaryRevision)
+        .filter(
+            dm.DocumentTemporaryRevision.tenant_id == tenant.amo_id,
+            dm.DocumentTemporaryRevision.created_by_user_id == current_user.id,
+            dm.DocumentTemporaryRevision.status.in_(["DRAFT", "IN_REVIEW", "APPROVED", "IN_FORCE", "EXPIRED"]),
+        )
+        .order_by(dm.DocumentTemporaryRevision.expiry_date.asc())
+        .limit(20)
+        .all()
+    )
+    for row in temporary_revisions:
+        manual_ids.add(row.manual_id)
+        due = _date_sort(row.expiry_date)
+        overdue = row.expiry_date < today and row.status in {"IN_FORCE", "EXPIRED"}
+        tasks.append({
+            "id": f"temporary-revision:{row.id}",
+            "kind": "TEMPORARY_REVISION",
+            "manual_id": row.manual_id,
+            "entity_id": row.id,
+            "title": f"TR {row.tr_number} · {row.title}",
+            "status": row.status,
+            "priority": "OVERDUE" if overdue else "ACTION" if row.status != "IN_FORCE" else "DUE",
+            "due_at": row.expiry_date.isoformat(),
+            "action_label": "Incorporate / withdraw" if row.status in {"IN_FORCE", "EXPIRED"} else "Continue TR",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=changes#document-control-record-actions",
+            "_sort_at": due,
+        })
+
+    controlled_copies = (
+        db.query(dm.DocumentControlledCopy)
+        .filter(
+            dm.DocumentControlledCopy.tenant_id == tenant.amo_id,
+            dm.DocumentControlledCopy.holder_user_id == current_user.id,
+            dm.DocumentControlledCopy.status.in_(["ISSUED", "RECALLED"]),
+        )
+        .order_by(dm.DocumentControlledCopy.due_back_at.asc().nullslast(), dm.DocumentControlledCopy.issued_at.asc())
+        .limit(20)
+        .all()
+    )
+    for row in controlled_copies:
+        manual_ids.add(row.manual_id)
+        due = _naive(row.due_back_at)
+        tasks.append({
+            "id": f"controlled-copy:{row.id}",
+            "kind": "CONTROLLED_COPY",
+            "manual_id": row.manual_id,
+            "entity_id": row.id,
+            "title": f"Controlled copy {row.copy_number}",
+            "status": row.status,
+            "priority": "OVERDUE" if due and due < now else "ACTION" if row.status == "RECALLED" else "DUE",
+            "due_at": row.due_back_at.isoformat() if row.due_back_at else None,
+            "action_label": "Return recalled copy" if row.status == "RECALLED" else "Open copy custody",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/controlled-copies?copy={row.id}",
             "_sort_at": due,
         })
 
@@ -346,7 +423,7 @@ def _my_work(
                 "priority": "ACTION",
                 "due_at": None,
                 "action_label": "Open workflow",
-                "target_path": f"/maintenance/{tenant_slug}/document-control/drafts/{row.id}",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=workflow#document-control-record-actions",
                 "_sort_at": None,
             })
 
@@ -358,10 +435,7 @@ def _my_work(
     )
     visible = [task for task in tasks if task["manual_id"] in labels]
     visible.sort(key=lambda task: (task.get("_sort_at") is None, task.get("_sort_at") or datetime.max, task["kind"], task["id"]))
-    return [
-        {**_without_internal_sort(task), "document": labels[task["manual_id"]]}
-        for task in visible[:30]
-    ]
+    return [{**_without_internal_sort(task), "document": labels[task["manual_id"]]} for task in visible[:30]]
 
 
 @router.get("/t/{tenant_slug}/my-work")
@@ -386,17 +460,9 @@ def get_role_appropriate_dashboard(
     reader response and cannot be inferred from tenant-wide totals.
     """
     if not is_control_user(current_user):
-        return _reader_dashboard(
-            db,
-            tenant_slug=tenant_slug,
-            current_user=current_user,
-        )
+        return _reader_dashboard(db, tenant_slug=tenant_slug, current_user=current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
-    dashboard = _get_full_dashboard(
-        tenant_slug=tenant_slug,
-        db=db,
-        current_user=current_user,
-    )
+    dashboard = _get_full_dashboard(tenant_slug=tenant_slug, db=db, current_user=current_user)
     dashboard["capabilities"] = document_control_capabilities(current_user)
     dashboard["metrics"].update(_controller_control_gaps(db, tenant=tenant))
     return dashboard

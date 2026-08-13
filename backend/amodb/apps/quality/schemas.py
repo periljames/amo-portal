@@ -1238,10 +1238,10 @@ class CARInviteOut(BaseModel):
 
 
 class CARInviteUpdate(BaseModel):
-    containment_action: Optional[str] = Field(default=None, max_length=500)
-    root_cause: Optional[str] = Field(default=None, max_length=500)
-    corrective_action: Optional[str] = Field(default=None, max_length=500)
-    preventive_action: Optional[str] = Field(default=None, max_length=500)
+    containment_action: Optional[str] = Field(default=None, max_length=8000)
+    root_cause: Optional[str] = Field(default=None, max_length=8000)
+    corrective_action: Optional[str] = Field(default=None, max_length=8000)
+    preventive_action: Optional[str] = Field(default=None, max_length=8000)
     evidence_ref: Optional[str] = Field(default=None, max_length=500)
     target_closure_date: Optional[date] = None
     due_date: Optional[date] = None

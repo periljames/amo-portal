@@ -11,12 +11,14 @@ import {
   recordAuditFollowUpComplete,
   reopenAuditFollowUp,
   transitionAuditReport,
+  type AuditClosureState,
   type AuditReportRevision,
 } from "../../services/qmsAuditCloseout";
 import "../../styles/qms-audit-report-closeout.css";
 
 type Props = { amoCode: string; auditKey: string };
 type Tab = "report" | "closeout";
+type AuditReportRevisionList = { items: AuditReportRevision[] };
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "The governed audit action could not be completed.";
@@ -39,14 +41,16 @@ const QualityAuditReportCloseoutHost: React.FC<Props> = ({ amoCode, auditKey }) 
   const auditQuery = useQuery({ queryKey: ["qms-audit-closeout-resolve", auditKey], queryFn: () => qmsResolveAudit(auditKey), staleTime: 5_000 });
   const audit = auditQuery.data;
   const auditId = audit?.id || "";
+  const reportQueryKey = ["qms-audit-report-revisions", amoCode, auditId] as const;
+  const closureQueryKey = ["qms-audit-closure-state", amoCode, auditId] as const;
 
   const reportQuery = useQuery({
-    queryKey: ["qms-audit-report-revisions", amoCode, auditId],
+    queryKey: reportQueryKey,
     queryFn: ({ signal }) => listAuditReportRevisions(amoCode, auditId, signal),
     enabled: Boolean(open && auditId),
   });
   const closureQuery = useQuery({
-    queryKey: ["qms-audit-closure-state", amoCode, auditId],
+    queryKey: closureQueryKey,
     queryFn: ({ signal }) => getAuditClosureState(amoCode, auditId, signal),
     enabled: Boolean(open && auditId),
   });
@@ -55,38 +59,64 @@ const QualityAuditReportCloseoutHost: React.FC<Props> = ({ amoCode, auditKey }) 
   const issued = reportQuery.data?.items?.find((row) => row.status === "ISSUED");
   const closure = closureQuery.data;
 
+  const cacheReportRevision = (revision: AuditReportRevision) => {
+    queryClient.setQueryData<AuditReportRevisionList>(reportQueryKey, (current) => {
+      const remaining = (current?.items || []).filter((row) => row.id !== revision.id);
+      return { items: [revision, ...remaining].sort((left, right) => right.revision_no - left.revision_no) };
+    });
+  };
+
+  const cacheClosureState = (next: AuditClosureState) => {
+    queryClient.setQueryData<AuditClosureState>(closureQueryKey, next);
+  };
+
   const refresh = async () => {
     setError("");
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["qms-audit-report-revisions", amoCode, auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms-audit-closure-state", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: reportQueryKey }),
+      queryClient.invalidateQueries({ queryKey: closureQueryKey }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-context", auditKey] }),
     ]);
   };
 
   const adopt = useMutation({
     mutationFn: () => adoptCurrentAuditReport(amoCode, auditId, reason),
-    onSuccess: () => void refresh(),
+    onSuccess: (revision) => {
+      cacheReportRevision(revision);
+      void refresh();
+    },
     onError: (cause) => setError(message(cause)),
   });
   const transition = useMutation({
     mutationFn: (action: "SUBMIT" | "RETURN" | "APPROVE" | "ISSUE" | "CANCEL") => latest ? transitionAuditReport(amoCode, auditId, latest.id, action, reason) : Promise.reject(new Error("No governed report revision exists.")),
-    onSuccess: () => void refresh(),
+    onSuccess: (revision) => {
+      cacheReportRevision(revision);
+      void refresh();
+    },
     onError: (cause) => setError(message(cause)),
   });
   const executionClose = useMutation({
     mutationFn: () => recordAuditExecutionClosed(amoCode, auditId, reason),
-    onSuccess: () => void refresh(),
+    onSuccess: (next) => {
+      cacheClosureState(next);
+      void refresh();
+    },
     onError: (cause) => setError(message(cause)),
   });
   const followUpComplete = useMutation({
     mutationFn: () => recordAuditFollowUpComplete(amoCode, auditId, reason),
-    onSuccess: () => void refresh(),
+    onSuccess: (next) => {
+      cacheClosureState(next);
+      void refresh();
+    },
     onError: (cause) => setError(message(cause)),
   });
   const reopen = useMutation({
     mutationFn: () => reopenAuditFollowUp(amoCode, auditId, reason),
-    onSuccess: () => void refresh(),
+    onSuccess: (next) => {
+      cacheClosureState(next);
+      void refresh();
+    },
     onError: (cause) => setError(message(cause)),
   });
 

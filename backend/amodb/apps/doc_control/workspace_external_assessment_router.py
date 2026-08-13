@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -91,11 +92,11 @@ def _context(db: Session, tenant_id: str, source: dm.ExternalDocumentSource) -> 
     latest = receipts[0] if receipts else None
     current = next((row for row in receipts if row.currency_status == "CURRENT"), None)
     affected = _affected_internal_documents(db, tenant_id, source.manual_id)
+    # Applicability assessment and source-currency verification are distinct
+    # governed controls. Once a permitted applicability decision is retained,
+    # an UNVERIFIED currency status must not reopen the applicability work item.
     assessment_required = bool(
-        latest and (
-            latest.applicability_status in ASSESSMENT_REQUIRED_STATUSES
-            or latest.currency_status == "UNVERIFIED"
-        )
+        latest and latest.applicability_status in ASSESSMENT_REQUIRED_STATUSES
     )
     return {
         "source": {
@@ -131,6 +132,102 @@ def _context(db: Session, tenant_id: str, source: dm.ExternalDocumentSource) -> 
         "assessment_required": assessment_required,
         "work_item_status": "NEW_REVISION_REQUIRES_ASSESSMENT" if assessment_required else "ASSESSMENT_COMPLETE",
     }
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo else value
+
+
+@router.get("/t/{tenant_slug}/external-source-work")
+def get_owned_external_source_work(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Return external-source obligations owned through the governed document profile.
+
+    A new received revision becomes personal work for the named external-document
+    owner when applicability is pending/unverified. A due currency check is also
+    routed to that same governed owner. No tenant-wide source count is exposed as
+    personal work when the document has no named owner.
+    """
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    now = datetime.utcnow()
+    rows = (
+        db.query(dm.ExternalDocumentSource, manual_models.Manual)
+        .join(
+            dm.DocumentControlProfile,
+            (dm.DocumentControlProfile.manual_id == dm.ExternalDocumentSource.manual_id)
+            & (dm.DocumentControlProfile.tenant_id == tenant.amo_id),
+        )
+        .join(manual_models.Manual, manual_models.Manual.id == dm.ExternalDocumentSource.manual_id)
+        .filter(
+            dm.ExternalDocumentSource.tenant_id == tenant.amo_id,
+            dm.DocumentControlProfile.owner_user_id == current_user.id,
+            manual_models.Manual.tenant_id == tenant.id,
+        )
+        .order_by(dm.ExternalDocumentSource.next_check_due_at.asc().nullslast())
+        .limit(30)
+        .all()
+    )
+
+    items: list[dict] = []
+    for source, manual in rows:
+        latest = (
+            db.query(dm.ExternalRevisionReceipt)
+            .filter(
+                dm.ExternalRevisionReceipt.tenant_id == tenant.amo_id,
+                dm.ExternalRevisionReceipt.source_id == source.id,
+            )
+            .order_by(dm.ExternalRevisionReceipt.received_at.desc(), dm.ExternalRevisionReceipt.id.desc())
+            .first()
+        )
+        assessment_required = bool(latest and latest.applicability_status in ASSESSMENT_REQUIRED_STATUSES)
+        currency_due_at = _naive(source.next_check_due_at)
+        currency_due = bool(currency_due_at and currency_due_at <= now)
+        if not assessment_required and not currency_due:
+            continue
+
+        if assessment_required:
+            title = f"Assess external revision {latest.revision_label}"
+            status = "NEW_REVISION_REQUIRES_ASSESSMENT"
+            action_label = "Assess revision"
+            target_path = (
+                f"/maintenance/{tenant_slug}/document-control/compliance"
+                f"?view=external-sources&assessment_source={source.id}"
+            )
+            priority = "ACTION"
+            due_at = latest.received_at.isoformat() if latest.received_at else None
+            sort_at = _naive(latest.received_at)
+        else:
+            title = f"Verify external source currency · {source.provider}"
+            status = "CURRENCY_CHECK_DUE"
+            action_label = "Review source"
+            target_path = f"/maintenance/{tenant_slug}/document-control/compliance?view=external-sources&q={manual.code}"
+            priority = "OVERDUE"
+            due_at = source.next_check_due_at.isoformat() if source.next_check_due_at else None
+            sort_at = currency_due_at
+
+        items.append({
+            "id": f"external-source:{source.id}:{status}",
+            "kind": "EXTERNAL_SOURCE_ACTION",
+            "manual_id": source.manual_id,
+            "entity_id": source.id,
+            "title": title,
+            "status": status,
+            "priority": priority,
+            "due_at": due_at,
+            "action_label": action_label,
+            "target_path": target_path,
+            "document": {"id": manual.id, "code": manual.code, "title": manual.title},
+            "_sort_at": sort_at,
+        })
+
+    items.sort(key=lambda item: (item.get("_sort_at") is None, item.get("_sort_at") or datetime.max, item["id"]))
+    return {"items": [{key: value for key, value in item.items() if key != "_sort_at"} for item in items[:20]], "limit": 20}
 
 
 @router.get("/t/{tenant_slug}/external-sources/{source_id}/assessment")

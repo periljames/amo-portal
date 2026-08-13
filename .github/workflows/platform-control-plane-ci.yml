@@ -249,12 +249,20 @@ jobs:
           from sqlalchemy import create_engine
 
           config = Config("amodb/alembic.ini")
-          expected = set(ScriptDirectory.from_config(config).get_heads())
+          script = ScriptDirectory.from_config(config)
+          heads = set(script.get_heads())
+          assert len(heads) == 1, f"Expected one authoritative Alembic head, got {sorted(heads)}"
+          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=next(iter(heads)))}
+          assert "plat_qms_260809_merge" in ancestry, "Platform/QMS merge revision is missing from current ancestry"
+
           engine = create_engine(os.environ["DATABASE_URL"])
-          with engine.connect() as connection:
-              current = set(MigrationContext.configure(connection).get_current_heads())
-          assert current == expected, {"current": sorted(current), "expected": sorted(expected)}
-          print("Alembic current heads:", ", ".join(sorted(current)))
+          try:
+              with engine.connect() as connection:
+                  current = set(MigrationContext.configure(connection).get_current_heads())
+          finally:
+              engine.dispose()
+          assert current == heads, f"Database revision {sorted(current)} does not match authoritative head {sorted(heads)}"
+          print("Clean PostgreSQL database is at the authoritative Alembic head with Platform/QMS ancestry intact")
           PY
       - name: Prove transaction-local database guards
         working-directory: backend

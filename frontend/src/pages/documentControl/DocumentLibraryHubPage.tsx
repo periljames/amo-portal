@@ -39,6 +39,11 @@ import DocumentControlShell, {
   DocumentControlLoading,
   DocumentControlStatus,
 } from "./DocumentControlShell";
+import {
+  documentControlJob,
+  documentJobTarget,
+  type DocumentControlJob,
+} from "./documentControlJobs";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentLibrary.css";
 
@@ -92,7 +97,7 @@ function discoveryRevisionText(item: LibraryDiscoveryItem): string {
 function physicalText(item: IntegratedLibraryItem): string {
   const physical = item.library.physical;
   if (!physical.total) return "No physical copy";
-  const parts = [];
+  const parts: string[] = [];
   if (physical.on_shelf) parts.push(`${physical.on_shelf} on shelf`);
   if (physical.checked_out) parts.push(`${physical.checked_out} with staff`);
   if (physical.recalled) parts.push(`${physical.recalled} recalled`);
@@ -118,6 +123,12 @@ function formatDate(value?: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value.length === 10 ? `${value}T00:00:00` : value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString([], value.length === 10 ? { dateStyle: "medium" } : { dateStyle: "medium", timeStyle: "short" });
+}
+
+function jobEligibility(item: IntegratedLibraryItem, job: DocumentControlJob): { allowed: boolean; reason?: string } {
+  if (job.requiresPublished && item.read_target.kind !== "PUBLISHED") return { allowed: false, reason: "A published revision is required" };
+  if (job.externalOnly && item.profile.document_class !== "EXTERNAL") return { allowed: false, reason: "External controlled documents only" };
+  return { allowed: true };
 }
 
 export default function DocumentLibraryHubPage() {
@@ -153,10 +164,12 @@ export default function DocumentLibraryHubPage() {
 
   const activeQueue = useMemo(() => queueLabel(params), [params]);
   const selectingChangeDocument = params.get("action") === "raise-change";
+  const selectedJob = useMemo(() => documentControlJob(params.get("action")), [params]);
+  const selectingDocumentForJob = Boolean(selectedJob);
   const requestedView = params.get("view") as LibraryDiscoveryView | null;
   const discoveryView: LibraryDiscoveryView = PRESETS.some((preset) => preset.id === requestedView) ? requestedView as LibraryDiscoveryView : "all";
   const hasIntegratedFilters = Boolean(filters.nodeType || filters.documentClass || filters.status || filters.ownerUserId || filters.departmentId || filters.indexingStatus || filters.unresolvedOwnership || filters.unresolvedRelationships || filters.structureStatus || filters.supersededReferenced);
-  const discoveryMode = !selectingChangeDocument && (Boolean(requestedView) || (Boolean(filters.q) && !hasIntegratedFilters));
+  const discoveryMode = !selectingDocumentForJob && (Boolean(requestedView) || (Boolean(filters.q) && !hasIntegratedFilters));
 
   const load = useCallback(async () => {
     if (!tenant) return;
@@ -185,7 +198,6 @@ export default function DocumentLibraryHubPage() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
-
   useEffect(() => {
     if (searchText === urlQuery) return;
     const timer = window.setTimeout(() => {
@@ -231,7 +243,7 @@ export default function DocumentLibraryHubPage() {
     setParams(next);
   };
 
-  const cancelChangeSelection = () => {
+  const cancelJobSelection = () => {
     const next = new URLSearchParams(params);
     next.delete("action");
     setParams(next, { replace: true });
@@ -257,10 +269,19 @@ export default function DocumentLibraryHubPage() {
     navigate(`${basePath}/library/${item.id}?tab=changes`);
   };
 
+  const selectForJob = (item: IntegratedLibraryItem) => {
+    if (!selectedJob) return;
+    if (selectingChangeDocument) {
+      selectForChange(item);
+      return;
+    }
+    navigate(documentJobTarget(basePath, item.id, selectedJob));
+  };
+
   return <DocumentControlShell
     title="Company document library"
-    eyebrow="CONTROLLED INFORMATION"
-    subtitle="Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."
+    eyebrow={selectedJob ? "SELECT DOCUMENT / CONTROLLED WORK" : "CONTROLLED INFORMATION"}
+    subtitle={selectedJob ? selectedJob.selectionPrompt : "Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."}
     canControl={canControl}
     actions={<>
       <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/structure`)}><FolderTree size={14} /> Browse hierarchy</button>
@@ -268,39 +289,33 @@ export default function DocumentLibraryHubPage() {
     </>}
   >
     <section className="dlibrary" data-testid="integrated-document-library" aria-busy={refreshing}>
-      {canControl && selectingChangeDocument ? <div className="dlibrary__queue-filter" role="status"><span><ClipboardCheck size={15} /><strong>Select a document for the change request.</strong> Search or filter the library, then choose Select for change.</span><button type="button" onClick={cancelChangeSelection}><FilterX size={14} /> Cancel</button></div> : null}
+      {canControl && selectedJob ? <div className="dlibrary__queue-filter dlibrary__queue-filter--job" role="status"><span><ClipboardCheck size={15} /><strong>{selectingChangeDocument ? "Select a document for the change request" : selectedJob.label}.</strong> {selectedJob.selectionPrompt} Search or filter the library, then choose {selectedJob.selectLabel}.</span><button type="button" onClick={cancelJobSelection}><FilterX size={14} /> Cancel</button></div> : null}
       {activeQueue ? <div className="dlibrary__queue-filter" role="status"><span><ShieldCheck size={15} /><strong>Governance queue</strong> · {activeQueue}</span><button type="button" onClick={clearGovernanceQueue}><FilterX size={14} /> Clear queue filter</button></div> : null}
       {error && (data || discoveryData) ? <div className="dlibrary__queue-filter" role="alert"><span><strong>The latest library update could not be loaded.</strong> The last available results remain visible.</span><button type="button" onClick={() => void load()}>Retry</button></div> : null}
 
-      <div className="dlibrary__presets" aria-label="Library views">
+      {!selectingDocumentForJob ? <div className="dlibrary__presets" aria-label="Library views">
         {PRESETS.map(({ id, label, icon: Icon }) => <button type="button" key={label} className={(requestedView || "") === id ? "active" : ""} onClick={() => selectPreset(id)}><Icon size={14} /> {label}</button>)}
-      </div>
+      </div> : null}
 
       {!discoveryMode ? <div className="dlibrary__categories" aria-label="Document categories">
         {CATEGORIES.map(([value, label, Icon]) => {
           const active = (filters.nodeType || "") === value;
           const count = value ? Number(data?.facets.node_types[value] || 0) : Number(data?.facets.visible_documents || 0);
-          return <button key={label} type="button" className={active ? "active" : ""} onClick={() => update("type", value)}>
-            <Icon size={16} /><span>{label}</span><small>{count}</small>
-          </button>;
+          return <button key={label} type="button" className={active ? "active" : ""} onClick={() => update("type", value)}><Icon size={16} /><span>{label}</span><small>{count}</small></button>;
         })}
       </div> : null}
 
       <div className="dlibrary__toolbar">
         <label className="dlibrary__search"><Search size={16} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Find code, title, alias, owner, revision, filename, hierarchy or indexed text" /></label>
-        {!discoveryMode ? <><select aria-label="Document control class" value={filters.documentClass || ""} onChange={(event) => update("class", event.target.value)}>
-          <option value="">Internal + external</option><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External controlled</option><option value="RECORD">Record documents</option>
-        </select>
-        <select aria-label="Document lifecycle" value={filters.status || ""} onChange={(event) => update("status", event.target.value)}>
-          <option value="">All lifecycle states</option><option value="ACTIVE">Active</option><option value="SUPERSEDED">Superseded</option><option value="ARCHIVED">Archived</option>
-        </select>
-        <select aria-label="Sort company library" value={`${filters.sort || "code"}:${filters.direction || "asc"}`} onChange={(event) => updateSort(event.target.value)}>
-          <option value="code:asc">Code A–Z</option><option value="code:desc">Code Z–A</option><option value="title:asc">Title A–Z</option><option value="title:desc">Title Z–A</option><option value="type:asc">Document type</option><option value="status:asc">Lifecycle status</option>
-        </select></> : <span className="dlibrary__discovery-note">Permission-filtered discovery · server-bounded</span>}
+        {!discoveryMode ? <>
+          <select aria-label="Document control class" value={filters.documentClass || ""} onChange={(event) => update("class", event.target.value)}><option value="">Internal + external</option><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External controlled</option><option value="RECORD">Record documents</option></select>
+          <select aria-label="Document lifecycle" value={filters.status || ""} onChange={(event) => update("status", event.target.value)}><option value="">All lifecycle states</option><option value="ACTIVE">Active</option><option value="SUPERSEDED">Superseded</option><option value="ARCHIVED">Archived</option></select>
+          <select aria-label="Sort company library" value={`${filters.sort || "code"}:${filters.direction || "asc"}`} onChange={(event) => updateSort(event.target.value)}><option value="code:asc">Code A–Z</option><option value="code:desc">Code Z–A</option><option value="title:asc">Title A–Z</option><option value="title:desc">Title Z–A</option><option value="type:asc">Document type</option><option value="status:asc">Lifecycle status</option></select>
+        </> : <span className="dlibrary__discovery-note">Permission-filtered discovery · server-bounded</span>}
         {refreshing ? <span role="status" aria-live="polite">Updating…</span> : null}
       </div>
 
-      {loading ? <DocumentControlLoading label="Opening the company library…" /> : null}
+      {loading ? <DocumentControlLoading label={selectedJob ? "Loading eligible controlled documents…" : "Opening the company library…"} /> : null}
       {error && !data && !discoveryData ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !hasRows ? <DocumentControlEmpty icon={BookOpen} title="No document matches this view" message="Change the view, filters or search text. Access-controlled documents are shown only to permitted users." /> : null}
 
@@ -310,6 +325,7 @@ export default function DocumentLibraryHubPage() {
           const physical = item.library.physical;
           const integration = item.library.integrations;
           const external = item.library.external;
+          const eligibility = selectedJob ? jobEligibility(item, selectedJob) : { allowed: true };
           return <tr key={item.id}>
             <td><strong>{item.code}</strong><span>{item.title}</span><small>{item.library.node_type.replaceAll("_", " ")}{item.library.structure_path ? ` · ${item.library.structure_path}` : ""}</small></td>
             <td><strong>{revisionText(item)}</strong><small>{item.latest_revision?.effective_date || "No effective date"}</small><DocumentControlStatus status={item.read_target.kind} kind={item.read_target.uncontrolled ? "warning" : "success"} /></td>
@@ -317,7 +333,7 @@ export default function DocumentLibraryHubPage() {
             <td><div className="dlibrary__availability"><span><BookOpen size={14} /> Digital {item.read_target.revision_id ? "available" : "unavailable"}</span><span className={physical.overdue ? "is-danger" : ""}><Copy size={14} /> {physicalText(item)}</span>{physical.overdue ? <small>{physical.overdue} overdue return{physical.overdue === 1 ? "" : "s"}</small> : null}</div></td>
             <td>{canControl ? <div className="dlibrary__connections"><span><Link2 size={14} /> {item.library.semantic_relationships || 0} document links</span><span><Workflow size={14} /> {integration?.count || 0} module links</span><span><Archive size={14} /> {item.library.generated_records || 0} generated records</span>{integration?.modules?.length ? <small>{integration.modules.join(" · ")}</small> : null}</div> : <small>Open the document to follow permitted links.</small>}</td>
             <td>{external ? <><strong>{external.provider}</strong><DocumentControlStatus status={external.currency_status} kind={statusKind(external.currency_status)} /><small>{external.revision_label || "Revision not received"}{external.authority ? ` · ${external.authority}` : ""}</small></> : <><DocumentControlStatus status={item.profile.document_class} kind={statusKind(item.profile.document_class)} /><small>Company-controlled source</small></>}</td>
-            <td><div className="dlibrary__actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}><BookOpen size={14} /> Read</button>{canControl ? selectingChangeDocument ? <button type="button" className="dc-button dc-button--primary" onClick={() => selectForChange(item)}>Select for change</button> : <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</div></td>
+            <td><div className="dlibrary__actions">{selectedJob && canControl ? <><button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button>{!eligibility.allowed ? <small>{eligibility.reason}</small> : null}</> : <><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}><BookOpen size={14} /> Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</>}</div></td>
           </tr>;
         })}</tbody>
       </table></div> : null}

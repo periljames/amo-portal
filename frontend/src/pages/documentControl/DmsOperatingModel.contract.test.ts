@@ -10,13 +10,14 @@ const libraryService = readFileSync(new URL("../../services/documentLibrary.ts",
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
 const recordActions = readFileSync(new URL("./DocumentControlRecordActions.tsx", import.meta.url), "utf-8");
-const recordActionsBase = readFileSync(new URL("./DocumentControlRecordActionsBase.tsx", import.meta.url), "utf-8");
+const changeActions = readFileSync(new URL("./DocumentControlChangeRequestActions.tsx", import.meta.url), "utf-8");
 const changesPortfolio = readFileSync(new URL("./DocumentControlChangesPortfolioPage.tsx", import.meta.url), "utf-8");
 const changesService = readFileSync(new URL("../../services/documentControlPortfolios.ts", import.meta.url), "utf-8");
 const distributionPortfolio = readFileSync(new URL("./DocumentControlDistributionPortfolioPage.tsx", import.meta.url), "utf-8");
 const distributionService = readFileSync(new URL("../../services/documentControlDistributionPortfolio.ts", import.meta.url), "utf-8");
 const compliancePortfolio = readFileSync(new URL("./DocumentControlCompliancePortfolioPage.tsx", import.meta.url), "utf-8");
 const complianceService = readFileSync(new URL("../../services/documentControlCompliancePortfolio.ts", import.meta.url), "utf-8");
+const externalActions = readFileSync(new URL("./DocumentControlExternalSourceActions.tsx", import.meta.url), "utf-8");
 const reportsPage = readFileSync(new URL("./DocumentControlReportsPage.tsx", import.meta.url), "utf-8");
 const reportsService = readFileSync(new URL("../../services/documentControlReportsPortfolio.ts", import.meta.url), "utf-8");
 const administrationPage = readFileSync(new URL("./DocumentControlAdministrationPage.tsx", import.meta.url), "utf-8");
@@ -89,7 +90,7 @@ describe("DMS frontend operating-model contract", () => {
     for (const label of ["Requests", "Draft", "In Review", "Awaiting Quality", "Awaiting Management", "Authority", "Temporary Revisions", "Ready for Release", "Closed"]) expect(changesPortfolio).toContain(`label: "${label}"`);
   });
 
-  it("makes raising a change request a real document-selection to canonical mutation flow", () => {
+  it("makes raising a change request a real document-selection to governed mutation flow", () => {
     expect(changesPortfolio).toContain("/library?action=raise-change");
     expect(changesPortfolio).not.toContain("`${basePath}/change-proposals`");
     expect(libraryPage).toContain('params.get("action") === "raise-change"');
@@ -97,9 +98,11 @@ describe("DMS frontend operating-model contract", () => {
     expect(libraryPage).toContain("Select for change");
     expect(libraryPage).toContain('navigate(`${basePath}/library/${item.id}?tab=changes`)');
     expect(recordActions).toContain('activeView === "changes"');
-    expect(recordActions).toContain('activeView="changes"');
-    expect(recordActionsBase).toContain("function ChangeRequestForm");
-    expect(recordActionsBase).toContain("createDocumentChangeRequest");
+    expect(recordActions).toContain("DocumentControlChangeRequestActions");
+    expect(recordActions).not.toContain('activeView="changes"');
+    expect(changeActions).toContain("createDocumentChangeRequest");
+    expect(changeActions).toContain("Do not paste database IDs");
+    expect(changeActions).toContain("searchDocumentIntegrationCatalog");
   });
 
   it("routes canonical Distribution to the bounded custody portfolio", () => {
@@ -125,7 +128,8 @@ describe("DMS frontend operating-model contract", () => {
     expect(homePage).toContain("/compliance?view=external-sources");
     expect(homePage).not.toContain("/compliance?view=external\"");
     expect(compliancePortfolio).toContain('if (raw === "external") return "external-sources"');
-    expect(compliancePortfolio).toContain('if (key === "view") next.delete("status")');
+    expect(compliancePortfolio).toMatch(/if \(key === "view"\) \{\s*next\.delete\("status"\)/);
+    expect(compliancePortfolio).toContain('if (value !== "external-sources") next.delete("assessment_source")');
   });
 
   it("makes Reports a bounded controlled-evidence catalogue instead of a master-register-only page", () => {
@@ -192,9 +196,12 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain('activeView="copies"');
     expect(recordActions).toContain('activeView === "compliance"');
     expect(recordActions).toContain('activeView="reviews"');
-    expect(recordActions).toContain('activeView="external"');
+    expect(recordActions).toContain("DocumentControlExternalSourceActions");
+    expect(recordActions).not.toContain('activeView="external"');
+    expect(externalActions).toContain("createExternalRevisionReceipt");
+    expect(externalActions).toContain('applicability_status: "PENDING"');
     expect(recordActions).toContain('activeView === "relationships"');
-    expect(recordActions).toContain('activeView="integrations"');
+    expect(recordActions).toContain("DocumentControlIntegrationActions");
   });
 
   it("retains the proven Publications reader and exposes Standard, Immersive, Fullscreen and Review Changes", () => {

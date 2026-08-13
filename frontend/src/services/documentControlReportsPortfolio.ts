@@ -83,6 +83,12 @@ export type ReportsRegisterResponse = {
   };
 };
 
+export type ReportsExportResult = {
+  blob: Blob;
+  filename: string;
+  rowCount: number | null;
+};
+
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
   if (!response.ok) {
     let message = `${fallback} (${response.status}).`;
@@ -97,6 +103,18 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
     throw new Error(message);
   }
   return response.json() as Promise<T>;
+}
+
+async function exportError(response: Response): Promise<Error> {
+  let message = `The full evidence export could not be generated (${response.status}).`;
+  try {
+    const payload = await response.json();
+    const detail = payload?.detail;
+    message = typeof detail === "string" ? detail : detail?.message || message;
+  } catch {
+    // Preserve the bounded-export fallback.
+  }
+  return new Error(message);
 }
 
 export async function getReportsPortfolio(
@@ -149,4 +167,39 @@ export async function getReportsRegister(
     { headers: authHeaders(), credentials: "same-origin" },
   );
   return readJson<ReportsRegisterResponse>(response, "The selected evidence register could not be loaded");
+}
+
+export async function exportReportsCsv(
+  tenant: string,
+  options: {
+    view: "master" | ReportRegisterView;
+    q?: string;
+    status?: string;
+    documentClass?: string;
+    lifecycleStatus?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  },
+): Promise<ReportsExportResult> {
+  const query = new URLSearchParams({ view: options.view });
+  if (options.q) query.set("q", options.q);
+  if (options.status) query.set("status", options.status);
+  if (options.documentClass) query.set("document_class", options.documentClass);
+  if (options.lifecycleStatus) query.set("lifecycle_status", options.lifecycleStatus);
+  if (options.dateFrom) query.set("date_from", options.dateFrom);
+  if (options.dateTo) query.set("date_to", options.dateTo);
+
+  const response = await fetch(
+    `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-export.csv?${query.toString()}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw await exportError(response);
+  const disposition = response.headers.get("content-disposition") || "";
+  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+  const rowHeader = response.headers.get("x-document-control-export-rows");
+  return {
+    blob: await response.blob(),
+    filename: filenameMatch?.[1] || `document-control-${options.view}-export.csv`,
+    rowCount: rowHeader && /^\d+$/.test(rowHeader) ? Number(rowHeader) : null,
+  };
 }

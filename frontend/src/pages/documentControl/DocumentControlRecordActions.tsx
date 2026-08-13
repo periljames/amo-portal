@@ -3,10 +3,16 @@ import { Settings2, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
+import DocumentControlApplicabilityActions from "./DocumentControlApplicabilityActions";
+import DocumentControlChangeRequestActions from "./DocumentControlChangeRequestActions";
 import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
+import DocumentControlExternalSourceActions from "./DocumentControlExternalSourceActions";
+import DocumentControlIntegrationActions from "./DocumentControlIntegrationActions";
 import DocumentControlLifecycleActions from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
+import DocumentControlRetentionActions from "./DocumentControlRetentionActions";
+import DocumentEvidencePackAction from "./DocumentEvidencePackAction";
 import { DocumentControlSection } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
 
@@ -98,16 +104,24 @@ export default function DocumentControlRecordActions({
 
   return (
     <div id="document-control-record-actions" className="dc-record-control-stack">
-      {activeView === "overview" ? (
+      {activeView === "overview" ? <>
         <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="overview" />
-      ) : null}
+        <DocumentControlSection title="Retention & disposition" description="Govern retention periods, legal holds and independently approved disposition without deleting the controlled history that proves what happened.">
+          <div className="dc-section__body"><DocumentControlRetentionActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
+        <DocumentControlSection title="Audit evidence pack" description="Generate a server-built, integrity-identifiable package of this document's controlled lifecycle, evidence and retained source files.">
+          <div className="dc-section__body"><DocumentEvidencePackAction detail={detail} tenant={tenant} /></div>
+        </DocumentControlSection>
+      </> : null}
 
       {activeView === "content" ? (
         <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="revisions" />
       ) : null}
 
       {activeView === "changes" ? <>
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="changes" />
+        <DocumentControlSection title="Raise a controlled change" description="Create the change against this document and, when applicable, select the live portal record that caused it rather than entering implementation IDs.">
+          <div className="dc-section__body"><DocumentControlChangeRequestActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
         <DocumentControlSection title="Temporary revision controls" description="Create, approve, place in force, incorporate or withdraw a temporary revision without leaving this document lifecycle.">
           <div className="dc-section__body"><DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="temporary-revisions" onChanged={onChanged} /></div>
         </DocumentControlSection>
@@ -135,12 +149,18 @@ export default function DocumentControlRecordActions({
         <DocumentControlSection title="Periodic review controls" description="Schedule and complete continued-applicability reviews against the controlled document.">
           <div className="dc-section__body"><DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="reviews" onChanged={onChanged} /></div>
         </DocumentControlSection>
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="applicability" />
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="external" />
+        <DocumentControlSection title="External technical-data controls" description="Register governed OEM/authority sources, retain received revision files, establish currency and create the downstream applicability-assessment obligation.">
+          <div className="dc-section__body"><DocumentControlExternalSourceActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
+        <DocumentControlSection title="Applicability controls" description="Create global inclusion/exclusion or select a live tenant record as the target. Target identifiers are server-verified before persistence.">
+          <div className="dc-section__body"><DocumentControlApplicabilityActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
       </> : null}
 
       {activeView === "relationships" ? (
-        <DocumentControlRecordActionsBase detail={detail} onChanged={onChanged} activeView="integrations" />
+        <DocumentControlSection title="Governed module relationships" description="Search live tenant-scoped records from QMS, Training, Workforce, Planning and other portal domains, then create a server-verified relationship.">
+          <div className="dc-section__body"><DocumentControlIntegrationActions detail={detail} tenant={tenant} onChanged={onChanged} /></div>
+        </DocumentControlSection>
       ) : null}
     </div>
   );

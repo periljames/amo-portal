@@ -1,0 +1,233 @@
+name: Document Control Lifecycle CI
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/doc_control/**"
+      - "backend/amodb/apps/manuals/**"
+      - "backend/amodb/alembic/versions/**"
+      - "backend/amodb/scripts/seed_document_governance_e2e.py"
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/services/documentLifecycle.ts"
+      - "frontend/src/services/documentControlEvidence.ts"
+      - "frontend/src/services/documentControlHome.ts"
+      - "frontend/src/services/documentControlIntegrationCatalog.ts"
+      - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/documentControlReportsPortfolio.ts"
+      - "frontend/src/services/publications.ts"
+      - "frontend/tests/e2e/document-lifecycle-controls.spec.ts"
+      - ".github/workflows/document-control-lifecycle-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: document-control-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authenticated-lifecycle:
+    name: Add, classify, guide and execute controlled document work
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_document_lifecycle_browser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_document_lifecycle_browser"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: document-control-lifecycle-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_lifecycle_browser
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_lifecycle_browser
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_document_lifecycle_browser
+      QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_DIRECT_API_URL: http://127.0.0.1:8080
+      E2E_LIVE_DOCUMENT_GOVERNANCE: "1"
+      E2E_AMO_CODE: dmsgate
+      E2E_AMO_ADMIN_EMAIL: dms-gate@example.com
+      E2E_AMO_ADMIN_PASSWORD: DmsGate!2026-Local
+      E2E_DOCUMENT_GOVERNANCE_ID: 00000000-0000-4000-8000-000000000480
+      E2E_DMS_LIFECYCLE_FIXTURE: /tmp/dms-lifecycle-work-instruction.pdf
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Run operating attribution, integration, export, evidence, reminder, source and applicability contracts
+        working-directory: backend
+        run: >-
+          pytest -q
+          amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
+          amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
+          amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
+          amodb/apps/doc_control/tests/test_reports_export_contract.py
+          amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_job_contract.py
+          amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
+          amodb/apps/doc_control/tests/test_change_source_contract.py
+          amodb/apps/doc_control/tests/test_applicability_target_contract.py
+      - name: Upgrade clean lifecycle database
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade head
+      - name: Seed authenticated governed document fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_document_governance_e2e.py
+      - name: Create work-instruction intake fixture
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from reportlab.lib.pagesizes import A4
+          from reportlab.pdfgen import canvas
+
+          path = "/tmp/dms-lifecycle-work-instruction.pdf"
+          pdf = canvas.Canvas(path, pagesize=A4, invariant=1)
+          pdf.setTitle("Quality Work Instruction QWI-900")
+          pdf.setFont("Helvetica-Bold", 16)
+          pdf.drawString(72, 790, "QUALITY WORK INSTRUCTION")
+          pdf.setFont("Helvetica", 11)
+          pdf.drawString(72, 765, "QWI-900 Daily Lifecycle Acceptance")
+          pdf.drawString(72, 740, "Controlled work instruction for DMS lifecycle acceptance.")
+          pdf.drawString(72, 715, "Revision 0 · Issue 01")
+          pdf.save()
+          print(path)
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run operational workflow contracts
+        working-directory: frontend
+        run: >-
+          npm exec -- vitest run
+          src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+          src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/documentControl/reviewerDecisionEvidence.test.ts
+      - name: Lint lifecycle acceptance and operating surfaces
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/pages/documentControl/DocumentLifecycleHeaderActions.tsx
+          src/pages/documentControl/DocumentControlShell.tsx
+          src/pages/documentControl/DocumentWorkflowGuide.tsx
+          src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+          src/pages/documentControl/DocumentControlJobLauncher.tsx
+          src/pages/documentControl/documentControlJobs.ts
+          src/pages/documentControl/DocumentLibraryHubPage.tsx
+          src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DocumentControlRecordActions.tsx
+          src/pages/documentControl/DocumentControlChangeRequestActions.tsx
+          src/pages/documentControl/DocumentControlApplicabilityActions.tsx
+          src/pages/documentControl/DocumentControlReviewActions.tsx
+          src/pages/documentControl/DocumentControlTemporaryRevisionActions.tsx
+          src/pages/documentControl/DocumentControlIntegrationActions.tsx
+          src/pages/documentControl/DocumentControlExternalSourceActions.tsx
+          src/pages/documentControl/DocumentControlApproverLifecycleActions.tsx
+          src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
+          src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
+          src/pages/documentControl/DocumentEvidencePicker.tsx
+          src/pages/documentControl/DocumentEvidencePackAction.tsx
+          src/pages/documentControl/reviewerDecisionEvidence.ts
+          src/pages/documentControl/reviewerDecisionEvidence.test.ts
+          src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
+          src/pages/documentControl/DocumentControlReportsPage.tsx
+          src/pages/documentControl/DocumentControlAdministrationPage.tsx
+          src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/services/documentLifecycle.ts
+          src/services/documentControlEvidence.ts
+          src/services/documentControlHome.ts
+          src/services/documentControlIntegrationCatalog.ts
+          src/services/documentControlReports.ts
+          src/services/documentControlReportsPortfolio.ts
+          tests/e2e/document-lifecycle-controls.spec.ts
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start backend and production preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/dms-lifecycle-backend.log 2>&1 & echo $! > /tmp/dms-lifecycle-backend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-lifecycle-backend.log; exit 1; fi
+            sleep 1
+          done
+          sleep 2
+          if grep -Eq "UndefinedColumn|UndefinedTable|Quality planner automatic reminder cycle failed|Document Control automatic reminder cycle failed|Document Control evidence-pack worker cycle failed" /tmp/dms-lifecycle-backend.log; then
+            echo "::error::Backend startup reported an ORM/schema or Document Control background-worker integration failure"
+            cat /tmp/dms-lifecycle-backend.log
+            exit 1
+          fi
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/dms-lifecycle-frontend.log 2>&1 & echo $! > /tmp/dms-lifecycle-frontend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:4173/maintenance/dmsgate/login >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/dms-lifecycle-frontend.log; exit 1; fi
+            sleep 1
+          done
+      - name: Run authenticated daily DMS lifecycle acceptance
+        working-directory: frontend
+        run: npm exec -- playwright test tests/e2e/document-lifecycle-controls.spec.ts
+      - name: Verify production runtime logs are clean
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "WebSocket connection.*failed|\[vite\].*failed to connect|HMR.*failed|UndefinedTable|UndefinedColumn|Document Control automatic reminder cycle failed|Document Control evidence-pack worker cycle failed" /tmp/dms-lifecycle-frontend.log /tmp/dms-lifecycle-backend.log 2>/dev/null; then
+            echo "::error::Material runtime, development-server or Document Control background-worker noise detected during lifecycle acceptance"
+            cat /tmp/dms-lifecycle-frontend.log 2>/dev/null || true
+            cat /tmp/dms-lifecycle-backend.log 2>/dev/null || true
+            exit 1
+          fi
+      - name: Dump server logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo '--- backend ---'
+          cat /tmp/dms-lifecycle-backend.log 2>/dev/null || true
+          echo '--- frontend ---'
+          cat /tmp/dms-lifecycle-frontend.log 2>/dev/null || true
+      - name: Upload lifecycle Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-lifecycle-evidence
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: warn
+      - name: Stop acceptance servers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/dms-lifecycle-frontend.pid ]; then kill "$(cat /tmp/dms-lifecycle-frontend.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/dms-lifecycle-backend.pid ]; then kill "$(cat /tmp/dms-lifecycle-backend.pid)" 2>/dev/null || true; fi

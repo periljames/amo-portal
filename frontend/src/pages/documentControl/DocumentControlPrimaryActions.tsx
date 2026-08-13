@@ -7,6 +7,7 @@ import {
   upsertDocumentProfile,
   type DocumentDetailResponse,
 } from "../../services/documentControl";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
 import { updateDocumentMetadata } from "../../services/documentControlReports";
 import {
   approvePublicationIntake,
@@ -14,6 +15,7 @@ import {
   uploadPublicationRevision,
   type PublicationUploadPreview,
 } from "../../services/publications";
+import DocumentEvidencePicker from "./DocumentEvidencePicker";
 
 
 type EnhancedCapabilities = DocumentDetailResponse["capabilities"] & {
@@ -25,10 +27,6 @@ type EnhancedCapabilities = DocumentDetailResponse["capabilities"] & {
 
 type Mode = "properties" | "upload" | "publish" | null;
 type UploadState = "DRAFT" | "APPROVED";
-
-function evidenceFrom(value: string): Array<{ asset_id: string }> {
-  return value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean).map((asset_id) => ({ asset_id }));
-}
 
 function distributionPolicy(metadata: Record<string, unknown>): {
   auto_issue_on_publish: boolean;
@@ -215,16 +213,15 @@ function RevisionUploadDialog({ detail, tenant, onClose, onChanged }: { detail: 
 function PublishDialog({ detail, tenant, onClose, onChanged }: { detail: DocumentDetailResponse; tenant: string; onClose: () => void; onChanged: () => void }) {
   const workflow = detail.workflows[0];
   const [comments, setComments] = useState("");
-  const [evidence, setEvidence] = useState("");
+  const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const references = evidenceFrom(evidence);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!workflow) return;
     setBusy(true); setError("");
     try {
-      await transitionDocumentWorkflow(tenant, workflow.id, { action: "PUBLISH", comments: comments.trim(), evidence: references, expected_version: workflow.version });
+      await transitionDocumentWorkflow(tenant, workflow.id, { action: "PUBLISH", comments: comments.trim(), evidence, expected_version: workflow.version });
       onChanged(); onClose();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Publication could not be completed."); }
     finally { setBusy(false); }
@@ -233,8 +230,18 @@ function PublishDialog({ detail, tenant, onClose, onChanged }: { detail: Documen
   return <DialogShell title="Publish controlled revision" description="Publication is immutable. Eligible users will be notified automatically and acknowledgement tasks will be created when required." busy={busy} onClose={onClose}><form className="dc-form" onSubmit={submit}>
     <div className="dc-callout"><Rocket size={17} /><div><strong>{detail.document.code} · Rev {detail.document.latest_revision?.revision_number}</strong><div>Workflow state: {workflow?.state || "Unavailable"} · Effectivity: {workflow?.effective_at || "Immediate"}</div></div></div>
     <label className="wide"><span>Publication decision and release basis</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} required /></label>
-    <label className="wide"><span>Retained evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="One evidence asset ID per line" required /></label>
+    <DocumentEvidencePicker
+      tenant={tenant}
+      manualId={detail.document.id}
+      revisionId={detail.document.latest_revision?.id || null}
+      category="WORKFLOW"
+      purpose="PUBLICATION_RELEASE"
+      value={evidence}
+      onChange={setEvidence}
+      label="Publication evidence"
+      help="Upload or select retained supporting evidence. Internal asset IDs are never entered manually."
+    />
     {error ? <div className="dc-form__error">{error}</div> : null}
-    <div className="dc-form__actions"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy || !comments.trim() || !references.length}>{busy ? "Publishing…" : "Publish and notify users"}</button></div>
+    <div className="dc-form__actions"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy || !comments.trim() || !evidence.length}>{busy ? "Publishing…" : "Publish and notify users"}</button></div>
   </form></DialogShell>;
 }

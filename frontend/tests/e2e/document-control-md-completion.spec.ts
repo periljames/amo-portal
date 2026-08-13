@@ -78,7 +78,13 @@ async function openRegisteredCopy(page: Page, copyNumber: string, homeLocation: 
 async function setIncidentEvidence(page: Page, reason: string, reference: string): Promise<void> {
   const scan = page.getByTestId("physical-copy-scan");
   await scan.getByLabel("Reason / incident narrative").fill(reason);
-  await scan.getByLabel("Retained evidence reference").fill(reference);
+  const filename = `${reference}.txt`;
+  await scan.locator('.dms-evidence-picker input[type="file"]').setInputFiles({
+    name: filename,
+    mimeType: "text/plain",
+    buffer: Buffer.from(`${reference}\n${reason}\n`),
+  });
+  await expect(scan.getByText(filename, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe.serial("DMS MD completion acceptance", () => {
@@ -253,7 +259,9 @@ test.describe.serial("DMS MD completion acceptance", () => {
     const download = await downloadPromise;
     expect(await download.suggestedFilename()).toMatch(/\.pdf$/i);
 
-    await scan.getByLabel("Return due").fill("2026-08-10T12:00");
+    const returnDue = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const returnDueValue = new Date(returnDue.getTime() - returnDue.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    await scan.getByLabel("Return due").fill(returnDueValue);
     await scan.getByLabel(/I accept custody/).check();
     await scan.getByRole("button", { name: "Check out to me", exact: true }).click();
     await expect(scan).toContainText("ISSUED", { timeout: 30_000 });
@@ -284,12 +292,12 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await setIncidentEvidence(page, "Controlled copy withdrawn after completed lifecycle acceptance.", "MD-EVIDENCE-WITHDRAW-001");
     await scan.getByRole("button", { name: "Withdraw", exact: true }).click();
     await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
-    await expect(scan).toContainText("MD-EVIDENCE-WITHDRAW-001");
+    await expect(scan).toContainText("MD-EVIDENCE-WITHDRAW-001.txt");
 
     await setIncidentEvidence(page, "Destroyed following controlled withdrawal and retained evidence review.", "MD-EVIDENCE-DESTROY-001");
     await scan.getByRole("button", { name: "Record destruction", exact: true }).click();
     await expect(scan).toContainText("DESTROYED", { timeout: 30_000 });
-    await expect(scan).toContainText("MD-EVIDENCE-DESTROY-001");
+    await expect(scan).toContainText("MD-EVIDENCE-DESTROY-001.txt");
   });
 
   test("physical controlled copy damage and loss preserve isolated incident evidence", async ({ page }) => {
@@ -300,7 +308,7 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await scan.getByRole("button", { name: "Record damage", exact: true }).click();
     await expect(scan).toContainText("DAMAGE", { timeout: 30_000 });
     await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
-    await expect(scan).toContainText("MD-EVIDENCE-DAMAGE-001");
+    await expect(scan).toContainText("MD-EVIDENCE-DAMAGE-001.txt");
 
     const lossNumber = `MD-LOSS-${Date.now().toString(36).toUpperCase()}`;
     await openRegisteredCopy(page, lossNumber, "Quality Library · Loss Fixture");
@@ -309,6 +317,6 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await scan.getByRole("button", { name: "Record loss", exact: true }).click();
     await expect(scan).toContainText("LOSS", { timeout: 30_000 });
     await expect(scan).toContainText("WITHDRAWN", { timeout: 30_000 });
-    await expect(scan).toContainText("MD-EVIDENCE-LOSS-001");
+    await expect(scan).toContainText("MD-EVIDENCE-LOSS-001.txt");
   });
 });

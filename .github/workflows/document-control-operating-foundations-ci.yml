@@ -1,0 +1,186 @@
+name: Document Control Operating Foundations CI
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/doc_control/**"
+      - "backend/amodb/alembic/versions/docctl_20260812_*.py"
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/services/documentControlEvidence.ts"
+      - "frontend/src/services/documentControlIntegrationCatalog.ts"
+      - "frontend/src/services/documentControlReports.ts"
+      - "frontend/src/services/documentControlRetention.ts"
+      - "frontend/src/services/documentControlHome.ts"
+      - ".github/workflows/document-control-operating-foundations-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: document-control-operating-foundations-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_dms_foundations
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_dms_foundations"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: dms-operating-foundations-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_dms_foundations
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_dms_foundations
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_dms_foundations
+      QUALITY_SCHEMA_STRICT: "0"
+      PYTHONPATH: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+
+      - name: Compile DMS operating foundations
+        working-directory: backend
+        run: >-
+          python -m py_compile
+          amodb/apps/doc_control/evidence_models.py
+          amodb/apps/doc_control/evidence_pack_runtime_guard.py
+          amodb/apps/doc_control/evidence_pack_job_service.py
+          amodb/apps/doc_control/evidence_pack_job_lifecycle_router.py
+          amodb/apps/doc_control/reminder_models.py
+          amodb/apps/doc_control/reminder_policy.py
+          amodb/apps/doc_control/reminder_service.py
+          amodb/apps/doc_control/reminder_runtime_guard.py
+          amodb/apps/doc_control/reminder_lifecycle_router.py
+          amodb/apps/doc_control/retention_models.py
+          amodb/apps/doc_control/workspace_retention_router.py
+          amodb/apps/doc_control/workspace_retention_accountability_router.py
+          amodb/apps/doc_control/workspace_retention_sources_router.py
+          amodb/apps/doc_control/workspace_evidence_router.py
+          amodb/apps/doc_control/workspace_evidence_pack_router.py
+          amodb/apps/doc_control/workspace_evidence_pack_job_router.py
+          amodb/apps/doc_control/workspace_copy_evidence_router.py
+          amodb/apps/doc_control/workspace_copy_due_router.py
+          amodb/apps/doc_control/workspace_external_router.py
+          amodb/apps/doc_control/workspace_change_router.py
+          amodb/apps/doc_control/workspace_applicability_router.py
+          amodb/apps/doc_control/workspace_authority_router.py
+          amodb/apps/doc_control/router.py
+
+      - name: Run all DMS foundation contracts
+        working-directory: backend
+        run: >-
+          pytest -q
+          amodb/apps/doc_control/tests/test_document_control_evidence_assets_contract.py
+          amodb/apps/doc_control/tests/test_document_control_reminder_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py
+          amodb/apps/doc_control/tests/test_document_evidence_pack_job_contract.py
+          amodb/apps/doc_control/tests/test_retention_disposition_contract.py
+          amodb/apps/doc_control/tests/test_change_source_contract.py
+          amodb/apps/doc_control/tests/test_applicability_target_contract.py
+          amodb/apps/doc_control/tests/test_controlled_copy_due_contract.py
+          amodb/apps/doc_control/tests/test_workspace_integration_catalog_contract.py
+          amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
+          amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
+
+      - name: Upgrade clean PostgreSQL database through current Alembic head
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade head
+
+      - name: Verify DMS foundation schema exists
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from sqlalchemy import inspect
+          from amodb.database import WriteSessionLocal
+          db = WriteSessionLocal()
+          try:
+              inspector = inspect(db.get_bind())
+              tables = set(inspector.get_table_names())
+              required = {
+                  "document_evidence_assets",
+                  "document_reminder_deliveries",
+                  "document_retention_dispositions",
+                  "saas_jobs",
+              }
+              missing = sorted(required - tables)
+              if missing:
+                  raise SystemExit(f"Missing DMS foundation tables after upgrade: {missing}")
+              retention_columns = {column["name"] for column in inspector.get_columns("document_retention_dispositions")}
+              if "approver_user_id" not in retention_columns:
+                  raise SystemExit("Retention schema is missing approver_user_id")
+              print("DMS foundation tables, durable job queue and retention approver column present")
+          finally:
+              db.close()
+          PY
+
+      - name: Import Document Control routing graph
+        working-directory: backend
+        run: python -c "from amodb.apps.doc_control.router import router; assert router.routes"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Run DMS operating-model contracts
+        working-directory: frontend
+        run: >-
+          npm exec -- vitest run
+          src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+          src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+          src/pages/documentControl/DmsOperatingModel.contract.test.ts
+          src/pages/documentControl/DmsProductionForms.contract.test.ts
+          src/pages/documentControl/reviewerDecisionEvidence.test.ts
+
+      - name: Lint new operating surfaces
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/pages/documentControl/DocumentControlRecordActions.tsx
+          src/pages/documentControl/DocumentControlPrimaryActions.tsx
+          src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx
+          src/pages/documentControl/DocumentControlChangeRequestActions.tsx
+          src/pages/documentControl/DocumentControlApplicabilityActions.tsx
+          src/pages/documentControl/DocumentControlExternalSourceActions.tsx
+          src/pages/documentControl/DocumentControlApproverLifecycleActions.tsx
+          src/pages/documentControl/DocumentControlReviewerLifecycleActions.tsx
+          src/pages/documentControl/DocumentControlRetentionActions.tsx
+          src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
+          src/pages/documentControl/DmsProductionForms.contract.test.ts
+          src/pages/documentControl/DocumentEvidencePicker.tsx
+          src/pages/documentControl/DocumentEvidencePackAction.tsx
+          src/pages/documentControl/DocumentControlAdministrationPage.tsx
+          src/services/documentControlEvidence.ts
+          src/services/documentControlReports.ts
+          src/services/documentControlRetention.ts
+          src/services/documentControlHome.ts
+
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
