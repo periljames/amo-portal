@@ -74,17 +74,29 @@ def validate_decision_evidence(payload: schemas.WorkflowTransitionRequest) -> No
         )
 
 
-def _server_revision_evidence(revision) -> list[dict]:
+def _server_revision_evidence(revision, *, allow_record_fallback: bool = False) -> list[dict]:
     checksum = str(getattr(revision, "source_sha256", "") or "").strip()
-    if not checksum:
-        return []
-    return [
-        {
-            "reference": f"manual-revision:{revision.id}",
-            "checksum_sha256": checksum,
-            "evidence_type": "CONTROLLED_REVISION_SOURCE",
-        }
-    ]
+    if checksum:
+        return [
+            {
+                "reference": f"manual-revision:{revision.id}",
+                "checksum_sha256": checksum,
+                "evidence_type": "CONTROLLED_REVISION_SOURCE",
+            }
+        ]
+    if allow_record_fallback:
+        # Legacy published revisions may predate retained source checksums. Archive
+        # must remain possible without weakening approval/publication evidence:
+        # the server-verified immutable revision record is the governed fallback
+        # only for the retirement decision.
+        return [
+            {
+                "reference": f"manual-revision:{revision.id}",
+                "evidence_type": "CONTROLLED_LEGACY_REVISION_RECORD",
+                "legacy_checksum_unavailable": True,
+            }
+        ]
+    return []
 
 
 def _normalise_decision_evidence(
@@ -117,7 +129,14 @@ def _normalise_decision_evidence(
                 "message": "A readiness waiver requires at least one uploaded controlled evidence asset.",
             },
         )
-    system_evidence = _server_revision_evidence(revision) if payload.action in _DECISION_EVIDENCE_ACTIONS else []
+    system_evidence = (
+        _server_revision_evidence(
+            revision,
+            allow_record_fallback=payload.action == "ARCHIVE",
+        )
+        if payload.action in _DECISION_EVIDENCE_ACTIONS
+        else []
+    )
     return payload.model_copy(update={"evidence": [*system_evidence, *supplied]})
 
 
