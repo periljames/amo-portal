@@ -178,4 +178,28 @@ describe("portal route manifest", () => {
       expect(paths.has(`/maintenance/tenant-a/${department}/settings`)).toBe(true);
     }
   });
+
+  it("exposes all eleven Training OS sections to a Training department user without QMS elevation", () => {
+    const trainingUser = user({ role: "TECHNICIAN", position_title: "Training Officer" });
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: trainingUser,
+      contextDepartment: "training",
+      adminModeActive: false,
+    }));
+    const trainingIds = items.filter((item) => item.id.startsWith("training-")).map((item) => item.id);
+    expect(trainingIds).toEqual(expect.arrayContaining([
+      "training-control-room", "training-people", "training-requirements", "training-plan",
+      "training-sessions", "training-assessments", "training-authorizations", "training-certificates",
+      "training-budget", "training-reports", "training-settings",
+    ]));
+    expect(items.some((item) => item.id === "department-quality")).toBe(false);
+  });
+
+  it("keeps the Training OS hidden from an ordinary employee while preserving My Training", () => {
+    const ordinary = user({ role: "TECHNICIAN", position_title: "Technician" });
+    const items = flattenPortalNavigation(buildPortalNavigation({ amoCode: "tenant-a", user: ordinary, contextDepartment: "maintenance", adminModeActive: false }));
+    expect(items.some((item) => item.id === "training-competence")).toBe(false);
+    expect(items.some((item) => item.id === "my-training")).toBe(true);
+  });
 });

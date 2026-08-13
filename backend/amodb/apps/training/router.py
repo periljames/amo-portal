@@ -63,6 +63,8 @@ from . import models as training_models
 from . import schemas as training_schemas
 from . import compliance as training_compliance
 from . import record_lifecycle as training_record_lifecycle
+from . import operating_service as training_operating_service
+from .permissions import TrainingCapability, default_training_capabilities, has_training_capability
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 from .records_import import import_training_records_rows, parse_training_records_sheet
@@ -1750,15 +1752,11 @@ def _ensure_training_upload_path(path: Path) -> Path:
 
 def _require_training_editor(
     current_user: accounts_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> accounts_models.User:
     """
-    Allow edits only for:
-    - SUPERUSER
-    - AMO_ADMIN
-    - QUALITY_MANAGER
-    - Any user whose department.code == 'QUALITY'
-
-    Block system / service accounts even if flags are set.
+    Compatibility dependency for legacy training mutation routes. The
+    Training-only capability never grants unrelated QMS or admin authority.
     """
     if getattr(current_user, "is_system_account", False):
         raise HTTPException(
@@ -1766,28 +1764,17 @@ def _require_training_editor(
             detail="System/service accounts cannot manage training records.",
         )
 
-    if getattr(current_user, "is_superuser", False) or getattr(current_user, "is_amo_admin", False):
-        return current_user
-
-    if current_user.role == accounts_models.AccountRole.QUALITY_MANAGER:
-        return current_user
-
-    dept = getattr(current_user, "department", None)
-    if dept is not None and getattr(dept, "code", "").upper() == "QUALITY":
+    if has_training_capability(db, user=current_user, capability=TrainingCapability.COURSE_MANAGE):
         return current_user
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Only Quality department or AMO Admin may modify training data.",
+        detail="The training.course.manage capability is required.",
     )
 
 
 def _is_training_editor(user: accounts_models.User) -> bool:
-    try:
-        _require_training_editor(user)  # type: ignore[arg-type]
-        return True
-    except HTTPException:
-        return False
+    return TrainingCapability.COURSE_MANAGE.value in default_training_capabilities(user)
 
 
 def _get_user_department_code(user: accounts_models.User) -> Optional[str]:
@@ -6058,6 +6045,17 @@ def issue_certificate(
     if existing_issue or record.certificate_reference:
         raise HTTPException(status_code=400, detail="Certificate already issued and immutable.")
 
+    blockers = training_operating_service.completion_gate(db, record=record)
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TRAINING_COMPLETION_GATE_BLOCKED",
+                "message": "Certificate issuance is blocked until all configured completion controls are satisfied.",
+                "blockers": blockers,
+            },
+        )
+
     _issue_certificate_for_record(db, record=record, amo_id=current_user.amo_id, actor_user_id=current_user.id)
     db.commit()
     db.refresh(record)
@@ -6700,5 +6698,7 @@ def verify_certificate_public_endpoint(
 
 # TRAINING_WORKBOOK_CONTROL_CENTRE
 from .workbook_router import router as training_workbook_import_router
+from .operating_router import router as training_operating_router
 
 router.include_router(training_workbook_import_router)
+router.include_router(training_operating_router)

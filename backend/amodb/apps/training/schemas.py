@@ -74,6 +74,13 @@ class TrainingCourseBase(BaseModel):
     nominal_hours: Optional[int] = Field(None, description="Nominal classroom/OJT hours for the course.")
     planning_lead_days: Optional[int] = Field(45, description="Default lead window used to schedule before due date.")
     candidate_requirement_text: Optional[str] = Field(None, description="MTM candidate qualification / scope / audience notes.")
+    assessment_required: bool = False
+    pass_threshold: Optional[int] = Field(80, ge=0, le=100)
+    attendance_required: bool = True
+    ojt_signoff_required: bool = False
+    evidence_required: bool = False
+    certificate_policy: str = "ON_COMPLETION"
+    external_completion_behavior: str = "REVIEW_REQUIRED"
 
     is_mandatory: bool = Field(False, description="True if this is a required course for some staff group.")
     mandatory_for_all: bool = Field(False, description="True if all staff in the AMO must hold this training.")
@@ -107,6 +114,13 @@ class TrainingCourseUpdate(BaseModel):
     nominal_hours: Optional[int] = None
     planning_lead_days: Optional[int] = None
     candidate_requirement_text: Optional[str] = None
+    assessment_required: Optional[bool] = None
+    pass_threshold: Optional[int] = Field(None, ge=0, le=100)
+    attendance_required: Optional[bool] = None
+    ojt_signoff_required: Optional[bool] = None
+    evidence_required: Optional[bool] = None
+    certificate_policy: Optional[str] = None
+    external_completion_behavior: Optional[str] = None
     is_mandatory: Optional[bool] = None
     mandatory_for_all: Optional[bool] = None
     prerequisite_course_id: Optional[str] = None
@@ -160,6 +174,11 @@ class TrainingRequirementBase(BaseModel):
 
     effective_from: Optional[date] = Field(None, description="Optional start date for this requirement rule.")
     effective_to: Optional[date] = Field(None, description="Optional end date for this requirement rule.")
+    manual_reference: Optional[str] = None
+    planning_lead_days: Optional[int] = Field(None, ge=1, le=365)
+    assessment_required: bool = False
+    certificate_required: bool = True
+    authorization_relevance: Optional[str] = None
 
 
 class TrainingRequirementCreate(TrainingRequirementBase):
@@ -180,6 +199,11 @@ class TrainingRequirementUpdate(BaseModel):
     is_active: Optional[bool] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
+    manual_reference: Optional[str] = None
+    planning_lead_days: Optional[int] = Field(None, ge=1, le=365)
+    assessment_required: Optional[bool] = None
+    certificate_required: Optional[bool] = None
+    authorization_relevance: Optional[str] = None
 
 
 class TrainingRequirementRead(TrainingRequirementBase):
@@ -922,4 +946,3 @@ class TrainingAuditorAccessRead(BaseModel):
     verify_url: str
     access_code: str = Field(..., description="Shown once. Reusable until expiry unless max_uses was set.")
     created_at: datetime
-

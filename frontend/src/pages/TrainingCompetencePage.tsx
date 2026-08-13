@@ -460,7 +460,11 @@ function buildRefresherAnomalies(
   return anomalies.sort((a, b) => a.userName.localeCompare(b.userName) || a.courseName.localeCompare(b.courseName));
 }
 
-const TrainingCompetencePage: React.FC = () => {
+type TrainingCompetencePageProps = { embedded?: boolean };
+
+const EmbeddedTrainingLayout: React.FC<React.ComponentProps<typeof QMSLayout>> = ({ children }) => <>{children}</>;
+
+const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedded = false }) => {
   const { amoCode, department } = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1360,9 +1364,10 @@ const TrainingCompetencePage: React.FC = () => {
   };
 
   const currentEventParticipants = useMemo(() => participants, [participants]);
+  const TrainingLayout = embedded ? EmbeddedTrainingLayout : QMSLayout;
 
   return (
-    <QMSLayout
+    <TrainingLayout
       amoCode={amoCode || "UNKNOWN"}
       department={department || "quality"}
       title="Training & Competence"
@@ -2296,7 +2301,7 @@ const TrainingCompetencePage: React.FC = () => {
           await load();
         }}
       />
-    </QMSLayout>
+    </TrainingLayout>
   );
 };
 

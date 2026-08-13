@@ -7,7 +7,7 @@ import {
 } from "../utils/departmentAccess";
 import { canViewFeature, type ModuleFeature } from "../utils/roleAccess";
 import { qmsNavigationItems, type QmsModuleRoute } from "../pages/qms/routes/qmsRouteRegistry";
-import { hasQmsRolePermission } from "./routeGuards";
+import { hasQmsRolePermission, userHasTrainingRolePermission } from "./routeGuards";
 
 export type PortalNavIcon =
   | "home" | "work" | "calendar" | "planning" | "production"
@@ -323,26 +323,24 @@ function supportingBranches(amoCode: string, user: PortalUser | null, contextDep
   if (records.length) result.push({ id: "technical-records", label: "Technical Records", icon: "records", path: `${base}/production/records`, children: records });
   const rostering = featureSections(`${base}/rostering`, ROSTERING, user, contextDepartment);
   if (rostering.length) result.push({ id: "duty-rostering", label: "Duty Rostering", icon: "rostering", path: `${base}/rostering`, children: rostering });
-  if (hasQmsRolePermission("qms.training.view")) {
+  if (userHasTrainingRolePermission(user, "training.view", contextDepartment)) {
     result.push({
       id: "training-competence",
       label: "Training & Competence",
       icon: "training",
-      path: `${base}/training/competence/dashboard`,
+      path: `${base}/training/competence/control-room`,
       children: [
-        { id: "training-people", label: "People", path: `${base}/training/competence/people`, children: [
-          { id: "training-dashboard", label: "Dashboard", path: `${base}/training/competence/dashboard` },
-          { id: "training-people-list", label: "People", path: `${base}/training/competence/people` },
-          { id: "training-courses", label: "Courses", path: `${base}/training/competence/courses` },
-          { id: "training-requirements", label: "Requirements", path: `${base}/training/competence/requirements` },
-        ] },
-        { id: "training-control", label: "Competence", path: `${base}/training/competence/matrix`, children: [
-          { id: "training-matrix", label: "Matrix", path: `${base}/training/competence/matrix` },
-          { id: "training-overdue", label: "Due / Overdue", path: `${base}/training/competence/overdue` },
-          { id: "training-expiring", label: "Expiring", path: `${base}/training/competence/expiring` },
-          { id: "training-schedule", label: "Schedule", path: `${base}/training/competence/schedule` },
-          { id: "training-reports", label: "Reports", path: `${base}/training/competence/reports` },
-        ] },
+        { id: "training-control-room", label: "Control Room", path: `${base}/training/competence/control-room` },
+        { id: "training-people", label: "People & Competence", path: `${base}/training/competence/people` },
+        { id: "training-requirements", label: "Requirements Matrix", path: `${base}/training/competence/requirements` },
+        { id: "training-plan", label: "Training Plan", path: `${base}/training/competence/plan` },
+        { id: "training-sessions", label: "Sessions & Attendance", path: `${base}/training/competence/sessions` },
+        { id: "training-assessments", label: "Assessments", path: `${base}/training/competence/assessments` },
+        { id: "training-authorizations", label: "Authorizations / Decisions", path: `${base}/training/competence/authorizations` },
+        { id: "training-certificates", label: "Certificates", path: `${base}/training/competence/certificates` },
+        { id: "training-budget", label: "Budget & Finance", path: `${base}/training/competence/budget` },
+        { id: "training-reports", label: "Records & Reports", path: `${base}/training/competence/reports` },
+        { id: "training-settings", label: "Templates / Settings", path: `${base}/training/competence/settings` },
       ],
     });
   }

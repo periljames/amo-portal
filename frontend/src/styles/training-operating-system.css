@@ -1,0 +1,65 @@
+.tos-shell { display: grid; gap: 18px; padding: 18px; color: #182338; }
+.tos-section-nav { display: flex; gap: 6px; overflow-x: auto; padding: 6px; border: 1px solid #dce3ed; border-radius: 16px; background: #f7f9fc; scrollbar-width: thin; }
+.tos-section-nav button { display: inline-flex; align-items: center; gap: 7px; min-width: max-content; padding: 9px 12px; border: 0; border-radius: 11px; background: transparent; color: #536078; font-size: 12px; font-weight: 700; cursor: pointer; }
+.tos-section-nav button:hover { background: #e9eef6; color: #14213a; }
+.tos-section-nav button.is-active { background: #182b4a; color: #fff; box-shadow: 0 6px 16px rgba(24, 43, 74, .2); }
+.tos-stack { display: grid; gap: 16px; min-width: 0; }
+.tos-grid { display: grid; gap: 14px; }
+.tos-grid--queues { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.tos-grid--finance { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.tos-grid--reports { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.tos-two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.tos-span-2 { grid-column: 1 / -1; }
+.tos-card, .tos-queue, .tos-code-card { padding: 18px; border: 1px solid #dce3ed; border-radius: 18px; background: #fff; box-shadow: 0 8px 25px rgba(24, 43, 74, .06); }
+.tos-card h2, .tos-card h3, .tos-queue h3 { margin: 0 0 6px; color: #14213a; }
+.tos-card p, .tos-queue p { margin: 0 0 14px; color: #68758d; line-height: 1.5; }
+.tos-queue { display: grid; gap: 8px; border-top-width: 4px; }
+.tos-queue > div:first-child, .tos-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tos-queue--critical { border-top-color: #c23b45; }
+.tos-queue--warning { border-top-color: #d09326; }
+.tos-queue--info { border-top-color: #3478c9; }
+.tos-queue__count { font-size: 34px; font-weight: 800; letter-spacing: -.03em; }
+.tos-pill { display: inline-flex; width: max-content; align-items: center; padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.tos-pill--critical { background: #fdecee; color: #a92c37; }
+.tos-pill--warning { background: #fff5dc; color: #956111; }
+.tos-pill--ok { background: #e7f7ef; color: #176946; }
+.tos-actionbar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.tos-actionbar > div:first-child { flex: 1 1 360px; }
+.tos-actionbar label { min-width: 120px; }
+.tos-card label, .tos-actionbar label { display: grid; gap: 5px; color: #536078; font-size: 12px; font-weight: 700; }
+.tos-card input, .tos-card select, .tos-card textarea, .tos-actionbar input, .tos-actionbar select, .tos-grid--reports select { min-height: 39px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cfd8e6; border-radius: 10px; background: #fff; color: #182338; }
+.tos-card textarea { min-height: 84px; resize: vertical; }
+.tos-card button, .tos-actions button, .tos-grid--reports button { min-height: 34px; padding: 7px 11px; border: 1px solid #cbd5e4; border-radius: 9px; background: #fff; color: #1c3558; font-weight: 700; cursor: pointer; }
+.tos-card button:hover, .tos-actions button:hover { background: #edf2f8; }
+.tos-card button:disabled, .tos-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.tos-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 15px 0; }
+.tos-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #dce3ed; border-radius: 16px; background: #fff; }
+.tos-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.tos-table th { padding: 11px 13px; background: #182b4a; color: #fff; text-align: left; font-size: 11px; letter-spacing: .035em; text-transform: uppercase; }
+.tos-table td { padding: 12px 13px; border-top: 1px solid #e3e8f0; vertical-align: top; font-size: 13px; }
+.tos-table tbody tr:nth-child(even) { background: #f8fafc; }
+.tos-table small, .tos-list small, .tos-card small { display: block; margin-top: 3px; color: #77839a; line-height: 1.4; }
+.tos-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tos-code-card { display: flex; gap: 16px; align-items: center; border-color: #c7a755; background: linear-gradient(135deg, #fffdf7, #f9f1d8); }
+.tos-code-card > div { flex: 1; display: grid; gap: 4px; }
+.tos-code-card strong { font: 800 18px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.tos-self-sign { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; align-items: center; gap: 12px; }
+.tos-self-sign h3 { margin: 0; }
+.tos-list { display: grid; margin-top: 12px; border-top: 1px solid #e3e8f0; }
+.tos-list > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid #e3e8f0; }
+.tos-readiness-head { display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 12px; background: #f3f6fa; }
+.tos-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tos-totals div { padding: 10px; border-radius: 10px; background: #f3f6fa; }
+.tos-totals dt { color: #68758d; font-size: 11px; }
+.tos-totals dd { margin: 4px 0 0; font-weight: 800; }
+.tos-banner { display: flex; gap: 9px; align-items: center; padding: 11px 13px; border-radius: 12px; font-weight: 700; }
+.tos-banner button { margin-left: auto; border: 0; background: transparent; font-size: 20px; cursor: pointer; }
+.tos-banner--success { background: #e7f7ef; color: #176946; }
+.tos-banner--error { background: #fdecee; color: #a92c37; }
+.tos-loading, .tos-empty, .tos-denied { display: grid; place-items: center; gap: 10px; min-height: 260px; padding: 30px; text-align: center; color: #68758d; }
+.tos-denied { min-height: 70vh; }
+.tos-denied h1 { margin: 0; color: #14213a; }
+.tos-spin { animation: tos-spin .9s linear infinite; }
+@keyframes tos-spin { to { transform: rotate(360deg); } }
+@media (max-width: 960px) { .tos-two-column { grid-template-columns: 1fr; } .tos-span-2 { grid-column: auto; } }
+@media (max-width: 640px) { .tos-shell { padding: 10px; } .tos-form-grid { grid-template-columns: 1fr; } .tos-span-2 { grid-column: auto; } .tos-self-sign { grid-template-columns: 1fr; } .tos-code-card { align-items: flex-start; flex-wrap: wrap; } }

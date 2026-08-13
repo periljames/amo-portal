@@ -17,7 +17,7 @@ import {
   type OnboardingStatus,
 } from "./services/auth";
 import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } from "./utils/roleAccess";
-import { hasQmsRolePermission, isPlatformSuperuser } from "./app/routeGuards";
+import { hasQmsRolePermission, hasTrainingRolePermission, isPlatformSuperuser } from "./app/routeGuards";
 
 const CHUNK_RECOVERY_PREFIX = "amoportal:route-chunk-recovery:";
 const CHUNK_RECOVERY_WINDOW_MS = 60_000;
@@ -207,7 +207,7 @@ const AdminInvoiceDetailPage = lazyDefault(() => import("./pages/AdminInvoiceDet
 const EmailLogsPage = lazyDefault(() => import("./pages/EmailLogsPage"));
 const EmailServerSettingsPage = lazyDefault(() => import("./pages/EmailServerSettingsPage"));
 const TrainingPage = lazyDefault(() => import("./pages/MyTrainingPage"));
-const TrainingCompetencePage = lazyDefault(() => import("./pages/TrainingCompetencePage"));
+const TrainingCompetencePage = lazyDefault(() => import("./pages/training/TrainingOperatingSystemPage"));
 const QmsCanonicalPage = lazyDefault(() => import("./pages/qms/QmsCanonicalPage"));
 const QMSTrainingUserPage = lazyDefault(() => import("./pages/QMSTrainingUserPage"));
 const AeroDocAuditModePage = lazyDefault(() => import("./pages/AeroDocAuditModePage"));
@@ -326,6 +326,12 @@ const RequireQmsPermission: React.FC<RequireQmsPermissionProps> = ({ permission,
       </div>
     );
   }
+  return children;
+};
+
+const RequireTrainingPermission: React.FC<{ permission?: string; children: React.ReactElement }> = ({ permission = "training.view", children }) => {
+  if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
+  if (!hasTrainingRolePermission(permission)) return <div style={{ padding: "2rem" }}>You do not have permission to access the Training &amp; Competence Operating System. Your personal records remain available under My Training.</div>;
   return children;
 };
 
@@ -972,19 +978,9 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/training/competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
 
       {/* Dedicated Training & Competence route surface. Keep these before the generic /quality/* route so training never falls into the canonical Quality table reader. */}
-      <Route path="/maintenance/:amoCode/training/competence" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/dashboard" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/people" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/courses" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/requirements" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/matrix" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/overdue" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/expiring" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/certificates" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/reports" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/people/:userId/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><QMSTrainingUserPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/training/competence/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence" element={<RequireAuth><RequireTrainingPermission><TrainingCompetencePage /></RequireTrainingPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/people/:userId/*" element={<RequireAuth><RequireTrainingPermission permission="training.people.view"><QMSTrainingUserPage /></RequireTrainingPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/*" element={<RequireAuth><RequireTrainingPermission><TrainingCompetencePage /></RequireTrainingPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/training/*" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />

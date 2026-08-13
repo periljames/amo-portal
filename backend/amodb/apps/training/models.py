@@ -270,6 +270,14 @@ class TrainingCourse(Base):
         doc="Free-text candidate / role applicability guidance from the MTM or course catalogue.",
     )
 
+    assessment_required = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    pass_threshold = Column(Integer, nullable=True, default=80, server_default=text("80"))
+    attendance_required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    ojt_signoff_required = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    evidence_required = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    certificate_policy = Column(String(32), nullable=False, default="ON_COMPLETION", server_default="ON_COMPLETION")
+    external_completion_behavior = Column(String(32), nullable=False, default="REVIEW_REQUIRED", server_default="REVIEW_REQUIRED")
+
     is_mandatory = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     mandatory_for_all = Column(Boolean, nullable=False, default=False)
 
@@ -388,6 +396,11 @@ class TrainingRequirement(Base):
 
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
+    manual_reference = Column(String(255), nullable=True)
+    planning_lead_days = Column(Integer, nullable=True)
+    assessment_required = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    certificate_required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    authorization_relevance = Column(Text, nullable=True)
 
     created_by_user_id = Column(
         String(36),
@@ -1144,3 +1157,8 @@ class TrainingCertificateStatusHistory(Base):
     reason = Column(Text, nullable=True)
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+# Register the Training Operating System tables on the shared metadata without
+# coupling the legacy model module to their implementation details.
+from . import operating_models as operating_models  # noqa: E402,F401

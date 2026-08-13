@@ -1,5 +1,11 @@
 // src/app/routeGuards.ts
-import { getCachedUser, type PortalUser } from "../services/auth";
+import { getCachedUser, getContext, type PortalUser } from "../services/auth";
+
+const TRAINING_READ = new Set([
+  "training.view", "training.people.view", "training.course.view", "training.requirement.view",
+  "training.plan.view", "training.budget.view", "training.session.view", "training.attendance.view",
+  "training.assessment.view", "training.authorization.view", "training.report.view",
+]);
 
 // Keep this read surface aligned with backend/apps/quality/assurance_permissions.py.
 // QUALITY_INSPECTOR and AUDITOR receive these additional view-only permissions
@@ -81,4 +87,26 @@ export function userHasQmsRolePermission(
 
 export function hasQmsRolePermission(permission: string): boolean {
   return userHasQmsRolePermission(getCachedUser(), permission);
+}
+
+export function userHasTrainingRolePermission(
+  user: PortalUser | null | undefined,
+  permission = "training.view",
+  contextDepartment?: string | null,
+): boolean {
+  if (!user || user.is_superuser || !user.amo_id) return false;
+  if (user.is_amo_admin || user.role === "AMO_ADMIN" || user.role === "QUALITY_MANAGER") return permission.startsWith("training.");
+  const department = (contextDepartment || "").trim().toUpperCase().replaceAll("_", "-");
+  if (["TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"].includes(department)) return permission.startsWith("training.");
+  if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR" || department === "QUALITY" || department === "QUALITY-ASSURANCE") {
+    return TRAINING_READ.has(permission) || ["training.plan.review", "training.budget.review", "training.assessment.review", "training.attendance.correct"].includes(permission);
+  }
+  if (user.role === "FINANCE_MANAGER" || user.role === "ACCOUNTS_OFFICER") return ["training.view", "training.plan.view", "training.budget.view", "training.budget.review", "training.budget.approve", "training.report.view", "training.report.export"].includes(permission);
+  const position = (user.position_title || "").toLowerCase();
+  if (/assessor|instructor|trainer/.test(position)) return ["training.view", "training.people.view", "training.session.view", "training.attendance.view", "training.assessment.view", "training.assessment.perform"].includes(permission);
+  return false;
+}
+
+export function hasTrainingRolePermission(permission = "training.view"): boolean {
+  return userHasTrainingRolePermission(getCachedUser(), permission, getContext().department);
 }

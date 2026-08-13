@@ -13,6 +13,7 @@ from . import models as training_models
 from . import workbook_models as training_workbook_models
 from . import record_lifecycle as training_record_lifecycle
 from . import schemas as training_schemas
+from .permissions import TrainingCapability, default_training_capabilities
 
 
 DEFAULT_DUE_SOON_WINDOW = 45
@@ -37,15 +38,7 @@ class TrainingPolicyEvaluation:
 
 
 def is_training_editor(user: accounts_models.User) -> bool:
-    if getattr(user, "is_system_account", False):
-        return False
-    if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
-        return True
-    if user.role == accounts_models.AccountRole.QUALITY_MANAGER:
-        return True
-    dept = getattr(user, "department", None)
-    code = getattr(dept, "code", "") if dept is not None else ""
-    return isinstance(code, str) and code.upper() == "QUALITY"
+    return TrainingCapability.COURSE_MANAGE.value in default_training_capabilities(user)
 
 
 def get_user_department_code(user: accounts_models.User) -> Optional[str]:
