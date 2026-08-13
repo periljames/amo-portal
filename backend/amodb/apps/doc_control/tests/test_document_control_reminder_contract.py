@@ -90,6 +90,19 @@ def test_duplicate_delivery_claim_uses_savepoint_not_full_cycle_rollback() -> No
     assert 'install_reminder_runtime_guard()' in lifecycle
 
 
+def test_failed_only_delivery_remains_retryable_until_a_channel_succeeds() -> None:
+    guard = _text(APP / "reminder_runtime_guard.py")
+    assert 'def _processed_delivery(' in guard
+    assert 'DocumentReminderDelivery.sent_at.isnot(None)' in guard
+    assert 'DocumentReminderDelivery.sent_at.is_(None)' in guard
+    assert 'successful_delivery = False' in guard
+    assert 'retryable_failure = False' in guard
+    assert 'email_status in {"FAILED", "SKIPPED_NO_PROVIDER"}' in guard
+    assert 'if retryable_failure and not successful_delivery:' in guard
+    assert 'row.sent_at = None' in guard
+    assert 'row.sent_at = now' in guard
+
+
 def test_scheduler_is_single_writer_and_escalates_only_after_policy_thresholds() -> None:
     source = _text(APP / "reminder_service.py")
     lifecycle = _text(APP / "reminder_lifecycle_router.py")
