@@ -1,0 +1,332 @@
+/*
+ * DMS reader header consolidation.
+ *
+ * Standard reader mode must keep the document identity, document tabs and
+ * reader-mode controls in one compact top header. The document canvas is the
+ * default working surface; metadata remains available after the reader rather
+ * than consuming the first viewport.
+ */
+
+.dms-reader-shell--standard .publication-reader-page {
+  display: grid;
+  grid-template-columns: minmax(250px, 360px) minmax(390px, 1fr) auto;
+  align-content: start;
+  min-height: 100%;
+}
+
+/* Let the existing semantic header contribute its title/actions directly to
+ * the page grid so the sibling record tabs can occupy the same visual row. */
+.dms-reader-shell--standard .publication-document-header {
+  display: contents;
+}
+
+.dms-reader-shell--standard .publication-document-header__title,
+.dms-reader-shell--standard .publication-document-tabs,
+.dms-reader-shell--standard .publication-floating-header,
+.dms-reader-shell--standard .publication-document-header__actions {
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--publication-surface) 97%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.dms-reader-shell--standard .publication-document-header__title {
+  grid-column: 1;
+  min-width: 0;
+  min-height: 64px;
+  align-items: center;
+  padding: 0.38rem 0.75rem;
+  border-right: 1px solid var(--publication-border);
+  border-bottom: 1px solid var(--publication-border);
+}
+
+.dms-reader-shell--standard .publication-document-header__title > div {
+  min-width: 0;
+}
+
+.dms-reader-shell--standard .publication-document-header__title p {
+  display: none;
+}
+
+.dms-reader-shell--standard .publication-document-header__title h1 {
+  overflow: hidden;
+  max-width: 100%;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 760;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dms-reader-shell--standard .publication-document-header__title span {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.22rem;
+  margin-right: 0.38rem;
+  font-size: 0.69rem;
+  line-height: 1.2;
+}
+
+.dms-reader-shell--standard .publication-document-header__title .publication-control-status {
+  margin-top: 0.18rem;
+}
+
+/* Tabs are no longer a separate full-width row. They occupy the upper half of
+ * the centre section of the same sticky document header. */
+.dms-reader-shell--standard .publication-document-tabs {
+  grid-column: 2;
+  align-self: start;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  gap: 0.08rem;
+  overflow-x: auto;
+  padding: 0 0.35rem;
+  border-bottom: 0;
+  box-shadow: none;
+  scrollbar-width: thin;
+}
+
+.dms-reader-shell--standard .publication-document-tabs button {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 0.56rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.dms-reader-shell--standard .publication-document-tabs button span {
+  padding: 0.08rem 0.3rem;
+  font-size: 0.6rem;
+}
+
+/* Keep reader-specific controls without recreating another header row. The
+ * duplicated title is removed; current section context and reading controls
+ * share the lower half of the centre header cell. */
+.dms-reader-shell--standard .publication-floating-header {
+  grid-column: 2;
+  align-self: end;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.12rem 0.4rem 0.26rem;
+  border-top: 1px solid color-mix(in srgb, var(--publication-border) 65%, transparent);
+  border-bottom: 1px solid var(--publication-border);
+  box-shadow: none;
+}
+
+.dms-reader-shell--standard .publication-floating-header > strong,
+.dms-reader-shell--standard .publication-floating-header > button {
+  display: none !important;
+}
+
+.dms-reader-shell--standard .publication-floating-header > span {
+  display: block;
+  min-width: 0;
+  max-width: 18rem;
+  overflow: hidden;
+  margin: 0;
+  font-size: 0.64rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dms-reader-shell--standard .publication-reader-controls {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+
+.dms-reader-shell--standard .publication-reader-controls select,
+.dms-reader-shell--standard .publication-reader-controls button {
+  min-height: 25px;
+  height: 25px;
+  padding: 0 0.42rem;
+  border: 1px solid var(--publication-border);
+  border-radius: 0.32rem;
+  background: var(--publication-paper);
+  color: var(--publication-muted);
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+
+.dms-reader-shell--standard .publication-reader-controls select {
+  max-width: 7.5rem;
+}
+
+.dms-reader-shell--standard .publication-document-header__actions {
+  grid-column: 3;
+  min-height: 64px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 0.28rem;
+  max-width: none;
+  padding: 0.35rem 0.6rem;
+  border-left: 1px solid var(--publication-border);
+  border-bottom: 1px solid var(--publication-border);
+}
+
+.dms-reader-shell--standard .publication-cache-state {
+  display: none;
+}
+
+.dms-reader-shell--standard .publication-document-header__actions button {
+  min-height: 29px;
+  height: 29px;
+  padding: 0 0.48rem;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+/* Every non-header surface spans the full reader width. */
+.dms-reader-shell--standard .publication-control-banner,
+.dms-reader-shell--standard .publication-reader-workspace,
+.dms-reader-shell--standard .publication-metadata,
+.dms-reader-shell--standard .publication-record-panel,
+.dms-reader-shell--standard .publication-reader-status,
+.dms-reader-shell--standard .publication-reader-error {
+  grid-column: 1 / -1;
+}
+
+/* Default Document tab = reader first. Metadata is preserved but placed after
+ * the working reader so it cannot consume the first viewport. */
+.dms-reader-shell--standard .publication-control-banner {
+  order: 5;
+}
+
+.dms-reader-shell--standard .publication-reader-workspace,
+.dms-reader-shell--standard .publication-record-panel {
+  order: 10;
+}
+
+.dms-reader-shell--standard .publication-metadata {
+  order: 20;
+  margin: 0 !important;
+  padding-top: 0.7rem;
+}
+
+.dms-reader-shell--standard .publication-reader-workspace {
+  min-height: calc(100dvh - 64px);
+}
+
+.dms-reader-shell--standard .publication-navigation {
+  top: 64px;
+  height: calc(100dvh - 64px);
+}
+
+.dms-reader-shell--standard .publication-native-pdf__toolbar {
+  top: 64px;
+}
+
+/* The consolidated header remains one row on normal desktop widths. On
+ * constrained widths, it reflows without inserting blank spacer rows. */
+@media (max-width: 1180px) {
+  .dms-reader-shell--standard .publication-reader-page {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .dms-reader-shell--standard .publication-document-header__title,
+  .dms-reader-shell--standard .publication-document-header__actions {
+    grid-row: 1;
+    position: static;
+  }
+
+  .dms-reader-shell--standard .publication-document-header__title {
+    grid-column: 1;
+    border-right: 0;
+  }
+
+  .dms-reader-shell--standard .publication-document-header__actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+
+  .dms-reader-shell--standard .publication-document-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    position: static;
+    align-self: stretch;
+    height: 34px;
+    min-height: 34px;
+    border-top: 1px solid var(--publication-border);
+  }
+
+  .dms-reader-shell--standard .publication-floating-header {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    position: sticky;
+    top: 0;
+    align-self: stretch;
+    height: 30px;
+    min-height: 30px;
+    padding-inline: 0.7rem;
+  }
+
+  .dms-reader-shell--standard .publication-navigation {
+    top: 30px;
+    height: calc(100dvh - 30px);
+  }
+
+  .dms-reader-shell--standard .publication-native-pdf__toolbar {
+    top: 30px;
+  }
+}
+
+@media (max-width: 760px) {
+  .dms-reader-shell--standard .publication-reader-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dms-reader-shell--standard .publication-document-header__title,
+  .dms-reader-shell--standard .publication-document-header__actions,
+  .dms-reader-shell--standard .publication-document-tabs,
+  .dms-reader-shell--standard .publication-floating-header {
+    grid-column: 1;
+  }
+
+  .dms-reader-shell--standard .publication-document-header__title {
+    grid-row: 1;
+    min-height: 52px;
+  }
+
+  .dms-reader-shell--standard .publication-document-header__actions {
+    grid-row: 2;
+    min-height: 38px;
+    overflow-x: auto;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    border-left: 0;
+    padding-block: 0.25rem;
+  }
+
+  .dms-reader-shell--standard .publication-document-tabs {
+    grid-row: 3;
+    overflow-x: auto;
+  }
+
+  .dms-reader-shell--standard .publication-floating-header {
+    grid-row: 4;
+  }
+
+  .dms-reader-shell--standard .publication-floating-header > span {
+    display: none;
+  }
+
+  .dms-reader-shell--standard .publication-reader-controls {
+    width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+}
