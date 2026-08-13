@@ -8,6 +8,7 @@ import PublicationsReaderPage from "./PublicationsReaderPage";
 import PublicationInlineReferenceController from "./PublicationInlineReferenceController";
 import "./publicationReaderPost477Stability.css";
 import "./dmsReaderExperience.css";
+import "./publicationReaderHeaderConsolidation.css";
 
 type ReaderExperienceMode = "standard" | "immersive";
 
