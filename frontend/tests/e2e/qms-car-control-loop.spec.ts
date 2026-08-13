@@ -182,18 +182,19 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
   const fulfil = async (route: Route) => {
     const request = route.request();
     const url = request.url();
+    const controlLoopBase = `/api/maintenance/tenant-a/quality/cars/${CAR_ID}/control-loop`;
 
-    if (url.includes(`/api/maintenance/tenant-a/quality/cars/${CAR_ID}/control-loop`)) {
+    if (url.includes(`${controlLoopBase}/attachments`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "attachment-1", car_id: CAR_ID, filename: "implementation-evidence.pdf", description: "Approved implementation evidence", content_type: "application/pdf", size_bytes: 125000, sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uploaded_at: "2026-08-21T08:15:00Z", download_url: `${controlLoopBase}/attachments/attachment-1/download` }]) });
+      return;
+    }
+    if (url.includes(controlLoopBase)) {
       if (url.endsWith("/evaluate") && request.method() === "POST") evaluations += 1;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(controlLoopPayload()) });
       return;
     }
     if (url.includes(`/quality/cars/${CAR_ID}/responses`)) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "response-1", car_id: CAR_ID, containment_action: "Containment completed and immediate exposure controlled.", root_cause: "The process lacked a staged ownership checkpoint and dependency escalation control.", corrective_action: "Introduce accountable milestone ownership and verify implementation before closure.", preventive_action: "Trend repeat findings during management review and verify effectiveness in subsequent audits.", evidence_ref: "EVID-026", submitted_by_name: "Head of Base Maintenance", submitted_by_email: "hbm@tenant-a.test", submitted_at: "2026-08-21T07:30:00Z", status: "SUBMITTED", is_latest: true }]) });
-      return;
-    }
-    if (url.includes(`/quality/cars/${CAR_ID}/attachments`)) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "attachment-1", car_id: CAR_ID, filename: "implementation-evidence.pdf", description: "Approved implementation evidence", content_type: "application/pdf", size_bytes: 125000, sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uploaded_at: "2026-08-21T08:15:00Z", download_url: "/quality/cars/attachment-1/download" }]) });
       return;
     }
     if (url.includes(`/quality/cars/${CAR_ID}/invite`)) {
