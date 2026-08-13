@@ -50,7 +50,7 @@ export async function downloadControlledRoster(
 }
 
 export function getCalendarSubscriptionStatus(): Promise<CalendarSubscriptionStatus> {
-  return apiJson("/rostering/calendar/subscription", {
+  return apiJson("/rostering/calendar/subscription/status", {
     offline: { cacheTtlMs: 60_000 },
   });
 }
