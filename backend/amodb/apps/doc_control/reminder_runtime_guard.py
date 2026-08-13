@@ -18,6 +18,35 @@ _installed = False
 _original_collect_candidates = service._collect_candidates
 
 
+def _processed_delivery(
+    db: Session,
+    *,
+    amo_id: str,
+    candidate: service.ReminderCandidate,
+    recipient_user_id: str,
+    stage: str,
+) -> bool:
+    """Only a completed reminder stage is idempotently terminal.
+
+    Failed-only attempts deliberately keep ``sent_at`` empty so the same durable
+    ledger row can be retried on a later scheduler cycle without creating a new
+    obligation/stage identity.
+    """
+    return (
+        db.query(reminder_models.DocumentReminderDelivery.id)
+        .filter(
+            reminder_models.DocumentReminderDelivery.tenant_id == amo_id,
+            reminder_models.DocumentReminderDelivery.obligation_type == candidate.obligation_type,
+            reminder_models.DocumentReminderDelivery.obligation_id == candidate.obligation_id,
+            reminder_models.DocumentReminderDelivery.recipient_user_id == recipient_user_id,
+            reminder_models.DocumentReminderDelivery.reminder_stage == stage,
+            reminder_models.DocumentReminderDelivery.sent_at.isnot(None),
+        )
+        .first()
+        is not None
+    )
+
+
 def _claim_delivery(
     db: Session,
     *,
@@ -45,7 +74,20 @@ def _claim_delivery(
             db.add(row)
             db.flush()
     except IntegrityError:
-        return None
+        # A prior failed-only attempt intentionally retains the unique ledger row
+        # with sent_at=NULL. Reuse it rather than suppressing every future retry.
+        return (
+            db.query(reminder_models.DocumentReminderDelivery)
+            .filter(
+                reminder_models.DocumentReminderDelivery.tenant_id == amo_id,
+                reminder_models.DocumentReminderDelivery.obligation_type == candidate.obligation_type,
+                reminder_models.DocumentReminderDelivery.obligation_id == candidate.obligation_id,
+                reminder_models.DocumentReminderDelivery.recipient_user_id == recipient_user_id,
+                reminder_models.DocumentReminderDelivery.reminder_stage == stage,
+                reminder_models.DocumentReminderDelivery.sent_at.is_(None),
+            )
+            .first()
+        )
     return row
 
 
@@ -61,7 +103,7 @@ def _deliver(
     policy,
     now: datetime,
 ) -> bool:
-    if service._already_processed(
+    if _processed_delivery(
         db,
         amo_id=amo_id,
         candidate=candidate,
@@ -89,6 +131,8 @@ def _deliver(
     )
     delivery: dict[str, str | None] = {"portal": "DISABLED", "email": "DISABLED"}
     error_text: str | None = None
+    successful_delivery = False
+    retryable_failure = False
 
     if policy.portal_notifications_enabled and service._portal_allowed(db, amo_id=amo_id, user_id=str(user.id)):
         existing = (
@@ -119,6 +163,7 @@ def _deliver(
                 },
             ))
         delivery["portal"] = "QUEUED"
+        successful_delivery = True
     elif policy.portal_notifications_enabled:
         delivery["portal"] = "SKIPPED_BY_PREFERENCE"
 
@@ -147,13 +192,29 @@ def _deliver(
                     "reminder_stage": stage,
                 },
             )
-            delivery["email"] = str(getattr(email_log.status, "value", email_log.status))
+            email_status = str(getattr(email_log.status, "value", email_log.status))
+            delivery["email"] = email_status
+            if email_status == "SENT":
+                successful_delivery = True
+            elif email_status in {"FAILED", "SKIPPED_NO_PROVIDER"}:
+                retryable_failure = True
+                error_text = str(getattr(email_log, "error", "") or email_status)[:2000]
         except Exception as exc:
             delivery["email"] = "FAILED"
+            retryable_failure = True
             error_text = str(exc)[:2000]
 
     row.delivery_json = delivery
     row.error_text = error_text
+    if retryable_failure and not successful_delivery:
+        # Preserve the durable attempt for auditability, but leave the stage open.
+        # The next scheduler cycle reuses this unique row and retries delivery.
+        row.sent_at = None
+        db.flush()
+        return False
+
+    # A successful channel, or an explicit disabled/preference-only outcome, is
+    # terminal for this recipient/stage and must remain idempotently deduplicated.
     row.sent_at = now
     db.flush()
     return True
