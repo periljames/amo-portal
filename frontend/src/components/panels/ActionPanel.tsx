@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { listAdminUsers } from "../../services/adminUsers";
+import { getContext } from "../../services/auth";
 import { qmsCreateDistribution, qmsDeleteCarAttachment, qmsListCarAttachments, qmsListDistributions, qmsUploadCarAttachment, qmsUpdateCar, type CARStatus } from "../../services/qms";
 import { addTrainingEventParticipant, downloadTrainingFile, listTrainingEvents, listTrainingFiles, uploadTrainingFile } from "../../services/training";
 import type { AdminUserRead } from "../../services/adminUsers";
@@ -27,6 +28,8 @@ type Props = {
 const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
   const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
+  const tenantContext = getContext();
+  const amoCode = tenantContext.amoSlug || tenantContext.amoCode || "UNKNOWN";
   const [selectedAssignee, setSelectedAssignee] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<CARStatus | "">("");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
@@ -44,8 +47,6 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
     queryKey: ["training-events"],
     queryFn: () => listTrainingEvents(),
   });
-
-
 
   const { data: carAttachments = [] } = useQuery({
     queryKey: ["qms-car-attachments", context?.type === "car" ? context.id : "none"],
@@ -197,6 +198,15 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
 
             {context.type === "car" && (
               <div className="action-panel__body">
+                <div className="action-panel__section">
+                  <div className="action-panel__label">Staged RCA/CAPA control</div>
+                  <a
+                    className="btn btn-secondary"
+                    href={`/maintenance/${encodeURIComponent(amoCode)}/quality/cars?control=${encodeURIComponent(context.id)}`}
+                  >
+                    Open staged control loop
+                  </a>
+                </div>
                 <div className="action-panel__section">
                   <div className="action-panel__label">Assign owner</div>
                   <select

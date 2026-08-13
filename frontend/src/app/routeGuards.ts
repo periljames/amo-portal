@@ -29,7 +29,7 @@ const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.equipment.view",
   "qms.external.view",
   "qms.review.view",
-  "qms.report.view",
+  "qms.reports.view",
   "qms.evidence.view",
   "qms.training.view",
 ]);

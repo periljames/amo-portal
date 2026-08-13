@@ -220,7 +220,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     segment: "reports",
     label: "Reports and Analytics",
     navigationLabel: "Reports & Analytics",
-    permission: "qms.report.view",
+    permission: "qms.reports.view",
     section: "reporting",
     defaultView: "executive-dashboard",
     validViews: ["executive-dashboard", "audit-performance", "car-performance", "training-compliance", "finding-trends", "exports"],

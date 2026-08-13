@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from amodb.apps.accounts import models as account_models
+from amodb.database import get_write_db
+
+from .car_control_loop_guard_router import (
+    close_control_loop_guarded as _close_control_loop_guarded,
+    decide_deadline_change_guarded as _decide_deadline_change_guarded,
+    request_deadline_change_guarded as _request_deadline_change_guarded,
+)
+from .car_control_loop_router import (
+    CloseControlLoop,
+    DeadlineChangeCreate,
+    DeadlineChangeDecision,
+    MilestoneUpdate,
+    _enum_value,
+    _load_car,
+    update_milestone as _update_milestone_base,
+)
+from .tenant_security import (
+    TenantContext,
+    assert_quality_permission,
+    set_postgres_tenant_context,
+    write_tenant_context,
+)
+
+router = APIRouter(prefix="/cars/{car_id}/control-loop", tags=["Quality CAR control-loop authority"])
+_TERMINAL_CAR_STATUSES = {"CLOSED", "CANCELLED"}
+
+
+def _require_active_control_car(car) -> None:
+    state = str(_enum_value(car.status) or "").upper()
+    if state in _TERMINAL_CAR_STATUSES:
+        raise HTTPException(status_code=409, detail="The CAR control loop is terminal; governed changes can no longer be made.")
+
+
+def _require_canonical_review_authority(
+    db: Session,
+    *,
+    ctx: TenantContext,
+    car,
+) -> None:
+    # Tenant membership/support-session validation is already represented by
+    # TenantContext. Resolve by identity rather than amo_id so a global platform
+    # superuser operating through an approved support session is not discarded.
+    current_user = (
+        db.query(account_models.User)
+        .filter(
+            account_models.User.id == ctx.user_id,
+            account_models.User.is_active.is_(True),
+        )
+        .first()
+    )
+    if current_user is None:
+        raise HTTPException(status_code=403, detail="The active Quality reviewer could not be resolved.")
+
+    from .router import _require_car_review_access
+
+    _require_car_review_access(db, current_user, car)
+
+
+def _require_milestone_review_authority(
+    db: Session,
+    *,
+    ctx: TenantContext,
+    car,
+    requested_status: str | None,
+) -> None:
+    if requested_status not in {"ACCEPTED", "REJECTED"}:
+        return
+    _require_canonical_review_authority(db, ctx=ctx, car=car)
+
+
+@router.patch("/milestones/{milestone_id}")
+def update_milestone_with_review_authority(
+    car_id: UUID,
+    milestone_id: UUID,
+    payload: MilestoneUpdate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    _require_active_control_car(car)
+    _require_milestone_review_authority(
+        db,
+        ctx=ctx,
+        car=car,
+        requested_status=payload.status,
+    )
+    return _update_milestone_base(str(car_id), str(milestone_id), payload, ctx, db)
+
+
+@router.post("/deadline-changes", status_code=status.HTTP_201_CREATED)
+def request_deadline_change_with_terminal_guard(
+    car_id: UUID,
+    payload: DeadlineChangeCreate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    _require_active_control_car(car)
+    return _request_deadline_change_guarded(car_id, payload, ctx, db)
+
+
+@router.post("/deadline-changes/{change_id}/decision")
+def decide_deadline_change_with_review_authority(
+    car_id: UUID,
+    change_id: UUID,
+    payload: DeadlineChangeDecision,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    _require_active_control_car(car)
+    _require_canonical_review_authority(db, ctx=ctx, car=car)
+    return _decide_deadline_change_guarded(car_id, change_id, payload, ctx, db)
+
+
+@router.post("/close")
+def close_control_loop_with_close_authority(
+    car_id: UUID,
+    payload: CloseControlLoop,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    # Closure is a distinct governed capability in the canonical CAR action map.
+    # The delegated guard still requires manage access, so callers must satisfy
+    # both general CAR management and the explicit close authority boundary.
+    assert_quality_permission(db, ctx, "qms.car.close")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _close_control_loop_guarded(car_id, payload, ctx, db)
