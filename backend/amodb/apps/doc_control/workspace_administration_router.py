@@ -12,6 +12,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import models as legacy_models
+from .reminder_policy import DocumentReminderPolicy
 from .workspace_service import audit, require_control_user, resolve_tenant
 
 
@@ -56,6 +57,7 @@ class WorkspaceAdministrationIn(BaseModel):
     indexing_policy: IndexingPolicy = Field(default_factory=IndexingPolicy)
     integration_modules: list[str] = Field(default_factory=list, max_length=64)
     physical_copy_policy: PhysicalCopyPolicy = Field(default_factory=PhysicalCopyPolicy)
+    reminder_policy: DocumentReminderPolicy = Field(default_factory=DocumentReminderPolicy)
 
 
 def _extended_settings(tenant) -> dict:
@@ -87,6 +89,7 @@ def _settings_payload(tenant, row) -> dict:
     workflow = WorkflowPolicy.model_validate(extended.get("workflow_policy") or {}).model_dump()
     indexing = IndexingPolicy.model_validate(extended.get("indexing_policy") or {}).model_dump()
     physical = PhysicalCopyPolicy.model_validate(extended.get("physical_copy_policy") or {}).model_dump()
+    reminder = DocumentReminderPolicy.model_validate(extended.get("reminder_policy") or {}).model_dump()
     return {
         "tenant_id": tenant.amo_id,
         "default_retention_years": row.default_retention_years if row else 5,
@@ -99,6 +102,7 @@ def _settings_payload(tenant, row) -> dict:
         "indexing_policy": indexing,
         "integration_modules": _normalize_modules(list(extended.get("integration_modules") or [])),
         "physical_copy_policy": physical,
+        "reminder_policy": reminder,
         "configured": bool(row or extended),
     }
 
@@ -174,6 +178,7 @@ def update_administration(
         "indexing_policy": payload.indexing_policy.model_dump(),
         "integration_modules": _normalize_modules(payload.integration_modules),
         "physical_copy_policy": payload.physical_copy_policy.model_dump(),
+        "reminder_policy": payload.reminder_policy.model_dump(),
     })
     tenant_settings = dict(tenant.settings_json or {})
     tenant_settings[ADMIN_SETTINGS_KEY] = extended

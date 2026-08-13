@@ -1,0 +1,150 @@
+.dclife-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+.dclife-dialog {
+  width: min(760px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  border: 1px solid var(--dc-border, #d8dee8);
+  border-radius: 14px;
+  background: var(--dc-surface, #fff);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.dclife-dialog > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--dc-border, #e2e8f0);
+  background: var(--dc-surface, #fff);
+}
+
+.dclife-dialog > header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.dclife-dialog > header p {
+  margin: 6px 0 0;
+  max-width: 620px;
+  color: var(--dc-muted, #64748b);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.dclife-dialog > header > button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dclife-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 22px;
+}
+
+.dclife-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dclife-form label > span {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--dc-text, #1e293b);
+}
+
+.dclife-form input,
+.dclife-form select,
+.dclife-form textarea {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--dc-border, #cbd5e1);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--dc-surface, #fff);
+  color: var(--dc-text, #0f172a);
+  font: inherit;
+}
+
+.dclife-form .wide {
+  grid-column: 1 / -1;
+}
+
+.dclife-detection,
+.dclife-warning,
+.dclife-document-card,
+.dclife-note {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  border: 1px solid var(--dc-border, #d8dee8);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--dc-subtle, #f8fafc);
+  color: var(--dc-text, #1e293b);
+}
+
+.dclife-detection div,
+.dclife-warning div,
+.dclife-document-card {
+  display: grid;
+  gap: 3px;
+}
+
+.dclife-detection span,
+.dclife-warning span,
+.dclife-document-card span,
+.dclife-detection small {
+  color: var(--dc-muted, #64748b);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.dclife-detection[data-confidence="LOW"] {
+  border-style: dashed;
+}
+
+.dclife-warning {
+  border-color: #f3c3c3;
+  background: #fff7f7;
+}
+
+.dclife-note {
+  display: block;
+  color: var(--dc-muted, #64748b);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.dclife-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .dclife-backdrop { padding: 10px; }
+  .dclife-form { grid-template-columns: 1fr; padding: 16px; }
+  .dclife-form .wide { grid-column: auto; }
+  .dclife-dialog > header { padding: 16px; }
+  .dclife-actions { flex-wrap: wrap; }
+}

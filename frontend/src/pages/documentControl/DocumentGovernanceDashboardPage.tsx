@@ -67,7 +67,7 @@ function statusKind(value?: string | null): "success" | "warning" | "danger" | "
   if (["CURRENT", "COMPLETED", "ACKNOWLEDGED", "READY"].includes(status)) return "success";
   if (["OVERDUE", "FAILED", "BLOCKED", "SUPERSEDED", "RECALLED"].includes(status)) return "danger";
   if (["PENDING", "DUE", "OPEN", "CORRECTIONS_REQUIRED"].includes(status)) return "warning";
-  if (["ACTION", "TECHNICAL_REVIEW", "QUALITY_REVIEW", "ACCOUNTABLE_MANAGER_APPROVAL", "AUTHORITY_SUBMITTED"].includes(status)) return "info";
+  if (["ACTION", "TECHNICAL_REVIEW", "QUALITY_REVIEW", "ACCOUNTABLE_MANAGER_APPROVAL", "AUTHORITY_SUBMITTED", "NEW_REVISION_REQUIRES_ASSESSMENT", "DISPOSITION_REQUESTED", "APPROVED"].includes(status)) return "info";
   return "neutral";
 }
 
@@ -75,6 +75,12 @@ function workKindLabel(kind: DocumentControlMyWorkItem["kind"]): string {
   if (kind === "CHANGE_REQUEST") return "Change request";
   if (kind === "PERIODIC_REVIEW") return "Periodic review";
   if (kind === "ACKNOWLEDGEMENT") return "Acknowledgement";
+  if (kind === "AUTHORITY_ACTION") return "Authority response";
+  if (kind === "TEMPORARY_REVISION") return "Temporary revision";
+  if (kind === "CONTROLLED_COPY") return "Controlled copy custody";
+  if (kind === "EXTERNAL_SOURCE_ACTION") return "External technical data";
+  if (kind === "RETENTION_APPROVAL") return "Retention approval";
+  if (kind === "RETENTION_EXECUTION") return "Retention execution";
   return "Workflow decision";
 }
 
@@ -182,7 +188,7 @@ export default function DocumentGovernanceDashboardPage() {
 
           <DocumentControlSection
             title="My Work"
-            description="Only obligations attributable to you through direct ownership, recipient assignment or confirmed document responsibility."
+            description="Only obligations attributable to you through direct ownership, recipient/custody assignment, authority submission, confirmed document responsibility or a named retention/disposition role."
             actions={<span className="dms-home__count">{myWork.length}</span>}
           >
             {myWork.length ? (
@@ -200,7 +206,7 @@ export default function DocumentGovernanceDashboardPage() {
                   ))}</tbody>
                 </table>
               </div>
-            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement or confirmed workflow decision assigned to you." />}
+            ) : <DocumentControlEmpty icon={CheckCircle2} title="No assigned work needs action" message="There is currently no change, review, acknowledgement, workflow decision, authority response, temporary revision, external-source assessment, controlled-copy custody or retention/disposition action attributable to you." />}
           </DocumentControlSection>
 
           {canControl ? (

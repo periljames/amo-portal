@@ -1,0 +1,70 @@
+name: Document Control Contract Diagnostics
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/services/documentControlHome.ts"
+      - "frontend/src/services/documentControlIntegrationCatalog.ts"
+      - "frontend/src/services/documentControlReportsPortfolio.ts"
+      - ".github/workflows/document-control-contract-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-guide-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run Document Workflow Guide contract
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/documentControl/DocumentWorkflowGuide.contract.test.ts
+
+  operational-jobs-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run DMS Operational Jobs contract
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/documentControl/DmsOperationalJobs.contract.test.ts
+
+  operating-model-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run DMS Operating Model contract
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/documentControl/DmsOperatingModel.contract.test.ts

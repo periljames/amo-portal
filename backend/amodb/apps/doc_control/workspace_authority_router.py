@@ -10,8 +10,17 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_decision_policy import require_decision_approver
+from .workspace_evidence_router import validate_evidence_references
 from .workspace_router import _authority_payload, _event
-from .workspace_service import audit, resolve_tenant, utcnow
+from .workspace_service import (
+    audit,
+    get_manual,
+    get_revision,
+    get_workflow,
+    require_control_user,
+    resolve_tenant,
+    utcnow,
+)
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Authority"])
@@ -25,6 +34,18 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "REJECTED": set(),
     "WITHDRAWN": set(),
 }
+
+
+def _merge_asset_evidence(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in [*existing, *incoming]:
+        asset_id = str((item or {}).get("asset_id") or "").strip()
+        if not asset_id or asset_id in seen:
+            continue
+        seen.add(asset_id)
+        merged.append(dict(item))
+    return merged
 
 
 def validate_authority_update(
@@ -89,6 +110,56 @@ def validate_authority_update(
         )
 
 
+@router.post(
+    "/t/{tenant_slug}/authority-submissions",
+    include_in_schema=False,
+)
+def create_authority_submission_with_evidence_guards(
+    tenant_slug: str,
+    payload: schemas.AuthoritySubmissionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    manual = get_manual(db, tenant, payload.manual_id)
+    revision = get_revision(db, manual, payload.revision_id)
+    workflow = get_workflow(db, tenant, revision.id)
+    if payload.workflow_id and (not workflow or workflow.id != payload.workflow_id):
+        raise HTTPException(status_code=400, detail="Workflow does not match the revision")
+    evidence = validate_evidence_references(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=manual.id,
+        evidence=list(payload.evidence or []),
+    )
+    row = dm.DocumentAuthoritySubmission(
+        tenant_id=tenant.amo_id,
+        manual_id=manual.id,
+        revision_id=revision.id,
+        workflow_id=payload.workflow_id or (workflow.id if workflow else None),
+        authority_name=payload.authority_name.strip(),
+        submission_reference=payload.submission_reference.strip(),
+        status="DRAFT",
+        response_due_at=payload.response_due_at,
+        evidence_json=evidence,
+    )
+    db.add(row)
+    db.flush()
+    audit(
+        db,
+        tenant,
+        request,
+        "document.authority.created",
+        "document_authority_submission",
+        row.id,
+        _authority_payload(row),
+    )
+    db.commit()
+    return _authority_payload(row)
+
+
 @router.patch(
     "/t/{tenant_slug}/authority-submissions/{submission_id}",
     include_in_schema=False,
@@ -101,13 +172,7 @@ def update_authority_submission_with_guards(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    """Update the authority record without silently advancing the workflow.
-
-    Authority evidence and workflow approval are separate controlled decisions.
-    Recording an authority response makes it available to the explicit workflow
-    transition, which then records the approver, comments, evidence, state change,
-    and optimistic workflow version in one decision trail.
-    """
+    """Update authority evidence without silently advancing the document workflow."""
     require_decision_approver(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = (
@@ -121,6 +186,30 @@ def update_authority_submission_with_guards(
     if not row:
         raise HTTPException(status_code=404, detail="Authority submission not found")
 
+    existing_evidence = validate_evidence_references(
+        db,
+        tenant_id=tenant.amo_id,
+        manual_id=row.manual_id,
+        evidence=list(row.evidence_json or []),
+    ) if row.evidence_json else []
+    normalized_evidence = None
+    if payload.evidence is not None:
+        incoming = validate_evidence_references(
+            db,
+            tenant_id=tenant.amo_id,
+            manual_id=row.manual_id,
+            evidence=list(payload.evidence),
+        )
+        if row.status == "DRAFT" and payload.status == "DRAFT":
+            normalized_evidence = incoming
+        else:
+            normalized_evidence = _merge_asset_evidence(existing_evidence, incoming)
+    elif payload.status in {"SUBMITTED", "APPROVED"}:
+        normalized_evidence = existing_evidence
+
+    if normalized_evidence is not None:
+        payload = payload.model_copy(update={"evidence": normalized_evidence})
+
     validate_authority_update(row, payload)
     before = _authority_payload(row)
     row.status = payload.status
@@ -128,8 +217,8 @@ def update_authority_submission_with_guards(
         row.response_summary = payload.response_summary
     if "response_due_at" in payload.model_fields_set:
         row.response_due_at = payload.response_due_at
-    if "evidence" in payload.model_fields_set and payload.evidence is not None:
-        row.evidence_json = list(payload.evidence)
+    if normalized_evidence is not None:
+        row.evidence_json = normalized_evidence
     if payload.status == "SUBMITTED":
         row.submitted_at = row.submitted_at or utcnow()
         row.submitted_by_user_id = row.submitted_by_user_id or current_user.id

@@ -52,6 +52,31 @@ def _source_manual_ids(context: SearchContext, request_payload: DocumentationAss
     return manual_ids
 
 
+def _source_revision_id(
+    context: SearchContext,
+    request_payload: DocumentationAssistRequest,
+    source_ids: list[str],
+    manual_id: str,
+) -> str | None:
+    requested_revision_id = request_payload.revision_id
+    if requested_revision_id:
+        requested_revision = context.revisions.get(requested_revision_id)
+        if requested_revision and requested_revision.manual_id == manual_id:
+            return requested_revision_id
+
+    for source_id in source_ids:
+        parts = str(source_id).split(":")
+        if len(parts) >= 3 and parts[0] == "document" and parts[1] == manual_id:
+            revision = context.revisions.get(parts[2])
+            if revision and revision.manual_id == manual_id:
+                return parts[2]
+        if len(parts) >= 3 and parts[0] == "section":
+            revision = context.revisions.get(parts[1])
+            if revision and revision.manual_id == manual_id:
+                return parts[1]
+    return None
+
+
 def audit_assist_safely(
     db: Session,
     *,
@@ -62,19 +87,15 @@ def audit_assist_safely(
     source_ids: list[str],
     warning: str | None,
 ) -> None:
-    """Persist document-scoped assistant audit events using the audit-table contract.
+    """Persist assisted-search audit events using the actual ORM/table contract.
 
-    ``ManualAIHookEvent`` stores tenant/revision identity as relational columns.
-    Manual and actor context are retained in ``payload_json`` rather than being
-    passed as undeclared ORM constructor keywords. Library-wide assisted search
-    emits one event for each authorised manual represented in returned sources; a
-    no-result query touches no controlled document and therefore emits no event.
+    ``ManualAIHookEvent`` is revision-scoped and intentionally has no ``manual_id``
+    or ``actor_contact_id`` columns. Library-wide search therefore emits one event
+    per represented document, links it to an authorised revision when available,
+    and retains manual/actor context inside the immutable JSON payload. This keeps
+    the audit useful without passing invalid SQLAlchemy constructor keywords.
     """
     manual_ids = _source_manual_ids(context, request_payload, source_ids)
-    query_sha256 = hashlib.sha256(
-        request_payload.query.strip().lower().encode("utf-8")
-    ).hexdigest()
-
     for manual_id in manual_ids:
         relevant_source_ids: list[str] = []
         for source_id in source_ids:
@@ -87,12 +108,7 @@ def audit_assist_safely(
                 if revision and revision.manual_id == manual_id:
                     relevant_source_ids.append(source_id)
 
-        revision_id = request_payload.revision_id
-        if revision_id:
-            revision = context.revisions.get(revision_id)
-            if not revision or revision.manual_id != manual_id:
-                revision_id = None
-
+        revision_id = _source_revision_id(context, request_payload, relevant_source_ids, manual_id)
         db.add(
             manual_models.ManualAIHookEvent(
                 tenant_id=context.tenant.id,
@@ -100,12 +116,14 @@ def audit_assist_safely(
                 event_name="documentation.assisted_search",
                 payload_json={
                     "actor_id": str(current_user.id),
-                    "query_sha256": query_sha256,
+                    "actor_contact_id": getattr(current_user, "contact_id", None),
+                    "manual_id": manual_id,
+                    "source_manual_id": manual_id,
+                    "query_sha256": hashlib.sha256(request_payload.query.strip().lower().encode("utf-8")).hexdigest(),
                     "query_length": len(request_payload.query),
                     "requested_mode": request_payload.mode,
                     "provider_mode": provider_mode,
                     "manual_context_id": request_payload.manual_id,
-                    "source_manual_id": manual_id,
                     "page_context": request_payload.page_number,
                     "source_ids": relevant_source_ids,
                     "source_count": len(relevant_source_ids),

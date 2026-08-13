@@ -1,5 +1,5 @@
 /* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   BookOpen,
   ClipboardList,
@@ -14,6 +14,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import DocumentationAssistantPanel from "../manuals/DocumentationAssistantPanel";
+import DocumentControlJobLauncher from "./DocumentControlJobLauncher";
+import DocumentLifecycleHeaderActions from "./DocumentLifecycleHeaderActions";
+import DocumentWorkflowGuide from "./DocumentWorkflowGuide";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentControlWorkspace.css";
 import "./documentControlExperience.css";
@@ -74,11 +77,6 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
   { id: "administration", label: "Administration", path: "/administration", icon: Settings, controlOnly: true },
 ];
 
-/**
- * During migration, legacy routes illuminate the primary workspace that owns
- * their job-to-be-done. This preserves deep links without preserving the old
- * navigation model.
- */
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
   if (
     pathname.includes("/drafts") ||
@@ -144,6 +142,14 @@ export default function DocumentControlShell({
   const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
   const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
   const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
+  const lifecycleActions = canControl && tenant
+    ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
+    : null;
+  const startWork = canControl ? <DocumentControlJobLauncher basePath={basePath} /> : null;
+  const workflowRefreshKey = useMemo(() => ({ actions }), [actions]);
+  const workflowGuide = tenant && assistantDocumentId
+    ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} refreshKey={workflowRefreshKey} />
+    : null;
 
   const body = (
     <div className="dc-workspace">
@@ -153,8 +159,10 @@ export default function DocumentControlShell({
           <h1>{title}</h1>
           <span>{subtitle}</span>
         </div>
-        {actions ? <div className="dc-workspace__header-actions">{actions}</div> : null}
+        {actions || lifecycleActions || startWork ? <div className="dc-workspace__header-actions">{startWork}{lifecycleActions}{actions}</div> : null}
       </header>
+
+      {workflowGuide}
 
       <nav className="dc-workspace__nav dc-workspace__nav--primary" aria-label="Document Control">
         {visibleWorkspaces.map((workspace) => {

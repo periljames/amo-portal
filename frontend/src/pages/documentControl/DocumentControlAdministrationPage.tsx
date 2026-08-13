@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Archive,
+  BellRing,
   Boxes,
   FileCog,
   FileStack,
@@ -35,6 +36,15 @@ function formatAuditTime(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
+function parseLeadDays(value: string): number[] {
+  return Array.from(new Set(
+    value
+      .split(",")
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isInteger(item) && item >= 1 && item <= 365),
+  )).sort((a, b) => b - a);
+}
+
 export default function DocumentControlAdministrationPage() {
   const navigate = useNavigate();
   const { tenant, basePath } = useDocumentControlRoute();
@@ -45,6 +55,7 @@ export default function DocumentControlAdministrationPage() {
   const [saved, setSaved] = useState(false);
   const [classText, setClassText] = useState("");
   const [integrationText, setIntegrationText] = useState("");
+  const [reminderLeadText, setReminderLeadText] = useState("30, 14, 7");
 
   const load = useCallback(async () => {
     if (!tenant) return;
@@ -55,6 +66,7 @@ export default function DocumentControlAdministrationPage() {
       setSettings(next);
       setClassText(next.document_classes.join(", "));
       setIntegrationText(next.integration_modules.join(", "));
+      setReminderLeadText(next.reminder_policy.lead_days.join(", "));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Document Control administration could not be loaded.");
     } finally {
@@ -66,6 +78,15 @@ export default function DocumentControlAdministrationPage() {
 
   const save = async () => {
     if (!settings) return;
+    const reminderLeadDays = parseLeadDays(reminderLeadText);
+    if (!reminderLeadDays.length) {
+      setError("Reminder lead days must contain at least one whole number between 1 and 365.");
+      return;
+    }
+    if (settings.reminder_policy.quality_escalation_days < settings.reminder_policy.owner_escalation_days) {
+      setError("Quality escalation cannot occur before the governed document-owner escalation.");
+      return;
+    }
     setSaving(true);
     setSaved(false);
     setError("");
@@ -83,10 +104,12 @@ export default function DocumentControlAdministrationPage() {
         indexing_policy: settings.indexing_policy,
         integration_modules: integrationModules,
         physical_copy_policy: settings.physical_copy_policy,
+        reminder_policy: { ...settings.reminder_policy, lead_days: reminderLeadDays },
       });
       setSettings(next);
       setClassText(next.document_classes.join(", "));
       setIntegrationText(next.integration_modules.join(", "));
+      setReminderLeadText(next.reminder_policy.lead_days.join(", "));
       setSaved(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Document Control administration could not be saved.");
@@ -116,7 +139,7 @@ export default function DocumentControlAdministrationPage() {
   return <DocumentControlShell
     title="Administration"
     eyebrow="LOW-FREQUENCY CONTROL"
-    subtitle="Tenant-wide Document Control policy, defaults and specialist administration. Operational approvals and evidence remain in their owning workspaces."
+    subtitle="Tenant-wide Document Control policy, defaults, reminders and specialist administration. Operational approvals and evidence remain in their owning workspaces."
     canControl
     actions={<><button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={14} /> Refresh</button><button type="button" className="dc-button dc-button--primary" disabled={saving || !settings} onClick={() => void save()}>{saving ? "Saving…" : "Save administration"}</button></>}
   >
@@ -144,6 +167,19 @@ export default function DocumentControlAdministrationPage() {
             <label><input type="checkbox" checked={settings.workflow_policy.management_approval_required} onChange={(event) => setSettings({ ...settings, workflow_policy: { ...settings.workflow_policy, management_approval_required: event.target.checked } })} /> Management approval required</label>
             <label><span>Authority routing</span><select aria-label="Authority routing policy" value={settings.workflow_policy.authority_routing} onChange={(event) => setSettings({ ...settings, workflow_policy: { ...settings.workflow_policy, authority_routing: event.target.value as DocumentControlAdministration["workflow_policy"]["authority_routing"] } })}><option value="WHEN_REQUIRED">When required</option><option value="ALWAYS">Always</option><option value="NEVER">Never by default</option></select></label>
           </div>
+        </DocumentControlSection>
+
+        <DocumentControlSection title="Reminder and escalation policy" description="Controls accountable due-work reminders. Each reminder stage is stored once in an immutable delivery ledger, so an hourly scheduler cannot repeatedly notify the same person for the same threshold.">
+          <div className="dms-admin__policy-grid" data-testid="document-control-reminder-policy">
+            <label><input type="checkbox" checked={settings.reminder_policy.enabled} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, enabled: event.target.checked } })} /> Enable Document Control reminders</label>
+            <label><input type="checkbox" checked={settings.reminder_policy.portal_notifications_enabled} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, portal_notifications_enabled: event.target.checked } })} /> Portal notifications</label>
+            <label><input type="checkbox" checked={settings.reminder_policy.email_notifications_enabled} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, email_notifications_enabled: event.target.checked } })} /> Email reminders when tenant delivery policy permits</label>
+            <label className="dms-admin__wide"><span>Lead reminder days</span><input aria-label="Document Control reminder lead days" value={reminderLeadText} onChange={(event) => setReminderLeadText(event.target.value)} placeholder="30, 14, 7" /><small>Comma-separated whole days before the due date. A threshold is sent once per obligation and recipient.</small></label>
+            <label><span>Repeat overdue every</span><input aria-label="Document Control overdue repeat days" type="number" min={1} max={90} value={settings.reminder_policy.overdue_repeat_days} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, overdue_repeat_days: Number(event.target.value) } })} /><small>Days between overdue stages.</small></label>
+            <label><span>Escalate to document owner after</span><input aria-label="Document owner escalation days" type="number" min={1} max={365} value={settings.reminder_policy.owner_escalation_days} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, owner_escalation_days: Number(event.target.value) } })} /><small>Overdue days.</small></label>
+            <label><span>Escalate to Quality after</span><input aria-label="Quality escalation days" type="number" min={1} max={365} value={settings.reminder_policy.quality_escalation_days} onChange={(event) => setSettings({ ...settings, reminder_policy: { ...settings.reminder_policy, quality_escalation_days: Number(event.target.value) } })} /><small>Overdue days; must not precede document-owner escalation.</small></label>
+          </div>
+          <div className="dc-callout"><BellRing size={16} /><div><strong>Covered obligations</strong><div>Periodic reviews, temporary-revision expiry, external-source currency checks, controlled-copy returns, authority responses and distribution acknowledgements. Personal reminders are routed only to authoritative owners, holders, submitters or recipients.</div></div></div>
         </DocumentControlSection>
 
         <DocumentControlSection title="Retention classes" description="Reusable retention classifications for generated controlled evidence." actions={<button type="button" className="dc-button" onClick={addRetention}><Plus size={14} /> Add class</button>}>
