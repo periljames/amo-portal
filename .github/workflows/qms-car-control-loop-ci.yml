@@ -65,7 +65,7 @@ jobs:
           --attempts 4
           --label "CAR control-loop backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Verify migration is the single Alembic head
+      - name: Verify migration remains in the single Alembic lineage
         run: |
           python - <<'PY'
           from alembic.config import Config
@@ -75,7 +75,21 @@ jobs:
           revision = script.get_revision("quality_260811_car_loop")
           assert revision is not None
           assert revision.down_revision == "docctl_ai_audit_260809"
-          assert script.get_heads() == ["quality_260811_car_loop"], script.get_heads()
+
+          heads = script.get_heads()
+          assert len(heads) == 1, heads
+
+          cursor = script.get_revision(heads[0])
+          lineage = set()
+          while cursor is not None:
+              lineage.add(cursor.revision)
+              parent = cursor.down_revision
+              if isinstance(parent, (tuple, list)):
+                  assert len(parent) == 1, parent
+                  parent = parent[0]
+              cursor = script.get_revision(parent) if parent else None
+
+          assert "quality_260811_car_loop" in lineage, lineage
           PY
       - name: Compile and configure Quality mappers
         run: |
