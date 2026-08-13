@@ -71,3 +71,69 @@ def test_control_loop_evidence_requires_manage_permission() -> None:
 
     permission_gate.assert_called_once_with(db, ctx, "qms.car.manage")
     context_gate.assert_called_once_with(db, amo_id="amo-1", user_id="user-1")
+
+
+def _registered_endpoint(api_router, *, suffix: str, method: str):
+    matches = [
+        route_item
+        for route_item in api_router.routes
+        if str(getattr(route_item, "path", "")).endswith(suffix)
+        and method in set(getattr(route_item, "methods", None) or ())
+    ]
+    assert len(matches) == 1, [
+        (
+            str(getattr(route_item, "path", "")),
+            sorted(getattr(route_item, "methods", None) or ()),
+            getattr(getattr(route_item, "endpoint", None), "__name__", None),
+        )
+        for route_item in matches
+    ]
+    return matches[0].endpoint
+
+
+@pytest.mark.parametrize("router_name", ["router", "legacy_router"])
+def test_registered_control_loop_routes_use_strict_authority_and_evidence_handlers(router_name: str) -> None:
+    from amodb.apps.quality import canonical_router
+    from amodb.apps.quality import car_control_loop_authority_guard as authority
+    from amodb.apps.quality import car_control_loop_evidence_guard as evidence
+
+    api_router = getattr(canonical_router, router_name)
+
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/milestones/{milestone_id}",
+        method="PATCH",
+    ) is authority.update_milestone_with_review_authority
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/deadline-changes/{change_id}/decision",
+        method="POST",
+    ) is authority.decide_deadline_change_with_review_authority
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/close",
+        method="POST",
+    ) is authority.close_control_loop_with_close_authority
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/attachments",
+        method="GET",
+    ) is evidence.list_control_loop_attachments
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/attachments",
+        method="POST",
+    ) is evidence.upload_control_loop_attachment
+    assert _registered_endpoint(
+        api_router,
+        suffix="/cars/{car_id}/control-loop/attachments/{attachment_id}",
+        method="DELETE",
+    ) is evidence.delete_control_loop_attachment
+
+
+def test_control_loop_routers_use_persistent_post_commit_tenant_context() -> None:
+    from amodb.apps.quality import car_control_loop_guard_router, car_control_loop_router
+    from amodb.apps.quality.car_control_loop_session_context import set_persistent_control_loop_context
+
+    assert car_control_loop_router.set_postgres_tenant_context is set_persistent_control_loop_context
+    assert car_control_loop_guard_router.set_postgres_tenant_context is set_persistent_control_loop_context
