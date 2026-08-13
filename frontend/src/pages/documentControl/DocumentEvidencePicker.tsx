@@ -53,13 +53,13 @@ export default function DocumentEvidencePicker({
     setLoading(true);
     setError("");
     try {
-      setAssets(await listDocumentEvidenceAssets(tenant, manualId));
+      setAssets(await listDocumentEvidenceAssets(tenant, manualId, revisionId));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Controlled evidence could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [manualId, tenant]);
+  }, [manualId, revisionId, tenant]);
 
   useEffect(() => { void load(); }, [load]);
 
