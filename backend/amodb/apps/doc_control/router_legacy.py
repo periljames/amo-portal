@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import models, schemas
 from amodb.apps.events.broker import EventEnvelope, publish_event
+from amodb.apps.training.gates import ensure_revision_training_gate_satisfied
 from amodb.database import get_db
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_capability
@@ -187,6 +188,7 @@ def publish_revision(package_id: str, payload: schemas.PublishRevisionIn, db: Se
     lep = db.query(models.LEP).filter_by(tenant_id=tenant_id, doc_id=package.doc_id, revision_no=package.revision_no).first()
     if not lep:
         raise HTTPException(400, "LEP required before publishing")
+    ensure_revision_training_gate_satisfied(db, amo_id=tenant_id, package=package)
 
     if doc.status == "Active":
         settings = db.query(models.DocControlSettings).filter_by(tenant_id=tenant_id).first() or models.DocControlSettings(tenant_id=tenant_id)

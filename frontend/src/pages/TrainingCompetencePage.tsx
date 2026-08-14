@@ -3,6 +3,7 @@ import { AlertTriangle, CalendarClock, CheckSquare, ClipboardSignature, Download
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
+import TrainingDataCenterDrawer from "../components/training/TrainingDataCenterDrawer";
 import TrainingWorkbookImportDialog from "../components/training/TrainingWorkbookImportDialog";
 import { useToast } from "../components/feedback/ToastProvider";
 import { saveDownloadedFile } from "../utils/downloads";
@@ -517,8 +518,18 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     is_active: true,
     effective_from: null,
     effective_to: null,
+    manual_reference: null,
+    planning_lead_days: null,
+    assessment_required: false,
+    certificate_required: true,
+    authorization_relevance: null,
+    source_type: null,
+    source_id: null,
+    blocking: false,
+    required_by_date: null,
   });
   const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
+  const [dataCenterOpen, setDataCenterOpen] = useState(false);
   const PEOPLE_PAGE_SIZE = 50;
   const [peoplePage, setPeoplePage] = useState(0);
   const [hasMorePeople, setHasMorePeople] = useState(false);
@@ -1237,6 +1248,15 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       is_active: true,
       effective_from: null,
       effective_to: null,
+      manual_reference: null,
+      planning_lead_days: null,
+      assessment_required: false,
+      certificate_required: true,
+      authorization_relevance: null,
+      source_type: null,
+      source_id: null,
+      blocking: false,
+      required_by_date: null,
     });
     setRequirementFormOpen(true);
   };
@@ -1253,6 +1273,15 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       is_active: requirement.is_active,
       effective_from: requirement.effective_from || null,
       effective_to: requirement.effective_to || null,
+      manual_reference: requirement.manual_reference || null,
+      planning_lead_days: requirement.planning_lead_days ?? null,
+      assessment_required: requirement.assessment_required ?? false,
+      certificate_required: requirement.certificate_required ?? true,
+      authorization_relevance: requirement.authorization_relevance || null,
+      source_type: requirement.source_type || null,
+      source_id: requirement.source_id || null,
+      blocking: requirement.blocking ?? false,
+      required_by_date: requirement.required_by_date || null,
     });
     setRequirementFormOpen(true);
   };
@@ -1274,6 +1303,16 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       pushToast({ title: "User required", message: "Pick the user for this targeted requirement.", variant: "error" });
       return;
     }
+    const governedSourceType = String(requirementForm.source_type || "").trim();
+    const governedSourceId = String(requirementForm.source_id || "").trim();
+    if (Boolean(governedSourceType) !== Boolean(governedSourceId)) {
+      pushToast({ title: "Governed source incomplete", message: "Source type and source ID must be supplied together.", variant: "error" });
+      return;
+    }
+    if (requirementForm.blocking && !governedSourceType) {
+      pushToast({ title: "Blocking source required", message: "Identify the DMS revision or QMS finding that this rule blocks.", variant: "error" });
+      return;
+    }
     setSavingRequirement(true);
     try {
       const payload: TrainingRequirementCreate | TrainingRequirementUpdate = {
@@ -1286,6 +1325,15 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         is_active: requirementForm.is_active,
         effective_from: requirementForm.effective_from || null,
         effective_to: requirementForm.effective_to || null,
+        manual_reference: String(requirementForm.manual_reference || "").trim() || null,
+        planning_lead_days: requirementForm.planning_lead_days || null,
+        assessment_required: requirementForm.assessment_required ?? false,
+        certificate_required: requirementForm.certificate_required ?? true,
+        authorization_relevance: String(requirementForm.authorization_relevance || "").trim() || null,
+        source_type: String(requirementForm.source_type || "").trim().toUpperCase() || null,
+        source_id: String(requirementForm.source_id || "").trim() || null,
+        blocking: requirementForm.blocking ?? false,
+        required_by_date: requirementForm.required_by_date || null,
       };
       if (editingRequirementId) await updateTrainingRequirement(editingRequirementId, payload as TrainingRequirementUpdate);
       else await createTrainingRequirement(payload as TrainingRequirementCreate);
@@ -1349,6 +1397,17 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     downloadTextFile(buildCsv(rows, ["person_name", "staff_code", "role", "course_id", "course_name", "completion_date", "valid_until", "hours_completed", "exam_score", "certificate_reference", "remarks"]), `training-records-${amoCode || "amo"}.csv`);
   };
 
+  const refreshAfterImport = async () => {
+    invalidateAdminUserCache();
+    invalidateTrainingServiceCache();
+    try {
+      window.sessionStorage.removeItem(trainingDashboardSnapshotKey(amoCode));
+    } catch {
+      // Ignore storage failures; the fresh API load remains authoritative.
+    }
+    await load();
+  };
+
   const prefetchPerson = (userId: string) => {
     void prefetchTrainingUserDetailBundle(userId);
   };
@@ -1377,7 +1436,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
           {canManageCourses ? (
             <>
               <button type="button" className="secondary-chip-btn" onClick={openCreateCourse}><Users size={14} /> New course</button>
-              <button type="button" className="primary-chip-btn" onClick={() => setWorkbookImportOpen(true)}><Upload size={14} /> Import workbook</button>
+              <button type="button" className="primary-chip-btn" onClick={() => setDataCenterOpen(true)}><Upload size={14} /> Import / forms</button>
             </>
           ) : null}
           <button type="button" className="secondary-chip-btn" onClick={exportCourses}><FileSpreadsheet size={14} /> Courses</button>
@@ -1389,6 +1448,17 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       }
     >
       <div className="tc-page">
+        {embedded ? (
+          <section className="tc-command-bar" aria-label="Training data actions">
+            <div className="tc-command-bar__copy"><strong>Training data</strong><small>Import Excel or open a governed portal form.</small></div>
+            <div className="tc-command-bar__actions">
+              <button type="button" className="primary-chip-btn" onClick={() => setDataCenterOpen(true)}><Upload size={15} /> Import Excel</button>
+              {canManageCourses ? <button type="button" className="secondary-chip-btn" onClick={openCreateCourse}><Users size={15} /> New course</button> : null}
+              {canManageCourses ? <button type="button" className="secondary-chip-btn" onClick={openCreateRequirement}><ClipboardSignature size={15} /> New requirement</button> : null}
+              <button type="button" className="secondary-chip-btn" onClick={() => setDataCenterOpen(true)}><FileSpreadsheet size={15} /> Data &amp; forms</button>
+            </div>
+          </section>
+        ) : null}
         <section className="tc-hero">
           <div className="tc-hero__row">
             <div>
@@ -1401,14 +1471,17 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
               <span className="tc-chip"><CalendarClock size={14} /> {animatedEvents} active sessions</span>
             </div>
           </div>
-          <div className="tc-summary-grid">
-            <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openPeopleFilter("OVERDUE")}><span>Overdue</span><strong>{animatedOverdue}</strong><small>Open overdue personnel</small></button>
-            <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openPeopleFilter("DUE_SOON")}><span>Due soon</span><strong>{animatedDueSoon}</strong><small>Open due-soon roster</small></button>
-            <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("matrix")}><span>Requirement rules</span><strong>{animatedRequirements}</strong><small>Review rule coverage</small></button>
-            <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("matrix")}><span>Course catalogue</span><strong>{animatedCourses}</strong><small>Manage courses</small></button>
-            <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("certificates")}><span>Certificates</span><strong>{animatedCertificates}</strong><small>Issue and download</small></button>
-            <button type="button" className="tc-kpi-card tc-kpi-card--warning tc-kpi-card--button" onClick={() => openPeopleFilter("ANOMALY", { anomalyOnly: true })}><span>Rectify data</span><strong>{animatedAnomalies}</strong><small>Open flagged records</small></button>
-          </div>
+          <details className="tc-hero-disclosure">
+            <summary><span>Key indicators</span><small>{animatedOverdue} overdue · {animatedDueSoon} due soon · {animatedRequirements} rules · {animatedCourses} courses</small></summary>
+            <div className="tc-summary-grid">
+              <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openPeopleFilter("OVERDUE")}><span>Overdue</span><strong>{animatedOverdue}</strong><small>Open overdue personnel</small></button>
+              <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openPeopleFilter("DUE_SOON")}><span>Due soon</span><strong>{animatedDueSoon}</strong><small>Open due-soon roster</small></button>
+              <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("matrix")}><span>Requirement rules</span><strong>{animatedRequirements}</strong><small>Review rule coverage</small></button>
+              <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("matrix")}><span>Course catalogue</span><strong>{animatedCourses}</strong><small>Manage courses</small></button>
+              <button type="button" className="tc-kpi-card tc-kpi-card--button" onClick={() => openTab("certificates")}><span>Certificates</span><strong>{animatedCertificates}</strong><small>Issue and download</small></button>
+              <button type="button" className="tc-kpi-card tc-kpi-card--warning tc-kpi-card--button" onClick={() => openPeopleFilter("ANOMALY", { anomalyOnly: true })}><span>Rectify data</span><strong>{animatedAnomalies}</strong><small>Open flagged records</small></button>
+            </div>
+          </details>
         </section>
 
         {error ? (
@@ -1711,12 +1784,13 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                       <th>Mandatory</th>
                       <th>Active</th>
                       <th>Effective window</th>
+                      <th>Governance</th>
                       {canManageCourses ? <th>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {requirementRows.length === 0 ? (
-                      <tr><td colSpan={canManageCourses ? 8 : 7}><p className="tc-empty">No requirement rules were returned from the server.</p></td></tr>
+                      <tr><td colSpan={canManageCourses ? 9 : 8}><p className="tc-empty">No requirement rules were returned from the server.</p></td></tr>
                     ) : requirementRows.map((row) => (
                       <tr key={row.id}>
                         <td>{row.course?.course_id || row.course_pk} · {row.course?.course_name || "Unknown course"}</td>
@@ -1726,6 +1800,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                         <td>{row.is_mandatory ? "Yes" : "No"}</td>
                         <td>{row.is_active ? "Active" : "Inactive"}</td>
                         <td>{row.effective_from || row.effective_to ? `${compactDate(row.effective_from)} → ${compactDate(row.effective_to)}` : "Always on"}</td>
+                        <td>{row.source_type ? <><strong>{row.source_type}</strong><div className="tc-table__hint">{row.blocking ? "Blocking" : "Linked"} · {row.source_id}</div></> : (row.manual_reference || "—")}</td>
                         {canManageCourses ? (
                           <td>
                             <div className="tc-inline-actions">
@@ -2210,8 +2285,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         </div>
       </Drawer>
 
-      <Drawer title={editingRequirementId ? "Modify requirement rule" : "Create requirement rule"} isOpen={requirementFormOpen} onClose={() => setRequirementFormOpen(false)}>
-        <div style={{ padding: 16, display: "grid", gap: 10 }}>
+      <Drawer title={editingRequirementId ? "Modify requirement rule" : "Create requirement rule"} isOpen={requirementFormOpen} onClose={() => setRequirementFormOpen(false)} panelClassName="training-form-drawer">
+        <div className="tc-drawer-form">
           <label className="tc-field">
             <span className="tc-field__label">Course</span>
             <select className="tc-select" value={requirementForm.course_pk} onChange={(e) => setRequirementForm((prev) => ({ ...prev, course_pk: e.target.value }))}>
@@ -2255,10 +2330,40 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
             <label className="tc-toggle"><input type="checkbox" checked={requirementForm.is_mandatory} onChange={(e) => setRequirementForm((prev) => ({ ...prev, is_mandatory: e.target.checked }))} /><span>Mandatory</span></label>
             <label className="tc-toggle"><input type="checkbox" checked={requirementForm.is_active} onChange={(e) => setRequirementForm((prev) => ({ ...prev, is_active: e.target.checked }))} /><span>Active</span></label>
           </div>
-          <div className="tc-form-grid-2">
-            <label className="tc-field"><span className="tc-field__label">Effective from</span><input className="tc-input" type="date" value={requirementForm.effective_from || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, effective_from: e.target.value || null }))} /></label>
-            <label className="tc-field"><span className="tc-field__label">Effective to</span><input className="tc-input" type="date" value={requirementForm.effective_to || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, effective_to: e.target.value || null }))} /></label>
-          </div>
+          <details className="tc-form-disclosure">
+            <summary><span>Validity &amp; planning</span><small>Dates, lead time and manual reference</small></summary>
+            <div className="tc-form-disclosure__body">
+              <div className="tc-form-grid-2">
+                <label className="tc-field"><span className="tc-field__label">Effective from</span><input className="tc-input" type="date" value={requirementForm.effective_from || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, effective_from: e.target.value || null }))} /></label>
+                <label className="tc-field"><span className="tc-field__label">Effective to</span><input className="tc-input" type="date" value={requirementForm.effective_to || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, effective_to: e.target.value || null }))} /></label>
+              </div>
+              <div className="tc-form-grid-2">
+                <label className="tc-field"><span className="tc-field__label">Planning lead days</span><input className="tc-input" type="number" min={1} max={365} value={requirementForm.planning_lead_days ?? ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, planning_lead_days: e.target.value ? Number(e.target.value) : null }))} /></label>
+                <label className="tc-field"><span className="tc-field__label">Required by</span><input className="tc-input" type="date" value={requirementForm.required_by_date || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, required_by_date: e.target.value || null }))} /></label>
+              </div>
+              <label className="tc-field"><span className="tc-field__label">Manual / regulatory reference</span><input className="tc-input" value={requirementForm.manual_reference || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, manual_reference: e.target.value || null }))} placeholder="MOE 3.4 / QWI-026 / form reference" /></label>
+            </div>
+          </details>
+          <details className="tc-form-disclosure">
+            <summary><span>Evidence &amp; authorization</span><small>Assessment, certificate and privilege impact</small></summary>
+            <div className="tc-form-disclosure__body">
+              <div className="tc-form-grid-2">
+                <label className="tc-toggle"><input type="checkbox" checked={requirementForm.assessment_required ?? false} onChange={(e) => setRequirementForm((prev) => ({ ...prev, assessment_required: e.target.checked }))} /><span>Assessment required</span></label>
+                <label className="tc-toggle"><input type="checkbox" checked={requirementForm.certificate_required ?? true} onChange={(e) => setRequirementForm((prev) => ({ ...prev, certificate_required: e.target.checked }))} /><span>Certificate required</span></label>
+              </div>
+              <label className="tc-field"><span className="tc-field__label">Authorization impact</span><textarea className="tc-textarea" rows={2} value={requirementForm.authorization_relevance || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, authorization_relevance: e.target.value || null }))} placeholder="Explain which privilege or authorization this requirement controls." /></label>
+            </div>
+          </details>
+          <details className="tc-form-disclosure">
+            <summary><span>QMS / DMS release gate</span><small>Optional governed source and blocking rule</small></summary>
+            <div className="tc-form-disclosure__body">
+              <div className="tc-form-grid-2">
+                <label className="tc-field"><span className="tc-field__label">Governed source</span><select className="tc-select" value={requirementForm.source_type || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, source_type: e.target.value || null, source_id: e.target.value ? prev.source_id : null, blocking: e.target.value ? prev.blocking : false }))}><option value="">No QMS/DMS release gate</option><option value="REVISION">DMS revision package</option><option value="FINDING">QMS finding</option></select></label>
+                <label className="tc-field"><span className="tc-field__label">Source ID</span><input className="tc-input" value={requirementForm.source_id || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, source_id: e.target.value || null }))} disabled={!requirementForm.source_type} placeholder="Paste the governed revision or finding ID" /></label>
+              </div>
+              <label className="tc-toggle"><input type="checkbox" checked={requirementForm.blocking ?? false} disabled={!requirementForm.source_type} onChange={(e) => setRequirementForm((prev) => ({ ...prev, blocking: e.target.checked }))} /><span>Block linked release until current verified evidence exists for every affected person</span></label>
+            </div>
+          </details>
           <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="secondary-chip-btn" onClick={() => setRequirementFormOpen(false)}>Cancel</button>
             <button type="button" className="secondary-chip-btn" onClick={submitRequirement} disabled={savingRequirement}>{savingRequirement ? "Saving…" : "Save rule"}</button>
@@ -2266,8 +2371,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         </div>
       </Drawer>
 
-      <Drawer title={editingCourseId ? "Modify course" : "Create course"} isOpen={courseFormOpen} onClose={() => setCourseFormOpen(false)}>
-        <div style={{ padding: 16, display: "grid", gap: 10 }}>
+      <Drawer title={editingCourseId ? "Modify course" : "Create course"} isOpen={courseFormOpen} onClose={() => setCourseFormOpen(false)} panelClassName="training-form-drawer training-form-drawer--compact">
+        <div className="tc-drawer-form">
           <input className="tc-input" placeholder="Course ID" value={courseForm.course_id} onChange={(e) => setCourseForm((prev) => ({ ...prev, course_id: e.target.value }))} />
           <input className="tc-input" placeholder="Course name" value={courseForm.course_name} onChange={(e) => setCourseForm((prev) => ({ ...prev, course_name: e.target.value }))} />
           <input className="tc-input" placeholder="Frequency months (blank allowed)" value={courseForm.frequency_months} onChange={(e) => setCourseForm((prev) => ({ ...prev, frequency_months: e.target.value }))} />
@@ -2287,19 +2392,23 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         </div>
       </Drawer>
 
+      <TrainingDataCenterDrawer
+        isOpen={dataCenterOpen}
+        onClose={() => setDataCenterOpen(false)}
+        canManage={canManageCourses}
+        onOpenFullWorkbook={() => setWorkbookImportOpen(true)}
+        onCreateCourse={openCreateCourse}
+        onCreateRequirement={openCreateRequirement}
+        onOpenGovernanceForms={() => navigate(`/maintenance/${amoCode || "UNKNOWN"}/training/competence/assessments`)}
+        onExportCourses={exportCourses}
+        onExportTraining={exportTrainings}
+        onCommitted={refreshAfterImport}
+      />
+
       <TrainingWorkbookImportDialog
         isOpen={workbookImportOpen}
         onClose={() => setWorkbookImportOpen(false)}
-        onCompleted={async () => {
-          invalidateAdminUserCache();
-          invalidateTrainingServiceCache();
-          try {
-            window.sessionStorage.removeItem(trainingDashboardSnapshotKey(amoCode));
-          } catch {
-            // Ignore storage failures; the fresh API load remains authoritative.
-          }
-          await load();
-        }}
+        onCompleted={refreshAfterImport}
       />
     </TrainingLayout>
   );

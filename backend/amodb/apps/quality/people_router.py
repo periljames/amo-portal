@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.training import models as training_models
+from amodb.apps.training.integration import current_training_evidence
 from amodb.database import get_read_db, get_write_db
 
 from . import models as quality_models
@@ -116,51 +117,13 @@ def _rule(db: Session, *, amo_id: str, rule_id: str | None = None, privilege_cod
 
 
 def _training_evidence(db: Session, *, amo_id: str, user_id: str, required_codes: list[str], as_of: date) -> dict[str, Any]:
-    required = sorted({str(code or "").strip().upper() for code in required_codes if str(code or "").strip()})
-    if not required:
-        return {"required": [], "satisfied": [], "missing": [], "records": [], "passed": True}
-
-    rows = (
-        db.query(training_models.TrainingRecord, training_models.TrainingCourse)
-        .join(training_models.TrainingCourse, training_models.TrainingCourse.id == training_models.TrainingRecord.course_id)
-        .filter(
-            training_models.TrainingRecord.amo_id == amo_id,
-            training_models.TrainingRecord.user_id == user_id,
-            training_models.TrainingCourse.amo_id == amo_id,
-            training_models.TrainingCourse.course_id.in_(required),
-        )
-        .order_by(training_models.TrainingRecord.completion_date.desc())
-        .limit(250)
-        .all()
+    return current_training_evidence(
+        db,
+        amo_id=amo_id,
+        user_id=user_id,
+        required_codes=required_codes,
+        as_of=as_of,
     )
-    current_by_code: dict[str, tuple[Any, Any]] = {}
-    for record, course in rows:
-        code = str(course.course_id or "").strip().upper()
-        if code in current_by_code:
-            continue
-        record_status = str(record.record_status or "ACTIVE").upper()
-        verification = _enum_value(record.verification_status).upper()
-        if record_status != "ACTIVE" or verification != "VERIFIED":
-            continue
-        if record.valid_until and record.valid_until < as_of:
-            continue
-        current_by_code[code] = (record, course)
-
-    satisfied = sorted(current_by_code)
-    missing = [code for code in required if code not in current_by_code]
-    records = [
-        {
-            "record_id": str(record.id),
-            "course_id": str(course.id),
-            "course_code": code,
-            "completion_date": record.completion_date.isoformat(),
-            "valid_until": record.valid_until.isoformat() if record.valid_until else None,
-            "verification_status": _enum_value(record.verification_status),
-            "source_route": f"/training/records/{record.id}",
-        }
-        for code, (record, course) in sorted(current_by_code.items())
-    ]
-    return {"required": required, "satisfied": satisfied, "missing": missing, "records": records, "passed": not missing}
 
 
 def _independence_evidence(

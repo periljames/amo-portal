@@ -24,6 +24,7 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality.enums import CARStatus, QMSAuditStatus, QMSDocStatus
 from amodb.apps.training import models as training_models
+from amodb.apps.training.integration import training_record_summary
 from .tenant_security import TenantContext, assert_quality_permission, has_quality_permission, require_quality_permission, resolve_tenant_context, set_postgres_tenant_context
 
 
@@ -310,6 +311,9 @@ def qms_dashboard(
                 SELECT DISTINCT ON (user_id, course_id) user_id, course_id, valid_until
                 FROM training_records
                 WHERE amo_id = :amo_id AND valid_until IS NOT NULL
+                  AND UPPER(CAST(verification_status AS TEXT)) = 'VERIFIED'
+                  AND COALESCE(UPPER(NULLIF(record_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+                  AND COALESCE(UPPER(NULLIF(source_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
                 ORDER BY user_id, course_id, completion_date DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
             ) latest
             WHERE valid_until < :today
@@ -501,6 +505,7 @@ def _calendar_source_training(
                 LEFT JOIN users u ON u.id = r.user_id AND u.amo_id = r.amo_id
                 WHERE r.amo_id = :amo_id
                   AND r.valid_until IS NOT NULL
+                  AND UPPER(CAST(r.verification_status AS TEXT)) = 'VERIFIED'
                   {lifecycle_sql}
                 ORDER BY r.user_id, r.course_id, r.completion_date DESC NULLS LAST, r.created_at DESC NULLS LAST, r.id DESC
             )
@@ -836,8 +841,18 @@ def qms_dashboard_lite(
         WHERE amo_id = :amo_id AND status = 'ACTIVE'
     """, params=params, source_errors=source_errors, label="active_documents", ctx=ctx)
     training_expired = _lite_scalar(db, sql="""
-        SELECT COUNT(*) FROM training_records
-        WHERE amo_id = :amo_id AND valid_until IS NOT NULL AND valid_until < :today
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT ON (user_id, course_id) user_id, course_id, valid_until
+            FROM training_records
+            WHERE amo_id = :amo_id
+              AND valid_until IS NOT NULL
+              AND UPPER(CAST(verification_status AS TEXT)) = 'VERIFIED'
+              AND COALESCE(UPPER(NULLIF(record_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+              AND COALESCE(UPPER(NULLIF(source_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+            ORDER BY user_id, course_id, valid_until DESC NULLS LAST,
+                     completion_date DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        ) latest
+        WHERE valid_until < :today
     """, params=params, source_errors=source_errors, label="training_expired_records", ctx=ctx, timeout_ms=1200)
 
     counters = {
@@ -1016,15 +1031,28 @@ def qms_integration_calendar(
     training_available = _training_calendar_available(db, amo_id=ctx.amo_id)
     if requested_source in {"all", "training", "month", "week", "list", "agenda", "year"} and training_available:
         training_rows = _append_calendar_rows(db, ctx=ctx, label="training_expiries", params=params, source_errors=source_errors, timeout_ms=1400, sql="""
-            SELECT r.id, r.user_id, r.course_id, r.valid_until AS event_date,
-                   c.course_id AS course_code, c.course_name,
-                   COALESCE(NULLIF(u.full_name, ''), NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), u.email, r.user_id) AS user_name
-            FROM training_records r
-            LEFT JOIN training_courses c ON c.id = r.course_id AND c.amo_id = r.amo_id
-            LEFT JOIN users u ON u.id = r.user_id AND u.amo_id = r.amo_id
-            WHERE r.amo_id = :amo_id
-              AND r.valid_until IS NOT NULL AND r.valid_until >= :start_date AND r.valid_until <= :end_date
-            ORDER BY r.valid_until ASC, user_name ASC
+            WITH ranked AS (
+                SELECT r.id, r.user_id, r.course_id, r.valid_until AS event_date,
+                       c.course_id AS course_code, c.course_name,
+                       COALESCE(NULLIF(u.full_name, ''), NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), u.email, r.user_id) AS user_name,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY r.user_id, r.course_id
+                           ORDER BY r.valid_until DESC NULLS LAST, r.completion_date DESC NULLS LAST,
+                                    r.created_at DESC NULLS LAST, r.id DESC
+                       ) AS record_rank
+                FROM training_records r
+                LEFT JOIN training_courses c ON c.id = r.course_id AND c.amo_id = r.amo_id
+                LEFT JOIN users u ON u.id = r.user_id AND u.amo_id = r.amo_id
+                WHERE r.amo_id = :amo_id
+                  AND r.valid_until IS NOT NULL
+                  AND UPPER(CAST(r.verification_status AS TEXT)) = 'VERIFIED'
+                  AND COALESCE(UPPER(NULLIF(r.record_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+                  AND COALESCE(UPPER(NULLIF(r.source_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+            )
+            SELECT id, user_id, course_id, event_date, course_code, course_name, user_name
+            FROM ranked
+            WHERE record_rank = 1 AND event_date >= :start_date AND event_date <= :end_date
+            ORDER BY event_date ASC, user_name ASC
             LIMIT :limit
         """)
         for row in training_rows:
@@ -1206,11 +1234,14 @@ def training_dashboard(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     today = date.today()
-    due_soon = today + timedelta(days=30)
-    total_records = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == ctx.amo_id).count()
-    expired = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == ctx.amo_id, training_models.TrainingRecord.valid_until < today).count()
-    expiring = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == ctx.amo_id, training_models.TrainingRecord.valid_until >= today, training_models.TrainingRecord.valid_until <= due_soon).count()
-    return {"total_records": total_records, "expired_records": expired, "expiring_records": expiring}
+    summary = training_record_summary(db, amo_id=ctx.amo_id, as_of=today, due_days=30)
+    return {
+        "total_records": summary.total_current,
+        "expired_records": summary.expired,
+        "expiring_records": summary.expiring,
+        "unverified_records": summary.unverified,
+        "counting_basis": "LATEST_ACTIVE_RECORD_PER_PERSON_AND_COURSE",
+    }
 
 
 @core_router.post("/reports/export")

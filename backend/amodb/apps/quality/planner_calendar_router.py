@@ -273,6 +273,7 @@ def qms_planner_calendar(
                       ON u.id = r.user_id AND u.amo_id = r.amo_id
                     WHERE r.amo_id = :amo_id
                       AND r.valid_until IS NOT NULL
+                      AND UPPER(CAST(r.verification_status AS TEXT)) = 'VERIFIED'
                       {lifecycle_sql}
                 )
                 SELECT id, user_id, course_id, event_date, course_code, course_name, user_name

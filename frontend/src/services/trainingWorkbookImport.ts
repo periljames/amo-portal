@@ -1,10 +1,14 @@
-import { apiGet, apiPost } from "./crs";
+import { apiDelete, apiGet, apiPost } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type {
   PersonnelLicenceRead,
+  TrainingCourseRoleRuleRead,
+  TrainingPersonRoleRead,
+  TrainingRoleGroupRead,
   TrainingWorkbookImportDecision,
   TrainingWorkbookImportJob,
+  TrainingWorkbookImportJobPage,
   TrainingWorkbookImportRowPage,
 } from "../types/trainingWorkbookImport";
 
@@ -112,3 +116,39 @@ export function listTrainingPersonnelLicences(userId: string): Promise<Personnel
     { headers: authHeaders() },
   );
 }
+
+export function listTrainingWorkbookImports(limit = 25, offset = 0): Promise<TrainingWorkbookImportJobPage> {
+  return apiGet<TrainingWorkbookImportJobPage>(`/training/workbook-imports?limit=${limit}&offset=${offset}`, { headers: authHeaders() });
+}
+
+export async function downloadTrainingWorkbookTemplate(): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/training/workbook-imports/template`, { headers: authHeaders() });
+  if (response.status === 401) handleAuthFailure("expired");
+  if (!response.ok) throw new Error(`Workbook template download failed (${response.status}).`);
+  const href = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = "amo-training-import-template-2026.08.xlsx";
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
+
+const CATALOG = "/training/workbook-imports/catalog";
+
+export const listTrainingRoleGroups = () => apiGet<TrainingRoleGroupRead[]>(`${CATALOG}/role-groups`);
+export const saveTrainingRoleGroup = (payload: { code: string; description?: string | null; is_active?: boolean }) =>
+  apiPost<TrainingRoleGroupRead>(`${CATALOG}/role-groups`, payload);
+export const deactivateTrainingRoleGroup = (id: string) =>
+  apiDelete<TrainingRoleGroupRead>(`${CATALOG}/role-groups/${encodeURIComponent(id)}`);
+
+export const listTrainingPersonRoles = () => apiGet<TrainingPersonRoleRead[]>(`${CATALOG}/person-roles`);
+export const saveTrainingPersonRole = (payload: { user_id: string; role_group_id: string; department?: string | null; position?: string | null; notes?: string | null; is_active?: boolean }) =>
+  apiPost<TrainingPersonRoleRead>(`${CATALOG}/person-roles`, payload);
+export const deactivateTrainingPersonRole = (id: string) =>
+  apiDelete<TrainingPersonRoleRead>(`${CATALOG}/person-roles/${encodeURIComponent(id)}`);
+
+export const listTrainingRoleRules = () => apiGet<TrainingCourseRoleRuleRead[]>(`${CATALOG}/role-rules`);
+export const saveTrainingRoleRule = (payload: { course_id: string; role_group_id: string; is_required?: boolean; requirement_type?: string; notes?: string | null; is_active?: boolean }) =>
+  apiPost<TrainingCourseRoleRuleRead>(`${CATALOG}/role-rules`, payload);
+export const deactivateTrainingRoleRule = (id: string) =>
+  apiDelete<TrainingCourseRoleRuleRead>(`${CATALOG}/role-rules/${encodeURIComponent(id)}`);

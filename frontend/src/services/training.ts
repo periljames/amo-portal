@@ -66,9 +66,11 @@ import type {
   TrainingAccessState,
   TrainingRequirementCreate,
   TrainingRequirementRead,
+  TrainingRequirementPage,
   TrainingRequirementUpdate,
   TrainingRecordImportSummary,
   TrainingCertificateArtifactOptions,
+  TrainingCoursePage,
 } from "../types/training";
 
 export interface TrainingUserDetailBundle {
@@ -292,6 +294,9 @@ export async function listTrainingCalendar(params: { start?: string; end?: strin
 
 export interface ListCoursesParams {
   include_inactive?: boolean;
+  search?: string;
+  category?: string;
+  group_code?: string;
   limit?: number;
   offset?: number;
 }
@@ -306,6 +311,9 @@ export async function listTrainingCourses(
   if (params.include_inactive) {
     sp.set("include_inactive", "true");
   }
+  if (params.search) sp.set("search", params.search);
+  if (params.category) sp.set("category", params.category);
+  if (params.group_code) sp.set("group_code", params.group_code);
   if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
     sp.set("limit", String(Math.max(1, Math.trunc(params.limit))));
   }
@@ -321,6 +329,19 @@ export async function listTrainingCourses(
       headers: authHeaders(),
     }),
   );
+}
+
+export async function listTrainingCourseCatalogue(
+  params: ListCoursesParams = {},
+): Promise<TrainingCoursePage> {
+  const sp = new URLSearchParams();
+  sp.set("include_inactive", String(params.include_inactive !== false));
+  if (params.search) sp.set("search", params.search);
+  if (params.category) sp.set("category", params.category);
+  if (params.group_code) sp.set("group_code", params.group_code);
+  sp.set("limit", String(params.limit || 25));
+  sp.set("offset", String(params.offset || 0));
+  return apiGet<TrainingCoursePage>(`/training/courses/catalogue-page?${sp.toString()}`, { headers: authHeaders() });
 }
 
 /**
@@ -478,6 +499,14 @@ export interface ListTrainingRequirementsParams {
   offset?: number;
 }
 
+export interface ListTrainingRequirementPageParams {
+  search?: string;
+  scope?: string;
+  state?: "ALL" | "ACTIVE" | "RETIRED";
+  limit?: number;
+  offset?: number;
+}
+
 export async function listTrainingRequirements(
   params: ListTrainingRequirementsParams = {},
 ): Promise<TrainingRequirementRead[]> {
@@ -490,6 +519,20 @@ export async function listTrainingRequirements(
   return cachedTrainingGet(`requirements:${qs || "all"}`, 3 * 60_000, () =>
     apiGet<TrainingRequirementRead[]>(path, { headers: authHeaders() }),
   );
+}
+
+export async function listTrainingRequirementPage(
+  params: ListTrainingRequirementPageParams = {},
+): Promise<TrainingRequirementPage> {
+  const sp = new URLSearchParams();
+  if (params.search) sp.set("search", params.search);
+  if (params.scope && params.scope !== "ALL") sp.set("scope", params.scope);
+  if (params.state) sp.set("state", params.state);
+  sp.set("limit", String(params.limit || 15));
+  sp.set("offset", String(params.offset || 0));
+  return apiGet<TrainingRequirementPage>(`/training/requirements/page?${sp.toString()}`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function createTrainingRequirement(payload: TrainingRequirementCreate): Promise<TrainingRequirementRead> {

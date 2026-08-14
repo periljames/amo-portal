@@ -60,6 +60,9 @@ const PersonnelLicencePanel: React.FC<Props> = ({ userId, fallback }) => {
       category_source: null,
       issued_on: null,
       expires_on: fallback.expiresOn || null,
+      expiry_source_record_id: null,
+      expiry_source_course_id: null,
+      expiry_synced_at: null,
       internal_stamp_no: null,
       initial_authorization_date: null,
       status: "ACTIVE",
@@ -95,6 +98,7 @@ const PersonnelLicencePanel: React.FC<Props> = ({ userId, fallback }) => {
                 <div><dt>Category</dt><dd>{licence.category_code || "Not recorded"}</dd></div>
                 <div><dt>Initial authorisation</dt><dd>{formatDate(licence.initial_authorization_date)}</dd></div>
                 <div><dt>Expiry</dt><dd><CalendarDays size={13} /> {formatDate(licence.expires_on)}</dd></div>
+                {licence.expiry_source_record_id ? <div><dt>Expiry source</dt><dd>AMEL renewal training<small>Record {licence.expiry_source_record_id}</small></dd></div> : null}
                 {licence.internal_stamp_no ? <div><dt>Internal stamp</dt><dd>{licence.internal_stamp_no}</dd></div> : null}
               </dl>
             </article>

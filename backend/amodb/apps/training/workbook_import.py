@@ -4,12 +4,14 @@ import hashlib
 import os
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable, Iterable, Optional
 
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from ...database import SessionLocal
@@ -19,6 +21,7 @@ from ..accounts.services import get_password_hash
 from ..audit import services as audit_services
 from . import models as training_models
 from . import records_import
+from .licence_rules import infer_licence_authority
 from .workbook_models import (
     PersonnelLicence,
     TrainingCourseRoleRule,
@@ -48,10 +51,74 @@ WORKBOOK_SHEETS: dict[str, dict[str, Any]] = {
 OPERATIONAL_ORDER = ["Courses", "People", "tblRoleGroups", "tblPersonRoles", "tblCourseMatrix", "Training"]
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+PREVIEW_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_PREVIEW_PROGRESS_BATCH", 40)
+COMMIT_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_COMMIT_PROGRESS_BATCH", 25)
+LICENCE_CATEGORY_MAX_CHARS = _positive_int_env("TRAINING_LICENCE_CATEGORY_MAX_CHARS", 32767)
+
+
 class PersonnelIdentityChanged(RuntimeError):
     def __init__(self, row_id: str, message: str):
         super().__init__(message)
         self.row_id = row_id
+
+
+class WorkbookRowCommitError(RuntimeError):
+    """Surface the original row failure after the atomic transaction rolls back."""
+
+    def __init__(self, row_id: str, sheet: str, source_row: int, message: str):
+        self.row_id = row_id
+        self.sheet = sheet
+        self.source_row = source_row
+        super().__init__(f"{sheet} row {source_row} could not be committed: {message}")
+
+
+class WorkbookCommitLeaseLost(RuntimeError):
+    """Stop an obsolete worker before it can publish or commit more work."""
+
+
+def new_commit_attempt_token() -> str:
+    """Return an opaque lease token used to fence superseded commit workers."""
+    return secrets.token_urlsafe(24)
+
+
+def _commit_attempt_token(job: TrainingWorkbookImportJob) -> str:
+    return str((job.summary_json or {}).get("active_commit_token") or "")
+
+
+def _is_transient_database_error(exc: BaseException) -> bool:
+    """Connection loss/restart is retryable; data-integrity failures are not."""
+    if isinstance(exc, IntegrityError):
+        return False
+    if isinstance(exc, OperationalError):
+        return True
+    return isinstance(exc, DBAPIError) and bool(exc.connection_invalidated)
+
+
+@dataclass
+class PersonnelCommitIndexes:
+    profiles_by_person: dict[str, account_models.PersonnelProfile]
+    profiles_by_email: dict[str, account_models.PersonnelProfile]
+    users_by_staff: dict[str, account_models.User]
+    users_by_email: dict[str, account_models.User]
+    users_by_id: dict[str, account_models.User]
+    department_ids_by_token: dict[str, str]
+    licences_by_profile_authority: dict[tuple[str, str], list[PersonnelLicence]]
+
+
+@dataclass(frozen=True)
+class PersonCommitResult:
+    entity_id: Optional[str]
+    action: str
+    profile_created: bool = False
+    portal_account_created: bool = False
+    non_login_identity_created: bool = False
 
 
 def _licence_reconciliation_status(current_number: Optional[str], imported_number: Optional[str]) -> str:
@@ -74,6 +141,15 @@ def clean(value: Any) -> Optional[str]:
 
 def upper(value: Any) -> str:
     return (clean(value) or "").upper()
+
+
+def _licence_category(value: Any, label: str) -> Optional[str]:
+    category = clean(value)
+    if category and len(category) > LICENCE_CATEGORY_MAX_CHARS:
+        raise ValueError(
+            f"{label} exceeds the {LICENCE_CATEGORY_MAX_CHARS:,}-character licence-category limit."
+        )
+    return category
 
 
 def bool_value(value: Any, default: bool = False) -> bool:
@@ -158,7 +234,7 @@ def _set_job_progress(
         job.processed_rows += processed_delta
     job.updated_at = utcnow()
     db.add(job)
-    should_publish = job.processed_rows % 10 == 0 or job.processed_rows >= job.total_rows
+    should_publish = job.processed_rows % PREVIEW_PROGRESS_BATCH == 0 or job.processed_rows >= job.total_rows
     if should_publish:
         db.commit()
         db.refresh(job)
@@ -246,8 +322,8 @@ def _person_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "last_name": last.title(),
         "full_name": clean(raw.get("PersonName")) or f"{first.title()} {last.title()}",
         "national_id": clean(raw.get("nid")),
-        "category_reg_2013": clean(raw.get("Category (Reg. 2013)")),
-        "category_reg_2018": clean(raw.get("Category (Reg. 2018)")),
+        "category_reg_2013": _licence_category(raw.get("Category (Reg. 2013)"), "Category (Reg. 2013)"),
+        "category_reg_2018": _licence_category(raw.get("Category (Reg. 2018)"), "Category (Reg. 2018)"),
         "kamel_no": clean(raw.get("KAMEL NO:")) or clean(raw.get("AMEL NO:")),
         "internal_stamp_no": clean(raw.get("Internal Certification Stamp No:")),
         "initial_authorization_date": date_value(raw.get("initial_auth")),
@@ -795,8 +871,21 @@ def process_workbook_preview(job_id: str) -> None:
         db.close()
 
 
-def _upsert_course(db: Session, amo_id: str, payload: dict[str, Any], actor_user_id: Optional[str]) -> training_models.TrainingCourse:
-    course = db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == amo_id, training_models.TrainingCourse.course_id == payload["course_id"]).first()
+def _upsert_course(
+    db: Session,
+    amo_id: str,
+    payload: dict[str, Any],
+    actor_user_id: Optional[str],
+    *,
+    courses_by_code: Optional[dict[str, training_models.TrainingCourse]] = None,
+) -> training_models.TrainingCourse:
+    code = upper(payload["course_id"])
+    course = courses_by_code.get(code) if courses_by_code is not None else None
+    if course is None and courses_by_code is None:
+        course = db.query(training_models.TrainingCourse).filter(
+            training_models.TrainingCourse.amo_id == amo_id,
+            training_models.TrainingCourse.course_id == payload["course_id"],
+        ).first()
     if course is None:
         course = training_models.TrainingCourse(amo_id=amo_id, course_id=payload["course_id"], created_by_user_id=actor_user_id)
         db.add(course)
@@ -807,16 +896,62 @@ def _upsert_course(db: Session, amo_id: str, payload: dict[str, Any], actor_user
     course.is_mandatory = bool(payload.get("is_mandatory"))
     course.scope = payload.get("scope")
     course.regulatory_reference = payload.get("regulatory_reference")
+    course.licence_authority = course.licence_authority or infer_licence_authority(
+        payload.get("course_id"), payload.get("course_name")
+    )
     course.is_active = payload.get("is_active", True)
     course.updated_by_user_id = actor_user_id
     db.flush()
+    if courses_by_code is not None:
+        courses_by_code[code] = course
     return course
 
 
-def _department_id(db: Session, amo_id: str, value: Optional[str]) -> Optional[str]:
+def _build_personnel_commit_indexes(db: Session, amo_id: str) -> PersonnelCommitIndexes:
+    profiles = db.query(account_models.PersonnelProfile).filter(
+        account_models.PersonnelProfile.amo_id == amo_id,
+    ).all()
+    users = db.query(account_models.User).filter(account_models.User.amo_id == amo_id).all()
+    departments = db.query(account_models.Department).filter(
+        account_models.Department.amo_id == amo_id,
+        account_models.Department.is_active.is_(True),
+    ).all()
+    licences = db.query(PersonnelLicence).filter(PersonnelLicence.amo_id == amo_id).all()
+
+    licence_index: dict[tuple[str, str], list[PersonnelLicence]] = {}
+    for licence in licences:
+        licence_index.setdefault((str(licence.personnel_profile_id), upper(licence.authority)), []).append(licence)
+
+    department_ids: dict[str, str] = {}
+    for department in departments:
+        if department.code:
+            department_ids[str(department.code).strip().lower()] = str(department.id)
+        if department.name:
+            department_ids[str(department.name).strip().lower()] = str(department.id)
+
+    return PersonnelCommitIndexes(
+        profiles_by_person={upper(item.person_id): item for item in profiles},
+        profiles_by_email={(item.email or "").strip().lower(): item for item in profiles if item.email},
+        users_by_staff={upper(item.staff_code): item for item in users},
+        users_by_email={(item.email or "").strip().lower(): item for item in users if item.email},
+        users_by_id={str(item.id): item for item in users},
+        department_ids_by_token=department_ids,
+        licences_by_profile_authority=licence_index,
+    )
+
+
+def _department_id(
+    db: Session,
+    amo_id: str,
+    value: Optional[str],
+    *,
+    indexes: Optional[PersonnelCommitIndexes] = None,
+) -> Optional[str]:
     if not value:
         return None
     normalized = value.strip().lower()
+    if indexes is not None:
+        return indexes.department_ids_by_token.get(normalized)
     items = db.query(account_models.Department).filter(account_models.Department.amo_id == amo_id, account_models.Department.is_active.is_(True)).all()
     for item in items:
         if str(item.code or "").strip().lower() == normalized or str(item.name or "").strip().lower() == normalized:
@@ -838,12 +973,17 @@ def _upsert_licence(
     payload: dict[str, Any],
     source_row: int,
     primary: bool,
+    indexes: Optional[PersonnelCommitIndexes] = None,
 ) -> None:
-    authority_licences = db.query(PersonnelLicence).filter(
-        PersonnelLicence.amo_id == job.amo_id,
-        PersonnelLicence.personnel_profile_id == profile.id,
-        PersonnelLicence.authority == authority,
-    ).all()
+    licence_key = (str(profile.id), upper(authority))
+    if indexes is not None:
+        authority_licences = indexes.licences_by_profile_authority.setdefault(licence_key, [])
+    else:
+        authority_licences = db.query(PersonnelLicence).filter(
+            PersonnelLicence.amo_id == job.amo_id,
+            PersonnelLicence.personnel_profile_id == profile.id,
+            PersonnelLicence.authority == authority,
+        ).all()
     licence = next((item for item in authority_licences if item.licence_number == number), None) if number else None
     for previous in authority_licences:
         if previous is licence:
@@ -864,6 +1004,7 @@ def _upsert_licence(
             licence_number=number,
         )
         db.add(licence)
+        authority_licences.append(licence)
     licence.user_id = user.id if user else None
     licence.country = country
     licence.category_code = category
@@ -876,29 +1017,42 @@ def _upsert_licence(
     licence.source_row = source_row
 
 
-def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWorkbookImportRow) -> tuple[Optional[str], str]:
+def _upsert_person(
+    db: Session,
+    job: TrainingWorkbookImportJob,
+    row: TrainingWorkbookImportRow,
+    *,
+    indexes: Optional[PersonnelCommitIndexes] = None,
+    inactive_password_hash: Optional[str] = None,
+) -> PersonCommitResult:
     payload = dict(row.payload_json or {})
     person_id = upper(payload.get("person_id"))
     decision = (row.decision or "").upper()
     if decision == "SKIP":
-        return None, "SKIP"
+        return PersonCommitResult(entity_id=None, action="SKIP")
     if decision == "USE_IMPORTED_EMAIL":
         raise ValueError("Imported email conflicts must be reconciled outside the import; choose KEEP_EXISTING_EMAIL or SKIP.")
 
-    profile_by_person = db.query(account_models.PersonnelProfile).filter(
-        account_models.PersonnelProfile.amo_id == job.amo_id,
-        account_models.PersonnelProfile.person_id == person_id,
-    ).first()
-    profile_by_email = None
-    if payload.get("email"):
-        profile_by_email = db.query(account_models.PersonnelProfile).filter(
+    email_key = str(payload.get("email") or "").strip().lower()
+    if indexes is not None:
+        profile_by_person = indexes.profiles_by_person.get(person_id)
+        profile_by_email = indexes.profiles_by_email.get(email_key) if email_key else None
+        existing_staff_user = indexes.users_by_staff.get(person_id)
+    else:
+        profile_by_person = db.query(account_models.PersonnelProfile).filter(
             account_models.PersonnelProfile.amo_id == job.amo_id,
-            func.lower(account_models.PersonnelProfile.email) == str(payload["email"]).lower(),
+            account_models.PersonnelProfile.person_id == person_id,
         ).first()
-    existing_staff_user = db.query(account_models.User).filter(
-        account_models.User.amo_id == job.amo_id,
-        account_models.User.staff_code == person_id,
-    ).first()
+        profile_by_email = None
+        if email_key:
+            profile_by_email = db.query(account_models.PersonnelProfile).filter(
+                account_models.PersonnelProfile.amo_id == job.amo_id,
+                func.lower(account_models.PersonnelProfile.email) == email_key,
+            ).first()
+        existing_staff_user = db.query(account_models.User).filter(
+            account_models.User.amo_id == job.amo_id,
+            account_models.User.staff_code == person_id,
+        ).first()
     profile = profile_by_person if decision == "KEEP_EXISTING_EMAIL" else profile_by_person or profile_by_email
     is_new = profile is None
     if profile is None:
@@ -915,6 +1069,12 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         selected_email = (profile_by_person.email if profile_by_person else None) or (existing_staff_user.email if existing_staff_user else None)
     else:
         selected_email = imported_email or profile.email
+
+    selected_email_key = str(selected_email or "").strip().lower()
+    if selected_email_key and decision != "KEEP_EXISTING_EMAIL":
+        claimed_profile = indexes.profiles_by_email.get(selected_email_key) if indexes is not None else profile_by_email
+        if claimed_profile is not None and claimed_profile is not profile:
+            raise PersonnelIdentityChanged(row.id, "The imported email is now assigned to another personnel profile. Review this People row again.")
 
     profile.person_id = person_id
     profile.first_name = payload["first_name"]
@@ -936,13 +1096,19 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
     profile.birth_place = payload.get("birth_place")
     db.flush()
 
-    existing_profile_user = db.get(account_models.User, profile.user_id) if profile.user_id else None
+    existing_profile_user = (
+        indexes.users_by_id.get(str(profile.user_id)) if indexes is not None and profile.user_id else
+        db.get(account_models.User, profile.user_id) if profile.user_id else None
+    )
     existing_email_user = None
     if selected_email and decision != "KEEP_EXISTING_EMAIL":
-        existing_email_user = db.query(account_models.User).filter(
-            account_models.User.amo_id == job.amo_id,
-            func.lower(account_models.User.email) == str(selected_email).lower(),
-        ).first()
+        if indexes is not None:
+            existing_email_user = indexes.users_by_email.get(selected_email_key)
+        else:
+            existing_email_user = db.query(account_models.User).filter(
+                account_models.User.amo_id == job.amo_id,
+                func.lower(account_models.User.email) == selected_email_key,
+            ).first()
 
     if decision == "PROFILE_ONLY":
         if existing_profile_user or existing_staff_user or existing_email_user:
@@ -950,7 +1116,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         user = account_models.User(
             id=generate_user_id(),
             amo_id=job.amo_id,
-            department_id=_department_id(db, job.amo_id, payload.get("department")),
+            department_id=_department_id(db, job.amo_id, payload.get("department"), indexes=indexes),
             staff_code=person_id,
             email=f"{person_id.lower()}@personnel.invalid",
             first_name=payload["first_name"],
@@ -960,7 +1126,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
             position_title=payload.get("position_title"),
             phone=payload.get("phone_number"),
             secondary_phone=payload.get("secondary_phone"),
-            hashed_password=get_password_hash(secrets.token_urlsafe(48)),
+            hashed_password=inactive_password_hash or get_password_hash(secrets.token_urlsafe(48)),
             is_active=False,
             is_amo_admin=False,
             is_auditor=False,
@@ -985,7 +1151,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
             user = account_models.User(
                 id=generate_user_id(),
                 amo_id=job.amo_id,
-                department_id=_department_id(db, job.amo_id, payload.get("department")),
+                department_id=_department_id(db, job.amo_id, payload.get("department"), indexes=indexes),
                 staff_code=person_id,
                 email=selected_email,
                 first_name=payload["first_name"],
@@ -995,7 +1161,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
                 position_title=payload.get("position_title"),
                 phone=payload.get("phone_number"),
                 secondary_phone=payload.get("secondary_phone"),
-                hashed_password=get_password_hash(secrets.token_urlsafe(48)),
+                hashed_password=inactive_password_hash or get_password_hash(secrets.token_urlsafe(48)),
                 is_active=False,
                 is_amo_admin=False,
                 is_auditor=False,
@@ -1012,7 +1178,7 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
         elif user is None and decision == "LINK_EXISTING_ACCOUNT":
             raise ValueError("The account selected for linking no longer exists. Re-run the workbook preview.")
         elif user is not None:
-            user.department_id = _department_id(db, job.amo_id, payload.get("department")) or user.department_id
+            user.department_id = _department_id(db, job.amo_id, payload.get("department"), indexes=indexes) or user.department_id
             user.first_name = payload["first_name"]
             user.last_name = payload["last_name"]
             user.full_name = payload.get("full_name") or user.full_name
@@ -1033,29 +1199,54 @@ def _upsert_person(db: Session, job: TrainingWorkbookImportJob, row: TrainingWor
 
     category = payload.get("category_reg_2018") or payload.get("category_reg_2013")
     category_source = "Reg. 2018" if payload.get("category_reg_2018") else "Reg. 2013" if payload.get("category_reg_2013") else None
-    _upsert_licence(db, job=job, profile=profile, user=user, authority="KCAA", country="Kenya", number=payload.get("kamel_no"), category=category, category_source=category_source, payload=payload, source_row=row.source_row, primary=True)
-    _upsert_licence(db, job=job, profile=profile, user=user, authority="ETHIOPIAN_CAA", country="Ethiopia", number=payload.get("e_amel"), category=None, category_source=None, payload=payload, source_row=row.source_row, primary=False)
-    _upsert_licence(db, job=job, profile=profile, user=user, authority="GHANA_CAA", country="Ghana", number=payload.get("g_amel"), category=None, category_source=None, payload=payload, source_row=row.source_row, primary=False)
+    _upsert_licence(db, job=job, profile=profile, user=user, authority="KCAA", country="Kenya", number=payload.get("kamel_no"), category=category, category_source=category_source, payload=payload, source_row=row.source_row, primary=True, indexes=indexes)
+    _upsert_licence(db, job=job, profile=profile, user=user, authority="ETHIOPIAN_CAA", country="Ethiopia", number=payload.get("e_amel"), category=None, category_source=None, payload=payload, source_row=row.source_row, primary=False, indexes=indexes)
+    _upsert_licence(db, job=job, profile=profile, user=user, authority="GHANA_CAA", country="Ghana", number=payload.get("g_amel"), category=None, category_source=None, payload=payload, source_row=row.source_row, primary=False, indexes=indexes)
     db.flush()
-    return str(user.id if user else profile.id), "CREATE" if is_new else "UPDATE"
+    if indexes is not None:
+        indexes.profiles_by_person[person_id] = profile
+        for key, indexed_profile in list(indexes.profiles_by_email.items()):
+            if indexed_profile is profile and key != selected_email_key:
+                indexes.profiles_by_email.pop(key, None)
+        if selected_email_key:
+            indexes.profiles_by_email[selected_email_key] = profile
+        if user is not None:
+            indexes.users_by_id[str(user.id)] = user
+            indexes.users_by_staff[person_id] = user
+            current_user_email_key = str(user.email or "").strip().lower()
+            for key, indexed_user in list(indexes.users_by_email.items()):
+                if indexed_user is user and key != current_user_email_key:
+                    indexes.users_by_email.pop(key, None)
+            if user.email:
+                indexes.users_by_email[current_user_email_key] = user
+    return PersonCommitResult(
+        entity_id=str(user.id if user else profile.id),
+        action="CREATE" if is_new else "UPDATE",
+        profile_created=is_new,
+        portal_account_created=decision == "CREATE_ACCOUNT" and user is not None,
+        non_login_identity_created=decision == "PROFILE_ONLY" and user is not None,
+    )
 
 
-def _progress_callback(job_id: str, base_processed: int) -> Callable[[int, int, str], None]:
+def _progress_callback(job_id: str, base_processed: int, attempt_token: str) -> Callable[[int, int, str], None]:
+    last_published = 0
+
     def callback(processed: int, total: int, label: str) -> None:
+        nonlocal last_published
+        if processed < total and processed - last_published < COMMIT_PROGRESS_BATCH:
+            return
+        last_published = processed
         progress_db = SessionLocal()
         try:
-            job = progress_db.get(TrainingWorkbookImportJob, job_id)
-            if not job:
-                return
-            job.stage = "COMMITTING_TRAINING"
-            job.current_sheet = "Training"
-            job.current_record_label = label[:255]
-            job.processed_rows = min(job.total_rows, base_processed + processed)
-            job.updated_at = utcnow()
-            progress_db.add(job)
-            progress_db.commit()
-            if job.cancel_requested:
-                raise RuntimeError("IMPORT_CANCELLED")
+            _commit_progress(
+                progress_db,
+                job_id,
+                attempt_token,
+                base_processed + processed,
+                "COMMITTING_TRAINING",
+                "Training",
+                label,
+            )
         finally:
             progress_db.close()
     return callback
@@ -1086,12 +1277,87 @@ def _materialize_mandatory_catalogue_requirements(db: Session, job: TrainingWork
     db.flush()
 
 
-def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None:
+def _refresh_identity_review_options(
+    db: Session,
+    job: TrainingWorkbookImportJob,
+    row: TrainingWorkbookImportRow,
+) -> list[str]:
+    """Rebuild valid choices when identity state changes after preview."""
+    payload = dict(row.payload_json or {})
+    person_id = upper(payload.get("person_id"))
+    email = str(payload.get("email") or "").strip().lower()
+    profile_by_person = db.query(account_models.PersonnelProfile).filter(
+        account_models.PersonnelProfile.amo_id == job.amo_id,
+        account_models.PersonnelProfile.person_id == person_id,
+    ).first()
+    profile_by_email = None
+    if email:
+        profile_by_email = db.query(account_models.PersonnelProfile).filter(
+            account_models.PersonnelProfile.amo_id == job.amo_id,
+            func.lower(account_models.PersonnelProfile.email) == email,
+        ).first()
+    identity_filters = [account_models.User.staff_code == person_id]
+    if email:
+        identity_filters.append(func.lower(account_models.User.email) == email)
+    user = db.query(account_models.User).filter(
+        account_models.User.amo_id == job.amo_id,
+        or_(*identity_filters),
+    ).first()
+    if user:
+        return ["LINK_EXISTING_ACCOUNT", "SKIP"]
+    if profile_by_person:
+        if profile_by_email is not None and profile_by_email.id != profile_by_person.id:
+            return ["KEEP_EXISTING_EMAIL", "SKIP"]
+        return (["CREATE_ACCOUNT", "PROFILE_ONLY", "SKIP"] if email else ["PROFILE_ONLY", "SKIP"])
+    return list(row.decision_options or ["SKIP"])
+
+
+def commit_workbook_import(
+    job_id: str,
+    *,
+    force_reimport: bool = False,
+    attempt_token: Optional[str] = None,
+) -> None:
     progress_db = SessionLocal()
     work_db = SessionLocal()
+    commit_started = perf_counter()
+    total_processed = 0
+    accounts_created = 0
+    profiles_created = 0
+    non_login_identities_created = 0
     try:
         job = progress_db.get(TrainingWorkbookImportJob, job_id)
         if not job:
+            return
+        expected_token = attempt_token or _commit_attempt_token(job)
+        if not expected_token or _commit_attempt_token(job) != expected_token:
+            return
+        claimed = (
+            progress_db.query(TrainingWorkbookImportJob)
+            .filter(
+                TrainingWorkbookImportJob.id == job_id,
+                TrainingWorkbookImportJob.status == "QUEUED_COMMIT",
+            )
+            .update(
+                {
+                    TrainingWorkbookImportJob.status: "COMMITTING",
+                    TrainingWorkbookImportJob.stage: "COMMITTING_COURSES",
+                    TrainingWorkbookImportJob.processed_rows: 0,
+                    TrainingWorkbookImportJob.current_sheet: "Courses",
+                    TrainingWorkbookImportJob.current_record_label: None,
+                    TrainingWorkbookImportJob.error_message: None,
+                    TrainingWorkbookImportJob.completed_at: None,
+                    TrainingWorkbookImportJob.updated_at: utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        progress_db.commit()
+        if claimed != 1:
+            return
+        progress_db.expire_all()
+        job = progress_db.get(TrainingWorkbookImportJob, job_id)
+        if not job or _commit_attempt_token(job) != expected_token:
             return
         duplicate = progress_db.query(TrainingWorkbookImportJob).filter(
             TrainingWorkbookImportJob.amo_id == job.amo_id,
@@ -1111,12 +1377,11 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
         if unresolved:
             raise ValueError(f"{unresolved} review decision(s) are still required before commit.")
 
-        job.status = "COMMITTING"
-        job.stage = "COMMITTING_COURSES"
-        job.processed_rows = 0
-        job.current_sheet = "Courses"
-        job.current_record_label = None
-        job.error_message = None
+        job.summary_json = {
+            **(job.summary_json or {}),
+            "commit_started_at": utcnow().isoformat(),
+            "last_commit_attempt": {"status": "RUNNING", "processed_rows": 0},
+        }
         progress_db.add(job)
         progress_db.commit()
 
@@ -1126,48 +1391,96 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
             rows_by_sheet.setdefault(item.sheet_name, []).append(item)
             progress_db.expunge(item)
 
-        total_processed = 0
         with work_db.begin():
             # Course catalogue first so matrix and history can resolve CourseID.
+            courses = {
+                upper(item.course_id): item
+                for item in work_db.query(training_models.TrainingCourse).filter(
+                    training_models.TrainingCourse.amo_id == job.amo_id,
+                ).all()
+            }
             for item in rows_by_sheet.get("Courses", []):
                 if item.status == "FAILED" or item.proposed_action == "SKIP":
                     total_processed += 1
                     continue
-                entity = _upsert_course(work_db, job.amo_id, dict(item.payload_json or {}), job.actor_user_id)
+                entity = _upsert_course(
+                    work_db,
+                    job.amo_id,
+                    dict(item.payload_json or {}),
+                    job.actor_user_id,
+                    courses_by_code=courses,
+                )
                 item.committed_entity_id = entity.id
                 total_processed += 1
-                if total_processed % 10 == 0:
-                    _commit_progress(progress_db, job.id, total_processed, "COMMITTING_COURSES", "Courses", item.display_label)
+                if total_processed % COMMIT_PROGRESS_BATCH == 0:
+                    _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSES", "Courses", item.display_label)
 
             # Personnel + explicit access decisions + multi-authority licences.
+            _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PEOPLE", "People", None)
+            personnel_indexes = _build_personnel_commit_indexes(work_db, job.amo_id)
+            needs_inactive_identity = any(
+                item.status != "FAILED"
+                and (item.decision or "").upper() in {"CREATE_ACCOUNT", "PROFILE_ONLY"}
+                for item in rows_by_sheet.get("People", [])
+            )
+            inactive_password_hash = get_password_hash(secrets.token_urlsafe(48)) if needs_inactive_identity else None
             for item in rows_by_sheet.get("People", []):
                 if item.status == "FAILED":
                     total_processed += 1
                     continue
                 try:
-                    entity_id, action = _upsert_person(work_db, job, item)
-                    item.committed_entity_id = entity_id
-                    if action == "SKIP":
+                    # A row savepoint ensures an identity race cannot poison the
+                    # surrounding atomic import transaction. Any failure exits
+                    # the outer context before another SQL command is issued.
+                    with work_db.begin_nested():
+                        result = _upsert_person(
+                            work_db,
+                            job,
+                            item,
+                            indexes=personnel_indexes,
+                            inactive_password_hash=inactive_password_hash,
+                        )
+                    item.committed_entity_id = result.entity_id
+                    profiles_created += int(result.profile_created)
+                    accounts_created += int(result.portal_account_created)
+                    non_login_identities_created += int(result.non_login_identity_created)
+                    if result.action == "SKIP":
                         item.status = "SKIPPED"
                 except PersonnelIdentityChanged:
                     raise
+                except IntegrityError as exc:
+                    raise PersonnelIdentityChanged(
+                        item.id,
+                        "A personnel profile or portal account changed after review. Review this People row again.",
+                    ) from exc
+                except (OperationalError, DBAPIError):
+                    raise
                 except Exception as exc:
-                    item.status = "FAILED"
-                    item.issue_code = "PERSON_COMMIT_FAILED"
-                    item.issue_message = str(exc)
+                    raise WorkbookRowCommitError(
+                        item.id,
+                        item.sheet_name,
+                        item.source_row,
+                        str(exc),
+                    ) from exc
                 total_processed += 1
-                if total_processed % 5 == 0:
-                    _commit_progress(progress_db, job.id, total_processed, "COMMITTING_PEOPLE", "People", item.display_label)
+                if total_processed % COMMIT_PROGRESS_BATCH == 0:
+                    _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PEOPLE", "People", item.display_label)
 
             # Applicability groups.
-            groups: dict[str, TrainingRoleGroup] = {}
+            _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_ROLE_GROUPS", "tblRoleGroups", None)
+            groups: dict[str, TrainingRoleGroup] = {
+                upper(item.code): item
+                for item in work_db.query(TrainingRoleGroup).filter(
+                    TrainingRoleGroup.amo_id == job.amo_id,
+                ).all()
+            }
             for item in rows_by_sheet.get("tblRoleGroups", []):
                 if item.status == "FAILED":
                     total_processed += 1
                     continue
                 payload = dict(item.payload_json or {})
                 code = upper(payload.get("code"))
-                group = work_db.query(TrainingRoleGroup).filter(TrainingRoleGroup.amo_id == job.amo_id, TrainingRoleGroup.code == code).first()
+                group = groups.get(code)
                 if group is None:
                     group = TrainingRoleGroup(amo_id=job.amo_id, code=code)
                     work_db.add(group)
@@ -1178,12 +1491,18 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                 groups[code] = group
                 item.committed_entity_id = group.id
                 total_processed += 1
-                if total_processed % 10 == 0:
-                    _commit_progress(progress_db, job.id, total_processed, "COMMITTING_ROLE_GROUPS", "tblRoleGroups", item.display_label)
+                if total_processed % COMMIT_PROGRESS_BATCH == 0:
+                    _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_ROLE_GROUPS", "tblRoleGroups", item.display_label)
 
-            profiles = {upper(item.person_id): item for item in work_db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all()}
-            users = {upper(item.staff_code): item for item in work_db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id).all()}
-            groups.update({upper(item.code): item for item in work_db.query(TrainingRoleGroup).filter(TrainingRoleGroup.amo_id == job.amo_id).all()})
+            _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PERSON_ROLES", "tblPersonRoles", None)
+            profiles = personnel_indexes.profiles_by_person
+            users = personnel_indexes.users_by_staff
+            assignments = {
+                (upper(item.person_id), str(item.role_group_id)): item
+                for item in work_db.query(TrainingPersonRole).filter(
+                    TrainingPersonRole.amo_id == job.amo_id,
+                ).all()
+            }
             for item in rows_by_sheet.get("tblPersonRoles", []):
                 if item.status == "FAILED":
                     total_processed += 1
@@ -1196,10 +1515,12 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                     item.issue_message = "Person or role group was not available at commit."
                     total_processed += 1
                     continue
-                assignment = work_db.query(TrainingPersonRole).filter(TrainingPersonRole.amo_id == job.amo_id, TrainingPersonRole.person_id == profile.person_id, TrainingPersonRole.role_group_id == group.id).first()
+                assignment_key = (upper(profile.person_id), str(group.id))
+                assignment = assignments.get(assignment_key)
                 if assignment is None:
                     assignment = TrainingPersonRole(amo_id=job.amo_id, person_id=profile.person_id, role_group_id=group.id)
                     work_db.add(assignment)
+                    assignments[assignment_key] = assignment
                 assignment.personnel_profile_id = profile.id
                 assignment.user_id = (users.get(upper(profile.person_id)).id if users.get(upper(profile.person_id)) else profile.user_id)
                 assignment.department = payload.get("department")
@@ -1210,10 +1531,16 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                 work_db.flush()
                 item.committed_entity_id = assignment.id
                 total_processed += 1
-                if total_processed % 10 == 0:
-                    _commit_progress(progress_db, job.id, total_processed, "COMMITTING_PERSON_ROLES", "tblPersonRoles", item.display_label)
+                if total_processed % COMMIT_PROGRESS_BATCH == 0:
+                    _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PERSON_ROLES", "tblPersonRoles", item.display_label)
 
-            courses = {upper(item.course_id): item for item in work_db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all()}
+            _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSE_MATRIX", "tblCourseMatrix", None)
+            rules = {
+                (str(item.course_id), str(item.role_group_id), upper(item.requirement_type) or "GENERAL"): item
+                for item in work_db.query(TrainingCourseRoleRule).filter(
+                    TrainingCourseRoleRule.amo_id == job.amo_id,
+                ).all()
+            }
             for item in rows_by_sheet.get("tblCourseMatrix", []):
                 if item.status == "FAILED":
                     total_processed += 1
@@ -1226,15 +1553,13 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                     item.issue_message = "Course or role group was not available at commit."
                     total_processed += 1
                     continue
-                rule = work_db.query(TrainingCourseRoleRule).filter(
-                    TrainingCourseRoleRule.amo_id == job.amo_id,
-                    TrainingCourseRoleRule.course_id == course.id,
-                    TrainingCourseRoleRule.role_group_id == group.id,
-                    TrainingCourseRoleRule.requirement_type == (payload.get("requirement_type") or "GENERAL"),
-                ).first()
+                requirement_type = upper(payload.get("requirement_type")) or "GENERAL"
+                rule_key = (str(course.id), str(group.id), requirement_type)
+                rule = rules.get(rule_key)
                 if rule is None:
-                    rule = TrainingCourseRoleRule(amo_id=job.amo_id, course_id=course.id, role_group_id=group.id, requirement_type=payload.get("requirement_type") or "GENERAL")
+                    rule = TrainingCourseRoleRule(amo_id=job.amo_id, course_id=course.id, role_group_id=group.id, requirement_type=requirement_type)
                     work_db.add(rule)
+                    rules[rule_key] = rule
                 rule.is_required = bool(payload.get("is_required", True))
                 rule.notes = payload.get("notes")
                 rule.is_active = True
@@ -1273,9 +1598,10 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                         canonical.is_mandatory = any_required
                         canonical.is_active = any_required
                 total_processed += 1
-                if total_processed % 10 == 0:
-                    _commit_progress(progress_db, job.id, total_processed, "COMMITTING_COURSE_MATRIX", "tblCourseMatrix", item.display_label)
+                if total_processed % COMMIT_PROGRESS_BATCH == 0:
+                    _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSE_MATRIX", "tblCourseMatrix", item.display_label)
 
+            _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_TRAINING", "Training", None)
             training_payloads = []
             training_rows = []
             for item in rows_by_sheet.get("Training", []):
@@ -1292,7 +1618,7 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                     dry_run=False,
                     actor_user_id=job.actor_user_id,
                     manage_transaction=False,
-                    progress_callback=_progress_callback(job.id, total_processed),
+                    progress_callback=_progress_callback(job.id, total_processed, expected_token),
                 )
                 preview_by_row = {entry.row_number: entry for entry in result.preview_rows}
                 for item in training_rows:
@@ -1305,6 +1631,19 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                             item.issue_message = preview.reason
                 total_processed += len(training_payloads)
 
+            # Fence this atomic transaction immediately before commit. If a
+            # stale worker was superseded while PostgreSQL was unavailable,
+            # only the currently leased attempt may publish operational data.
+            _commit_progress(
+                progress_db,
+                job.id,
+                expected_token,
+                total_processed,
+                "FINALIZING_COMMIT",
+                "Training",
+                None,
+            )
+
             audit_services.log_event(
                 work_db,
                 amo_id=job.amo_id,
@@ -1315,20 +1654,63 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                 after={"filename": job.filename, "sha256": job.file_sha256, "rows": total_processed},
                 metadata={"module": "training", "source": "Training_Tracker workbook"},
             )
+            _require_commit_lease(progress_db, job.id, expected_token)
 
-        # Persist row result markers after the atomic operational transaction succeeds.
-        for item in rows:
-            persisted = progress_db.get(TrainingWorkbookImportRow, item.id)
-            if persisted:
-                persisted.status = item.status if item.status in {"FAILED", "SKIPPED"} else "COMMITTED"
-                persisted.issue_code = item.issue_code
-                persisted.issue_message = item.issue_message
-                persisted.committed_entity_id = item.committed_entity_id
-                persisted.proposed_action = item.proposed_action
-                progress_db.add(persisted)
+        # Persist all row outcomes as one executemany operation. The previous
+        # per-row get/update loop issued thousands of round trips on realistic
+        # workbooks and made the final percentage appear frozen.
+        _commit_progress(
+            progress_db,
+            job.id,
+            expected_token,
+            total_processed,
+            "FINALIZING_IMPORT",
+            "Reconciliation",
+            None,
+        )
+        progress_db.bulk_update_mappings(
+            TrainingWorkbookImportRow,
+            [
+                {
+                    "id": item.id,
+                    "status": item.status if item.status in {"FAILED", "SKIPPED"} else "COMMITTED",
+                    "issue_code": item.issue_code,
+                    "issue_message": item.issue_message,
+                    "committed_entity_id": item.committed_entity_id,
+                    "proposed_action": item.proposed_action,
+                    "updated_at": utcnow(),
+                }
+                for item in rows
+            ],
+        )
         progress_db.commit()
 
-        job = progress_db.get(TrainingWorkbookImportJob, job.id)
+        # Keep the current-year training plan in step with the newly committed
+        # personnel history. This is intentionally a separate transaction: an
+        # optional planning sync must never invalidate an otherwise successful
+        # governed workbook import.
+        plan_sync: dict[str, Any]
+        try:
+            from sqlalchemy import inspect
+            from . import operating_service
+
+            if inspect(work_db.get_bind()).has_table("training_plans"):
+                with work_db.begin():
+                    actor = work_db.query(account_models.User).filter(
+                        account_models.User.id == job.actor_user_id,
+                        account_models.User.amo_id == job.amo_id,
+                    ).first()
+                    if actor is None:
+                        plan_sync = {"action": "SKIPPED", "message": "Import actor is not available for plan provenance."}
+                    else:
+                        plan_sync = operating_service.sync_current_plan_from_records(work_db, actor=actor)
+            else:
+                plan_sync = {"action": "SKIPPED", "message": "Training planning migration is not installed yet."}
+        except Exception as plan_exc:
+            work_db.rollback()
+            plan_sync = {"action": "FAILED", "message": str(plan_exc)}
+
+        job = _require_commit_lease(progress_db, job.id, expected_token)
         committed_rows = progress_db.query(TrainingWorkbookImportRow).filter(TrainingWorkbookImportRow.job_id == job.id).all()
         job.created_count = sum(1 for item in committed_rows if item.status == "COMMITTED" and item.proposed_action == "CREATE")
         job.updated_count = sum(1 for item in committed_rows if item.status == "COMMITTED" and item.proposed_action == "UPDATE")
@@ -1344,11 +1726,43 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
         job.committed_by_user_id = job.actor_user_id
         job.committed_at = utcnow()
         job.completed_at = utcnow()
+        job.summary_json = {
+            **(job.summary_json or {}),
+            "active_commit_token": None,
+            "training_plan_sync": plan_sync,
+            "commit_stats": {
+                "portal_accounts_created": accounts_created,
+                "personnel_profiles_created": profiles_created,
+                "non_login_identities_created": non_login_identities_created,
+                "processed_rows": total_processed,
+                "elapsed_ms": int((perf_counter() - commit_started) * 1000),
+            },
+            "last_commit_attempt": {
+                "status": "COMPLETED",
+                "processed_rows": total_processed,
+                "elapsed_ms": int((perf_counter() - commit_started) * 1000),
+            },
+        }
         progress_db.add(job)
         progress_db.commit()
+    except WorkbookCommitLeaseLost:
+        for session in (work_db, progress_db):
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        return
     except Exception as exc:
-        work_db.rollback()
-        progress_db.rollback()
+        for session in (work_db, progress_db):
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        # A PostgreSQL restart invalidates both sessions. Leave the durable job
+        # active so the status endpoint can renew its lease and rerun the whole
+        # atomic commit after connectivity returns.
+        if _is_transient_database_error(exc):
+            return
         job = progress_db.get(TrainingWorkbookImportJob, job_id)
         if job:
             if isinstance(exc, PersonnelIdentityChanged):
@@ -1357,12 +1771,19 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                     row.status = "REVIEW"
                     row.decision = None
                     row.decision_required = True
+                    row.decision_options = _refresh_identity_review_options(progress_db, job, row)
                     row.issue_code = "IDENTITY_CHANGED"
                     row.issue_message = str(exc)
                     progress_db.add(row)
                 job.status = "REVIEW_REQUIRED"
                 job.stage = "REVIEW"
                 job.error_message = str(exc)
+            elif isinstance(exc, WorkbookRowCommitError):
+                row = progress_db.get(TrainingWorkbookImportRow, exc.row_id)
+                if row:
+                    row.issue_code = "COMMIT_RETRY_REQUIRED"
+                    row.issue_message = str(exc)
+                    progress_db.add(row)
             if str(exc) == "IMPORT_CANCELLED":
                 job.status = "CANCELLED"
                 job.stage = "CANCELLED"
@@ -1370,6 +1791,16 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
                 job.status = "FAILED"
                 job.stage = "FAILED"
                 job.error_message = str(exc)
+            job.summary_json = {
+                **(job.summary_json or {}),
+                "active_commit_token": None,
+                "last_commit_attempt": {
+                    "status": job.status,
+                    "processed_rows": total_processed,
+                    "elapsed_ms": int((perf_counter() - commit_started) * 1000),
+                    "error": str(exc),
+                },
+            }
             job.completed_at = utcnow()
             progress_db.add(job)
             progress_db.commit()
@@ -1378,10 +1809,30 @@ def commit_workbook_import(job_id: str, *, force_reimport: bool = False) -> None
         progress_db.close()
 
 
-def _commit_progress(db: Session, job_id: str, processed: int, stage: str, sheet: str, label: Optional[str]) -> None:
+def _require_commit_lease(db: Session, job_id: str, attempt_token: str) -> TrainingWorkbookImportJob:
+    db.expire_all()
     job = db.get(TrainingWorkbookImportJob, job_id)
-    if not job:
-        return
+    if (
+        not job
+        or job.status != "COMMITTING"
+        or _commit_attempt_token(job) != attempt_token
+    ):
+        raise WorkbookCommitLeaseLost("This workbook commit worker was superseded.")
+    if job.cancel_requested:
+        raise RuntimeError("IMPORT_CANCELLED")
+    return job
+
+
+def _commit_progress(
+    db: Session,
+    job_id: str,
+    attempt_token: str,
+    processed: int,
+    stage: str,
+    sheet: str,
+    label: Optional[str],
+) -> None:
+    job = _require_commit_lease(db, job_id, attempt_token)
     job.processed_rows = min(job.total_rows, processed)
     job.stage = stage
     job.current_sheet = sheet
@@ -1389,5 +1840,3 @@ def _commit_progress(db: Session, job_id: str, processed: int, stage: str, sheet
     job.updated_at = utcnow()
     db.add(job)
     db.commit()
-    if job.cancel_requested:
-        raise RuntimeError("IMPORT_CANCELLED")

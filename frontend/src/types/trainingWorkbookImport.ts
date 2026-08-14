@@ -87,6 +87,14 @@ export interface TrainingWorkbookImportJob {
   sheets: TrainingWorkbookImportSheet[];
 }
 
+export interface TrainingWorkbookImportJobPage {
+  items: TrainingWorkbookImportJob[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
 export interface TrainingWorkbookImportDecision {
   row_id: string;
   decision: string;
@@ -103,10 +111,48 @@ export interface PersonnelLicenceRead {
   category_source?: string | null;
   issued_on?: string | null;
   expires_on?: string | null;
+  expiry_source_record_id?: string | null;
+  expiry_source_course_id?: string | null;
+  expiry_synced_at?: string | null;
   internal_stamp_no?: string | null;
   initial_authorization_date?: string | null;
   status: string;
   is_primary: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface TrainingRoleGroupRead {
+  id: string;
+  code: string;
+  description?: string | null;
+  is_active: boolean;
+}
+
+export interface TrainingPersonRoleRead {
+  id: string;
+  person_id: string;
+  personnel_profile_id?: string | null;
+  user_id?: string | null;
+  role_group_id: string;
+  role_group_code?: string | null;
+  person_name?: string | null;
+  staff_code?: string | null;
+  department?: string | null;
+  position?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+}
+
+export interface TrainingCourseRoleRuleRead {
+  id: string;
+  course_id: string;
+  course_code?: string | null;
+  course_name?: string | null;
+  role_group_id: string;
+  role_group_code?: string | null;
+  is_required: boolean;
+  requirement_type: string;
+  notes?: string | null;
+  is_active: boolean;
 }

@@ -27,6 +27,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -178,6 +179,7 @@ class TrainingCourse(Base):
         Index("idx_training_courses_amo_active", "amo_id", "is_active"),
         Index("idx_training_courses_amo_category", "amo_id", "category"),
         Index("idx_training_courses_amo_kind", "amo_id", "kind"),
+        Index("ix_training_courses_amo_group", "amo_id", "group_code"),
         CheckConstraint("frequency_months IS NULL OR frequency_months >= 0", name="ck_training_course_freq_nonneg"),
         CheckConstraint(
             "default_duration_days IS NULL OR default_duration_days >= 0",
@@ -251,6 +253,17 @@ class TrainingCourse(Base):
 
     regulatory_reference = Column(String(255), nullable=True)
     default_provider = Column(String(255), nullable=True)
+    default_facility = Column(String(255), nullable=True)
+    default_instructor_ids = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    cost_currency = Column(String(3), nullable=False, default="USD", server_default="USD")
+    estimated_unit_cost = Column(Numeric(18, 6), nullable=False, default=0, server_default="0")
+    default_capacity = Column(Integer, nullable=True)
+    group_code = Column(String(64), nullable=True)
+    licence_authority = Column(
+        String(64),
+        nullable=True,
+        doc="Regulatory authority whose licence expiry follows this course's valid-until date.",
+    )
     default_duration_days = Column(Integer, nullable=True, default=1)
     nominal_hours = Column(
         Integer,
@@ -401,6 +414,15 @@ class TrainingRequirement(Base):
     assessment_required = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     certificate_required = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     authorization_relevance = Column(Text, nullable=True)
+
+    # Cross-module provenance used by QMS findings and DMS revisions. These
+    # columns already exist in converged deployments (p0a4/saas convergence),
+    # but keeping them off the ORM made the release gates impossible to
+    # configure or evaluate through the canonical Training API.
+    source_type = Column(String(32), nullable=True)
+    source_id = Column(String(64), nullable=True)
+    blocking = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    required_by_date = Column(Date, nullable=True)
 
     created_by_user_id = Column(
         String(36),

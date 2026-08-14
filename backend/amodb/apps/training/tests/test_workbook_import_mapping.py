@@ -12,6 +12,7 @@ from amodb.apps.training.workbook_import import (
     _person_payload,
     _workbook_params,
 )
+from amodb.apps.training import compliance, models as training_models
 
 
 def test_training_tracker_operational_and_derived_sheets_are_explicitly_mapped():
@@ -126,3 +127,21 @@ def test_params_default_frequency_applies_to_recurrent_courses_without_override(
     )
     assert default_months == 24
     assert payload["frequency_months"] == 24
+
+
+def test_standalone_recurrent_requirement_is_not_hidden_as_an_unmet_refresher():
+    standalone = training_models.TrainingCourse(
+        id="course-amel",
+        amo_id="amo-1",
+        course_id="AMEL",
+        course_name="Aircraft Maintenance Engineers' Licence",
+        status="Recurrent",
+        frequency_months=24,
+    )
+    assert compliance._should_suppress_refresher_until_initial_exists(
+        standalone,
+        {},
+        course_by_code={"AMEL": standalone},
+        completed_initial_ids=set(),
+        completed_initial_families=set(),
+    ) is False

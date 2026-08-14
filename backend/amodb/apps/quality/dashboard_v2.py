@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
+from amodb.apps.training.integration import training_record_summary
 
 from .canonical_router import (
     _pg_set_read_timeout,
@@ -259,39 +260,14 @@ def _training_exposure(
     ctx: TenantContext,
     today: date,
     source_errors: list[dict[str, Any]],
-) -> tuple[int | None, int | None]:
-    oldest_rows = _safe_rows(
-        db,
-        sql="""
-            SELECT valid_until
-            FROM training_records
-            WHERE amo_id = :amo_id AND valid_until IS NOT NULL AND valid_until < :today
-            ORDER BY valid_until ASC
-            LIMIT 1
-        """,
-        params={"amo_id": ctx.amo_id, "today": today},
-        label="dashboard_v2_oldest_expired_training",
-        ctx=ctx,
-        source_errors=source_errors,
-        timeout_ms=1200,
-    )
-    total = _safe_count(
-        db,
-        sql="""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT user_id, course_id
-                FROM training_records
-                WHERE amo_id = :amo_id
-            ) population
-        """,
-        params={"amo_id": ctx.amo_id},
-        label="dashboard_v2_training_population",
-        ctx=ctx,
-        source_errors=source_errors,
-        timeout_ms=1200,
-    )
-    oldest = _age_days(oldest_rows[0].get("valid_until"), today) if oldest_rows else None
-    return oldest, total
+) -> tuple[int | None, int | None, int | None]:
+    try:
+        summary = training_record_summary(db, amo_id=ctx.amo_id, as_of=today, due_days=30)
+        return _age_days(summary.oldest_expiry, today), summary.total_current, summary.unverified
+    except Exception as exc:
+        source_errors.append({"label": "dashboard_v2_training_exposure", "message": str(exc), "type": exc.__class__.__name__})
+        _recover_qms_read_session(db, amo_id=ctx.amo_id, user_id=ctx.user_id, timeout_ms=1200)
+        return None, None, None
 
 
 def _finding_exposure(
@@ -450,7 +426,12 @@ def _performance_kpis(
     overdue_rate = _percentage(int(counters.get("overdue_cars", 0)), int(counters.get("open_cars", 0)))
     training_compliance = None
     if training_total is not None and training_total > 0:
-        valid = max(0, training_total - int(counters.get("training_expired_records", 0)))
+        valid = max(
+            0,
+            training_total
+            - int(counters.get("training_expired_records", 0))
+            - int(counters.get("training_unverified_records", 0)),
+        )
         training_compliance = _percentage(valid, training_total)
 
     quality = f"/maintenance/{ctx.amo_code}/quality"
@@ -459,7 +440,7 @@ def _performance_kpis(
         ("overdue-car-rate", "Overdue CAR rate", overdue_rate, 0.0, None, "%", f"{quality}/cars/overdue", True),
         ("median-car-closure-days", "Median CAR closure time", closure_current, None, closure_previous, "days", f"{quality}/reports/car-performance", True),
         ("repeat-finding-rate", "Repeat-finding rate", repeat_rate, 0.0, None, "%", f"{quality}/reports/finding-trends", True),
-        ("training-compliance", "Training compliance", training_compliance, 100.0, None, "%", f"/maintenance/{ctx.amo_code}/training/competence/matrix", False),
+        ("training-compliance", "Current verified training records", training_compliance, 100.0, None, "%", f"/maintenance/{ctx.amo_code}/training/competence/matrix", False),
     ]
     return [
         {
@@ -516,7 +497,9 @@ def qms_operational_dashboard_v2(
         _recover_qms_read_session(db, amo_id=ctx.amo_id, user_id=ctx.user_id, timeout_ms=1800)
 
     oldest_car_age, car_unassigned, car_aging = _car_exposure(db, ctx=ctx, today=today, source_errors=source_errors)
-    oldest_training_age, training_total = _training_exposure(db, ctx=ctx, today=today, source_errors=source_errors)
+    oldest_training_age, training_total, training_unverified = _training_exposure(db, ctx=ctx, today=today, source_errors=source_errors)
+    if training_unverified is not None:
+        counters["training_unverified_records"] = training_unverified
     finding_unassigned, severity_breakdown = _finding_exposure(db, ctx=ctx, source_errors=source_errors)
 
     action_queue = _build_action_queue(

@@ -148,6 +148,7 @@ class PersonnelLicence(Base):
         Index("ix_personnel_licences_amo_profile", "amo_id", "personnel_profile_id"),
         Index("ix_personnel_licences_amo_user", "amo_id", "user_id"),
         Index("ix_personnel_licences_expiry", "amo_id", "expires_on"),
+        Index("ix_personnel_licences_expiry_source", "amo_id", "expiry_source_record_id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -157,10 +158,16 @@ class PersonnelLicence(Base):
     authority = Column(String(64), nullable=False)
     country = Column(String(64), nullable=True)
     licence_number = Column(String(128), nullable=False)
-    category_code = Column(String(255), nullable=True)
+    # A licence can carry a governed list of aircraft/engine category scopes.
+    # These are regulatory evidence, not a single short lookup code, so retain
+    # the complete source wording instead of truncating it to 255 characters.
+    category_code = Column(Text, nullable=True)
     category_source = Column(String(64), nullable=True)
     issued_on = Column(Date, nullable=True)
     expires_on = Column(Date, nullable=True)
+    expiry_source_record_id = Column(String(36), ForeignKey("training_records.id", ondelete="SET NULL"), nullable=True)
+    expiry_source_course_id = Column(String(36), ForeignKey("training_courses.id", ondelete="SET NULL"), nullable=True)
+    expiry_synced_at = Column(DateTime(timezone=True), nullable=True)
     internal_stamp_no = Column(String(255), nullable=True)
     initial_authorization_date = Column(Date, nullable=True)
     status = Column(String(32), nullable=False, default="ACTIVE", index=True)

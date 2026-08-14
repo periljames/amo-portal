@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -70,6 +71,13 @@ class TrainingCourseBase(BaseModel):
         description="Optional reference (e.g. MPM section, MTM chapter, KCAR, IOSA chapter, etc.).",
     )
     default_provider: Optional[str] = None
+    default_facility: Optional[str] = None
+    default_instructor_ids: List[str] = Field(default_factory=list)
+    cost_currency: str = Field("USD", min_length=3, max_length=3)
+    estimated_unit_cost: Decimal = Field(Decimal("0"), ge=0)
+    default_capacity: Optional[int] = Field(None, ge=1)
+    group_code: Optional[str] = Field(None, max_length=64)
+    licence_authority: Optional[str] = Field(None, max_length=64)
     default_duration_days: Optional[int] = 1
     nominal_hours: Optional[int] = Field(None, description="Nominal classroom/OJT hours for the course.")
     planning_lead_days: Optional[int] = Field(45, description="Default lead window used to schedule before due date.")
@@ -96,7 +104,7 @@ class TrainingCourseCreate(TrainingCourseBase):
     amo_id and created_by_user_id come from the current user/context in the router.
     """
 
-    pass
+    is_active: bool = True
 
 
 class TrainingCourseUpdate(BaseModel):
@@ -110,6 +118,13 @@ class TrainingCourseUpdate(BaseModel):
     delivery_method: Optional[TrainingDeliveryMethod] = None
     regulatory_reference: Optional[str] = None
     default_provider: Optional[str] = None
+    default_facility: Optional[str] = None
+    default_instructor_ids: Optional[List[str]] = None
+    cost_currency: Optional[str] = Field(None, min_length=3, max_length=3)
+    estimated_unit_cost: Optional[Decimal] = Field(None, ge=0)
+    default_capacity: Optional[int] = Field(None, ge=1)
+    group_code: Optional[str] = Field(None, max_length=64)
+    licence_authority: Optional[str] = Field(None, max_length=64)
     default_duration_days: Optional[int] = None
     nominal_hours: Optional[int] = None
     planning_lead_days: Optional[int] = None
@@ -142,6 +157,16 @@ class TrainingCourseRead(TrainingCourseBase):
 
     class Config:
         from_attributes = True
+
+
+class TrainingCoursePage(BaseModel):
+    items: List[TrainingCourseRead]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    category_counts: Dict[str, int] = Field(default_factory=dict)
+    group_counts: Dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +204,10 @@ class TrainingRequirementBase(BaseModel):
     assessment_required: bool = False
     certificate_required: bool = True
     authorization_relevance: Optional[str] = None
+    source_type: Optional[str] = Field(None, max_length=32, description="Optional governed source type, for example REVISION or FINDING.")
+    source_id: Optional[str] = Field(None, max_length=64, description="Tenant-scoped identifier in the governed source module.")
+    blocking: bool = Field(False, description="Block the linked QMS/DMS release until affected personnel have current verified evidence.")
+    required_by_date: Optional[date] = None
 
 
 class TrainingRequirementCreate(TrainingRequirementBase):
@@ -204,17 +233,33 @@ class TrainingRequirementUpdate(BaseModel):
     assessment_required: Optional[bool] = None
     certificate_required: Optional[bool] = None
     authorization_relevance: Optional[str] = None
+    source_type: Optional[str] = Field(None, max_length=32)
+    source_id: Optional[str] = Field(None, max_length=64)
+    blocking: Optional[bool] = None
+    required_by_date: Optional[date] = None
 
 
 class TrainingRequirementRead(TrainingRequirementBase):
     id: str
     amo_id: str
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
     created_by_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class TrainingRequirementPage(BaseModel):
+    items: List[TrainingRequirementRead]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    scope_counts: Dict[str, int] = Field(default_factory=dict)
+    state_counts: Dict[str, int] = Field(default_factory=dict)
 
 
 class TrainingMutationResult(BaseModel):
@@ -272,6 +317,9 @@ class TrainingEventUpdate(BaseModel):
 class TrainingEventRead(TrainingEventBase):
     id: str
     amo_id: str
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    participant_count: int = 0
     created_by_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime

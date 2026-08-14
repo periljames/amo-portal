@@ -1,5 +1,5 @@
 // src/app/routeGuards.ts
-import { getCachedUser, getContext, type PortalUser } from "../services/auth";
+import { getActiveAmoId, getCachedUser, getContext, type PortalUser } from "../services/auth";
 
 const TRAINING_READ = new Set([
   "training.view", "training.people.view", "training.course.view", "training.requirement.view",
@@ -94,7 +94,9 @@ export function userHasTrainingRolePermission(
   permission = "training.view",
   contextDepartment?: string | null,
 ): boolean {
-  if (!user || user.is_superuser || !user.amo_id) return false;
+  if (!user) return false;
+  if (user.is_superuser) return Boolean(getActiveAmoId()) && permission.startsWith("training.");
+  if (!user.amo_id) return false;
   if (user.is_amo_admin || user.role === "AMO_ADMIN" || user.role === "QUALITY_MANAGER") return permission.startsWith("training.");
   const department = (contextDepartment || "").trim().toUpperCase().replaceAll("_", "-");
   if (["TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"].includes(department)) return permission.startsWith("training.");

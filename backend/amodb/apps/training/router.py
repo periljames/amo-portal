@@ -46,10 +46,11 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import inspect, or_, select, text
+from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session, load_only, noload, selectinload
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
+from amodb import storage
 from ...database import SessionLocal, get_db, get_read_db
 from ...entitlements import require_module
 from ...security import SECRET_KEY, get_current_active_user
@@ -68,6 +69,7 @@ from .permissions import TrainingCapability, default_training_capabilities, has_
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 from .records_import import import_training_records_rows, parse_training_records_sheet
+from .licence_rules import infer_licence_authority
 
 router = APIRouter(
     prefix="/training",
@@ -112,10 +114,43 @@ _TRAINING_UPLOAD_DIR = Path(os.getenv("TRAINING_UPLOAD_DIR", "uploads/training")
 _TRAINING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Optional: max file size guard (bytes). 0/None disables.
-_MAX_UPLOAD_BYTES = int(os.getenv("TRAINING_MAX_UPLOAD_BYTES", "0") or "0")
+_MAX_UPLOAD_BYTES = int(os.getenv("TRAINING_MAX_UPLOAD_BYTES", "52428800") or "52428800")
 
 
 _ACCESS_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _materialize_training_file(f: training_models.TrainingFile) -> Path:
+    """Resolve governed evidence from shared storage or the legacy upload root."""
+
+    raw = str(f.storage_path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from controlled storage.")
+
+    try:
+        if raw.startswith("s3://"):
+            return storage.materialize(raw, expected_sha256=f.sha256)
+
+        candidate = Path(raw).resolve()
+        if _path_is_within(candidate, storage.local_root()):
+            return storage.materialize(raw, expected_sha256=f.sha256)
+
+        # Read-only compatibility for files retained before shared storage was
+        # introduced. New uploads are always written through amodb.storage.
+        if _path_is_within(candidate, _TRAINING_UPLOAD_DIR) and candidate.is_file():
+            return candidate
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from controlled storage.") from exc
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from controlled storage.")
 
 
 def _sha256_hex(value: str) -> str:
@@ -385,6 +420,10 @@ def _seed_refresher_records_from_initial(
             created_by_user_id=created_by_user_id,
             record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
             source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
+            verification_status=training_models.TrainingRecordVerificationStatus.VERIFIED,
+            verified_at=datetime.now(timezone.utc),
+            verified_by_user_id=created_by_user_id,
+            verification_comment="Derived from a verified initial-course completion.",
         )
         db.add(seeded_record)
         seeded.append(seeded_record)
@@ -1161,6 +1200,24 @@ def _ensure_training_catalog_schema_compat(db: Session) -> None:
 
             requirement_cols = table_columns("training_requirements")
             if requirement_cols:
+                if "manual_reference" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS manual_reference VARCHAR(255)")
+                if "planning_lead_days" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS planning_lead_days INTEGER")
+                if "assessment_required" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS assessment_required BOOLEAN DEFAULT FALSE")
+                if "certificate_required" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS certificate_required BOOLEAN DEFAULT TRUE")
+                if "authorization_relevance" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS authorization_relevance TEXT")
+                if "source_type" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS source_type VARCHAR(32)")
+                if "source_id" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS source_id VARCHAR(64)")
+                if "blocking" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS blocking BOOLEAN DEFAULT FALSE")
+                if "required_by_date" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS required_by_date DATE")
                 if "created_at" not in requirement_cols:
                     statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
                 if "updated_at" not in requirement_cols:
@@ -2008,11 +2065,20 @@ def _build_status_item_from_dates(
     )
 
 
-def _event_to_read(event: training_models.TrainingEvent) -> training_schemas.TrainingEventRead:
+def _event_to_read(
+    event: training_models.TrainingEvent,
+    *,
+    course_code: str | None = None,
+    course_name: str | None = None,
+    participant_count: int | None = None,
+) -> training_schemas.TrainingEventRead:
     return training_schemas.TrainingEventRead(
         id=event.id,
         amo_id=event.amo_id,
         course_pk=event.course_id,
+        course_code=course_code,
+        course_name=course_name,
+        participant_count=int(participant_count or 0),
         title=event.title,
         location=event.location,
         provider=event.provider,
@@ -2134,10 +2200,13 @@ def _deferral_to_read(d: training_models.TrainingDeferralRequest) -> training_sc
 
 
 def _requirement_to_read(r: training_models.TrainingRequirement) -> training_schemas.TrainingRequirementRead:
+    course = getattr(r, "course", None)
     return training_schemas.TrainingRequirementRead(
         id=r.id,
         amo_id=r.amo_id,
         course_pk=r.course_id,
+        course_code=getattr(course, "course_id", None),
+        course_name=getattr(course, "course_name", None),
         scope=r.scope,
         department_code=r.department_code,
         job_role=r.job_role,
@@ -2146,10 +2215,76 @@ def _requirement_to_read(r: training_models.TrainingRequirement) -> training_sch
         is_active=r.is_active,
         effective_from=r.effective_from,
         effective_to=r.effective_to,
+        manual_reference=r.manual_reference,
+        planning_lead_days=r.planning_lead_days,
+        assessment_required=r.assessment_required,
+        certificate_required=r.certificate_required,
+        authorization_relevance=r.authorization_relevance,
+        source_type=r.source_type,
+        source_id=r.source_id,
+        blocking=r.blocking,
+        required_by_date=r.required_by_date,
         created_by_user_id=r.created_by_user_id,
         created_at=r.created_at,
         updated_at=r.updated_at,
     )
+
+
+def _validate_requirement_target(
+    db: Session,
+    *,
+    amo_id: str,
+    scope: training_models.TrainingRequirementScope,
+    department_code: Optional[str],
+    job_role: Optional[str],
+    user_id: Optional[str],
+) -> None:
+    if scope == training_models.TrainingRequirementScope.DEPARTMENT:
+        code = str(department_code or "").strip().upper()
+        if not code:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_code is required for scope=DEPARTMENT.")
+        department = db.query(accounts_models.Department.id).filter(
+            accounts_models.Department.amo_id == amo_id,
+            accounts_models.Department.code == code,
+            accounts_models.Department.is_active.is_(True),
+        ).first()
+        if not department:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The selected department is not active in this AMO.")
+    elif scope == training_models.TrainingRequirementScope.JOB_ROLE:
+        if not str(job_role or "").strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_role is required for scope=JOB_ROLE.")
+    elif scope == training_models.TrainingRequirementScope.USER:
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required for scope=USER.")
+        user = db.query(accounts_models.User.id).filter(
+            accounts_models.User.id == user_id,
+            accounts_models.User.amo_id == amo_id,
+            accounts_models.User.is_active.is_(True),
+            accounts_models.User.is_system_account.is_(False),
+        ).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The selected user is inactive, a system account, or belongs to another AMO.")
+
+
+def _validate_requirement_governance(
+    *,
+    source_type: Optional[str],
+    source_id: Optional[str],
+    blocking: bool,
+    effective_from: Optional[date],
+    effective_to: Optional[date],
+) -> tuple[Optional[str], Optional[str]]:
+    normalized_type = str(source_type or "").strip().upper() or None
+    normalized_id = str(source_id or "").strip() or None
+    if bool(normalized_type) != bool(normalized_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="source_type and source_id must be supplied together.")
+    if blocking and not normalized_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A blocking requirement must identify its governed source.")
+    if blocking and normalized_type not in {"REVISION", "FINDING"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Blocking requirements support DMS REVISION or QMS FINDING sources.")
+    if effective_from and effective_to and effective_to < effective_from:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="effective_to cannot be before effective_from.")
+    return normalized_type, normalized_id
 
 
 def _notification_to_read(n: training_models.TrainingNotification) -> training_schemas.TrainingNotificationRead:
@@ -2204,6 +2339,9 @@ def _file_to_read(f: training_models.TrainingFile) -> training_schemas.TrainingF
 )
 def list_courses(
     include_inactive: bool = False,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+    group_code: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_read_db),
@@ -2217,8 +2355,81 @@ def list_courses(
     )
     if not include_inactive:
         q = q.filter(training_models.TrainingCourse.is_active.is_(True))
+    if search and search.strip():
+        token = f"%{search.strip()}%"
+        q = q.filter(or_(
+            training_models.TrainingCourse.course_id.ilike(token),
+            training_models.TrainingCourse.course_name.ilike(token),
+            training_models.TrainingCourse.default_provider.ilike(token),
+        ))
+    if category and category.strip():
+        q = q.filter(training_models.TrainingCourse.category == category.strip().upper())
+    if group_code and group_code.strip():
+        q = q.filter(training_models.TrainingCourse.group_code == group_code.strip().upper())
 
     return q.order_by(training_models.TrainingCourse.course_id.asc()).offset(offset).limit(limit).all()
+
+
+@router.get(
+    "/courses/catalogue-page",
+    response_model=training_schemas.TrainingCoursePage,
+    summary="Search and page the tenant course catalogue",
+)
+def page_courses(
+    include_inactive: bool = True,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+    group_code: Optional[str] = None,
+    limit: int = 25,
+    offset: int = 0,
+    db: Session = Depends(get_read_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    limit, offset = _normalize_pagination(limit, offset)
+    _ensure_training_catalog_schema_compat(db)
+    scoped = db.query(training_models.TrainingCourse).filter(
+        training_models.TrainingCourse.amo_id == current_user.amo_id
+    )
+    if not include_inactive:
+        scoped = scoped.filter(training_models.TrainingCourse.is_active.is_(True))
+    category_counts = {
+        str(key.value if hasattr(key, "value") else key): int(count)
+        for key, count in scoped.with_entities(
+            training_models.TrainingCourse.category,
+            func.count(training_models.TrainingCourse.id),
+        ).group_by(training_models.TrainingCourse.category).all()
+    }
+    group_counts = {
+        str(key): int(count)
+        for key, count in scoped.with_entities(
+            training_models.TrainingCourse.group_code,
+            func.count(training_models.TrainingCourse.id),
+        ).filter(training_models.TrainingCourse.group_code.isnot(None)).group_by(training_models.TrainingCourse.group_code).all()
+        if key
+    }
+    query = scoped
+    if search and search.strip():
+        token = f"%{search.strip()}%"
+        query = query.filter(or_(
+            training_models.TrainingCourse.course_id.ilike(token),
+            training_models.TrainingCourse.course_name.ilike(token),
+            training_models.TrainingCourse.default_provider.ilike(token),
+        ))
+    if category and category.strip():
+        query = query.filter(training_models.TrainingCourse.category == category.strip().upper())
+    if group_code and group_code.strip():
+        query = query.filter(training_models.TrainingCourse.group_code == group_code.strip().upper())
+    total = query.count()
+    items = query.order_by(training_models.TrainingCourse.course_id.asc()).offset(offset).limit(limit).all()
+    return training_schemas.TrainingCoursePage(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(items) < total,
+        category_counts=category_counts,
+        group_counts=group_counts,
+    )
 
 
 @router.get(
@@ -2283,14 +2494,28 @@ def create_course(
         delivery_method=payload.delivery_method,
         regulatory_reference=payload.regulatory_reference,
         default_provider=payload.default_provider,
+        default_facility=payload.default_facility,
+        default_instructor_ids=payload.default_instructor_ids,
+        cost_currency=payload.cost_currency.strip().upper(),
+        estimated_unit_cost=payload.estimated_unit_cost,
+        default_capacity=payload.default_capacity,
+        group_code=payload.group_code.strip().upper() if payload.group_code else None,
+        licence_authority=(payload.licence_authority.strip().upper() if payload.licence_authority else infer_licence_authority(course_id_norm, payload.course_name)),
         default_duration_days=payload.default_duration_days,
         nominal_hours=payload.nominal_hours,
         planning_lead_days=payload.planning_lead_days,
         candidate_requirement_text=payload.candidate_requirement_text,
+        assessment_required=payload.assessment_required,
+        pass_threshold=payload.pass_threshold,
+        attendance_required=payload.attendance_required,
+        ojt_signoff_required=payload.ojt_signoff_required,
+        evidence_required=payload.evidence_required,
+        certificate_policy=payload.certificate_policy,
+        external_completion_behavior=payload.external_completion_behavior,
         is_mandatory=payload.is_mandatory,
         mandatory_for_all=payload.mandatory_for_all,
         prerequisite_course_id=payload.prerequisite_course_id,
-        is_active=True,
+        is_active=payload.is_active,
         created_by_user_id=current_user.id,
         updated_by_user_id=current_user.id,
     )
@@ -2397,6 +2622,13 @@ def update_course(
 
     update_data = payload.model_dump(exclude_unset=True)
 
+    if update_data.get("cost_currency"):
+        update_data["cost_currency"] = str(update_data["cost_currency"]).strip().upper()
+    if update_data.get("group_code"):
+        update_data["group_code"] = str(update_data["group_code"]).strip().upper()
+    if update_data.get("licence_authority"):
+        update_data["licence_authority"] = str(update_data["licence_authority"]).strip().upper()
+
     for field, value in update_data.items():
         setattr(course, field, value)
 
@@ -2445,6 +2677,83 @@ def list_requirements(
     return [_requirement_to_read(r) for r in reqs]
 
 
+@router.get(
+    "/requirements/page",
+    response_model=training_schemas.TrainingRequirementPage,
+    summary="Search and page the tenant training requirement register",
+)
+def page_requirements(
+    search: Optional[str] = None,
+    scope: Optional[str] = None,
+    state: str = "ALL",
+    limit: int = 15,
+    offset: int = 0,
+    db: Session = Depends(get_read_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    limit, offset = _normalize_pagination(limit, offset)
+    _ensure_training_catalog_schema_compat(db)
+    base = db.query(training_models.TrainingRequirement).options(
+        selectinload(training_models.TrainingRequirement.course)
+    ).filter(training_models.TrainingRequirement.amo_id == current_user.amo_id)
+
+    scope_counts = {
+        str(key.value if hasattr(key, "value") else key): int(count or 0)
+        for key, count in base.with_entities(
+            training_models.TrainingRequirement.scope,
+            func.count(training_models.TrainingRequirement.id),
+        ).group_by(training_models.TrainingRequirement.scope).all()
+    }
+    active_count = int(base.filter(training_models.TrainingRequirement.is_active.is_(True)).count())
+    retired_count = int(base.filter(training_models.TrainingRequirement.is_active.is_(False)).count())
+
+    query = base
+    state_norm = str(state or "ALL").strip().upper()
+    if state_norm == "ACTIVE":
+        query = query.filter(training_models.TrainingRequirement.is_active.is_(True))
+    elif state_norm == "RETIRED":
+        query = query.filter(training_models.TrainingRequirement.is_active.is_(False))
+    elif state_norm != "ALL":
+        raise HTTPException(status_code=422, detail="Requirement state must be ALL, ACTIVE or RETIRED.")
+
+    if scope and scope.strip() and scope.strip().upper() != "ALL":
+        scope_norm = scope.strip().upper()
+        try:
+            scope_value = training_models.TrainingRequirementScope(scope_norm)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Unknown training requirement scope.")
+        query = query.filter(training_models.TrainingRequirement.scope == scope_value)
+
+    if search and search.strip():
+        token = f"%{search.strip()}%"
+        query = query.join(
+            training_models.TrainingCourse,
+            training_models.TrainingRequirement.course_id == training_models.TrainingCourse.id,
+        ).filter(or_(
+            training_models.TrainingCourse.course_id.ilike(token),
+            training_models.TrainingCourse.course_name.ilike(token),
+            training_models.TrainingRequirement.department_code.ilike(token),
+            training_models.TrainingRequirement.job_role.ilike(token),
+            training_models.TrainingRequirement.manual_reference.ilike(token),
+            training_models.TrainingRequirement.source_id.ilike(token),
+        ))
+
+    total = int(query.count())
+    rows = query.order_by(
+        training_models.TrainingRequirement.is_active.desc(),
+        training_models.TrainingRequirement.created_at.desc(),
+    ).offset(offset).limit(limit).all()
+    return training_schemas.TrainingRequirementPage(
+        items=[_requirement_to_read(item) for item in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(rows) < total,
+        scope_counts=scope_counts,
+        state_counts={"ACTIVE": active_count, "RETIRED": retired_count},
+    )
+
+
 @router.post(
     "/requirements",
     response_model=training_schemas.TrainingRequirementRead,
@@ -2464,13 +2773,21 @@ def create_requirement(
     if not course:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid course for this AMO.")
 
-    # Basic scope sanity checks
-    if payload.scope == training_models.TrainingRequirementScope.DEPARTMENT and not payload.department_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_code is required for scope=DEPARTMENT.")
-    if payload.scope == training_models.TrainingRequirementScope.JOB_ROLE and not payload.job_role:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_role is required for scope=JOB_ROLE.")
-    if payload.scope == training_models.TrainingRequirementScope.USER and not payload.user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required for scope=USER.")
+    _validate_requirement_target(
+        db,
+        amo_id=current_user.amo_id,
+        scope=payload.scope,
+        department_code=payload.department_code,
+        job_role=payload.job_role,
+        user_id=payload.user_id,
+    )
+    source_type, source_id = _validate_requirement_governance(
+        source_type=payload.source_type,
+        source_id=payload.source_id,
+        blocking=payload.blocking,
+        effective_from=payload.effective_from,
+        effective_to=payload.effective_to,
+    )
 
     req = training_models.TrainingRequirement(
         amo_id=current_user.amo_id,
@@ -2483,6 +2800,15 @@ def create_requirement(
         is_active=payload.is_active,
         effective_from=payload.effective_from,
         effective_to=payload.effective_to,
+        manual_reference=payload.manual_reference,
+        planning_lead_days=payload.planning_lead_days,
+        assessment_required=payload.assessment_required,
+        certificate_required=payload.certificate_required,
+        authorization_relevance=payload.authorization_relevance,
+        source_type=source_type,
+        source_id=source_id,
+        blocking=payload.blocking,
+        required_by_date=payload.required_by_date,
         created_by_user_id=current_user.id,
     )
 
@@ -2538,14 +2864,35 @@ def update_requirement(
     if "job_role" in data and data["job_role"]:
         data["job_role"] = data["job_role"].strip()
 
+    scope = data.get("scope", req.scope)
     if "scope" in data:
-        scope = data["scope"]
-        if scope == training_models.TrainingRequirementScope.DEPARTMENT and not (data.get("department_code") or req.department_code):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_code is required for scope=DEPARTMENT.")
-        if scope == training_models.TrainingRequirementScope.JOB_ROLE and not (data.get("job_role") or req.job_role):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_role is required for scope=JOB_ROLE.")
-        if scope == training_models.TrainingRequirementScope.USER and not (data.get("user_id") or req.user_id):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required for scope=USER.")
+        if scope != training_models.TrainingRequirementScope.DEPARTMENT:
+            data["department_code"] = None
+        if scope != training_models.TrainingRequirementScope.JOB_ROLE:
+            data["job_role"] = None
+        if scope != training_models.TrainingRequirementScope.USER:
+            data["user_id"] = None
+    department_code = data.get("department_code", req.department_code)
+    job_role = data.get("job_role", req.job_role)
+    user_id = data.get("user_id", req.user_id)
+    _validate_requirement_target(
+        db,
+        amo_id=current_user.amo_id,
+        scope=scope,
+        department_code=department_code,
+        job_role=job_role,
+        user_id=user_id,
+    )
+
+    source_type, source_id = _validate_requirement_governance(
+        source_type=data.get("source_type", req.source_type),
+        source_id=data.get("source_id", req.source_id),
+        blocking=bool(data.get("blocking", req.blocking)),
+        effective_from=data.get("effective_from", req.effective_from),
+        effective_to=data.get("effective_to", req.effective_to),
+    )
+    data["source_type"] = source_type
+    data["source_id"] = source_id
 
     for k, v in data.items():
         setattr(req, k, v)
@@ -2739,7 +3086,19 @@ def list_events(
     limit, offset = _normalize_pagination(limit, offset)
     _ensure_training_catalog_schema_compat(db)
 
-    q = db.query(training_models.TrainingEvent).filter(training_models.TrainingEvent.amo_id == current_user.amo_id)
+    participant_count = db.query(func.count(training_models.TrainingEventParticipant.id)).filter(
+        training_models.TrainingEventParticipant.amo_id == current_user.amo_id,
+        training_models.TrainingEventParticipant.event_id == training_models.TrainingEvent.id,
+    ).correlate(training_models.TrainingEvent).scalar_subquery()
+    q = db.query(
+        training_models.TrainingEvent,
+        training_models.TrainingCourse.course_id,
+        training_models.TrainingCourse.course_name,
+        participant_count,
+    ).join(
+        training_models.TrainingCourse,
+        training_models.TrainingCourse.id == training_models.TrainingEvent.course_id,
+    ).options(noload("*")).filter(training_models.TrainingEvent.amo_id == current_user.amo_id)
 
     if course_pk:
         q = q.filter(training_models.TrainingEvent.course_id == course_pk)
@@ -2749,7 +3108,7 @@ def list_events(
         q = q.filter(training_models.TrainingEvent.starts_on <= to_date)
 
     events = q.order_by(training_models.TrainingEvent.starts_on.asc()).offset(offset).limit(limit).all()
-    return [_event_to_read(e) for e in events]
+    return [_event_to_read(event, course_code=course_code, course_name=course_name, participant_count=count) for event, course_code, course_name, count in events]
 
 
 @router.get(
@@ -4874,7 +5233,10 @@ def review_training_file(
     f.reviewed_by_user_id = current_user.id
 
     # Notify owner
-    owner = db.query(accounts_models.User).filter(accounts_models.User.id == f.owner_user_id).first()
+    owner = db.query(accounts_models.User).filter(
+        accounts_models.User.id == f.owner_user_id,
+        accounts_models.User.amo_id == current_user.amo_id,
+    ).first()
     if owner:
         title = "Evidence approved" if payload.review_status == training_models.TrainingFileReviewStatus.APPROVED else "Evidence rejected"
         body = f"Your document '{f.original_filename}' has been {payload.review_status}."
@@ -4933,14 +5295,13 @@ def download_training_file(
     if not is_editor and f.owner_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to download this file.")
 
-    path = _ensure_training_upload_path(Path(f.storage_path))
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server storage.")
+    path = _materialize_training_file(f)
 
     return FileResponse(
         path=str(path),
         media_type=f.content_type or "application/octet-stream",
         filename=f.original_filename,
+        headers={"ETag": f'"{f.sha256 or f.id}"', "Cache-Control": "private, max-age=300"},
     )
 
 

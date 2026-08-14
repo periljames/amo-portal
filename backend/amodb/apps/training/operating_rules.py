@@ -1,7 +1,7 @@
 """Dependency-free rules used by Training Operating System workflows and tests."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Mapping
 
@@ -84,3 +84,20 @@ def level_four_causation_allowed(*, causation_claimed: bool, evidence: Mapping[s
     if not causation_claimed:
         return True
     return {"baseline", "comparison", "confounders", "method"}.issubset(evidence) and bool((conclusion or "").strip())
+
+
+def plan_month_for_due_date(*, due_date: date | None, plan_year: int, generated_on: date) -> int:
+    """Place an obligation in its expiry month, or the first actionable catch-up month.
+
+    Never-completed and already-overdue obligations go to January for a future
+    plan. For the current year they go to the month in which the plan is built,
+    so generating a plan in August never schedules overdue work back into January.
+    """
+    catch_up_month = generated_on.month if plan_year == generated_on.year else 1
+    if due_date is None or due_date.year < plan_year:
+        return catch_up_month
+    if due_date.year > plan_year:
+        raise ValueError("due date falls after the requested plan year")
+    if plan_year == generated_on.year and due_date < generated_on:
+        return generated_on.month
+    return due_date.month

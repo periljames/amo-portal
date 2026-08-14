@@ -300,6 +300,9 @@ def _overview_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], 
                 SELECT DISTINCT ON (user_id, course_id) user_id, course_id, valid_until
                 FROM training_records
                 WHERE amo_id = :amo_id AND valid_until IS NOT NULL
+                  AND UPPER(CAST(verification_status AS TEXT)) = 'VERIFIED'
+                  AND COALESCE(UPPER(NULLIF(record_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
+                  AND COALESCE(UPPER(NULLIF(source_status, '')), 'ACTIVE') NOT IN ('RENEWED', 'SUPERSEDED')
                 ORDER BY user_id, course_id, completion_date DESC NULLS LAST,
                          created_at DESC NULLS LAST, id DESC
             ) latest WHERE valid_until < :today

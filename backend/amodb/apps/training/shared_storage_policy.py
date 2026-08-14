@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
-from fastapi.responses import FileResponse
 
 from amodb import storage
 from amodb.apps.accounts import services as account_services
@@ -16,30 +15,28 @@ from . import models as training_models
 
 
 _INSTALLED = False
-
-
-def _inside(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
+_ALLOWED_EVIDENCE_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".webp",
+    ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".csv", ".txt",
+}
+_BLOCKED_CONTENT_TYPES = {
+    "text/html", "application/xhtml+xml", "application/javascript",
+    "text/javascript", "application/x-msdownload", "application/x-executable",
+}
 
 
 def install_training_shared_storage(router_module) -> None:
-    """Replace only Training evidence upload/download persistence.
+    """Replace only Training evidence upload persistence.
 
-    Course, compliance, review, notification and audit behavior stays in the
-    authoritative Training router; the two file-transfer endpoints retain their
-    existing FastAPI dependency model and permissions while storing bytes through
-    the shared portal object store.
+    Download remains an explicit FastAPI endpoint in the authoritative Training
+    router so its path parameters and dependencies cannot drift after route
+    registration. New upload bytes are stored through the shared object store.
     """
 
     global _INSTALLED
     if _INSTALLED:
         return
 
-    legacy_root = Path(router_module._TRAINING_UPLOAD_DIR).resolve()
     max_upload_bytes = int(router_module._MAX_UPLOAD_BYTES or 0)
 
     def upload_training_file_shared(**values: Any):
@@ -74,14 +71,36 @@ def install_training_shared_storage(router_module) -> None:
             (record_id, training_models.TrainingRecord, "record_id"),
             (deferral_request_id, training_models.TrainingDeferralRequest, "deferral_request_id"),
         )
+        linked: dict[str, Any] = {}
         for identifier, model, label in checks:
             if identifier:
-                ok = db.query(model).filter(model.id == identifier, model.amo_id == current_user.amo_id).first()
-                if not ok:
+                row = db.query(model).filter(model.id == identifier, model.amo_id == current_user.amo_id).first()
+                if not row:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid {label} for this AMO.")
+                linked[label] = row
 
-        original_name = file.filename or "upload.bin"
-        ext = "".join(Path(original_name).suffixes)[-20:]
+        linked_record = linked.get("record_id")
+        linked_event = linked.get("event_id")
+        linked_deferral = linked.get("deferral_request_id")
+        if linked_record and str(linked_record.user_id) != str(owner.id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected training record belongs to a different person.")
+        if linked_record and course_id and str(linked_record.course_id) != str(course_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected training record belongs to a different course.")
+        if linked_record and event_id and linked_record.event_id and str(linked_record.event_id) != str(event_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected training record belongs to a different session.")
+        if linked_event and course_id and str(linked_event.course_id) != str(course_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected session belongs to a different course.")
+        if linked_deferral and str(linked_deferral.user_id) != str(owner.id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected deferral belongs to a different person.")
+        if linked_deferral and course_id and str(linked_deferral.course_id) != str(course_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected deferral belongs to a different course.")
+
+        original_name = Path(file.filename or "upload.bin").name
+        ext = Path(original_name).suffix.lower()
+        if ext not in _ALLOWED_EVIDENCE_EXTENSIONS:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported training evidence file type.")
+        if str(file.content_type or "").lower() in _BLOCKED_CONTENT_TYPES:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsafe training evidence content type.")
         file_id = training_models.generate_user_id()
         cache = storage.cache_root()
         cache.mkdir(parents=True, exist_ok=True)
@@ -177,44 +196,8 @@ def install_training_shared_storage(router_module) -> None:
             except Exception:
                 pass
 
-    def download_training_file_shared(**values: Any):
-        file_id = values["file_id"]
-        db = values["db"]
-        current_user = values["current_user"]
-        record = (
-            db.query(training_models.TrainingFile)
-            .filter(training_models.TrainingFile.id == file_id, training_models.TrainingFile.amo_id == current_user.amo_id)
-            .first()
-        )
-        if not record:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training file not found.")
-        if not router_module._is_training_editor(current_user) and record.owner_user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to download this file.")
-
-        raw = str(record.storage_path or "")
-        try:
-            if raw.startswith("s3://") or _inside(Path(raw), storage.local_root()):
-                path = storage.materialize(raw, expected_sha256=record.sha256)
-            else:
-                # Controlled read compatibility for evidence uploaded before the
-                # shared-storage migration. New writes never use this path.
-                legacy = Path(raw).resolve()
-                if not _inside(legacy, legacy_root) or not legacy.is_file():
-                    raise FileNotFoundError(raw)
-                path = legacy
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from controlled storage.") from exc
-
-        return FileResponse(
-            path=str(path),
-            media_type=record.content_type or "application/octet-stream",
-            filename=record.original_filename,
-            headers={"ETag": f'"{record.sha256 or record.id}"', "Cache-Control": "private, max-age=300"},
-        )
-
     replacements = {
         "/training/files/upload": upload_training_file_shared,
-        "/training/files/{file_id}/download": download_training_file_shared,
     }
     for route in router_module.router.routes:
         replacement = replacements.get(getattr(route, "path", ""))

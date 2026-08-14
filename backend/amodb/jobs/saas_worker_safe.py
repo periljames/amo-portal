@@ -179,14 +179,54 @@ def _run_periodic_quality_tasks(last_run: float | None) -> float:
     return now
 
 
+def _training_plan_interval_seconds() -> int:
+    requested = int(os.getenv("TRAINING_PLAN_AUTOMATION_INTERVAL_SECONDS", "3600"))
+    return max(300, min(requested, 86400))
+
+
+def _run_periodic_training_plans(last_run: float | None) -> float:
+    now = time.monotonic()
+    interval = _training_plan_interval_seconds()
+    if last_run is not None and now - last_run < interval:
+        return last_run
+    from amodb.jobs import training_plan_automation
+
+    summary = training_plan_automation.run_once()
+    if summary.get("eligible") or summary.get("failed"):
+        logger.info("Training monthly plan automation completed: %s", summary)
+    return now
+
+
+def _training_report_interval_seconds() -> int:
+    requested = int(os.getenv("TRAINING_REPORT_JOB_INTERVAL_SECONDS", "15"))
+    return max(5, min(requested, 300))
+
+
+def _run_periodic_training_reports(last_run: float | None) -> float:
+    now = time.monotonic()
+    interval = _training_report_interval_seconds()
+    if last_run is not None and now - last_run < interval:
+        return last_run
+    from amodb.jobs import training_report_jobs
+
+    summary = training_report_jobs.run_once()
+    if summary.get("claimed") or summary.get("failed"):
+        logger.info("Training retained report jobs completed: %s", summary)
+    return now
+
+
 def run_forever(*, poll_seconds: float = 1.0, batch_size: int = 1) -> None:
     worker_id = _worker_id()
     last_health_run: float | None = None
     last_quality_task_run: float | None = None
+    last_training_plan_run: float | None = None
+    last_training_report_run: float | None = None
     while True:
         result = run_once(batch_size=batch_size, worker_id=worker_id)
         last_health_run = _run_periodic_health(last_health_run)
         last_quality_task_run = _run_periodic_quality_tasks(last_quality_task_run)
+        last_training_plan_run = _run_periodic_training_plans(last_training_plan_run)
+        last_training_report_run = _run_periodic_training_reports(last_training_report_run)
         if result["claimed"] == 0:
             time.sleep(max(0.25, min(poll_seconds, 30.0)))
 

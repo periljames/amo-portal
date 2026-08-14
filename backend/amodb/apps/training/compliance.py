@@ -177,8 +177,10 @@ def _should_suppress_refresher_until_initial_exists(
         return False
 
     prerequisite_ok = False
+    prerequisite_declared = False
     prerequisite_code = getattr(course, "prerequisite_course_id", None)
     if isinstance(prerequisite_code, str) and prerequisite_code.strip():
+        prerequisite_declared = True
         prerequisite = course_by_code.get(prerequisite_code.strip().upper())
         if prerequisite and prerequisite.id in completed_initial_ids:
             prerequisite_ok = True
@@ -186,6 +188,22 @@ def _should_suppress_refresher_until_initial_exists(
     family = _course_family_key(course)
     if family and family in completed_initial_families:
         prerequisite_ok = True
+
+    # "Recurrent" is also used for standalone periodic requirements (for
+    # example AMEL/licence tracking). Do not hide those as if they were a
+    # refresher pair. The initial gate applies only when the catalogue contains
+    # a real initial counterpart or explicitly declares a prerequisite.
+    has_initial_counterpart = bool(
+        family
+        and any(
+            candidate.id != course.id
+            and is_initial_course(candidate)
+            and _course_family_key(candidate) == family
+            for candidate in course_by_code.values()
+        )
+    )
+    if not prerequisite_declared and not has_initial_counterpart:
+        return False
 
     return not prerequisite_ok
 
@@ -302,7 +320,10 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
     # extend the canonical requirement model. Guard the optional tables so a
     # rolling deployment cannot interrupt existing compliance reads before the
     # Alembic migration reaches every application instance.
-    inspector = inspect(db.get_bind())
+    # Inspect through the session connection. Opening a second engine-level
+    # connection during plan generation can interfere with transactional test
+    # databases and needlessly bypasses the tenant-scoped transaction.
+    inspector = inspect(db.connection())
     if (
         inspector.has_table("training_role_groups")
         and inspector.has_table("training_person_roles")
@@ -388,6 +409,7 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
             training_models.TrainingRecord.amo_id == user.amo_id,
             training_models.TrainingRecord.user_id == user.id,
             training_models.TrainingRecord.course_id.in_(course_ids),
+            training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.VERIFIED,
             training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
         )
         .order_by(
@@ -418,6 +440,7 @@ def _all_completed_initial_evidence_for_user(
         .filter(
             training_models.TrainingRecord.amo_id == user.amo_id,
             training_models.TrainingRecord.user_id == user.id,
+            training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.VERIFIED,
             training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
             training_models.TrainingCourse.amo_id == user.amo_id,
         )
@@ -556,8 +579,11 @@ def evaluate_user_training_policy(
             )
         )
 
+    # When required_only is true the requirement and imported role-rule queries
+    # already define the mandatory population. Do not discard a role-matrix
+    # course merely because the legacy Courses sheet left Mandatory blank.
     mandatory_course_codes = {c.course_id for c in courses if c.is_mandatory}
-    mandatory_items = [item for item in items if item.course_id in mandatory_course_codes]
+    mandatory_items = list(items) if required_only else [item for item in items if item.course_id in mandatory_course_codes]
     overdue_items = [item for item in mandatory_items if item.status == "OVERDUE"]
     due_soon_items = [item for item in mandatory_items if item.status == "DUE_SOON"]
     deferred_items = [item for item in mandatory_items if item.status == "DEFERRED"]

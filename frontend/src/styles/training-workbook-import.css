@@ -145,6 +145,30 @@
   white-space: nowrap;
 }
 
+.training-import-status__telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  margin-top: 0.55rem;
+}
+
+.training-import-status__telemetry span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-secondary, #667085);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.training-import-status__telemetry span:first-child {
+  color: var(--accent-primary, #8b6f00);
+}
+
+.training-import-status__telemetry .is-stale {
+  color: #b54708;
+}
+
 .training-import-status__count {
   display: grid;
   justify-items: end;
@@ -310,7 +334,7 @@
 
 .training-import-live-list > div {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) auto;
+  grid-template-columns: 105px minmax(0, 1fr) minmax(150px, auto);
   gap: 0.7rem;
   align-items: center;
   padding: 0.55rem 0.2rem;
@@ -431,6 +455,26 @@
   background: #fef3f2;
 }
 
+.training-import-alert--recovering {
+  align-items: center;
+}
+
+.training-import-alert--recovering > span {
+  display: grid;
+  flex: 1;
+  gap: 0.2rem;
+}
+
+.training-import-alert--recovering small {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.training-import-alert--recovering .secondary-chip-btn {
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+
 .training-import-complete {
   color: #067647;
   border-color: #84e1bc;
@@ -444,6 +488,142 @@
 
 .training-import-complete span {
   font-size: 0.8rem;
+}
+
+.training-import-completion {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border: 1px solid #84e1bc;
+  border-radius: 14px;
+  background: color-mix(in srgb, #ecfdf3 72%, var(--surface, #fff));
+}
+
+.training-import-outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.training-import-outcome-grid > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, #84e1bc 58%, var(--border-subtle, #d0d5dd));
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.training-import-outcome-grid span,
+.training-import-outcome-grid small {
+  color: var(--text-secondary, #667085);
+  font-size: 0.72rem;
+}
+
+.training-import-outcome-grid span {
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.training-import-outcome-grid strong {
+  overflow: hidden;
+  color: var(--text-primary, #17212b);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-import-account-review {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, #84e1bc 65%, transparent);
+}
+
+.training-import-account-review h4,
+.training-import-account-review p {
+  margin: 0;
+}
+
+.training-import-account-review p {
+  margin-top: 0.18rem;
+  color: var(--text-secondary, #667085);
+  font-size: 0.8rem;
+}
+
+.training-import-password-policy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid #f5d28c;
+  border-radius: 10px;
+  color: #8a4b08;
+  background: #fffaeb;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.training-import-password-policy svg {
+  flex: 0 0 auto;
+}
+
+.training-import-account-list {
+  display: grid;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle, #d0d5dd);
+  border-radius: 11px;
+  background: var(--surface, #fff);
+}
+
+.training-import-account-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-subtle, #d0d5dd);
+}
+
+.training-import-account-list > div:last-child {
+  border-bottom: 0;
+}
+
+.training-import-account-list > div > div {
+  display: grid;
+  min-width: 0;
+}
+
+.training-import-account-list > div > div span {
+  overflow: hidden;
+  color: var(--text-secondary, #667085);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-import-account-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.training-import-account-state {
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  color: #8a4b08;
+  background: #fef0c7;
+  font-size: 0.7rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.training-import-account-loading {
+  padding: 0.6rem;
+  border-radius: 9px;
+  background: var(--surface-soft, #f8fafc);
 }
 
 .training-import-issues {
@@ -506,6 +686,10 @@
   .training-import-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .training-import-outcome-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -524,9 +708,23 @@
     justify-items: start;
   }
 
+  .training-import-status__telemetry {
+    display: grid;
+  }
+
   .training-import-sheet-grid,
   .training-import-metrics {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .training-import-outcome-grid,
+  .training-import-account-list > div {
+    grid-template-columns: 1fr;
+  }
+
+  .training-import-account-state,
+  .training-import-account-list button {
+    justify-self: start;
   }
 
   .training-import-live-list > div {
@@ -536,6 +734,15 @@
 
   .training-import-actions {
     flex-wrap: wrap;
+  }
+
+  .training-import-alert--recovering {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .training-import-alert--recovering .secondary-chip-btn {
+    margin-left: 1.75rem;
   }
 }
 
@@ -564,4 +771,17 @@ body[data-theme="dark"] .training-import-complete {
   color: #6ce9a6;
   border-color: #05603a;
   background: #082f23;
+}
+
+:root[data-theme="dark"] .training-import-completion,
+body[data-theme="dark"] .training-import-completion {
+  border-color: #05603a;
+  background: #082f23;
+}
+
+:root[data-theme="dark"] .training-import-password-policy,
+body[data-theme="dark"] .training-import-password-policy {
+  color: #fedf89;
+  border-color: #7a4a10;
+  background: #2c210f;
 }

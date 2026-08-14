@@ -20,6 +20,7 @@ from . import models
 from .schema_compat import ensure_qms_audit_reference_schema
 from ..finance import models as finance_models
 from ..training import models as training_models
+from ..training.integration import training_record_summary
 from ..accounts import models as account_models
 from ..tasks import models as task_models
 from ..audit import models as audit_models
@@ -496,25 +497,18 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
         models.CorrectiveActionRequest.due_date < today,
     ))
 
-    training_q = db.query(training_models.TrainingRecord)
     deferral_q = db.query(training_models.TrainingDeferralRequest)
-    if amo_id and hasattr(training_models.TrainingRecord, "amo_id"):
-        training_q = training_q.filter(training_models.TrainingRecord.amo_id == amo_id)
     if amo_id and hasattr(training_models.TrainingDeferralRequest, "amo_id"):
         deferral_q = deferral_q.filter(training_models.TrainingDeferralRequest.amo_id == amo_id)
 
-    training_expiring_30d = _safe_count(training_q.filter(
-        training_models.TrainingRecord.valid_until.is_not(None),
-        training_models.TrainingRecord.valid_until >= today,
-        training_models.TrainingRecord.valid_until <= today + timedelta(days=30),
-    ))
-    training_expired = _safe_count(training_q.filter(
-        training_models.TrainingRecord.valid_until.is_not(None),
-        training_models.TrainingRecord.valid_until < today,
-    ))
-    training_unverified = _safe_count(training_q.filter(
-        training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.PENDING,
-    ))
+    try:
+        training_summary = training_record_summary(db, amo_id=amo_id, as_of=today, due_days=30) if amo_id else None
+    except SQLAlchemyError:
+        _rollback_session(db)
+        training_summary = None
+    training_expiring_30d = training_summary.expiring if training_summary else 0
+    training_expired = training_summary.expired if training_summary else 0
+    training_unverified = training_summary.unverified if training_summary else 0
     training_deferrals_pending = _safe_count(deferral_q.filter(
         training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.PENDING,
     ))

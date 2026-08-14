@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.training.integration import training_source_status_snapshot
 from amodb.database import Base, get_db
 from amodb.security import get_current_active_user
 
@@ -46,8 +47,34 @@ _ALLOWED_TABLE_RULES: dict[str, tuple[str, ...]] = {
     "TECHNICAL_RECORDS": ("technical_", "records_", "crs_", "maintenance_record", "work_order"),
 }
 
+# The prefix rule is intentionally narrowed for Training.  Import staging,
+# notifications, audit logs, access tokens and low-level participant rows are
+# not governed DMS link targets and must not be exposed through the catalogue.
+_EXPLICIT_ALLOWED_TABLES: dict[str, set[str]] = {
+    "TRAINING": {
+        "training_courses",
+        "training_requirements",
+        "training_records",
+        "training_events",
+        "training_files",
+        "training_certificate_issues",
+        "training_plans",
+        "training_plan_items",
+        "training_attendance_windows",
+        "training_assessment_instances",
+        "training_authorization_cases",
+        "training_experience_reviews",
+        "training_competence_reviews",
+        "training_remedial_actions",
+    },
+}
+
 _DISPLAY_COLUMN_PRIORITY = (
     "code",
+    "course_id",
+    "course_name",
+    "certificate_number",
+    "original_filename",
     "reference",
     "number",
     "title",
@@ -60,6 +87,71 @@ _DISPLAY_COLUMN_PRIORITY = (
 )
 
 
+def _search_training_records(
+    db: Session,
+    *,
+    table: sa.Table,
+    tenant_values: list[str],
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    courses = Base.metadata.tables.get("training_courses")
+    users = Base.metadata.tables.get("users")
+    if courses is None or users is None:
+        return []
+    statement = (
+        sa.select(
+            table.c.id,
+            table.c.valid_until,
+            table.c.completion_date,
+            table.c.verification_status,
+            table.c.record_status,
+            table.c.source_status,
+            courses.c.course_id.label("course_code"),
+            courses.c.course_name,
+            users.c.full_name.label("person_name"),
+            users.c.staff_code,
+        )
+        .select_from(
+            table.join(courses, sa.and_(courses.c.id == table.c.course_id, courses.c.amo_id == table.c.amo_id))
+            .join(users, sa.and_(users.c.id == table.c.user_id, users.c.amo_id == table.c.amo_id))
+        )
+        .where(sa.cast(table.c.amo_id, sa.String).in_(tenant_values))
+        .order_by(table.c.completion_date.desc(), table.c.id.desc())
+        .limit(limit)
+    )
+    if query:
+        term = f"%{query}%"
+        statement = statement.where(
+            sa.or_(
+                sa.cast(courses.c.course_id, sa.String).ilike(term),
+                sa.cast(courses.c.course_name, sa.String).ilike(term),
+                sa.cast(users.c.full_name, sa.String).ilike(term),
+                sa.cast(users.c.staff_code, sa.String).ilike(term),
+            )
+        )
+    items: list[dict[str, Any]] = []
+    for row in db.execute(statement).mappings().all():
+        status_value = training_source_status_snapshot(
+            table.name,
+            row,
+            fallback=str(row.get("verification_status") or ""),
+            as_of=date.today(),
+        )
+        course = str(row.get("course_code") or row.get("course_name") or "Training")
+        person = str(row.get("person_name") or row.get("staff_code") or "Personnel")
+        completed = str(row.get("completion_date") or "date unavailable")
+        items.append({
+            "id": str(row["id"]),
+            "label": f"{person} · {course} · completed {completed}",
+            "status": status_value,
+            "source_module": "TRAINING",
+            "source_table": table.name,
+            "entity_type": table.name,
+        })
+    return items
+
+
 def _safe_identifier(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
     if not normalized:
@@ -68,8 +160,12 @@ def _safe_identifier(value: str) -> str:
 
 
 def _table_allowed(source_module: str, table_name: str) -> bool:
-    rules = _ALLOWED_TABLE_RULES.get(source_module.upper(), ())
+    module = source_module.upper()
+    explicit = _EXPLICIT_ALLOWED_TABLES.get(module)
     lowered = table_name.lower()
+    if explicit is not None:
+        return lowered in explicit
+    rules = _ALLOWED_TABLE_RULES.get(module, ())
     return any(lowered == rule or lowered.startswith(rule) for rule in rules)
 
 
@@ -223,6 +319,13 @@ def verify_source_entity(
         live_status = "ACTIVE" if raw_status else "INACTIVE"
     else:
         live_status = str(getattr(raw_status, "value", raw_status or "VERIFIED")).upper()
+    if source_module.strip().upper() == "TRAINING":
+        live_status = training_source_status_snapshot(
+            table.name,
+            row,
+            fallback=live_status,
+            as_of=date.today(),
+        )
 
     return {
         "source_table": table.name,
@@ -290,6 +393,16 @@ def search_integration_catalog(
     status_column = _status_column(table)
     tenant_values = [str(tenant.amo_id), str(tenant.id)]
 
+    if module == "TRAINING" and table.name == "training_records":
+        items = _search_training_records(
+            db,
+            table=table,
+            tenant_values=tenant_values,
+            query=q.strip(),
+            limit=limit,
+        )
+        return {"items": items, "limit": limit, "source_module": module, "source_table": table.name}
+
     statement = sa.select(table).where(sa.cast(tenant_column, sa.String).in_(tenant_values))
     query = q.strip()
     if query and display_columns:
@@ -308,6 +421,13 @@ def search_integration_catalog(
             status_value = "ACTIVE" if raw_status else "INACTIVE"
         else:
             status_value = str(getattr(raw_status, "value", raw_status or "VERIFIED")).upper()
+        if module == "TRAINING":
+            status_value = training_source_status_snapshot(
+                table.name,
+                row,
+                fallback=status_value,
+                as_of=date.today(),
+            )
         items.append({
             "id": entity_id,
             "label": _display_value(row, display_columns, entity_id),

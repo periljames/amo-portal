@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import MyTrainingTaskInbox from "../components/training/MyTrainingTaskInbox";
 import { getCachedUser, getContext } from "../services/auth";
 import "../styles/training.css";
 import { saveDownloadedFile } from "../utils/downloads";
@@ -1400,6 +1401,8 @@ function MyTrainingPage() {
                 </div>
               </div>
             </section>
+
+            <MyTrainingTaskInbox />
 
             {/* Summary row */}
             <section className="page-section" id="training-overview">

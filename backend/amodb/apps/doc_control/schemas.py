@@ -81,6 +81,16 @@ class RevisionPackageIn(BaseModel):
     authority_status: Optional[str] = None
     authority_evidence_asset_id: Optional[str] = None
     published_revision_asset_id: Optional[str] = None
+    requires_training: bool = False
+    training_gate_policy: Literal["NONE", "ALL_COMPLETE"] = "NONE"
+
+    @model_validator(mode="after")
+    def validate_training_gate(self):
+        if self.requires_training and self.training_gate_policy == "NONE":
+            raise ValueError("training_gate_policy must be ALL_COMPLETE when the revision requires training")
+        if not self.requires_training and self.training_gate_policy != "NONE":
+            raise ValueError("requires_training must be enabled when a training gate policy is selected")
+        return self
 
 
 class LEPIn(BaseModel):

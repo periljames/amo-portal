@@ -43,6 +43,13 @@ export interface TrainingCourseRead {
   delivery_method?: TrainingDeliveryMethod | string;
   regulatory_reference?: string | null;
   default_provider?: string | null;
+  default_facility?: string | null;
+  default_instructor_ids?: string[];
+  cost_currency?: string;
+  estimated_unit_cost?: string | number;
+  default_capacity?: number | null;
+  group_code?: string | null;
+  licence_authority?: string | null;
   default_duration_days?: number | null;
   nominal_hours?: number | null;
   planning_lead_days?: number | null;
@@ -63,11 +70,23 @@ export type TrainingCourseCreate = Omit<Partial<TrainingCourseRead>, "id" | "amo
 };
 export type TrainingCourseUpdate = Partial<TrainingCourseCreate>;
 
+export interface TrainingCoursePage {
+  items: TrainingCourseRead[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  category_counts: Record<string, number>;
+  group_counts: Record<string, number>;
+}
+
 export interface TrainingRequirementRead {
   id: string;
   amo_id: string;
   course_id: string;
   course_pk: string;
+  course_code?: string | null;
+  course_name?: string | null;
   scope: TrainingRequirementScope;
   department_code?: string | null;
   job_role?: string | null;
@@ -76,6 +95,15 @@ export interface TrainingRequirementRead {
   is_active?: boolean;
   effective_from?: string | null;
   effective_to?: string | null;
+  manual_reference?: string | null;
+  planning_lead_days?: number | null;
+  assessment_required?: boolean;
+  certificate_required?: boolean;
+  authorization_relevance?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  blocking?: boolean;
+  required_by_date?: string | null;
   created_at?: string;
   updated_at?: string;
   course?: TrainingCourseRead | null;
@@ -93,15 +121,36 @@ export interface TrainingRequirementCreate {
   is_active?: boolean;
   effective_from?: string | null;
   effective_to?: string | null;
+  manual_reference?: string | null;
+  planning_lead_days?: number | null;
+  assessment_required?: boolean;
+  certificate_required?: boolean;
+  authorization_relevance?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  blocking?: boolean;
+  required_by_date?: string | null;
 }
 
 export type TrainingRequirementUpdate = Partial<TrainingRequirementCreate>;
+
+export interface TrainingRequirementPage {
+  items: TrainingRequirementRead[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  scope_counts: Record<string, number>;
+  state_counts: Record<string, number>;
+}
 
 export interface TrainingEventRead {
   id: string;
   amo_id: string;
   course_id: string;
   course_pk?: string;
+  course_code?: string | null;
+  course_name?: string | null;
   title: string;
   location?: string | null;
   provider?: string | null;

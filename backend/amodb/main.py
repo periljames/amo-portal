@@ -16,7 +16,7 @@ from jose import JWTError, jwt
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
-from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
 from .database import Base, engine, WriteSessionLocal, close_session_safely, dispose_engines
 from .security import JWT_ALGORITHM, SECRET_KEY
@@ -362,6 +362,18 @@ def _pool_timeout_response() -> JSONResponse:
         headers={"Retry-After": "5"},
     )
 
+
+def _database_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "The database is temporarily unavailable. The request is safe to retry.",
+            "error_code": "DB_TEMPORARILY_UNAVAILABLE",
+            "retryable": True,
+        },
+        headers={"Retry-After": "3"},
+    )
+
 @app.middleware("http")
 async def meter_api_calls(request: Request, call_next):
     started = time.perf_counter()
@@ -378,6 +390,10 @@ async def meter_api_calls(request: Request, call_next):
         timeout_error = True
         status_code = 503
         response = _pool_timeout_response()
+    except OperationalError:
+        timeout_error = True
+        status_code = 503
+        response = _database_unavailable_response()
     except RuntimeError as exc:
         if "No response returned" in str(exc):
             response = Response(status_code=499)

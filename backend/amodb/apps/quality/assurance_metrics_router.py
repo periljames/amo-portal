@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
+from amodb.apps.training.integration import training_record_summary
 
 from .assurance_wiring_router import (
     SOURCE_REGISTRY,
@@ -251,15 +252,19 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
 
     training_columns = _table_columns(db, "training_records")
     training_validity = _first(training_columns, "valid_until", "due_date")
-    metrics["expired_training"] = _count(
-        db,
-        ctx,
-        source="expired_training",
-        table="training_records",
-        conditions=[f"{_safe_identifier(training_validity)} IS NOT NULL", f"{_safe_identifier(training_validity)} < :today"] if training_validity else [],
-        params={"today": date.today()},
-        warnings=warnings,
-    ) if training_validity else 0
+    if training_validity:
+        try:
+            metrics["expired_training"] = training_record_summary(
+                db,
+                amo_id=ctx.amo_id,
+                as_of=date.today(),
+            ).expired
+        except Exception as exc:
+            db.rollback()
+            metrics["expired_training"] = 0
+            warnings.append({"source": "expired_training", "message": str(exc), "type": exc.__class__.__name__})
+    else:
+        metrics["expired_training"] = 0
     if training_columns and not training_validity:
         warnings.append({"source": "expired_training", "message": "Training validity is not represented in a supported field.", "type": "SourceShapeUnsupported"})
 

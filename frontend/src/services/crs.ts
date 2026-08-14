@@ -45,11 +45,14 @@ async function request<T>(
 
   try {
     markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
-    void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
+    const sessionExtension = extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`);
+    if (sessionExtension) await sessionExtension;
+    const headers = authHeaders(fetchInit.headers);
     const res = await portalFetch(path, {
       method,
       body,
       ...fetchInit,
+      headers,
       timeoutMs: method === "GET" ? 12_000 : 45_000,
       offline: {
         cache: offline?.cache ?? method === "GET",
@@ -63,9 +66,10 @@ async function request<T>(
     });
 
     if (res.status === 401) {
-      const shouldSuppressAuthLogout = Boolean(suppressAuthLogout) || path.startsWith("/training/");
-      if (!shouldSuppressAuthLogout) handleAuthFailure("expired");
-      throw new Error("Session expired or this training endpoint is not authorised. Please refresh your session if this continues.");
+      if (!suppressAuthLogout) handleAuthFailure("expired");
+      const error = new Error("Your session has expired. Sign in again to continue.") as Error & { status?: number };
+      error.status = 401;
+      throw error;
     }
 
     if (!res.ok) {

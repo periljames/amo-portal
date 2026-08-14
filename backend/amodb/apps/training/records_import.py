@@ -8,9 +8,11 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
+from ...user_id import generate_user_id
 from ..accounts import models as accounts_models
 from . import models, schemas
 from .compliance import add_months, is_initial_course
+from .licence_rules import sync_licence_expiry_from_records
 
 EXPECTED_HEADERS = [
     "RecordID",
@@ -322,7 +324,7 @@ def _compute_purge_after(user: accounts_models.User, completion_date: date) -> d
     return add_months(completion_date, 60)
 
 
-def _apply_record_lifecycle(
+def _stage_record_lifecycle(
     db: Session,
     *,
     amo_id: str,
@@ -330,27 +332,39 @@ def _apply_record_lifecycle(
     course: models.TrainingCourse,
     actor_user_id: Optional[str],
     dry_run: bool,
-) -> Dict[str, str]:
-    rows = (
-        db.query(models.TrainingRecord)
-        .filter(
-            models.TrainingRecord.amo_id == amo_id,
-            models.TrainingRecord.user_id == str(user.id),
-            models.TrainingRecord.course_id == str(course.id),
+    preloaded_rows: Optional[list[models.TrainingRecord]] = None,
+) -> tuple[Dict[str, str], Optional[models.TrainingRecord]]:
+    if preloaded_rows is None:
+        rows = (
+            db.query(models.TrainingRecord)
+            .filter(
+                models.TrainingRecord.amo_id == amo_id,
+                models.TrainingRecord.user_id == str(user.id),
+                models.TrainingRecord.course_id == str(course.id),
+            )
+            .order_by(models.TrainingRecord.completion_date.asc(), models.TrainingRecord.created_at.asc(), models.TrainingRecord.id.asc())
+            .all()
         )
-        .order_by(models.TrainingRecord.completion_date.asc(), models.TrainingRecord.created_at.asc(), models.TrainingRecord.id.asc())
-        .all()
-    )
+    else:
+        rows = sorted(
+            preloaded_rows,
+            key=lambda item: (item.completion_date, item.created_at, item.id),
+        )
     if not rows:
-        return {}
+        return {}, None
     latest = rows[-1]
     today = date.today()
+    now = datetime.now(timezone.utc)
     status_map: Dict[str, str] = {}
 
     for row in rows[:-1]:
         status_map[row.id] = "RENEWED"
         if not dry_run:
+            row.record_status = "RENEWED"
             row.valid_until = None
+            row.superseded_by_record_id = latest.id
+            row.superseded_at = now
+            row.purge_after = row.purge_after or _compute_purge_after(user, row.completion_date)
             row.remarks = _upsert_remark_token(row.remarks, "LifecycleStatus", "RENEWED")
             db.add(row)
 
@@ -366,7 +380,20 @@ def _apply_record_lifecycle(
         latest.verified_by_user_id = latest.verified_by_user_id or actor_user_id
         db.add(latest)
 
-    return status_map
+    return status_map, latest
+
+
+def _activate_latest_records(
+    db: Session,
+    latest_records: Iterable[models.TrainingRecord],
+) -> None:
+    """Promote each pair's latest row only after all older active rows were flushed."""
+    for latest in latest_records:
+        latest.record_status = "ACTIVE"
+        latest.superseded_by_record_id = None
+        latest.superseded_at = None
+        latest.purge_after = None
+        db.add(latest)
 
 
 def import_training_records_rows(
@@ -529,7 +556,11 @@ def import_training_records_rows(
             .all()
         )
     existing_by_key: Dict[tuple[str, str, date], models.TrainingRecord] = {}
+    records_by_pair: Dict[tuple[str, str], list[models.TrainingRecord]] = {}
     for record in existing_records:
+        pair = (str(record.user_id), str(record.course_id))
+        if pair in affected_exact_pairs:
+            records_by_pair.setdefault(pair, []).append(record)
         key = (str(record.user_id), str(record.course_id), record.completion_date)
         current = existing_by_key.get(key)
         if current is None or record.created_at > current.created_at:
@@ -556,6 +587,7 @@ def import_training_records_rows(
             created_records += 1
             if not dry_run:
                 record = models.TrainingRecord(
+                    id=generate_user_id(),
                     amo_id=amo_id,
                     user_id=str(user.id),
                     course_id=str(course.id),
@@ -572,11 +604,17 @@ def import_training_records_rows(
                     verified_by_user_id=actor_user_id,
                     verification_comment="Verified on import from TRAINING.xlsx.",
                     created_by_user_id=actor_user_id,
+                    # New rows are staged as historical so PostgreSQL never sees
+                    # two active rows for the same person/course. The latest row
+                    # is promoted in one batch after every prior active row is
+                    # durably marked RENEWED.
+                    record_status="RENEWED",
                 )
                 db.add(record)
-                db.flush()
                 existing = record
-                existing_by_key[(str(user.id), str(course.id), parsed.completion_date)] = record
+                pair = (str(user.id), str(course.id))
+                existing_by_key[(pair[0], pair[1], parsed.completion_date)] = record
+                records_by_pair.setdefault(pair, []).append(record)
         else:
             action = "UNCHANGED"
             compare_pairs = [
@@ -639,16 +677,37 @@ def import_training_records_rows(
 
     affected_user_objs = {str(user.id): user for _parsed, user, _course in matched_pairs}
     affected_course_objs = {str(course.id): course for _parsed, _user, course in matched_pairs}
+    latest_records: list[models.TrainingRecord] = []
     for user_id, course_id in sorted(affected_exact_pairs):
         user = affected_user_objs[user_id]
         course = affected_course_objs[course_id]
-        status_map = _apply_record_lifecycle(db, amo_id=amo_id, user=user, course=course, actor_user_id=actor_user_id, dry_run=dry_run)
+        status_map, latest = _stage_record_lifecycle(
+            db,
+            amo_id=amo_id,
+            user=user,
+            course=course,
+            actor_user_id=actor_user_id,
+            dry_run=dry_run,
+            preloaded_rows=records_by_pair.get((user_id, course_id), []),
+        )
         lifecycle_status_by_id.update(status_map)
+        if latest is not None:
+            latest_records.append(latest)
 
     if not dry_run:
-        for record in existing_by_key.values():
-            if record.id in lifecycle_status_by_id:
-                db.add(record)
+        # Phase 1 flushes every retirement across the import. Phase 2 promotes
+        # exactly one latest row per pair. This preserves the partial unique
+        # index at every intermediate database state and avoids a flush per row.
+        db.flush()
+        _activate_latest_records(db, latest_records)
+        db.flush()
+        sync_licence_expiry_from_records(
+            db,
+            amo_id=amo_id,
+            records=latest_records,
+            courses_by_id=affected_course_objs,
+        )
+        db.flush()
         if manage_transaction:
             db.commit()
 

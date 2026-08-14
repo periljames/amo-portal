@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..accounts import models as accounts_models
 from . import models, schemas
+from .licence_rules import infer_licence_authority
 
 
 @dataclass
@@ -372,6 +373,7 @@ def import_courses_rows(
                 category_raw=parsed.category_raw,
                 scope=parsed.scope,
                 regulatory_reference=parsed.reference,
+                licence_authority=infer_licence_authority(parsed.course_id, parsed.course_name),
                 is_mandatory=parsed.is_mandatory,
                 mandatory_for_all=_normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"},
                 is_active=parsed.is_active,
@@ -389,6 +391,7 @@ def import_courses_rows(
                 existing.category_raw = parsed.category_raw
                 existing.scope = parsed.scope
                 existing.regulatory_reference = parsed.reference
+                existing.licence_authority = existing.licence_authority or infer_licence_authority(parsed.course_id, parsed.course_name)
                 existing.is_mandatory = parsed.is_mandatory
                 existing.mandatory_for_all = _normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"}
                 existing.is_active = parsed.is_active

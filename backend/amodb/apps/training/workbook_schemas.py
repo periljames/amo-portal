@@ -97,6 +97,14 @@ class TrainingWorkbookImportJobRead(BaseModel):
     sheets: list[WorkbookImportSheetRead] = Field(default_factory=list)
 
 
+class TrainingWorkbookImportJobPage(BaseModel):
+    items: list[TrainingWorkbookImportJobRead]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 class PersonnelLicenceRead(BaseModel):
     id: str
     personnel_profile_id: str
@@ -108,6 +116,9 @@ class PersonnelLicenceRead(BaseModel):
     category_source: Optional[str] = None
     issued_on: Optional[date] = None
     expires_on: Optional[date] = None
+    expiry_source_record_id: Optional[str] = None
+    expiry_source_course_id: Optional[str] = None
+    expiry_synced_at: Optional[datetime] = None
     internal_stamp_no: Optional[str] = None
     initial_authorization_date: Optional[date] = None
     status: str
@@ -129,6 +140,12 @@ class TrainingRoleGroupRead(BaseModel):
         from_attributes = True
 
 
+class TrainingRoleGroupWrite(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True
+
+
 class TrainingPersonRoleRead(BaseModel):
     id: str
     person_id: str
@@ -136,10 +153,21 @@ class TrainingPersonRoleRead(BaseModel):
     user_id: Optional[str] = None
     role_group_id: str
     role_group_code: Optional[str] = None
+    person_name: Optional[str] = None
+    staff_code: Optional[str] = None
     department: Optional[str] = None
     position: Optional[str] = None
     notes: Optional[str] = None
     is_active: bool
+
+
+class TrainingPersonRoleWrite(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    role_group_id: str = Field(min_length=1, max_length=64)
+    department: Optional[str] = Field(default=None, max_length=255)
+    position: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True
 
 
 class TrainingCourseRoleRuleRead(BaseModel):
@@ -153,3 +181,12 @@ class TrainingCourseRoleRuleRead(BaseModel):
     requirement_type: str
     notes: Optional[str] = None
     is_active: bool
+
+
+class TrainingCourseRoleRuleWrite(BaseModel):
+    course_id: str = Field(min_length=1, max_length=64)
+    role_group_id: str = Field(min_length=1, max_length=64)
+    is_required: bool = True
+    requirement_type: str = Field(default="GENERAL", min_length=1, max_length=64)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True

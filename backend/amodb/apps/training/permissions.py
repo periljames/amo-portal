@@ -182,6 +182,7 @@ def default_training_capabilities(user: account_models.User) -> set[str]:
             TrainingCapability.PEOPLE_VIEW.value,
             TrainingCapability.SESSION_VIEW.value,
             TrainingCapability.ATTENDANCE_VIEW.value,
+            TrainingCapability.ATTENDANCE_MANAGE.value,
             TrainingCapability.ASSESSMENT_VIEW.value,
             TrainingCapability.ASSESSMENT_PERFORM.value,
         }

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -101,6 +101,8 @@ class RevisionPackage(Base):
     internal_approval_status = Column(String(64), nullable=False, default="Pending")
     authority_status = Column(String(64), nullable=True)
     authority_evidence_asset_id = Column(String(255), nullable=True)
+    requires_training = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    training_gate_policy = Column(String(32), nullable=False, default="NONE", server_default="NONE")
     published_at = Column(DateTime, nullable=True)
     published_revision_asset_id = Column(String(255), nullable=True)
 
