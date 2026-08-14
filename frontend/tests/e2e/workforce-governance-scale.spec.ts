@@ -222,7 +222,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
   });
 
   await page.goto(`${ROSTER_ROOT}/settings?section=workforce`);
-  await page.getByRole("button", { name: "Organization & roles" }).click();
+  await page.getByRole("button", { name: "Structure & positions" }).click();
   await page.getByRole("button", { name: "Personnel changes" }).click();
 
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();

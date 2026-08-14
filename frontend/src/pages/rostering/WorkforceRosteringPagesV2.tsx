@@ -8,6 +8,8 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { getCurrentWorkforcePermissions } from "../../services/workforce";
 import { RosterError, RosterLoading, RosterShell } from "./components/RosterShell";
 
+const LazyCalendarSubscriptionSecurityPanel = lazy(() => import("./components/CalendarSubscriptionSecurityPanel")
+  .then((module) => ({ default: module.CalendarSubscriptionSecurityPanel })));
 const LazyComplianceImpact = lazy(() => import("./components/ComplianceImpact")
   .then((module) => ({ default: module.ComplianceImpact })));
 const LazyDutyLocationAssistant = lazy(() => import("./components/DutyLocationAssistant")
@@ -20,8 +22,8 @@ const LazyRosterOperationsWorkspace = lazy(() => import("./components/RosterOper
   .then((module) => ({ default: module.RosterOperationsWorkspace })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
-const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspace")
-  .then((module) => ({ default: module.RosteringSetupWorkspace })));
+const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspaceWithCodeRegistry")
+  .then((module) => ({ default: module.RosteringSetupWorkspaceWithCodeRegistry })));
 const LazyWorkforceHrWorkspace = lazy(() => import("./components/WorkforceHrWorkspaceV2")
   .then((module) => ({ default: module.WorkforceHrWorkspaceV2 })));
 
@@ -78,6 +80,7 @@ export function MyRosterPage() {
   return (
     <RosterShell eyebrow="Employee self-service" title="My duty and time" description="Review published duty, acknowledge changes, request leave, capture attendance and inspect timesheet reconciliation.">
       <DeferredWorkspace label="Checking private duty-location guidance…"><LazyDutyLocationAssistant /></DeferredWorkspace>
+      <DeferredWorkspace label="Checking calendar subscription security…"><LazyCalendarSubscriptionSecurityPanel /></DeferredWorkspace>
       <DeferredWorkspace label="Opening your duty workspace…"><LazyMyRosterWorkspace /></DeferredWorkspace>
     </RosterShell>
   );
@@ -139,7 +142,7 @@ export function RosterSettingsPage() {
     <RosterShell
       eyebrow="Guided setup"
       title="Roster setup"
-      description="Check readiness, configure future periods and draft rotations, manage shifts and patterns, and review controlled policy."
+      description="Check readiness, configure tenant roster codes, future periods and draft rotations, manage shifts and patterns, and review controlled policy."
     >
       <DeferredWorkspace label="Opening roster setup…"><LazyRosteringSetupWorkspace /></DeferredWorkspace>
     </RosterShell>

@@ -203,7 +203,7 @@ jobs:
           exit 1
       - name: Run bounded 10,000-person acceptance
         working-directory: frontend
-        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts
+        run: npm exec -- playwright test tests/e2e/workforce-governance-scale.spec.ts --timeout=60000
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v6

@@ -45,6 +45,7 @@ import type { RosterAssignmentRead, RosterValidationFindingRead, ShiftTemplateRe
 import { errorMessage, formatDay, isoDate, newIdempotencyKey } from "../rosterUi";
 import { formatInZone, moveIntervalToZonedDay, templateWindowInZone } from "../timezone";
 import { useRosterPlannerDataV2, type PlannerSourceErrors } from "../hooks/useRosterPlannerDataV2";
+import { AircraftAllocationEditor } from "./AircraftAllocationEditor";
 import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 
 type DragPayload = { type: "person"; userId: string } | { type: "assignment"; assignmentId: string };
@@ -252,6 +253,7 @@ function AssignmentDrawer({ assignment, templates, bases, timezoneName, editable
         <label className="wr-span-2"><span>Task note</span><textarea rows={3} value={taskNote} disabled={!editable} onChange={(event) => setTaskNote(event.target.value)} /></label>
         <label className="wr-span-2"><span>Change reason</span><textarea rows={2} value={reason} disabled={!editable} onChange={(event) => setReason(event.target.value)} /></label>
       </div>
+      <AircraftAllocationEditor assignmentId={assignment.id} editable={editable} />
       {error ? <div className="wr-inline-error">{error}</div> : null}
       <div className="wr-drawer__footer">{editable ? <button type="button" className="wr-button wr-button--danger-ghost" onClick={remove} disabled={busy}><Trash2 size={16} /> Remove</button> : <StatusPill value={assignment.id.startsWith("offline-") ? "PENDING SYNC" : "PUBLISHED LOCK"} />}<div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Cancel</button>{editable ? <button type="button" className="wr-button wr-button--primary" onClick={save} disabled={busy || !reason.trim()}><Save size={16} /> Save</button> : null}</div></div>
     </motion.aside>

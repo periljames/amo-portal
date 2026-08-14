@@ -7,8 +7,10 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from ..fleet import models as fleet_models
 from ..workforce import models as workforce_models
 from . import common, models, planning, schemas
+from .aircraft_allocation import RosterAircraftAllocation
 
 
 def report_summary(
@@ -111,6 +113,50 @@ def report_summary(
     )
 
 
+def _aircraft_by_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    assignment_ids: list[str],
+) -> dict[str, dict[str, str]]:
+    if not assignment_ids:
+        return {}
+    result: dict[str, dict[str, list[str]]] = defaultdict(lambda: {"registrations": [], "display_codes": []})
+    rows = (
+        db.query(RosterAircraftAllocation, fleet_models.Aircraft)
+        .join(
+            fleet_models.Aircraft,
+            fleet_models.Aircraft.serial_number == RosterAircraftAllocation.aircraft_serial_number,
+        )
+        .filter(
+            RosterAircraftAllocation.amo_id == amo_id,
+            RosterAircraftAllocation.roster_assignment_id.in_(assignment_ids),
+            fleet_models.Aircraft.amo_id == amo_id,
+        )
+        .order_by(
+            RosterAircraftAllocation.roster_assignment_id.asc(),
+            RosterAircraftAllocation.starts_at.asc(),
+            fleet_models.Aircraft.registration.asc(),
+        )
+        .all()
+    )
+    for allocation, aircraft in rows:
+        bucket = result[allocation.roster_assignment_id]
+        registration = str(aircraft.registration)
+        display_code = str(aircraft.internal_aircraft_identifier or aircraft.registration)
+        if registration not in bucket["registrations"]:
+            bucket["registrations"].append(registration)
+        if display_code not in bucket["display_codes"]:
+            bucket["display_codes"].append(display_code)
+    return {
+        assignment_id: {
+            "aircraft_registrations": ", ".join(values["registrations"]),
+            "aircraft_display_codes": ", ".join(values["display_codes"]),
+        }
+        for assignment_id, values in result.items()
+    }
+
+
 def assignment_export_rows(
     db: Session,
     *,
@@ -130,6 +176,7 @@ def assignment_export_rows(
         base_station_id=base_station_id,
         department_id=department_id,
     )
+    aircraft = _aircraft_by_assignment(db, amo_id=amo_id, assignment_ids=[row.id for row in rows])
     return [{
         "assignment_id": row.id,
         "version_id": row.version_id,
@@ -147,6 +194,8 @@ def assignment_export_rows(
         "role_label": row.role_label,
         "team_code": row.team_code,
         "location_label": row.location_label,
+        "aircraft_registrations": aircraft.get(row.id, {}).get("aircraft_registrations", ""),
+        "aircraft_display_codes": aircraft.get(row.id, {}).get("aircraft_display_codes", ""),
         "linked_task_count": len(row.task_links or []),
         "linked_task_hours": round(sum(common.task_link_hours(link) for link in row.task_links or []), 2),
         "change_reason": row.change_reason,
