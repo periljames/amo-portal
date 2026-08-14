@@ -26,7 +26,7 @@ const TrainingWorkflowWorkspace: React.FC<Props> = ({ canManage, initialType = "
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workflows = useQuery({ queryKey: ["training", "controlled-workflows", type, offset], queryFn: () => listTrainingWorkflows({ workflow_type: type || undefined, limit: PAGE_SIZE, offset }) });
-  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: listTrainingPeopleReference });
+  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: () => listTrainingPeopleReference() });
   const courses = useQuery({ queryKey: ["training", "course-catalogue"], queryFn: () => listTrainingCourses({ limit: 500 }) });
   const templates = useQuery({ queryKey: ["training", "controlled-forms"], queryFn: listControlledTrainingForms });
   const personById = useMemo(() => new Map((people.data || []).map((item) => [item.id, item])), [people.data]);
