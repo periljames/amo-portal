@@ -22,7 +22,7 @@ const TrainingCertificatesWorkspace: React.FC<Props> = ({ canIssue, canRevoke, c
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const certificates = useQuery({ queryKey: ["training", "certificates", offset], queryFn: async () => { const rows = await listTrainingCertificates(undefined, { limit: PAGE_SIZE + 1, offset }); return { items: rows.slice(0, PAGE_SIZE), hasMore: rows.length > PAGE_SIZE }; } });
-  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: listTrainingPeopleReference });
+  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: () => listTrainingPeopleReference() });
   const eligibility = useQuery({ queryKey: ["training", "certificate-eligibility", eligibilitySearch], queryFn: () => listCertificateEligibility(eligibilitySearch), enabled: eligibilityOpen });
   const personById = useMemo(() => new Map((people.data || []).map((item) => [item.id, item])), [people.data]);
   const rows = useMemo(() => (certificates.data?.items || []).filter((row) => { const term = search.toLowerCase(); const person = personById.get(row.user_id); return !term || row.certificate_reference?.toLowerCase().includes(term) || row.course_name?.toLowerCase().includes(term) || person?.full_name.toLowerCase().includes(term) || person?.staff_code.toLowerCase().includes(term); }), [certificates.data, personById, search]);
