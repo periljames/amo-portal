@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Optional, Sequence
 
 from sqlalchemy import func, or_
@@ -12,39 +13,47 @@ from ..workforce import calculations as workforce_calculations
 from . import common, governance, models, schemas, validation
 
 
+_SHIFT_CODE_RE = re.compile(r"^[A-Z0-9]{2,8}$")
+
+
+def _normalize_shift_code(value: str) -> str:
+    code = str(value or "").strip().upper()
+    if not _SHIFT_CODE_RE.fullmatch(code):
+        raise ValueError(
+            "Roster code must be 2-8 uppercase letters/numbers. Two characters are recommended; punctuation such as H.A is not a canonical code."
+        )
+    return code
+
+
+def _require_unique_shift_code(
+    db: Session,
+    *,
+    amo_id: str,
+    code: str,
+    exclude_template_id: Optional[str] = None,
+) -> None:
+    query = db.query(models.ShiftTemplate.id).filter(
+        models.ShiftTemplate.amo_id == amo_id,
+        func.upper(models.ShiftTemplate.code) == code,
+    )
+    if exclude_template_id:
+        query = query.filter(models.ShiftTemplate.id != exclude_template_id)
+    if query.first():
+        raise ValueError(f"Roster code {code} already exists for this tenant")
+
+
 def seed_default_shift_templates(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> None:
-    defaults = [
-        ("DAY", "Day duty", models.ShiftTemplateKind.DAY, "08:00", "17:00", 540, True, "shift-day", "Sun"),
-        ("NIGHT", "Night duty", models.ShiftTemplateKind.NIGHT, "18:00", "06:00", 720, True, "shift-night", "Moon"),
-        ("STBY", "Standby", models.ShiftTemplateKind.STANDBY, "06:00", "18:00", 720, True, "shift-standby", "Radio"),
-        ("TRAIN", "Training", models.ShiftTemplateKind.TRAINING, "08:00", "17:00", 540, False, "shift-training", "GraduationCap"),
-        ("OFF", "Off duty", models.ShiftTemplateKind.OFF, None, None, 0, False, "shift-off", "CircleOff"),
-        ("LEAVE", "Leave", models.ShiftTemplateKind.LEAVE, None, None, 0, False, "shift-leave", "Palmtree"),
-    ]
-    existing = {row[0] for row in db.query(models.ShiftTemplate.code).filter(models.ShiftTemplate.amo_id == amo_id).all()}
-    for order, (code, label, kind, start, end, minutes, counts, color_token, icon_name) in enumerate(defaults, start=1):
-        if code in existing:
-            continue
-        db.add(models.ShiftTemplate(
-            amo_id=amo_id,
-            code=code,
-            label=label,
-            kind=kind,
-            default_start_time=start,
-            default_end_time=end,
-            duration_minutes=minutes,
-            counts_as_duty=counts,
-            display_order=order * 10,
-            color_token=color_token,
-            icon_name=icon_name,
-            created_by_user_id=actor_user_id,
-            updated_by_user_id=actor_user_id,
-        ))
-    db.flush()
+    """Deprecated compatibility hook.
+
+    Shift defaults are no longer seeded while reading the library. Tenants may
+    explicitly install the recommended AMO starter pack or keep a blank code
+    library. Keeping this callable as a no-op avoids breaking historical import
+    paths while preventing deleted defaults from silently reappearing.
+    """
+    return None
 
 
 def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.ShiftTemplate]:
-    seed_default_shift_templates(db, amo_id=amo_id)
     query = db.query(models.ShiftTemplate).filter(models.ShiftTemplate.amo_id == amo_id)
     if not include_inactive:
         query = query.filter(models.ShiftTemplate.is_active.is_(True))
@@ -52,13 +61,15 @@ def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = F
 
 
 def create_shift_template(db: Session, *, amo_id: str, actor_user_id: str, payload: schemas.ShiftTemplateCreate) -> models.ShiftTemplate:
+    values = common.dump(payload)
+    values["code"] = _normalize_shift_code(values["code"])
+    _require_unique_shift_code(db, amo_id=amo_id, code=values["code"])
     row = models.ShiftTemplate(
         amo_id=amo_id,
-        **common.dump(payload),
+        **values,
         created_by_user_id=actor_user_id,
         updated_by_user_id=actor_user_id,
     )
-    row.code = row.code.strip().upper()
     row.label = row.label.strip()
     db.add(row)
     db.flush()
@@ -70,7 +81,13 @@ def update_shift_template(db: Session, *, row: models.ShiftTemplate, actor_user_
     before = {"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "is_active": row.is_active}
     for key, value in common.dump(payload, exclude_unset=True).items():
         if key == "code" and value:
-            value = value.strip().upper()
+            value = _normalize_shift_code(value)
+            _require_unique_shift_code(
+                db,
+                amo_id=row.amo_id,
+                code=value,
+                exclude_template_id=row.id,
+            )
         if key == "label" and value:
             value = value.strip()
         setattr(row, key, value)

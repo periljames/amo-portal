@@ -7,11 +7,16 @@ import os
 import time
 
 from ...database import WriteSessionLocal
+from ..rostering import models as _rostering_models  # noqa: F401
 from . import bulk_models, governance_mutations
 from .bulk_worker import process_operation
 
 
 def run_once(*, operation_limit: int = 10) -> int:
+    # Workforce work-pattern models reference Rostering's ShiftTemplate by
+    # SQLAlchemy class name. The web application imports both domains before
+    # mapper configuration; the standalone worker must register the Rostering
+    # models explicitly so its first database query has the same mapper graph.
     with WriteSessionLocal() as db:
         completed_offboarding = governance_mutations.apply_due_offboarding(db, limit=100)
         db.commit()

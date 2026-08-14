@@ -11,8 +11,11 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
+from ..fleet import models as fleet_models
 from ..work import models as work_models
 from . import commitments, models
+from .aircraft_allocation import RosterAircraftAllocation
+from .code_registry_models import RosterCalendarMode, RosterShiftTemplatePolicy
 
 UTC = timezone.utc
 TOKEN_PURPOSE = "rostering-personal-calendar-v1"
@@ -103,7 +106,7 @@ def _event(
     return lines
 
 
-def _task_detail(assignment: models.RosterAssignment) -> tuple[str, str]:
+def _task_detail(assignment: models.RosterAssignment) -> tuple[str, list[str]]:
     summaries: list[str] = []
     aircraft: list[str] = []
     for link in assignment.task_links or []:
@@ -123,7 +126,52 @@ def _task_detail(assignment: models.RosterAssignment) -> tuple[str, str]:
         aircraft_label = getattr(aircraft_row, "registration", None) or getattr(work_order, "aircraft_serial_number", None)
         if aircraft_label:
             aircraft.append(str(aircraft_label))
-    return "\n".join(dict.fromkeys(summaries)), ", ".join(dict.fromkeys(aircraft))
+    return "\n".join(dict.fromkeys(summaries)), list(dict.fromkeys(aircraft))
+
+
+def _direct_aircraft(
+    db: Session,
+    *,
+    amo_id: str,
+    assignment_id: str,
+) -> list[str]:
+    rows = (
+        db.query(RosterAircraftAllocation, fleet_models.Aircraft)
+        .join(
+            fleet_models.Aircraft,
+            fleet_models.Aircraft.serial_number == RosterAircraftAllocation.aircraft_serial_number,
+        )
+        .filter(
+            RosterAircraftAllocation.amo_id == amo_id,
+            RosterAircraftAllocation.roster_assignment_id == assignment_id,
+            fleet_models.Aircraft.amo_id == amo_id,
+        )
+        .order_by(RosterAircraftAllocation.starts_at.asc(), fleet_models.Aircraft.registration.asc())
+        .all()
+    )
+    return list(dict.fromkeys(str(aircraft.registration) for _, aircraft in rows))
+
+
+def _calendar_mode(
+    db: Session,
+    *,
+    amo_id: str,
+    shift_template_id: Optional[str],
+) -> RosterCalendarMode:
+    if not shift_template_id:
+        return RosterCalendarMode.TIMED
+    row = (
+        db.query(RosterShiftTemplatePolicy.calendar_mode)
+        .filter(
+            RosterShiftTemplatePolicy.amo_id == amo_id,
+            RosterShiftTemplatePolicy.shift_template_id == shift_template_id,
+        )
+        .first()
+    )
+    if not row:
+        return RosterCalendarMode.TIMED
+    value = row[0]
+    return value if isinstance(value, RosterCalendarMode) else RosterCalendarMode(str(value))
 
 
 def _published_assignment_loader_options():
@@ -190,7 +238,7 @@ def personal_calendar(
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
         f"X-WR-CALNAME:{_escape('AMO Portal · ' + user.full_name)}",
-        "X-WR-CALDESC:Published duty, training, Quality audits and linked maintenance work",
+        "X-WR-CALDESC:Published duty, training, Quality audits, direct aircraft allocations and linked maintenance work",
         "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
         "X-PUBLISHED-TTL:PT1H",
     ]
@@ -202,7 +250,17 @@ def personal_calendar(
         from_date=start,
         to_date=end,
     ):
-        tasks, aircraft = _task_detail(assignment)
+        calendar_mode = _calendar_mode(
+            db,
+            amo_id=amo_id,
+            shift_template_id=assignment.shift_template_id,
+        )
+        if calendar_mode == RosterCalendarMode.HIDDEN:
+            continue
+        tasks, task_aircraft = _task_detail(assignment)
+        direct_aircraft = _direct_aircraft(db, amo_id=amo_id, assignment_id=assignment.id)
+        aircraft_list = list(dict.fromkeys([*direct_aircraft, *task_aircraft]))
+        aircraft = ", ".join(aircraft_list)
         shift = getattr(assignment.shift_template, "code", None) or assignment.status.value
         base = getattr(assignment.base_station, "code", None) or assignment.location_label or "Base unassigned"
         summary_parts = [shift, base]
@@ -216,13 +274,15 @@ def personal_calendar(
             tasks,
             assignment.task_note,
         ]))
+        stable_key = assignment.source_reference_id or assignment.id
         lines.extend(_event(
-            uid=f"roster:{assignment.id}",
+            uid=f"roster:{stable_key}",
             starts_at=assignment.starts_at,
             ends_at=assignment.ends_at,
             summary=" · ".join(summary_parts),
             description=description,
             location=assignment.location_label or base,
+            all_day=calendar_mode == RosterCalendarMode.ALL_DAY,
         ))
 
     projected = commitments.list_commitments(

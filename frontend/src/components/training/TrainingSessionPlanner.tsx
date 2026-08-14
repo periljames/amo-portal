@@ -23,7 +23,7 @@ const TrainingSessionPlanner: React.FC<Props> = ({ canManage, onOpenAttendance }
   const [error, setError] = useState<string | null>(null);
   const events = useQuery({ queryKey: ["training", "sessions", offset], queryFn: async () => { const rows = await listTrainingEvents({ limit: PAGE_SIZE + 1, offset }); return { items: rows.slice(0, PAGE_SIZE), hasMore: rows.length > PAGE_SIZE }; } });
   const courses = useQuery({ queryKey: ["training", "course-catalogue"], queryFn: () => listTrainingCourses({ limit: 500 }) });
-  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: listTrainingPeopleReference, enabled: Boolean(rosterEvent) });
+  const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: () => listTrainingPeopleReference(), enabled: Boolean(rosterEvent) });
   const participants = useQuery({ queryKey: ["training", "session-participants", rosterEvent?.id], queryFn: () => listTrainingEventParticipants(rosterEvent!.id), enabled: Boolean(rosterEvent) });
   const invitations = useQuery({ queryKey: ["training", "session-invitations", rosterEvent?.id], queryFn: () => listTrainingSessionInvitations(rosterEvent!.id), enabled: Boolean(rosterEvent) });
   const participantIds = useMemo(() => new Set((participants.data || []).map((item) => item.user_id)), [participants.data]);

@@ -15,12 +15,8 @@ const orgUnits = [
   { id: "org-line", parent_id: "org-engineering", legacy_department_id: null, code: "LINE", name: "Line Maintenance", unit_type: "SECTION", description: null, is_active: true, sort_order: 20, depth: 1, path_ids: ["org-engineering", "org-line"], path_names: ["Engineering", "Line Maintenance"] },
   { id: "org-quality", parent_id: null, legacy_department_id: "department-quality", code: "QMS", name: "Quality", unit_type: "DEPARTMENT", description: null, is_active: true, sort_order: 30, depth: 0, path_ids: ["org-quality"], path_names: ["Quality"] },
 ];
-const jobFamilies = [
-  { id: "family-maintenance", code: "MAINT", name: "Aircraft Maintenance", description: null, is_active: true },
-];
-const grades = [
-  { id: "grade-3", code: "G3", name: "Grade 3", rank_order: 30, description: null, is_active: true },
-];
+const jobFamilies = [{ id: "family-maintenance", code: "MAINT", name: "Aircraft Maintenance", description: null, is_active: true }];
+const grades = [{ id: "grade-3", code: "G3", name: "Grade 3", rank_order: 30, description: null, is_active: true }];
 const positions = [
   { id: "position-technician", code: "TECH", canonical_title: "Aircraft Technician", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, is_supervisory: false, is_active: true },
   { id: "position-supervisor", code: "SUP", canonical_title: "Maintenance Supervisor", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, is_supervisory: true, is_active: true },
@@ -83,11 +79,25 @@ function person(index: number) {
     grade_name: "Grade 3",
     supervisor_user_id: "person-00001",
     secondary_org_units: index % 10 === 0 ? [{
-      id: `secondary-${padded}`, user_id: `person-${padded}`, org_unit_id: "org-quality", org_unit_name: "Quality",
-      org_path_names: ["Quality"], position_id: null, position_title: null, preferred_title: null,
-      job_family_id: null, job_family_name: null, grade_id: null, grade_name: null, placement_type: "SECONDARY",
-      base_station_id: "base-mba", base_station_name: "Mombasa", supervisor_user_id: null, supervisor_name: null,
-      effective_from: "2025-01-01", effective_to: null,
+      id: `secondary-${padded}`,
+      user_id: `person-${padded}`,
+      org_unit_id: "org-quality",
+      org_unit_name: "Quality",
+      org_path_names: ["Quality"],
+      position_id: null,
+      position_title: null,
+      preferred_title: null,
+      job_family_id: null,
+      job_family_name: null,
+      grade_id: null,
+      grade_name: null,
+      placement_type: "SECONDARY",
+      base_station_id: "base-mba",
+      base_station_name: "Mombasa",
+      supervisor_user_id: null,
+      supervisor_name: null,
+      effective_from: "2025-01-01",
+      effective_to: null,
     }] : [],
     matrix_org_units: [],
     secondary_base_station_id: index % 10 === 0 ? "base-mba" : null,
@@ -100,9 +110,12 @@ function person(index: number) {
 function facets() {
   return {
     departments: [{ value: "department-engineering", label: "Engineering", count: 5000 }, { value: "department-quality", label: "Quality", count: 5000 }],
-    roles: [], position_titles: [], contract_types: [{ value: "PERMANENT", label: "Permanent", count: TOTAL_PERSONNEL }],
+    roles: [],
+    position_titles: [],
+    contract_types: [{ value: "PERMANENT", label: "Permanent", count: TOTAL_PERSONNEL }],
     employment_statuses: [{ value: "ACTIVE", label: "Active", count: TOTAL_PERSONNEL }],
-    bases: [{ value: "base-nbo", label: "Nairobi", count: TOTAL_PERSONNEL }], groups: [],
+    bases: [{ value: "base-nbo", label: "Nairobi", count: TOTAL_PERSONNEL }],
+    groups: [],
     readiness_states: [{ value: "READY", label: "Ready", count: TOTAL_PERSONNEL }],
     contract_states: [{ value: "EFFECTIVE", label: "Effective", count: TOTAL_PERSONNEL }],
     pattern_states: [{ value: "DEFAULT", label: "Default", count: TOTAL_PERSONNEL }],
@@ -125,20 +138,38 @@ async function installSession(page: Page) {
   const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
   const token = `eyJhbGciOiJub25lIn0.${payload}.test-signature`;
   const user = {
-    id: "admin-scale", amo_id: "amo-test", department_id: "department-engineering", staff_code: "ADMIN-001",
-    email: "admin@scale.invalid", first_name: "Scale", last_name: "Admin", full_name: "Scale Admin",
-    role: "AMO_ADMIN", position_title: "AMO Administrator", phone: null, regulatory_authority: null,
-    licence_number: null, licence_state_or_country: null, licence_expires_on: null, is_active: true,
-    is_superuser: false, is_amo_admin: true, must_change_password: false, last_login_at: null,
-    last_login_ip: null, created_at: "2025-01-01T00:00:00Z", updated_at: "2026-08-06T00:00:00Z",
-    department_code: "engineering", department: { code: "engineering", name: "Engineering" },
+    id: "scale-technician",
+    amo_id: "amo-test",
+    department_id: "department-maintenance",
+    staff_code: "TECH-001",
+    email: "technician@scale.invalid",
+    first_name: "Scale",
+    last_name: "Technician",
+    full_name: "Scale Technician",
+    role: "TECHNICIAN",
+    position_title: "Aircraft Technician",
+    phone: null,
+    regulatory_authority: null,
+    licence_number: null,
+    licence_state_or_country: null,
+    licence_expires_on: null,
+    is_active: true,
+    is_superuser: false,
+    is_amo_admin: false,
+    must_change_password: false,
+    last_login_at: null,
+    last_login_ip: null,
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z",
+    department_code: "maintenance",
+    department: { code: "maintenance", name: "Maintenance" },
   };
   await page.addInitScript(({ storedToken, storedUser }) => {
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_current_user", JSON.stringify(storedUser));
     localStorage.setItem("amo_code", "TESTAMO");
     localStorage.setItem("amo_slug", "testamo");
-    localStorage.setItem("amo_department", "engineering");
+    localStorage.setItem("amo_department", "maintenance");
     localStorage.setItem("amodb_active_amo_id", "amo-test");
     sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
   }, { storedToken: token, storedUser: user });
@@ -147,12 +178,24 @@ async function installSession(page: Page) {
 function operation(status: "QUEUED" | "RUNNING" | "COMPLETED", progress: number) {
   const processed = Math.round((TOTAL_PERSONNEL * progress) / 100);
   return {
-    id: "operation-scale-1", operation_type: "ASSIGN_ORGANIZATION", status,
-    idempotency_key: "scale-idempotency", selection_token: "scale-selection-token-0001",
-    total_count: TOTAL_PERSONNEL, processed_count: processed, succeeded_count: processed,
-    skipped_count: 0, failed_count: 0, progress_percent: progress, retry_of_operation_id: null,
-    last_error: null, started_at: "2026-08-06T08:00:00Z", completed_at: status === "COMPLETED" ? "2026-08-06T08:01:00Z" : null,
-    heartbeat_at: "2026-08-06T08:00:30Z", created_at: "2026-08-06T08:00:00Z", updated_at: "2026-08-06T08:00:30Z",
+    id: "operation-scale-1",
+    operation_type: "ASSIGN_ORGANIZATION",
+    status,
+    idempotency_key: "scale-idempotency",
+    selection_token: "scale-selection-token-0001",
+    total_count: TOTAL_PERSONNEL,
+    processed_count: processed,
+    succeeded_count: processed,
+    skipped_count: 0,
+    failed_count: 0,
+    progress_percent: progress,
+    retry_of_operation_id: null,
+    last_error: null,
+    started_at: "2026-08-06T08:00:00Z",
+    completed_at: status === "COMPLETED" ? "2026-08-06T08:01:00Z" : null,
+    heartbeat_at: "2026-08-06T08:00:30Z",
+    created_at: "2026-08-06T08:00:00Z",
+    updated_at: "2026-08-06T08:00:30Z",
   };
 }
 
@@ -160,7 +203,9 @@ test.use({ serviceWorkers: "block" });
 
 test("governed Workforce remains bounded and completes a 10,000-person batch", async ({ page }) => {
   page.on("pageerror", (error) => console.error(`[pageerror] ${error.stack || error.message}`));
-  page.on("console", (message) => { if (message.type() === "error") console.error(`[browser-console] ${message.text()}`); });
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error(`[browser-console] ${message.text()}`);
+  });
   await installSession(page);
   let operationPolls = 0;
   let submittedBody: any = null;
@@ -172,17 +217,35 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     const url = new URL(request.url());
     const path = url.pathname;
 
-    if (path.endsWith("/workforce/permissions/current")) return json(route, { user_id: "admin-scale", permissions });
+    if (path.endsWith("/workforce/permissions/current")) return json(route, { user_id: "scale-technician", permissions });
     if (path.endsWith("/workforce/hr/dashboard")) return json(route, {
-      generated_at: "2026-08-06T08:00:00Z", can_manage_contracts: true, can_initialize_default_day_pattern: true,
-      can_manage_leave_balances: true, can_review_leave: true, can_approve_leave: true,
-      can_approve_timesheet_supervisor: true, can_approve_timesheet_hr: true,
-      can_approve_overtime_supervisor: true, can_approve_overtime_hr: true, can_export_payroll: true,
-      active_employee_count: TOTAL_PERSONNEL, employees_without_contract_count: 0, onboarding_employee_count: 0,
-      suspended_employee_count: 0, contracts_expiring_soon_count: 0, employees_without_pattern_count: 0,
-      employees_without_base_count: 0, pending_leave_count: 0, pending_timesheet_count: 0,
-      pending_overtime_count: 0, attendance_exception_count: 0, metrics: [], action_queue: [],
-      pending_overtime: [], attendance_exceptions: [], people: [],
+      generated_at: "2026-08-14T08:00:00Z",
+      can_manage_contracts: true,
+      can_initialize_default_day_pattern: true,
+      can_manage_leave_balances: true,
+      can_review_leave: true,
+      can_approve_leave: true,
+      can_approve_timesheet_supervisor: true,
+      can_approve_timesheet_hr: true,
+      can_approve_overtime_supervisor: true,
+      can_approve_overtime_hr: true,
+      can_export_payroll: true,
+      active_employee_count: TOTAL_PERSONNEL,
+      employees_without_contract_count: 0,
+      onboarding_employee_count: 0,
+      suspended_employee_count: 0,
+      contracts_expiring_soon_count: 0,
+      employees_without_pattern_count: 0,
+      employees_without_base_count: 0,
+      pending_leave_count: 0,
+      pending_timesheet_count: 0,
+      pending_overtime_count: 0,
+      attendance_exception_count: 0,
+      metrics: [],
+      action_queue: [],
+      pending_overtime: [],
+      attendance_exceptions: [],
+      people: [],
     });
     if (path.endsWith("/workforce/hr/organization-units")) return json(route, orgUnits);
     if (path.endsWith("/workforce/hr/job-families")) return json(route, jobFamilies);
@@ -192,11 +255,12 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     if (path.endsWith("/foundations/base-stations")) return json(route, baseStations);
     if (path.endsWith("/workforce/hr/supervisors")) return json(route, {
       items: [{ user_id: "person-00001", staff_code: "STAFF-00001", full_name: "Scale Supervisor", position_title: "Maintenance Supervisor", org_unit_name: "Line Maintenance", is_supervisory_position: true }],
-      page: 1, page_size: 100, total: 1, pages: 1,
+      page: 1,
+      page_size: 100,
+      total: 1,
+      pages: 1,
     });
-    if (path.endsWith("/workforce/hr/people/governed/selection-preview")) return json(route, {
-      matched_count: TOTAL_PERSONNEL, selection_token: "scale-selection-token-0001",
-    });
+    if (path.endsWith("/workforce/hr/people/governed/selection-preview")) return json(route, { matched_count: TOTAL_PERSONNEL, selection_token: "scale-selection-token-0001" });
     if (path.endsWith("/workforce/hr/bulk-operations/personnel") && request.method() === "POST") {
       submittedBody = request.postDataJSON();
       return json(route, operation("QUEUED", 0), 202);
@@ -213,11 +277,14 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
       const startIndex = org === "org-quality" ? 5_000 : 0;
       const total = org ? 5_000 : TOTAL_PERSONNEL;
       const offset = (pageNumber - 1) * pageSize;
-      const items = Array.from({ length: Math.max(0, Math.min(pageSize, total - offset)) }, (_, itemIndex) => person(startIndex + offset + itemIndex));
+      const items = Array.from(
+        { length: Math.max(0, Math.min(pageSize, total - offset)) },
+        (_, itemIndex) => person(startIndex + offset + itemIndex),
+      );
       return json(route, { items, page: pageNumber, page_size: pageSize, total, pages: Math.ceil(total / pageSize) });
     }
     if (path.includes("/onboarding")) return json(route, { is_complete: true, missing: [] });
-    if (path.endsWith("/rostering/dashboard")) return json(route, { generated_at: "2026-08-06T08:00:00Z", top_findings: [], upcoming_periods: [] });
+    if (path.endsWith("/rostering/dashboard")) return json(route, { generated_at: "2026-08-14T08:00:00Z", top_findings: [], upcoming_periods: [] });
     return json(route, { detail: "Not required by the Workforce scale scenario" }, 404);
   });
 

@@ -37,6 +37,8 @@ ASSIGNMENT_COLUMNS = [
     "role_label",
     "team_code",
     "location_label",
+    "aircraft_registrations",
+    "aircraft_display_codes",
     "linked_task_count",
     "linked_task_hours",
     "change_reason",
@@ -73,12 +75,15 @@ def _assignment_dates(row: dict[str, Any]) -> list[date]:
 
 
 def _matrix_label(row: dict[str, Any]) -> str:
-    shift = str(row.get("shift_code") or row.get("status") or "Duty")
-    starts_at = _parse_datetime(row["starts_at"])
-    ends_at = _parse_datetime(row["ends_at"])
-    time_label = f"{starts_at:%H:%M}-{ends_at:%H:%M}"
-    role = str(row.get("role_label") or "").strip()
-    return " · ".join(value for value in (shift, time_label, role) if value)
+    """Compact printable cell: canonical shift code, then aircraft badge.
+
+    Timing, role and the full registration remain in Assignment Detail. Keeping
+    the month matrix compact mirrors daily AMO roster practice and allows a full
+    28-31 day period to remain printable.
+    """
+    shift = str(row.get("shift_code") or row.get("status") or "Duty").strip()
+    aircraft = str(row.get("aircraft_display_codes") or "").strip()
+    return "\n".join(value for value in (shift, aircraft) if value)
 
 
 def _build_matrix_sheet(workbook: Workbook, rows: Sequence[dict[str, Any]]) -> None:
@@ -146,15 +151,17 @@ def _build_matrix_sheet(workbook: Workbook, rows: Sequence[dict[str, Any]]) -> N
             output_row.append("\n".join(dict.fromkeys(day_values.get(day, []))))
         sheet.append(output_row)
 
-    sheet.column_dimensions["A"].width = 15
-    sheet.column_dimensions["B"].width = 28
-    sheet.column_dimensions["C"].width = 16
-    sheet.column_dimensions["D"].width = 14
+    sheet.column_dimensions["A"].width = 12
+    sheet.column_dimensions["B"].width = 24
+    sheet.column_dimensions["C"].width = 14
+    sheet.column_dimensions["D"].width = 12
     for column in range(5, 5 + len(all_dates)):
-        sheet.column_dimensions[get_column_letter(column)].width = 18
+        sheet.column_dimensions[get_column_letter(column)].width = 8
     for row in sheet.iter_rows(min_row=3):
         for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            cell.alignment = Alignment(horizontal="center" if cell.column >= 5 else "left", vertical="center", wrap_text=True)
+            if cell.column >= 5:
+                cell.font = Font(bold=True, size=9)
     sheet.auto_filter.ref = f"A2:{get_column_letter(max(sheet.max_column, 4))}{max(sheet.max_row, 2)}"
     sheet.row_dimensions[1].height = 24
     sheet.row_dimensions[2].height = 70
@@ -202,11 +209,11 @@ def assignment_pdf(rows: Sequence[dict[str, Any]], *, title: str, subtitle: str)
     )
     styles = getSampleStyleSheet()
     story = [Paragraph(title, styles["Title"]), Paragraph(subtitle, styles["Normal"]), Spacer(1, 5 * mm)]
-    columns = ["staff_code", "full_name", "department_code", "base_code", "shift_code", "status", "starts_at", "ends_at", "planned_minutes", "role_label"]
+    columns = ["staff_code", "full_name", "department_code", "base_code", "shift_code", "aircraft_display_codes", "status", "starts_at", "ends_at", "planned_minutes", "role_label"]
     data = [[column.replace("_", " ").title() for column in columns]]
     for row in rows:
         data.append([str(row.get(column) or "") for column in columns])
-    table = Table(data, repeatRows=1, colWidths=[20 * mm, 34 * mm, 23 * mm, 18 * mm, 18 * mm, 18 * mm, 34 * mm, 34 * mm, 20 * mm, 30 * mm])
+    table = Table(data, repeatRows=1, colWidths=[18 * mm, 30 * mm, 21 * mm, 16 * mm, 14 * mm, 20 * mm, 16 * mm, 31 * mm, 31 * mm, 18 * mm, 27 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
@@ -290,11 +297,16 @@ def assignment_ics(rows: Sequence[dict[str, Any]], *, calendar_name: str = "AMO 
     for row in rows:
         starts_at = datetime.fromisoformat(str(row["starts_at"]))
         ends_at = datetime.fromisoformat(str(row["ends_at"]))
-        summary = f"{row.get('shift_code') or row.get('status') or 'Duty'} · {row.get('base_code') or 'Base unassigned'}"
+        aircraft = row.get("aircraft_registrations") or ""
+        summary_parts = [row.get("shift_code") or row.get("status") or "Duty", row.get("base_code") or "Base unassigned"]
+        if aircraft:
+            summary_parts.append(aircraft)
+        summary = " · ".join(str(value) for value in summary_parts if value)
         description = "\n".join(filter(None, [
             f"Status: {row.get('status')}",
             f"Role: {row.get('role_label')}" if row.get("role_label") else None,
             f"Team: {row.get('team_code')}" if row.get("team_code") else None,
+            f"Aircraft: {aircraft}" if aircraft else None,
             f"Location: {row.get('location_label')}" if row.get("location_label") else None,
         ]))
         lines.extend([
