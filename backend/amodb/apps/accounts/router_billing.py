@@ -1,27 +1,19 @@
-# backend/amodb/apps/accounts/router_billing.py
-
 from __future__ import annotations
 
-from typing import Any, Dict, Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
-from fastapi.responses import HTMLResponse, Response
 import html
 from io import BytesIO
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
-from amodb.security import get_current_active_user
-from . import audit, schemas, services, models
+
+from . import billing_access, billing_auth, models, schemas, services
+
 
 router = APIRouter(prefix="/billing", tags=["billing"])
-
-
-def _require_user(current_user=Depends(get_current_active_user)):
-    if not current_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return current_user
-
 
 
 def _is_platform_superuser(user) -> bool:
@@ -61,6 +53,7 @@ def _platform_access_status() -> schemas.BillingAccessStatusRead:
         actionable_invoice_id=None,
     )
 
+
 def _invoice_filename(invoice: models.BillingInvoice, suffix: str) -> str:
     return f"{services.format_invoice_number(invoice)}.{suffix}"
 
@@ -88,17 +81,20 @@ def _build_invoice_context(db: Session, invoice: models.BillingInvoice) -> dict[
         "currency_amount": f"{(view['total_cents'] or 0) / 100:.2f}",
         "subtotal_amount": f"{(view['subtotal_cents'] or 0) / 100:.2f}",
         "tax_amount": f"{(view['tax_amount_cents'] or 0) / 100:.2f}",
-        "issued_label": invoice.issued_at.strftime('%d %b %Y %H:%M') if invoice.issued_at else 'â€”',
-        "due_label": invoice.due_at.strftime('%d %b %Y %H:%M') if invoice.due_at else 'â€”',
-        "paid_label": invoice.paid_at.strftime('%d %b %Y %H:%M') if invoice.paid_at else 'â€”',
-        "compliance_note": 'eTIMS bridge not yet connected. This invoice is audit-ready for the portal but should not be treated as a KRA eTIMS fiscal invoice until eTIMS integration is configured.',
+        "issued_label": invoice.issued_at.strftime("%d %b %Y %H:%M") if invoice.issued_at else "—",
+        "due_label": invoice.due_at.strftime("%d %b %Y %H:%M") if invoice.due_at else "—",
+        "paid_label": invoice.paid_at.strftime("%d %b %Y %H:%M") if invoice.paid_at else "—",
+        "compliance_note": "This portal invoice has not been confirmed as a final fiscal record unless the fiscalization status below says FISCALIZED.",
     }
 
 
 def _render_invoice_html(db: Session, invoice: models.BillingInvoice) -> str:
     ctx = _build_invoice_context(db, invoice)
-    def esc(v: Any) -> str:
-        return html.escape(str(v or 'â€”'))
+
+    def esc(value: Any) -> str:
+        return html.escape(str(value if value not in {None, ""} else "—"))
+
+    description = ctx.get("line_description") or ctx.get("description") or invoice.description or "Portal subscription / service invoice"
     return f"""
 <!doctype html>
 <html>
@@ -145,16 +141,12 @@ def _render_invoice_html(db: Session, invoice: models.BillingInvoice) -> str:
           <strong>Commercial summary</strong>
           <div class="muted">Due: {esc(ctx['due_label'])}</div>
           <div class="muted">Paid: {esc(ctx['paid_label'])}</div>
-          <div class="muted">eTIMS: {esc(ctx['etims_status'])}</div>
+          <div class="muted">eTIMS: {esc(ctx.get('etims_status'))}</div>
         </div>
         <div class="card" style="grid-column:1 / -1;">
           <table>
-            <thead>
-              <tr><th>Description</th><th>Amount</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>{esc(invoice.description or 'Portal subscription / service invoice')}</td><td>{esc(ctx['currency_amount'])} {esc(invoice.currency)}</td></tr>
-            </tbody>
+            <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+            <tbody><tr><td>{esc(description)}</td><td>{esc(ctx['currency_amount'])} {esc(invoice.currency)}</td></tr></tbody>
             <tfoot>
               <tr class="totals"><td>Subtotal</td><td>{esc(ctx['subtotal_amount'])} {esc(invoice.currency)}</td></tr>
               <tr class="totals"><td>Tax</td><td>{esc(ctx['tax_amount'])} {esc(invoice.currency)}</td></tr>
@@ -172,166 +164,118 @@ def _render_invoice_html(db: Session, invoice: models.BillingInvoice) -> str:
 
 def _render_invoice_pdf(db: Session, invoice: models.BillingInvoice) -> bytes:
     ctx = _build_invoice_context(db, invoice)
-    def _escape(text: str) -> str:
-        return text.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+    def escape_pdf(text: str) -> str:
+        return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    description = str(ctx.get("line_description") or ctx.get("description") or invoice.description or "Portal subscription / service invoice")
     lines = [
-        _escape(ctx['seller_name']),
-        _escape(ctx['invoice_number']),
-        _escape(f"Status: {ctx['status_label']}"),
-        _escape(f"Issued: {ctx['issued_label']}"),
-        _escape(f"Bill to: {ctx['buyer_name']} ({ctx['buyer_code'] or ''})"),
-        _escape(f"Description: {invoice.description or 'Portal subscription / service invoice'}"),
-        _escape(f"Subtotal: {ctx['subtotal_amount']} {invoice.currency}"),
-        _escape(f"Tax: {ctx['tax_amount']} {invoice.currency}"),
-        _escape(f"Total: {ctx['currency_amount']} {invoice.currency}"),
-        _escape(f"eTIMS: {ctx['etims_status']}"),
+        escape_pdf(str(ctx["seller_name"])),
+        escape_pdf(str(ctx["invoice_number"])),
+        escape_pdf(f"Status: {ctx['status_label']}"),
+        escape_pdf(f"Issued: {ctx['issued_label']}"),
+        escape_pdf(f"Bill to: {ctx['buyer_name']} ({ctx['buyer_code'] or ''})"),
+        escape_pdf(f"Description: {description}"),
+        escape_pdf(f"Subtotal: {ctx['subtotal_amount']} {invoice.currency}"),
+        escape_pdf(f"Tax: {ctx['tax_amount']} {invoice.currency}"),
+        escape_pdf(f"Total: {ctx['currency_amount']} {invoice.currency}"),
+        escape_pdf(f"eTIMS: {ctx.get('etims_status') or 'NOT_FISCALIZED'}"),
     ]
-    text_lines = ' T* '.join([f"({line}) Tj" for line in lines])
-    content = f"BT /F1 12 Tf 50 760 Td {text_lines} ET"
-    objects = []
-    objects.append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj")
-    objects.append("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj")
-    objects.append("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj")
-    objects.append("4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj")
-    content_bytes = content.encode('utf-8')
-    objects.append(f"5 0 obj << /Length {len(content_bytes)} >> stream {content_bytes.decode('utf-8')} endstream endobj")
-    offsets = []
+    content = "BT /F1 12 Tf 50 760 Td " + " T* ".join(f"({line}) Tj" for line in lines) + " ET"
+    objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
+        "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+        f"5 0 obj << /Length {len(content.encode('utf-8'))} >> stream {content} endstream endobj",
+    ]
     pdf = BytesIO()
     pdf.write(b"%PDF-1.4\n")
+    offsets: list[int] = []
     for obj in objects:
         offsets.append(pdf.tell())
-        pdf.write(obj.encode('utf-8'))
+        pdf.write(obj.encode("utf-8"))
         pdf.write(b"\n")
     xref_start = pdf.tell()
     pdf.write(b"xref\n0 %d\n" % (len(objects) + 1))
     pdf.write(b"0000000000 65535 f \n")
     for offset in offsets:
-        pdf.write(f"{offset:010d} 00000 n \n".encode('utf-8'))
+        pdf.write(f"{offset:010d} 00000 n \n".encode("utf-8"))
     pdf.write(b"trailer << /Size %d /Root 1 0 R >>\n" % (len(objects) + 1))
     pdf.write(b"startxref\n")
-    pdf.write(f"{xref_start}".encode('utf-8'))
+    pdf.write(str(xref_start).encode("utf-8"))
     pdf.write(b"\n%%EOF")
     return pdf.getvalue()
-
-
-@router.get("/catalog", response_model=list[schemas.CatalogSKURead])
-def list_catalog(
-    include_inactive: bool = False,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if include_inactive and not getattr(current_user, "is_superuser", False):
-        include_inactive = False
-    return services.list_catalog_skus(db, include_inactive=include_inactive)
-
-
-@router.post(
-    "/catalog",
-    response_model=schemas.CatalogSKURead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_catalog(
-    payload: schemas.CatalogSKUCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if not getattr(current_user, "is_superuser", False):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
-    try:
-        return services.create_catalog_sku(
-            db,
-            data=payload,
-            actor_user_id=current_user.id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.put(
-    "/catalog/{sku_id}",
-    response_model=schemas.CatalogSKURead,
-)
-def update_catalog(
-    sku_id: str,
-    payload: schemas.CatalogSKUUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if not getattr(current_user, "is_superuser", False):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
-    try:
-        return services.update_catalog_sku(
-            db,
-            sku_id=sku_id,
-            data=payload,
-            actor_user_id=current_user.id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
-def list_entitlements(
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        return _platform_entitlements()
-    entitlements = services.resolve_entitlements(db, amo_id=current_user.amo_id)
-    return list(entitlements.values())
-
-
-@router.get("/subscription", response_model=schemas.SubscriptionRead)
-def get_current_subscription(
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Platform superuser is not a billable AMO tenant.",
-        )
-    subscription = services.get_effective_subscription(db, amo_id=current_user.amo_id)
-    if not subscription:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription.")
-    return subscription
 
 
 @router.get("/access-status", response_model=schemas.BillingAccessStatusRead)
 def get_billing_access_status(
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(billing_auth.require_authenticated_user),
 ):
     if _is_platform_superuser(current_user):
         return _platform_access_status()
-    return services.get_billing_access_status(db, amo_id=current_user.amo_id)
+    return billing_access.get_billing_access_status(db, amo_id=current_user.amo_id)
+
+
+@router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
+def list_entitlements(
+    db: Session = Depends(get_db),
+    current_user=Depends(billing_auth.require_authenticated_user),
+):
+    if _is_platform_superuser(current_user):
+        return _platform_entitlements()
+    return list(billing_access.resolve_entitlements(db, amo_id=current_user.amo_id).values())
+
+
+@router.get("/usage-meters", response_model=list[schemas.UsageMeterRead])
+def get_usage_meters(
+    db: Session = Depends(get_db),
+    current_user=Depends(billing_auth.require_authenticated_user),
+):
+    if _is_platform_superuser(current_user):
+        return []
+    return services.list_usage_meters(db, amo_id=current_user.amo_id)
 
 
 @router.get("/invoices", response_model=list[schemas.InvoiceRead])
 def get_invoices(
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(billing_auth.require_billing_reader),
 ):
     if _is_platform_superuser(current_user):
         return []
+    return [schemas.InvoiceRead(**services.build_invoice_view(invoice)) for invoice in services.list_invoices(db, amo_id=current_user.amo_id)]
+
+
+@router.get("/invoices/export")
+def export_invoices(
+    format: Literal["csv"] = "csv",
+    db: Session = Depends(get_db),
+    current_user=Depends(billing_auth.require_billing_reader),
+):
+    if _is_platform_superuser(current_user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers must export invoices from the platform billing workspace with an explicit tenant filter.")
+    if format != "csv":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export format.")
     invoices = services.list_invoices(db, amo_id=current_user.amo_id)
-    return [schemas.InvoiceRead(**services.build_invoice_view(invoice)) for invoice in invoices]
+    content = services.build_invoice_export_csv(invoices)
+    amo_code = getattr(getattr(current_user, "amo", None), "amo_code", None) or current_user.amo_id
+    return Response(content, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=billing-invoices-{amo_code}.csv"})
 
 
 @router.get("/invoices/{invoice_id}", response_model=schemas.InvoiceDetailRead)
 def get_invoice_detail(
     invoice_id: str,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(billing_auth.require_billing_reader),
 ):
-    invoice = (
-        db.query(models.BillingInvoice)
-        .filter(
-            models.BillingInvoice.id == invoice_id,
-            models.BillingInvoice.amo_id == current_user.amo_id,
-        )
-        .first()
-    )
+    if _is_platform_superuser(current_user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use the platform billing workspace with an explicit tenant context.")
+    invoice = db.query(models.BillingInvoice).filter(
+        models.BillingInvoice.id == invoice_id,
+        models.BillingInvoice.amo_id == current_user.amo_id,
+    ).first()
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     data = schemas.InvoiceDetailRead(**services.build_invoice_view(invoice))
@@ -345,80 +289,26 @@ def get_invoice_document(
     invoice_id: str,
     format: Literal["html", "pdf"] = "html",
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(billing_auth.require_billing_reader),
 ):
-    invoice = (
-        db.query(models.BillingInvoice)
-        .filter(
-            models.BillingInvoice.id == invoice_id,
-            models.BillingInvoice.amo_id == current_user.amo_id,
-        )
-        .first()
-    )
+    if _is_platform_superuser(current_user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use the platform billing workspace with an explicit tenant context.")
+    invoice = db.query(models.BillingInvoice).filter(
+        models.BillingInvoice.id == invoice_id,
+        models.BillingInvoice.amo_id == current_user.amo_id,
+    ).first()
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
-
     if format == "pdf":
-        pdf_bytes = _render_invoice_pdf(db, invoice)
         return Response(
-            pdf_bytes,
+            _render_invoice_pdf(db, invoice),
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename={_invoice_filename(invoice, "pdf")}'
-            },
+            headers={"Content-Disposition": f'attachment; filename={_invoice_filename(invoice, "pdf")}'},
         )
-    html_doc = _render_invoice_html(db, invoice)
     return HTMLResponse(
-        html_doc,
-        headers={
-            "Content-Disposition": f'attachment; filename={_invoice_filename(invoice, "html")}'
-        },
+        _render_invoice_html(db, invoice),
+        headers={"Content-Disposition": f'attachment; filename={_invoice_filename(invoice, "html")}'},
     )
-
-
-@router.get("/invoices/export")
-def export_invoices(
-    format: Literal["csv"] = "csv",
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Platform superusers must export invoices from the billing audit workspace with an explicit tenant filter.",
-        )
-    invoices = services.list_invoices(db, amo_id=current_user.amo_id)
-    if format == "csv":
-        content = services.build_invoice_export_csv(invoices)
-        amo_code = getattr(getattr(current_user, "amo", None), "amo_code", None) or current_user.amo_id
-        filename = f"billing-invoices-{amo_code}.csv"
-        return Response(content, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export format.")
-
-
-@router.get("/audit/export")
-def export_billing_audit(
-    amo_id: str | None = None,
-    event_type: str | None = None,
-    limit: int = 200,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if not getattr(current_user, "is_superuser", False):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
-    logs = services.list_billing_audit_logs(db, amo_id=amo_id, event_type=event_type, limit=max(1, min(limit, 1000)))
-    content = services.build_billing_audit_export_csv(logs)
-    return Response(content, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=billing-audit.csv"})
-
-
-@router.get("/usage-meters", response_model=list[schemas.UsageMeterRead])
-def get_usage_meters(
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        return []
-    return services.list_usage_meters(db, amo_id=current_user.amo_id)
 
 
 @router.get("/audit", response_model=list[schemas.BillingAuditLogRead])
@@ -427,161 +317,26 @@ def list_billing_audit(
     event_type: str | None = None,
     limit: int = 50,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(billing_auth.require_authenticated_user),
 ):
-    if not getattr(current_user, "is_superuser", False):
+    if not _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
-    limit = max(1, min(limit, 200))
-    return services.list_billing_audit_logs(
-        db, amo_id=amo_id, event_type=event_type, limit=limit
+    return services.list_billing_audit_logs(db, amo_id=amo_id, event_type=event_type, limit=max(1, min(limit, 200)))
+
+
+@router.get("/audit/export")
+def export_billing_audit(
+    amo_id: str | None = None,
+    event_type: str | None = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    current_user=Depends(billing_auth.require_authenticated_user),
+):
+    if not _is_platform_superuser(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
+    logs = services.list_billing_audit_logs(db, amo_id=amo_id, event_type=event_type, limit=max(1, min(limit, 1000)))
+    return Response(
+        services.build_billing_audit_export_csv(logs),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=billing-audit.csv"},
     )
-
-
-@router.get("/payment-methods", response_model=list[schemas.PaymentMethodRead])
-def get_payment_methods(
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        return []
-    return services.list_payment_methods(db, amo_id=current_user.amo_id)
-
-
-@router.post("/payment-methods", response_model=schemas.PaymentMethodRead, status_code=status.HTTP_201_CREATED)
-def add_payment_method(
-    payload: schemas.PaymentMethodUpsertRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot mutate tenant payment methods from a global session.")
-    if payload.amo_id != current_user.amo_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AMO mismatch.")
-    return services.add_payment_method(
-        db,
-        amo_id=current_user.amo_id,
-        data=payload,
-        idempotency_key=payload.idempotency_key,
-    )
-
-
-@router.delete("/payment-methods/{payment_method_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_payment_method(
-    payment_method_id: str,
-    payload: schemas.PaymentMethodMutationRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot mutate tenant payment methods from a global session.")
-    services.remove_payment_method(
-        db,
-        amo_id=current_user.amo_id,
-        payment_method_id=payment_method_id,
-        idempotency_key=payload.idempotency_key,
-    )
-    return {}
-
-
-@router.post("/trial", response_model=schemas.SubscriptionRead, status_code=status.HTTP_201_CREATED)
-def start_trial(
-    payload: schemas.TrialStartRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot start a tenant trial from a global session.")
-    try:
-        license = services.start_trial(
-            db,
-            amo_id=current_user.amo_id,
-            sku_code=payload.sku_code,
-            idempotency_key=payload.idempotency_key,
-        )
-        return license
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
-
-
-@router.post("/purchase", response_model=schemas.SubscriptionRead, status_code=status.HTTP_201_CREATED)
-def purchase(
-    payload: schemas.PurchaseRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot purchase tenant subscriptions from a global session.")
-    license, _ledger, _invoice = services.purchase_sku(
-        db,
-        amo_id=current_user.amo_id,
-        sku_code=payload.sku_code,
-        idempotency_key=payload.idempotency_key,
-        purchase_kind=payload.purchase_kind,
-        expected_amount_cents=payload.expected_amount_cents,
-        expected_currency=payload.currency,
-    )
-    return license
-
-
-@router.post("/cancel", response_model=schemas.SubscriptionRead)
-def cancel(
-    payload: schemas.CancelSubscriptionRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot cancel tenant subscriptions from a global session.")
-    license = services.cancel_subscription(
-        db,
-        amo_id=current_user.amo_id,
-        effective_date=payload.effective_date,
-        idempotency_key=payload.idempotency_key,
-    )
-    if not license:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription to cancel.")
-    return license
-
-
-@router.post("/audit-events", status_code=status.HTTP_202_ACCEPTED)
-def record_audit_event(
-    payload: schemas.AuditEventCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if _is_platform_superuser(current_user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers must record billing audit events with an explicit tenant workflow.")
-    log = audit.safe_record_audit_event(
-        db,
-        amo_id=current_user.amo_id,
-        event=payload.event_type.strip(),
-        details=payload.details or {},
-    )
-    return {
-        "id": log.id if log else None,
-        "created_at": log.created_at if log else None,
-    }
-
-
-@router.post("/webhooks/{provider}", status_code=status.HTTP_202_ACCEPTED)
-async def webhook_handler(
-    provider: models.PaymentProvider,
-    request: Request,
-    psp_signature: str = Header(None, alias="X-PSP-Signature"),
-    db: Session = Depends(get_db),
-):
-    payload: Dict[str, Any] = await request.json()
-    external_id = payload.get("id") or payload.get("event_id") or "unknown"
-    should_fail = payload.get("simulate_failure", False)
-    event = services.handle_webhook(
-        db,
-        provider=provider,
-        payload=payload,
-        signature=psp_signature or "",
-        external_event_id=str(external_id),
-        event_type=payload.get("type"),
-        should_fail=bool(should_fail),
-    )
-    return {"status": event.status}
-

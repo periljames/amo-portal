@@ -1,1867 +1,443 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
 import {
-  addPaymentMethod,
-  cancelSubscription,
-  createCatalogSku,
-  exportBillingAuditCsv,
-  exportInvoicesCsv,
-  fetchCatalog,
-  fetchEntitlements,
+  fetchBillingAccessStatus,
   fetchInvoiceDocument,
   fetchInvoices,
-  fetchPaymentMethods,
-  fetchSubscriptionStatus,
-  fetchUsageMeters,
-  purchaseSubscription,
-  removePaymentMethod,
-  startTrial,
-  updateCatalogSku,
 } from "../services/billing";
-import type {
-  BillingAccessStatus,
-  CatalogSKU,
-  Invoice,
-  PaymentMethod,
-  ResolvedEntitlement,
-  Subscription,
-  UsageMeter,
-} from "../types/billing";
-import { saveDownloadedFile } from "../utils/downloads";
 import {
-  createIntegrationConfig,
-  listIntegrationConfigs,
-  listIntegrationOutbox,
-  updateIntegrationConfig,
-  type IntegrationConfig,
-  type IntegrationOutboundEvent,
-} from "../services/integrations";
+  cancelTenantModuleSubscription,
+  createModuleSubscriptionOrder,
+  fetchSelfServiceModuleCatalog,
+  fetchTenantPaymentJob,
+  initiateTenantInvoicePayment,
+  type CommercialModule,
+  type ModulePrice,
+  type SelfServiceCatalog,
+} from "../services/moduleCommerce";
+import type { BillingAccessStatus, Invoice } from "../types/billing";
+import { saveDownloadedFile } from "../utils/downloads";
 
-type UrlParams = {
-  amoCode?: string;
+type UrlParams = { amoCode?: string };
+type PaymentProvider = "paystack" | "mpesa_daraja";
+type Checkout = { module: CommercialModule; price: ModulePrice };
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const money = (cents: number, currency = "USD") => {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format((cents || 0) / 100);
+  } catch {
+    return `${currency} ${((cents || 0) / 100).toFixed(2)}`;
+  }
 };
 
-type PaymentFormState = {
-  provider: PaymentMethod["provider"];
-  displayName: string;
-  externalRef: string;
-  cardLast4: string;
-  expMonth: string;
-  expYear: string;
-  isDefault: boolean;
-};
+const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString() : "—";
 
-const USAGE_WARNING_THRESHOLD = 80;
-const OVERAGE_RULES: Record<string, string> = {
-  storage_mb:
-    "Additional storage is billed on renewal; archive or delete large files to stay within plan.",
-  automation_runs:
-    "Automation runs beyond your plan are billed per run and may throttle when grossly exceeded.",
-  scheduled_jobs:
-    "Scheduled maintenance jobs above plan are invoiced at renewal; keep only active schedules.",
-  notifications_sent:
-    "High notification volume may trigger messaging surcharges; prefer digesting when possible.",
-  api_calls:
-    "API calls above the included quota are billed pay-as-you-go. Consider caching to reduce volume.",
-};
-
-const formatMoney = (amountCents: number, currency = "USD"): string => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amountCents / 100);
-};
-
-const formatCountdown = (iso?: string | null): string | null => {
-  if (!iso) return null;
-  const target = new Date(iso).getTime();
-  const now = Date.now();
-  const diff = target - now;
-  if (diff <= 0) return "0d";
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  if (days > 0) return `${days}d ${hours}h`;
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-};
-
-const formatDate = (value?: string | null): string => {
-  if (!value) return "—";
-  const d = new Date(value);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-};
-
-function lowercaseMatch(value: string, term: string): boolean {
-  return value.toLowerCase().includes(term.toLowerCase());
+function invoiceDetails(invoice: Invoice): Record<string, unknown> {
+  if (!invoice.description) return {};
+  try {
+    const parsed = JSON.parse(invoice.description) as unknown;
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
 }
 
-const SubscriptionManagementPage: React.FC = () => {
-  const { amoCode } = useParams<UrlParams>();
+function invoiceLabel(invoice: Invoice) {
+  const details = invoiceDetails(invoice);
+  return String(details.module_name || details.module_code || details.description || "Platform services");
+}
+
+function providerLabel(provider: PaymentProvider) {
+  return provider === "mpesa_daraja" ? "M-PESA" : "Paystack";
+}
+
+const AdminBillingPage: React.FC = () => {
+  const { amoCode = "UNKNOWN" } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const user = useMemo(() => getCachedUser(), []);
+  const role = String(user?.role || "").toUpperCase();
+  const isSuperuser = !!user?.is_superuser;
+  const canSubscribe = !isSuperuser && (!!user?.is_amo_admin || role === "AMO_ADMIN" || role === "FINANCE_MANAGER");
+  const canPay = canSubscribe || (!isSuperuser && role === "ACCOUNTS_OFFICER");
+  const canViewBillingDetails = canPay;
 
-  const currentUser = useMemo(() => getCachedUser(), []);
-  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+  const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const stateFrom = (location.state as { from?: string } | null)?.from;
+  const returnTo = query.get("returnTo") || stateFrom || null;
 
-  const [catalog, setCatalog] = useState<CatalogSKU[]>([]);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [entitlements, setEntitlements] = useState<ResolvedEntitlement[]>([]);
-  const [usageMeters, setUsageMeters] = useState<UsageMeter[]>([]);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [access, setAccess] = useState<BillingAccessStatus | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [accessStatus, setAccessStatus] = useState<BillingAccessStatus | null>(null);
-  const [billingWarnings, setBillingWarnings] = useState<string[]>([]);
-  const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
-  const [integrationOutbox, setIntegrationOutbox] = useState<IntegrationOutboundEvent[]>([]);
-  const [integrationForms, setIntegrationForms] = useState<Record<string, { enabled: boolean; baseUrl: string; secret: string; environment: string; invoicePrefix: string }>>({});
-  const [integrationSaving, setIntegrationSaving] = useState<string | null>(null);
-  const [integrationError, setIntegrationError] = useState<string | null>(null);
-
+  const [catalog, setCatalog] = useState<SelfServiceCatalog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [scaCue, setScaCue] = useState<string | null>(null);
 
-  const [changePlanOpen, setChangePlanOpen] = useState(false);
-  const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [selectedSkuId, setSelectedSkuId] = useState<string>("");
-  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<
-    string | undefined
-  >(undefined);
-  const [planForm, setPlanForm] = useState({
-    code: "",
-    name: "",
-    description: "",
-    term: "MONTHLY" as CatalogSKU["term"],
-    trialDays: 14,
-    amountDollars: 0,
-    currency: "USD",
-    minUsageLimit: "",
-    maxUsageLimit: "",
-    isActive: true,
-  });
-  const [planSaving, setPlanSaving] = useState(false);
-  const [planError, setPlanError] = useState<string | null>(null);
-  const [planSuccess, setPlanSuccess] = useState<string | null>(null);
-  const [planEdit, setPlanEdit] = useState<CatalogSKU | null>(null);
-  const [planEditForm, setPlanEditForm] = useState({
-    name: "",
-    description: "",
-    trialDays: "",
-    amountDollars: "",
-    currency: "",
-    minUsageLimit: "",
-    maxUsageLimit: "",
-    isActive: true,
-  });
+  const [paymentInvoiceId, setPaymentInvoiceId] = useState<string | null>(null);
+  const [provider, setProvider] = useState<PaymentProvider>("paystack");
+  const [phone, setPhone] = useState("");
+  const [paying, setPaying] = useState(false);
 
-  const [paymentForm, setPaymentForm] = useState<PaymentFormState>({
-    provider: "STRIPE",
-    displayName: "",
-    externalRef: "",
-    cardLast4: "",
-    expMonth: "",
-    expYear: "",
-    isDefault: true,
-  });
+  const [checkout, setCheckout] = useState<Checkout | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [ordering, setOrdering] = useState(false);
 
-  const [processingPayment, setProcessingPayment] = useState(false);
-  const [removingPaymentId, setRemovingPaymentId] = useState<string | null>(null);
+  const [cancelModule, setCancelModule] = useState<CommercialModule | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    if (isTenantAdmin) return;
-
-    if (amoCode) {
-      navigate(`/maintenance/${amoCode}/admin/overview`, { replace: true });
-      return;
-    }
-    navigate("/login", { replace: true });
-  }, [amoCode, currentUser, isTenantAdmin, navigate]);
-
-  const hydrateIntegrationForms = (configs: IntegrationConfig[]) => {
-    const next: Record<string, { enabled: boolean; baseUrl: string; secret: string; environment: string; invoicePrefix: string }> = {};
-    configs.forEach((config) => {
-      next[config.integration_key] = {
-        enabled: !!config.enabled,
-        baseUrl: config.base_url || "",
-        secret: config.signing_secret || "",
-        environment: String(config.metadata_json?.environment || "sandbox"),
-        invoicePrefix: String(config.metadata_json?.invoice_prefix || ""),
-      };
-    });
-    setIntegrationForms(next);
-  };
-
-  const setIntegrationField = (key: string, field: "enabled" | "baseUrl" | "secret" | "environment" | "invoicePrefix", value: string | boolean) => {
-    setIntegrationForms((prev) => ({
-      ...prev,
-      [key]: {
-        ...(prev[key] || {
-          enabled: false,
-          baseUrl: "",
-          secret: "",
-          environment: "sandbox",
-          invoicePrefix: "",
-        }),
-        [field]: value,
-      },
-    }));
-  };
-
-  const saveIntegration = async (integrationKey: string, displayName: string) => {
-    const form = integrationForms[integrationKey] || {
-      enabled: false,
-      baseUrl: "",
-      secret: "",
-      environment: "sandbox",
-      invoicePrefix: "",
-    };
-    setIntegrationSaving(integrationKey);
-    setIntegrationError(null);
-    try {
-      const existing = integrations.find((item) => item.integration_key === integrationKey);
-      const payload = {
-        integration_key: integrationKey,
-        display_name: displayName,
-        enabled: form.enabled,
-        status: form.enabled ? "ACTIVE" as const : "DISABLED" as const,
-        base_url: form.baseUrl || null,
-        signing_secret: form.secret || null,
-        metadata_json: {
-          environment: form.environment || "sandbox",
-          invoice_prefix: form.invoicePrefix || null,
-        },
-      };
-      const saved = existing
-        ? await updateIntegrationConfig(existing.id, payload)
-        : await createIntegrationConfig(payload);
-      const refreshed = existing
-        ? integrations.map((item) => (item.id === saved.id ? saved : item))
-        : [saved, ...integrations];
-      setIntegrations(refreshed);
-      hydrateIntegrationForms(refreshed);
-      setNotice(`${displayName} settings saved.`);
-    } catch (err: any) {
-      setIntegrationError(err?.message || `Unable to save ${displayName} settings.`);
-    } finally {
-      setIntegrationSaving(null);
-    }
-  };
-
-  const handleInvoiceDownload = async (invoice: Invoice, format: "html" | "pdf" = "pdf") => {
+  const load = async (quiet = false) => {
+    quiet ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const downloaded = await fetchInvoiceDocument(invoice.id, format);
-      saveDownloadedFile(downloaded);
-    } catch (err: any) {
-      setError(err?.message || "Unable to download invoice.");
-    }
-  };
+      const accessResult = await fetchBillingAccessStatus();
+      setAccess(accessResult);
 
-  const handleExportInvoices = async () => {
-    try {
-      const downloaded = await exportInvoicesCsv();
-      saveDownloadedFile(downloaded);
-    } catch (err: any) {
-      setError(err?.message || "Unable to export invoices.");
-    }
-  };
-
-  const handleExportAudit = async () => {
-    try {
-      const downloaded = await exportBillingAuditCsv({ limit: 500 });
-      saveDownloadedFile(downloaded);
-    } catch (err: any) {
-      setError(err?.message || "Unable to export billing audit.");
-    }
-  };
-
-  const loadBillingData = async () => {
-    setLoading(true);
-    setError(null);
-    setBillingWarnings([]);
-    try {
-      const subscriptionResult = await fetchSubscriptionStatus();
-      setSubscription(subscriptionResult.subscription);
-      setAccessStatus(subscriptionResult.accessStatus);
-
-      const warnings: string[] = [];
-      const [catalogResult, entitlementsResult, metersResult, paymentResult, invoiceResult, configsResult, outboxResult] = await Promise.allSettled([
-        fetchCatalog(!!currentUser?.is_superuser),
-        fetchEntitlements(),
-        fetchUsageMeters(),
-        fetchPaymentMethods(),
-        fetchInvoices(),
-        isTenantAdmin ? listIntegrationConfigs() : Promise.resolve([] as IntegrationConfig[]),
-        isTenantAdmin ? listIntegrationOutbox(25) : Promise.resolve([] as IntegrationOutboundEvent[]),
-      ]);
-
-      const catalogData = catalogResult.status === "fulfilled" ? catalogResult.value : [];
-      if (catalogResult.status !== "fulfilled") warnings.push(catalogResult.reason?.message || "Catalog unavailable.");
-      const entitlementsData = entitlementsResult.status === "fulfilled" ? entitlementsResult.value : [];
-      if (entitlementsResult.status !== "fulfilled") warnings.push(entitlementsResult.reason?.message || "Entitlements unavailable.");
-      const metersData = metersResult.status === "fulfilled" ? metersResult.value : [];
-      if (metersResult.status !== "fulfilled") warnings.push(metersResult.reason?.message || "Usage meters unavailable.");
-      const paymentData = paymentResult.status === "fulfilled" ? paymentResult.value : [];
-      if (paymentResult.status !== "fulfilled") warnings.push(paymentResult.reason?.message || "Payment methods unavailable.");
-      const invoiceData = invoiceResult.status === "fulfilled" ? invoiceResult.value : [];
-      if (invoiceResult.status !== "fulfilled") warnings.push(invoiceResult.reason?.message || "Invoices unavailable.");
-      const configData = configsResult.status === "fulfilled" ? configsResult.value : [];
-      if (configsResult.status !== "fulfilled") warnings.push(configsResult.reason?.message || "Integrations unavailable.");
-      const outboxData = outboxResult.status === "fulfilled" ? outboxResult.value : [];
-
-      setCatalog(catalogData);
-      setEntitlements(entitlementsData);
-      setUsageMeters(metersData);
-      setPaymentMethods(paymentData);
-      setInvoices(invoiceData);
-      setIntegrations(configData);
-      setIntegrationOutbox(outboxData);
-      hydrateIntegrationForms(configData);
-      setBillingWarnings(warnings);
-      setSelectedPaymentMethodId(paymentData.find((pm) => pm.is_default)?.id || paymentData[0]?.id);
-
-      if (subscriptionResult.subscription && subscriptionResult.subscription.sku_id) {
-        const altSku = catalogData.find((sku) => sku.id !== subscriptionResult.subscription?.sku_id) || catalogData[0];
-        setSelectedSkuId(altSku?.id || "");
-      } else if (catalogData[0]) {
-        setSelectedSkuId(catalogData[0].id);
+      if (!canViewBillingDetails) {
+        setInvoices([]);
+        setCatalog(null);
+        return;
       }
-    } catch (err: any) {
-      console.error("Failed to load billing data", err);
-      setError(err?.message || "Unable to load billing data.");
+
+      const [invoiceResult, catalogResult] = await Promise.all([
+        fetchInvoices(),
+        fetchSelfServiceModuleCatalog(),
+      ]);
+      setInvoices(invoiceResult);
+      setCatalog(catalogResult);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const handlePlanChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value, type } = e.target;
-    const checked = (e.target as HTMLInputElement).checked;
-    setPlanForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  };
+  useEffect(() => { void load(); }, [canViewBillingDetails]);
 
-  const handlePlanEditChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value, type } = e.target;
-    const checked = (e.target as HTMLInputElement).checked;
-    setPlanEditForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  };
+  const pendingInvoices = useMemo(
+    () => invoices.filter((invoice) => String(invoice.status).toUpperCase() === "PENDING"),
+    [invoices],
+  );
 
-  const handleCreatePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser?.is_superuser) {
-      setPlanError("Only superusers can create plans.");
-      return;
-    }
-    setPlanSaving(true);
-    setPlanError(null);
-    setPlanSuccess(null);
-    try {
-      const amountCents = Math.max(
-        0,
-        Math.round(Number(planForm.amountDollars) * 100)
-      );
-      const minUsage =
-        planForm.minUsageLimit === "" ? undefined : Number(planForm.minUsageLimit);
-      const maxUsage =
-        planForm.maxUsageLimit === "" ? undefined : Number(planForm.maxUsageLimit);
-      const created = await createCatalogSku({
-        code: planForm.code.trim().toUpperCase(),
-        name: planForm.name.trim(),
-        description: planForm.description.trim() || undefined,
-        term: planForm.term,
-        trial_days: Math.max(0, Math.round(Number(planForm.trialDays))),
-        amount_cents: amountCents,
-        currency: planForm.currency.trim().toUpperCase(),
-        min_usage_limit: Number.isFinite(minUsage) ? minUsage : undefined,
-        max_usage_limit: Number.isFinite(maxUsage) ? maxUsage : undefined,
-        is_active: planForm.isActive,
-      });
-      setPlanSuccess(`Plan ${created.code} created.`);
-      setPlanForm((prev) => ({
-        ...prev,
-        code: "",
-        name: "",
-        description: "",
-        trialDays: 14,
-        amountDollars: 0,
-        currency: created.currency || "USD",
-        minUsageLimit: "",
-        maxUsageLimit: "",
-        isActive: true,
-      }));
-      await loadBillingData();
-    } catch (err: any) {
-      setPlanError(err?.message || "Failed to create plan.");
-    } finally {
-      setPlanSaving(false);
-    }
-  };
-
-  const handleSelectPlan = (sku: CatalogSKU) => {
-    setPlanEdit(sku);
-    setPlanEditForm({
-      name: sku.name,
-      description: sku.description || "",
-      trialDays: sku.trial_days?.toString() ?? "",
-      amountDollars: (sku.amount_cents / 100).toFixed(2),
-      currency: sku.currency || "USD",
-      minUsageLimit:
-        sku.min_usage_limit === null || sku.min_usage_limit === undefined
-          ? ""
-          : sku.min_usage_limit.toString(),
-      maxUsageLimit:
-        sku.max_usage_limit === null || sku.max_usage_limit === undefined
-          ? ""
-          : sku.max_usage_limit.toString(),
-      isActive: sku.is_active,
+  const outstandingByCurrency = useMemo(() => {
+    const totals = new Map<string, number>();
+    pendingInvoices.forEach((invoice) => {
+      const currency = String(invoice.currency || "USD").toUpperCase();
+      totals.set(currency, (totals.get(currency) || 0) + Number(invoice.total_cents ?? invoice.amount_cents ?? 0));
     });
-    setPlanError(null);
-    setPlanSuccess(null);
-  };
+    return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [pendingInvoices]);
 
-  const handleUpdatePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!planEdit) return;
-    setPlanSaving(true);
-    setPlanError(null);
-    setPlanSuccess(null);
-    try {
-      const amountCents = Math.max(
-        0,
-        Math.round(Number(planEditForm.amountDollars) * 100)
-      );
-      const minUsage =
-        planEditForm.minUsageLimit === "" ? undefined : Number(planEditForm.minUsageLimit);
-      const maxUsage =
-        planEditForm.maxUsageLimit === "" ? undefined : Number(planEditForm.maxUsageLimit);
-      const updated = await updateCatalogSku(planEdit.id, {
-        name: planEditForm.name.trim(),
-        description: planEditForm.description.trim() || undefined,
-        trial_days: Math.max(0, Math.round(Number(planEditForm.trialDays))),
-        amount_cents: amountCents,
-        currency: planEditForm.currency.trim().toUpperCase(),
-        min_usage_limit: Number.isFinite(minUsage) ? minUsage : undefined,
-        max_usage_limit: Number.isFinite(maxUsage) ? maxUsage : undefined,
-        is_active: planEditForm.isActive,
-      });
-      setPlanSuccess(`Plan ${updated.code} updated.`);
-      await loadBillingData();
-      setPlanEdit(updated);
-    } catch (err: any) {
-      setPlanError(err?.message || "Failed to update plan.");
-    } finally {
-      setPlanSaving(false);
-    }
-  };
-
-  useEffect(() => {
-    loadBillingData();
-  }, []);
-
-  const currentSku = useMemo(
-    () => catalog.find((sku) => sku.id === subscription?.sku_id),
-    [catalog, subscription?.sku_id]
+  const activeModules = useMemo(
+    () => (catalog?.items || []).filter((item) => item.is_active_for_tenant),
+    [catalog],
   );
-
-  const targetSku = useMemo(
-    () =>
-      catalog.find(
-        (sku) => sku.id === selectedSkuId || sku.code === selectedSkuId
-      ),
-    [catalog, selectedSkuId]
+  const availableModules = useMemo(
+    () => (catalog?.items || []).filter((item) => !item.is_active_for_tenant),
+    [catalog],
   );
+  const paymentRequired = Boolean(access && !access.has_access && access.redirect_to_billing);
 
-  const selectedPaymentMethod = useMemo(
-    () =>
-      paymentMethods.find((pm) => pm.id === selectedPaymentMethodId) ||
-      paymentMethods.find((pm) => pm.is_default),
-    [paymentMethods, selectedPaymentMethodId]
-  );
-
-  const seatEntitlement = useMemo(
-    () =>
-      entitlements.find(
-        (e) =>
-          lowercaseMatch(e.key, "seat") ||
-          lowercaseMatch(e.key, "user") ||
-          lowercaseMatch(e.key, "member")
-      ),
-    [entitlements]
-  );
-
-  const seatUsage = useMemo(
-    () =>
-      usageMeters.find(
-        (m) =>
-          lowercaseMatch(m.meter_key, "seat") ||
-          lowercaseMatch(m.meter_key, "user") ||
-          lowercaseMatch(m.meter_key, "member")
-      )?.used_units || 0,
-    [usageMeters]
-  );
-
-  const usageLimits: Record<string, number | null> = useMemo(() => {
-    const limits: Record<string, number | null> = {};
-    entitlements.forEach((ent) => {
-      limits[ent.key] = ent.is_unlimited ? null : ent.limit ?? null;
-    });
-    return limits;
-  }, [entitlements]);
-
-  const isReadOnly = subscription?.is_read_only ?? false;
-  const isExpired = subscription?.status === "EXPIRED";
-  const isTrialing = subscription?.status === "TRIALING";
-  const trialCountdownLabel = useMemo(
-    () => formatCountdown(subscription?.trial_ends_at),
-    [subscription?.trial_ends_at]
-  );
-  const graceCountdownLabel = useMemo(
-    () => formatCountdown(subscription?.trial_grace_expires_at),
-    [subscription?.trial_grace_expires_at]
-  );
-
-  const trialDaysRemaining = useMemo(() => {
-    if (!subscription?.trial_ends_at) return null;
-    const end = new Date(subscription.trial_ends_at).getTime();
-    const now = Date.now();
-    return Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
-  }, [subscription?.trial_ends_at]);
-
-  const prorationPreview = useMemo(() => {
-    if (!targetSku) return null;
-    if (!subscription || !currentSku) {
-      return {
-        label: "New purchase",
-        creditCents: 0,
-        chargeCents: targetSku.amount_cents,
-        currency: targetSku.currency,
-        remainingDays: null,
-        totalDays: null,
-      };
-    }
-
-    const now = Date.now();
-    const start = new Date(subscription.current_period_start).getTime();
-    const end = subscription.current_period_end
-      ? new Date(subscription.current_period_end).getTime()
-      : start;
-
-    const totalMs = Math.max(end - start, 1);
-    const remainingMs = Math.max(end - now, 0);
-    const remainingRatio = Math.min(1, remainingMs / totalMs);
-    const credit = Math.round((currentSku.amount_cents || 0) * remainingRatio);
-    const charge = Math.max(targetSku.amount_cents - credit, 0);
-
-    return {
-      label: "Proration preview",
-      creditCents: credit,
-      chargeCents: charge,
-      currency: targetSku.currency,
-      remainingDays: Math.round(remainingMs / (1000 * 60 * 60 * 24)),
-      totalDays: Math.round(totalMs / (1000 * 60 * 60 * 24)),
-    };
-  }, [targetSku, subscription, currentSku]);
-
-  const needsSca =
-    selectedPaymentMethod &&
-    selectedPaymentMethod.provider !== "OFFLINE" &&
-    selectedPaymentMethod.provider !== "MANUAL";
-
-  const handlePurchase = async () => {
-    if (!targetSku) {
-      setError("Please choose a plan or module to continue.");
-      return;
-    }
-    setProcessingPayment(true);
+  const downloadInvoice = async (invoice: Invoice) => {
+    if (!canViewBillingDetails) return;
     setError(null);
-    setNotice(null);
-    setScaCue(
-      needsSca
-        ? "Security step: expect an SCA/3DS prompt from your bank to approve this change."
-        : null
-    );
     try {
-      const updated = await purchaseSubscription(
-        targetSku.code,
-        targetSku.amount_cents,
-        targetSku.currency,
-        "PLAN_CHANGE"
-      );
-      setSubscription(updated);
-      setNotice("Plan updated successfully. New entitlements are now active.");
-      setChangePlanOpen(false);
-      await loadBillingData();
-    } catch (err: any) {
-      setError(err?.message || "Unable to change the plan right now.");
-    } finally {
-      setProcessingPayment(false);
+      saveDownloadedFile(await fetchInvoiceDocument(invoice.id, "pdf"));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
-  const handleCancelPlan = async () => {
-    if (!subscription) return;
-    setProcessingPayment(true);
-    setError(null);
-    setNotice(null);
-    setScaCue(
-      subscription.current_period_end
-        ? "Cancellation scheduled; access remains until the current period ends."
-        : null
-    );
-    try {
-      const effectiveDate = subscription.current_period_end
-        ? new Date(subscription.current_period_end)
-        : new Date();
-      const updated = await cancelSubscription(effectiveDate);
-      setSubscription(updated);
-      setNotice("Cancellation recorded. You can renew or upgrade at any time.");
-      setCancelModalOpen(false);
-      await loadBillingData();
-    } catch (err: any) {
-      setError(err?.message || "Could not cancel the subscription.");
-    } finally {
-      setProcessingPayment(false);
-    }
-  };
-
-  const handleStartTrial = async () => {
-    if (!targetSku) return;
-    setProcessingPayment(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const trial = await startTrial(targetSku.code);
-      setSubscription(trial);
-      setNotice("Trial activated. Enjoy your evaluation period!");
-      await loadBillingData();
-    } catch (err: any) {
-      setError(err?.message || "Unable to start a trial right now.");
-    } finally {
-      setProcessingPayment(false);
-    }
-  };
-
-  const handleConvertTrial = async () => {
-    if (!currentSku) {
-      setError("Current plan not found. Please refresh and try again.");
-      return;
-    }
-    setProcessingPayment(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const updated = await purchaseSubscription(
-        currentSku.code,
-        currentSku.amount_cents,
-        currentSku.currency,
-        "TRIAL_CONVERT"
-      );
-      setSubscription(updated);
-      setNotice("Trial converted to paid successfully.");
-      await loadBillingData();
-    } catch (err: any) {
-      setError(err?.message || "Unable to convert the trial right now.");
-    } finally {
-      setProcessingPayment(false);
-    }
-  };
-
-  const handleAddPaymentMethod = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser?.amo_id) {
-      setError("Missing AMO context for this user.");
-      return;
-    }
-
-    setProcessingPayment(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const created = await addPaymentMethod({
-        amo_id: currentUser.amo_id,
-        provider: paymentForm.provider,
-        external_ref: paymentForm.externalRef.trim() || "psp-token",
-        display_name: paymentForm.displayName.trim() || "Payment method",
-        card_last4: paymentForm.cardLast4.trim() || undefined,
-        card_exp_month: paymentForm.expMonth ? Number(paymentForm.expMonth) : undefined,
-        card_exp_year: paymentForm.expYear ? Number(paymentForm.expYear) : undefined,
-        is_default: paymentForm.isDefault,
-      });
-      setPaymentMethods((prev) => [created, ...prev]);
-      setSelectedPaymentMethodId(created.id);
-      setPaymentModalOpen(false);
-      setNotice("Payment method saved and ready for billing.");
-    } catch (err: any) {
-      setError(err?.message || "Could not add the payment method.");
-    } finally {
-      setProcessingPayment(false);
-    }
-  };
-
-  const handleRemovePaymentMethod = async (id: string) => {
-    setRemovingPaymentId(id);
-    setError(null);
-    setNotice(null);
-    try {
-      await removePaymentMethod(id);
-      setPaymentMethods((prev) => prev.filter((pm) => pm.id !== id));
-      if (selectedPaymentMethodId === id) {
-        setSelectedPaymentMethodId(
-          paymentMethods.find((pm) => pm.id !== id)?.id || undefined
-        );
+  const waitForPaymentJob = async (jobId: string) => {
+    for (let i = 0; i < 45; i += 1) {
+      const job = await fetchTenantPaymentJob(jobId);
+      const status = String(job.status || "").toUpperCase();
+      if (status === "SUCCEEDED") return job;
+      if (["FAILED", "DEAD", "CANCELLED"].includes(status)) {
+        throw new Error(job.last_error || "Payment provider request failed.");
       }
-    } catch (err: any) {
-      setError(err?.message || "Unable to remove the payment method.");
+      await sleep(1000);
+    }
+    throw new Error("Payment initialization is taking longer than expected. Refresh Billing to check the current status before retrying.");
+  };
+
+  const waitForInvoiceSettlement = async (invoiceId: string) => {
+    for (let i = 0; i < 45; i += 1) {
+      await sleep(2000);
+      const freshInvoices = await fetchInvoices();
+      setInvoices(freshInvoices);
+      if (freshInvoices.some((row) => row.id === invoiceId && String(row.status).toUpperCase() === "PAID")) {
+        const freshAccess = await fetchBillingAccessStatus();
+        setAccess(freshAccess);
+        await fetchSelfServiceModuleCatalog().then(setCatalog).catch(() => undefined);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const payInvoice = async (invoiceId: string) => {
+    if (!canPay) return;
+    if (provider === "mpesa_daraja" && !phone.trim()) {
+      setError("Enter the mobile number that should receive the M-PESA STK prompt.");
+      return;
+    }
+    setPaying(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const queued = await initiateTenantInvoicePayment(invoiceId, {
+        provider,
+        phone: provider === "mpesa_daraja" ? phone.trim() : undefined,
+      });
+      const initialized = await waitForPaymentJob(queued.id);
+      if (provider === "paystack") {
+        const url = String(initialized.result?.authorization_url || "").trim();
+        if (!url) throw new Error("Paystack did not return a hosted checkout URL.");
+        window.location.assign(url);
+        return;
+      }
+
+      setNotice("M-PESA request sent. Complete the STK prompt on the phone. Access changes only after Safaricom confirms settlement.");
+      const settled = await waitForInvoiceSettlement(invoiceId);
+      if (settled) {
+        setNotice("Payment verified. Billing and subscribed access have been refreshed.");
+        setPaymentInvoiceId(null);
+      } else {
+        setNotice("The M-PESA request was initiated, but settlement is still pending. Do not submit a duplicate payment; use Refresh to check status.");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setRemovingPaymentId(null);
+      setPaying(false);
     }
   };
 
-  const usageMeterRows = useMemo(() => {
-    return usageMeters.map((meter) => {
-      const limit = usageLimits[meter.meter_key] ?? null;
-      const remaining = limit !== null ? Math.max(limit - meter.used_units, 0) : null;
-      const percent =
-        limit !== null && limit > 0
-          ? Math.min(100, Math.round((meter.used_units / limit) * 100))
-          : null;
-      const overLimit = percent !== null && percent >= 100;
-      const nearLimit = percent !== null && percent >= USAGE_WARNING_THRESHOLD;
-      const overageRule =
-        OVERAGE_RULES[meter.meter_key] ||
-        "Overages are billed on the next renewal if limits are exceeded.";
-      return { meter, limit, remaining, percent, overLimit, nearLimit, overageRule };
-    });
-  }, [usageMeters, usageLimits]);
+  const orderModule = async () => {
+    if (!checkout || !catalog?.terms || !canSubscribe) return;
+    if (!termsAccepted) {
+      setError("Accept the recurring billing terms before creating the order.");
+      return;
+    }
+    setOrdering(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const invoice = await createModuleSubscriptionOrder({
+        module_code: checkout.module.code,
+        price_id: checkout.price.id,
+        expected_amount_cents: checkout.price.amount_cents,
+        currency: checkout.price.currency,
+        terms_version: catalog.terms.version,
+        auto_renew_accepted: true,
+      });
+      await load(true);
+      setCheckout(null);
+      setTermsAccepted(false);
+      setPaymentInvoiceId(invoice.id);
+      setNotice("Order created. Pay the invoice below to activate the module; creating an order alone does not grant access.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setOrdering(false);
+    }
+  };
 
-  const usageAlerts = useMemo(
-    () => usageMeterRows.filter((row) => row.nearLimit || row.overLimit),
-    [usageMeterRows]
-  );
+  const confirmCancellation = async () => {
+    if (!cancelModule || !canSubscribe) return;
+    if (!cancelReason.trim()) {
+      setError("Enter a cancellation reason for the commercial audit trail.");
+      return;
+    }
+    setCancelling(true);
+    setError(null);
+    try {
+      await cancelTenantModuleSubscription(cancelModule.code, cancelReason.trim());
+      setNotice(`${cancelModule.name} will not renew. Access remains available through the already-paid service period.`);
+      setCancelModule(null);
+      setCancelReason("");
+      await load(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setCancelling(false);
+    }
+  };
 
-  if (currentUser && !isTenantAdmin) {
-    return null;
-  }
-
-  const showTrialCta =
-    (!subscription ||
-      subscription.status === "CANCELLED" ||
-      subscription.status === "EXPIRED") &&
-    !isReadOnly;
+  const selectedTax = checkout ? Math.round(checkout.price.amount_cents * (checkout.price.tax_rate_bps || 0) / 10000) : 0;
+  const selectedTotal = checkout ? checkout.price.amount_cents + selectedTax : 0;
 
   return (
-    <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin-billing">
-      <header className="page-header">
-        <h1 className="page-header__title">Subscription & Billing</h1>
-        <p className="page-header__subtitle">
-          Manage plan changes, entitlements, payment methods, and compliance-friendly
-          billing records.
-        </p>
-        <div className="page-section__actions">
-          <button
-            className="btn btn-secondary"
-            onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/invoices`)}
-          >
-            View invoices
-          </button>
+    <DepartmentLayout amoCode={amoCode} activeDepartment="admin-billing">
+      <div className="admin-page admin-billing">
+        <PageHeader
+          title="Billing & subscriptions"
+          subtitle="Resolve account billing status and, for authorised finance roles, manage invoices and subscribed modules."
+          actions={
+            <Button type="button" size="sm" variant="secondary" disabled={refreshing} onClick={() => void load(true)}>
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+          }
+        />
+
+        {paymentRequired && (
+          <InlineAlert tone="danger" title="Payment required to restore platform access">
+            <span>{access?.lock_reason || "This account has an overdue billing obligation."} An AMO administrator or authorised finance user can settle the account from this page.</span>
+          </InlineAlert>
+        )}
+        {error && <InlineAlert tone="danger" title="Billing action failed"><span>{error}</span></InlineAlert>}
+        {notice && <InlineAlert tone="info" title="Billing update"><span>{notice}</span></InlineAlert>}
+
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Access</span><span className="admin-summary-item__value">{access?.access_state || (loading ? "Loading…" : "Unknown")}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Commercial details</span><span className="admin-summary-item__value">{canViewBillingDetails ? "Authorised" : "Restricted"}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Open invoices</span><span className="admin-summary-item__value">{canViewBillingDetails ? pendingInvoices.length : "—"}</span></div>
+          <div className="admin-summary-item"><span className="admin-summary-item__label">Outstanding</span><span className="admin-summary-item__value">{canViewBillingDetails ? (outstandingByCurrency.length ? outstandingByCurrency.map(([currency, cents]) => money(cents, currency)).join(" · ") : "None") : "Restricted"}</span></div>
         </div>
-      </header>
 
-      <div className="page-layout">
-        {error && (
-          <div className="card card--error">
-            <strong>Something went wrong:</strong> {error}
-          </div>
-        )}
-        {notice && (
-          <div className="card card--success">
-            <strong>Updated:</strong> {notice}
-          </div>
-        )}
-        {scaCue && (
-          <div className="card card--warning">
-            <strong>Security check:</strong> {scaCue}
-          </div>
-        )}
-        {isTrialing && (
-          <div className="card card--info">
-            <div className="card-header">
-              <div>
-                <h3 style={{ margin: "4px 0" }}>Trial countdown</h3>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  {trialCountdownLabel
-                    ? `Trial ends in ${trialCountdownLabel}.`
-                    : "Trial ending soon."}{" "}
-                  Convert to paid to avoid read-only mode.
-                </p>
-              </div>
-              <div className="page-section__actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={handleConvertTrial}
-                  disabled={processingPayment || !currentSku}
-                >
-                  Convert to paid
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setChangePlanOpen(true)}
-                  disabled={processingPayment}
-                >
-                  View plans
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {isExpired && (
-          <div className={`card ${isReadOnly ? "card--error" : "card--warning"}`}>
-            <div className="card-header">
-              <div>
-                <h3 style={{ margin: "4px 0" }}>
-                  {isReadOnly ? "Trial locked" : "Trial expired"}
-                </h3>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  {isReadOnly
-                    ? "Grace has ended; workspace is read-only until billing resumes."
-                    : graceCountdownLabel
-                    ? `Grace ends in ${graceCountdownLabel}.`
-                    : "Grace period is active. Add a payment method to keep access."}
-                </p>
-              </div>
-              <div className="page-section__actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => setChangePlanOpen(true)}
-                  disabled={processingPayment}
-                >
-                  Choose a paid plan
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/upsell`)}
-                  disabled={processingPayment}
-                >
-                  View pricing
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <section className="page-section subscription-grid">
-          <div className="card card--form">
-            <div className="card-header">
-              <div>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  Current plan
-                </p>
-                <h3 style={{ margin: "6px 0" }}>
-                  {currentSku?.name || "No active subscription"}
-                </h3>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  {subscription
-                    ? `${subscription.status} · ${currentSku?.term || subscription.term}`
-                    : "Select a plan to unlock billing controls"}
-                </p>
-              </div>
-              <div className="page-section__actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => setChangePlanOpen(true)}
-                  disabled={loading || processingPayment || isReadOnly}
-                >
-                  Upgrade / Downgrade
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setCancelModalOpen(true)}
-                  disabled={!subscription || processingPayment || isReadOnly}
-                >
-                  Cancel plan
-                </button>
-              </div>
-            </div>
-            <div className="summary-stats">
-              <div className="summary-stat">
-                <p className="text-muted">Renewal / period end</p>
-                <strong>{formatDate(subscription?.current_period_end)}</strong>
-              </div>
-              <div className="summary-stat">
-                <p className="text-muted">Trial status</p>
-                <strong>
-                  {subscription?.status === "TRIALING"
-                    ? trialCountdownLabel || `${trialDaysRemaining ?? 0} days left`
-                    : showTrialCta
-                    ? "No trial in progress"
-                    : isExpired
-                    ? "Expired"
-                    : "Active"}
-                </strong>
-              </div>
-              <div className="summary-stat">
-                <p className="text-muted">Seat allocation</p>
-                <strong>
-                  {seatEntitlement?.is_unlimited
-                    ? `${seatUsage} used · unlimited`
-                    : seatEntitlement?.limit
-                    ? `${seatUsage}/${seatEntitlement.limit}`
-                    : `${seatUsage} seats tracked`}
-                </strong>
-              </div>
-              <div className="summary-stat">
-                <p className="text-muted">Default payment method</p>
-                <strong>
-                  {selectedPaymentMethod
-                    ? selectedPaymentMethod.display_name ||
-                      selectedPaymentMethod.external_ref
-                    : "Add a payment method"}
-                </strong>
-              </div>
-            </div>
-            {showTrialCta && (
-              <div className="info-banner info-banner--soft">
-                <div>
-                  <strong>Trial or reactivation</strong>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    Start a trial or repurchase to regain entitlements. Buttons lock
-                    during processing for idempotency.
-                  </p>
-                </div>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleStartTrial}
-                  disabled={!targetSku || processingPayment}
-                >
-                  Start trial
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 style={{ margin: 0 }}>Entitlements</h3>
-              <span className="badge">
-                {entitlements.length ? `${entitlements.length} keys` : "No entitlements"}
-              </span>
-            </div>
-            <div className="entitlement-grid">
-              {entitlements.length === 0 && (
-                <p className="text-muted">No entitlements are active for this tenant.</p>
-              )}
-              {entitlements.map((entitlement) => (
-                <div key={entitlement.key} className="entitlement-chip">
-                  <div>
-                    <strong>{entitlement.key}</strong>
-                    <p className="text-muted" style={{ margin: 0 }}>
-                      {entitlement.is_unlimited
-                        ? "Unlimited"
-                        : entitlement.limit ?? "Not set"}{" "}
-                      · {entitlement.license_term.toLowerCase()}
-                    </p>
-                  </div>
-                  <span
-                    className={
-                      entitlement.license_status === "ACTIVE"
-                        ? "badge badge--success"
-                        : "badge"
-                    }
-                  >
-                    {entitlement.license_status.toLowerCase()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {usageAlerts.length > 0 && (
-            <div className="card card--warning">
-              <div className="card-header">
-                <h3 style={{ margin: 0 }}>Usage alerts</h3>
-                <span className="badge">{usageAlerts.length} at risk</span>
-              </div>
-              <ul style={{ margin: "8px 0 0 16px" }}>
-                {usageAlerts.map((alert) => (
-                  <li key={alert.meter.id}>
-                    <strong>{alert.meter.meter_key}</strong>:{" "}
-                    {alert.overLimit
-                      ? "Over the included limit."
-                      : "Approaching the included limit."}{" "}
-                    {alert.limit !== null
-                      ? `(${alert.meter.used_units}/${alert.limit})`
-                      : `${alert.meter.used_units} used`}
-                  </li>
-                ))}
-              </ul>
-              <p className="text-muted" style={{ margin: "8px 0 0 16px" }}>
-                We bill overages per plan rules; see each meter below for handling.
-              </p>
-            </div>
-          )}
-
-          <div className="card">
-            <div className="card-header">
-              <h3 style={{ margin: 0 }}>Usage meters</h3>
-              <span className="badge">
-                {usageMeters.length ? `${usageMeters.length} meters` : "No meters yet"}
-              </span>
-            </div>
-            <div className="usage-grid">
-              {usageMeters.length === 0 && (
-                <p className="text-muted">No usage has been recorded yet.</p>
-              )}
-              {usageMeterRows.map(
-                ({ meter, limit, remaining, percent, overLimit, nearLimit, overageRule }) => (
-                <div key={meter.id} className="usage-meter">
-                  <div className="usage-meter__row">
-                    <div>
-                      <strong>{meter.meter_key}</strong>
-                      <p className="text-muted" style={{ margin: 0 }}>
-                        {limit !== null
-                          ? `${meter.used_units}/${limit} used`
-                          : `${meter.used_units} used`}
-                      </p>
-                    </div>
-                    <div className="page-section__actions">
-                      {overLimit && <span className="badge badge--error">Over limit</span>}
-                      {!overLimit && nearLimit && (
-                        <span className="badge badge--warning">Approaching</span>
-                      )}
-                      <span className="badge">
-                        {percent !== null ? `${percent}%` : "Uncapped"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="usage-meter__bar">
-                    <span
-                      style={{
-                        width: `${percent ?? 100}%`,
-                        backgroundColor: overLimit
-                          ? "#e55353"
-                          : nearLimit
-                          ? "#f59e0b"
-                          : undefined,
-                      }}
-                    />
-                  </div>
-                  {remaining !== null && (
-                    <p className="text-muted" style={{ margin: "4px 0 0" }}>
-                      {remaining} units remaining before renewal
-                    </p>
-                  )}
-                  <p className="text-muted" style={{ margin: "4px 0 0" }}>
-                    {overageRule}
-                  </p>
-                </div>
-              ))
-              }
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 style={{ margin: 0 }}>Payment methods</h3>
-              <button
-                className="btn btn-primary"
-                onClick={() => setPaymentModalOpen(true)}
-                disabled={processingPayment}
-              >
-                Add payment method
-              </button>
-            </div>
-            <div className="payment-methods">
-              {paymentMethods.length === 0 && (
-                <p className="text-muted">
-                  No payment methods on file. Add one to enable billing.
-                </p>
-              )}
-              {paymentMethods.map((method) => (
-                <div key={method.id} className="payment-method">
-                  <div>
-                    <strong>{method.display_name || method.external_ref}</strong>
-                    <p className="text-muted" style={{ margin: 0 }}>
-                      {method.provider} ·{" "}
-                      {method.card_last4 ? `•••• ${method.card_last4}` : "Tokenized"} · exp{" "}
-                      {method.card_exp_month || "—"}/{method.card_exp_year || "—"}
-                    </p>
-                  </div>
-                  <div className="page-section__actions">
-                    {method.is_default && <span className="badge">Default</span>}
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => setSelectedPaymentMethodId(method.id)}
-                      disabled={processingPayment}
-                    >
-                      Use for checkout
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => handleRemovePaymentMethod(method.id)}
-                      disabled={removingPaymentId === method.id || processingPayment}
-                    >
-                      {removingPaymentId === method.id ? "Removing..." : "Remove"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 style={{ margin: 0 }}>Invoices</h3>
-              <div className="page-section__actions">
-                <span className="badge">
-                  {invoices.length ? `${invoices.length} invoices` : "No invoices yet"}
-                </span>
-                <button className="btn btn-secondary" onClick={handleExportInvoices}>
-                  Export CSV
-                </button>
-                {currentUser?.is_superuser && (
-                  <button className="btn btn-secondary" onClick={handleExportAudit}>
-                    Export audit
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="table-responsive">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    <th>Total</th>
-                    <th>Issued</th>
-                    <th>Due</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="text-muted">
-                        No invoices generated yet.
-                      </td>
-                    </tr>
-                  )}
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id}>
-                      <td>{invoice.invoice_number || invoice.id}</td>
-                      <td>{invoice.description || "Invoice"}</td>
-                      <td>
-                        <span className={invoice.status === "PAID" ? "badge badge--success" : "badge"}>
-                          {invoice.status.toLowerCase()}
-                        </span>
-                      </td>
-                      <td>{formatMoney(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
-                      <td>{formatDate(invoice.issued_at)}</td>
-                      <td>{formatDate(invoice.due_at)}</td>
-                      <td>
-                        <div className="page-section__actions">
-                          <button className="btn btn-secondary" onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/invoices/${invoice.id}`)}>
-                            View
-                          </button>
-                          <button className="btn btn-secondary" onClick={() => handleInvoiceDownload(invoice, "pdf")}>
-                            PDF
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {isTenantAdmin && (
-            <div className="card card--form">
-              <div className="card-header">
-                <div>
-                  <h3 style={{ margin: 0 }}>Compliance integrations</h3>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    Prepare official integrations for KRA eTIMS and your payment service provider. This keeps billing and invoice records auditable and integration-ready.
-                  </p>
-                </div>
-              </div>
-              {integrationError && (
-                <div className="card card--error">
-                  <strong>Integration error:</strong> {integrationError}
-                </div>
-              )}
-              {[{ key: "KRA_ETIMS", label: "KRA eTIMS" }, { key: "PAYMENT_PSP", label: "Payment provider" }].map((entry) => {
-                const form = integrationForms[entry.key] || { enabled: false, baseUrl: "", secret: "", environment: "sandbox", invoicePrefix: "" };
-                const saving = integrationSaving === entry.key;
-                return (
-                  <div key={entry.key} className="card" style={{ marginTop: 12 }}>
-                    <div className="card-header">
-                      <h4 style={{ margin: 0 }}>{entry.label}</h4>
-                      <span className="badge">{form.enabled ? "Enabled" : "Disabled"}</span>
-                    </div>
-                    <div className="form-grid">
-                      <div className="form-row">
-                        <label>Base URL</label>
-                        <input type="text" value={form.baseUrl} onChange={(e) => setIntegrationField(entry.key, "baseUrl", e.target.value)} placeholder={entry.key === "KRA_ETIMS" ? "https://etims-sbx.kra.go.ke/..." : "https://api.provider.example/..."} />
-                      </div>
-                      <div className="form-row">
-                        <label>Signing secret</label>
-                        <input type="text" value={form.secret} onChange={(e) => setIntegrationField(entry.key, "secret", e.target.value)} placeholder="Secret / token reference" />
-                      </div>
-                      <div className="form-row">
-                        <label>Environment</label>
-                        <select value={form.environment} onChange={(e) => setIntegrationField(entry.key, "environment", e.target.value)}>
-                          <option value="sandbox">Sandbox</option>
-                          <option value="live">Live</option>
-                        </select>
-                      </div>
-                      <div className="form-row">
-                        <label>Invoice prefix</label>
-                        <input type="text" value={form.invoicePrefix} onChange={(e) => setIntegrationField(entry.key, "invoicePrefix", e.target.value)} placeholder="INV-SAF" />
-                      </div>
-                      <div className="form-row form-row--checkbox">
-                        <label>
-                          <input type="checkbox" checked={form.enabled} onChange={(e) => setIntegrationField(entry.key, "enabled", e.target.checked)} /> Enable integration
-                        </label>
-                      </div>
-                    </div>
-                    <div className="page-section__actions">
-                      <button className="btn btn-primary" disabled={saving} onClick={() => saveIntegration(entry.key, entry.label)}>
-                        {saving ? "Saving..." : "Save settings"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="table-responsive" style={{ marginTop: 16 }}>
-                <table className="table">
-                  <thead>
-                    <tr><th>Outbound event</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Created</th></tr>
-                  </thead>
+        <div className="admin-page__grid">
+          {canViewBillingDetails ? (
+            <Panel title={paymentRequired ? "Settle outstanding billing" : "Invoices & payments"} subtitle="Only verified provider settlement changes invoice or access state.">
+              {loading && <p className="admin-muted">Loading billing records…</p>}
+              {!loading && invoices.length === 0 && <p className="admin-muted">No invoices have been issued to this AMO.</p>}
+              {!loading && invoices.length > 0 && (
+                <Table>
+                  <thead><tr><th>Invoice</th><th>For</th><th>Status</th><th>Due</th><th>Total</th><th>Actions</th></tr></thead>
                   <tbody>
-                    {integrationOutbox.length === 0 && (
-                      <tr><td colSpan={5} className="text-muted">No outbound integration events recorded yet.</td></tr>
-                    )}
-                    {integrationOutbox.map((event) => (
-                      <tr key={event.id}>
-                        <td>{event.event_type}</td>
-                        <td>{event.status}</td>
-                        <td>{event.attempt_count}</td>
-                        <td>{event.last_error || "—"}</td>
-                        <td>{formatDate(event.created_at)}</td>
+                    {invoices.map((invoice) => (
+                      <tr key={invoice.id} style={access?.actionable_invoice_id === invoice.id ? { fontWeight: 700 } : undefined}>
+                        <td>{invoice.invoice_number || invoice.id.slice(-8).toUpperCase()}</td>
+                        <td>{invoiceLabel(invoice)}</td>
+                        <td>{invoice.status}</td>
+                        <td>{dateLabel(invoice.due_at)}</td>
+                        <td>{money(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
+                        <td><div className="page-section__actions">
+                          <Button type="button" size="sm" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/invoices/${invoice.id}`)}>View</Button>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => void downloadInvoice(invoice)}>PDF</Button>
+                          {String(invoice.status).toUpperCase() === "PENDING" && canPay && <Button type="button" size="sm" onClick={() => setPaymentInvoiceId(invoice.id)}>Pay</Button>}
+                        </div></td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
-            </div>
+                </Table>
+              )}
+
+              {paymentInvoiceId && pendingInvoices.some((row) => row.id === paymentInvoiceId) && (
+                <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border-color, #d8dde6)" }}>
+                  <h3 style={{ marginTop: 0 }}>Process payment</h3>
+                  <p className="admin-muted">Card/bank entry is handled on the payment provider's hosted checkout. AMO Portal never asks for or stores a card number, CVV/CVC, PIN, magnetic-stripe data or bank authentication secret.</p>
+                  <div className="form-row"><label htmlFor="billing-provider">Payment method</label><select id="billing-provider" value={provider} onChange={(event) => setProvider(event.target.value as PaymentProvider)}><option value="paystack">Paystack — hosted card/bank checkout</option><option value="mpesa_daraja">M-PESA — STK Push</option></select></div>
+                  {provider === "mpesa_daraja" && <div className="form-row"><label htmlFor="billing-phone">M-PESA mobile number</label><input id="billing-phone" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="07XX XXX XXX" inputMode="tel" autoComplete="tel" /></div>}
+                  <div className="form-actions"><Button type="button" disabled={paying} onClick={() => void payInvoice(paymentInvoiceId)}>{paying ? "Starting payment…" : `Continue with ${providerLabel(provider)}`}</Button><Button type="button" variant="ghost" disabled={paying} onClick={() => setPaymentInvoiceId(null)}>Cancel</Button></div>
+                </div>
+              )}
+            </Panel>
+          ) : (
+            <Panel title="Billing action is restricted" subtitle="Commercial records are protected by tenant billing roles.">
+              <p className="admin-muted">You can see whether the AMO account is locked, but invoice values, payment references, negotiated prices and recurring contract terms are visible only to the AMO Administrator, Finance Manager or Accounts Officer.</p>
+              {paymentRequired && <InlineAlert tone="warning" title="Contact an authorised billing user"><span>Ask your AMO Administrator, Finance Manager or Accounts Officer to settle the outstanding account. Your operational records remain preserved while access is restricted.</span></InlineAlert>}
+            </Panel>
           )}
 
-          {currentUser?.is_superuser && (
-            <div className="card card--form">
-              <div className="card-header">
-                <div>
-                  <h3 style={{ margin: 0 }}>Plan catalog</h3>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    Create a custom plan for bespoke agreements. Plans created here are
-                    immediately available for trials and purchases.
-                  </p>
+          <div className="admin-page__side">
+            <Panel title="Account status" compact>
+              <p><strong>{access?.access_state || "Unknown"}</strong></p>
+              <p className="admin-muted">{access?.lock_reason || "No account-level billing lock is active."}</p>
+              {returnTo && access?.has_access && <Button type="button" size="sm" onClick={() => navigate(returnTo, { replace: true })}>Return to workspace</Button>}
+            </Panel>
+            <Panel title="Payment data protection" compact>
+              <p className="admin-muted">Hosted Paystack/Stripe checkout and M-PESA STK keep sensitive authentication data away from AMO Portal. The portal retains only the invoice, opaque provider/transaction references and minimized settlement evidence required for reconciliation.</p>
+            </Panel>
+            <Panel title="Payment authority" compact>
+              <p className="admin-muted">{canSubscribe ? "You may accept or cancel recurring module contracts for this AMO." : canPay ? "You may settle existing invoices but cannot bind the AMO to a new recurring contract." : "Commercial details are restricted. Contact an AMO administrator or finance billing user."}</p>
+            </Panel>
+          </div>
+        </div>
+
+        {canViewBillingDetails && !isSuperuser && (
+          <>
+            <div style={{ height: 18 }} />
+            <Panel title="Subscribed modules" subtitle="Capabilities currently enabled for this AMO and their paid service periods.">
+              {activeModules.length === 0 ? <p className="admin-muted">No self-service module subscription is currently recorded.</p> : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12 }}>
+                  {activeModules.map((module) => (
+                    <div key={module.code} style={{ border: "1px solid var(--border-color, #d8dde6)", borderRadius: 10, padding: 14 }}>
+                      <strong>{module.name}</strong>
+                      <p className="admin-muted" style={{ margin: "6px 0" }}>{module.description}</p>
+                      <p style={{ margin: "6px 0" }}>{module.subscription_status || "ACTIVE"}{module.effective_to ? ` · through ${dateLabel(module.effective_to)}` : ""}</p>
+                      {module.bundle_parent && <p className="admin-muted">Included through {module.bundle_parent}</p>}
+                      {module.cancel_at_period_end && <p className="admin-muted">Cancellation scheduled; no further renewal will be generated.</p>}
+                      {canSubscribe && module.is_root_contract && module.auto_renew && !module.cancel_at_period_end && <Button type="button" size="sm" variant="secondary" onClick={() => { setCancelModule(module); setCancelReason(""); }}>Cancel at period end</Button>}
+                    </div>
+                  ))}
                 </div>
+              )}
+            </Panel>
+
+            <div style={{ height: 18 }} />
+            <Panel title="Add platform modules" subtitle="Choose only the capabilities your organisation needs. Technical dependencies and bundle contents are enforced before checkout.">
+              {!catalog && !loading && <p className="admin-muted">The module catalog is unavailable.</p>}
+              {catalog && availableModules.length === 0 && <p className="admin-muted">No additional customer-selectable modules are currently available.</p>}
+              {catalog && availableModules.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+                  {availableModules.map((module) => (
+                    <div key={module.code} style={{ border: "1px solid var(--border-color, #d8dde6)", borderRadius: 12, padding: 16, display: "grid", gap: 10 }}>
+                      <div><strong>{module.name}</strong><p className="admin-muted" style={{ margin: "6px 0 0" }}>{module.description}</p></div>
+                      <div className="admin-muted">{module.kind.replace(/_/g, " ")}{module.included_modules?.length ? ` · includes ${module.included_modules.join(", ")}` : ""}</div>
+                      {!!module.missing_dependencies?.length && <InlineAlert tone="warning" title="Requires other modules"><span>{module.missing_dependencies.join(", ")}</span></InlineAlert>}
+                      {module.tenant_offer_expired && <InlineAlert tone="warning" title="Commercial offer expired"><span>Ask your platform administrator to issue updated terms.</span></InlineAlert>}
+                      {module.prices?.length ? module.prices.map((price) => (
+                        <div key={`${module.code}-${price.id}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <span>{money(price.amount_cents + Math.round(price.amount_cents * (price.tax_rate_bps || 0) / 10000), price.currency)} · {price.billing_term.replace(/_/g, " ").toLowerCase()}</span>
+                          {canSubscribe && module.can_subscribe && <Button type="button" size="sm" onClick={() => { setCheckout({ module, price }); setTermsAccepted(false); }}>Select</Button>}
+                        </div>
+                      )) : <span className="admin-muted">No purchasable price is currently configured.</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          </>
+        )}
+
+        {checkout && catalog?.terms && canSubscribe && (
+          <>
+            <div style={{ height: 18 }} />
+            <Panel title={`Confirm ${checkout.module.name}`} subtitle="Review the full commercial terms before creating the invoice.">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 16 }}>
+                <div><span className="admin-muted">Subtotal</span><div><strong>{money(checkout.price.amount_cents, checkout.price.currency)}</strong></div></div>
+                <div><span className="admin-muted">Tax</span><div><strong>{money(selectedTax, checkout.price.currency)}</strong></div></div>
+                <div><span className="admin-muted">Total due now</span><div><strong>{money(selectedTotal, checkout.price.currency)}</strong></div></div>
+                <div><span className="admin-muted">Renews</span><div><strong>{checkout.price.billing_term.replace(/_/g, " ").toLowerCase()}</strong></div></div>
               </div>
-              {planError && (
-                <div className="card card--error">
-                  <strong>Plan error:</strong> {planError}
-                </div>
-              )}
-              {planSuccess && (
-                <div className="card card--success">
-                  <strong>Plan created:</strong> {planSuccess}
-                </div>
-              )}
-              <form className="form-grid" onSubmit={handleCreatePlan}>
-                <div className="form-row">
-                  <label htmlFor="planCode">Plan code</label>
-                  <input
-                    id="planCode"
-                    name="code"
-                    type="text"
-                    value={planForm.code}
-                    onChange={handlePlanChange}
-                    placeholder="CUSTOM-PLAN"
-                    required
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planName">Plan name</label>
-                  <input
-                    id="planName"
-                    name="name"
-                    type="text"
-                    value={planForm.name}
-                    onChange={handlePlanChange}
-                    placeholder="Custom enterprise plan"
-                    required
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planDescription">Description</label>
-                  <input
-                    id="planDescription"
-                    name="description"
-                    type="text"
-                    value={planForm.description}
-                    onChange={handlePlanChange}
-                    placeholder="Short description for admins"
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planTerm">Billing term</label>
-                  <select
-                    id="planTerm"
-                    name="term"
-                    value={planForm.term}
-                    onChange={handlePlanChange}
-                  >
-                    <option value="MONTHLY">Monthly</option>
-                    <option value="ANNUAL">Annual</option>
-                    <option value="BI_ANNUAL">Bi-annual</option>
-                  </select>
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planTrialDays">Trial days</label>
-                  <input
-                    id="planTrialDays"
-                    name="trialDays"
-                    type="number"
-                    min={0}
-                    value={planForm.trialDays}
-                    onChange={handlePlanChange}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planAmount">Amount</label>
-                  <input
-                    id="planAmount"
-                    name="amountDollars"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={planForm.amountDollars}
-                    onChange={handlePlanChange}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planMinUsage">Min usage limit</label>
-                  <input
-                    id="planMinUsage"
-                    name="minUsageLimit"
-                    type="number"
-                    min={0}
-                    value={planForm.minUsageLimit}
-                    onChange={handlePlanChange}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planMaxUsage">Max usage limit</label>
-                  <input
-                    id="planMaxUsage"
-                    name="maxUsageLimit"
-                    type="number"
-                    min={0}
-                    value={planForm.maxUsageLimit}
-                    onChange={handlePlanChange}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planCurrency">Currency</label>
-                  <input
-                    id="planCurrency"
-                    name="currency"
-                    type="text"
-                    value={planForm.currency}
-                    onChange={handlePlanChange}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="planActive">
-                    <input
-                      id="planActive"
-                      name="isActive"
-                      type="checkbox"
-                      checked={planForm.isActive}
-                      onChange={handlePlanChange}
-                    />
-                    <span style={{ marginLeft: 8 }}>Active plan</span>
-                  </label>
-                </div>
-                <div className="form-actions">
-                  <button className="btn btn-primary" type="submit" disabled={planSaving}>
-                    {planSaving ? "Creating..." : "Create plan"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-          {currentUser?.is_superuser && (
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <h3 style={{ margin: 0 }}>Plan management</h3>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    Edit or deactivate plans without leaving the billing screen.
-                  </p>
-                </div>
-              </div>
-              {catalog.length === 0 && (
-                <p className="text-muted">No plans available.</p>
-              )}
-              {catalog.length > 0 && (
-                <div className="table-responsive">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Code</th>
-                        <th>Name</th>
-                        <th>Term</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {catalog.map((sku) => (
-                        <tr key={sku.id}>
-                          <td>{sku.code}</td>
-                          <td>{sku.name}</td>
-                          <td>{sku.term}</td>
-                          <td>{sku.is_active ? "Active" : "Inactive"}</td>
-                          <td>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => handleSelectPlan(sku)}
-                            >
-                              Edit
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {planEdit && (
-                <form className="form-grid" onSubmit={handleUpdatePlan}>
-                  <div className="form-row">
-                    <label>Plan code</label>
-                    <input type="text" value={planEdit.code} disabled />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanName">Plan name</label>
-                    <input
-                      id="editPlanName"
-                      name="name"
-                      type="text"
-                      value={planEditForm.name}
-                      onChange={handlePlanEditChange}
-                      required
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanDescription">Description</label>
-                    <input
-                      id="editPlanDescription"
-                      name="description"
-                      type="text"
-                      value={planEditForm.description}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanTrial">Trial days</label>
-                    <input
-                      id="editPlanTrial"
-                      name="trialDays"
-                      type="number"
-                      min={0}
-                      value={planEditForm.trialDays}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanAmount">Amount</label>
-                    <input
-                      id="editPlanAmount"
-                      name="amountDollars"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={planEditForm.amountDollars}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanCurrency">Currency</label>
-                    <input
-                      id="editPlanCurrency"
-                      name="currency"
-                      type="text"
-                      value={planEditForm.currency}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanMinUsage">Min usage limit</label>
-                    <input
-                      id="editPlanMinUsage"
-                      name="minUsageLimit"
-                      type="number"
-                      min={0}
-                      value={planEditForm.minUsageLimit}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanMaxUsage">Max usage limit</label>
-                    <input
-                      id="editPlanMaxUsage"
-                      name="maxUsageLimit"
-                      type="number"
-                      min={0}
-                      value={planEditForm.maxUsageLimit}
-                      onChange={handlePlanEditChange}
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label htmlFor="editPlanActive">
-                      <input
-                        id="editPlanActive"
-                        name="isActive"
-                        type="checkbox"
-                        checked={planEditForm.isActive}
-                        onChange={handlePlanEditChange}
-                      />
-                      <span style={{ marginLeft: 8 }}>Active plan</span>
-                    </label>
-                  </div>
-                  <div className="form-actions">
-                    <button className="btn btn-primary" type="submit" disabled={planSaving}>
-                      {planSaving ? "Saving..." : "Save changes"}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          )}
-        </section>
+              <ul className="admin-muted" style={{ paddingLeft: 18 }}><li>{catalog.terms.recurring_billing}</li><li>{catalog.terms.price_disclosure}</li><li>{catalog.terms.non_payment}</li><li>{catalog.terms.cancellation}</li><li>{catalog.terms.records}</li></ul>
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "16px 0" }}><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I am authorised to bind this AMO and accept the displayed recurring price, tax and renewal interval under terms version <strong>{catalog.terms.version}</strong>.</span></label>
+              <div className="form-actions"><Button type="button" disabled={ordering || !termsAccepted} onClick={() => void orderModule()}>{ordering ? "Creating order…" : "Create invoice"}</Button><Button type="button" variant="ghost" disabled={ordering} onClick={() => { setCheckout(null); setTermsAccepted(false); }}>Cancel</Button></div>
+            </Panel>
+          </>
+        )}
+
+        {cancelModule && canSubscribe && (
+          <>
+            <div style={{ height: 18 }} />
+            <Panel title={`Cancel ${cancelModule.name} at period end`} subtitle="This stops future renewal; it does not erase records or cut off an already-paid period.">
+              <div className="form-row"><label htmlFor="module-cancel-reason">Reason</label><textarea id="module-cancel-reason" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Commercial reason for the audit trail" /></div>
+              <p className="admin-muted">Current paid access ends {dateLabel(cancelModule.effective_to)}. Included bundle capabilities must be cancelled through their parent contract.</p>
+              <div className="form-actions"><Button type="button" disabled={cancelling || !cancelReason.trim()} onClick={() => void confirmCancellation()}>{cancelling ? "Recording…" : "Confirm cancellation"}</Button><Button type="button" variant="ghost" disabled={cancelling} onClick={() => setCancelModule(null)}>Keep subscription</Button></div>
+            </Panel>
+          </>
+        )}
       </div>
-
-      {changePlanOpen && (
-        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
-          <div className="upsell-modal">
-            <div className="upsell-modal__header">
-              <div>
-                <p className="upsell-modal__eyebrow">Upgrade / Downgrade</p>
-                <h3 className="upsell-modal__title">Change your subscription</h3>
-                <p className="upsell-modal__subtitle">
-                  Buttons are locked while processing to keep payments idempotent. If SCA
-                  is required, you will see a 3DS prompt from your bank.
-                </p>
-              </div>
-              <button
-                className="upsell-modal__close"
-                onClick={() => setChangePlanOpen(false)}
-                aria-label="Close"
-                disabled={processingPayment}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-field">
-              <label htmlFor="plan-select">Select a plan or module</label>
-              <select
-                id="plan-select"
-                value={selectedSkuId}
-                onChange={(e) => setSelectedSkuId(e.target.value)}
-                disabled={processingPayment}
-              >
-                {catalog.map((sku) => (
-                  <option key={sku.id} value={sku.id}>
-                    {sku.name} · {formatMoney(sku.amount_cents, sku.currency)} ·{" "}
-                    {sku.term.toLowerCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="modal-field">
-              <label htmlFor="payment-select">Payment method</label>
-              <select
-                id="payment-select"
-                value={selectedPaymentMethod?.id || ""}
-                onChange={(e) => setSelectedPaymentMethodId(e.target.value)}
-                disabled={processingPayment || paymentMethods.length === 0}
-              >
-                {paymentMethods.map((pm) => (
-                  <option key={pm.id} value={pm.id}>
-                    {pm.display_name || pm.external_ref} ({pm.provider})
-                  </option>
-                ))}
-                {paymentMethods.length === 0 && (
-                  <option value="">No payment methods available</option>
-                )}
-              </select>
-            </div>
-            {prorationPreview && (
-              <div className="info-banner">
-                <div>
-                  <strong>{prorationPreview.label}</strong>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    Remaining time:{" "}
-                    {prorationPreview.remainingDays !== null
-                      ? `${prorationPreview.remainingDays} of ${prorationPreview.totalDays} days`
-                      : "N/A"}
-                  </p>
-                </div>
-                <div className="proration-values">
-                  <span>
-                    Credit: {formatMoney(prorationPreview.creditCents, prorationPreview.currency)}
-                  </span>
-                  <span>
-                    New charge:{" "}
-                    {formatMoney(prorationPreview.chargeCents, prorationPreview.currency)}
-                  </span>
-                </div>
-              </div>
-            )}
-            <div className="upsell-modal__actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setChangePlanOpen(false)}
-                disabled={processingPayment}
-              >
-                Close
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handlePurchase}
-                disabled={processingPayment || !targetSku}
-              >
-                {processingPayment ? "Processing…" : "Confirm change"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {cancelModalOpen && (
-        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
-          <div className="upsell-modal">
-            <div className="upsell-modal__header">
-              <div>
-                <p className="upsell-modal__eyebrow">Remove modules</p>
-                <h3 className="upsell-modal__title">Confirm cancellation</h3>
-                <p className="upsell-modal__subtitle">
-                  Access remains until the end of the current period. Billing actions are
-                  idempotent and buttons stay locked while we process the request.
-                </p>
-              </div>
-              <button
-                className="upsell-modal__close"
-                onClick={() => setCancelModalOpen(false)}
-                aria-label="Close"
-                disabled={processingPayment}
-              >
-                ×
-              </button>
-            </div>
-            <div className="upsell-modal__actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setCancelModalOpen(false)}
-                disabled={processingPayment}
-              >
-                Keep plan
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleCancelPlan}
-                disabled={processingPayment || !subscription}
-              >
-                {processingPayment ? "Processing…" : "Cancel at period end"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {paymentModalOpen && (
-        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
-          <div className="upsell-modal">
-            <div className="upsell-modal__header">
-              <div>
-                <p className="upsell-modal__eyebrow">Payment method</p>
-                <h3 className="upsell-modal__title">Add a payment method</h3>
-                <p className="upsell-modal__subtitle">
-                  We surface 3DS / SCA cues whenever the provider requires it and lock the
-                  submit button while tokenization runs.
-                </p>
-              </div>
-              <button
-                className="upsell-modal__close"
-                onClick={() => setPaymentModalOpen(false)}
-                aria-label="Close"
-                disabled={processingPayment}
-              >
-                ×
-              </button>
-            </div>
-            <form className="payment-form" onSubmit={handleAddPaymentMethod}>
-              <div className="modal-field">
-                <label htmlFor="provider">Provider</label>
-                <select
-                  id="provider"
-                  value={paymentForm.provider}
-                  onChange={(e) =>
-                    setPaymentForm((prev) => ({
-                      ...prev,
-                      provider: e.target.value as PaymentFormState["provider"],
-                    }))
-                  }
-                  disabled={processingPayment}
-                >
-                  <option value="STRIPE">Stripe (SCA)</option>
-                  <option value="PSP">PSP</option>
-                  <option value="OFFLINE">Offline</option>
-                  <option value="MANUAL">Manual</option>
-                </select>
-              </div>
-              <div className="modal-field">
-                <label htmlFor="displayName">Label</label>
-                <input
-                  id="displayName"
-                  type="text"
-                  value={paymentForm.displayName}
-                  onChange={(e) =>
-                    setPaymentForm((prev) => ({ ...prev, displayName: e.target.value }))
-                  }
-                  placeholder="Corporate card"
-                  disabled={processingPayment}
-                />
-              </div>
-              <div className="modal-field">
-                <label htmlFor="externalRef">Payment token / reference</label>
-                <input
-                  id="externalRef"
-                  type="text"
-                  value={paymentForm.externalRef}
-                  onChange={(e) =>
-                    setPaymentForm((prev) => ({ ...prev, externalRef: e.target.value }))
-                  }
-                  placeholder="psp_123 or vault token"
-                  disabled={processingPayment}
-                  required
-                />
-              </div>
-              <div className="modal-field modal-field--inline">
-                <div>
-                  <label htmlFor="last4">Card last 4</label>
-                  <input
-                    id="last4"
-                    type="text"
-                    value={paymentForm.cardLast4}
-                    onChange={(e) =>
-                      setPaymentForm((prev) => ({ ...prev, cardLast4: e.target.value }))
-                    }
-                    maxLength={4}
-                    placeholder="1234"
-                    disabled={processingPayment}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="expMonth">Exp. month</label>
-                  <input
-                    id="expMonth"
-                    type="text"
-                    value={paymentForm.expMonth}
-                    onChange={(e) =>
-                      setPaymentForm((prev) => ({ ...prev, expMonth: e.target.value }))
-                    }
-                    maxLength={2}
-                    placeholder="09"
-                    disabled={processingPayment}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="expYear">Exp. year</label>
-                  <input
-                    id="expYear"
-                    type="text"
-                    value={paymentForm.expYear}
-                    onChange={(e) =>
-                      setPaymentForm((prev) => ({ ...prev, expYear: e.target.value }))
-                    }
-                    maxLength={4}
-                    placeholder="2027"
-                    disabled={processingPayment}
-                  />
-                </div>
-              </div>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={paymentForm.isDefault}
-                  onChange={(e) =>
-                    setPaymentForm((prev) => ({
-                      ...prev,
-                      isDefault: e.target.checked,
-                    }))
-                  }
-                  disabled={processingPayment}
-                />
-                Set as default for renewals
-              </label>
-              <div className="upsell-modal__actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setPaymentModalOpen(false)}
-                  disabled={processingPayment}
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={processingPayment}
-                >
-                  {processingPayment ? "Saving…" : "Save payment method"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </DepartmentLayout>
   );
 };
 
-export default SubscriptionManagementPage;
+export default AdminBillingPage;
