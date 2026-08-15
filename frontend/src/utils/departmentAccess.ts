@@ -58,6 +58,11 @@ function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
       return "planning";
     case "PRODUCTION_ENGINEER":
       return "production";
+    case "BASE_MAINTENANCE_MANAGER":
+    case "LINE_MAINTENANCE_MANAGER":
+      return "maintenance";
+    case "WORKSHOP_MANAGER":
+      return "workshops";
     case "CERTIFYING_ENGINEER":
     case "CERTIFYING_TECHNICIAN":
     case "TECHNICIAN":

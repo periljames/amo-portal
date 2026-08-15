@@ -11,16 +11,17 @@ from sqlalchemy.orm import Session, selectinload
 from ..accounts import models as account_models
 from ..workforce import calculations as workforce_calculations
 from . import common, governance, models, schemas, validation
+from .aircraft_allocation import RosterAircraftAllocation
 
 
-_SHIFT_CODE_RE = re.compile(r"^[A-Z0-9]{2,8}$")
+_SHIFT_CODE_RE = re.compile(r"^[A-Z0-9]{1,2}$")
 
 
 def _normalize_shift_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if not _SHIFT_CODE_RE.fullmatch(code):
         raise ValueError(
-            "Roster code must be 2-8 uppercase letters/numbers. Two characters are recommended; punctuation such as H.A is not a canonical code."
+            "Shift code must be one or two uppercase letters/numbers (for example D, N1 or OF)."
         )
     return code
 
@@ -42,6 +43,31 @@ def _require_unique_shift_code(
         raise ValueError(f"Roster code {code} already exists for this tenant")
 
 
+def _resolve_shift_departments(
+    db: Session,
+    *,
+    amo_id: str,
+    department_ids: Sequence[str],
+) -> list[account_models.Department]:
+    normalized = list(dict.fromkeys(str(value).strip() for value in department_ids if str(value).strip()))
+    if not normalized:
+        return []
+    rows = (
+        db.query(account_models.Department)
+        .filter(
+            account_models.Department.amo_id == amo_id,
+            account_models.Department.id.in_(normalized),
+        )
+        .order_by(account_models.Department.sort_order.asc(), account_models.Department.code.asc())
+        .all()
+    )
+    found = {str(row.id) for row in rows}
+    missing = [value for value in normalized if value not in found]
+    if missing:
+        raise ValueError("One or more selected departments do not belong to this AMO")
+    return rows
+
+
 def seed_default_shift_templates(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> None:
     """Deprecated compatibility hook.
 
@@ -54,7 +80,9 @@ def seed_default_shift_templates(db: Session, *, amo_id: str, actor_user_id: Opt
 
 
 def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.ShiftTemplate]:
-    query = db.query(models.ShiftTemplate).filter(models.ShiftTemplate.amo_id == amo_id)
+    query = db.query(models.ShiftTemplate).options(
+        selectinload(models.ShiftTemplate.departments),
+    ).filter(models.ShiftTemplate.amo_id == amo_id)
     if not include_inactive:
         query = query.filter(models.ShiftTemplate.is_active.is_(True))
     return query.order_by(models.ShiftTemplate.display_order.asc(), models.ShiftTemplate.code.asc(), models.ShiftTemplate.id.asc()).all()
@@ -62,6 +90,7 @@ def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = F
 
 def create_shift_template(db: Session, *, amo_id: str, actor_user_id: str, payload: schemas.ShiftTemplateCreate) -> models.ShiftTemplate:
     values = common.dump(payload)
+    department_ids = values.pop("department_ids", [])
     values["code"] = _normalize_shift_code(values["code"])
     _require_unique_shift_code(db, amo_id=amo_id, code=values["code"])
     row = models.ShiftTemplate(
@@ -71,15 +100,27 @@ def create_shift_template(db: Session, *, amo_id: str, actor_user_id: str, paylo
         updated_by_user_id=actor_user_id,
     )
     row.label = row.label.strip()
+    row.departments = _resolve_shift_departments(
+        db,
+        amo_id=amo_id,
+        department_ids=department_ids,
+    )
     db.add(row)
     db.flush()
-    common.audit(db, amo_id=amo_id, actor_user_id=actor_user_id, entity_type="ShiftTemplate", entity_id=row.id, action="create", after={"code": row.code, "label": row.label, "kind": common.enum_value(row.kind)})
+    common.audit(db, amo_id=amo_id, actor_user_id=actor_user_id, entity_type="ShiftTemplate", entity_id=row.id, action="create", after={"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "department_ids": row.department_ids})
     return row
 
 
 def update_shift_template(db: Session, *, row: models.ShiftTemplate, actor_user_id: str, payload: schemas.ShiftTemplateUpdate) -> models.ShiftTemplate:
-    before = {"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "is_active": row.is_active}
+    before = {"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "is_active": row.is_active, "department_ids": row.department_ids}
     for key, value in common.dump(payload, exclude_unset=True).items():
+        if key == "department_ids":
+            row.departments = _resolve_shift_departments(
+                db,
+                amo_id=row.amo_id,
+                department_ids=value or [],
+            )
+            continue
         if key == "code" and value:
             value = _normalize_shift_code(value)
             _require_unique_shift_code(
@@ -94,7 +135,7 @@ def update_shift_template(db: Session, *, row: models.ShiftTemplate, actor_user_
     row.updated_by_user_id = actor_user_id
     db.add(row)
     db.flush()
-    common.audit(db, amo_id=row.amo_id, actor_user_id=actor_user_id, entity_type="ShiftTemplate", entity_id=row.id, action="update", before=before, after={"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "is_active": row.is_active})
+    common.audit(db, amo_id=row.amo_id, actor_user_id=actor_user_id, entity_type="ShiftTemplate", entity_id=row.id, action="update", before=before, after={"code": row.code, "label": row.label, "kind": common.enum_value(row.kind), "is_active": row.is_active, "department_ids": row.department_ids})
     return row
 
 
@@ -123,6 +164,18 @@ def create_period(db: Session, *, amo_id: str, actor_user_id: str, payload: sche
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
     timezone_name = payload.timezone_name or getattr(amo, "time_zone", None) or "UTC"
     workforce_calculations.get_zone(timezone_name)
+    overlap = db.query(models.RosterPeriod).filter(
+        models.RosterPeriod.amo_id == amo_id,
+        models.RosterPeriod.status != models.RosterPeriodStatus.ARCHIVED,
+        models.RosterPeriod.starts_on <= payload.ends_on,
+        models.RosterPeriod.ends_on >= payload.starts_on,
+    ).order_by(models.RosterPeriod.starts_on.asc(), models.RosterPeriod.id.asc()).first()
+    if overlap:
+        raise ValueError(
+            f"Roster period {payload.starts_on.isoformat()} to {payload.ends_on.isoformat()} "
+            f"overlaps {overlap.period_code} ({overlap.starts_on.isoformat()} to {overlap.ends_on.isoformat()}). "
+            "Archive or adjust the existing period before creating another."
+        )
     row = models.RosterPeriod(
         amo_id=amo_id,
         period_code=payload.period_code.strip().upper(),
@@ -157,8 +210,9 @@ def _next_version_number(db: Session, *, period_id: str) -> int:
 
 
 def _copy_assignments(db: Session, *, source: models.RosterVersion, target: models.RosterVersion, actor_user_id: str) -> None:
+    assignment_map: dict[str, models.RosterAssignment] = {}
     for item in sorted([row for row in source.assignments or [] if row.deleted_at is None], key=lambda row: (row.starts_at, row.user_id, row.id)):
-        db.add(models.RosterAssignment(
+        copied = models.RosterAssignment(
             amo_id=target.amo_id,
             version_id=target.id,
             user_id=item.user_id,
@@ -180,7 +234,39 @@ def _copy_assignments(db: Session, *, source: models.RosterVersion, target: mode
             state_revision=1,
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
-        ))
+        )
+        db.add(copied)
+        assignment_map[item.id] = copied
+    db.flush()
+    for item in sorted([row for row in source.assignments or [] if row.id in assignment_map], key=lambda row: row.id):
+        copied = assignment_map[item.id]
+        for link in item.task_links or []:
+            db.add(models.RosterTaskAssignmentLink(
+                amo_id=target.amo_id,
+                roster_assignment_id=copied.id,
+                task_assignment_id=link.task_assignment_id,
+                allocated_start=link.allocated_start,
+                allocated_end=link.allocated_end,
+                allocated_hours=link.allocated_hours,
+                created_by_user_id=actor_user_id,
+            ))
+    if assignment_map:
+        source_allocations = db.query(RosterAircraftAllocation).filter(
+            RosterAircraftAllocation.amo_id == source.amo_id,
+            RosterAircraftAllocation.roster_assignment_id.in_(list(assignment_map)),
+        ).all()
+        for allocation in source_allocations:
+            copied = assignment_map[allocation.roster_assignment_id]
+            db.add(RosterAircraftAllocation(
+                amo_id=target.amo_id,
+                roster_assignment_id=copied.id,
+                aircraft_serial_number=allocation.aircraft_serial_number,
+                starts_at=allocation.starts_at,
+                ends_at=allocation.ends_at,
+                allocation_type=allocation.allocation_type,
+                notes=allocation.notes,
+                created_by_user_id=actor_user_id,
+            ))
     db.flush()
 
 
@@ -309,6 +395,39 @@ def create_demand_requirement(db: Session, *, amo_id: str, actor_user_id: str, p
     db.add(row)
     db.flush()
     common.audit(db, amo_id=amo_id, actor_user_id=actor_user_id, entity_type="RosterDemandRequirement", entity_id=row.id, action="create", after={"requirement_code": row.requirement_code, "starts_at": row.starts_at.isoformat(), "ends_at": row.ends_at.isoformat(), "required_headcount": row.required_headcount, "required_minutes": row.required_minutes})
+    return row
+
+
+def retire_demand_requirement(
+    db: Session,
+    *,
+    row: models.RosterDemandRequirement,
+    actor_user_id: str,
+    reason: str,
+) -> models.RosterDemandRequirement:
+    before = {
+        "requirement_code": row.requirement_code,
+        "is_active": row.is_active,
+        "starts_at": row.starts_at.isoformat(),
+        "ends_at": row.ends_at.isoformat(),
+    }
+    row.is_active = False
+    row.updated_by_user_id = actor_user_id
+    metadata = dict(row.metadata_json or {})
+    metadata["retirement_reason"] = reason.strip()
+    row.metadata_json = metadata
+    db.add(row)
+    db.flush()
+    common.audit(
+        db,
+        amo_id=row.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="RosterDemandRequirement",
+        entity_id=row.id,
+        action="retire",
+        before=before,
+        after={"requirement_code": row.requirement_code, "is_active": False, "reason": reason.strip()},
+    )
     return row
 
 

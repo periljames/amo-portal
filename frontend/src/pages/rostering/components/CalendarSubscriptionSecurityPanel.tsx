@@ -6,12 +6,12 @@ import {
   createCalendarSubscription,
   getCalendarSubscriptionStatus,
   revokeCalendarSubscription,
+  ROSTER_CALENDAR_LINK_QUERY_KEY,
+  ROSTER_CALENDAR_STATUS_QUERY_KEY,
   rotateCalendarSubscription,
   type CalendarSubscriptionLink,
 } from "../../../services/rosteringControl";
 import { errorMessage, formatDateTime } from "../rosterUi";
-
-const CALENDAR_KEY = ["rostering", "self-service", "calendar-subscription"] as const;
 
 export function CalendarSubscriptionSecurityPanel() {
   const queryClient = useQueryClient();
@@ -19,7 +19,7 @@ export function CalendarSubscriptionSecurityPanel() {
   const [error, setError] = useState<string | null>(null);
   const [latestLink, setLatestLink] = useState<CalendarSubscriptionLink | null>(null);
   const query = useQuery({
-    queryKey: CALENDAR_KEY,
+    queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY,
     queryFn: getCalendarSubscriptionStatus,
     staleTime: 60_000,
   });
@@ -31,7 +31,9 @@ export function CalendarSubscriptionSecurityPanel() {
     try {
       const link = await createCalendarSubscription();
       setLatestLink(link);
-      await queryClient.invalidateQueries({ queryKey: CALENDAR_KEY });
+      queryClient.setQueryData(ROSTER_CALENDAR_LINK_QUERY_KEY, link);
+      queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, link);
+      await queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -46,7 +48,9 @@ export function CalendarSubscriptionSecurityPanel() {
     try {
       const link = await rotateCalendarSubscription();
       setLatestLink(link);
-      await queryClient.invalidateQueries({ queryKey: CALENDAR_KEY });
+      queryClient.setQueryData(ROSTER_CALENDAR_LINK_QUERY_KEY, link);
+      queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, link);
+      await queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -61,7 +65,15 @@ export function CalendarSubscriptionSecurityPanel() {
     try {
       await revokeCalendarSubscription();
       setLatestLink(null);
-      await queryClient.invalidateQueries({ queryKey: CALENDAR_KEY });
+      await queryClient.cancelQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
+      queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, {
+        ...query.data,
+        active: false,
+        refresh_interval_minutes: query.data?.refresh_interval_minutes ?? 60,
+        includes: query.data?.includes ?? [],
+      });
+      queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
+      await queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {

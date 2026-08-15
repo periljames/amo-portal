@@ -52,10 +52,7 @@ import {
 } from "../../app/portalRouteManifest";
 import {
   endSession,
-  extendSession,
   getCachedUser,
-  getTokenSecondsRemaining,
-  markSessionActivity,
 } from "../../services/auth";
 import {
   activateAdminProfile,
@@ -92,9 +89,6 @@ type NavBranchProps = {
   onNavigate: (path: string) => void;
 };
 
-const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const IDLE_WARNING_MS = 60 * 1000;
-const IDLE_RESET_THROTTLE_MS = 1_000;
 const SIDEBAR_MIN = 236;
 const SIDEBAR_MAX = 420;
 const SIDEBAR_DEFAULT = 284;
@@ -336,16 +330,8 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const [adminProfile, setAdminProfile] = useState<AdminProfileState | null>(() => readCachedAdminProfileState(amoCode));
   const [adminProfileBusy, setAdminProfileBusy] = useState(false);
   const [adminProfileError, setAdminProfileError] = useState<string | null>(null);
-  const [idleWarning, setIdleWarning] = useState(false);
-  const [idleSeconds, setIdleSeconds] = useState(Math.ceil(IDLE_WARNING_MS / 1000));
-
   const profileRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
-  const lastActivityRef = useRef(Date.now());
-  const idleWarningRef = useRef(false);
-  const warningTimerRef = useRef<number | null>(null);
-  const logoutTimerRef = useRef<number | null>(null);
-  const countdownRef = useRef<number | null>(null);
 
   const navigation = useMemo(
     () => buildPortalNavigation({
@@ -495,70 +481,6 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     if (activeIds.size) setExpanded((previous) => new Set([...previous, ...activeIds]));
   }, [location.pathname, navigation]);
 
-  const clearIdleTimers = useCallback(() => {
-    if (warningTimerRef.current) window.clearTimeout(warningTimerRef.current);
-    if (logoutTimerRef.current) window.clearTimeout(logoutTimerRef.current);
-    if (countdownRef.current) window.clearInterval(countdownRef.current);
-    warningTimerRef.current = null;
-    logoutTimerRef.current = null;
-    countdownRef.current = null;
-  }, []);
-
-  const scheduleIdleTimers = useCallback(() => {
-    clearIdleTimers();
-    warningTimerRef.current = window.setTimeout(() => {
-      idleWarningRef.current = true;
-      setIdleWarning(true);
-      setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
-      countdownRef.current = window.setInterval(() => setIdleSeconds((value) => Math.max(0, value - 1)), 1000);
-    }, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
-    logoutTimerRef.current = window.setTimeout(() => {
-      idleWarningRef.current = false;
-      endSession("idle");
-      navigate(`/maintenance/${encodeURIComponent(amoCode)}/login`, { replace: true });
-    }, IDLE_TIMEOUT_MS);
-  }, [amoCode, clearIdleTimers, navigate]);
-
-  useEffect(() => {
-    scheduleIdleTimers();
-    let lastBroadcast = 0;
-    let lastExtend = 0;
-    let lastTimerReset = Date.now();
-    const immediateResetEvents = new Set(["pointerdown", "keydown", "touchstart", "focus"]);
-
-    const handleActivity = (event: Event) => {
-      const now = Date.now();
-      lastActivityRef.current = now;
-
-      if (idleWarningRef.current) {
-        idleWarningRef.current = false;
-        setIdleWarning(false);
-        setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
-      }
-
-      if (immediateResetEvents.has(event.type) || now - lastTimerReset >= IDLE_RESET_THROTTLE_MS) {
-        lastTimerReset = now;
-        scheduleIdleTimers();
-      }
-
-      if (now - lastBroadcast > 10_000) {
-        lastBroadcast = now;
-        markSessionActivity(event.type);
-      }
-      const remaining = getTokenSecondsRemaining();
-      if (remaining !== null && remaining <= 300 && now - lastExtend > 60_000) {
-        lastExtend = now;
-        void extendSession(`shell:${event.type}`).catch(() => undefined);
-      }
-    };
-    const events = ["pointerdown", "keydown", "wheel", "touchstart", "focus"];
-    events.forEach((name) => window.addEventListener(name, handleActivity, { passive: true, capture: true }));
-    return () => {
-      events.forEach((name) => window.removeEventListener(name, handleActivity, true));
-      clearIdleTimers();
-    };
-  }, [clearIdleTimers, scheduleIdleTimers]);
-
   const navigateFromDrawer = useCallback((path: string) => {
     navigate(path);
     setSearchQuery("");
@@ -616,11 +538,8 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   }, [adminProfile, adminProfileBusy, amoCode, homePath, navigate]);
 
   const handleSignOut = useCallback(() => {
-    idleWarningRef.current = false;
-    clearIdleTimers();
     endSession("manual");
-    navigate(`/maintenance/${encodeURIComponent(amoCode)}/login`, { replace: true });
-  }, [amoCode, clearIdleTimers, navigate]);
+  }, []);
 
   const drawerVisible = pinned || drawerOpen;
   const shellStyle = { "--tenant-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
@@ -783,25 +702,6 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               </main>
             </div>
 
-            {idleWarning ? (
-              <div className="tenant-shell__session-overlay" role="alertdialog" aria-modal="true" aria-labelledby="idle-title" aria-describedby="idle-description">
-                <div className="tenant-shell__session-card">
-                  <h2 id="idle-title">Inactivity warning</h2>
-                  <p id="idle-description">Your session will end in <strong>{idleSeconds}s</strong>.</p>
-                  <div>
-                    <button type="button" className="btn btn-secondary" onClick={handleSignOut}>Sign out</button>
-                    <button type="button" className="btn btn-primary" autoFocus onClick={() => {
-                      lastActivityRef.current = Date.now();
-                      idleWarningRef.current = false;
-                      setIdleWarning(false);
-                      setIdleSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
-                      void extendSession("idle-warning").catch(() => undefined);
-                      scheduleIdleTimers();
-                    }}>Stay signed in</button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </div>
         )}
       </BrandContext.Consumer>

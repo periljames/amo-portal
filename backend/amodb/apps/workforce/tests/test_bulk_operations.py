@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from uuid import uuid4
 
 import pytest
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
-from amodb.apps.workforce import bulk_models, bulk_schemas, bulk_service, bulk_worker, hr_schemas, models
+from amodb.apps.workforce import bulk_models, bulk_patterns, bulk_schemas, bulk_service, bulk_worker, hr_schemas, models
 
 
 def _id() -> str:
@@ -195,6 +195,95 @@ def test_contract_bulk_operation_is_idempotent_chunked_and_auditable(monkeypatch
         assert operation.failed_count == 0
         assert db.query(models.EmploymentContract).filter(
             models.EmploymentContract.amo_id == seeded["amo_id"]
+        ).count() == 3
+    finally:
+        _close_postgres_session(engine, connection, transaction, db)
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL", "").startswith("postgresql"),
+    reason="PostgreSQL integration database is not configured",
+)
+def test_work_pattern_batch_replaces_from_effective_date_and_preserves_history(monkeypatch) -> None:
+    engine, connection, transaction, db = _postgres_session()
+    try:
+        seeded = _seed(db)
+        monkeypatch.setattr(
+            bulk_worker,
+            "WriteSessionLocal",
+            sessionmaker(bind=connection, autoflush=False, expire_on_commit=False),
+        )
+        monkeypatch.setattr(bulk_service.audit_services, "log_event", lambda *args, **kwargs: None)
+        monkeypatch.setattr(bulk_worker.audit_services, "log_event", lambda *args, **kwargs: None)
+        monkeypatch.setattr(bulk_patterns.audit_services, "log_event", lambda *args, **kwargs: None)
+
+        old_pattern = models.WorkPattern(
+            amo_id=seeded["amo_id"], code="OLD", name="Old rotation", cycle_length_days=7,
+            timezone_name="UTC", applicability_json={}, is_active=True,
+        )
+        new_pattern = models.WorkPattern(
+            amo_id=seeded["amo_id"], code="NEW", name="New rotation", cycle_length_days=7,
+            timezone_name="UTC", applicability_json={}, is_active=True,
+        )
+        db.add_all([old_pattern, new_pattern])
+        db.flush()
+        effective_from = date.today()
+        db.add(models.EmployeeWorkPatternAssignment(
+            amo_id=seeded["amo_id"], user_id=seeded["people"][0].id,
+            work_pattern_id=old_pattern.id, effective_from=effective_from - timedelta(days=30),
+            effective_to=None, cycle_anchor_date=effective_from - timedelta(days=30),
+            created_by_user_id=seeded["admin"].id,
+        ))
+        db.flush()
+
+        selection = hr_schemas.HrPeopleSelection(
+            mode="EXPLICIT",
+            user_ids=[str(user.id) for user in seeded["people"]],
+        )
+        options = bulk_schemas.WorkPatternBatchOptions(
+            work_pattern_id=str(new_pattern.id), effective_from=effective_from,
+            cycle_anchor_date=effective_from, conflict_strategy="REPLACE_OVERLAPS",
+            reason="Move department to new rotation",
+        )
+        preview = bulk_service.preview_work_pattern_batch(
+            db,
+            amo_id=str(seeded["amo_id"]),
+            actor=seeded["admin"],
+            payload=bulk_schemas.WorkPatternBatchPreviewRequest(selection=selection, options=options),
+        )
+        assert preview.matched_count == 3
+        assert preview.assign_count == 2
+        assert preview.replace_count == 1
+        assert preview.blocked_count == 0
+
+        operation, created = bulk_service.submit_work_pattern_batch(
+            db,
+            amo_id=str(seeded["amo_id"]),
+            actor=seeded["admin"],
+            idempotency_key="pattern-bulk-idempotency-1",
+            payload=bulk_schemas.WorkPatternBatchSubmitRequest(
+                selection=selection, options=options,
+                expected_match_count=preview.matched_count,
+                expected_selection_token=preview.selection_token,
+            ),
+        )
+        assert created is True
+        bulk_service.process_operation(operation.id)
+        db.expire_all()
+
+        completed = bulk_service.read_operation(
+            db, amo_id=str(seeded["amo_id"]), operation_id=operation.id,
+        )
+        assert completed.status == "COMPLETED"
+        assert completed.succeeded_count == 3
+        old_assignment = db.query(models.EmployeeWorkPatternAssignment).filter(
+            models.EmployeeWorkPatternAssignment.user_id == seeded["people"][0].id,
+            models.EmployeeWorkPatternAssignment.work_pattern_id == old_pattern.id,
+        ).one()
+        assert old_assignment.effective_to == effective_from - timedelta(days=1)
+        assert db.query(models.EmployeeWorkPatternAssignment).filter(
+            models.EmployeeWorkPatternAssignment.work_pattern_id == new_pattern.id,
+            models.EmployeeWorkPatternAssignment.effective_from == effective_from,
         ).count() == 3
     finally:
         _close_postgres_session(engine, connection, transaction, db)

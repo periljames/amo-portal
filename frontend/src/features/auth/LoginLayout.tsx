@@ -31,6 +31,7 @@ type LoginLayoutProps = {
   showPassword: boolean;
   showPasswordField: boolean;
   errorMsg: string | null;
+  noticeMsg?: string | null;
   loading: boolean;
   loadingContext: boolean;
   socialAvailability: Record<SocialProvider, boolean>;
@@ -161,6 +162,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   showPassword,
   showPasswordField,
   errorMsg,
+  noticeMsg,
   loading,
   loadingContext,
   socialAvailability,
@@ -198,6 +200,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
               <p className={styles.subtitle}>{subtitle}</p>
 
               <form className={styles.form} onSubmit={onSubmit} noValidate>
+                {noticeMsg ? <p className={styles.authNotice} role="status">{noticeMsg}</p> : null}
                 {errorMsg ? <p className={styles.error}>{errorMsg}</p> : null}
 
                 <label htmlFor="identifier" className={styles.label}>Email</label>

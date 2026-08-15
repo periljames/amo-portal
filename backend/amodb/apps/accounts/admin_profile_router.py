@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
-from . import models
+from . import models, role_registry
 
 
 # Included by the canonical /accounts/admin router. The resulting API surface is
@@ -55,7 +55,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 def _normalise_role(user: models.User) -> str:
     value = getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))
-    return str(value or "").upper()
+    return role_registry.canonical_role_key(value) or str(value or "").upper()
 
 
 def _is_implicit_admin(user: models.User) -> bool:
@@ -69,9 +69,10 @@ def _is_management_approver(user: models.User) -> bool:
         return True
     role = _normalise_role(user)
     title = str(getattr(user, "position_title", "") or "").lower()
+    inferred = role_registry.infer_regulated_role(title)
     return (
-        role in {"QUALITY_MANAGER", "SAFETY_MANAGER"}
-        or "accountable manager" in title
+        role in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER", "SAFETY_MANAGER"}
+        or inferred == models.AccountRole.ACCOUNTABLE_EXECUTIVE
         or "human resources manager" in title
         or title.strip() == "hr manager"
     )

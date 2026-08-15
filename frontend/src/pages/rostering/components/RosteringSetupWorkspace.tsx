@@ -10,7 +10,6 @@ import {
   CalendarPlus,
   CheckCircle2,
   History,
-  Layers3,
   Play,
   Plus,
   RefreshCw,
@@ -18,16 +17,16 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
-  UsersRound,
+  Trash2,
   X,
 } from "lucide-react";
 
 import {
-  createShiftTemplate,
+  createRosterDemandRequirement,
+  listRosterDemandRequirements,
   listRosterPeriods,
   listRosterRules,
-  listShiftTemplates,
-  updateShiftTemplate,
+  retireRosterDemandRequirement,
 } from "../../../services/rostering";
 import {
   getRosterSetupReadiness,
@@ -36,22 +35,18 @@ import {
   runRosterAutomation,
   updateRosterAutomationPolicy,
 } from "../../../services/rosteringAutomation";
-import {
-  createWorkPattern,
-  getCurrentWorkforcePermissions,
-  listWorkPatternAssignments,
-  listWorkPatterns,
-} from "../../../services/workforce";
 import { listAllRosterPeople } from "../../../services/rosterPeople";
-import type { ShiftTemplateKind, ShiftTemplateRead } from "../../../types/rostering";
 import type {
   RosterAutomationPreview,
   RosterAutomationFrequency,
   RosterGenerationPolicy,
 } from "../../../types/rosteringAutomation";
-import type { PatternDayStatus, WorkPatternDayInput } from "../../../types/workforce";
 import { errorMessage, newIdempotencyKey } from "../rosterUi";
+import { zonedWallTimeToIso } from "../timezone";
+import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
+import { RosterPeriodQuickActions } from "./RosterPeriodQuickActions";
+import { WorkPatternStudio } from "./WorkPatternStudio";
 
 const RosterGovernancePanel = lazy(() =>
   import("./RosterGovernancePanel").then((module) => ({ default: module.RosterGovernancePanel })),
@@ -59,20 +54,29 @@ const RosterGovernancePanel = lazy(() =>
 const RosterRuleQuickEditor = lazy(() =>
   import("./RosterRuleQuickEditor").then((module) => ({ default: module.RosterRuleQuickEditor })),
 );
+const ControlledRosterSettingsPanel = lazy(() =>
+  import("./ControlledRosterSettingsPanel").then((module) => ({ default: module.ControlledRosterSettingsPanel })),
+);
+const RosterCodeRegistryPanel = lazy(() =>
+  import("./RosterCodeRegistryPanel").then((module) => ({ default: module.RosterCodeRegistryPanel })),
+);
 
-type Section = "overview" | "calendar" | "automation" | "shifts" | "patterns" | "policy" | "advanced";
+type Section = "start" | "patterns" | "control" | "advanced";
+type ControlView = "coverage" | "governance";
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
-  { id: "overview", label: "Setup overview" },
-  { id: "calendar", label: "Planning calendar" },
-  { id: "automation", label: "Automation" },
-  { id: "shifts", label: "Shift library" },
-  { id: "patterns", label: "Work patterns" },
-  { id: "policy", label: "Compliance & approval" },
-  { id: "advanced", label: "History & diagnostics" },
+  { id: "start", label: "Get started" },
+  { id: "patterns", label: "Shifts & patterns" },
+  { id: "control", label: "Coverage & approvals" },
+  { id: "advanced", label: "Advanced" },
 ];
 
-const SHIFT_KINDS: ShiftTemplateKind[] = ["DAY", "NIGHT", "STANDBY", "TRAINING", "OFF", "LEAVE", "OTHER"];
+function normalizeSection(value: string | null): Section {
+  if (value === "shifts" || value === "patterns") return "patterns";
+  if (value === "coverage" || value === "policy" || value === "control") return "control";
+  if (value === "automation" || value === "advanced") return "advanced";
+  return "start";
+}
 
 function formatDate(value?: string | null): string {
   if (!value) return "Not scheduled";
@@ -91,8 +95,9 @@ export function RosteringSetupWorkspace() {
   const { amoCode = "" } = useParams();
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
   const queryClient = useQueryClient();
-  const initial = new URLSearchParams(window.location.search).get("section") as Section | null;
-  const [section, setSection] = useState<Section>(SECTIONS.some((item) => item.id === initial) ? initial! : "overview");
+  const initial = new URLSearchParams(window.location.search).get("section");
+  const [section, setSection] = useState<Section>(() => normalizeSection(initial));
+  const [controlView, setControlView] = useState<ControlView>(initial === "policy" ? "governance" : "coverage");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -101,33 +106,11 @@ export function RosteringSetupWorkspace() {
     queryFn: getRosterSetupReadiness,
     staleTime: 60_000,
   });
-  const permissionsQuery = useQuery({
-    queryKey: ["rostering", "settings", "permissions"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 15 * 60_000,
-  });
+  const permissionsQuery = useWorkforcePermissions();
   const periodsQuery = useQuery({
     queryKey: ["rostering", "settings", "periods"],
     queryFn: () => listRosterPeriods(),
-    enabled: section === "calendar" || section === "policy",
-    staleTime: 60_000,
-  });
-  const shiftsQuery = useQuery({
-    queryKey: ["rostering", "settings", "shifts"],
-    queryFn: () => listShiftTemplates(true),
-    enabled: section === "shifts" || section === "patterns",
-    staleTime: 15 * 60_000,
-  });
-  const patternsQuery = useQuery({
-    queryKey: ["rostering", "settings", "patterns"],
-    queryFn: () => listWorkPatterns(true),
-    enabled: section === "patterns",
-    staleTime: 5 * 60_000,
-  });
-  const patternAssignmentsQuery = useQuery({
-    queryKey: ["rostering", "settings", "pattern-assignments"],
-    queryFn: () => listWorkPatternAssignments(),
-    enabled: section === "patterns",
+    enabled: section === "control" && controlView === "governance",
     staleTime: 60_000,
   });
   const governancePeopleQuery = useQuery({
@@ -137,13 +120,13 @@ export function RosteringSetupWorkspace() {
       active_only: true,
       roster_eligible_only: false,
     }),
-    enabled: section === "policy",
+    enabled: section === "control",
     staleTime: 15 * 60_000,
   });
   const rulesQuery = useQuery({
     queryKey: ["rostering", "settings", "rules"],
     queryFn: () => listRosterRules(true),
-    enabled: section === "policy",
+    enabled: section === "control" && controlView === "governance",
     staleTime: 15 * 60_000,
   });
   const runsQuery = useQuery({
@@ -151,6 +134,12 @@ export function RosteringSetupWorkspace() {
     queryFn: () => listRosterAutomationRuns(40),
     enabled: section === "advanced",
     staleTime: 30_000,
+  });
+  const demandsQuery = useQuery({
+    queryKey: ["rostering", "settings", "demand-requirements"],
+    queryFn: () => listRosterDemandRequirements({ include_inactive: true }),
+    enabled: section === "control" && controlView === "coverage",
+    staleTime: 60_000,
   });
 
   const permissions = permissionsQuery.data?.permissions || [];
@@ -221,67 +210,20 @@ export function RosteringSetupWorkspace() {
 
       {actionError ? <div className="wr-inline-error" role="alert">{actionError}</div> : null}
 
-      {section === "overview" ? (
-        <SetupOverview readiness={readiness} root={root} onOpen={navigateSection} onRefresh={refresh} />
-      ) : null}
-      {section === "calendar" ? (
-        <PlanningCalendar
-          periods={periodsQuery.data || []}
-          loading={periodsQuery.isPending}
-          error={periodsQuery.error}
-          previewEnabled={canGenerate}
-          busy={busy}
-          runAction={runAction}
-          onOpenAutomation={() => navigateSection("automation")}
-        />
-      ) : null}
-      {section === "automation" ? (
-        <AutomationPanel
-          policy={readiness.policy}
-          canManage={can("roster.manage_patterns")}
-          busy={busy}
-          runAction={runAction}
-        />
-      ) : null}
-      {section === "shifts" ? (
-        <ShiftLibrary
-          shifts={shiftsQuery.data || []}
-          loading={shiftsQuery.isPending}
-          error={shiftsQuery.error}
-          canManage={can("roster.manage_shift_templates")}
-          busy={busy}
-          runAction={runAction}
-        />
-      ) : null}
+      {section === "start" ? <div className="rs-setup__stack"><SetupOverview readiness={readiness} root={root} onOpen={navigateSection} onRefresh={refresh} /><PlanningCalendar previewEnabled={canGenerate} busy={busy} runAction={runAction} /></div> : null}
       {section === "patterns" ? (
-        <PatternBuilder
-          shifts={shiftsQuery.data || []}
-          patterns={patternsQuery.data || []}
-          assignments={patternAssignmentsQuery.data || []}
-          loading={shiftsQuery.isPending || patternsQuery.isPending || patternAssignmentsQuery.isPending}
-          canManage={can("roster.manage_patterns")}
+        <WorkPatternStudio
+          canManageShifts={can("roster.manage_shift_templates")}
+          canManagePatterns={can("roster.manage_patterns")}
           busy={busy}
           runAction={runAction}
           workforcePath={`${root}/workforce`}
           timezoneName={readiness.policy.timezone_name}
         />
       ) : null}
-      {section === "policy" ? (
-        <PolicyPanel
-          rules={rulesQuery.data || []}
-          loading={rulesQuery.isPending}
-          authorityCount={readiness.active_approval_authority_count}
-          canManageRules={can("roster.manage_rules")}
-          canManageAuthorities={can("roster.manage_approval_authorities")}
-          people={governancePeople}
-          periods={periodsQuery.data || []}
-          bases={governanceBases}
-          governanceLoading={governancePeopleQuery.isPending || periodsQuery.isPending}
-          governanceError={governancePeopleQuery.error || periodsQuery.error}
-        />
-      ) : null}
+      {section === "control" ? <div className="rs-setup__stack"><nav className="rs-subnav" aria-label="Coverage and approval controls"><button type="button" className={controlView === "coverage" ? "is-active" : ""} onClick={() => setControlView("coverage")}>Coverage demand</button><button type="button" className={controlView === "governance" ? "is-active" : ""} onClick={() => setControlView("governance")}>Rules & approvals</button></nav>{controlView === "coverage" ? <CoverageDemandPanel demands={demandsQuery.data || []} loading={demandsQuery.isPending || governancePeopleQuery.isPending} error={demandsQuery.error || governancePeopleQuery.error} people={governancePeople} bases={governanceBases} timezoneName={readiness.policy.timezone_name} canManage={can("roster.allocate_work")} busy={busy} runAction={runAction} /> : <PolicyPanel rules={rulesQuery.data || []} loading={rulesQuery.isPending} authorityCount={readiness.active_approval_authority_count} canManageRules={can("roster.manage_rules")} canManageAuthorities={can("roster.manage_approval_authorities")} people={governancePeople} periods={periodsQuery.data || []} bases={governanceBases} governanceLoading={governancePeopleQuery.isPending || periodsQuery.isPending} governanceError={governancePeopleQuery.error || periodsQuery.error} />}</div> : null}
       {section === "advanced" ? (
-        <AdvancedPanel runs={runsQuery.data || []} loading={runsQuery.isPending} onRefresh={() => void runsQuery.refetch()} />
+        <AdvancedWorkspace policy={readiness.policy} permissions={permissions} busy={busy} runAction={runAction} runs={runsQuery.data || []} loading={runsQuery.isPending} onRefresh={() => void runsQuery.refetch()} />
       ) : null}
     </div>
   );
@@ -299,83 +241,37 @@ function SetupOverview({
   onRefresh: () => Promise<void>;
 }) {
   const percent = Math.round((readiness.ready_count / Math.max(readiness.total_count, 1)) * 100);
+  const outstanding = readiness.items.filter((item) => item.state !== "READY");
   return (
-    <div className="rs-setup__stack">
-      <section className="wr-panel rs-readiness">
-        <div className="wr-section-heading">
-          <div>
-            <span className="wr-eyebrow">Setup readiness</span>
-            <h2>{readiness.can_plan ? "Ready to plan" : "Action required before planning"}</h2>
-          </div>
-          <button type="button" className="wr-icon-button" onClick={() => void onRefresh()} aria-label="Refresh setup readiness">
-            <RefreshCw size={17} />
-          </button>
-        </div>
-        <div className="rs-readiness__summary">
-          <div className="rs-readiness__score"><strong>{readiness.ready_count}</strong><span>of {readiness.total_count} ready</span></div>
-          <div className="rs-readiness__bar" aria-label={`${percent}% setup ready`}><span style={{ width: `${percent}%` }} /></div>
-          <p>
-            {readiness.can_plan
-              ? "The planner can be used now. Resolve warnings before relying on automatic generation."
-              : "Complete the blocked items below. Rostering will not invent HR, base or policy records."}
-          </p>
-        </div>
-      </section>
+    <section className="wr-panel rs-start">
+      <div className="rs-start__status">
+        <div><span className="wr-eyebrow">Setup status</span><h2>{readiness.can_plan ? "Ready to build a roster" : "Finish setup before planning"}</h2><p>{readiness.can_plan ? "Use the three-step path below. Advanced settings stay out of the way unless you need them." : `${outstanding.length} setup item${outstanding.length === 1 ? "" : "s"} still need attention.`}</p></div>
+        <div className="rs-start__score"><strong>{percent}%</strong><span>{readiness.ready_count} of {readiness.total_count} ready</span><button type="button" className="wr-icon-button" onClick={() => void onRefresh()} aria-label="Refresh setup status"><RefreshCw size={16} /></button></div>
+      </div>
+      <div className="rs-start__bar" aria-label={`${percent}% setup complete`}><span style={{ width: `${percent}%` }} /></div>
 
-      <section className="rs-setup-card-grid">
-        {readiness.items.map((item) => {
-          const target = (item.action_path || "overview") as Section;
-          return (
-            <article key={item.key} className={`rs-setup-card is-${stateTone(item.state)}`}>
-              <div className="rs-setup-card__head">
-                <span className="rs-setup-card__icon">
-                  {item.state === "READY" ? <CheckCircle2 size={19} /> : item.state === "BLOCKED" ? <AlertTriangle size={19} /> : <Settings2 size={19} />}
-                </span>
-                <StatusPill value={item.state} />
-              </div>
-              <h3>{item.label}</h3>
-              <p>{item.detail}</p>
-              <button type="button" className="wr-text-link" onClick={() => onOpen(SECTIONS.some((entry) => entry.id === target) ? target : "overview")}>
-                {item.action_label || "Open"} <ArrowRight size={14} />
-              </button>
-            </article>
-          );
-        })}
-      </section>
+      {outstanding.length ? <div className="rs-start__issues">{outstanding.slice(0, 4).map((item) => <button key={item.key} type="button" onClick={() => onOpen(normalizeSection(item.action_path || null))}><span className={`rs-setup-card__icon is-${stateTone(item.state)}`}>{item.state === "BLOCKED" ? <AlertTriangle size={17} /> : <Settings2 size={17} />}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={14} /></button>)}</div> : null}
 
-      <section className="wr-panel rs-boundaries">
-        <div className="wr-section-heading"><div><span className="wr-eyebrow">Clear ownership</span><h2>Where records are managed</h2></div></div>
-        <div className="rs-boundaries__grid">
-          <article><UsersRound size={19} /><div><strong>Workforce & HR</strong><p>Contracts, leave, time approval, payroll readiness and employee pattern assignments.</p></div><Link to={`${root}/workforce`}>Open Workforce <ArrowRight size={14} /></Link></article>
-          <article><CalendarClock size={19} /><div><strong>Rostering</strong><p>Planning periods, shift templates, draft rotations, compliance validation and controlled publication.</p></div><Link to={`${root}/calendar`}>Open Planner <ArrowRight size={14} /></Link></article>
-          <article><ShieldCheck size={19} /><div><strong>Operating Structure</strong><p>Canonical bases and effective-dated personnel deployments remain tenant-wide records.</p></div><Link to={`/maintenance/${encodeURIComponent(root.split("/")[2] || "")}/admin/amo-assets?section=operating-structure`}>Open structure <ArrowRight size={14} /></Link></article>
-        </div>
-      </section>
-    </div>
+      <div className="rs-workflow">
+        <button type="button" onClick={() => onOpen("patterns")}><span>1</span><div><strong>Set shifts and patterns</strong><small>Choose a rotation recipe and adjust the cycle.</small></div><ArrowRight size={15} /></button>
+        <div><span>2</span><div><strong>Create the month</strong><small>Preview pattern-generated duty before creating a draft.</small></div><CalendarPlus size={15} /></div>
+        <Link to={`${root}/calendar`}><span>3</span><div><strong>Review and publish</strong><small>Resolve gaps, validate and move through approval.</small></div><ArrowRight size={15} /></Link>
+      </div>
+    </section>
   );
 }
 
 function PlanningCalendar({
-  periods,
-  loading,
-  error,
   previewEnabled,
   busy,
   runAction,
-  onOpenAutomation,
 }: {
-  periods: Awaited<ReturnType<typeof listRosterPeriods>>;
-  loading: boolean;
-  error: unknown;
   previewEnabled: boolean;
   busy: string | null;
   runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
-  onOpenAutomation: () => void;
 }) {
   const [preview, setPreview] = useState<RosterAutomationPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const recent = useMemo(() => [...periods].sort((a, b) => b.starts_on.localeCompare(a.starts_on)).slice(0, 12), [periods]);
-
   const openPreview = async () => {
     setPreviewError(null);
     try {
@@ -384,67 +280,12 @@ function PlanningCalendar({
       setPreviewError(errorMessage(cause));
     }
   };
-
   return (
-    <section className="wr-panel">
-      <div className="wr-section-heading">
-        <div><span className="wr-eyebrow">Planning calendar</span><h2>Roster periods</h2><p>One list, one next action. Period lifecycle changes are kept separate from ordinary date details.</p></div>
-        <div className="wr-actions">
-          <button type="button" className="wr-button wr-button--secondary" onClick={onOpenAutomation}><CalendarClock size={16} /> Calendar policy</button>
-          {previewEnabled ? <button type="button" className="wr-button wr-button--primary" onClick={() => void openPreview()}><CalendarPlus size={16} /> Prepare next period</button> : null}
-        </div>
-      </div>
-      {error ? <div className="wr-inline-error">{errorMessage(error)}</div> : null}
-      {previewError ? <div className="wr-inline-error">{previewError}</div> : null}
-      {loading ? <RosterLoading label="Loading planning calendar…" /> : null}
-      {!loading && recent.length === 0 ? <EmptyState title="No roster periods" description="Prepare the next controlled period after configuring the calendar policy." /> : null}
-      <div className="rs-period-list">
-        {recent.map((period) => {
-          const latest = [...period.versions].sort((a, b) => b.version_no - a.version_no)[0];
-          return (
-            <article key={period.id}>
-              <div><strong>{period.period_code} · {period.name}</strong><span>{period.starts_on} → {period.ends_on} · {period.timezone_name}</span></div>
-              <StatusPill value={period.status} />
-              <span>{period.versions.length} version{period.versions.length === 1 ? "" : "s"}</span>
-              <span>{latest ? `Latest: v${latest.version_no} ${latest.status}` : "No draft yet"}</span>
-            </article>
-          );
-        })}
-      </div>
-
-      {preview ? (
-        <div className="rs-preview" role="dialog" aria-modal="true" aria-label="Automatic period preview">
-          <div className="rs-preview__head"><div><span className="wr-eyebrow">Preview</span><h3>{preview.period_code} · {preview.period_name}</h3></div><button type="button" className="wr-icon-button" onClick={() => setPreview(null)}><X size={16} /></button></div>
-          <div className="rs-preview__facts">
-            <span><strong>{preview.target_from}</strong> starts</span>
-            <span><strong>{preview.target_to}</strong> ends</span>
-            <span><strong>{preview.eligible_employee_count}</strong> eligible people</span>
-            <span><strong>{preview.estimated_assignment_count}</strong> estimated duties</span>
-          </div>
-          {preview.items.map((item) => <div key={item.code} className={`rs-preview__issue is-${item.severity.toLowerCase()}`}><strong>{item.code.replace(/_/g, " ")}</strong><span>{item.message}</span></div>)}
-          <div className="wr-actions wr-actions--end">
-            <button type="button" className="wr-button wr-button--secondary" onClick={() => setPreview(null)}>Cancel</button>
-            <button
-              type="button"
-              className="wr-button wr-button--primary"
-              disabled={Boolean(busy) || preview.blocking_issue_count > 0}
-              onClick={() => void runAction("automation-run", async () => {
-                await runRosterAutomation({
-                  target_from: preview.target_from,
-                  target_to: preview.target_to,
-                  create_missing_period: true,
-                  create_initial_draft: true,
-                  generate_from_patterns: true,
-                  confirm_preview: true,
-                  idempotency_key: newIdempotencyKey("roster-automation"),
-                });
-                setPreview(null);
-              })}
-            ><Play size={15} /> Create draft and rotation</button>
-          </div>
-          <small>Automation creates a draft only. It never approves or publishes a roster.</small>
-        </div>
-      ) : null}
+    <section className="wr-panel rs-month-start">
+      <div className="wr-section-heading"><div><span className="wr-eyebrow">Step 2 · Monthly roster</span><h2>Create the next roster</h2><p>Use the guided action for normal work. Manual period and amendment controls remain available below.</p></div>{previewEnabled ? <button type="button" className="wr-button wr-button--primary" onClick={() => void openPreview()}><CalendarPlus size={16} /> Preview next month</button> : null}</div>
+      {previewError ? <div className="wr-inline-error" role="alert">{previewError}</div> : null}
+      <details className="rs-progressive"><summary><span><CalendarClock size={16} /><strong>Manual period controls</strong><small>Create a specific month or amend a published version</small></span></summary><div className="rs-progressive__body"><RosterPeriodQuickActions /></div></details>
+      {preview ? <div className="rs-preview" role="dialog" aria-modal="true" aria-label="Next roster preview"><div className="rs-preview__head"><div><span className="wr-eyebrow">Safe preview</span><h3>{preview.period_code} · {preview.period_name}</h3></div><button type="button" className="wr-icon-button" aria-label="Close preview" onClick={() => setPreview(null)}><X size={16} /></button></div><div className="rs-preview__facts"><span><strong>{preview.target_from}</strong> starts</span><span><strong>{preview.target_to}</strong> ends</span><span><strong>{preview.eligible_employee_count}</strong> eligible people</span><span><strong>{preview.estimated_assignment_count}</strong> estimated duties</span></div>{preview.items.map((item) => <div key={item.code} className={`rs-preview__issue is-${item.severity.toLowerCase()}`}><strong>{item.code.replace(/_/g, " ")}</strong><span>{item.message}</span></div>)}<div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setPreview(null)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || preview.blocking_issue_count > 0} onClick={() => void runAction("automation-run", async () => { await runRosterAutomation({ target_from: preview.target_from, target_to: preview.target_to, create_missing_period: true, create_initial_draft: true, generate_from_patterns: true, confirm_preview: true, idempotency_key: newIdempotencyKey("roster-automation") }); setPreview(null); })}><Play size={15} /> Create draft roster</button></div><small>Creates a draft only. Approval and publication always remain separate authorised actions.</small></div> : null}
     </section>
   );
 }
@@ -531,166 +372,136 @@ function AutomationPanel({
   );
 }
 
-function ShiftLibrary({
-  shifts,
+function CoverageDemandPanel({
+  demands,
   loading,
   error,
+  people,
+  bases,
+  timezoneName,
   canManage,
   busy,
   runAction,
 }: {
-  shifts: ShiftTemplateRead[];
+  demands: Awaited<ReturnType<typeof listRosterDemandRequirements>>;
   loading: boolean;
   error: unknown;
+  people: Awaited<ReturnType<typeof listAllRosterPeople>>["items"];
+  bases: Array<{ id: string; code: string }>;
+  timezoneName: string;
   canManage: boolean;
   busy: string | null;
   runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
 }) {
-  const empty = { code: "", label: "", kind: "DAY" as ShiftTemplateKind, start: "08:00", end: "17:00", description: "" };
-  const [editing, setEditing] = useState<ShiftTemplateRead | null>(null);
+  const now = new Date();
+  const dateValue = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const empty = {
+    requirement_code: "",
+    label: "",
+    work_date: dateValue,
+    start_time: "08:00",
+    end_time: "17:00",
+    required_headcount: 1,
+    required_minutes: 0,
+    base_station_id: "",
+    department_id: "",
+    role_label: "",
+  };
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(empty);
-
-  const beginEdit = (shift: ShiftTemplateRead) => {
-    setEditing(shift);
-    setCreating(false);
-    setDraft({ code: shift.code, label: shift.label, kind: shift.kind, start: shift.default_start_time || "08:00", end: shift.default_end_time || "17:00", description: shift.description || "" });
-  };
-  const beginCreate = () => { setEditing(null); setCreating(true); setDraft(empty); };
-  const close = () => { setEditing(null); setCreating(false); };
-  const save = () => runAction("shift", async () => {
-    const nonDuty = ["OFF", "LEAVE"].includes(draft.kind);
-    const payload = {
-      code: draft.code.trim().toUpperCase(),
+  const [retiringId, setRetiringId] = useState<string | null>(null);
+  const [retireReason, setRetireReason] = useState("");
+  const departments = useMemo(() => {
+    const rows = new Map<string, string>();
+    people.forEach((person) => {
+      if (person.department_id) rows.set(person.department_id, `${person.department_code || "DEPT"} · ${person.department_name || "Department"}`);
+    });
+    return [...rows].map(([id, label]) => ({ id, label })).sort((left, right) => left.label.localeCompare(right.label));
+  }, [people]);
+  const active = demands.filter((row) => row.is_active).sort((left, right) => left.starts_at.localeCompare(right.starts_at));
+  const archived = demands.filter((row) => !row.is_active);
+  const toIso = (workDate: string, wallTime: string) => zonedWallTimeToIso(new Date(`${workDate}T12:00:00`), wallTime, timezoneName);
+  const save = () => runAction("coverage-demand", async () => {
+    await createRosterDemandRequirement({
+      requirement_code: draft.requirement_code.trim().toUpperCase(),
       label: draft.label.trim(),
-      kind: draft.kind,
-      default_start_time: nonDuty ? null : draft.start,
-      default_end_time: nonDuty ? null : draft.end,
-      duration_minutes: null,
-      counts_as_duty: !nonDuty,
-      is_active: editing?.is_active ?? true,
-      display_order: editing?.display_order ?? (shifts.length + 1) * 10,
-      description: draft.description.trim() || null,
-      color_token: editing?.color_token || `shift-${draft.kind.toLowerCase()}`,
-      icon_name: editing?.icon_name || null,
-    };
-    if (editing) await updateShiftTemplate(editing.id, payload);
-    else await createShiftTemplate(payload);
-    close();
+      starts_at: toIso(draft.work_date, draft.start_time),
+      ends_at: toIso(draft.work_date, draft.end_time),
+      required_headcount: draft.required_headcount,
+      required_minutes: draft.required_minutes,
+      base_station_id: draft.base_station_id || null,
+      department_id: draft.department_id || null,
+      role_label: draft.role_label.trim() || null,
+      authorisation_type_id: null,
+      source_type: "MANUAL",
+      source_id: null,
+      metadata_json: { timezone_name: timezoneName },
+      is_active: true,
+    });
+    setDraft(empty);
+    setCreating(false);
   });
-
-  return (
-    <section className="wr-panel">
-      <div className="wr-section-heading"><div><span className="wr-eyebrow">Reusable building blocks</span><h2>Shift library</h2><p>Create, review, clone and retire shifts without exposing a permanent creation form.</p></div>{canManage ? <button type="button" className="wr-button wr-button--primary" onClick={beginCreate}><Plus size={16} /> New shift</button> : null}</div>
-      {error ? <div className="wr-inline-error">{errorMessage(error)}</div> : null}
-      {loading ? <RosterLoading label="Loading shift library…" /> : null}
-      <div className="rs-shift-table">
-        {shifts.map((shift) => (
-          <article key={shift.id} className={!shift.is_active ? "is-inactive" : ""}>
-            <div><strong>{shift.code}</strong><StatusPill value={shift.kind} /></div>
-            <div><strong>{shift.label}</strong><span>{shift.default_start_time || "—"} → {shift.default_end_time || "—"}</span></div>
-            <span>{shift.counts_as_duty ? "Counts as duty" : "Protected non-duty"}</span>
-            <StatusPill value={shift.is_active ? "ACTIVE" : "INACTIVE"} />
-            {canManage ? <div className="wr-actions"><button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(shift)}>Open</button><button type="button" className="wr-button wr-button--small" onClick={() => { setEditing(null); setCreating(true); setDraft({ code: `${shift.code}-COPY`, label: `${shift.label} copy`, kind: shift.kind, start: shift.default_start_time || "08:00", end: shift.default_end_time || "17:00", description: shift.description || "" }); }}><Layers3 size={14} /> Clone</button></div> : null}
-          </article>
-        ))}
-      </div>
-      {!loading && !shifts.length ? <EmptyState title="No shifts" description="Create the first shift template before building work patterns." /> : null}
-
-      {creating || editing ? (
-        <div className="rs-drawer" role="dialog" aria-modal="true" aria-label={editing ? `Edit ${editing.label}` : "Create shift"}>
-          <div className="rs-drawer__head"><div><span className="wr-eyebrow">Shift details</span><h3>{editing ? editing.label : "New shift"}</h3></div><button type="button" className="wr-icon-button" onClick={close}><X size={16} /></button></div>
-          <div className="rs-form-grid">
-            <label><span>Code</span><input value={draft.code} onChange={(event) => setDraft({ ...draft, code: event.target.value })} /></label>
-            <label><span>Name</span><input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
-            <label><span>Type</span><select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as ShiftTemplateKind })}>{SHIFT_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label>
-            <label><span>Starts</span><input type="time" value={draft.start} disabled={["OFF", "LEAVE"].includes(draft.kind)} onChange={(event) => setDraft({ ...draft, start: event.target.value })} /></label>
-            <label><span>Ends</span><input type="time" value={draft.end} disabled={["OFF", "LEAVE"].includes(draft.kind)} onChange={(event) => setDraft({ ...draft, end: event.target.value })} /></label>
-            <label className="rs-form-grid__wide"><span>Description</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-          </div>
-          {editing ? <label className="rs-toggle-row"><input type="checkbox" checked={editing.is_active} onChange={(event) => setEditing({ ...editing, is_active: event.target.checked })} /><span>Active</span></label> : null}
-          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={close}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !draft.code.trim() || !draft.label.trim()} onClick={() => void save()}><Save size={15} /> Save shift</button></div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function PatternBuilder({
-  shifts,
-  patterns,
-  assignments,
-  loading,
-  canManage,
-  busy,
-  runAction,
-  workforcePath,
-  timezoneName,
-}: {
-  shifts: ShiftTemplateRead[];
-  patterns: Awaited<ReturnType<typeof listWorkPatterns>>;
-  assignments: Awaited<ReturnType<typeof listWorkPatternAssignments>>;
-  loading: boolean;
-  canManage: boolean;
-  busy: string | null;
-  runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
-  workforcePath: string;
-  timezoneName: string;
-}) {
-  const activeShifts = shifts.filter((shift) => shift.is_active);
-  const [building, setBuilding] = useState(false);
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [cycleLength, setCycleLength] = useState(7);
-  const [dayShifts, setDayShifts] = useState<Array<string | null>>(Array.from({ length: 7 }, () => null));
-  const resize = (length: number) => {
-    const next = [...dayShifts];
-    while (next.length < length) next.push(null);
-    setDayShifts(next.slice(0, length));
-    setCycleLength(length);
+  const retire = () => {
+    if (!retiringId) return;
+    void runAction("coverage-retire", async () => {
+      await retireRosterDemandRequirement(retiringId, retireReason.trim());
+      setRetiringId(null);
+      setRetireReason("");
+    });
   };
-  const days: WorkPatternDayInput[] = dayShifts.map((shiftId, index) => {
-    const shift = activeShifts.find((item) => item.id === shiftId);
-    const status: PatternDayStatus = !shift ? "OFF" : shift.kind === "STANDBY" ? "STANDBY" : shift.kind === "TRAINING" ? "TRAINING" : shift.kind === "OFF" ? "OFF" : "DUTY";
-    const spans = Boolean(shift?.default_start_time && shift?.default_end_time && shift.default_end_time <= shift.default_start_time);
-    return { cycle_day_index: index, shift_template_id: shift?.id || null, status, start_time_local: shift?.default_start_time || null, end_time_local: shift?.default_end_time || null, spans_next_day: spans, planned_minutes: shift?.duration_minutes || 0 };
-  });
-  const save = () => runAction("pattern", async () => {
-    await createWorkPattern({ code: code.trim().toUpperCase(), name: name.trim(), description: null, cycle_length_days: cycleLength, is_active: true, timezone_name: timezoneName, days });
-    setBuilding(false); setCode(""); setName(""); resize(7);
-  });
 
   return (
     <div className="rs-setup__stack">
       <section className="wr-panel">
-        <div className="wr-section-heading"><div><span className="wr-eyebrow">Rotation builder</span><h2>Visual work patterns</h2><p>Build real mixed cycles such as day, day, night, night, off, off—rather than reducing every rotation to one shift.</p></div>{canManage ? <button type="button" className="wr-button wr-button--primary" onClick={() => setBuilding(true)}><Plus size={16} /> New pattern</button> : null}</div>
-        {loading ? <RosterLoading label="Loading work patterns…" /> : null}
-        <div className="rs-pattern-grid">
-          {patterns.map((pattern) => (
-            <article key={pattern.id}>
-              <div><strong>{pattern.code} · {pattern.name}</strong><StatusPill value={pattern.is_active ? "ACTIVE" : "INACTIVE"} /></div>
-              <p>{pattern.cycle_length_days}-day cycle · {pattern.assigned_employee_count} assigned</p>
-              <div className="rs-cycle-strip">{pattern.days.map((day) => <span key={day.id} className={`is-${day.status.toLowerCase()}`} title={`Day ${day.cycle_day_index + 1}: ${day.shift_code || day.status}`}>{day.shift_code || day.status.slice(0, 3)}</span>)}</div>
+        <div className="wr-section-heading">
+          <div><span className="wr-eyebrow">Coverage inputs</span><h2>Required staffing windows</h2><p>Define the headcount or labour minutes that validation must protect. These records drive coverage-gap findings and recommendations.</p></div>
+          {canManage ? <button type="button" className="wr-button wr-button--primary" onClick={() => setCreating(true)}><Plus size={16} /> New requirement</button> : null}
+        </div>
+        {error ? <div className="wr-inline-error" role="alert">{errorMessage(error)}</div> : null}
+        {loading ? <RosterLoading label="Loading coverage requirements…" /> : null}
+        <div className="rs-demand-list">
+          {active.map((row) => (
+            <article key={row.id}>
+              <div><strong>{row.requirement_code} · {row.label}</strong><span>{formatDate(row.starts_at)} → {formatDate(row.ends_at)}</span><small>{row.role_label || "Any eligible role"} · {row.required_headcount || 0} people · {row.required_minutes || 0} minutes</small></div>
+              <StatusPill value="ACTIVE" />
+              <span>{bases.find((base) => base.id === row.base_station_id)?.code || "All bases"}</span>
+              {canManage ? <button type="button" className="wr-button wr-button--danger-ghost" onClick={() => { setRetiringId(row.id); setRetireReason(""); }}><Trash2 size={14} /> Retire</button> : null}
             </article>
           ))}
         </div>
-        {!loading && !patterns.length ? <EmptyState title="No work patterns" description="Create a visual rotation, then assign it to employees from Workforce & HR." /> : null}
+        {!loading && !active.length ? <EmptyState title="No coverage requirements" description="Add required staffing windows so roster validation can identify genuine gaps." /> : null}
+        {archived.length ? <details className="rs-archived"><summary>{archived.length} retired requirement{archived.length === 1 ? "" : "s"}</summary>{archived.map((row) => <div key={row.id}><span>{row.requirement_code} · {row.label}</span><StatusPill value="RETIRED" /></div>)}</details> : null}
+        {!canManage ? <div className="rs-readonly">Coverage demand is readable. Roster work-allocation permission is required to create or retire records.</div> : null}
       </section>
 
-      <section className="wr-panel rs-pattern-assignment-summary">
-        <div><UsersRound size={20} /><span><strong>{assignments.length}</strong> effective pattern assignment record{assignments.length === 1 ? "" : "s"}</span></div>
-        <p>Employee assignment, contract dates and supervisors are HR-owned records. They are not recreated inside Rostering.</p>
-        <Link className="wr-button wr-button--secondary" to={workforcePath}>Open Workforce & HR <ArrowRight size={14} /></Link>
-      </section>
-
-      {building ? (
-        <div className="rs-drawer rs-drawer--wide" role="dialog" aria-modal="true" aria-label="Build work pattern">
-          <div className="rs-drawer__head"><div><span className="wr-eyebrow">Visual pattern builder</span><h3>New work pattern</h3></div><button type="button" className="wr-icon-button" onClick={() => setBuilding(false)}><X size={16} /></button></div>
-          <div className="rs-form-grid"><label><span>Code</span><input value={code} onChange={(event) => setCode(event.target.value)} /></label><label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Cycle days</span><input type="number" min="1" max="56" value={cycleLength} onChange={(event) => resize(Math.min(56, Math.max(1, Number(event.target.value))))} /></label></div>
-          <div className="rs-cycle-builder">{dayShifts.map((shiftId, index) => <label key={index}><span>Day {index + 1}</span><select value={shiftId || ""} onChange={(event) => { const next = [...dayShifts]; next[index] = event.target.value || null; setDayShifts(next); }}><option value="">OFF</option>{activeShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.code} · {shift.label}</option>)}</select></label>)}</div>
-          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setBuilding(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !code.trim() || !name.trim()} onClick={() => void save()}><Save size={15} /> Save pattern</button></div>
+      {creating ? (
+        <div className="rs-drawer" role="dialog" aria-modal="true" aria-label="Create coverage requirement">
+          <div className="rs-drawer__head"><div><span className="wr-eyebrow">Structured demand</span><h3>New staffing requirement</h3><p>Times are interpreted in {timezoneName}.</p></div><button type="button" className="wr-icon-button" onClick={() => setCreating(false)}><X size={16} /></button></div>
+          <div className="rs-form-grid">
+            <label><span>Requirement code</span><input value={draft.requirement_code} onChange={(event) => setDraft({ ...draft, requirement_code: event.target.value })} placeholder="LINE-AM" /></label>
+            <label><span>Name</span><input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Morning line coverage" /></label>
+            <label><span>Work date</span><input type="date" value={draft.work_date} onChange={(event) => setDraft({ ...draft, work_date: event.target.value })} /></label>
+            <label><span>Starts</span><input type="time" value={draft.start_time} onChange={(event) => setDraft({ ...draft, start_time: event.target.value })} /></label>
+            <label><span>Ends</span><input type="time" value={draft.end_time} onChange={(event) => setDraft({ ...draft, end_time: event.target.value })} /></label>
+            <label><span>Required people</span><input type="number" min="0" value={draft.required_headcount} onChange={(event) => setDraft({ ...draft, required_headcount: Math.max(0, Number(event.target.value)) })} /></label>
+            <label><span>Required labour minutes</span><input type="number" min="0" value={draft.required_minutes} onChange={(event) => setDraft({ ...draft, required_minutes: Math.max(0, Number(event.target.value)) })} /></label>
+            <label><span>Base</span><select value={draft.base_station_id} onChange={(event) => setDraft({ ...draft, base_station_id: event.target.value })}><option value="">All bases</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code}</option>)}</select></label>
+            <label><span>Department</span><select value={draft.department_id} onChange={(event) => setDraft({ ...draft, department_id: event.target.value })}><option value="">All departments</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.label}</option>)}</select></label>
+            <label className="rs-form-grid__wide"><span>Required role</span><input value={draft.role_label} onChange={(event) => setDraft({ ...draft, role_label: event.target.value })} placeholder="Optional, for example Certifying Engineer" /></label>
+          </div>
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setCreating(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !draft.requirement_code.trim() || !draft.label.trim() || (!draft.required_headcount && !draft.required_minutes) || draft.end_time <= draft.start_time} onClick={() => void save()}><Save size={15} /> Save requirement</button></div>
         </div>
       ) : null}
+
+      {retiringId ? (
+        <div className="rs-preview" role="dialog" aria-modal="true" aria-label="Retire coverage requirement">
+          <div className="rs-preview__head"><div><span className="wr-eyebrow">Audited removal</span><h3>Retire coverage requirement</h3></div><button type="button" className="wr-icon-button" onClick={() => setRetiringId(null)}><X size={16} /></button></div>
+          <p>Retiring preserves history but removes this requirement from future validation.</p>
+          <label className="rs-retire-reason"><span>Reason</span><textarea rows={3} value={retireReason} onChange={(event) => setRetireReason(event.target.value)} placeholder="Explain why this staffing requirement no longer applies" /></label>
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setRetiringId(null)}>Cancel</button><button type="button" className="wr-button wr-button--danger" disabled={Boolean(busy) || retireReason.trim().length < 5} onClick={retire}><Trash2 size={15} /> Retire</button></div>
+        </div>
+      ) : null}
+
     </div>
   );
 }
@@ -763,6 +574,44 @@ function PolicyPanel({
           />
         </Suspense>
       )}
+    </div>
+  );
+}
+
+function AdvancedWorkspace({ policy, permissions, busy, runAction, runs, loading, onRefresh }: {
+  policy: RosterGenerationPolicy;
+  permissions: string[];
+  busy: string | null;
+  runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+  runs: Awaited<ReturnType<typeof listRosterAutomationRuns>>;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const access = [
+    ["Read", ["roster.view_own", "roster.view_department", "roster.view_all"]],
+    ["Edit", ["roster.create", "roster.edit"]],
+    ["Delete draft duty", ["roster.delete_draft_assignment"]],
+    ["Configure", ["roster.manage_shift_templates", "roster.manage_patterns", "roster.manage_rules"]],
+    ["Approve / publish", ["roster.approve", "roster.publish"]],
+  ] as const;
+  return (
+    <div className="rs-setup__stack">
+      <details className="wr-panel rs-progressive">
+        <summary><span><CalendarClock size={17} /><strong>Automatic period creation</strong><small>Scheduling and unattended draft-generation policy</small></span><StatusPill value={policy.enabled ? "ON" : "OFF"} /></summary>
+        <div className="rs-progressive__body"><AutomationPanel policy={policy} canManage={permissions.includes("roster.manage_patterns")} busy={busy} runAction={runAction} /></div>
+      </details>
+      <details className="wr-panel rs-progressive">
+        <summary><span><History size={17} /><strong>Automation history</strong><small>Generation results, conflicts and failures</small></span><StatusPill value={`${runs.length} RUNS`} /></summary>
+        <div className="rs-progressive__body"><AdvancedPanel runs={runs} loading={loading} onRefresh={onRefresh} /></div>
+      </details>
+      <details className="wr-panel rs-progressive">
+        <summary><span><ShieldCheck size={17} /><strong>Document and code controls</strong><small>Controlled output metadata and legacy roster-code verification</small></span></summary>
+        <div className="rs-progressive__body"><Suspense fallback={<RosterLoading label="Opening controlled settings…" />}><ControlledRosterSettingsPanel /><RosterCodeRegistryPanel /></Suspense></div>
+      </details>
+      <details className="wr-panel rs-progressive">
+        <summary><span><Settings2 size={17} /><strong>My effective permissions</strong><small>Why a control is editable or read-only</small></span></summary>
+        <div className="rs-progressive__body"><div className="rs-access-compact">{access.map(([label, codes]) => { const allowed = codes.some((code) => permissions.includes(code)); return <span key={label} className={allowed ? "is-allowed" : "is-restricted"}>{allowed ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}{label}</span>; })}</div></div>
+      </details>
     </div>
   );
 }

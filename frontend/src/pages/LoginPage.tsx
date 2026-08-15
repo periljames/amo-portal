@@ -100,7 +100,13 @@ const LoginPage: React.FC = () => {
   const [step, setStep] = useState<LoginStep>(amoCode ? "password" : "identify");
   const redirectedRef = useRef(false);
 
-  const fromState = (location.state as { from?: string } | null)?.from;
+  const navigationState = location.state as { from?: string; sessionReason?: string } | null;
+  const fromState = navigationState?.from;
+  const sessionNotice = navigationState?.sessionReason === "idle-logout"
+    ? "You were signed out after inactivity. Sign in to continue where you left off."
+    : navigationState?.sessionReason === "expired"
+      ? "Your secure session expired. Sign in to continue where you left off."
+      : null;
 
   const effectiveAmoSlug = useMemo(() => loginContext?.login_slug ?? "", [loginContext?.login_slug]);
 
@@ -297,6 +303,7 @@ const LoginPage: React.FC = () => {
       showPassword={showPassword}
       showPasswordField={step === "password"}
       errorMsg={errorMsg}
+      noticeMsg={sessionNotice}
       loading={loading}
       loadingContext={loadingContext}
       socialAvailability={{

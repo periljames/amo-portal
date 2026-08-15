@@ -2,6 +2,8 @@ import { normalizeDepartmentCode, type AccountRole, type PortalUser } from "../s
 
 export type RoleCapability =
   | "admin"
+  | "management"
+  | "publisher"
   | "planner"
   | "supervisor"
   | "certifying"
@@ -148,8 +150,13 @@ export function getUserCapabilities(
   const assignedDepartment = getDepartmentFromUser(user, contextDepartment);
 
   if (user.is_superuser || user.is_amo_admin || role === "SUPERUSER" || role === "AMO_ADMIN") caps.add("admin");
+  if (role === "ACCOUNTABLE_EXECUTIVE") {
+    caps.add("management");
+    caps.add("publisher");
+  }
+  if (role === "BASE_MAINTENANCE_MANAGER") caps.add("publisher");
   if (role === "PLANNING_ENGINEER") caps.add("planner");
-  if (role === "PRODUCTION_ENGINEER") caps.add("supervisor");
+  if (["PRODUCTION_ENGINEER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"].includes(role)) caps.add("supervisor");
   if (role === "CERTIFYING_ENGINEER" || role === "CERTIFYING_TECHNICIAN") caps.add("certifying");
   if (role === "TECHNICIAN") caps.add("technician");
   if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "AUDITOR") caps.add("quality");
@@ -176,6 +183,12 @@ export function getRoleDrivenDepartments(
     return [
       "planning", "production", "maintenance", "document-control", "quality",
       "reliability", "safety", "procurement", "stores", "workshops", "admin",
+    ];
+  }
+  if (caps.has("management")) {
+    return [
+      "planning", "production", "maintenance", "document-control", "quality",
+      "reliability", "safety", "procurement", "stores", "workshops",
     ];
   }
 
@@ -279,8 +292,8 @@ const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
   "rostering.edit-draft": ["admin", "planner", "supervisor"],
   "rostering.validate": ["admin", "planner", "supervisor", "quality"],
   "rostering.submit": ["admin", "planner", "supervisor"],
-  "rostering.approve": ["admin", "supervisor", "quality"],
-  "rostering.publish": ["admin", "supervisor", "quality"],
+  "rostering.approve": ["admin", "management", "supervisor"],
+  "rostering.publish": ["admin", "publisher"],
   "rostering.override-rule": ["admin", "quality"],
   "rostering.allocate-work": ["admin", "planner", "supervisor"],
 };
@@ -295,7 +308,8 @@ export function canViewFeature(
   contextDepartment?: string | null,
 ): boolean {
   const rule = FEATURE_RULES[feature];
-  return Boolean(rule && hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.view));
+  const capabilities = getUserCapabilities(user, contextDepartment);
+  return Boolean(rule && (capabilities.includes("management") || hasMatchingCapability(capabilities, rule.view)));
 }
 
 export function canEditFeature(
@@ -354,6 +368,8 @@ export function formatCapabilitiesForUi(user: PortalUser | null, contextDepartme
   return getUserCapabilities(user, contextDepartment).map((cap) => {
     switch (cap) {
       case "admin": return "Admin";
+      case "management": return "Management oversight";
+      case "publisher": return "Roster publisher";
       case "planner": return "Planner";
       case "supervisor": return "Supervisor";
       case "certifying": return "Certifying Staff";

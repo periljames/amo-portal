@@ -1,6 +1,80 @@
 import { addDays, endOfWeek, format, parseISO, startOfDay, startOfWeek } from "date-fns";
 
+import type { RosterCalendarSubscriptionRead } from "../../types/rostering";
+
 export type PlannerDensity = "compact" | "comfortable";
+
+export type RosterCalendarUrls = {
+  httpsUrl: string;
+  webcalUrl: string;
+  feedPath: string;
+};
+
+function optionalString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function safeUrl(value: string): URL | null {
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function safeOrigin(value?: string | null): string | null {
+  const parsed = safeUrl(optionalString(value));
+  return parsed?.origin || null;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(normalized);
+}
+
+export function resolveRosterCalendarUrls(
+  subscription: Partial<RosterCalendarSubscriptionRead> | null | undefined,
+  options: {
+    browserOrigin?: string | null;
+    configuredApiOrigin?: string | null;
+  } = {},
+): RosterCalendarUrls | null {
+  if (!subscription || typeof subscription !== "object") return null;
+
+  const httpsValue = optionalString(subscription.https_url);
+  const webcalValue = optionalString(subscription.webcal_url);
+  const supplied = safeUrl(httpsValue)
+    || safeUrl(webcalValue.replace(/^webcal:/i, "https:"));
+  const suppliedPath = supplied
+    ? `${supplied.pathname}${supplied.search}${supplied.hash}`
+    : "";
+  const rawFeedPath = optionalString(subscription.feed_path);
+  const feedPath = rawFeedPath
+    ? (rawFeedPath.startsWith("/") ? rawFeedPath : `/${rawFeedPath}`)
+    : suppliedPath;
+  if (!feedPath) return null;
+
+  const targetOrigin = safeOrigin(options.configuredApiOrigin)
+    || (supplied && !isLoopbackHostname(supplied.hostname) ? supplied.origin : null)
+    || safeOrigin(options.browserOrigin);
+  if (!targetOrigin) return null;
+
+  const targetPath = supplied && !isLoopbackHostname(supplied.hostname)
+    ? suppliedPath
+    : feedPath;
+  try {
+    const httpsUrl = new URL(targetPath, targetOrigin);
+    const resolvedFeedPath = `${httpsUrl.pathname}${httpsUrl.search}${httpsUrl.hash}`;
+    return {
+      httpsUrl: httpsUrl.toString(),
+      webcalUrl: `webcal://${httpsUrl.host}${resolvedFeedPath}`,
+      feedPath: resolvedFeedPath,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function isoDate(value: Date): string {
   return format(value, "yyyy-MM-dd");
@@ -16,10 +90,11 @@ export function weekBounds(anchor: Date): { from: string; to: string; days: Date
   };
 }
 
-export function monthBounds(anchor = new Date()): { from: string; to: string } {
+export function monthBounds(anchor = new Date()): { from: string; to: string; days: Date[] } {
   const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
-  return { from: isoDate(from), to: isoDate(to) };
+  const count = to.getDate();
+  return { from: isoDate(from), to: isoDate(to), days: Array.from({ length: count }, (_, index) => addDays(from, index)) };
 }
 
 export function dayKey(value: string | Date): string {

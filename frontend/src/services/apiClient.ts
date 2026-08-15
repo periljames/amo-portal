@@ -1,11 +1,10 @@
 // src/services/apiClient.ts
 import {
   authHeaders,
-  extendSessionIfNeeded,
   getCachedUser,
   getContext,
   handleAuthFailure,
-  markSessionActivity,
+  ensureAuthenticatedRequestAllowed,
 } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
@@ -287,8 +286,9 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) finalHeaders.set("Content-Type", "application/json");
 
   const method = getMethod(rest);
-  markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
-  void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
+  if (!ensureAuthenticatedRequestAllowed()) {
+    throw new ApiClientError(401, "Your session has ended. Sign in again to continue.", null);
+  }
 
   const scope = ensureScope();
   const urls = buildRequestUrls(path);
@@ -339,7 +339,6 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           throw new ApiClientError(response.status, detail, responseBody);
         }
 
-        markSessionActivity(`api:${method.toLowerCase()}:ok:${path}`);
         if (canUseCache && effectiveCacheTtlMs > 0) {
           const now = Date.now();
           const entry: CacheEntry = {

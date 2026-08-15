@@ -24,6 +24,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Table,
     Text,
     UniqueConstraint,
 )
@@ -157,6 +158,25 @@ class RosterAmendmentType(str, Enum):
     OTHER = "OTHER"
 
 
+shift_template_departments = Table(
+    "shift_template_departments",
+    Base.metadata,
+    Column(
+        "shift_template_id",
+        String(36),
+        ForeignKey("shift_templates.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "department_id",
+        String(36),
+        ForeignKey("departments.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Index("ix_shift_template_departments_department", "department_id", "shift_template_id"),
+)
+
+
 class ShiftTemplate(Base):
     __tablename__ = "shift_templates"
     __table_args__ = (
@@ -185,6 +205,16 @@ class ShiftTemplate(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     assignments = relationship("RosterAssignment", back_populates="shift_template", lazy="selectin")
+    departments = relationship(
+        "Department",
+        secondary=shift_template_departments,
+        lazy="selectin",
+    )
+
+    @property
+    def department_ids(self) -> list[str]:
+        """Empty means the shift is available to every department."""
+        return sorted(str(row.id) for row in (self.departments or []))
 
 
 class RosterPeriod(Base):

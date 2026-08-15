@@ -7,7 +7,7 @@ const formatTime = (value: Date | null): string => {
   return value.toLocaleTimeString();
 };
 
-type DisplayState = "live" | "syncing" | "offline";
+type DisplayState = "live" | "syncing" | "degraded" | "offline";
 
 const buildDisplayState = (params: {
   status: string;
@@ -17,10 +17,11 @@ const buildDisplayState = (params: {
   staleSeconds: number;
 }): DisplayState => {
   if (!params.isOnline) return "offline";
-  if (params.backendHealth === "ok" && params.staleSeconds < 180) return "live";
+  if (params.backendHealth !== "ok") return "degraded";
+  if (params.status === "syncing" || params.brokerState === "connecting") return "syncing";
   if (params.status === "live" && params.staleSeconds < 180) return "live";
   if (params.brokerState === "connected" && params.staleSeconds < 180) return "live";
-  return "offline";
+  return "syncing";
 };
 
 const statusLabel = (displayState: DisplayState): string => {
@@ -28,7 +29,9 @@ const statusLabel = (displayState: DisplayState): string => {
     case "live":
       return "Live";
     case "syncing":
-      return "Live";
+      return "Syncing";
+    case "degraded":
+      return "Degraded";
     case "offline":
       return "Offline";
     default:
@@ -58,7 +61,7 @@ const LiveStatusIndicator: React.FC<{ compact?: boolean }> = ({ compact = false 
   );
   const label = useMemo(() => statusLabel(displayState), [displayState]);
   const showOfflineIcon = displayState === "offline";
-  const showSyncIcon = displayState === "syncing";
+  const showSyncIcon = displayState === "syncing" || displayState === "degraded";
   const isLongConnectionIssue = displayState === "offline" && staleSeconds >= 180;
 
   if (compact) {
@@ -103,6 +106,9 @@ const LiveStatusIndicator: React.FC<{ compact?: boolean }> = ({ compact = false 
             <div className="live-status__meta">
               Connection issue for {Math.floor(staleSeconds / 60)}m {staleSeconds % 60}s.
             </div>
+          ) : null}
+          {displayState === "degraded" ? (
+            <div className="live-status__meta">The API is reachable, but an authoritative dependency is still recovering.</div>
           ) : null}
           {displayState === "live" ? (
             <div className="live-status__meta">The portal is online and the last server heartbeat is within the accepted window.</div>

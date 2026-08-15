@@ -65,6 +65,8 @@ class WorkforceRosterPersonRead(BaseModel):
     standby_eligible: bool = False
     active_authorisation_count: int = 0
     has_active_contract: bool = False
+    contract_effective_from: Optional[date] = None
+    contract_effective_to: Optional[date] = None
     is_active: bool
 
 
@@ -111,7 +113,8 @@ def _people_query(
     db: Session,
     *,
     amo_id: str,
-    today: date,
+    effective_from: date,
+    effective_to: date,
     search: Optional[str],
     department_id: Optional[str],
     base_station_id: Optional[str],
@@ -126,10 +129,10 @@ def _people_query(
         .filter(
             models.EmploymentContract.amo_id == amo_id,
             models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
-            models.EmploymentContract.effective_from <= today,
+            models.EmploymentContract.effective_from <= effective_to,
             or_(
                 models.EmploymentContract.effective_to.is_(None),
-                models.EmploymentContract.effective_to >= today,
+                models.EmploymentContract.effective_to >= effective_from,
             ),
         )
         .group_by(models.EmploymentContract.user_id)
@@ -271,6 +274,8 @@ def _roster_person(
         standby_eligible=bool(getattr(contract, "standby_eligible", False)),
         active_authorisation_count=active_authorisations,
         has_active_contract=contract is not None,
+        contract_effective_from=getattr(contract, "effective_from", None),
+        contract_effective_to=getattr(contract, "effective_to", None),
         is_active=bool(user.is_active),
     )
 
@@ -282,6 +287,8 @@ def list_roster_people_page(
     base_station_id: Optional[str] = Query(default=None),
     active_only: bool = Query(default=True),
     roster_eligible_only: bool = Query(default=True),
+    from_date: Optional[date] = Query(default=None, alias="from"),
+    to_date: Optional[date] = Query(default=None, alias="to"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=25, le=250),
     db: Session = Depends(get_db),
@@ -294,10 +301,15 @@ def list_roster_people_page(
         base_station_id=base_station_id,
     )
     today = date.today()
+    target_from = from_date or today
+    target_to = to_date or target_from
+    if target_to < target_from:
+        target_from, target_to = target_to, target_from
     query = _people_query(
         db,
         amo_id=amo_id,
-        today=today,
+        effective_from=target_from,
+        effective_to=target_to,
         search=search,
         department_id=department_id,
         base_station_id=base_station_id,
@@ -357,7 +369,8 @@ def list_workforce_people(
         _people_query(
             db,
             amo_id=amo_id,
-            today=today,
+            effective_from=today,
+            effective_to=today,
             search=search,
             department_id=department_id,
             base_station_id=base_station_id,

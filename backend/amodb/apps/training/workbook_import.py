@@ -730,14 +730,32 @@ def _preview_matrix(db: Session, job: TrainingWorkbookImportJob, sheet: Training
 def process_workbook_preview(job_id: str) -> None:
     db = SessionLocal()
     try:
+        claimed = (
+            db.query(TrainingWorkbookImportJob)
+            .filter(
+                TrainingWorkbookImportJob.id == job_id,
+                TrainingWorkbookImportJob.status == "QUEUED",
+            )
+            .update(
+                {
+                    TrainingWorkbookImportJob.status: "PARSING",
+                    TrainingWorkbookImportJob.stage: "DISCOVERING_SHEETS",
+                    TrainingWorkbookImportJob.started_at: utcnow(),
+                    TrainingWorkbookImportJob.processed_rows: 0,
+                    TrainingWorkbookImportJob.error_message: None,
+                    TrainingWorkbookImportJob.completed_at: None,
+                    TrainingWorkbookImportJob.updated_at: utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if claimed != 1:
+            return
+        db.expire_all()
         job = db.get(TrainingWorkbookImportJob, job_id)
         if not job:
             return
-        job.status = "PARSING"
-        job.stage = "DISCOVERING_SHEETS"
-        job.started_at = utcnow()
-        job.processed_rows = 0
-        job.error_message = None
         db.query(TrainingWorkbookImportRow).filter(TrainingWorkbookImportRow.job_id == job.id).delete(synchronize_session=False)
         db.query(TrainingWorkbookImportSheet).filter(TrainingWorkbookImportSheet.job_id == job.id).delete(synchronize_session=False)
         db.commit()
@@ -1089,7 +1107,26 @@ def _upsert_person(
     profile.phone_number = payload.get("phone_number")
     profile.secondary_phone = payload.get("secondary_phone")
     profile.email = selected_email
-    profile.hire_date = date_value(payload.get("hire_date"))
+    imported_hire_date = date_value(payload.get("hire_date"))
+    previous_hire_date = profile.hire_date
+    if imported_hire_date and imported_hire_date != previous_hire_date:
+        profile.hire_date = imported_hire_date
+        audit_services.log_event(
+            db,
+            amo_id=job.amo_id,
+            actor_user_id=job.actor_user_id,
+            entity_type="PersonnelProfile",
+            entity_id=str(profile.id),
+            action="HIRE_DATE_IMPORT_APPLIED",
+            before={"hire_date": previous_hire_date.isoformat() if previous_hire_date else None},
+            after={"hire_date": imported_hire_date.isoformat()},
+            metadata={
+                "module": "training",
+                "imported_hire_date": imported_hire_date.isoformat(),
+                "reason": "Imported personnel hire date is the authoritative Workforce start",
+            },
+            critical=True,
+        )
     profile.employment_status = payload.get("employment_status")
     profile.status = payload.get("status") or "Active"
     profile.date_of_birth = date_value(payload.get("date_of_birth"))
@@ -1196,6 +1233,18 @@ def _upsert_person(
         user.regulatory_authority = account_models.RegulatoryAuthority.KCAA
         user.licence_number = payload.get("kamel_no")
         user.licence_state_or_country = "Kenya"
+
+    if user and profile.hire_date:
+        from ..workforce import services as workforce_services
+
+        workforce_services.sync_contract_start_from_hire_date(
+            db,
+            amo_id=job.amo_id,
+            user_id=str(user.id),
+            hire_date=profile.hire_date,
+            actor_user_id=job.actor_user_id,
+            source="TRAINING_WORKBOOK_PEOPLE_HIREDATE",
+        )
 
     category = payload.get("category_reg_2018") or payload.get("category_reg_2013")
     category_source = "Reg. 2018" if payload.get("category_reg_2018") else "Reg. 2013" if payload.get("category_reg_2013") else None

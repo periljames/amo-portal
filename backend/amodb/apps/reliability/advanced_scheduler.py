@@ -9,7 +9,8 @@ from typing import Iterator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from amodb.database import WriteSessionLocal, close_session_safely
+from amodb.database import WriteSessionLocal, close_session_safely, probe_database
+from amodb.database_resilience import database_circuit, is_database_disconnect
 
 from . import advanced_models as domain
 from . import advanced_services as services
@@ -157,10 +158,17 @@ def run_reliability_cycle() -> dict[str, int]:
 
 def _worker() -> None:
     while not _stop_event.is_set():
+        if not probe_database():
+            _stop_event.wait(database_circuit.retry_after_seconds())
+            continue
         try:
             result = run_reliability_cycle()
             logger.info("Reliability scheduler cycle completed: %s", result)
-        except Exception:
+        except Exception as exc:
+            if is_database_disconnect(exc):
+                database_circuit.mark_failure(exc)
+                _stop_event.wait(database_circuit.retry_after_seconds())
+                continue
             logger.exception("Reliability scheduler cycle failed")
         _stop_event.wait(_interval_seconds())
 

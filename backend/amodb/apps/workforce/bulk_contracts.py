@@ -11,8 +11,7 @@ from ..accounts import models as account_models
 from . import (
     bulk_models,
     bulk_schemas,
-    hr_people_directory,
-    hr_schemas,
+    hierarchy_roles,
     hr_selection_integrity,
     models,
     permissions,
@@ -34,6 +33,7 @@ def contract_input_for(
     override: bulk_schemas.ContractOverride | None,
     *,
     user_id: str,
+    hire_date: date | None = None,
 ) -> dict[str, Any]:
     data = defaults.model_dump(mode="json")
     if override is not None:
@@ -41,6 +41,8 @@ def contract_input_for(
             if value is not None:
                 data[key] = value
     data["user_id"] = user_id
+    if hire_date is not None:
+        data["effective_from"] = hire_date.isoformat()
     return data
 
 
@@ -98,6 +100,9 @@ def preview_contract_batch(
             .all()
         )
     users.sort(key=lambda row: ((row.full_name or "").lower(), str(row.id)))
+    hire_dates = services.hire_dates_by_user(
+        db, amo_id=amo_id, user_ids=[str(user.id) for user in users]
+    )
 
     rows: list[bulk_schemas.ContractPreviewRow] = []
     eligible_count = 0
@@ -108,6 +113,7 @@ def preview_contract_batch(
             payload.defaults,
             override_by_user.get(str(user.id)),
             user_id=str(user.id),
+            hire_date=hire_dates.get(str(user.id)),
         )
         try:
             contract = schemas.EmploymentContractCreate.model_validate(contract_input)
@@ -122,8 +128,33 @@ def preview_contract_batch(
         if contract is not None:
             if not contract.primary_base_station_id:
                 reasons.append("MISSING_PRIMARY_BASE")
-            if contract.supervisor_user_id is None:
+            can_have_supervisor = hierarchy_roles.person_can_have_supervisor(
+                db,
+                amo_id=amo_id,
+                user_id=str(user.id),
+                on_date=services._supervisor_validation_date(
+                    effective_from=contract.effective_from,
+                    effective_to=contract.effective_to,
+                ),
+            )
+            if can_have_supervisor and contract.supervisor_user_id is None:
                 reasons.append("MISSING_SUPERVISOR")
+            if not can_have_supervisor and contract.supervisor_user_id is not None:
+                reasons.append("MANAGEMENT_POSITION_CANNOT_HAVE_SUPERVISOR")
+            if can_have_supervisor and contract.supervisor_user_id:
+                try:
+                    hierarchy_roles.require_no_reporting_cycle(
+                        db,
+                        amo_id=amo_id,
+                        user_id=str(user.id),
+                        supervisor_user_id=contract.supervisor_user_id,
+                        on_date=services._supervisor_validation_date(
+                            effective_from=contract.effective_from,
+                            effective_to=contract.effective_to,
+                        ),
+                    )
+                except ValueError as exc:
+                    reasons.append(f"INVALID_REPORTING_LINE: {exc}")
             if not permissions.has_permission(
                 db,
                 user=actor,
@@ -160,7 +191,7 @@ def preview_contract_batch(
                         contract.supervisor_user_id
                         if contract else contract_input.get("supervisor_user_id")
                     ),
-                    effective_from=(contract.effective_from if contract else payload.defaults.effective_from),
+                    effective_from=(contract.effective_from if contract else hire_dates.get(str(user.id)) or payload.defaults.effective_from),
                     effective_to=(contract.effective_to if contract else payload.defaults.effective_to),
                     eligible=eligible,
                     reasons=reasons,
@@ -224,45 +255,11 @@ def process_default_pattern_item(
     item: bulk_models.WorkforceBulkOperationItem,
     actor: account_models.User,
 ) -> tuple[str, str, str, dict[str, Any] | None]:
-    user = db.query(account_models.User).filter(
-        account_models.User.amo_id == operation.amo_id,
-        account_models.User.id == item.user_id,
-    ).first()
-    if user is None:
-        return "FAILED", "USER_NOT_FOUND", "The selected user no longer exists in this tenant", None
-    for required_permission in (
-        permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
-        permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
-        permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
-    ):
-        if not permissions.has_permission(
-            db,
-            user=actor,
-            permission=required_permission,
-            department_id=user.department_id,
-            base_station_id=None,
-        ):
-            return "FAILED", "OUTSIDE_PERMISSION_SCOPE", f"The administrator no longer has {required_permission.value} for this person's scope", None
+    from .legacy_guard import RETIRED_DEFAULT_PATTERN_MESSAGE
 
-    selection = hr_schemas.HrPeopleSelection(mode="EXPLICIT", user_ids=[str(item.user_id)])
-    _, token = hr_selection_integrity.resolve_with_token(
-        db, amo_id=operation.amo_id, selection=selection
+    return (
+        "FAILED",
+        "DEFAULT_PATTERN_RETIRED",
+        RETIRED_DEFAULT_PATTERN_MESSAGE,
+        None,
     )
-    result = hr_people_directory.apply_default_day_pattern_batch(
-        db,
-        amo_id=operation.amo_id,
-        actor_user_id=operation.actor_user_id,
-        payload=hr_schemas.HrDefaultDayBatchApplyRequest(
-            selection=selection,
-            expected_match_count=1,
-            expected_selection_token=token,
-        ),
-    )
-    data = result.model_dump(mode="json")
-    if result.assigned_count:
-        return "SUCCEEDED", "DEFAULT_PATTERN_ASSIGNED", "Default day pattern assigned", data
-    if result.already_assigned_count:
-        return "SKIPPED", "PATTERN_ALREADY_COMPLIANT", "An active compliant pattern is already assigned", data
-    if result.skipped_conflict_count:
-        return "SKIPPED", "FUTURE_PATTERN_CONFLICT", "A future pattern assignment conflicts with this change", data
-    return "SKIPPED", "PATTERN_INELIGIBLE", "No active eligible contract exists for pattern assignment", data

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..accounts import models as account_models
 from ..foundations import models as foundation_models
-from . import hr_schemas, hr_service, models
+from . import hr_schemas, hr_service, models, schemas, services
 
 MAX_BATCH_USERS = 10_000
 _BATCH_CHUNK_SIZE = 500
@@ -136,6 +136,42 @@ def _base_user_query(db: Session, *, amo_id: str):
     )
 
 
+def _automatic_pattern_resolution(
+    db: Session,
+    *,
+    amo_id: str,
+    today: date,
+) -> tuple[set[str], set[str]]:
+    user_ids = [
+        str(user_id)
+        for (user_id,) in _base_user_query(db, amo_id=amo_id)
+        .with_entities(account_models.User.id)
+        .all()
+    ]
+    if not user_ids:
+        return set(), set()
+    preview = services.preview_patterns(
+        db,
+        amo_id=amo_id,
+        payload=schemas.PatternPreviewRequest(
+            from_date=today,
+            to_date=today,
+            user_ids=user_ids,
+        ),
+    )
+    resolved = {
+        str(row.user_id)
+        for row in preview.items
+        if row.resolution_source == "RULE" and row.pattern_id
+    }
+    ambiguous = {
+        str(row.user_id)
+        for row in preview.items
+        if row.resolution_source == "RULE" and "AMBIGUOUS_PATTERN_RULE" in row.conflicts
+    }
+    return resolved, ambiguous
+
+
 def _apply_filters(
     query,
     *,
@@ -143,6 +179,8 @@ def _apply_filters(
     filters: hr_schemas.HrPeopleFilterInput,
     today: date,
     now: datetime,
+    automatic_patterned_user_ids: set[str] | None = None,
+    ambiguous_pattern_user_ids: set[str] | None = None,
 ):
     effective_exists = _effective_contract_exists(amo_id=amo_id, today=today)
     future_exists = _future_contract_exists(amo_id=amo_id, today=today)
@@ -158,6 +196,22 @@ def _apply_filters(
     )
     ready = _ready_condition(amo_id=amo_id, today=today, now=now)
     blocked = _blocked_condition(amo_id=amo_id, today=today)
+    automatic_ids = automatic_patterned_user_ids or set()
+    ambiguous_ids = ambiguous_pattern_user_ids or set()
+    automatic_pattern = account_models.User.id.in_(automatic_ids) if automatic_ids else None
+    if automatic_pattern is not None:
+        automatic_ready = and_(
+            automatic_pattern,
+            exists().where(
+                _effective_contract_predicate(amo_id=amo_id, today=today),
+                models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
+                models.EmploymentContract.primary_base_station_id.is_not(None),
+            ),
+            ~_approved_leave_exists(amo_id=amo_id, now=now),
+        )
+        if ambiguous_ids:
+            automatic_ready = and_(automatic_ready, account_models.User.id.notin_(ambiguous_ids))
+        ready = or_(ready, automatic_ready)
 
     if filters.search:
         term = f"%{filters.search.strip()}%"
@@ -264,9 +318,14 @@ def _apply_filters(
     if filters.pattern_state == "DEFAULT":
         query = query.filter(default_pattern)
     elif filters.pattern_state == "ASSIGNED":
-        query = query.filter(active_pattern, ~default_pattern)
+        assigned = and_(active_pattern, ~default_pattern)
+        query = query.filter(or_(assigned, automatic_pattern) if automatic_pattern is not None else assigned)
     elif filters.pattern_state == "MISSING":
-        query = query.filter(~active_pattern)
+        query = query.filter(
+            and_(~active_pattern, ~automatic_pattern)
+            if automatic_pattern is not None
+            else ~active_pattern
+        )
 
     if filters.readiness_state == "READY":
         query = query.filter(ready, ~blocked)
@@ -358,6 +417,7 @@ def _serialize_users(
         user_ids=user_ids,
         now=now,
     )
+    hire_dates = services.hire_dates_by_user(db, amo_id=amo_id, user_ids=user_ids)
     memberships = _group_memberships(db, amo_id=amo_id, user_ids=user_ids)
     managed_pattern_id = hr_service._default_day_system_id(
         amo_id=amo_id,
@@ -376,6 +436,7 @@ def _serialize_users(
             pattern=pattern,
             leave=leave_by_user.get(user_id),
             on_date=today,
+            hire_date=hire_dates.get(user_id),
         )
         contract_state = "MISSING"
         if contract:
@@ -404,6 +465,12 @@ def _serialize_users(
             "group_ids": [group_id for group_id, _ in groups],
             "group_names": [group_name for _, group_name in groups],
         }))
+    hr_service._apply_automatic_pattern_readiness(
+        db,
+        amo_id=amo_id,
+        on_date=today,
+        items=items,
+    )
     return items
 
 
@@ -419,6 +486,14 @@ def list_people_page(
     now = hr_service._utcnow()
     safe_page_size = max(1, min(int(page_size), 200))
     safe_page = max(1, int(page))
+    automatic_ids: set[str] = set()
+    ambiguous_ids: set[str] = set()
+    if filters.pattern_state or filters.readiness_state:
+        automatic_ids, ambiguous_ids = _automatic_pattern_resolution(
+            db,
+            amo_id=amo_id,
+            today=today,
+        )
 
     query = _apply_filters(
         _base_user_query(db, amo_id=amo_id),
@@ -426,6 +501,8 @@ def list_people_page(
         filters=filters,
         today=today,
         now=now,
+        automatic_patterned_user_ids=automatic_ids,
+        ambiguous_pattern_user_ids=ambiguous_ids,
     )
     total = int(query.order_by(None).count())
     pages = (total + safe_page_size - 1) // safe_page_size if total else 0
@@ -465,6 +542,11 @@ def _options(rows, *, value_index: int = 0, label_index: int = 1, count_index: i
 def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets:
     today = _today(db, amo_id=amo_id)
     now = hr_service._utcnow()
+    automatic_ids, ambiguous_ids = _automatic_pattern_resolution(
+        db,
+        amo_id=amo_id,
+        today=today,
+    )
     human_filter = (
         account_models.User.amo_id == amo_id,
         account_models.User.is_active.is_(True),
@@ -575,6 +657,8 @@ def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets
             filters=model,
             today=today,
             now=now,
+            automatic_patterned_user_ids=automatic_ids,
+            ambiguous_pattern_user_ids=ambiguous_ids,
         ).order_by(None).count())
 
     readiness_states = [
@@ -596,9 +680,9 @@ def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets
     pattern_states = [
         hr_schemas.HrFilterOption(value=value, label=label, count=count_for(pattern_state=value))
         for value, label in (
-            ("DEFAULT", "Default day pattern"),
-            ("ASSIGNED", "Other assigned pattern"),
-            ("MISSING", "No active pattern"),
+            ("DEFAULT", "Legacy default"),
+            ("ASSIGNED", "Assigned or automatic"),
+            ("MISSING", "No matching pattern"),
         )
     ]
 
@@ -642,12 +726,22 @@ def resolve_selection_user_ids(
     if selection.mode == "EXPLICIT":
         query = query.filter(account_models.User.id.in_(selection.user_ids))
     else:
+        automatic_ids: set[str] = set()
+        ambiguous_ids: set[str] = set()
+        if selection.filters.pattern_state or selection.filters.readiness_state:
+            automatic_ids, ambiguous_ids = _automatic_pattern_resolution(
+                db,
+                amo_id=amo_id,
+                today=today,
+            )
         query = _apply_filters(
             query,
             amo_id=amo_id,
             filters=selection.filters,
             today=today,
             now=now,
+            automatic_patterned_user_ids=automatic_ids,
+            ambiguous_pattern_user_ids=ambiguous_ids,
         )
         if selection.exclude_user_ids:
             query = query.filter(account_models.User.id.notin_(selection.exclude_user_ids))
@@ -730,88 +824,12 @@ def _ensure_default_day_entities(
     actor_user_id: str,
     operation_id: str,
 ):
-    from ..rostering import models as roster_models
-
     amo = db.query(account_models.AMO).filter(
         account_models.AMO.id == amo_id,
     ).with_for_update().one()
     timezone_name = str(amo.time_zone or "UTC")
 
-    shift_id = hr_service._default_day_system_id(
-        amo_id=amo_id,
-        system_key=hr_service._DEFAULT_DAY_SHIFT_KEY,
-    )
-    shift_by_code = db.query(roster_models.ShiftTemplate).filter(
-        roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.code == hr_service._DEFAULT_DAY_SHIFT_CODE,
-    ).with_for_update().first()
-    shift = db.query(roster_models.ShiftTemplate).filter(
-        roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.id == shift_id,
-    ).with_for_update().first()
-    if shift_by_code is not None and str(shift_by_code.id) != shift_id:
-        raise ValueError(
-            "Reserved shift code DEFAULT-DAY is already owned by tenant configuration; "
-            "rename that shift before applying the managed default-day baseline."
-        )
-    if shift is not None and shift_by_code is not None and str(shift.id) != str(shift_by_code.id):
-        raise ValueError("Managed default-day shift identity conflicts with the reserved code")
-
-    shift_before = hr_service._shift_template_snapshot(shift) if shift is not None else None
-    if shift is None:
-        shift = roster_models.ShiftTemplate(
-            id=shift_id,
-            amo_id=amo_id,
-            code=hr_service._DEFAULT_DAY_SHIFT_CODE,
-            label="Default day shift",
-            kind=roster_models.ShiftTemplateKind.DAY,
-            default_start_time="08:00",
-            default_end_time="17:00",
-            duration_minutes=480,
-            counts_as_duty=True,
-            is_active=True,
-            display_order=10,
-            description=(
-                "Portal-managed baseline for active staff without an assigned work pattern; "
-                "planner review remains required."
-            ),
-            icon_name="Sun",
-            created_by_user_id=actor_user_id,
-            updated_by_user_id=actor_user_id,
-        )
-        db.add(shift)
-    else:
-        shift.code = hr_service._DEFAULT_DAY_SHIFT_CODE
-        shift.label = "Default day shift"
-        shift.kind = roster_models.ShiftTemplateKind.DAY
-        shift.default_start_time = "08:00"
-        shift.default_end_time = "17:00"
-        shift.duration_minutes = 480
-        shift.counts_as_duty = True
-        shift.is_active = True
-        shift.display_order = 10
-        shift.description = (
-            "Portal-managed baseline for active staff without an assigned work pattern; "
-            "planner review remains required."
-        )
-        shift.icon_name = "Sun"
-        shift.updated_by_user_id = actor_user_id
-        db.add(shift)
-    db.flush()
-    shift_after = hr_service._shift_template_snapshot(shift)
-    if shift_before != shift_after:
-        hr_service._bootstrap_audit(
-            db,
-            amo_id=amo_id,
-            actor_user_id=actor_user_id,
-            operation_id=operation_id,
-            entity_type="ShiftTemplate",
-            entity_id=str(shift.id),
-            action="bootstrap_create" if shift_before is None else "bootstrap_update",
-            before=shift_before,
-            after=shift_after,
-            metadata={"system_key": hr_service._DEFAULT_DAY_SHIFT_KEY},
-        )
+    shift = hr_service._resolve_existing_day_shift(db, amo_id=amo_id)
 
     pattern_id = hr_service._default_day_system_id(
         amo_id=amo_id,

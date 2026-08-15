@@ -18,7 +18,15 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
-from .database import Base, engine, WriteSessionLocal, close_session_safely, dispose_engines
+from .database import (
+    Base,
+    engine,
+    WriteSessionLocal,
+    close_session_safely,
+    dispose_engines,
+    probe_database,
+)
+from .database_resilience import database_circuit
 from .security import JWT_ALGORITHM, SECRET_KEY
 from .apps.accounts import models as accounts_models
 
@@ -62,6 +70,11 @@ from .apps.platform.router import router as platform_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
 from .apps.rostering.router import router as rostering_router
+from .jobs.portal_job_supervisor import (
+    portal_job_supervisor_status,
+    start_portal_job_supervisor,
+    stop_portal_job_supervisor,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -230,6 +243,10 @@ def _get_platform_settings_cached() -> accounts_models.PlatformSettings | None:
     cached_data = _platform_settings_cache.get("data")
     if cached_data and now - cached_at <= platform_settings_cache_ttl:
         return cached_data  # type: ignore[return-value]
+    if not database_circuit.allow_request():
+        # Request-size enforcement must not bypass the global circuit and open
+        # a fresh PostgreSQL connection for every request during an outage.
+        return cached_data  # type: ignore[return-value]
     db = WriteSessionLocal()
     try:
         cached_data = db.query(accounts_models.PlatformSettings).first()
@@ -276,6 +293,7 @@ def _schema_preflight() -> None:
     realtime_gateway.connect()
     reliability_scheduler.start_reliability_scheduler()
     start_quality_planner_scheduler()
+    start_portal_job_supervisor()
 
 
 def _run_shutdown_step(name: str, fn: Callable[[], None], timeout_seconds: float) -> None:
@@ -304,6 +322,7 @@ def _flush_usage_metrics_on_shutdown() -> None:
     app.state.is_shutting_down = True
     timeout_seconds = float(os.getenv("AMODB_SHUTDOWN_STEP_TIMEOUT_SEC", "3") or "3")
 
+    _run_shutdown_step("portal-job-supervisor", stop_portal_job_supervisor, timeout_seconds)
     _run_shutdown_step("quality-planner-scheduler", stop_quality_planner_scheduler, timeout_seconds)
     _run_shutdown_step("reliability-scheduler", reliability_scheduler.stop_reliability_scheduler, timeout_seconds)
     _run_shutdown_step("realtime-disconnect", realtime_gateway.disconnect, timeout_seconds)
@@ -358,21 +377,30 @@ def _pool_timeout_response() -> JSONResponse:
             "detail": "Database connection pool is temporarily exhausted. The request was isolated instead of taking down the portal.",
             "error_code": "DB_POOL_TIMEOUT",
             "retryable": True,
+            "request_accepted": False,
         },
-        headers={"Retry-After": "5"},
+        headers={"Retry-After": "5", "X-Portal-Readiness": "degraded"},
     )
 
 
 def _database_unavailable_response() -> JSONResponse:
+    retry_after = database_circuit.retry_after_seconds()
     return JSONResponse(
         status_code=503,
         content={
             "detail": "The database is temporarily unavailable. The request is safe to retry.",
             "error_code": "DB_TEMPORARILY_UNAVAILABLE",
             "retryable": True,
+            "request_accepted": False,
         },
-        headers={"Retry-After": "3"},
+        headers={
+            "Retry-After": str(retry_after),
+            "X-Portal-Readiness": "offline",
+        },
     )
+
+
+_CIRCUIT_BYPASS_PATHS = frozenset({"/", "/health", "/healthz", "/livez", "/readyz", "/time"})
 
 @app.middleware("http")
 async def meter_api_calls(request: Request, call_next):
@@ -381,7 +409,10 @@ async def meter_api_calls(request: Request, call_next):
     timeout_error = False
     tenant_id = _tenant_from_token_for_metrics(request)
     try:
-        response = await call_next(request)
+        if request.url.path not in _CIRCUIT_BYPASS_PATHS and not database_circuit.allow_request():
+            response = _database_unavailable_response()
+        else:
+            response = await call_next(request)
         status_code = getattr(response, "status_code", 200)
     except asyncio.CancelledError:
         response = Response(status_code=499)
@@ -390,9 +421,11 @@ async def meter_api_calls(request: Request, call_next):
         timeout_error = True
         status_code = 503
         response = _pool_timeout_response()
-    except OperationalError:
+    except OperationalError as exc:
         timeout_error = True
         status_code = 503
+        if database_circuit.mark_failure(exc):
+            logger.warning("Database circuit opened; API requests will fail fast until readiness recovers")
         response = _database_unavailable_response()
     except RuntimeError as exc:
         if "No response returned" in str(exc):
@@ -452,17 +485,79 @@ def read_root():
 def health():
     return {"status": "ok"}
 
+@app.get("/livez", tags=["health"])
+def livez():
+    """Process liveness only; never claims that PostgreSQL is ready."""
+    return {"status": "alive", "process": True}
+
+
+_readiness_migration_cache: dict[str, object] = {"checked_at": 0.0, "ready": False, "detail": "Not checked"}
+
+
+def _migration_readiness() -> tuple[bool, str | None]:
+    now = time.monotonic()
+    if now - float(_readiness_migration_cache["checked_at"] or 0.0) < 30.0:
+        detail = str(_readiness_migration_cache["detail"] or "") or None
+        return bool(_readiness_migration_cache["ready"]), detail
+    db = WriteSessionLocal()
+    try:
+        script = ScriptDirectory.from_config(Config(str(Path(__file__).resolve().parent / "alembic.ini")))
+        repository_heads = set(script.get_heads())
+        database_heads = {str(row[0]) for row in db.execute(text("SELECT version_num FROM alembic_version")).fetchall()}
+        ready = database_heads == repository_heads
+        detail = None if ready else (
+            f"Database migrations {sorted(database_heads)} do not match repository heads {sorted(repository_heads)}"
+        )
+    except Exception as exc:
+        ready = False
+        detail = f"Migration readiness check failed: {str(exc)[:240]}"
+    finally:
+        close_session_safely(db)
+    _readiness_migration_cache.update({"checked_at": now, "ready": ready, "detail": detail or ""})
+    return ready, detail
+
+
+def _readiness_response() -> JSONResponse:
+    db_ok = probe_database(force=database_circuit.allow_request())
+    migrations_ok, migration_detail = _migration_readiness() if db_ok else (False, "Database unavailable")
+    job_runtime = portal_job_supervisor_status()
+    worker_families = dict(job_runtime.get("families") or {})
+    jobs_ok = not job_runtime["enabled"] or (
+        job_runtime["running"] and bool(worker_families) and all(worker_families.values())
+    )
+    healthy = db_ok and migrations_ok and jobs_ok
+    circuit = database_circuit.snapshot()
+    payload = {
+        "status": "ok" if healthy else "degraded",
+        "db": db_ok,
+        "migrations": {"ready": migrations_ok, "detail": migration_detail},
+        "ready": healthy,
+        "request_accepted": healthy,
+        "error_code": None if healthy else (
+            "DB_TEMPORARILY_UNAVAILABLE" if not db_ok else "SERVICE_NOT_READY"
+        ),
+        "retryable": not healthy,
+        "broker": realtime_gateway.health(),
+        "jobs": job_runtime,
+        "database_circuit": circuit,
+    }
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Portal-Readiness": "ready" if healthy else "degraded",
+    }
+    if not healthy:
+        headers["Retry-After"] = str(max(1, int(circuit.get("retry_after_seconds") or 1)))
+    return JSONResponse(status_code=200 if healthy else 503, content=payload, headers=headers)
+
+
+@app.get("/readyz", tags=["health"])
+def readyz():
+    return _readiness_response()
+
+
 @app.get("/healthz", tags=["health"])
 def healthz():
-    db_ok = True
-    try:
-        db = WriteSessionLocal()
-        db.execute(text("SELECT 1"))
-    except Exception:
-        db_ok = False
-    finally:
-        close_session_safely(locals().get("db"))
-    return {"status": "ok" if db_ok else "degraded", "db": db_ok, "broker": realtime_gateway.health()}
+    return _readiness_response()
 
 @app.get("/time", tags=["health"])
 def server_time():

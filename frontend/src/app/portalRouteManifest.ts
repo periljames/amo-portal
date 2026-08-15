@@ -128,14 +128,12 @@ const ROSTERING: FeatureSection[] = [
     feature("rostering-my-roster", "My Roster", "my-roster", "rostering.my-roster"),
   ] },
   { id: "rostering-planning", label: "Planning", routes: [
-    feature("rostering-calendar", "Calendar", "calendar", "rostering.calendar"),
-    feature("rostering-board", "Planning Board", "planning-board", "rostering.planning-board"),
-    feature("rostering-training", "Training Impact", "training-impact", "rostering.training-impact"),
+    feature("rostering-calendar", "Planner", "calendar", "rostering.calendar"),
+    feature("rostering-board", "Operations", "planning-board", "rostering.planning-board"),
   ] },
   { id: "rostering-control", label: "Control", routes: [
-    feature("rostering-dashboard", "Dashboard", "dashboard", "rostering.dashboard"),
-    feature("rostering-reports", "Reports", "reports", "rostering.reports"),
-    feature("rostering-settings", "Settings", "settings", "rostering.settings"),
+    feature("rostering-dashboard", "Command centre", "dashboard", "rostering.dashboard"),
+    feature("rostering-settings", "Setup", "settings", "rostering.settings"),
   ] },
 ];
 

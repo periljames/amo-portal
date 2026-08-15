@@ -130,6 +130,7 @@ export const listTrainingReportDefinitions = () => apiGet<ReportDefinition[]>(`$
 export const createTrainingReportDefinition = (payload: Record<string, unknown>) => apiPost<ReportDefinition>(`${ROOT}/report-definitions`, payload);
 export const listTrainingReportJobs = (limit = 50, offset = 0) => apiGet<ReportJobPage>(`${ROOT}/report-jobs?limit=${limit}&offset=${offset}`);
 export const queueTrainingReportJob = (report_code: string, output_format: "PDF" | "XLSX" | "CSV", filters_json: Record<string, unknown> = {}) => apiPost<ReportJob>(`${ROOT}/report-jobs`, { report_code, output_format, filters_json });
+export const retryTrainingReportJob = (jobId: string) => apiPost<ReportJob>(`${ROOT}/report-jobs/${encodeURIComponent(jobId)}/retry`, {});
 export const downloadTrainingReportJob = (job: ReportJob) => downloadTrainingOperatingReport(`/report-jobs/${encodeURIComponent(job.id)}/download`, `training-${job.report_code.toLowerCase().replaceAll("_", "-")}-${job.id}.${job.output_format.toLowerCase()}`);
 
 export async function downloadTrainingOperatingReport(path: string, filename: string): Promise<void> {

@@ -1,6 +1,11 @@
 import type { PersistedClient, Persister } from "@tanstack/react-query-persist-client";
 
-import { currentOfflineScope } from "./offlinePersistence";
+import {
+  currentOfflineScope,
+  decryptDeviceValue,
+  encryptDeviceValue,
+  type EncryptedDeviceValue,
+} from "./offlinePersistence";
 
 const DATABASE_NAME = "amo-portal-query-cache";
 const DATABASE_VERSION = 1;
@@ -9,7 +14,8 @@ const CACHE_KEY = "tanstack-query-cache-v3";
 
 type ScopedPersistedClient = {
   scope: string;
-  client: PersistedClient;
+  client?: PersistedClient;
+  encryptedClient?: EncryptedDeviceValue;
 };
 
 type ScopeChangeHandler = (previousScope: string, nextScope: string) => void;
@@ -83,9 +89,11 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       memoryClients.set(scope, client);
       const database = await openDatabase();
       if (!database || currentOfflineScope() !== scope) return;
+      const encryptedClient = await encryptDeviceValue(client).catch(() => null);
+      if (!encryptedClient || currentOfflineScope() !== scope) return;
       const transaction = database.transaction(STORE_NAME, "readwrite");
       const done = transactionDone(transaction);
-      const record: ScopedPersistedClient = { scope, client };
+      const record: ScopedPersistedClient = { scope, encryptedClient };
       transaction.objectStore(STORE_NAME).put(record, storageKey(scope));
       await done;
     },
@@ -105,8 +113,22 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       await done;
       if (currentOfflineScope() !== scope) return undefined;
       if (!record || record.scope !== scope) return memoryClients.get(scope);
-      memoryClients.set(scope, record.client);
-      return record.client;
+      const client = record.encryptedClient
+        ? await decryptDeviceValue<PersistedClient>(record.encryptedClient).catch(() => undefined)
+        : record.client;
+      if (!client) return memoryClients.get(scope);
+      memoryClients.set(scope, client);
+      if (!record.encryptedClient) {
+        // Transparently replace legacy plaintext cache records after upgrade.
+        const encryptedClient = await encryptDeviceValue(client).catch(() => null);
+        if (encryptedClient && currentOfflineScope() === scope) {
+          const migration = database.transaction(STORE_NAME, "readwrite");
+          const migrated = transactionDone(migration);
+          migration.objectStore(STORE_NAME).put({ scope, encryptedClient } satisfies ScopedPersistedClient, storageKey(scope));
+          await migrated.catch(() => undefined);
+        }
+      }
+      return client;
     },
 
     async removeClient(): Promise<void> {

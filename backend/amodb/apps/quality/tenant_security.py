@@ -73,6 +73,10 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
 }
 
+# The Accountable Executive has governed oversight visibility, not Quality
+# mutation rights. Quality independence remains with the Quality Manager.
+_QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"] = set(_QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"])
+
 _READ_ONLY_SUPPORT_PERMISSIONS = {
     "qms.dashboard.view",
     "qms.inbox.view",

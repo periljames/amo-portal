@@ -4,13 +4,14 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..audit import services as audit_services
-from . import governance_directory, governance_schemas, permissions, services
+from . import governance_directory, governance_schemas, hierarchy_roles, permissions, services
 
 router = APIRouter(prefix="/workforce/hr", tags=["workforce-governance"])
 
@@ -287,6 +288,55 @@ def positions(
     return governance_directory.list_positions(db, amo_id=_amo(current_user), include_inactive=include_inactive)
 
 
+@router.get("/positions/hierarchy-blueprint", response_model=governance_schemas.HierarchyBlueprintRead)
+def position_hierarchy_blueprint(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _view(db, current_user)
+    return hierarchy_roles.hierarchy_blueprint(db, amo_id=_amo(current_user))
+
+
+@router.post("/positions/initialize-kcars-2025", response_model=governance_schemas.HierarchyBlueprintRead)
+def initialize_kcars_2025_positions(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _manage(db, current_user)
+    try:
+        result = hierarchy_roles.initialize_kcar_roles(db, amo_id=_amo(current_user))
+        audit_services.log_event(
+            db,
+            amo_id=_amo(current_user),
+            actor_user_id=str(current_user.id),
+            entity_type="WorkforceHierarchy",
+            entity_id=_amo(current_user),
+            action="initialize_kcars_2025_roles",
+            after={
+                "ready_role_count": result.ready_role_count,
+                "created_count": result.created_count,
+                "adopted_count": result.adopted_count,
+                "updated_count": result.updated_count,
+                "supervisor_links_cleared": result.supervisor_links_cleared,
+                "accounts_synced": result.accounts_synced,
+            },
+            metadata={"module": "workforce", "source": "KCAR_2025", "regulations": "19-21"},
+            critical=True,
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="WORKFORCE_HIERARCHY_INVALID") from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error(
+            "The hierarchy changed while KCAR roles were being applied. Refresh and retry.",
+            code="WORKFORCE_HIERARCHY_CONFLICT",
+            status_code=status.HTTP_409_CONFLICT,
+        ) from exc
+
+
 @router.post("/positions", response_model=governance_schemas.PositionRead, status_code=status.HTTP_201_CREATED)
 def create_position(
     payload: governance_schemas.PositionWrite,
@@ -303,6 +353,9 @@ def create_position(
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), code="WORKFORCE_POSITION_INVALID") from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error("Position code or tenant function is already in use.", code="WORKFORCE_POSITION_CONFLICT", status_code=status.HTTP_409_CONFLICT) from exc
 
 
 @router.put("/positions/{row_id}", response_model=governance_schemas.PositionRead)
@@ -321,3 +374,6 @@ def update_position(
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), code="WORKFORCE_POSITION_INVALID") from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error("Position code or tenant function is already in use.", code="WORKFORCE_POSITION_CONFLICT", status_code=status.HTTP_409_CONFLICT) from exc

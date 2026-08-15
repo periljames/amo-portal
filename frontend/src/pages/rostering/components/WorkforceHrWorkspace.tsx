@@ -38,7 +38,6 @@ import {
 } from "../../../services/workforce";
 import {
   assignWorkforceHrPattern,
-  bootstrapWorkforceHrDefaultDayPattern,
   decideWorkforceHrOvertime,
   getWorkforceHrDashboard,
   listWorkforceHrOvertime,
@@ -208,11 +207,10 @@ export function WorkforceHrWorkspace() {
           loading={peopleQuery.isPending}
           onPage={setPeoplePage}
           bases={basesQuery.data || []}
-          loadingBases={basesQuery.isPending}           canManage={dashboard.can_manage_contracts}
-           canInitializeDefaults={dashboard.can_initialize_default_day_pattern}
-           onInitializeDefaults={() => runAction("default-day-pattern", bootstrapWorkforceHrDefaultDayPattern)}
-           busy={busy}
-runAction={runAction}
+          loadingBases={basesQuery.isPending}
+          canManage={dashboard.can_manage_contracts}
+          busy={busy}
+          runAction={runAction}
         />
       ) : null}
       {section === "leave" ? <LeavePanel dashboard={dashboard} requests={leaveQuery.data?.items || []} loading={leaveQuery.isPending} onDecision={setDecision} /> : null}
@@ -276,7 +274,7 @@ function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awai
       <section className="wr-panel hr-ownership">
         <ShieldCheck size={20} />
         <div><strong>Canonical Workforce ownership</strong><p>Contracts, leave, attendance, timesheets, overtime, payroll readiness and employee work-pattern assignments are managed here. Rostering consumes these records and cannot silently manufacture replacements.</p></div>
-        <Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=overview`}>Open roster setup <ArrowRight size={14} /></Link>
+        <Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=start`}>Open roster setup <ArrowRight size={14} /></Link>
       </section>
     </div>
   );
@@ -294,7 +292,7 @@ function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (sectio
 }
 
 function PeoplePanel({
-  people, search, onSearch, page, pages, total, loading, onPage, bases, loadingBases, canManage, canInitializeDefaults, onInitializeDefaults, busy, runAction,
+  people, search, onSearch, page, pages, total, loading, onPage, bases, loadingBases, canManage, busy, runAction,
 }: {
   people: HrPersonReadiness[];
   search: string;
@@ -307,8 +305,6 @@ function PeoplePanel({
   bases: BaseStationRead[];
   loadingBases: boolean;
   canManage: boolean;
-  canInitializeDefaults: boolean;
-  onInitializeDefaults: () => Promise<void>;
   busy: string | null;
   runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
 }) {
@@ -320,7 +316,7 @@ function PeoplePanel({
     setDraft({
       contract_type: (person.contract_type || "PERMANENT") as ContractType,
       employment_status: (person.contract_id ? person.employment_status : "ACTIVE") as EmploymentStatus,
-      effective_from: person.contract_effective_from || isoDate(new Date()),
+      effective_from: person.hire_date || person.contract_effective_from || isoDate(new Date()),
       effective_to: person.contract_effective_to || "",
       primary_base_station_id: person.primary_base_station_id || "",
       standard_weekly_hours: String((person.standard_weekly_minutes || 2400) / 60),
@@ -373,7 +369,7 @@ function PeoplePanel({
 
   return (
     <section className="wr-panel">
-      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>Every active tenant user appears here. Missing contracts, bases and patterns remain visible as readiness blockers instead of removing the employee.</p></div><div className="wr-actions">{canInitializeDefaults ? <button type="button" className="wr-button wr-button--secondary" disabled={Boolean(busy)} onClick={() => void onInitializeDefaults()}><CalendarDays size={15} /> Apply default day pattern</button> : null}<label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, email, role, base or department" /></label></div></div>
+      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>Missing contracts, bases and rotations stay visible as blockers.</p></div><label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, email, role, base or department" /></label></div>
       <div className="hr-people-table">
         <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Action</span></header>
         {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span>{person.uses_default_day_pattern ? <small>System baseline · planner review required</small> : null}</div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div>{canManage ? <button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(person)}><BriefcaseBusiness size={14} /> {person.contract_id ? "Edit" : "Create contract"}</button> : <span className="hr-person-source">Read only</span>}</article>)}
@@ -395,7 +391,7 @@ function PeoplePanel({
           <div className="hr-contract-grid">
             <label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => setDraft({ ...draft, contract_type: event.target.value as ContractType })}>{["PERMANENT", "FIXED_TERM", "TEMPORARY", "CONTRACTOR", "INTERN"].map((value) => <option key={value}>{value}</option>)}</select></label>
             <label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => setDraft({ ...draft, employment_status: event.target.value as EmploymentStatus })}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED"].map((value) => <option key={value}>{value}</option>)}</select></label>
-            <label><span>Effective from</span><input type="date" value={draft.effective_from} onChange={(event) => setDraft({ ...draft, effective_from: event.target.value })} /></label>
+            <label className={editing.hire_date ? "wr-locked-field" : undefined}><span>Workforce start</span><input type="date" value={draft.effective_from} disabled={Boolean(editing.hire_date)} onChange={(event) => setDraft({ ...draft, effective_from: event.target.value })} />{editing.hire_date ? <small>Locked to imported hire date. Re-employ from User Management to change it.</small> : null}</label>
             <label><span>Effective to</span><input type="date" min={draft.effective_from} value={draft.effective_to} onChange={(event) => setDraft({ ...draft, effective_to: event.target.value })} /></label>
             <label><span>Primary base</span><select value={draft.primary_base_station_id} disabled={loadingBases} onChange={(event) => setDraft({ ...draft, primary_base_station_id: event.target.value })}><option value="">Select canonical base</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label>
             <label><span>FTE percentage</span><input type="number" min="1" max="100" step="0.1" value={draft.fte_percentage} onChange={(event) => setDraft({ ...draft, fte_percentage: event.target.value })} /></label>
@@ -500,9 +496,9 @@ function PatternsPanel({
 
   return (
     <section className="wr-panel">
-      <div className="wr-section-heading"><div><span className="wr-eyebrow">Employee rotation assignments</span><h2>Work-pattern readiness</h2><p>Pattern templates are designed in Rostering. Effective employee assignments and dates are controlled here by Workforce and HR.</p></div><div className="wr-actions"><Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=patterns`}>Open pattern builder <ArrowRight size={14} /></Link>{dashboard.can_manage_contracts ? <button type="button" className="wr-button wr-button--primary" onClick={() => setAssigning(true)}><Plus size={15} /> Assign pattern</button> : null}</div></div>
+      <div className="wr-section-heading"><div><span className="wr-eyebrow">Employee rotation assignments</span><h2>Work-pattern readiness</h2><p>Pattern templates are designed in Rostering. Effective employee assignments and dates are controlled here by Workforce and HR.</p></div><div className="wr-actions"><Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=patterns`}>Open pattern builder <ArrowRight size={14} /></Link>{dashboard.can_assign_patterns ? <button type="button" className="wr-button wr-button--primary" onClick={() => setAssigning(true)}><Plus size={15} /> Assign pattern</button> : null}</div></div>
       {loading ? <RosterLoading label="Loading approved work patterns…" /> : null}
-      <div className="hr-pattern-list">{dashboard.people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.primary_base_code || "No base"}</span></div><div><strong>{person.work_pattern_code || "No pattern"}</strong><span>{person.work_pattern_name || "Automatic duty generation will skip this employee"}</span></div><StatusPill value={person.work_pattern_code ? "ASSIGNED" : "MISSING"} /><button type="button" className="wr-icon-button" aria-label={`Assign pattern to ${person.full_name}`} disabled={!dashboard.can_manage_contracts} onClick={() => { setUserId(person.user_id); setAssigning(true); }}><ArrowRight size={15} /></button></article>)}</div>
+      <div className="hr-pattern-list">{dashboard.people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.primary_base_code || "No base"}</span></div><div><strong>{person.work_pattern_code || "No pattern"}</strong><span>{person.work_pattern_name || "Automatic duty generation will skip this employee"}</span></div><StatusPill value={person.work_pattern_code ? "ASSIGNED" : "MISSING"} /><button type="button" className="wr-icon-button" aria-label={`Assign pattern to ${person.full_name}`} disabled={!dashboard.can_assign_patterns} onClick={() => { setUserId(person.user_id); setAssigning(true); }}><ArrowRight size={15} /></button></article>)}</div>
       {!dashboard.people.length ? <EmptyState title="No employees" description="Create effective employment contracts before assigning work patterns." /> : null}
       {withoutPattern.length ? <div className="hr-warning"><AlertTriangle size={17} /><span>{withoutPattern.length} employee{withoutPattern.length === 1 ? "" : "s"} will be omitted from automatic rotation until a pattern is assigned.</span></div> : null}
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { useAdminAccountRoles } from "../hooks/useAdminAccountRoles";
 import { getContext } from "../services/auth";
 import {
   applyAdminUserEmploymentAction,
@@ -34,27 +35,6 @@ import type {
 import "../styles/admin-user-management.css";
 
 type ProfileTab = "profile" | "permissions" | "groups" | "tasks" | "lifecycle" | "activity" | "login";
-
-const ROLE_OPTIONS: AccountRole[] = [
-  "SUPERUSER",
-  "AMO_ADMIN",
-  "QUALITY_MANAGER",
-  "AUDITOR",
-  "SAFETY_MANAGER",
-  "PLANNING_ENGINEER",
-  "PRODUCTION_ENGINEER",
-  "CERTIFYING_ENGINEER",
-  "CERTIFYING_TECHNICIAN",
-  "TECHNICIAN",
-  "STORES",
-  "VIEW_ONLY",
-  "FINANCE_MANAGER",
-  "ACCOUNTS_OFFICER",
-  "STORES_MANAGER",
-  "STOREKEEPER",
-  "PROCUREMENT_OFFICER",
-  "QUALITY_INSPECTOR",
-];
 
 const formatRole = (value: string) => value.replaceAll("_", " ");
 
@@ -145,6 +125,7 @@ const AdminUserDetailPage: React.FC = () => {
   const [lifecycleEffectiveFrom, setLifecycleEffectiveFrom] = useState("");
   const [lifecycleEffectiveTo, setLifecycleEffectiveTo] = useState("");
   const [feedback, setFeedback] = useState("");
+  const roleCatalogue = useAdminAccountRoles(profileRole || lifecycleRole);
 
   const workspaceQuery = useQuery({
     queryKey: ["admin-user-workspace", resolvedUserId],
@@ -397,7 +378,7 @@ const AdminUserDetailPage: React.FC = () => {
             <article className="aum-panel">
               <h2>Edit account</h2>
               <div className="aum-stack">
-                <label className="aum-field"><span>Role</span><select className="aum-select" value={profileRole} onChange={(event) => setProfileRole(event.target.value as AccountRole)}>{ROLE_OPTIONS.map((role) => <option key={role} value={role}>{formatRole(role)}</option>)}</select></label>
+                <label className="aum-field"><span>Role</span><select className="aum-select" value={profileRole} onChange={(event) => { const role = event.target.value as AccountRole; const definition = roleCatalogue.roles.find((item) => item.key === role); setProfileRole(role); if (definition?.regulated) setProfileTitle(definition.label); }}>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select><small>{roleCatalogue.roles.find((role) => role.key === profileRole)?.permission_summary.join(" · ")}</small></label>
                 <label className="aum-field"><span>Department</span><select className="aum-select" value={profileDepartmentId} onChange={(event) => setProfileDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
                 <label className="aum-field"><span>Job role / title</span><input className="aum-input" value={profileTitle} onChange={(event) => setProfileTitle(event.target.value)} /></label>
                 <label className="aum-field"><span>Primary phone</span><input className="aum-input" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
@@ -537,15 +518,15 @@ const AdminUserDetailPage: React.FC = () => {
             <article className="aum-panel">
               <div className="aum-panel-header"><div><h2>Employment lifecycle</h2><p>Promote, demote, transfer, schedule leave, reinstate, or resign the employee from this workspace.</p></div></div>
               <div className="aum-stack">
-                <label className="aum-field"><span>Action</span><select className="aum-select" value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option></select></label>
-                <label className="aum-field"><span>Role</span><select className="aum-select" value={lifecycleRole} onChange={(event) => setLifecycleRole(event.target.value as AccountRole)}>{ROLE_OPTIONS.map((role) => <option key={role} value={role}>{formatRole(role)}</option>)}</select></label>
+                <label className="aum-field"><span>Action</span><select className="aum-select" value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option></select></label>
+                <label className="aum-field"><span>Role</span><select className="aum-select" value={lifecycleRole} onChange={(event) => { const role = event.target.value as AccountRole; const definition = roleCatalogue.roles.find((item) => item.key === role); setLifecycleRole(role); if (definition?.regulated) setLifecycleTitle(definition.label); }}>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select></label>
                 <label className="aum-field"><span>Department</span><select className="aum-select" value={lifecycleDepartmentId} onChange={(event) => setLifecycleDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
                 <label className="aum-field"><span>Job role / title</span><input className="aum-input" value={lifecycleTitle} onChange={(event) => setLifecycleTitle(event.target.value)} /></label>
                 <label className="aum-field"><span>Employment status text</span><input className="aum-input" value={lifecycleStatus} onChange={(event) => setLifecycleStatus(event.target.value)} /></label>
                 <label className="aum-field"><span>Note</span><textarea className="aum-textarea" rows={3} value={lifecycleNote} onChange={(event) => setLifecycleNote(event.target.value)} /></label>
-                <label className="aum-field"><span>Effective from</span><input className="aum-input" type="datetime-local" value={lifecycleEffectiveFrom} onChange={(event) => setLifecycleEffectiveFrom(event.target.value)} /></label>
+                <label className="aum-field"><span>{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? "New workforce start" : "Effective from"}</span><input className="aum-input" type="datetime-local" required={lifecycleAction === "reinstate" || lifecycleAction === "reemploy"} value={lifecycleEffectiveFrom} onChange={(event) => setLifecycleEffectiveFrom(event.target.value)} />{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? <small>This starts a new contract period and becomes the locked workforce date.</small> : null}</label>
                 <label className="aum-field"><span>Effective to</span><input className="aum-input" type="datetime-local" value={lifecycleEffectiveTo} onChange={(event) => setLifecycleEffectiveTo(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" onClick={() => lifecycleMutation.mutate({ action: lifecycleAction, role: lifecycleRole || undefined, department_id: lifecycleDepartmentId || undefined, position_title: lifecycleTitle || undefined, employment_status: lifecycleStatus || undefined, note: lifecycleNote || undefined, effective_from: lifecycleEffectiveFrom || undefined, effective_to: lifecycleEffectiveTo || undefined })}>Apply lifecycle action</button>
+                <button type="button" className="aum-button aum-button--primary" disabled={(lifecycleAction === "reinstate" || lifecycleAction === "reemploy") && !lifecycleEffectiveFrom} onClick={() => lifecycleMutation.mutate({ action: lifecycleAction, role: lifecycleRole || undefined, department_id: lifecycleDepartmentId || undefined, position_title: lifecycleTitle || undefined, employment_status: lifecycleStatus || undefined, note: lifecycleNote || undefined, effective_from: lifecycleEffectiveFrom || undefined, effective_to: lifecycleEffectiveTo || undefined })}>Apply lifecycle action</button>
               </div>
             </article>
             <article className="aum-panel">

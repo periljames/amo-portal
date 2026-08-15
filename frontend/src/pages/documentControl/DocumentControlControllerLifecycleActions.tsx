@@ -27,7 +27,7 @@ const CONTROLLER_WORKFLOW_ACTIONS: Record<string, ControllerAction[]> = {
   CORRECTIONS_REQUIRED: [{ action: "RESUBMIT_TECHNICAL_REVIEW", label: "Resubmit technical review" }],
   TECHNICAL_APPROVED: [{ action: "START_QUALITY_REVIEW", label: "Start Quality review" }],
   QUALITY_REVIEW: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
-  QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Manager" }],
+  QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Executive" }],
   ACCOUNTABLE_MANAGER_APPROVAL: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
   AUTHORITY_SUBMITTED: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
   SCHEDULED_FOR_EFFECTIVITY: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],

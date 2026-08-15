@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -12,6 +12,11 @@ import {
 } from "lucide-react";
 
 import { getRosterDashboard } from "../../../services/rostering";
+import {
+  getOfflineOutboxSummary,
+  onOfflineStateChanged,
+  type OfflineOutboxSummary,
+} from "../../../services/offlinePersistence";
 import { errorMessage, monthBounds } from "../rosterUi";
 import { EmptyState, MetricCard, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 
@@ -30,12 +35,21 @@ export function RosterDashboard() {
     networkMode: "offlineFirst",
   });
   const data = query.data;
+  const [localChanges, setLocalChanges] = useState<OfflineOutboxSummary>({ queued: 0, syncing: 0, conflict: 0, failed: 0, total: 0 });
+
+  useEffect(() => {
+    const refreshLocal = () => void getOfflineOutboxSummary().then(setLocalChanges).catch(() => undefined);
+    refreshLocal();
+    return onOfflineStateChanged(refreshLocal);
+  }, []);
 
   if (query.isPending && !data) return <RosterLoading label="Loading duty command centre…" />;
   if (query.error && !data) return <RosterError message={errorMessage(query.error)} onRetry={() => void query.refetch()} />;
   if (!data) return null;
 
-  const operationalTone = data.blocker_count > 0 ? "danger" : data.warning_count > 0 ? "warning" : "good";
+  const blockedLocalChanges = localChanges.conflict + localChanges.failed;
+  const pendingLocalChanges = localChanges.queued + localChanges.syncing;
+  const operationalTone = data.blocker_count > 0 || blockedLocalChanges > 0 ? "danger" : data.warning_count > 0 || pendingLocalChanges > 0 ? "warning" : "good";
 
   return (
     <div className="wr-dashboard">
@@ -46,6 +60,7 @@ export function RosterDashboard() {
         <MetricCard label="Capacity gap" value={`${data.capacity_gap_hours.toFixed(1)}h`} detail="Uncovered demand" tone={data.capacity_gap_hours > 0 ? "danger" : "good"} />
         <MetricCard label="Pending leave" value={data.pending_leave_count} detail="Supervisor or HR action" tone={data.pending_leave_count ? "warning" : "neutral"} />
         <MetricCard label="Acknowledgements" value={data.unacknowledged_publication_count} detail="Still outstanding" tone={data.unacknowledged_publication_count ? "warning" : "good"} />
+        <MetricCard label="Local changes" value={localChanges.total} detail={blockedLocalChanges ? `${blockedLocalChanges} need correction` : pendingLocalChanges ? `${pendingLocalChanges} waiting to sync` : "All changes are on the server"} tone={blockedLocalChanges ? "danger" : pendingLocalChanges ? "warning" : "good"} />
       </section>
 
       <div className="wr-dashboard-grid">
@@ -60,12 +75,13 @@ export function RosterDashboard() {
           <div className={`wr-readiness wr-tone-${operationalTone}`}>
             <div className="wr-readiness__score">
               {data.blocker_count > 0 ? <AlertTriangle size={28} /> : <ClipboardCheck size={28} />}
-              <strong>{data.blocker_count > 0 ? "Action required" : data.warning_count > 0 ? "Review warnings" : "Ready"}</strong>
+              <strong>{blockedLocalChanges > 0 ? "Local changes blocked" : data.blocker_count > 0 ? "Action required" : data.warning_count > 0 || pendingLocalChanges > 0 ? "Review warnings" : "Ready"}</strong>
             </div>
             <div className="wr-readiness__facts">
               <span><b>{data.blocker_count}</b> blockers</span>
               <span><b>{data.warning_count}</b> warnings</span>
               <span><b>{data.capacity_gap_hours.toFixed(1)}h</b> gap</span>
+              <span><b>{localChanges.total}</b> local</span>
             </div>
           </div>
           <div className="wr-command-actions">

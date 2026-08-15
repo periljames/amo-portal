@@ -10,8 +10,8 @@ from ..accounts import models as account_models
 from . import (
     hr_people_directory,
     hr_schemas,
-    hr_selection_integrity,
     hr_service,
+    legacy_guard,
     permissions,
     schemas,
     services,
@@ -180,21 +180,11 @@ def hr_preview_default_day_pattern_batch(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_default_pattern_permissions(db, current_user)
-    amo_id = _amo(current_user)
-    try:
-        _, selection_token = hr_selection_integrity.resolve_with_token(
-            db,
-            amo_id=amo_id,
-            selection=selection,
-        )
-        result = hr_people_directory.preview_default_day_pattern_batch(
-            db,
-            amo_id=amo_id,
-            selection=selection,
-        )
-        return result.model_copy(update={"selection_token": selection_token})
-    except ValueError as exc:
-        raise _error(str(exc), code="HR_DEFAULT_DAY_BATCH_PREVIEW_INVALID") from exc
+    raise _error(
+        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        code="HR_DEFAULT_DAY_PATTERN_RETIRED",
+        status_code=status.HTTP_410_GONE,
+    )
 
 
 @router.post(
@@ -207,36 +197,11 @@ def hr_apply_default_day_pattern_batch(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_default_pattern_permissions(db, current_user)
-    amo_id = _amo(current_user)
-    try:
-        selected_ids, selection_token = hr_selection_integrity.resolve_with_token(
-            db,
-            amo_id=amo_id,
-            selection=payload.selection,
-        )
-        if len(selected_ids) != payload.expected_match_count:
-            raise ValueError(
-                "The filtered population count changed after preview. Review the updated selection before applying the pattern."
-            )
-        if selection_token != payload.expected_selection_token:
-            raise ValueError(
-                "The selected employees changed after preview. Review the updated selection before applying the pattern."
-            )
-        result = hr_people_directory.apply_default_day_pattern_batch(
-            db,
-            amo_id=amo_id,
-            actor_user_id=current_user.id,
-            payload=payload,
-        )
-        db.commit()
-        return result
-    except ValueError as exc:
-        db.rollback()
-        raise _error(
-            str(exc),
-            code="HR_DEFAULT_DAY_BATCH_APPLY_INVALID",
-            status_code=status.HTTP_409_CONFLICT,
-        ) from exc
+    raise _error(
+        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        code="HR_DEFAULT_DAY_PATTERN_RETIRED",
+        status_code=status.HTTP_410_GONE,
+    )
 
 
 @router.post("/people/export")
@@ -275,19 +240,16 @@ def hr_bootstrap_default_day_pattern(
 ):
     """Backward-compatible tenant-wide bootstrap used by existing clients."""
     _require_default_pattern_permissions(db, current_user)
-    try:
-        result = hr_service.bootstrap_default_day_pattern(
-            db, amo_id=_amo(current_user), actor_user_id=current_user.id
-        )
-        db.commit()
-        return result
-    except ValueError as exc:
-        db.rollback()
-        raise _error(str(exc), code="HR_DEFAULT_DAY_PATTERN_INVALID") from exc
+    raise _error(
+        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        code="HR_DEFAULT_DAY_PATTERN_RETIRED",
+        status_code=status.HTTP_410_GONE,
+    )
 
 
 @router.get("/work-patterns", response_model=list[schemas.WorkPatternRead])
 def hr_work_patterns(
+    response: Response,
     include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -297,6 +259,8 @@ def hr_work_patterns(
         user=current_user,
         permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
     )
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return services.list_patterns(
         db,
         amo_id=_amo(current_user),
@@ -317,7 +281,7 @@ def hr_create_work_pattern_assignment(
     permissions.require_permission(
         db,
         user=current_user,
-        permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
+        permission=permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS,
     )
     try:
         row = services.assign_pattern(

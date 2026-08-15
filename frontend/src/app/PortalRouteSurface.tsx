@@ -47,8 +47,15 @@ function AuthenticatedSurface({
   label: string;
   children: React.ReactElement;
 }): React.ReactElement {
+  const location = useLocation();
   if (!isAuthenticated()) {
-    return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/login`} replace />;
+    return (
+      <Navigate
+        to={`/maintenance/${encodeURIComponent(amoCode)}/login`}
+        replace
+        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+      />
+    );
   }
   return <Suspense fallback={<LoadingRoute label={label} />}>{children}</Suspense>;
 }

@@ -441,11 +441,16 @@ def _pending_queue_counts(db: Session, *, amo_id: str) -> dict[str, int]:
             func.abs(models.RosterActualVariance.variance_minutes) >= 30,
         ),
     ).scalar() or 0)
+    attendance_event_review = int(db.query(func.count(models.AttendanceEvent.id)).filter(
+        models.AttendanceEvent.amo_id == amo_id,
+        models.AttendanceEvent.metadata_json.isnot(None),
+        models.AttendanceEvent.metadata_json["requires_review"].as_boolean().is_(True),
+    ).scalar() or 0)
     return {
         "leave": pending_leave,
         "timesheet": pending_timesheet,
         "overtime": pending_overtime,
-        "attendance_exception": attendance_exception,
+        "attendance_exception": attendance_exception + attendance_event_review,
     }
 
 
@@ -579,7 +584,18 @@ def dashboard(
         ),
     ).order_by(models.RosterActualVariance.calculated_at.desc()).limit(50).all()
 
-    attendance_user_ids = sorted({row.user_id for row in attendance_exception_rows})
+    attendance_review_events = db.query(models.AttendanceEvent).options(
+        joinedload(models.AttendanceEvent.user),
+    ).filter(
+        models.AttendanceEvent.amo_id == amo_id,
+        models.AttendanceEvent.metadata_json.isnot(None),
+        models.AttendanceEvent.metadata_json["requires_review"].as_boolean().is_(True),
+    ).order_by(models.AttendanceEvent.occurred_at.desc()).limit(50).all()
+
+    attendance_user_ids = sorted(
+        {row.user_id for row in attendance_exception_rows}
+        | {row.user_id for row in attendance_review_events}
+    )
     attendance_users = (
         db.query(account_models.User).filter(
             account_models.User.amo_id == amo_id,
@@ -683,6 +699,20 @@ def dashboard(
             action_label="Inspect variance",
             action_path=f"time/attendance/{row.id}",
         ))
+    for row in attendance_review_events[:20]:
+        metadata = row.metadata_json or {}
+        actions.append(hr_schemas.HrActionItem(
+            id=f"attendance-event:{row.id}",
+            category="ATTENDANCE",
+            severity="ACTION",
+            title="Attendance event needs confirmation",
+            detail=str(metadata.get("review_reason") or "Location, timing or automatic closure evidence requires review."),
+            user_id=row.user_id,
+            user_name=_display_name(row.user),
+            due_on=row.occurred_at.date(),
+            action_label="Review attendance",
+            action_path=f"time/attendance?event={row.id}",
+        ))
     actions.sort(key=lambda item: (
         0 if item.severity == "BLOCKER" else 1 if item.severity == "ACTION" else 2,
         item.due_on or date.max,
@@ -694,12 +724,19 @@ def dashboard(
         hr_schemas.HrMetric(key="onboarding", label="Onboarding", value=onboarding_count, detail="Not yet fully active", tone="info"),
         hr_schemas.HrMetric(key="leave", label="Leave approvals", value=pending_counts["leave"], detail="Supervisor or HR action", tone="warning" if pending_counts["leave"] else "neutral"),
         hr_schemas.HrMetric(key="time", label="Time approvals", value=pending_counts["timesheet"], detail="Submitted timesheets", tone="warning" if pending_counts["timesheet"] else "neutral"),
+        hr_schemas.HrMetric(key="attendance", label="Attendance review", value=pending_counts["attendance_exception"], detail="Location, timing or variance checks", tone="warning" if pending_counts["attendance_exception"] else "good"),
         hr_schemas.HrMetric(key="patterns", label="Pattern gaps", value=len(without_pattern), detail="Cannot be auto-rotated", tone="danger" if without_pattern else "good"),
         hr_schemas.HrMetric(key="contracts", label="Expiring contracts", value=len(expiring_rows), detail="Within 60 days", tone="warning" if expiring_rows else "neutral"),
     ]
 
     can_manage_contracts = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS
+    )
+    can_manage_patterns = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.ROSTER_MANAGE_PATTERNS
+    )
+    can_assign_patterns = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS
     )
     can_manage_leave_balances = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.LEAVE_MANAGE_BALANCES
@@ -722,6 +759,9 @@ def dashboard(
     can_approve_overtime_hr = can_approve_overtime_supervisor and permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_APPROVE
     )
+    can_manage_attendance = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_MANAGE
+    )
     can_export_payroll = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.PAYROLL_EXPORT
     )
@@ -739,6 +779,8 @@ def dashboard(
     return hr_schemas.HrDashboardResponse(
         generated_at=now,
         can_manage_contracts=can_manage_contracts,
+        can_manage_patterns=can_manage_patterns,
+        can_assign_patterns=can_assign_patterns,
         can_manage_leave_balances=can_manage_leave_balances,
         can_review_leave=can_review_leave,
         can_approve_leave=can_approve_leave,
@@ -746,6 +788,7 @@ def dashboard(
         can_approve_timesheet_hr=can_approve_timesheet_hr,
         can_approve_overtime_supervisor=can_approve_overtime_supervisor,
         can_approve_overtime_hr=can_approve_overtime_hr,
+        can_manage_attendance=can_manage_attendance,
         can_export_payroll=can_export_payroll,
         active_employee_count=active_count,
         onboarding_employee_count=onboarding_count,
@@ -840,6 +883,7 @@ def _person_readiness_for_user(
     pattern: Optional[models.EmployeeWorkPatternAssignment],
     leave: Optional[models.LeaveRequest],
     on_date: date,
+    hire_date: Optional[date] = None,
 ) -> hr_schemas.HrPersonReadiness:
     reasons: list[str] = []
     status_value = _value(contract.employment_status) if contract else None
@@ -859,7 +903,6 @@ def _person_readiness_for_user(
             reasons.append(f"Employment status is {status_value.replace('_', ' ').lower()}.")
         if not contract.primary_base_station_id:
             reasons.append("No primary base is assigned.")
-
     work_pattern = pattern.work_pattern if pattern else None
     if not work_pattern or not work_pattern.is_active:
         reasons.append("No active work pattern is assigned.")
@@ -877,6 +920,17 @@ def _person_readiness_for_user(
         amo_id=amo_id,
         system_key=_DEFAULT_DAY_PATTERN_KEY,
     )
+    uses_managed_default = bool(
+        pattern and str(pattern.work_pattern_id) == managed_default_pattern_id
+    )
+    contract_state = (
+        "EFFECTIVE"
+        if contract_is_effective
+        else "FUTURE"
+        if contract is not None
+        else "MISSING"
+    )
+    pattern_state = "DEFAULT" if uses_managed_default else "ASSIGNED" if work_pattern else "MISSING"
 
     return hr_schemas.HrPersonReadiness(
         user_id=str(user.id),
@@ -885,13 +939,13 @@ def _person_readiness_for_user(
         full_name=_display_name(user) or str(user.id),
         email=getattr(user, "email", None),
         has_effective_contract=contract_is_effective,
-        uses_default_day_pattern=bool(
-            pattern and str(pattern.work_pattern_id) == managed_default_pattern_id
-        ),
+        uses_default_day_pattern=uses_managed_default,
         position_title=getattr(user, "position_title", None),
         department_code=_department_code(user),
         employment_status=status_value,
         contract_type=_value(contract.contract_type) if contract else None,
+        contract_state=contract_state,
+        hire_date=hire_date,
         contract_effective_from=contract.effective_from if contract else None,
         contract_effective_to=contract.effective_to if contract else None,
         primary_base_station_id=contract.primary_base_station_id if contract else None,
@@ -908,10 +962,67 @@ def _person_readiness_for_user(
         work_pattern_code=getattr(work_pattern, "code", None),
         work_pattern_name=getattr(work_pattern, "name", None),
         work_pattern_effective_from=pattern.effective_from if pattern else None,
+        pattern_state=pattern_state,
         active_leave_status=_value(leave.status) if leave else None,
         readiness_state=state,
         readiness_reasons=reasons,
     )
+
+
+def _apply_automatic_pattern_readiness(
+    db: Session,
+    *,
+    amo_id: str,
+    on_date: date,
+    items: list[hr_schemas.HrPersonReadiness],
+) -> set[str]:
+    """Annotate people resolved by a scoped rule when no explicit override exists."""
+    candidates = [item.user_id for item in items if item.pattern_state == "MISSING"]
+    if not candidates:
+        return set()
+    preview = services.preview_patterns(
+        db,
+        amo_id=amo_id,
+        payload=schemas.PatternPreviewRequest(
+            from_date=on_date,
+            to_date=on_date,
+            user_ids=candidates,
+        ),
+    )
+    rule_rows = {
+        str(row.user_id): row
+        for row in preview.items
+        if row.resolution_source == "RULE" and row.pattern_id
+    }
+    if not rule_rows:
+        return set()
+    names = {
+        str(pattern.id): pattern.name
+        for pattern in db.query(models.WorkPattern).filter(
+            models.WorkPattern.amo_id == amo_id,
+            models.WorkPattern.id.in_({str(row.pattern_id) for row in rule_rows.values()}),
+        ).all()
+    }
+    resolved: set[str] = set()
+    for item in items:
+        row = rule_rows.get(item.user_id)
+        if row is None:
+            continue
+        item.work_pattern_code = row.pattern_code
+        item.work_pattern_name = names.get(str(row.pattern_id), row.pattern_code)
+        item.pattern_state = "ASSIGNED"
+        item.readiness_reasons = [
+            reason for reason in item.readiness_reasons
+            if reason != "No active work pattern is assigned."
+        ]
+        if "AMBIGUOUS_PATTERN_RULE" in row.conflicts:
+            item.readiness_reasons.append("Multiple automatic work-pattern rules match this employee.")
+        if item.employment_status == models.EmploymentStatus.SUSPENDED.value:
+            item.readiness_state = "BLOCKED"
+        else:
+            item.readiness_state = "NEEDS_ATTENTION" if item.readiness_reasons else "READY"
+        resolved.add(item.user_id)
+    return resolved
 
 
 def list_people_page_v2(
@@ -931,6 +1042,7 @@ def list_people_page_v2(
     )
     patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
     leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
+    hire_dates = services.hire_dates_by_user(db, amo_id=amo_id, user_ids=user_ids)
     items = [
         _person_readiness_for_user(
             user,
@@ -939,9 +1051,16 @@ def list_people_page_v2(
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
             on_date=today,
+            hire_date=hire_dates.get(str(user.id)),
         )
         for user in users
     ]
+    _apply_automatic_pattern_readiness(
+        db,
+        amo_id=amo_id,
+        on_date=today,
+        items=items,
+    )
     needle = str(search or "").strip().lower()
     if needle:
         items = [
@@ -1002,6 +1121,7 @@ def dashboard_v2(
     )
     patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
     leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
+    hire_dates = services.hire_dates_by_user(db, amo_id=amo_id, user_ids=user_ids)
     people = [
         _person_readiness_for_user(
             user,
@@ -1010,9 +1130,16 @@ def dashboard_v2(
             pattern=patterns.get(str(user.id)),
             leave=leave_by_user.get(str(user.id)),
             on_date=today,
+            hire_date=hire_dates.get(str(user.id)),
         )
         for user in users
     ]
+    automatically_patterned = _apply_automatic_pattern_readiness(
+        db,
+        amo_id=amo_id,
+        on_date=today,
+        items=people,
+    )
     people.sort(key=lambda item: (
         item.has_effective_contract,
         item.readiness_state == "READY",
@@ -1031,9 +1158,10 @@ def dashboard_v2(
     ]
     without_pattern = [
         user for user in users
-        if not (assignment := patterns.get(str(user.id)))
+        if str(user.id) not in automatically_patterned
+        and (not (assignment := patterns.get(str(user.id)))
         or not assignment.work_pattern
-        or not assignment.work_pattern.is_active
+        or not assignment.work_pattern.is_active)
     ]
     without_base = [
         user for user in users
@@ -1053,23 +1181,9 @@ def dashboard_v2(
     response.employees_without_pattern_count = len(without_pattern)
     response.employees_without_base_count = len(without_base)
     response.people = people[:people_limit]
-    response.can_initialize_default_day_pattern = all((
-        permissions.has_permission(
-            db,
-            user=current_user,
-            permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
-        ),
-        permissions.has_permission(
-            db,
-            user=current_user,
-            permission=permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
-        ),
-        permissions.has_permission(
-            db,
-            user=current_user,
-            permission=permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
-        ),
-    ))
+    # The former tenant-wide DAY bootstrap is retired. Automatic assignment is
+    # now enabled only on an explicitly scoped work-pattern rule.
+    response.can_initialize_default_day_pattern = False
 
     metric_by_key = {metric.key: metric for metric in response.metrics}
     if "active" in metric_by_key:
@@ -1137,22 +1251,37 @@ def _default_day_system_id(*, amo_id: str, system_key: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"amo-portal:{amo_id}:{system_key}"))
 
 
-def _shift_template_snapshot(row) -> dict:
-    return {
-        "code": row.code,
-        "label": row.label,
-        "kind": _value(row.kind),
-        "default_start_time": row.default_start_time,
-        "default_end_time": row.default_end_time,
-        "duration_minutes": row.duration_minutes,
-        "counts_as_duty": bool(row.counts_as_duty),
-        "is_active": bool(row.is_active),
-        "display_order": row.display_order,
-        "description": row.description,
-        "icon_name": row.icon_name,
-        "updated_by_user_id": row.updated_by_user_id,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
+def _resolve_existing_day_shift(db: Session, *, amo_id: str):
+    """Reuse tenant configuration; never manufacture a hidden DEFAULT-DAY shift."""
+    from ..rostering import models as roster_models
+
+    system_id = _default_day_system_id(amo_id=amo_id, system_key=_DEFAULT_DAY_SHIFT_KEY)
+    rows = db.query(roster_models.ShiftTemplate).filter(
+        roster_models.ShiftTemplate.amo_id == amo_id,
+        roster_models.ShiftTemplate.kind == roster_models.ShiftTemplateKind.DAY,
+        roster_models.ShiftTemplate.counts_as_duty.is_(True),
+        roster_models.ShiftTemplate.is_active.is_(True),
+    ).with_for_update().all()
+    if not rows:
+        raise ValueError(
+            "Create or activate a day-duty shift in Roster setup before assigning a default work pattern"
+        )
+    legacy = next((row for row in rows if str(row.id) == system_id), None)
+    if legacy is not None:
+        return legacy
+    legacy = next((row for row in rows if str(row.code or "").strip().upper() == _DEFAULT_DAY_SHIFT_CODE), None)
+    if legacy is not None:
+        return legacy
+    return sorted(
+        rows,
+        key=lambda row: (
+            0 if str(row.code or "").strip().upper() == "D" else 1,
+            0 if len(str(row.code or "").strip()) <= 2 else 1,
+            0 if str(row.default_start_time or "")[:5] == "08:00" and str(row.default_end_time or "")[:5] == "17:00" else 1,
+            int(row.display_order or 0),
+            str(row.code or ""),
+        ),
+    )[0]
 
 
 def _work_pattern_snapshot(db: Session, row: models.WorkPattern) -> dict:
@@ -1235,8 +1364,7 @@ def bootstrap_default_day_pattern(
     amo_id: str,
     actor_user_id: str,
 ) -> hr_schemas.HrDefaultDayBootstrapResponse:
-    """Create one controlled day-shift baseline and assign it only where safe."""
-    from ..rostering import models as roster_models
+    """Build the managed pattern from an existing tenant day shift and assign it safely."""
 
     amo = db.query(account_models.AMO).filter(
         account_models.AMO.id == amo_id,
@@ -1246,78 +1374,7 @@ def bootstrap_default_day_pattern(
     week_monday = today - timedelta(days=today.weekday())
     operation_id = str(uuid4())
 
-    shift_id = _default_day_system_id(amo_id=amo_id, system_key=_DEFAULT_DAY_SHIFT_KEY)
-    shift_by_code = db.query(roster_models.ShiftTemplate).filter(
-        roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.code == _DEFAULT_DAY_SHIFT_CODE,
-    ).with_for_update().first()
-    shift = db.query(roster_models.ShiftTemplate).filter(
-        roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.id == shift_id,
-    ).with_for_update().first()
-    if shift_by_code is not None and str(shift_by_code.id) != shift_id:
-        raise ValueError(
-            "Reserved shift code DEFAULT-DAY is already owned by tenant configuration; "
-            "rename that shift before applying the managed default-day baseline."
-        )
-    if shift is not None and shift_by_code is not None and str(shift.id) != str(shift_by_code.id):
-        raise ValueError("Managed default-day shift identity conflicts with the reserved code")
-
-    shift_before = _shift_template_snapshot(shift) if shift is not None else None
-    if shift is None:
-        shift = roster_models.ShiftTemplate(
-            id=shift_id,
-            amo_id=amo_id,
-            code=_DEFAULT_DAY_SHIFT_CODE,
-            label="Default day shift",
-            kind=roster_models.ShiftTemplateKind.DAY,
-            default_start_time="08:00",
-            default_end_time="17:00",
-            duration_minutes=480,
-            counts_as_duty=True,
-            is_active=True,
-            display_order=10,
-            description=(
-                "Portal-managed baseline for active staff without an assigned work pattern; "
-                "planner review remains required."
-            ),
-            icon_name="Sun",
-            created_by_user_id=actor_user_id,
-            updated_by_user_id=actor_user_id,
-        )
-        db.add(shift)
-    else:
-        shift.code = _DEFAULT_DAY_SHIFT_CODE
-        shift.label = "Default day shift"
-        shift.kind = roster_models.ShiftTemplateKind.DAY
-        shift.default_start_time = "08:00"
-        shift.default_end_time = "17:00"
-        shift.duration_minutes = 480
-        shift.counts_as_duty = True
-        shift.is_active = True
-        shift.display_order = 10
-        shift.description = (
-            "Portal-managed baseline for active staff without an assigned work pattern; "
-            "planner review remains required."
-        )
-        shift.icon_name = "Sun"
-        shift.updated_by_user_id = actor_user_id
-        db.add(shift)
-    db.flush()
-    shift_after = _shift_template_snapshot(shift)
-    if shift_before != shift_after:
-        _bootstrap_audit(
-            db,
-            amo_id=amo_id,
-            actor_user_id=actor_user_id,
-            operation_id=operation_id,
-            entity_type="ShiftTemplate",
-            entity_id=str(shift.id),
-            action="bootstrap_create" if shift_before is None else "bootstrap_update",
-            before=shift_before,
-            after=shift_after,
-            metadata={"system_key": _DEFAULT_DAY_SHIFT_KEY},
-        )
+    shift = _resolve_existing_day_shift(db, amo_id=amo_id)
 
     pattern_id = _default_day_system_id(amo_id=amo_id, system_key=_DEFAULT_DAY_PATTERN_KEY)
     pattern_by_code = db.query(models.WorkPattern).filter(

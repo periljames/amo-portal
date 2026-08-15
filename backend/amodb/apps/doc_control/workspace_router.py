@@ -895,7 +895,7 @@ def transition_workflow(
     manual = get_manual(db, tenant, workflow.manual_id)
     revision = get_revision(db, manual, workflow.revision_id)
     if payload.action in {"APPROVE_TECHNICAL", "APPROVE_QUALITY", "APPROVE_ACCOUNTABLE_MANAGER", "MARK_AUTHORITY_APPROVED", "PUBLISH", "ARCHIVE"}:
-        require_approver(current_user)
+        require_approver(current_user, action=payload.action)
     if revision.immutable_locked and workflow.state not in {"PUBLISHED"}:
         raise HTTPException(status_code=409, detail="The revision is immutable")
     if payload.training_readiness_status is not None:

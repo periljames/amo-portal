@@ -159,6 +159,62 @@ def _availability_commitments(
     return items
 
 
+def _pending_leave_commitments(
+    db: Session,
+    *,
+    amo_id: str,
+    people: dict[str, account_models.User],
+    starts_at: datetime,
+    ends_at: datetime,
+    zone: ZoneInfo,
+) -> list[RosterCommitmentRead]:
+    """Project submitted leave immediately; approval later replaces it with availability."""
+    if not people:
+        return []
+    rows = db.query(workforce_models.LeaveRequest).filter(
+        workforce_models.LeaveRequest.amo_id == amo_id,
+        workforce_models.LeaveRequest.user_id.in_(list(people)),
+        workforce_models.LeaveRequest.status.in_([
+            workforce_models.LeaveRequestStatus.SUBMITTED,
+            workforce_models.LeaveRequestStatus.SUPERVISOR_APPROVED,
+        ]),
+        workforce_models.LeaveRequest.starts_at < ends_at,
+        workforce_models.LeaveRequest.ends_at > starts_at,
+    ).order_by(
+        workforce_models.LeaveRequest.starts_at.asc(),
+        workforce_models.LeaveRequest.user_id.asc(),
+        workforce_models.LeaveRequest.id.asc(),
+    ).all()
+
+    items: list[RosterCommitmentRead] = []
+    for row in rows:
+        user = people.get(str(row.user_id))
+        if not user:
+            continue
+        local_start = row.starts_at.astimezone(zone)
+        local_end = row.ends_at.astimezone(zone)
+        leave_type = getattr(row, "leave_type", None)
+        kind = _enum_value(getattr(leave_type, "availability_type", "LEAVE"))
+        leave_name = str(getattr(leave_type, "name", None) or kind.replace("_", " ").title())
+        items.append(RosterCommitmentRead(
+            id=f"pending-leave:{row.id}",
+            **_person_fields(user),
+            kind=kind,
+            source_module="WORKFORCE",
+            source_type="LEAVE_REQUEST",
+            source_id=str(row.id),
+            title=f"{leave_name} · pending",
+            starts_at=row.starts_at,
+            ends_at=row.ends_at,
+            all_day=local_start.time() == time.min and local_end.time() == time.min,
+            blocking=False,
+            provisional=True,
+            status=_enum_value(row.status),
+            detail=row.reason or "Awaiting approval",
+        ))
+    return items
+
+
 def _training_commitments(
     db: Session,
     *,
@@ -314,6 +370,14 @@ def list_commitments(
     people = _active_people(db, amo_id=amo_id, user_ids=user_ids)
 
     items = [
+        *_pending_leave_commitments(
+            db,
+            amo_id=amo_id,
+            people=people,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            zone=zone,
+        ),
         *_availability_commitments(
             db,
             amo_id=amo_id,

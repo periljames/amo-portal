@@ -51,6 +51,10 @@ def _mark_webhook_failure(db, job: models.SaaSJob, exc: Exception) -> None:
 def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
     if job.job_type == "PLATFORM_COMMAND_JOB":
         return platform_command_queue.process_leased_job(db, job)
+    if job.job_type in {"MANUAL_REVISION_PROCESS", "MANUAL_REVISION_OCR"}:
+        from amodb.jobs import manual_revision_jobs
+
+        return manual_revision_jobs.process_job(db, job)
     if job.job_type == "ETIMS_FISCALIZE_INVOICE":
         return saas_side_effects.process_etims_fiscalization(db, job=job)
     if job.job_type == "AI_SUPPORT_REPLY":

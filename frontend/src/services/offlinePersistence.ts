@@ -1,16 +1,22 @@
-import { authHeaders, getCachedUser, getContext, getToken } from "./auth";
+import { authHeaders, getCachedUser, getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import {
+  isPortalReady,
+  notePortalResponse,
+  recommendedRequestTimeoutMs,
+} from "./portalConnectivity";
 
 const DATABASE_NAME = "amo-portal-offline";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const API_STORE = "api_cache";
 const OUTBOX_STORE = "outbox";
 const LEASE_STORE = "leases";
+const KEY_STORE = "device_keys";
 const OFFLINE_EVENT = "amo:offline-state-changed";
 const OFFLINE_SYNC_EVENT = "amo:offline-sync-complete";
+const OFFLINE_PROGRESS_EVENT = "amo:offline-sync-progress";
 const OFFLINE_CHANNEL = "amo:offline-state";
 const REPLAY_LEASE_MS = 45_000;
-const REPLAY_REQUEST_TIMEOUT_MS = 30_000;
 const ACTIVE_AMO_KEYS = ["amodb_active_amo_id", "amodb_admin_active_amo_id"];
 
 export type OfflineOutboxStatus = "queued" | "syncing" | "conflict" | "failed";
@@ -29,7 +35,13 @@ export type OfflineOutboxEntry = {
   entityType?: string;
   entityId?: string;
   idempotencyKey: string;
+  nextAttemptAt?: number;
+  lastAttemptAt?: number;
   error?: string;
+  responseStatus?: number;
+  errorCode?: string;
+  retryable?: boolean;
+  serverDetail?: string;
   conflict?: unknown;
 };
 
@@ -49,6 +61,16 @@ export type OfflineSyncDetail = {
   reason?: "synced" | "discarded";
 };
 
+export type OfflineReplayProgress = {
+  scope: string;
+  phase: "idle" | "sending" | "paused" | "complete";
+  current: number;
+  total: number;
+  synced: number;
+  currentPath?: string;
+  message?: string;
+};
+
 export type ApiCacheRecord<T = unknown> = {
   key: string;
   scope: string;
@@ -63,6 +85,15 @@ type ReplayLease = {
   scope: string;
   owner: string;
   expiresAt: number;
+};
+
+export type EncryptedDeviceValue = { v: 1; iv: string; data: string };
+type StoredApiCacheRecord = Omit<ApiCacheRecord, "value"> & {
+  value?: unknown;
+  encryptedValue?: EncryptedDeviceValue;
+};
+type StoredOfflineOutboxEntry = OfflineOutboxEntry & {
+  encryptedBody?: EncryptedDeviceValue;
 };
 
 type EnqueueOfflineMutationInput = {
@@ -82,6 +113,7 @@ type DatabaseRead<T> = {
 };
 
 let databasePromise: Promise<IDBDatabase | null> | null = null;
+let deviceKeyPromise: Promise<CryptoKey | null> | null = null;
 let offlineChannel: BroadcastChannel | null = null;
 const memoryApiCache = new Map<string, ApiCacheRecord>();
 const memoryOutbox = new Map<string, OfflineOutboxEntry>();
@@ -130,6 +162,9 @@ async function openDatabase(): Promise<IDBDatabase | null> {
         store.createIndex("scope", "scope", { unique: false });
         store.createIndex("expiresAt", "expiresAt", { unique: false });
       }
+      if (!database.objectStoreNames.contains(KEY_STORE)) {
+        database.createObjectStore(KEY_STORE, { keyPath: "id" });
+      }
     };
     request.onsuccess = () => {
       const database = request.result;
@@ -144,6 +179,108 @@ async function openDatabase(): Promise<IDBDatabase | null> {
   });
 
   return databasePromise;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((value) => { binary += String.fromCharCode(value); });
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+async function deviceEncryptionKey(): Promise<CryptoKey | null> {
+  if (deviceKeyPromise) return deviceKeyPromise;
+  const loadOrCreate = async (): Promise<CryptoKey | null> => {
+    if (!globalThis.crypto?.subtle) return null;
+    const database = await openDatabase();
+    if (!database) return null;
+    const readTransaction = database.transaction(KEY_STORE, "readonly");
+    const existing = await requestResult(readTransaction.objectStore(KEY_STORE).get("portal-device")) as {
+      id: string;
+      key: CryptoKey;
+    } | undefined;
+    await transactionDone(readTransaction);
+    if (existing?.key) return existing.key;
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    // Another tab may have created the device key while WebCrypto was running.
+    const recheckTransaction = database.transaction(KEY_STORE, "readonly");
+    const recheck = await requestResult(recheckTransaction.objectStore(KEY_STORE).get("portal-device")) as {
+      id: string;
+      key: CryptoKey;
+    } | undefined;
+    await transactionDone(recheckTransaction);
+    if (recheck?.key) return recheck.key;
+    const writeTransaction = database.transaction(KEY_STORE, "readwrite");
+    const done = transactionDone(writeTransaction);
+    writeTransaction.objectStore(KEY_STORE).put({ id: "portal-device", key, createdAt: Date.now() });
+    await done;
+    return key;
+  };
+  deviceKeyPromise = (async () => {
+    const lockManager = typeof navigator === "undefined"
+      ? null
+      : (navigator as Navigator & {
+        locks?: { request<T>(name: string, callback: () => Promise<T>): Promise<T> };
+      }).locks;
+    return lockManager
+      ? lockManager.request("amo-portal-device-key", loadOrCreate)
+      : loadOrCreate();
+  })().catch(() => null);
+  return deviceKeyPromise;
+}
+
+export async function encryptDeviceValue(value: unknown): Promise<EncryptedDeviceValue | null> {
+  const key = await deviceEncryptionKey();
+  if (!key) return null;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  return { v: 1, iv: bytesToBase64(iv), data: bytesToBase64(new Uint8Array(encrypted)) };
+}
+
+export async function decryptDeviceValue<T>(value: EncryptedDeviceValue): Promise<T> {
+  const key = await deviceEncryptionKey();
+  if (!key) throw new Error("This device can no longer unlock the locally saved record.");
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(value.iv) },
+    key,
+    base64ToBytes(value.data),
+  );
+  return JSON.parse(new TextDecoder().decode(decrypted)) as T;
+}
+
+async function protectApiRecord(record: ApiCacheRecord): Promise<StoredApiCacheRecord> {
+  const encryptedValue = await encryptDeviceValue(record.value).catch(() => null);
+  if (!encryptedValue) throw new Error("Secure device storage is unavailable");
+  return { ...record, value: undefined, encryptedValue };
+}
+
+async function restoreApiRecord<T>(record: StoredApiCacheRecord): Promise<ApiCacheRecord<T>> {
+  if (!record.encryptedValue) return record as ApiCacheRecord<T>;
+  const value = await decryptDeviceValue<T>(record.encryptedValue);
+  const { encryptedValue: _encryptedValue, ...rest } = record;
+  return { ...rest, value } as ApiCacheRecord<T>;
+}
+
+async function protectOutboxEntry(entry: OfflineOutboxEntry): Promise<StoredOfflineOutboxEntry> {
+  if (entry.body === undefined) return entry;
+  const encryptedBody = await encryptDeviceValue(entry.body).catch(() => null);
+  if (!encryptedBody) throw new Error("Secure device storage is unavailable; reconnect before saving this change");
+  return { ...entry, body: undefined, encryptedBody };
+}
+
+async function restoreOutboxEntry(entry: StoredOfflineOutboxEntry): Promise<OfflineOutboxEntry> {
+  if (!entry.encryptedBody) return entry;
+  const body = await decryptDeviceValue<string>(entry.encryptedBody);
+  const { encryptedBody: _encryptedBody, ...rest } = entry;
+  return { ...rest, body };
 }
 
 function randomId(prefix: string): string {
@@ -176,9 +313,19 @@ function channel(): BroadcastChannel | null {
   if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return null;
   if (offlineChannel) return offlineChannel;
   offlineChannel = new BroadcastChannel(OFFLINE_CHANNEL);
-  offlineChannel.onmessage = (event: MessageEvent<{ type?: string; detail?: OfflineSyncDetail }>) => {
+  offlineChannel.onmessage = (event: MessageEvent<{
+    type?: string;
+    detail?: OfflineSyncDetail | OfflineReplayProgress;
+  }>) => {
     if (event.data?.type === "sync" && event.data.detail) {
-      window.dispatchEvent(new CustomEvent<OfflineSyncDetail>(OFFLINE_SYNC_EVENT, { detail: event.data.detail }));
+      window.dispatchEvent(new CustomEvent<OfflineSyncDetail>(OFFLINE_SYNC_EVENT, {
+        detail: event.data.detail as OfflineSyncDetail,
+      }));
+    }
+    if (event.data?.type === "progress" && event.data.detail) {
+      window.dispatchEvent(new CustomEvent<OfflineReplayProgress>(OFFLINE_PROGRESS_EVENT, {
+        detail: event.data.detail as OfflineReplayProgress,
+      }));
     }
     window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
   };
@@ -198,6 +345,25 @@ function notifyOfflineSyncComplete(detail: OfflineSyncDetail, broadcast = true):
   if (broadcast) channel()?.postMessage({ type: "sync", detail });
 }
 
+function notifyOfflineReplayProgress(detail: OfflineReplayProgress, broadcast = true): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<OfflineReplayProgress>(OFFLINE_PROGRESS_EVENT, { detail }));
+  if (broadcast) channel()?.postMessage({ type: "progress", detail });
+}
+
+async function requestBackgroundReplay(): Promise<void> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const sync = (registration as ServiceWorkerRegistration & {
+      sync?: { register(tag: string): Promise<void> };
+    }).sync;
+    await sync?.register("amo-portal-outbox");
+  } catch {
+    // Background Sync is optional; the foreground readiness monitor is authoritative.
+  }
+}
+
 export function onOfflineStateChanged(listener: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
   channel();
@@ -211,6 +377,14 @@ export function onOfflineSyncComplete(listener: (detail: OfflineSyncDetail) => v
   const handler = (event: Event) => listener((event as CustomEvent<OfflineSyncDetail>).detail);
   window.addEventListener(OFFLINE_SYNC_EVENT, handler);
   return () => window.removeEventListener(OFFLINE_SYNC_EVENT, handler);
+}
+
+export function onOfflineReplayProgress(listener: (detail: OfflineReplayProgress) => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  channel();
+  const handler = (event: Event) => listener((event as CustomEvent<OfflineReplayProgress>).detail);
+  window.addEventListener(OFFLINE_PROGRESS_EVENT, handler);
+  return () => window.removeEventListener(OFFLINE_PROGRESS_EVENT, handler);
 }
 
 async function putRecord(storeName: string, value: unknown): Promise<boolean> {
@@ -282,7 +456,7 @@ export async function writeApiCache<T>(
     expiresAt: now + Math.max(ttlMs, 1),
   };
   memoryApiCache.set(key, record);
-  await putRecord(API_STORE, record).catch((error) => {
+  await protectApiRecord(record).then((storedRecord) => putRecord(API_STORE, storedRecord)).catch((error) => {
     console.warn("[offline] Could not cache API response", error);
     return false;
   });
@@ -298,15 +472,17 @@ export async function readApiCache<T>(
   const memory = memoryApiCache.get(key) as ApiCacheRecord<T> | undefined;
   if (memory && (allowExpired || memory.expiresAt > Date.now())) return memory;
 
-  const stored = await readRecord<ApiCacheRecord<T>>(API_STORE, key).catch(() => ({
+  const stored = await readRecord<StoredApiCacheRecord>(API_STORE, key).catch(() => ({
     available: false,
     value: undefined,
   }));
   if (currentOfflineScope() !== scope) return null;
   if (!stored.available || !stored.value || stored.value.scope !== scope) return null;
-  memoryApiCache.set(key, stored.value);
-  if (!allowExpired && stored.value.expiresAt <= Date.now()) return null;
-  return stored.value;
+  const restored = await restoreApiRecord<T>(stored.value).catch(() => null);
+  if (!restored) return null;
+  memoryApiCache.set(key, restored);
+  if (!allowExpired && restored.expiresAt <= Date.now()) return null;
+  return restored;
 }
 
 export async function removeApiCache(path: string, scope = currentOfflineScope()): Promise<void> {
@@ -337,16 +513,26 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
     entityType: input.entityType,
     entityId: input.entityId,
     idempotencyKey,
+    nextAttemptAt: now,
   };
+  if (!(await openDatabase())) {
+    // Memory-only fallback is not persisted at rest, so no plaintext is left
+    // on the device when secure IndexedDB/WebCrypto storage is unavailable.
+    memoryOutbox.set(entry.id, entry);
+    notifyOfflineStateChanged();
+    return entry;
+  }
+  const storedEntry = await protectOutboxEntry(entry);
+  await putRecord(OUTBOX_STORE, storedEntry);
   memoryOutbox.set(entry.id, entry);
-  await putRecord(OUTBOX_STORE, entry);
   notifyOfflineStateChanged();
+  void requestBackgroundReplay();
   return entry;
 }
 
 export async function listOfflineMutations(scope = currentOfflineScope()): Promise<OfflineOutboxEntry[]> {
   if (currentOfflineScope() !== scope) return [];
-  const result = await recordsForScope<OfflineOutboxEntry>(OUTBOX_STORE, scope).catch(() => ({
+  const result = await recordsForScope<StoredOfflineOutboxEntry>(OUTBOX_STORE, scope).catch(() => ({
     available: false,
     value: [],
   }));
@@ -358,12 +544,15 @@ export async function listOfflineMutations(scope = currentOfflineScope()): Promi
       .sort((left, right) => left.createdAt - right.createdAt);
   }
 
-  const storedIds = new Set(result.value.map((entry) => entry.id));
+  const restoredEntries = (await Promise.all(
+    result.value.map((entry) => restoreOutboxEntry(entry).catch(() => null)),
+  )).filter((entry): entry is OfflineOutboxEntry => entry !== null);
+  const storedIds = new Set(restoredEntries.map((entry) => entry.id));
   [...memoryOutbox.entries()].forEach(([id, entry]) => {
     if (entry.scope === scope && !storedIds.has(id)) memoryOutbox.delete(id);
   });
-  result.value.forEach((entry) => memoryOutbox.set(entry.id, entry));
-  return result.value.sort((left, right) => left.createdAt - right.createdAt);
+  restoredEntries.forEach((entry) => memoryOutbox.set(entry.id, entry));
+  return restoredEntries.sort((left, right) => left.createdAt - right.createdAt);
 }
 
 export async function getOfflineOutboxSummary(scope = currentOfflineScope()): Promise<OfflineOutboxSummary> {
@@ -379,14 +568,15 @@ export async function getOfflineOutboxSummary(scope = currentOfflineScope()): Pr
 }
 
 async function findOutboxEntry(id: string): Promise<OfflineOutboxEntry | undefined> {
-  const stored = await readRecord<OfflineOutboxEntry>(OUTBOX_STORE, id).catch(() => ({
+  const stored = await readRecord<StoredOfflineOutboxEntry>(OUTBOX_STORE, id).catch(() => ({
     available: false,
     value: undefined,
   }));
   if (stored.available) {
-    if (stored.value) memoryOutbox.set(id, stored.value);
+    const restored = stored.value ? await restoreOutboxEntry(stored.value).catch(() => undefined) : undefined;
+    if (restored) memoryOutbox.set(id, restored);
     else memoryOutbox.delete(id);
-    return stored.value;
+    return restored;
   }
   return memoryOutbox.get(id);
 }
@@ -404,17 +594,21 @@ async function replaceOutboxEntry(
     return next;
   }
 
+  const protectedNext = await protectOutboxEntry(next);
   const transaction = database.transaction(OUTBOX_STORE, "readwrite");
   const done = transactionDone(transaction);
   const store = transaction.objectStore(OUTBOX_STORE);
-  const current = await requestResult(store.get(expected.id)) as OfflineOutboxEntry | undefined;
+  const current = await requestResult(store.get(expected.id)) as StoredOfflineOutboxEntry | undefined;
   if (!current || current.updatedAt !== expected.updatedAt || current.status !== expected.status) {
     await done;
     if (!current) memoryOutbox.delete(expected.id);
-    else memoryOutbox.set(current.id, current);
+    else {
+      const restored = await restoreOutboxEntry(current).catch(() => undefined);
+      if (restored) memoryOutbox.set(current.id, restored);
+    }
     return null;
   }
-  store.put(next);
+  store.put(protectedNext);
   await done;
   memoryOutbox.set(next.id, next);
   notifyOfflineStateChanged();
@@ -434,11 +628,14 @@ async function removeOutboxEntry(
     const transaction = database.transaction(OUTBOX_STORE, "readwrite");
     const done = transactionDone(transaction);
     const store = transaction.objectStore(OUTBOX_STORE);
-    const current = await requestResult(store.get(expected.id)) as OfflineOutboxEntry | undefined;
+    const current = await requestResult(store.get(expected.id)) as StoredOfflineOutboxEntry | undefined;
     if (!current || current.updatedAt !== expected.updatedAt || current.status !== expected.status) {
       await done;
       if (!current) memoryOutbox.delete(expected.id);
-      else memoryOutbox.set(current.id, current);
+      else {
+        const restored = await restoreOutboxEntry(current).catch(() => undefined);
+        if (restored) memoryOutbox.set(current.id, restored);
+      }
       return false;
     }
     store.delete(expected.id);
@@ -539,6 +736,9 @@ export async function rebaseConflictBody(entry: OfflineOutboxEntry): Promise<str
 export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEntry> {
   const entry = await findOutboxEntry(id);
   if (!entry) throw new Error("The local change no longer exists.");
+  if (entry.retryable === false) {
+    throw new Error(entry.serverDetail || "This change cannot be retried unchanged. Correct the source data, then recreate it.");
+  }
   if (entry.scope !== currentOfflineScope()) {
     throw new Error("Switch back to the AMO where this change was created before retrying it.");
   }
@@ -549,7 +749,12 @@ export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEnt
     status: "queued",
     updatedAt: Date.now(),
     error: undefined,
+    responseStatus: undefined,
+    errorCode: undefined,
+    retryable: undefined,
+    serverDetail: undefined,
     conflict: undefined,
+    nextAttemptAt: Date.now(),
   };
   const saved = await replaceOutboxEntry(entry, queued);
   if (!saved) throw new Error("The local change was updated or removed in another tab. Refresh before retrying.");
@@ -639,9 +844,10 @@ async function fetchForReplay(entry: OfflineOutboxEntry): Promise<Response> {
     throw new Error("AMO context changed. This change will retry when you return to its AMO.");
   }
   const controller = new AbortController();
+  const requestTimeoutMs = recommendedRequestTimeoutMs(entry.method);
   const timeout = globalThis.setTimeout(
     () => controller.abort(new DOMException("Offline replay request timed out", "AbortError")),
-    REPLAY_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs,
   );
   try {
     const headers = new Headers(authHeaders(entry.headers));
@@ -659,6 +865,7 @@ async function fetchForReplay(entry: OfflineOutboxEntry): Promise<Response> {
     if (currentOfflineScope() !== entry.scope) {
       throw new Error("AMO context changed during synchronisation. The operation remains queued in its original AMO.");
     }
+    notePortalResponse(response);
     return response;
   } finally {
     globalThis.clearTimeout(timeout);
@@ -671,13 +878,44 @@ async function parseReplayError(response: Response): Promise<unknown> {
   return response.text().catch(() => response.statusText);
 }
 
+function normaliseReplayError(detail: unknown, status: number): {
+  message: string;
+  errorCode?: string;
+  retryable?: boolean;
+} {
+  const outer = detail && typeof detail === "object" ? detail as Record<string, unknown> : null;
+  const nested = outer?.detail && typeof outer.detail === "object"
+    ? outer.detail as Record<string, unknown>
+    : outer;
+  const messageValue = nested?.detail ?? outer?.detail;
+  const message = typeof messageValue === "string" && messageValue.trim()
+    ? messageValue.trim()
+    : typeof detail === "string" && detail.trim()
+      ? detail.trim()
+      : `The server rejected this change (${status}).`;
+  return {
+    message,
+    errorCode: typeof nested?.error_code === "string" ? nested.error_code : undefined,
+    retryable: typeof nested?.retryable === "boolean" ? nested.retryable : undefined,
+  };
+}
+
 function retryableReplayStatus(status: number): boolean {
   return status === 401 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+function replayDelayMs(attempts: number, response?: Response): number {
+  const headerSeconds = Number(response?.headers.get("Retry-After"));
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+    return Math.min(5 * 60_000, Math.ceil(headerSeconds) * 1000);
+  }
+  const base = Math.min(60_000, 2_000 * (2 ** Math.min(Math.max(attempts - 1, 0), 5)));
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+}
+
 export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   const scope = currentOfflineScope();
-  if (typeof navigator !== "undefined" && !navigator.onLine) return getOfflineOutboxSummary(scope);
+  if (!isPortalReady()) return getOfflineOutboxSummary(scope);
   if (!getToken()) return getOfflineOutboxSummary(scope);
   const leaseOwner = await acquireReplayLease(scope);
   if (!leaseOwner) return getOfflineOutboxSummary(scope);
@@ -687,18 +925,46 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   let synced = 0;
 
   try {
+    const replayStartedAt = Date.now();
     const entries = (await listOfflineMutations(scope))
-      .filter((entry) => entry.status === "queued" || entry.status === "syncing");
+      .filter((entry) => (
+        (entry.status === "queued" || entry.status === "syncing")
+        && (!entry.nextAttemptAt || entry.nextAttemptAt <= replayStartedAt)
+      ));
     if (currentOfflineScope() !== scope) return getOfflineOutboxSummary(scope);
 
-    for (const entry of entries) {
+    notifyOfflineReplayProgress({
+      scope,
+      phase: entries.length > 0 ? "sending" : "idle",
+      current: 0,
+      total: entries.length,
+      synced: 0,
+      message: entries.length > 0 ? `Sending 0 of ${entries.length}` : "No local changes are waiting",
+    });
+
+    for (const [index, entry] of entries.entries()) {
       if (currentOfflineScope() !== scope || entry.scope !== scope) break;
       if (!(await renewReplayLease(leaseOwner, scope))) break;
+      notifyOfflineReplayProgress({
+        scope,
+        phase: "sending",
+        current: index + 1,
+        total: entries.length,
+        synced,
+        currentPath: entry.path,
+        message: `Sending ${index + 1} of ${entries.length}`,
+      });
       const syncing: OfflineOutboxEntry = {
         ...entry,
         status: "syncing",
         updatedAt: Date.now(),
         error: undefined,
+        responseStatus: undefined,
+        errorCode: undefined,
+        retryable: undefined,
+        serverDetail: undefined,
+        lastAttemptAt: Date.now(),
+        nextAttemptAt: undefined,
       };
       const claimed = await replaceOutboxEntry(entry, syncing);
       if (!claimed) continue;
@@ -716,28 +982,55 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
         }
 
         const detail = await parseReplayError(response);
-        if (response.status === 409 || response.status === 412 || response.status === 422) {
+        const failure = normaliseReplayError(detail, response.status);
+        const revisionConflict = failure.retryable === true
+          || Boolean(failure.errorCode?.includes("REVISION_CONFLICT"));
+        if ((response.status === 409 || response.status === 412) && revisionConflict) {
           await replaceOutboxEntry(claimed, {
             ...claimed,
             status: "conflict",
             attempts: claimed.attempts + 1,
             updatedAt: Date.now(),
-            error: `Server conflict (${response.status})`,
+            error: failure.message,
+            responseStatus: response.status,
+            errorCode: failure.errorCode,
+            retryable: true,
+            serverDetail: failure.message,
             conflict: detail,
+            nextAttemptAt: undefined,
           });
           continue;
         }
 
         if (retryableReplayStatus(response.status)) {
+          const attempts = claimed.attempts + 1;
+          const nextAttemptAt = Date.now() + replayDelayMs(attempts, response);
           await replaceOutboxEntry(claimed, {
             ...claimed,
             status: "queued",
-            attempts: claimed.attempts + 1,
+            attempts,
             updatedAt: Date.now(),
             error: response.status === 401
               ? "Session expired. This change will retry after sign-in."
-              : `Server unavailable (${response.status})`,
+              : failure.message,
+            responseStatus: response.status,
+            errorCode: failure.errorCode,
+            retryable: true,
+            serverDetail: failure.message,
+            nextAttemptAt,
           });
+          notifyOfflineReplayProgress({
+            scope,
+            phase: "paused",
+            current: index + 1,
+            total: entries.length,
+            synced,
+            currentPath: claimed.path,
+            message: response.status === 401
+              ? "Sign in to continue synchronising"
+              : "Server recovery in progress; retry scheduled",
+          });
+          if (response.status === 401) handleAuthFailure("outbox-replay-unauthorized");
           break;
         }
 
@@ -746,15 +1039,32 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           status: "failed",
           attempts: claimed.attempts + 1,
           updatedAt: Date.now(),
-          error: typeof detail === "string" ? detail : JSON.stringify(detail),
+          error: failure.message,
+          responseStatus: response.status,
+          errorCode: failure.errorCode,
+          retryable: false,
+          serverDetail: failure.message,
+          nextAttemptAt: undefined,
         });
       } catch (error) {
+        const attempts = claimed.attempts + 1;
         await replaceOutboxEntry(claimed, {
           ...claimed,
           status: "queued",
-          attempts: claimed.attempts + 1,
+          attempts,
           updatedAt: Date.now(),
           error: error instanceof Error ? error.message : String(error),
+          retryable: true,
+          nextAttemptAt: Date.now() + replayDelayMs(attempts),
+        });
+        notifyOfflineReplayProgress({
+          scope,
+          phase: "paused",
+          current: index + 1,
+          total: entries.length,
+          synced,
+          currentPath: claimed.path,
+          message: "Connection interrupted; retry scheduled",
         });
         break;
       }
@@ -770,7 +1080,18 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
     entityTypes: [...syncedEntityTypes],
     reason: "synced",
   });
-  return getOfflineOutboxSummary(scope);
+  const finalSummary = await getOfflineOutboxSummary(scope);
+  notifyOfflineReplayProgress({
+    scope,
+    phase: finalSummary.queued > 0 ? "paused" : "complete",
+    current: synced,
+    total: synced + finalSummary.total,
+    synced,
+    message: finalSummary.queued > 0
+      ? `${finalSummary.queued} local change${finalSummary.queued === 1 ? "" : "s"} waiting for retry`
+      : synced > 0 ? `${synced} change${synced === 1 ? "" : "s"} confirmed` : "Up to date",
+  });
+  return finalSummary;
 }
 
 export async function clearCurrentOfflineScope(): Promise<void> {

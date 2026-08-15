@@ -14,7 +14,7 @@ from . import bulk_governance, bulk_schemas, bulk_service, permissions, services
 router = APIRouter(prefix="/workforce/hr", tags=["workforce-hr-bulk"])
 
 _OPERATION_PATTERN = (
-    "^(CREATE_CONTRACTS|ASSIGN_DEFAULT_DAY_PATTERN|ASSIGN_ORGANIZATION|ASSIGN_POSITION|"
+    "^(CREATE_CONTRACTS|ASSIGN_DEFAULT_DAY_PATTERN|ASSIGN_WORK_PATTERN|ASSIGN_ORGANIZATION|ASSIGN_POSITION|"
     "ASSIGN_BASES|ASSIGN_SUPERVISOR|UPDATE_GROUPS|UPDATE_CONTRACT_SETTINGS|SCHEDULE_OFFBOARDING)$"
 )
 
@@ -53,6 +53,50 @@ def _require_default_pattern_management(db: Session, user: account_models.User) 
         permissions.require_permission(db, user=user, permission=permission)
 
 
+def _require_pattern_batch_access(db: Session, user: account_models.User) -> None:
+    if permissions.any_permission(
+        db,
+        user=user,
+        permissions=(
+            permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
+            permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS,
+            permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+        ),
+    ):
+        return
+    permissions.require_permission(
+        db,
+        user=user,
+        permission=permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS,
+    )
+
+
+def _require_bulk_read_access(db: Session, user: account_models.User) -> None:
+    if permissions.any_permission(
+        db,
+        user=user,
+        permissions=(
+            permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+            permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS,
+            permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
+        ),
+    ):
+        return
+    permissions.require_permission(
+        db,
+        user=user,
+        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
+    )
+
+
+def _require_operation_management(db: Session, user: account_models.User, operation_id: str) -> None:
+    operation = bulk_service.get_operation(db, amo_id=_amo(user), operation_id=operation_id)
+    if operation is not None and operation.operation_type == "ASSIGN_WORK_PATTERN":
+        _require_pattern_batch_access(db, user)
+        return
+    _require_contract_management(db, user)
+
+
 def _queue(background_tasks: BackgroundTasks, operation: bulk_schemas.BulkOperationRead, created: bool) -> None:
     """Production leaves work queued for the standalone worker.
 
@@ -85,6 +129,27 @@ def preview_contract_batch(
         )
     except ValueError as exc:
         raise _error(str(exc), code="WORKFORCE_CONTRACT_BATCH_PREVIEW_INVALID") from exc
+
+
+@router.post(
+    "/people/work-patterns/preview",
+    response_model=bulk_schemas.WorkPatternBatchPreview,
+)
+def preview_work_pattern_batch(
+    payload: bulk_schemas.WorkPatternBatchPreviewRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_pattern_batch_access(db, current_user)
+    try:
+        return bulk_service.preview_work_pattern_batch(
+            db,
+            amo_id=_amo(current_user),
+            actor=current_user,
+            payload=payload,
+        )
+    except ValueError as exc:
+        raise _error(str(exc), code="WORKFORCE_PATTERN_BATCH_PREVIEW_INVALID") from exc
 
 
 @router.post(
@@ -146,6 +211,35 @@ def submit_default_pattern_batch(
 
 
 @router.post(
+    "/bulk-operations/work-patterns",
+    response_model=bulk_schemas.BulkOperationRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def submit_work_pattern_batch(
+    payload: bulk_schemas.WorkPatternBatchSubmitRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=128),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_pattern_batch_access(db, current_user)
+    try:
+        operation, created = bulk_service.submit_work_pattern_batch(
+            db,
+            amo_id=_amo(current_user),
+            actor=current_user,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        db.commit()
+        _queue(background_tasks, operation, created)
+        return operation
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="WORKFORCE_PATTERN_BATCH_INVALID") from exc
+
+
+@router.post(
     "/bulk-operations/personnel",
     response_model=bulk_schemas.BulkOperationRead,
     status_code=status.HTTP_202_ACCEPTED,
@@ -186,11 +280,7 @@ def get_bulk_operations(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    permissions.require_permission(
-        db,
-        user=current_user,
-        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
-    )
+    _require_bulk_read_access(db, current_user)
     return bulk_service.list_operations(
         db,
         amo_id=_amo(current_user),
@@ -210,11 +300,7 @@ def get_bulk_operation(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    permissions.require_permission(
-        db,
-        user=current_user,
-        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
-    )
+    _require_bulk_read_access(db, current_user)
     try:
         return bulk_service.read_operation(db, amo_id=_amo(current_user), operation_id=operation_id)
     except ValueError as exc:
@@ -233,11 +319,7 @@ def get_bulk_operation_items(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    permissions.require_permission(
-        db,
-        user=current_user,
-        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
-    )
+    _require_bulk_read_access(db, current_user)
     try:
         return bulk_service.list_items(
             db,
@@ -257,11 +339,7 @@ def download_bulk_failure_report(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    permissions.require_permission(
-        db,
-        user=current_user,
-        permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
-    )
+    _require_bulk_read_access(db, current_user)
     try:
         content = bulk_service.failure_report_csv(
             db,
@@ -289,7 +367,7 @@ def retry_bulk_operation(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_contract_management(db, current_user)
+    _require_operation_management(db, current_user, operation_id)
     try:
         operation, created = bulk_service.retry_failed_operation(
             db,
@@ -317,7 +395,7 @@ def resume_bulk_operation(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_contract_management(db, current_user)
+    _require_operation_management(db, current_user, operation_id)
     try:
         operation = bulk_service.resume_operation(
             db,

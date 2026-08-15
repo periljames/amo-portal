@@ -12,6 +12,7 @@ import { updateAdminUser, deactivateAdminUser, type AccountRole } from "../../se
 import { motionTokens } from "../../utils/motion";
 import { getEvidenceAcceptString, isEvidenceFileAllowed } from "../../services/notificationPreferences";
 import { saveDownloadedFile } from "../../utils/downloads";
+import { useAdminAccountRoles } from "../../hooks/useAdminAccountRoles";
 
 export type ActionPanelContext =
   | { type: "car"; id: string; title: string; status?: CARStatus; ownerId?: string | null }
@@ -37,6 +38,10 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
   const [roleSelection, setRoleSelection] = useState<AccountRole | "">("");
   const [selectedEvidenceFile, setSelectedEvidenceFile] = useState<File | null>(null);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const accountRoles = useAdminAccountRoles(
+    roleSelection || (context?.type === "user" ? context.role : ""),
+    context?.type === "user",
+  );
 
   const { data: adminUsers = [] } = useQuery({
     queryKey: ["admin-users"],
@@ -339,22 +344,9 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
                     onChange={(event) => setRoleSelection(event.target.value as AccountRole)}
                   >
                     <option value="">Select role</option>
-                    {[
-                      "SUPERUSER",
-                      "AMO_ADMIN",
-                      "QUALITY_MANAGER",
-                      "SAFETY_MANAGER",
-                      "PLANNING_ENGINEER",
-                      "PRODUCTION_ENGINEER",
-                      "CERTIFYING_ENGINEER",
-                      "CERTIFYING_TECHNICIAN",
-                      "TECHNICIAN",
-                      "AUDITOR",
-                      "STORES",
-                      "VIEW_ONLY",
-                    ].map((role) => (
-                      <option key={role} value={role}>
-                        {role}
+                    {accountRoles.roles.map((role) => (
+                      <option key={role.key} value={role.key}>
+                        {role.regulated ? "KCAR 2025 · " : ""}{role.label}
                       </option>
                     ))}
                   </select>

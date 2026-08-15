@@ -1792,7 +1792,7 @@ def _current_user_can_modify_car(db: Session, current_user: account_models.User,
 
 def _require_car_not_escalated(car: models.CorrectiveActionRequest) -> None:
     if car.status == models.CARStatus.ESCALATED:
-        raise HTTPException(status_code=423, detail="This CAR has been escalated to the Accountable Manager and is view-only.")
+        raise HTTPException(status_code=423, detail="This CAR has been escalated to the Accountable Executive and is view-only.")
 
 
 def _require_car_review_access(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> None:

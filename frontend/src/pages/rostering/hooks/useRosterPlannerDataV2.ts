@@ -12,7 +12,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { addWeeks } from "date-fns";
+import { addMonths } from "date-fns";
 
 import {
   listOfflineMutations,
@@ -39,7 +39,7 @@ import type {
   RosterVersionRead,
   ShiftTemplateRead,
 } from "../../../types/rostering";
-import { errorMessage, weekBounds } from "../rosterUi";
+import { errorMessage, monthBounds } from "../rosterUi";
 
 export type PlannerSourceErrors = {
   periods: string | null;
@@ -57,7 +57,7 @@ export type PlannerDataV2 = {
   sourceErrors: PlannerSourceErrors;
   anchor: Date;
   setAnchor: (date: Date) => void;
-  week: ReturnType<typeof weekBounds>;
+  month: ReturnType<typeof monthBounds>;
   periods: RosterPeriodRead[];
   selectedPeriodId: string;
   setSelectedPeriodId: (id: string) => void;
@@ -82,7 +82,7 @@ export type PlannerDataV2 = {
   contracts: RosterContractResponse | null;
   refresh: () => Promise<void>;
   retrySource: (source: keyof PlannerSourceErrors) => Promise<void>;
-  moveWeek: (direction: -1 | 1) => void;
+  moveMonth: (direction: -1 | 1) => void;
 };
 
 type VersionWorkspace = {
@@ -98,7 +98,7 @@ const WORKSPACE_STALE_MS = 45_000;
 const ROSTER_GC_MS = 7 * 24 * 60 * 60_000;
 const PEOPLE_PAGE_SIZE = 100;
 const REQUEST_TIMEOUT_MS = 20_000;
-const PENDING_OUTBOX_STATUSES = new Set(["queued", "syncing", "conflict", "failed"]);
+const PENDING_OUTBOX_STATUSES = new Set(["queued", "syncing", "conflict"]);
 const ASSIGNMENT_PATCH_FIELDS = [
   "department_id",
   "base_station_id",
@@ -311,7 +311,7 @@ function mergePendingRosterOutbox(
 export function useRosterPlannerDataV2(): PlannerDataV2 {
   const queryClient = useQueryClient();
   const [anchor, setAnchor] = useState(new Date());
-  const week = useMemo(() => weekBounds(anchor), [anchor]);
+  const month = useMemo(() => monthBounds(anchor), [anchor]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [manualRefreshing, setManualRefreshing] = useState(false);
@@ -320,8 +320,8 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   const debouncedPeopleSearch = useDebouncedValue(peopleSearch.trim(), 250);
 
   const periodsQuery = useQuery({
-    queryKey: periodsKey(week.from, week.to),
-    queryFn: () => withTimeout("Roster periods", listRosterPeriods({ from: week.from, to: week.to })),
+    queryKey: periodsKey(month.from, month.to),
+    queryFn: () => withTimeout("Roster periods", listRosterPeriods({ from: month.from, to: month.to })),
     staleTime: PERIOD_STALE_MS,
     gcTime: ROSTER_GC_MS,
     placeholderData: keepPreviousData,
@@ -330,7 +330,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   });
 
   const peopleQuery = useInfiniteQuery({
-    queryKey: ["rostering", "planner", "eligible-people", debouncedPeopleSearch, peopleDepartmentId],
+    queryKey: ["rostering", "planner", "eligible-people", month.from, month.to, debouncedPeopleSearch, peopleDepartmentId],
     queryFn: ({ pageParam }) => withTimeout("Eligible personnel", listRosterPeoplePage({
       page: pageParam,
       page_size: PEOPLE_PAGE_SIZE,
@@ -338,6 +338,8 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
       department_id: peopleDepartmentId || null,
       active_only: true,
       roster_eligible_only: true,
+      from: month.from,
+      to: month.to,
     })),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.page + 1 : undefined,
@@ -379,9 +381,9 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
       return;
     }
     const current = periods.find((row) => row.id === selectedPeriodId);
-    const next = current || periods.find((row) => row.starts_on <= week.to && row.ends_on >= week.from) || periods[0];
+    const next = current || periods.find((row) => row.starts_on <= month.to && row.ends_on >= month.from) || periods[0];
     if (next && next.id !== selectedPeriodId) setSelectedPeriodId(next.id);
-  }, [periods, selectedPeriodId, week.from, week.to]);
+  }, [month.from, month.to, periods, selectedPeriodId]);
 
   useEffect(() => {
     if (!selectedPeriod) {
@@ -423,7 +425,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   useEffect(() => {
     for (const direction of [-1, 1] as const) {
-      const adjacent = weekBounds(addWeeks(anchor, direction));
+      const adjacent = monthBounds(addMonths(anchor, direction));
       void queryClient.prefetchQuery({
         queryKey: periodsKey(adjacent.from, adjacent.to),
         queryFn: () => withTimeout("Adjacent roster periods", listRosterPeriods({ from: adjacent.from, to: adjacent.to })),
@@ -484,7 +486,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     sourceErrors,
     anchor,
     setAnchor,
-    week,
+    month,
     periods,
     selectedPeriodId,
     setSelectedPeriodId,
@@ -509,6 +511,6 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     contracts: contractsQuery.data || null,
     refresh,
     retrySource,
-    moveWeek: (direction) => setAnchor((value) => addWeeks(value, direction)),
+    moveMonth: (direction) => setAnchor((value) => addMonths(value, direction)),
   };
 }

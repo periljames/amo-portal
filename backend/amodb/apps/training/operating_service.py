@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, noload, selectinload
 
 from ..accounts import models as account_models
+from ..accounts import role_registry as account_role_registry
 from ..audit import services as audit_services
 from ..quality import models as quality_models
 from ..doc_control import models as doc_control_models
@@ -32,7 +33,22 @@ UTC = timezone.utc
 APPROVED_STATES = {"APPROVED", "EFFECTIVE"}
 MUTABLE_STATES = {"DRAFT", "RETURNED"}
 COMPLETED_AUDIT_STATES = {"COMPLETED", "CLOSED", "APPROVED"}
-DEFAULT_COMMITTEE_POSITIONS = ["HEAD_OF_QUALITY", "HEAD_OF_BASE_MAINTENANCE", "HEAD_OF_LINE_MAINTENANCE"]
+DEFAULT_COMMITTEE_POSITIONS = [
+    "QUALITY_MANAGER",
+    "BASE_MAINTENANCE_MANAGER",
+    "LINE_MAINTENANCE_MANAGER",
+]
+
+
+def _canonical_committee_positions(values: list[str] | None) -> list[str]:
+    """Resolve legacy KCAR titles/codes without discarding tenant-defined seats."""
+    result: list[str] = []
+    for value in values or []:
+        canonical = account_role_registry.canonical_role_key(value)
+        normalized = canonical or str(value or "").strip().upper().replace(" ", "_")
+        if normalized and normalized not in result:
+            result.append(normalized)
+    return result
 
 
 def utcnow() -> datetime:
@@ -103,6 +119,9 @@ def read_settings(db: Session, *, amo_id: str) -> schemas.TrainingOperatingSetti
     if row is None:
         return schemas.TrainingOperatingSettingsRead(amo_id=amo_id, configured=False)
     payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    payload["default_committee_positions"] = _canonical_committee_positions(
+        payload.get("default_committee_positions")
+    )
     payload["configured"] = True
     return schemas.TrainingOperatingSettingsRead.model_validate(payload)
 
@@ -116,12 +135,18 @@ def update_settings(
     amo_id = _amo_id(actor)
     row = get_or_create_settings(db, amo_id=amo_id)
     before = {key: getattr(row, key) for key in payload.__class__.model_fields}
-    for key, value in payload.model_dump().items():
+    update_values = payload.model_dump()
+    update_values["default_committee_positions"] = _canonical_committee_positions(
+        update_values.get("default_committee_positions")
+    )
+    for key, value in update_values.items():
         setattr(row, key, value)
     row.updated_by_user_id = str(actor.id)
     row.configuration_revision_no = int(row.configuration_revision_no or 0) + 1
     db.flush()
-    snapshot = payload.model_dump(mode="json")
+    snapshot = {**payload.model_dump(mode="json"), **{
+        "default_committee_positions": update_values["default_committee_positions"]
+    }}
     snapshot["configuration_revision_no"] = row.configuration_revision_no
     db.add(models.TrainingConfigurationRevision(
         amo_id=amo_id,
@@ -1513,7 +1538,9 @@ def create_authorization_case(db: Session, *, actor: account_models.User, payloa
     _get_scoped(db, account_models.AuthorisationType, payload.authorisation_type_id, amo_id, "Authorisation type")
     row = models.TrainingAuthorizationCase(
         amo_id=amo_id, requested_by_user_id=str(actor.id),
-        required_committee_positions=payload.required_committee_positions or DEFAULT_COMMITTEE_POSITIONS,
+        required_committee_positions=_canonical_committee_positions(
+            payload.required_committee_positions or DEFAULT_COMMITTEE_POSITIONS
+        ),
         **payload.model_dump(exclude={"required_committee_positions"}),
     )
     db.add(row)
@@ -1524,7 +1551,9 @@ def create_authorization_case(db: Session, *, actor: account_models.User, payloa
 
 
 def _committee_holder(db: Session, *, amo_id: str, position_code: str) -> tuple[str | None, str]:
-    label = position_code.replace("_", " ").title()
+    canonical_code = account_role_registry.canonical_role_key(position_code) or position_code
+    definition = account_role_registry.ROLE_DEFINITIONS.get(canonical_code)
+    label = definition.label if definition else canonical_code.replace("_", " ").title()
     if db.get_bind().dialect.name == "postgresql":
         row = db.execute(text("""
             SELECT COALESCE(delegated_to_user_id, user_id), postholder_code
@@ -1533,7 +1562,7 @@ def _committee_holder(db: Session, *, amo_id: str, position_code: str) -> tuple[
               AND (valid_from IS NULL OR valid_from <= NOW())
               AND (valid_to IS NULL OR valid_to >= NOW())
             ORDER BY created_at DESC LIMIT 1
-        """), {"amo_id": amo_id, "code": position_code}).first()
+        """), {"amo_id": amo_id, "code": canonical_code}).first()
         if row:
             return str(row[0]), str(row[1]).replace("_", " ").title()
     return None, label
@@ -1592,12 +1621,21 @@ def compute_authorization_readiness(db: Session, *, case: models.TrainingAuthori
             reason="Approved passing outcome recorded." if passed else "Approved passing outcome is required.", source="assessment register",
         ))
     committee_ready = True
-    for position in case.required_committee_positions or []:
+    committee_positions = _canonical_committee_positions(case.required_committee_positions)
+    if committee_positions != (case.required_committee_positions or []):
+        case.required_committee_positions = committee_positions
+    decisions = db.query(models.TrainingCommitteeDecision).filter(
+        models.TrainingCommitteeDecision.authorization_case_id == case.id
+    ).all()
+    for position in committee_positions:
         holder, label = _committee_holder(db, amo_id=amo_id, position_code=position)
-        decided = db.query(models.TrainingCommitteeDecision).filter(
-            models.TrainingCommitteeDecision.authorization_case_id == case.id,
-            models.TrainingCommitteeDecision.position_code == position,
-        ).first()
+        decided = next(
+            (
+                decision for decision in decisions
+                if _canonical_committee_positions([decision.position_code]) == [position]
+            ),
+            None,
+        )
         status_value = "COMPLETE" if decided else "READY" if holder else "BLOCKED"
         committee_ready = committee_ready and bool(decided)
         items.append(schemas.ReadinessItem(
@@ -1606,7 +1644,6 @@ def compute_authorization_readiness(db: Session, *, case: models.TrainingAuthori
             source="postholder assignments and committee decisions",
         ))
     pre_committee_blockers = [item for item in items if item.blocking and item.key.startswith("committee_") is False and item.status not in {"CURRENT", "COMPLETE", "READY", "NOT_APPLICABLE"}]
-    decisions = db.query(models.TrainingCommitteeDecision).filter(models.TrainingCommitteeDecision.authorization_case_id == case.id).all()
     if any(row.decision == "REJECT" for row in decisions):
         overall = "REJECTED"
     elif any(row.decision == "DEFER" for row in decisions):
@@ -1640,23 +1677,33 @@ def decide_committee(
 ) -> models.TrainingCommitteeDecision:
     amo_id = _amo_id(actor)
     case = _get_scoped(db, models.TrainingAuthorizationCase, case_id, amo_id, "Authorization case")
-    if payload.position_code not in (case.required_committee_positions or []):
+    required_positions = _canonical_committee_positions(case.required_committee_positions)
+    requested_position = _canonical_committee_positions([payload.position_code])
+    position_code = requested_position[0] if requested_position else ""
+    if position_code not in required_positions:
         raise HTTPException(status_code=422, detail="That position is not a required member of this case committee.")
-    holder_id, label = _committee_holder(db, amo_id=amo_id, position_code=payload.position_code)
+    case.required_committee_positions = required_positions
+    holder_id, label = _committee_holder(db, amo_id=amo_id, position_code=position_code)
     if not holder_id:
-        raise HTTPException(status_code=409, detail={"code": "POSTHOLDER_NOT_ASSIGNED", "position_code": payload.position_code})
+        raise HTTPException(status_code=409, detail={"code": "POSTHOLDER_NOT_ASSIGNED", "position_code": position_code})
     if holder_id != str(actor.id):
         raise HTTPException(status_code=403, detail="Only the active postholder or recorded delegate may decide for this position.")
     require_not_self_approval(actor_user_id=str(actor.id), originator_user_id=case.requested_by_user_id, action="decide")
-    existing = db.query(models.TrainingCommitteeDecision).filter(
-        models.TrainingCommitteeDecision.authorization_case_id == case.id,
-        models.TrainingCommitteeDecision.position_code == payload.position_code,
-    ).first()
+    existing = next(
+        (
+            decision
+            for decision in db.query(models.TrainingCommitteeDecision).filter(
+                models.TrainingCommitteeDecision.authorization_case_id == case.id
+            ).all()
+            if _canonical_committee_positions([decision.position_code]) == [position_code]
+        ),
+        None,
+    )
     if existing:
         raise HTTPException(status_code=409, detail="This committee position has already recorded a decision.")
     row = models.TrainingCommitteeDecision(
         amo_id=amo_id, authorization_case_id=case.id, member_user_id=str(actor.id),
-        position_code=payload.position_code, position_label_snapshot=label,
+        position_code=position_code, position_label_snapshot=label,
         decision=payload.decision, comments=payload.comments,
         evidence_snapshot=case.readiness_snapshot or {},
     )
@@ -1666,7 +1713,7 @@ def decide_committee(
     if payload.decision in {"REJECT", "DEFER"}:
         case.decision = payload.decision
         case.decision_at = utcnow()
-    _audit(db, amo_id=amo_id, actor_user_id=str(actor.id), entity_type="training.authorization_case", entity_id=str(case.id), action=f"COMMITTEE_{payload.decision}", after={"position_code": payload.position_code}, critical=True)
+    _audit(db, amo_id=amo_id, actor_user_id=str(actor.id), entity_type="training.authorization_case", entity_id=str(case.id), action=f"COMMITTEE_{payload.decision}", after={"position_code": position_code}, critical=True)
     return row
 
 

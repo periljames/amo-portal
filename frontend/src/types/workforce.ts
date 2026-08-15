@@ -95,6 +95,15 @@ export type WorkPatternDayRead = WorkPatternDayInput & {
   updated_at: string;
 };
 
+export type WorkPatternApplicability = {
+  auto_assign: boolean;
+  department_ids: string[];
+  position_ids: string[];
+  contract_types: ContractType[];
+  anchor_date?: string | null;
+  priority: number;
+};
+
 export type WorkPatternRead = {
   id: string;
   amo_id: string;
@@ -104,6 +113,7 @@ export type WorkPatternRead = {
   cycle_length_days: number;
   is_active: boolean;
   timezone_name: string;
+  applicability: WorkPatternApplicability;
   days: WorkPatternDayRead[];
   assigned_employee_count: number;
   created_by_user_id?: string | null;
@@ -144,6 +154,9 @@ export type PatternPreviewRow = {
   planned_minutes: number;
   shift_template_id?: string | null;
   shift_code?: string | null;
+  pattern_id?: string | null;
+  pattern_code?: string | null;
+  resolution_source: "EXPLICIT" | "RULE";
   base_station_id?: string | null;
   source_reference_id: string;
   duplicate: boolean;
@@ -247,6 +260,7 @@ export type LeaveRequestCreate = {
   requested_minutes?: number | null;
   reason?: string | null;
   attachment_reference?: string | null;
+  submit_immediately?: boolean;
 };
 
 export type AvailabilityEventRead = {
@@ -295,8 +309,26 @@ export type AttendanceSummaryRead = {
   break_minutes: number;
   paid_minutes: number;
   incomplete: boolean;
+  current_state: "CLOCKED_OUT" | "WORKING" | "ON_BREAK" | "STALE_OPEN";
+  current_since?: string | null;
+  current_session_minutes: number;
+  requires_review_count: number;
   warnings: string[];
   events: AttendanceEventRead[];
+};
+
+export type PublicHolidayRead = {
+  id: string;
+  amo_id: string;
+  calendar_id: string;
+  holiday_date: string;
+  name: string;
+  paid: boolean;
+  metadata_json?: Record<string, unknown> | null;
+  calendar_code?: string | null;
+  calendar_name?: string | null;
+  created_by_user_id?: string | null;
+  created_at: string;
 };
 
 export type TimesheetLineRead = {

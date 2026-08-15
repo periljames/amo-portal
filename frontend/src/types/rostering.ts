@@ -27,6 +27,7 @@ export type ShiftTemplateRead = {
   description?: string | null;
   color_token?: string | null;
   icon_name?: string | null;
+  department_ids: string[];
   created_by_user_id?: string | null;
   updated_by_user_id?: string | null;
   created_at: string;
@@ -258,6 +259,77 @@ export type RosterBulkAssignmentResult = {
   skipped: Array<Record<string, unknown>>;
   conflicts: Array<Record<string, unknown>>;
   idempotent_replay: boolean;
+};
+
+export type RosterBulkAssignmentItem = RosterAssignmentCreate & {
+  client_id?: string | null;
+};
+
+export type RosterBulkAssignmentRequest = {
+  assignments: RosterBulkAssignmentItem[];
+  idempotency_key: string;
+  expected_version_revision?: number | null;
+  atomic?: boolean;
+};
+
+export type PatternGenerationRequest = {
+  from_date: string;
+  to_date: string;
+  user_ids?: string[];
+  idempotency_key: string;
+  skip_duplicates?: boolean;
+  expected_version_revision?: number | null;
+};
+
+export type RosterCoverageCandidateRead = {
+  user_id: string;
+  full_name: string;
+  staff_code: string;
+  score: number;
+  workload_minutes: number;
+  department_match: boolean;
+  base_match: boolean;
+  role_match: boolean;
+  active_authorisation_count: number;
+  reasons: string[];
+};
+
+export type RosterCoverageRecommendationRead = {
+  assignment_id: string;
+  assignment_state_revision: number;
+  absent_user_id: string;
+  absent_user_full_name: string;
+  shift_code?: string | null;
+  shift_label?: string | null;
+  starts_at: string;
+  ends_at: string;
+  commitment_id: string;
+  commitment_kind: string;
+  commitment_title: string;
+  commitment_source_module: string;
+  linked_task_count: number;
+  aircraft_allocation_count: number;
+  candidates: RosterCoverageCandidateRead[];
+};
+
+export type RosterCoverageRecommendationResponse = {
+  version_id: string;
+  generated_at: string;
+  conflict_count: number;
+  items: RosterCoverageRecommendationRead[];
+};
+
+export type RosterCoverageRecommendationApplyRequest = {
+  assignment_id: string;
+  replacement_user_id: string;
+  reason: string;
+  idempotency_key: string;
+  expected_assignment_revision?: number | null;
+};
+
+export type RosterCoverageRecommendationApplyResult = {
+  removed_assignment_id: string;
+  replacement_assignment: RosterAssignmentRead;
 };
 
 export type MyRosterResponse = {
@@ -510,6 +582,7 @@ export type RosterApprovalAuthorityRead = {
 };
 
 export type RosterApprovalAuthorityCreate = Omit<RosterApprovalAuthorityRead, "id" | "amo_id" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">;
+export type RosterApprovalAuthorityUpdate = Partial<Pick<RosterApprovalAuthorityRead, "can_approve" | "can_publish" | "effective_from" | "effective_to" | "reason" | "is_active">>;
 
 export type RosterDepartmentApprovalRead = {
   id: string;

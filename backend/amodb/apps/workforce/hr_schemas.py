@@ -48,6 +48,7 @@ class HrPersonReadiness(HrSchema):
     employment_status: Optional[str] = None
     contract_type: Optional[str] = None
     contract_state: Literal["EFFECTIVE", "FUTURE", "MISSING"] = "MISSING"
+    hire_date: Optional[date] = None
     contract_effective_from: Optional[date] = None
     contract_effective_to: Optional[date] = None
     primary_base_station_id: Optional[str] = None
@@ -199,6 +200,8 @@ class HrOvertimeDecisionRequest(HrSchema):
 class HrDashboardResponse(HrSchema):
     generated_at: datetime
     can_manage_contracts: bool
+    can_manage_patterns: bool = False
+    can_assign_patterns: bool = False
     can_initialize_default_day_pattern: bool = False
     can_manage_leave_balances: bool
     can_review_leave: bool
@@ -207,6 +210,7 @@ class HrDashboardResponse(HrSchema):
     can_approve_timesheet_hr: bool
     can_approve_overtime_supervisor: bool
     can_approve_overtime_hr: bool
+    can_manage_attendance: bool
     can_export_payroll: bool
     active_employee_count: int
     employees_without_contract_count: int = 0

@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import services as audit_services
 from amodb.apps.notifications import service as notification_service
-from amodb.database import WriteSessionLocal, close_session_safely, get_write_db
+from amodb.database import WriteSessionLocal, close_session_safely, get_write_db, probe_database
+from amodb.database_resilience import database_circuit, is_database_disconnect
 
 from . import models
 from .enums import QMSAuditKind, QMSAuditScheduleFrequency, QMSAuditStatus, QMSDomain
@@ -1202,9 +1203,16 @@ def run_quality_planner_cycle() -> dict[str, Any]:
 
 def _worker() -> None:
     while not _stop_event.is_set():
+        if not probe_database():
+            _stop_event.wait(database_circuit.retry_after_seconds())
+            continue
         try:
             logger.info("Quality planner automation cycle completed: %s", run_quality_planner_cycle())
-        except Exception:
+        except Exception as exc:
+            if is_database_disconnect(exc):
+                database_circuit.mark_failure(exc)
+                _stop_event.wait(database_circuit.retry_after_seconds())
+                continue
             logger.exception("Quality planner automation cycle failed")
         _stop_event.wait(_interval_seconds())
 

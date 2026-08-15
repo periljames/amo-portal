@@ -495,6 +495,23 @@ def queue_report_job(
     return row
 
 
+@router.post("/report-jobs/{job_id}/retry", response_model=schemas.ReportJobRead, status_code=202)
+def retry_report_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(require_training_capability(Cap.REPORT_EXPORT)),
+):
+    row = db.query(models.TrainingReportJob).filter(
+        models.TrainingReportJob.id == job_id,
+        models.TrainingReportJob.amo_id == tenant_id_for(current_user),
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Training report job was not found in this tenant.")
+    readiness_service.retry_report_job(db, actor=current_user, job=row)
+    db.commit(); db.refresh(row)
+    return row
+
+
 @router.get("/report-jobs/{job_id}/download")
 def download_report_job(
     job_id: str,

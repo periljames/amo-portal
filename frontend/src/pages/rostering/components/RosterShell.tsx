@@ -1,20 +1,19 @@
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 import {
   Building2,
   CalendarDays,
+  CircleHelp,
   ClipboardCheck,
   Gauge,
-  GraduationCap,
   Settings2,
   UsersRound,
 } from "lucide-react";
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../../../services/auth";
-import { getCurrentWorkforcePermissions } from "../../../services/workforce";
 import { canViewFeature, type ModuleFeature } from "../../../utils/roleAccess";
+import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import "../../../styles/rostering-workforce.css";
 import "../../../styles/rostering-workforce-layout.css";
 
@@ -39,11 +38,10 @@ const NAV: NavItem[] = [
   { suffix: "dashboard", label: "Command", icon: Gauge, feature: "rostering.dashboard" },
   { suffix: "calendar", label: "Planner", icon: CalendarDays, feature: "rostering.calendar" },
   { suffix: "planning-board", label: "Operations", icon: UsersRound, feature: "rostering.planning-board" },
-  { suffix: "training-impact", label: "Compliance", icon: GraduationCap, feature: "rostering.training-impact" },
   { suffix: "my-roster", label: "My duty", icon: ClipboardCheck, feature: "rostering.my-roster" },
   { suffix: "settings?section=workforce", label: "Workforce", icon: Building2, requiredPermissions: ["workforce.view_sensitive"] },
   {
-    suffix: "settings?section=overview",
+    suffix: "settings?section=start",
     label: "Setup",
     icon: Settings2,
     requiredPermissions: ["roster.create", "roster.manage_shift_templates", "roster.manage_patterns", "roster.manage_rules"],
@@ -54,13 +52,8 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
   const { amoCode = "UNKNOWN" } = useParams();
   const location = useLocation();
   const user = getCachedUser();
-  const permissionsQuery = useQuery({
-    queryKey: ["rostering", "shell", "workforce-permissions"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 5 * 60_000,
-    networkMode: "offlineFirst",
-  });
-  const livePermissions = permissionsQuery.data?.permissions || [];
+  const permissionsQuery = useWorkforcePermissions();
+  const livePermissions = permissionsQuery.isSuccess ? permissionsQuery.data.permissions : [];
   const visibleNav = NAV.filter((item) => {
     if (item.requiredPermissions) {
       return item.requiredPermissions.some((permission) => livePermissions.includes(permission));
@@ -75,11 +68,16 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
       <div className="wr-page">
         <header className="wr-header">
           <div className="wr-header__copy">
-            <span className="wr-eyebrow">{eyebrow}</span>
             <h1>{title}</h1>
-            <p>{description}</p>
+            <span className="wr-header__context">{eyebrow}</span>
           </div>
-          {actions ? <div className="wr-header__actions">{actions}</div> : null}
+          <div className="wr-header__actions">
+            <details className="wr-header-help">
+              <summary aria-label={`About ${title}`} title={`About ${title}`}><CircleHelp size={17} /></summary>
+              <p>{description}</p>
+            </details>
+            {actions}
+          </div>
         </header>
 
         <nav className="wr-tabs" aria-label="Duty rostering sections">
@@ -117,11 +115,15 @@ export function RosterLoading({ label = "Loading duty data…" }: { label?: stri
   );
 }
 
-export function RosterError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function RosterError({ title = "Could not load this workspace", message, onRetry }: {
+  title?: string;
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="wr-state wr-state--error" role="alert">
       <div>
-        <strong>Could not load this workspace</strong>
+        <strong>{title}</strong>
         <p>{message}</p>
       </div>
       {onRetry ? <button className="wr-button wr-button--secondary" type="button" onClick={onRetry}>Retry</button> : null}

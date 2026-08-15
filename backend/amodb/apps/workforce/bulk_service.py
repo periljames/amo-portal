@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
 from ..audit import services as audit_services
-from . import bulk_contracts, bulk_models, bulk_schemas, hr_selection_integrity
+from . import bulk_contracts, bulk_models, bulk_patterns, bulk_schemas, hr_selection_integrity, legacy_guard
 from .bulk_worker import process_operation
 
 MAX_BULK_RECORDS = 10_000
@@ -58,6 +58,10 @@ def read_operation(db: Session, *, amo_id: str, operation_id: str):
 
 def preview_contract_batch(db: Session, *, amo_id: str, actor, payload):
     return bulk_contracts.preview_contract_batch(db, amo_id=amo_id, actor=actor, payload=payload)
+
+
+def preview_work_pattern_batch(db: Session, *, amo_id: str, actor, payload):
+    return bulk_patterns.preview_work_pattern_batch(db, amo_id=amo_id, actor=actor, payload=payload)
 
 
 def _create_operation(
@@ -144,12 +148,33 @@ def submit_contract_batch(db: Session, *, amo_id: str, actor, idempotency_key: s
 
 
 def submit_default_pattern_batch(db: Session, *, amo_id: str, actor, idempotency_key: str, payload):
+    raise ValueError(legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE)
+
+
+def submit_work_pattern_batch(db: Session, *, amo_id: str, actor, idempotency_key: str, payload):
     user_ids, selection_token = _resolve_checked_selection(db, amo_id=amo_id, payload=payload)
+    _pattern, candidates = bulk_patterns.classify_work_pattern_batch(
+        db,
+        amo_id=amo_id,
+        actor=actor,
+        user_ids=user_ids,
+        options=payload.options,
+    )
+    actionable_user_ids = [row.user_id for row in candidates if row.eligible]
+    if not actionable_user_ids:
+        raise ValueError("No selected personnel require an eligible work-pattern change")
+    item_payload = payload.options.model_dump(mode="json")
     row, created = _create_operation(
-        db, amo_id=amo_id, actor_user_id=str(actor.id),
-        operation_type="ASSIGN_DEFAULT_DAY_PATTERN", idempotency_key=idempotency_key,
-        selection_token=selection_token, user_ids=user_ids,
-        selection_snapshot=payload.selection.model_dump(mode="json"), payload_json={},
+        db,
+        amo_id=amo_id,
+        actor_user_id=str(actor.id),
+        operation_type="ASSIGN_WORK_PATTERN",
+        idempotency_key=idempotency_key,
+        selection_token=selection_token,
+        user_ids=actionable_user_ids,
+        selection_snapshot=payload.selection.model_dump(mode="json"),
+        payload_json={**item_payload, "matched_count": len(user_ids)},
+        item_inputs={user_id: item_payload for user_id in actionable_user_ids},
     )
     return _operation_read(row), created
 

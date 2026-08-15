@@ -103,8 +103,24 @@ class WorkforcePosition(Base):
     __tablename__ = "workforce_positions"
     __table_args__ = (
         UniqueConstraint("amo_id", "code", name="uq_workforce_position_code"),
+        UniqueConstraint("amo_id", "role_key", name="uq_workforce_position_role_key"),
         Index("ix_workforce_position_family_grade", "amo_id", "job_family_id", "grade_id"),
         Index("ix_workforce_position_active_title", "amo_id", "is_active", "canonical_title"),
+        Index(
+            "ix_workforce_position_hierarchy",
+            "amo_id",
+            "role_source",
+            "management_level",
+            "is_active",
+        ),
+        CheckConstraint(
+            "role_source IN ('TENANT', 'KCAR_2025')",
+            name="ck_workforce_position_role_source",
+        ),
+        CheckConstraint(
+            "management_level IN ('STAFF', 'SUPERVISOR', 'MANAGER', 'EXECUTIVE')",
+            name="ck_workforce_position_management_level",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -124,6 +140,9 @@ class WorkforcePosition(Base):
         index=True,
     )
     description = Column(Text, nullable=True)
+    role_source = Column(String(24), nullable=False, default="TENANT")
+    role_key = Column(String(64), nullable=True)
+    management_level = Column(String(24), nullable=False, default="STAFF")
     is_supervisory = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

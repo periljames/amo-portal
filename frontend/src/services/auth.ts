@@ -9,6 +9,11 @@
 import { getApiBaseUrl } from "./config";
 import { clearBrandContext, setBrandContext } from "./branding";
 import { setPortalDataMode } from "./runtimeMode";
+import {
+  getPortalConnectivitySnapshot,
+  isPortalReady,
+  recommendedRequestTimeoutMs,
+} from "./portalConnectivity";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
@@ -16,17 +21,23 @@ const AMO_SLUG_KEY = "amo_slug";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 const SESSION_EVENT_KEY = "amo_session_event";
+const SESSION_SYNC_KEY = "amo_session_sync_v2";
+const SESSION_LAST_USER_ACTIVITY_KEY = "amo_session_last_user_activity";
 const ONBOARDING_STATUS_KEY = "amo_onboarding_status";
 const LAST_LOGIN_IDENTIFIER_KEY = "amo_last_login_identifier";
 const LOGIN_CONTEXT_CACHE_KEY = "amo_login_context_cache";
+const PENDING_SESSION_REVOCATION_KEY = "amo_pending_session_revocation";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
 const LOGIN_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 const SESSION_EXTEND_THRESHOLD_SECONDS = 5 * 60;
 const SESSION_EXTEND_COOLDOWN_MS = 60 * 1000;
+export const PORTAL_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+export const PORTAL_IDLE_WARNING_MS = 60 * 1000;
 let sessionEnded = false;
 let lastSessionExtendAttemptAt = 0;
 let sessionExtendInFlight: Promise<LoginResponse | null> | null = null;
+let sessionRecoveryInFlight: Promise<LoginResponse | null> | null = null;
 let cachedUserRaw: string | null = null;
 let cachedUserObject: PortalUser | null = null;
 
@@ -86,6 +97,11 @@ export function normalizeDepartmentCode(value?: string | null): string | null {
 export type AccountRole =
   | "SUPERUSER"
   | "AMO_ADMIN"
+  | "USER"
+  | "ACCOUNTABLE_EXECUTIVE"
+  | "BASE_MAINTENANCE_MANAGER"
+  | "LINE_MAINTENANCE_MANAGER"
+  | "WORKSHOP_MANAGER"
   | "QUALITY_MANAGER"
   | "AUDITOR"
   | "SAFETY_MANAGER"
@@ -184,8 +200,17 @@ export interface LoginContextResponse {
 }
 
 export type SessionEventDetail = {
-  type: "expired" | "idle-warning" | "idle-logout" | "authenticated" | "activity" | "manual-logout";
+  type: "expired" | "idle-warning" | "idle-logout" | "authenticated" | "activity" | "manual-logout"
+    | "session-recovering" | "offline-continuity";
   reason?: string;
+  at?: number;
+  deadlineAt?: number;
+};
+
+type SessionSyncEnvelope = {
+  id: string;
+  at: number;
+  detail: SessionEventDetail;
 };
 
 export type OnboardingStatus = {
@@ -371,15 +396,51 @@ export function getTokenSecondsRemaining(): number | null {
   return Math.floor(exp - Date.now() / 1000);
 }
 
+function sessionIsIdleExpired(now = Date.now()): boolean {
+  const lastUserActivityAt = getLastUserSessionActivityAt();
+  return Boolean(lastUserActivityAt && now - lastUserActivityAt >= PORTAL_IDLE_TIMEOUT_MS);
+}
+
 export function isAuthenticated(): boolean {
   const token = getToken();
   if (!token) return false;
   const remaining = getTokenSecondsRemaining();
   if (remaining != null && remaining <= 0) {
-    // Do not treat an expired JWT as an authenticated session.
-    // This prevents protected routes from mounting and firing many 401 requests
-    // before the login screen has a chance to take over.
-    logout();
+    if (sessionIsIdleExpired()) {
+      endSession("idle");
+      return false;
+    }
+    if (!getCachedUser()) return false;
+    if (isPortalReady()) void recoverSession("route-guard");
+    else emitSessionEvent({ type: "offline-continuity", reason: "access-token-expired-offline" });
+    // Cached, tenant-scoped views remain usable while recovery is pending.
+    // Authoritative requests are still blocked by ensureAuthenticatedRequestAllowed().
+    return true;
+  }
+  return true;
+}
+
+export function getLastUserSessionActivityAt(): number | null {
+  const value = Number(localStorage.getItem(SESSION_LAST_USER_ACTIVITY_KEY));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function recordUserSessionActivity(reason = "interaction", at = Date.now()): void {
+  if (!getToken() || sessionEnded) return;
+  localStorage.setItem(SESSION_LAST_USER_ACTIVITY_KEY, String(at));
+  emitSessionEvent({ type: "activity", reason, at });
+}
+
+export function ensureAuthenticatedRequestAllowed(): boolean {
+  if (sessionEnded || !getToken()) return false;
+  const remaining = getTokenSecondsRemaining();
+  if (remaining !== null && remaining <= 0) {
+    if (isPortalReady()) void recoverSession("token-expired-preflight");
+    else emitSessionEvent({ type: "offline-continuity", reason: "token-expired-preflight" });
+    return false;
+  }
+  if (sessionIsIdleExpired()) {
+    endSession("idle");
     return false;
   }
   return true;
@@ -489,6 +550,7 @@ export async function login(
   const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
 
@@ -498,6 +560,7 @@ export async function login(
 
   const data: LoginResponse = await res.json();
 
+  localStorage.removeItem(PENDING_SESSION_REVOCATION_KEY);
   saveToken(data.access_token);
 
   // Store context (AMO code + department code, if provided)
@@ -533,8 +596,8 @@ export async function login(
   }
 
   saveLastLoginIdentifier(trimmedIdentifier);
+  recordUserSessionActivity("login");
   emitSessionEvent({ type: "authenticated" });
-  emitSessionEvent({ type: "activity", reason: "login" });
 
   return data;
 }
@@ -565,6 +628,76 @@ export async function getLoginContext(
   return context;
 }
 
+function applyRecoveredSession(data: LoginResponse): void {
+  localStorage.removeItem(PENDING_SESSION_REVOCATION_KEY);
+  saveToken(data.access_token);
+  if (data.user) cacheCurrentUser(data.user);
+  if (data.amo) {
+    setContext(data.amo.amo_code, data.department ? data.department.code : null, data.amo.login_slug);
+    setBrandContext({
+      name: data.amo.name,
+      logoUrl: data.amo.branding?.logoUrl,
+      logoUrlDark: data.amo.branding?.logoUrlDark,
+      logoUrlLight: data.amo.branding?.logoUrlLight,
+      updatedAt: data.amo.branding?.updatedAt,
+    });
+    setPortalDataMode(data.amo.is_demo || data.amo.data_mode === "DEMO" ? "DEMO" : "REAL");
+    setActiveAmoId(data.amo.id);
+  } else if (data.user?.is_superuser) {
+    clearContext();
+    clearActiveAmoId();
+    clearBrandContext();
+    setPortalDataMode("REAL");
+  }
+  emitSessionEvent({ type: "authenticated", reason: "session-recovered" });
+}
+
+export function recoverSession(reason = "connectivity-recovered"): Promise<LoginResponse | null> {
+  if (sessionRecoveryInFlight) return sessionRecoveryInFlight;
+  if (sessionEnded || !getCachedUser()) return Promise.resolve(null);
+  if (sessionIsIdleExpired()) {
+    endSession("idle");
+    return Promise.resolve(null);
+  }
+  if (!isPortalReady()) {
+    const connectivity = getPortalConnectivitySnapshot();
+    emitSessionEvent({ type: "offline-continuity", reason: connectivity.reason || reason });
+    return Promise.resolve(null);
+  }
+
+  emitSessionEvent({ type: "session-recovering", reason });
+  sessionRecoveryInFlight = (async () => {
+    try {
+      const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/refresh-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Portal-Refresh": "1",
+          "X-AMO-Silent-Error": "1",
+        },
+        credentials: "include",
+        body: JSON.stringify({ reason }),
+        timeoutMs: recommendedRequestTimeoutMs("POST"),
+      });
+      if (res.status === 401 || res.status === 403) {
+        expireLocalSession("recovery-session-expired");
+        return null;
+      }
+      if (!res.ok) return null;
+      const data = await res.json() as LoginResponse;
+      applyRecoveredSession(data);
+      return data;
+    } catch {
+      // A transport failure is not proof that the recovery credential is
+      // invalid. Preserve the local workspace and retry after readiness.
+      return null;
+    }
+  })().finally(() => {
+    sessionRecoveryInFlight = null;
+  });
+  return sessionRecoveryInFlight;
+}
+
 export async function extendSession(reason = "active"): Promise<LoginResponse | null> {
   const token = getToken();
   if (!token || sessionEnded) return null;
@@ -575,8 +708,7 @@ export async function extendSession(reason = "active"): Promise<LoginResponse | 
     timeoutMs: 10000,
   });
   if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
+    return recoverSession("access-token-expired");
   }
   if (!res.ok) throw new Error(await readErrorMessage(res));
   const data = (await res.json()) as LoginResponse;
@@ -587,18 +719,22 @@ export async function extendSession(reason = "active"): Promise<LoginResponse | 
     setPortalDataMode(data.amo.is_demo || data.amo.data_mode === "DEMO" ? "DEMO" : "REAL");
     setActiveAmoId(data.amo.id);
   }
-  emitSessionEvent({ type: "activity", reason: `extend-session:${reason}` });
   return data;
 }
 
 export function extendSessionIfNeeded(reason = "active"): Promise<LoginResponse | null> | null {
   const remaining = getTokenSecondsRemaining();
   if (remaining != null && remaining <= 0) {
-    handleAuthFailure("expired");
-    return null;
+    return isPortalReady()
+      ? recoverSession("access-token-expired")
+      : null;
   }
   if (remaining == null || remaining > SESSION_EXTEND_THRESHOLD_SECONDS || sessionEnded) return null;
   const now = Date.now();
+  const lastUserActivityAt = getLastUserSessionActivityAt();
+  // Network traffic is not proof that a person is present. Pollers may request
+  // extension, but only recent keyboard/pointer activity may authorize it.
+  if (!lastUserActivityAt || now - lastUserActivityAt >= PORTAL_IDLE_TIMEOUT_MS) return null;
   if (now - lastSessionExtendAttemptAt < SESSION_EXTEND_COOLDOWN_MS) return sessionExtendInFlight;
   lastSessionExtendAttemptAt = now;
   sessionExtendInFlight = extendSession(reason).finally(() => {
@@ -760,17 +896,43 @@ async function sendPresenceBeacon(state: "online" | "away", reason?: string): Pr
   }
 }
 
-async function serverLogoutBestEffort(): Promise<void> {
+async function serverLogoutBestEffort(reason: "manual" | "idle"): Promise<void> {
   const token = getToken();
   if (!token) return;
   try {
-    await fetchWithTimeout(`${getApiBaseUrl()}/auth/logout`, {
+    const response = await fetchWithTimeout(`${getApiBaseUrl()}/auth/logout`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-AMO-Silent-Error": "1",
+      },
+      body: JSON.stringify({ reason }),
+      credentials: "include",
       timeoutMs: 5000,
     });
+    if (!response.ok) throw new Error(`Logout rejected (${response.status})`);
+    localStorage.removeItem(PENDING_SESSION_REVOCATION_KEY);
   } catch {
-    // best-effort only; local logout must still complete
+    localStorage.setItem(PENDING_SESSION_REVOCATION_KEY, String(Date.now()));
+    void flushPendingSessionRevocation();
+  }
+}
+
+export async function flushPendingSessionRevocation(): Promise<boolean> {
+  if (!localStorage.getItem(PENDING_SESSION_REVOCATION_KEY) || !isPortalReady()) return false;
+  try {
+    const response = await fetchWithTimeout(`${getApiBaseUrl()}/auth/revoke-recovery-session`, {
+      method: "POST",
+      headers: { "X-Portal-Refresh": "1", "X-AMO-Silent-Error": "1" },
+      credentials: "include",
+      timeoutMs: recommendedRequestTimeoutMs("POST"),
+    });
+    if (!response.ok) return false;
+    localStorage.removeItem(PENDING_SESSION_REVOCATION_KEY);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -785,11 +947,22 @@ export function logout(): void {
   clearActiveAmoId();
   clearBrandContext();
   clearOnboardingStatus();
+  localStorage.removeItem(SESSION_LAST_USER_ACTIVITY_KEY);
 }
 
 export function emitSessionEvent(detail: SessionEventDetail): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(SESSION_EVENT_KEY, { detail }));
+  if (!["activity", "idle-warning", "session-recovering", "offline-continuity"].includes(detail.type)) {
+    const envelope: SessionSyncEnvelope = {
+      id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      at: Date.now(),
+      detail,
+    };
+    localStorage.setItem(SESSION_SYNC_KEY, JSON.stringify(envelope));
+  }
 }
 
 export function onSessionEvent(
@@ -802,8 +975,27 @@ export function onSessionEvent(
     handler(event.detail as SessionEventDetail);
   };
 
+  const storageListener = (event: StorageEvent) => {
+    if (event.key === SESSION_LAST_USER_ACTIVITY_KEY && event.newValue) {
+      const at = Number(event.newValue);
+      if (Number.isFinite(at) && at > 0) handler({ type: "activity", reason: "another-tab", at });
+      return;
+    }
+    if (event.key !== SESSION_SYNC_KEY || !event.newValue) return;
+    try {
+      const envelope = JSON.parse(event.newValue) as SessionSyncEnvelope;
+      if (envelope?.detail?.type) handler(envelope.detail);
+    } catch {
+      // Ignore malformed or legacy cross-tab session messages.
+    }
+  };
+
   window.addEventListener(SESSION_EVENT_KEY, listener);
-  return () => window.removeEventListener(SESSION_EVENT_KEY, listener);
+  window.addEventListener("storage", storageListener);
+  return () => {
+    window.removeEventListener(SESSION_EVENT_KEY, listener);
+    window.removeEventListener("storage", storageListener);
+  };
 }
 
 export function markSessionActivity(reason = "interaction"): void {
@@ -813,16 +1005,26 @@ export function markSessionActivity(reason = "interaction"): void {
 export function endSession(reason: "manual" | "idle" = "manual"): void {
   if (sessionEnded && !getToken()) return;
   void sendPresenceBeacon("away", reason);
-  void serverLogoutBestEffort();
+  void serverLogoutBestEffort(reason);
   logout();
   emitSessionEvent({ type: reason === "idle" ? "idle-logout" : "manual-logout", reason });
 }
 
-export function handleAuthFailure(reason = "expired"): void {
+function expireLocalSession(reason: string): void {
   if (sessionEnded && !getToken()) return;
-  // A 401 means the token is already invalid on the server. Clear local state
-  // first and do not send a presence beacon with the same rejected token, which
-  // otherwise creates extra noisy 401 calls during route recovery.
   logout();
   emitSessionEvent({ type: "expired", reason });
+}
+
+export function handleAuthFailure(reason = "expired"): void {
+  if (sessionEnded && !getToken()) return;
+  if (sessionIsIdleExpired()) {
+    endSession("idle");
+    return;
+  }
+  if (isPortalReady()) {
+    void recoverSession(reason);
+    return;
+  }
+  emitSessionEvent({ type: "offline-continuity", reason });
 }

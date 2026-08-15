@@ -201,6 +201,15 @@ class WorkPattern(Base):
     cycle_length_days = Column(Integer, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     timezone_name = Column(String(64), nullable=False, default="UTC")
+    applicability_json = Column(
+        JSON,
+        nullable=False,
+        default=dict,
+        doc=(
+            "Explicit automatic-assignment rule. Empty/disabled rules never create "
+            "a tenant-wide default pattern."
+        ),
+    )
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

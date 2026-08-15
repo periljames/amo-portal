@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
 from ..workforce import models as workforce_models
+from ..workforce import schemas as workforce_schemas
+from ..workforce import services as workforce_services
 from . import models as roster_models
 from . import schemas as roster_schemas
 from . import services as roster_services
@@ -352,59 +354,6 @@ def _eligible_user_ids(
     return sorted(str(row[0]) for row in query.all())
 
 
-def _pattern_assignments(
-    db: Session,
-    *,
-    amo_id: str,
-    target_from: date,
-    target_to: date,
-    user_ids: list[str],
-) -> list[workforce_models.EmployeeWorkPatternAssignment]:
-    if not user_ids:
-        return []
-    return db.query(workforce_models.EmployeeWorkPatternAssignment).join(
-        workforce_models.WorkPattern,
-        workforce_models.EmployeeWorkPatternAssignment.work_pattern_id == workforce_models.WorkPattern.id,
-    ).options(
-        selectinload(workforce_models.EmployeeWorkPatternAssignment.work_pattern).selectinload(
-            workforce_models.WorkPattern.days
-        ),
-    ).filter(
-        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
-        workforce_models.WorkPattern.amo_id == amo_id,
-        workforce_models.WorkPattern.is_active.is_(True),
-        workforce_models.EmployeeWorkPatternAssignment.user_id.in_(user_ids),
-        workforce_models.EmployeeWorkPatternAssignment.effective_from <= target_to,
-        or_(
-            workforce_models.EmployeeWorkPatternAssignment.effective_to.is_(None),
-            workforce_models.EmployeeWorkPatternAssignment.effective_to >= target_from,
-        ),
-    ).all()
-
-
-def _estimated_assignments(
-    assignments: list[workforce_models.EmployeeWorkPatternAssignment],
-    *,
-    target_from: date,
-    target_to: date,
-) -> int:
-    total = 0
-    for assignment in assignments:
-        pattern = assignment.work_pattern
-        if not pattern or not pattern.is_active or not pattern.days:
-            continue
-        by_index = {int(day.cycle_day_index): day for day in pattern.days}
-        cursor = max(target_from, assignment.effective_from)
-        final = min(target_to, assignment.effective_to or target_to)
-        while cursor <= final:
-            cycle_index = (cursor - assignment.cycle_anchor_date).days % pattern.cycle_length_days
-            day = by_index.get(cycle_index)
-            if day and day.shift_template_id and _enum_value(day.status) not in {"OFF", "LEAVE", "UNAVAILABLE"}:
-                total += 1
-            cursor += timedelta(days=1)
-    return total
-
-
 def preview(
     db: Session,
     *,
@@ -434,16 +383,22 @@ def preview(
         target_to=target_to,
         requested_user_ids=payload.user_ids,
     )
-    pattern_rows = _pattern_assignments(
+    pattern_preview = workforce_services.preview_patterns(
         db,
         amo_id=amo_id,
-        target_from=target_from,
-        target_to=target_to,
-        user_ids=eligible_ids,
+        payload=workforce_schemas.PatternPreviewRequest(
+            from_date=target_from,
+            to_date=target_to,
+            user_ids=eligible_ids,
+            roster_version_id=draft.id if draft else None,
+        ),
     )
-    patterned_users = {row.user_id for row in pattern_rows}
+    patterned_users = {row.user_id for row in pattern_preview.items}
     missing_pattern_count = len(set(eligible_ids) - patterned_users)
-    estimated_count = _estimated_assignments(pattern_rows, target_from=target_from, target_to=target_to)
+    estimated_count = sum(
+        1 for row in pattern_preview.items
+        if row.shift_template_id and _enum_value(row.status) not in {"OFF", "LEAVE", "UNAVAILABLE"} and not row.conflicts
+    )
 
     items: list[RosterAutomationPreviewItem] = []
     if not period and not payload.create_missing_period:
@@ -464,11 +419,11 @@ def preview(
             severity="WARNING",
             message=f"{missing_pattern_count} eligible employee(s) have no effective work pattern and will remain unassigned.",
         ))
-    if not pattern_rows and (payload.generate_from_patterns if payload.generate_from_patterns is not None else policy.generate_from_patterns):
+    if not pattern_preview.items and (payload.generate_from_patterns if payload.generate_from_patterns is not None else policy.generate_from_patterns):
         items.append(RosterAutomationPreviewItem(
             code="NO_ACTIVE_PATTERN_ASSIGNMENTS",
             severity="WARNING",
-            message="No effective work-pattern assignments were found for automatic rotation generation.",
+            message="No explicit assignments or matching automatic rotation rules were found.",
         ))
 
     blocker_count = sum(1 for item in items if item.severity == "BLOCKER")
@@ -482,7 +437,7 @@ def preview(
         period_id=period.id if period else None,
         draft_exists=bool(draft),
         draft_version_id=draft.id if draft else None,
-        active_pattern_assignment_count=len(pattern_rows),
+        active_pattern_assignment_count=len({(row.user_id, row.pattern_id) for row in pattern_preview.items}),
         eligible_employee_count=len(eligible_ids),
         employees_without_pattern_count=missing_pattern_count,
         estimated_assignment_count=estimated_count,
@@ -715,14 +670,20 @@ def readiness(
         target_from=today,
         target_to=next_target_to,
     )
-    pattern_rows = _pattern_assignments(
+    readiness_preview = workforce_services.preview_patterns(
         db,
         amo_id=amo_id,
-        target_from=today,
-        target_to=next_target_to,
-        user_ids=active_contract_ids,
+        payload=workforce_schemas.PatternPreviewRequest(
+            # Readiness only needs to resolve each person's effective pattern,
+            # not materialise every duty and commitment through the end of the
+            # next period. The full multi-day preview remains an explicit,
+            # bounded planner action.
+            from_date=next_target_from,
+            to_date=next_target_from,
+            user_ids=active_contract_ids,
+        ),
     )
-    patterned_users = {row.user_id for row in pattern_rows}
+    patterned_users = {row.user_id for row in readiness_preview.items}
     missing_pattern_count = len(set(active_contract_ids) - patterned_users)
     upcoming_period_count = db.query(func.count(roster_models.RosterPeriod.id)).filter(
         roster_models.RosterPeriod.amo_id == amo_id,
@@ -767,7 +728,7 @@ def readiness(
             key="patterns",
             label="Work patterns",
             state="READY" if active_pattern_count and not missing_pattern_count else "NEEDS_ATTENTION",
-            detail=f"{active_pattern_count} active pattern(s); {missing_pattern_count} employee(s) need an assignment.",
+            detail=f"{active_pattern_count} active rotation(s); {missing_pattern_count} employee(s) need an override or matching rule.",
             action_label="Manage patterns",
             action_path="patterns",
         ),

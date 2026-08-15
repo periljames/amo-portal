@@ -12,6 +12,7 @@ import type {
   HrDefaultDayBootstrap,
   HrGrade,
   HrGradeWrite,
+  HrHierarchyBlueprint,
   HrJobFamily,
   HrJobFamilyWrite,
   HrOrgUnit,
@@ -25,6 +26,8 @@ import type {
   HrPosition,
   HrPositionWrite,
   HrSupervisorOptionsPage,
+  HrWorkPatternBatchOptions,
+  HrWorkPatternBatchPreview,
 } from "../types/workforceHr";
 import type { WorkPatternAssignmentRead, WorkPatternRead } from "../types/workforce";
 
@@ -90,6 +93,7 @@ export function bootstrapWorkforceHrDefaultDayPattern(): Promise<HrDefaultDayBoo
 }
 export function listWorkforceHrPatterns(includeInactive = false): Promise<WorkPatternRead[]> {
   return apiJson(`/workforce/hr/work-patterns${queryString({ include_inactive: includeInactive })}`, {
+    cache: "no-store",
     offline: { cacheTtlMs: 5 * 60_000 },
   });
 }
@@ -130,6 +134,22 @@ export function submitWorkforceHrContractBatch(
   idempotencyKey: string,
 ): Promise<HrBulkOperation> {
   return apiJson("/workforce/hr/bulk-operations/contracts", {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: jsonBody(payload),
+  });
+}
+export type HrWorkPatternBatchPayload = {
+  selection: HrPeopleSelection;
+  options: HrWorkPatternBatchOptions;
+  preview_limit?: number;
+};
+export function previewWorkforceHrPatternBatch(payload: HrWorkPatternBatchPayload): Promise<HrWorkPatternBatchPreview> {
+  return apiJson("/workforce/hr/people/work-patterns/preview", { method: "POST", body: jsonBody(payload) });
+}
+export function submitWorkforceHrPatternBatch(
+  payload: HrWorkPatternBatchPayload & { expected_match_count: number; expected_selection_token: string },
+  idempotencyKey: string,
+): Promise<HrBulkOperation> {
+  return apiJson("/workforce/hr/bulk-operations/work-patterns", {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: jsonBody(payload),
   });
 }
@@ -201,6 +221,12 @@ export function saveWorkforceHrGrade(payload: HrGradeWrite, id?: string): Promis
 }
 export function listWorkforceHrPositions(includeInactive = false): Promise<HrPosition[]> {
   return apiJson(`/workforce/hr/positions${queryString({ include_inactive: includeInactive })}`);
+}
+export function getWorkforceHrHierarchyBlueprint(): Promise<HrHierarchyBlueprint> {
+  return apiJson("/workforce/hr/positions/hierarchy-blueprint", { offline: { cacheTtlMs: 60_000 } });
+}
+export function initializeWorkforceHrKcars2025Hierarchy(): Promise<HrHierarchyBlueprint> {
+  return apiJson("/workforce/hr/positions/initialize-kcars-2025", { method: "POST" });
 }
 export function saveWorkforceHrPosition(payload: HrPositionWrite, id?: string): Promise<HrPosition> {
   return apiJson(id ? `/workforce/hr/positions/${encodeURIComponent(id)}` : "/workforce/hr/positions", {

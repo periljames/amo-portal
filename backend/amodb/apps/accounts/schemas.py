@@ -245,6 +245,25 @@ class UserRead(UserBase):
         from_attributes = True
 
 
+class AccountRoleCatalogueItem(BaseModel):
+    key: AccountRole
+    label: str
+    category: str
+    description: str
+    aliases: list[str] = Field(default_factory=list)
+    regulated: bool = False
+    workforce_role_key: Optional[str] = None
+    can_manage_accounts: bool = False
+    can_have_supervisor: bool = True
+    permission_summary: list[str] = Field(default_factory=list)
+
+
+class AccountRoleCatalogueRead(BaseModel):
+    source: str
+    canonical_storage: bool = True
+    roles: list[AccountRoleCatalogueItem] = Field(default_factory=list)
+
+
 
 
 class UserCommandNotifyPayload(BaseModel):
@@ -438,6 +457,10 @@ class LoginContextResponse(BaseModel):
     amo_code: Optional[str] = None
     amo_name: Optional[str] = None
     is_platform: bool = False
+
+
+class SessionActionRequest(BaseModel):
+    reason: str = Field(default="active", min_length=1, max_length=80)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -1132,6 +1155,7 @@ class UserEmploymentActionRequest(BaseModel):
         "transfer",
         "resign",
         "reinstate",
+        "reemploy",
         "schedule_leave",
         "return_from_leave",
     ]
@@ -1167,4 +1191,3 @@ class AdminUserWorkspaceRead(BaseModel):
     profile: Optional[PersonnelProfileSummaryRead] = None
     availability: List[UserAvailabilitySummaryRead] = Field(default_factory=list)
     group_memberships: List[UserGroupRead] = Field(default_factory=list)
-

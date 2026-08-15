@@ -20,6 +20,8 @@ describe("development proxy routing", () => {
     expect(shouldProxyDevApi("/quality/audits")).toBe(true);
     expect(shouldProxyDevApi("/platform/settings")).toBe(true);
     expect(shouldProxyDevApi("/healthz")).toBe(true);
+    expect(shouldProxyDevApi("/livez")).toBe(true);
+    expect(shouldProxyDevApi("/readyz")).toBe(true);
   });
 
   it("uses separate default targets and accepts deployment-local overrides", () => {

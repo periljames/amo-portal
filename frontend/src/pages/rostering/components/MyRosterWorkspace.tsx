@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO, subDays } from "date-fns";
 import {
@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 
 import { getCachedUser } from "../../../services/auth";
+import { isOfflineQueuedError } from "../../../services/offlineHttp";
+import { onOfflineSyncComplete } from "../../../services/offlinePersistence";
+import { isPortalReady } from "../../../services/portalConnectivity";
 import {
   acknowledgeRosterVersion,
   exportMyRosterCalendar,
@@ -26,8 +29,17 @@ import {
   getRosterCalendarSubscription,
 } from "../../../services/rostering";
 import {
+  createCalendarSubscription,
+  getCalendarSubscriptionStatus,
+  ROSTER_CALENDAR_LINK_QUERY_KEY,
+  ROSTER_CALENDAR_STATUS_QUERY_KEY,
+} from "../../../services/rosteringControl";
+import {
   createAttendanceEvent,
+  cancelLeaveRequest,
   createLeaveRequest,
+  downloadAttendanceExport,
+  downloadLeaveRequestsExport,
   getAttendanceSummary,
   listLeaveBalances,
   listLeaveRequests,
@@ -35,7 +47,7 @@ import {
   listTimesheets,
   submitLeaveRequest,
 } from "../../../services/workforce";
-import type { MyRosterResponse, RosterCalendarSubscriptionRead } from "../../../types/rostering";
+import type { MyRosterResponse } from "../../../types/rostering";
 import type { AttendanceEventRead } from "../../../types/workforce";
 import {
   errorMessage,
@@ -43,6 +55,7 @@ import {
   hoursLabel,
   isoDate,
   newIdempotencyKey,
+  resolveRosterCalendarUrls,
 } from "../rosterUi";
 import {
   EmptyState,
@@ -58,19 +71,43 @@ const ATTENDANCE_STALE_MS = 15_000;
 const REFERENCE_STALE_MS = 6 * 60 * 60_000;
 const CALENDAR_STALE_MS = 24 * 60 * 60_000;
 
-type AttendanceMode = "CLOCKED_OUT" | "WORKING" | "ON_BREAK";
+type AttendanceMode = "CLOCKED_OUT" | "WORKING" | "ON_BREAK" | "STALE_OPEN";
 type AttendanceAction = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END";
 
 const ALLOWED_ATTENDANCE_ACTIONS: Record<AttendanceMode, AttendanceAction[]> = {
   CLOCKED_OUT: ["CLOCK_IN"],
   WORKING: ["BREAK_START", "CLOCK_OUT"],
-  ON_BREAK: ["BREAK_END"],
+  ON_BREAK: ["BREAK_END", "CLOCK_OUT"],
+  STALE_OPEN: ["CLOCK_OUT"],
 };
 
 function initialRange() {
   const from = new Date();
   const to = addDays(from, 30);
   return { from: isoDate(from), to: isoDate(to) };
+}
+
+function initialHistoryRange() {
+  const to = new Date();
+  return { from: isoDate(subDays(to, 30)), to: isoDate(to) };
+}
+
+function captureAttendancePosition(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("This device does not provide location evidence."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: Math.max(position.coords.accuracy || 1, 1),
+      }),
+      (error) => reject(new Error(error.message || "Location evidence is unavailable.")),
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 8_000 },
+    );
+  });
 }
 
 function attendanceMode(events: AttendanceEventRead[]): AttendanceMode {
@@ -93,11 +130,6 @@ function calendarLinkStorageKey(userId: string): string {
   return `amo_portal_roster_calendar_link:${userId || "current"}`;
 }
 
-function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(normalized);
-}
-
 function configuredApiOrigin(): string | null {
   if (typeof window === "undefined") return null;
   const configured = String(import.meta.env.VITE_API_BASE_URL || "").trim();
@@ -107,39 +139,6 @@ function configuredApiOrigin(): string | null {
   } catch {
     return null;
   }
-}
-
-function browserCalendarUrls(subscription: RosterCalendarSubscriptionRead): {
-  httpsUrl: string;
-  webcalUrl: string;
-} {
-  if (typeof window === "undefined" || !window.location.host) {
-    return { httpsUrl: subscription.https_url, webcalUrl: subscription.webcal_url };
-  }
-
-  const feedPath = subscription.feed_path.startsWith("/")
-    ? subscription.feed_path
-    : `/${subscription.feed_path}`;
-  let supplied: URL | null = null;
-  try {
-    supplied = new URL(subscription.https_url);
-  } catch {
-    supplied = null;
-  }
-
-  const configuredOrigin = configuredApiOrigin();
-  const targetOrigin = configuredOrigin
-    || (!supplied || isLoopbackHostname(supplied.hostname)
-      ? window.location.origin
-      : supplied.origin);
-  const targetPath = supplied && !isLoopbackHostname(supplied.hostname)
-    ? `${supplied.pathname}${supplied.search}${supplied.hash}`
-    : feedPath;
-  const httpsUrl = new URL(targetPath, targetOrigin);
-  return {
-    httpsUrl: httpsUrl.toString(),
-    webcalUrl: `webcal://${httpsUrl.host}${httpsUrl.pathname}${httpsUrl.search}${httpsUrl.hash}`,
-  };
 }
 
 function AttendanceButton({
@@ -172,13 +171,17 @@ export function MyRosterWorkspace() {
   const user = getCachedUser();
   const userId = String((user as { id?: string } | null)?.id || "");
   const [range, setRange] = useState(initialRange);
+  const [historyRange, setHistoryRange] = useState(initialHistoryRange);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [localAttendanceMode, setLocalAttendanceMode] = useState<AttendanceMode | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaveTypeId, setLeaveTypeId] = useState("");
   const [leaveStart, setLeaveStart] = useState(range.from);
   const [leaveEnd, setLeaveEnd] = useState(range.from);
   const [leaveReason, setLeaveReason] = useState("");
+  const [leaveAttachmentReference, setLeaveAttachmentReference] = useState("");
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarSetupStarted, setCalendarSetupStarted] = useState(false);
   const calendarStorageKey = calendarLinkStorageKey(userId);
@@ -193,8 +196,8 @@ export function MyRosterWorkspace() {
     [range.from, range.to],
   );
   const attendanceKey = useMemo(
-    () => ["rostering", "self-service", "attendance", userId, range.from, range.to] as const,
-    [range.from, range.to, userId],
+    () => ["rostering", "self-service", "attendance-history", userId, historyRange.from, historyRange.to] as const,
+    [historyRange.from, historyRange.to, userId],
   );
   const currentAttendanceWindow = useMemo(() => {
     const now = new Date();
@@ -212,16 +215,16 @@ export function MyRosterWorkspace() {
     [currentAttendanceWindow.from, currentAttendanceWindow.to, userId],
   );
   const requestsKey = useMemo(
-    () => ["rostering", "self-service", "leave-requests", userId, range.from, range.to] as const,
-    [range.from, range.to, userId],
+    () => ["rostering", "self-service", "leave-requests", userId] as const,
+    [userId],
   );
   const balancesKey = useMemo(
     () => ["rostering", "self-service", "leave-balances", userId, leaveYear] as const,
     [leaveYear, userId],
   );
   const timesheetsKey = useMemo(
-    () => ["rostering", "self-service", "timesheets", userId, range.from, range.to] as const,
-    [range.from, range.to, userId],
+    () => ["rostering", "self-service", "timesheets", userId, historyRange.from, historyRange.to] as const,
+    [historyRange.from, historyRange.to, userId],
   );
 
   const rosterQuery = useQuery({
@@ -245,8 +248,6 @@ export function MyRosterWorkspace() {
     queryKey: requestsKey,
     queryFn: () => listLeaveRequests({
       user_id: userId || null,
-      from: range.from,
-      to: range.to,
       page_size: 100,
     }),
     staleTime: 60_000,
@@ -256,8 +257,8 @@ export function MyRosterWorkspace() {
     queryKey: attendanceKey,
     queryFn: () => getAttendanceSummary({
       user_id: userId || null,
-      from: range.from,
-      to: range.to,
+      from: historyRange.from,
+      to: historyRange.to,
     }),
     staleTime: ATTENDANCE_STALE_MS,
     placeholderData: keepPreviousData,
@@ -275,16 +276,23 @@ export function MyRosterWorkspace() {
     queryKey: timesheetsKey,
     queryFn: () => listTimesheets({
       user_id: userId || null,
-      from: range.from,
-      to: range.to,
+      from: historyRange.from,
+      to: historyRange.to,
       page_size: 100,
     }),
     staleTime: 5 * 60_000,
     placeholderData: keepPreviousData,
   });
+  const calendarStatusQuery = useQuery({
+    queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY,
+    queryFn: getCalendarSubscriptionStatus,
+    staleTime: 60_000,
+  });
+  const calendarActive = calendarStatusQuery.data?.active === true;
   const calendarQuery = useQuery({
-    queryKey: ["rostering", "self-service", "calendar-subscription"],
+    queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY,
     queryFn: getRosterCalendarSubscription,
+    enabled: calendarActive,
     staleTime: CALENDAR_STALE_MS,
   });
 
@@ -295,19 +303,32 @@ export function MyRosterWorkspace() {
   const attendance = attendanceQuery.data || null;
   const currentAttendance = currentAttendanceQuery.data || null;
   const timesheets = timesheetsQuery.data?.items || [];
-  const calendarSubscription = calendarQuery.data || null;
+  const calendarSubscription = calendarActive ? calendarQuery.data || null : null;
   const effectiveLeaveTypeId = leaveTypeId || leaveTypes[0]?.id || "";
-  const mode = useMemo(() => attendanceMode(currentAttendance?.events || []), [currentAttendance?.events]);
+  const selectedLeaveType = leaveTypes.find((type) => type.id === effectiveLeaveTypeId) || null;
+  const mode = useMemo(
+    () => localAttendanceMode || currentAttendance?.current_state || attendanceMode(currentAttendance?.events || []),
+    [currentAttendance?.current_state, currentAttendance?.events, localAttendanceMode],
+  );
+
+  useEffect(() => onOfflineSyncComplete((detail) => {
+    if (!detail.entityTypes.includes("attendance-event")) return;
+    setLocalAttendanceMode(null);
+    void Promise.allSettled([currentAttendanceQuery.refetch(), attendanceQuery.refetch()]);
+  }), [attendanceKey, currentAttendanceKey]);
   const lastAttendance = useMemo(
     () => latestAttendanceEvent(currentAttendance?.events || []),
     [currentAttendance?.events],
   );
-  const calendarLinked = Boolean(
-    calendarSubscription && linkedFeedPath === calendarSubscription.feed_path,
-  );
   const calendarUrls = calendarSubscription
-    ? browserCalendarUrls(calendarSubscription)
+    ? resolveRosterCalendarUrls(calendarSubscription, {
+        browserOrigin: typeof window === "undefined" ? null : window.location.origin,
+        configuredApiOrigin: configuredApiOrigin(),
+      })
     : null;
+  const calendarLinked = Boolean(
+    calendarUrls?.feedPath && linkedFeedPath === calendarUrls.feedPath,
+  );
 
   const refreshing = rosterQuery.isFetching
     || leaveTypesQuery.isFetching
@@ -316,6 +337,7 @@ export function MyRosterWorkspace() {
     || attendanceQuery.isFetching
     || currentAttendanceQuery.isFetching
     || timesheetsQuery.isFetching
+    || calendarStatusQuery.isFetching
     || calendarQuery.isFetching;
   const supplementalError = leaveTypesQuery.error
     || balancesQuery.error
@@ -323,11 +345,20 @@ export function MyRosterWorkspace() {
     || attendanceQuery.error
     || currentAttendanceQuery.error
     || timesheetsQuery.error
+    || calendarStatusQuery.error
     || calendarQuery.error;
 
-  const nextDuty = useMemo(
-    () => roster?.assignments.find((row) => parseISO(row.ends_at) >= new Date()),
-    [roster],
+  const activeDuty = useMemo(() => {
+    const now = new Date();
+    return roster?.assignments.find((row) => parseISO(row.starts_at) <= now && parseISO(row.ends_at) >= now);
+  }, [roster]);
+  const pendingLeaveCount = useMemo(
+    () => requests.filter((request) => ["SUBMITTED", "SUPERVISOR_APPROVED"].includes(request.status)).length,
+    [requests],
+  );
+  const draftLeaveCount = useMemo(
+    () => requests.filter((request) => request.status === "DRAFT").length,
+    [requests],
   );
   const plannedMinutes = useMemo(
     () => roster?.assignments.reduce(
@@ -343,7 +374,8 @@ export function MyRosterWorkspace() {
 
   const refresh = async () => {
     setActionError(null);
-    await Promise.allSettled([
+    setActionNotice(null);
+    const refreshes: Array<Promise<unknown>> = [
       rosterQuery.refetch(),
       leaveTypesQuery.refetch(),
       balancesQuery.refetch(),
@@ -351,30 +383,73 @@ export function MyRosterWorkspace() {
       attendanceQuery.refetch(),
       currentAttendanceQuery.refetch(),
       timesheetsQuery.refetch(),
-      calendarQuery.refetch(),
-    ]);
+      calendarStatusQuery.refetch(),
+    ];
+    if (calendarActive) refreshes.push(calendarQuery.refetch());
+    await Promise.allSettled(refreshes);
   };
 
   const attendanceAction = async (eventType: AttendanceAction) => {
     setBusy(eventType);
     setActionError(null);
+    setActionNotice(null);
     try {
-      const refreshed = await currentAttendanceQuery.refetch();
-      if (refreshed.error) throw refreshed.error;
-      const refreshedMode = attendanceMode(refreshed.data?.events || []);
+      const refreshed = isPortalReady() ? await currentAttendanceQuery.refetch() : null;
+      if (refreshed?.error) throw refreshed.error;
+      const refreshedMode = refreshed
+        ? refreshed.data?.current_state || attendanceMode(refreshed.data?.events || [])
+        : mode;
       if (!ALLOWED_ATTENDANCE_ACTIONS[refreshedMode].includes(eventType)) {
         throw new Error("Attendance state changed in another session. The available actions have been refreshed.");
       }
-      await createAttendanceEvent({
+      let locationEvidence: {
+        location_latitude?: number;
+        location_longitude?: number;
+        location_accuracy_m?: number;
+        location_exception_reason?: string;
+      } = {};
+      if (eventType === "CLOCK_IN" || eventType === "CLOCK_OUT") {
+        try {
+          const position = await captureAttendancePosition();
+          locationEvidence = {
+            location_latitude: position.latitude,
+            location_longitude: position.longitude,
+            location_accuracy_m: position.accuracy,
+          };
+        } catch (locationError) {
+          const reason = errorMessage(locationError);
+          const proceed = window.confirm(`${reason}\n\nContinue and flag this attendance event for supervisor review?`);
+          if (!proceed) return;
+          locationEvidence = { location_exception_reason: reason };
+        }
+      }
+      const created = await createAttendanceEvent({
         event_type: eventType,
         occurred_at: new Date().toISOString(),
         source: "SELF_SERVICE",
-        base_station_id: nextDuty?.base_station_id || null,
-        roster_assignment_id: nextDuty?.id || null,
+        base_station_id: activeDuty?.base_station_id || null,
+        roster_assignment_id: activeDuty?.id || null,
         idempotency_key: newIdempotencyKey(eventType.toLowerCase()),
+        ...locationEvidence,
       });
+      if ((created.metadata_json || {}).requires_review) {
+        setActionNotice(`Attendance recorded and flagged for review: ${String((created.metadata_json || {}).review_reason || "location or timing evidence needs confirmation")}.`);
+      } else {
+        setActionNotice(`${eventType.replace(/_/g, " ").toLowerCase()} recorded${created.base_station_id ? " against your effective base" : ""}.`);
+      }
       await Promise.allSettled([currentAttendanceQuery.refetch(), attendanceQuery.refetch()]);
     } catch (reason) {
+      if (isOfflineQueuedError(reason)) {
+        const nextMode: Record<AttendanceAction, AttendanceMode> = {
+          CLOCK_IN: "WORKING",
+          CLOCK_OUT: "CLOCKED_OUT",
+          BREAK_START: "ON_BREAK",
+          BREAK_END: "WORKING",
+        };
+        setLocalAttendanceMode(nextMode[eventType]);
+        setActionNotice(`${eventType.replace(/_/g, " ").toLowerCase()} saved on this device. It will be confirmed automatically when the server returns.`);
+        return;
+      }
       setActionError(errorMessage(reason));
     } finally {
       setBusy(null);
@@ -382,8 +457,12 @@ export function MyRosterWorkspace() {
   };
 
   const requestLeave = async () => {
-    if (!effectiveLeaveTypeId || !leaveStart || !leaveEnd) {
+    if (!effectiveLeaveTypeId || !leaveStart || !leaveEnd || leaveEnd < leaveStart) {
       setActionError("Select a leave type and valid dates before submitting.");
+      return;
+    }
+    if (selectedLeaveType?.requires_attachment && !leaveAttachmentReference.trim()) {
+      setActionError("This leave type requires an attachment or document reference.");
       return;
     }
     setBusy("leave");
@@ -392,19 +471,61 @@ export function MyRosterWorkspace() {
       const startsAt = new Date(`${leaveStart}T00:00:00`).toISOString();
       const endDate = new Date(`${leaveEnd}T00:00:00`);
       endDate.setDate(endDate.getDate() + 1);
-      const created = await createLeaveRequest({
+      await createLeaveRequest({
         leave_type_id: effectiveLeaveTypeId,
         starts_at: startsAt,
         ends_at: endDate.toISOString(),
         reason: leaveReason || null,
+        attachment_reference: leaveAttachmentReference.trim() || null,
+        submit_immediately: true,
       });
-      await submitLeaveRequest(created.id);
       setLeaveOpen(false);
       setLeaveReason("");
+      setLeaveAttachmentReference("");
       await Promise.allSettled([
         requestsQuery.refetch(),
         balancesQuery.refetch(),
         rosterQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["workforce", "hr"] }),
+        queryClient.invalidateQueries({ queryKey: ["rostering", "planner"] }),
+      ]);
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cancelLeave = async (requestId: string) => {
+    setBusy(`leave-cancel:${requestId}`);
+    setActionError(null);
+    try {
+      await cancelLeaveRequest(requestId, "Cancelled by employee from My duty");
+      await Promise.allSettled([
+        requestsQuery.refetch(),
+        balancesQuery.refetch(),
+        rosterQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["workforce", "hr"] }),
+        queryClient.invalidateQueries({ queryKey: ["rostering", "planner"] }),
+      ]);
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitDraftLeave = async (requestId: string) => {
+    setBusy(`leave-submit:${requestId}`);
+    setActionError(null);
+    try {
+      await submitLeaveRequest(requestId);
+      await Promise.allSettled([
+        requestsQuery.refetch(),
+        balancesQuery.refetch(),
+        rosterQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["workforce", "hr"] }),
+        queryClient.invalidateQueries({ queryKey: ["rostering", "planner"] }),
       ]);
     } catch (reason) {
       setActionError(errorMessage(reason));
@@ -441,10 +562,24 @@ export function MyRosterWorkspace() {
     }
   };
 
+  const activateCalendar = async () => {
+    setBusy("calendar-create");
+    setActionError(null);
+    try {
+      const link = await createCalendarSubscription();
+      queryClient.setQueryData(ROSTER_CALENDAR_LINK_QUERY_KEY, link);
+      await calendarStatusQuery.refetch();
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const confirmCalendarLinked = () => {
-    if (!calendarSubscription || typeof window === "undefined") return;
-    window.localStorage.setItem(calendarStorageKey, calendarSubscription.feed_path);
-    setLinkedFeedPath(calendarSubscription.feed_path);
+    if (!calendarUrls || typeof window === "undefined") return;
+    window.localStorage.setItem(calendarStorageKey, calendarUrls.feedPath);
+    setLinkedFeedPath(calendarUrls.feedPath);
     setCalendarSetupStarted(false);
     setCalendarOpen(false);
   };
@@ -508,7 +643,7 @@ export function MyRosterWorkspace() {
           className="wr-button wr-button--secondary"
           onClick={() => exportMyRosterCalendar(range)}
         >
-          <Download size={16} /> Export
+          <Download size={16} /> Export calendar
         </button>
 
         <div className="wr-calendar-control">
@@ -520,7 +655,7 @@ export function MyRosterWorkspace() {
             aria-label={calendarLinked
               ? "Personal operations calendar linked"
               : "Link personal operations calendar"}
-            disabled={!calendarSubscription && calendarQuery.isPending}
+            disabled={calendarStatusQuery.isPending || (calendarActive && calendarQuery.isPending)}
           >
             {calendarLinked ? <CalendarCheck2 size={17} /> : <Link2 size={17} />}
             <span>{calendarLinked ? "Calendar linked" : "Link calendar"}</span>
@@ -542,7 +677,18 @@ export function MyRosterWorkspace() {
                   : "Open the secure feed in your calendar app, then confirm after the app accepts it."}</small>
               </div>
 
-              {calendarSubscription && calendarUrls ? (
+              {!calendarActive ? (
+                <div className="wr-calendar-popover__actions">
+                  <button
+                    type="button"
+                    className="wr-button wr-button--primary"
+                    disabled={busy === "calendar-create"}
+                    onClick={() => void activateCalendar()}
+                  >
+                    <Link2 size={14} /> {busy === "calendar-create" ? "Creating…" : "Create secure link"}
+                  </button>
+                </div>
+              ) : calendarSubscription && calendarUrls ? (
                 <div className="wr-calendar-popover__actions">
                   <button
                     type="button"
@@ -580,8 +726,8 @@ export function MyRosterWorkspace() {
                   ) : null}
                 </div>
               ) : (
-                <small>{calendarQuery.error
-                  ? errorMessage(calendarQuery.error)
+                <small>{calendarStatusQuery.error || calendarQuery.error
+                  ? errorMessage(calendarStatusQuery.error || calendarQuery.error)
                   : "Preparing secure calendar link…"}</small>
               )}
 
@@ -602,6 +748,7 @@ export function MyRosterWorkspace() {
       </section>
 
       {actionError ? <div className="wr-inline-error" role="alert">{actionError}</div> : null}
+      {actionNotice ? <div className="wr-inline-note" role="status"><CheckCircle2 size={16} /> {actionNotice}</div> : null}
       {supplementalError ? (
         <div className="wr-inline-warning" role="status">
           Some employee-service data is temporarily unavailable. Published duty remains usable. {errorMessage(supplementalError)}
@@ -622,7 +769,7 @@ export function MyRosterWorkspace() {
             ? "Checking live state"
             : currentAttendanceQuery.error
               ? "Live state unavailable"
-              : mode === "CLOCKED_OUT" ? "Not checked in" : mode === "ON_BREAK" ? "On break" : "Checked in"}
+              : mode === "STALE_OPEN" ? "Supervisor correction required" : mode === "CLOCKED_OUT" ? "Not checked in" : mode === "ON_BREAK" ? "On break" : "Checked in"}
           tone={!currentAttendanceQuery.isPending && !currentAttendanceQuery.error && mode === "WORKING"
             ? "good"
             : !currentAttendanceQuery.isPending && !currentAttendanceQuery.error && mode === "ON_BREAK"
@@ -634,6 +781,12 @@ export function MyRosterWorkspace() {
           value={hoursLabel(availableLeave)}
           detail={`${balances.length} leave balances`}
           tone="neutral"
+        />
+        <MetricCard
+          label="Pending leave"
+          value={pendingLeaveCount}
+          detail={`${pendingLeaveCount} awaiting approval · ${draftLeaveCount} draft${draftLeaveCount === 1 ? "" : "s"}`}
+          tone={pendingLeaveCount || draftLeaveCount ? "warning" : "good"}
         />
         <MetricCard
           label="Acknowledgements"
@@ -663,7 +816,9 @@ export function MyRosterWorkspace() {
             <label><span>Starts</span><input type="date" value={leaveStart} onChange={(event) => setLeaveStart(event.target.value)} /></label>
             <label><span>Ends</span><input type="date" value={leaveEnd} onChange={(event) => setLeaveEnd(event.target.value)} /></label>
             <label className="wr-span-2"><span>Reason</span><input value={leaveReason} onChange={(event) => setLeaveReason(event.target.value)} placeholder="Optional context for approvers" /></label>
+            {selectedLeaveType?.requires_attachment ? <label className="wr-span-2"><span>Attachment or document reference</span><input value={leaveAttachmentReference} onChange={(event) => setLeaveAttachmentReference(event.target.value)} placeholder="Document ID, secure file reference or URL" required /></label> : null}
           </div>
+          <p className="wr-form-note">Requested hours are calculated from your effective work pattern and contracted daily hours; off days are not charged as 24-hour leave.</p>
           <div className="wr-actions wr-actions--end">
             <button type="button" className="wr-button wr-button--secondary" onClick={() => setLeaveOpen(false)}>Cancel</button>
             <button type="button" className="wr-button wr-button--primary" onClick={() => void requestLeave()} disabled={busy === "leave" || !leaveTypes.length}><Send size={16} /> Submit request</button>
@@ -707,26 +862,33 @@ export function MyRosterWorkspace() {
             <Clock3 size={20} />
           </div>
           <div className={`wr-attendance-state wr-attendance-state--${mode.toLowerCase().replace("_", "-")}`}>
-            <span>{currentAttendanceQuery.isPending
+            <span>{currentAttendanceQuery.isPending && !localAttendanceMode
     ? "Checking attendance"
-    : currentAttendanceQuery.error
+    : currentAttendanceQuery.error && !localAttendanceMode && !currentAttendance
       ? "Live attendance unavailable"
-      : mode === "CLOCKED_OUT"
+      : mode === "STALE_OPEN"
+        ? "Correction required"
+        : mode === "CLOCKED_OUT"
         ? "Not checked in"
         : mode === "ON_BREAK"
           ? "Break in progress"
           : "Checked in"}</span>
-  <small>{currentAttendanceQuery.isPending
+  <small>{localAttendanceMode
+    ? "Saved locally · waiting for server confirmation"
+    : currentAttendanceQuery.isPending
     ? "Confirming the latest event before enabling controls"
-    : currentAttendanceQuery.error
+    : currentAttendanceQuery.error && !currentAttendance
       ? "Refresh the live state before recording another attendance event"
-      : lastAttendance
-        ? `${lastAttendance.event_type.replace(/_/g, " ").toLowerCase()} · ${formatDateTime(lastAttendance.occurred_at)}`
+      : currentAttendance?.current_since
+        ? `${hoursLabel(currentAttendance.current_session_minutes)} open · since ${formatDateTime(currentAttendance.current_since)}`
+        : lastAttendance
+          ? `${lastAttendance.event_type.replace(/_/g, " ").toLowerCase()} · ${formatDateTime(lastAttendance.occurred_at)}`
         : "No recent attendance event recorded"}</small>
           </div>
           <div
             className="wr-attendance-actions wr-attendance-actions--stateful"
-            hidden={currentAttendanceQuery.isPending || Boolean(currentAttendanceQuery.error)}
+            hidden={(currentAttendanceQuery.isPending && !localAttendanceMode)
+              || (Boolean(currentAttendanceQuery.error) && !localAttendanceMode && !currentAttendance)}
           >
             {mode === "CLOCKED_OUT" ? (
               <AttendanceButton eventType="CLOCK_IN" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />
@@ -738,7 +900,13 @@ export function MyRosterWorkspace() {
               </>
             ) : null}
             {mode === "ON_BREAK" ? (
-              <AttendanceButton eventType="BREAK_END" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />
+              <>
+                <AttendanceButton eventType="BREAK_END" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />
+                <AttendanceButton eventType="CLOCK_OUT" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />
+              </>
+            ) : null}
+            {mode === "STALE_OPEN" ? (
+              <AttendanceButton eventType="CLOCK_OUT" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />
             ) : null}
           </div>
           {attendance?.warnings.length ? (
@@ -746,34 +914,65 @@ export function MyRosterWorkspace() {
               {attendance.warnings.map((warning) => <p key={warning}>{warning}</p>)}
             </div>
           ) : null}
-          <div className="wr-event-list">
-            {(attendance?.events || []).slice(-8).reverse().map((event) => (
+          <div className="wr-history-toolbar">
+            <div>
+              <strong>Attendance history</strong>
+              <small>{attendance?.events.length || 0} events · {hoursLabel(attendance?.paid_minutes)} paid</small>
+            </div>
+            <label><span>From</span><input type="date" value={historyRange.from} onChange={(event) => setHistoryRange((current) => ({ ...current, from: event.target.value }))} /></label>
+            <label><span>To</span><input type="date" value={historyRange.to} onChange={(event) => setHistoryRange((current) => ({ ...current, to: event.target.value }))} /></label>
+            <button type="button" className="wr-button wr-button--secondary wr-button--small" onClick={() => void downloadAttendanceExport({ user_id: userId || null, ...historyRange })}><Download size={14} /> Export CSV</button>
+          </div>
+          <div className="wr-event-list wr-event-list--history">
+            {(attendance?.events || []).slice().reverse().map((event) => (
               <div key={event.id}>
                 <StatusPill value={event.event_type} />
                 <span>{formatDateTime(event.occurred_at)}</span>
-                <small>{event.source}</small>
+                <small>{event.source.replace(/_/g, " ").toLowerCase()}</small>
+                {(event.metadata_json || {}).requires_review ? <span className="wr-pill wr-pill--blocker">Review required</span> : null}
               </div>
             ))}
           </div>
-          <p className="wr-attendance-assist">
-            Location-assisted prompts remain off until the assigned base has an approved geofence. Any future prompt must be opt-in, one-shot and must never record a check-in without confirmation.
-          </p>
+          {!attendanceQuery.isPending && !(attendance?.events.length) ? <EmptyState title="No attendance history" description="Clock-in, break and clock-out events for the selected dates will appear here." /> : null}
         </section>
       </div>
 
       <div className="wr-two-column">
         <section className="wr-panel">
-          <div className="wr-section-heading"><div><span className="wr-eyebrow">Leave control</span><h2>Requests and balances</h2></div></div>
+          <div className="wr-section-heading">
+            <div><span className="wr-eyebrow">Leave control</span><h2>Requests and balances</h2><p>Every request remains visible here regardless of the roster date filter.</p></div>
+            <button type="button" className="wr-button wr-button--secondary wr-button--small" onClick={() => void downloadLeaveRequestsExport({ user_id: userId || null })}><Download size={14} /> Export CSV</button>
+          </div>
           {requests.length === 0 ? (
             <EmptyState title="No leave requests" description="Submitted leave requests will appear here with approval status and roster conflicts." />
           ) : (
             <div className="wr-data-list">
               {requests.map((request) => (
-                <article key={request.id} className="wr-data-row">
+                <article key={request.id} className="wr-data-row wr-data-row--leave">
                   <div><strong>{request.leave_type_name || request.leave_type_code}</strong><small>{formatDateTime(request.starts_at)} → {formatDateTime(request.ends_at)}</small></div>
                   <span>{hoursLabel(request.requested_minutes)}</span>
                   <StatusPill value={request.status} />
                   {request.published_roster_conflicts.length ? <span className="wr-pill wr-pill--blocker">Roster conflict</span> : null}
+                  {request.status === "DRAFT" ? (
+                    <button
+                      type="button"
+                      className="wr-button wr-button--primary wr-button--small"
+                      disabled={Boolean(busy)}
+                      onClick={() => void submitDraftLeave(request.id)}
+                    >
+                      <Send size={14} /> {busy === `leave-submit:${request.id}` ? "Submitting…" : "Submit draft"}
+                    </button>
+                  ) : null}
+                  {["DRAFT", "SUBMITTED", "SUPERVISOR_APPROVED"].includes(request.status) ? (
+                    <button
+                      type="button"
+                      className="wr-button wr-button--danger-ghost wr-button--small"
+                      disabled={Boolean(busy)}
+                      onClick={() => void cancelLeave(request.id)}
+                    >
+                      {busy === `leave-cancel:${request.id}` ? "Cancelling…" : "Cancel request"}
+                    </button>
+                  ) : null}
                 </article>
               ))}
             </div>

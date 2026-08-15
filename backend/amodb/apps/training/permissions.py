@@ -159,6 +159,13 @@ def default_training_capabilities(user: account_models.User) -> set[str]:
 
     if role == "QUALITY_MANAGER":
         return set(ALL_TRAINING_CAPABILITIES)
+    if role in {
+        "ACCOUNTABLE_EXECUTIVE",
+        "BASE_MAINTENANCE_MANAGER",
+        "LINE_MAINTENANCE_MANAGER",
+        "WORKSHOP_MANAGER",
+    }:
+        return set(_READ)
     if role in {"QUALITY_INSPECTOR", "AUDITOR"}:
         return set(_QUALITY_REVIEW)
     if department in {"QUALITY", "QUALITY-ASSURANCE"}:

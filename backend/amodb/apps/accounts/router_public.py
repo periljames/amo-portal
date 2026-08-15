@@ -9,6 +9,7 @@ import threading
 import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -17,6 +18,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     status,
 )
 from sqlalchemy.orm import Session
@@ -32,6 +34,43 @@ from ..training import compliance as training_compliance
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
+REFRESH_COOKIE_NAME = "amo_portal_refresh"
+
+
+def _refresh_cookie_secure(request: Request | None = None) -> bool:
+    explicit = (os.getenv("AUTH_COOKIE_SECURE") or "").strip().lower()
+    if explicit:
+        return explicit in {"1", "true", "yes", "on"}
+    environment_secure = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower() in {
+        "prod",
+        "production",
+    }
+    if request is None:
+        return environment_secure
+    forwarded_protocol = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+    return environment_secure or request.url.scheme == "https" or forwarded_protocol == "https"
+
+
+def _set_refresh_cookie(response: Response, raw_token: str, request: Request) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=raw_token,
+        max_age=services.PORTAL_REFRESH_SESSION_HOURS * 60 * 60,
+        httponly=True,
+        secure=_refresh_cookie_secure(request),
+        samesite="lax",
+        path="/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        httponly=True,
+        secure=_refresh_cookie_secure(request),
+        samesite="lax",
+        path="/auth",
+    )
 
 
 # Basic in-memory auth rate limiting (per-IP + endpoint).
@@ -208,6 +247,7 @@ def _maybe_send_whatsapp(
 def login(
     payload: schemas.LoginRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     """
@@ -269,12 +309,28 @@ def login(
                 detail=access_state.portal_lock_reason or "Portal access is blocked because mandatory training is overdue.",
             )
 
-    token, expires_in = services.issue_access_token_for_user(user)
+    auth_session_id = str(uuid4())
+    token, expires_in = services.issue_access_token_for_user(
+        user,
+        auth_session_id=auth_session_id,
+    )
 
     response_amo = None if user.is_superuser else user.amo
     if user.is_superuser:
         services.set_user_active_context(db, user=user, active_amo_id=None, data_mode=models.DataMode.REAL)
-        db.commit()
+    services.revoke_portal_refresh_session(
+        db,
+        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
+    )
+    raw_refresh, _refresh_row = services.create_portal_refresh_session(
+        db,
+        user=user,
+        auth_session_id=auth_session_id,
+        ip=_client_ip(request),
+        user_agent=_user_agent(request),
+    )
+    db.commit()
+    _set_refresh_cookie(response, raw_refresh, request)
 
     return schemas.Token(
         access_token=token,
@@ -285,15 +341,94 @@ def login(
     )
 
 @router.post(
+    "/refresh-session",
+    response_model=schemas.Token,
+    summary="Recover a browser session after an extended connectivity outage",
+)
+def refresh_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    _enforce_auth_rate_limit(request, "refresh-session")
+    if request.headers.get("X-Portal-Refresh") != "1":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Explicit portal refresh header is required.",
+        )
+    resolved = services.resolve_portal_refresh_session(
+        db,
+        raw_token=request.cookies.get(REFRESH_COOKIE_NAME) or "",
+    )
+    if resolved is None:
+        _clear_refresh_cookie(response, request)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="The recovery session is unavailable or expired. Sign in again.",
+        )
+    row, user = resolved
+    token, expires_in = services.issue_access_token_for_user(
+        user,
+        auth_session_id=row.auth_session_id,
+    )
+    db.commit()
+    return schemas.Token(
+        access_token=token,
+        expires_in=expires_in,
+        user=user,
+        amo=None if user.is_superuser else user.amo,
+        department=user.department,
+    )
+
+
+@router.post(
+    "/revoke-recovery-session",
+    summary="Revoke the HttpOnly browser recovery session",
+)
+def revoke_recovery_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    if request.headers.get("X-Portal-Refresh") != "1":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Explicit portal refresh header is required.",
+        )
+    revoked = services.revoke_portal_refresh_session(
+        db,
+        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
+    )
+    db.commit()
+    _clear_refresh_cookie(response, request)
+    return {"ok": True, "revoked": revoked}
+
+
+@router.post(
     "/logout",
     summary="Revoke the current access token and end the server-side session",
 )
 def logout(
     request: Request,
+    response: Response,
+    payload: schemas.SessionActionRequest | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    current_user.token_revoked_at = datetime.now(timezone.utc)
+    ended_at = datetime.now(timezone.utc)
+    current_user.token_revoked_at = ended_at
+    reason = str(payload.reason if payload else "manual").strip().lower()[:32]
+    if reason not in {"manual", "idle"}:
+        reason = "manual"
+    auth_session_id = str(
+        getattr(current_user, "auth_session_id", None)
+        or getattr(current_user, "_auth_session_id", None)
+        or ""
+    ).strip()
+    services.revoke_portal_refresh_session(
+        db,
+        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
+    )
     try:
         audit_services.record_event(
             db,
@@ -301,16 +436,33 @@ def logout(
                 action="auth.logout",
                 entity_type="user",
                 entity_id=str(current_user.id),
-                metadata={"ip": _client_ip(request), "user_agent": _user_agent(request)},
+                metadata={
+                    "ip": _client_ip(request),
+                    "user_agent": _user_agent(request),
+                    "auth_session_id": auth_session_id or None,
+                    "reason": reason,
+                },
             ),
             actor_user_id=str(current_user.id),
             amo_id=getattr(current_user, "amo_id", None),
         )
     except Exception:
         # Logout must not fail just because audit logging is unavailable.
-        pass
+        db.rollback()
+        current_user.token_revoked_at = ended_at
+        services.revoke_portal_refresh_session(
+            db,
+            raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
+        )
     db.commit()
-    return {"ok": True, "token_revoked_at": current_user.token_revoked_at}
+    _clear_refresh_cookie(response, request)
+    return {
+        "ok": True,
+        "token_revoked_at": current_user.token_revoked_at,
+        "auth_session_id": auth_session_id or None,
+        "reason": reason,
+        "ended_at": ended_at,
+    }
 
 
 @router.post(
@@ -320,10 +472,20 @@ def logout(
 )
 def extend_session(
     request: Request,
+    payload: schemas.SessionActionRequest | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    token, expires_in = services.issue_access_token_for_user(current_user)
+    reason = str(payload.reason if payload else "active").strip()[:80]
+    auth_session_id = str(
+        getattr(current_user, "auth_session_id", None)
+        or getattr(current_user, "_auth_session_id", None)
+        or ""
+    ).strip()
+    token, expires_in = services.issue_access_token_for_user(
+        current_user,
+        auth_session_id=auth_session_id,
+    )
     try:
         audit_services.record_event(
             db,
@@ -331,7 +493,12 @@ def extend_session(
                 action="auth.extend_session",
                 entity_type="user",
                 entity_id=str(current_user.id),
-                metadata={"ip": _client_ip(request), "user_agent": _user_agent(request)},
+                metadata={
+                    "ip": _client_ip(request),
+                    "user_agent": _user_agent(request),
+                    "auth_session_id": auth_session_id or None,
+                    "reason": reason,
+                },
             ),
             actor_user_id=str(current_user.id),
             amo_id=getattr(current_user, "amo_id", None),

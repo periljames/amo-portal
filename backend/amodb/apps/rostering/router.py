@@ -615,6 +615,52 @@ def generate_roster_from_pattern(
         raise _translate(exc, default_code="ROSTER_PATTERN_GENERATION_FAILED") from exc
 
 
+@router.get(
+    "/versions/{version_id}/coverage-recommendations",
+    response_model=schemas.RosterCoverageRecommendationResponse,
+)
+def get_coverage_recommendations(
+    version_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not services.can_view_roster(db, user=current_user):
+        raise _error("Roster access denied", error_code="ROSTER_ACCESS_DENIED", status_code=403)
+    version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id)
+    try:
+        return services.coverage_recommendations(db, version=version)
+    except (ValueError, RuntimeError) as exc:
+        raise _translate(exc, default_code="ROSTER_COVERAGE_RECOMMENDATION_FAILED") from exc
+
+
+@router.post(
+    "/versions/{version_id}/coverage-recommendations/apply",
+    response_model=schemas.RosterCoverageRecommendationApplyResult,
+)
+def apply_coverage_recommendation(
+    version_id: str,
+    payload: schemas.RosterCoverageRecommendationApplyRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_EDIT)
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT)
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_ALLOCATE_WORK)
+    version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
+    try:
+        result = services.apply_coverage_recommendation(
+            db,
+            version=version,
+            actor_user_id=current_user.id,
+            payload=payload,
+        )
+        db.commit()
+        return result
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_COVERAGE_RECOMMENDATION_INVALID") from exc
+
+
 # ---------------------------------------------------------------------------
 # Validation, approval, publication and acknowledgement
 # ---------------------------------------------------------------------------
@@ -869,6 +915,40 @@ def create_demand_requirement(
         raise _translate(exc, default_code="ROSTER_DEMAND_INVALID") from exc
 
 
+@router.delete("/demand-requirements/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)
+def retire_demand_requirement(
+    requirement_id: str,
+    payload: schemas.RosterDemandRequirementRetireRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    row = db.query(models.RosterDemandRequirement).filter(
+        models.RosterDemandRequirement.amo_id == _amo(current_user),
+        models.RosterDemandRequirement.id == requirement_id,
+    ).first()
+    if not row:
+        raise _error("Roster demand requirement not found", error_code="ROSTER_DEMAND_NOT_FOUND", status_code=404)
+    _require(
+        db,
+        current_user,
+        workforce_permissions.PermissionCode.ROSTER_ALLOCATE_WORK,
+        department_id=row.department_id,
+        base_station_id=row.base_station_id,
+    )
+    try:
+        services.retire_demand_requirement(
+            db,
+            row=row,
+            actor_user_id=current_user.id,
+            reason=payload.reason,
+        )
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_DEMAND_RETIRE_FAILED") from exc
+
+
 # ---------------------------------------------------------------------------
 # Maintenance-task allocation
 # ---------------------------------------------------------------------------
@@ -903,6 +983,32 @@ def link_assignment_to_task_assignment(
     except (ValueError, RuntimeError) as exc:
         db.rollback()
         raise _translate(exc, default_code="ROSTER_TASK_LINK_FAILED") from exc
+
+
+@router.delete("/assignments/{assignment_id}/task-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_assignment_task(
+    assignment_id: str,
+    link_id: str,
+    payload: schemas.RosterTaskLinkDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_ALLOCATE_WORK)
+    assignment = _assignment_or_404(db, amo_id=_amo(current_user), assignment_id=assignment_id)
+    link = db.query(models.RosterTaskAssignmentLink).filter(
+        models.RosterTaskAssignmentLink.amo_id == _amo(current_user),
+        models.RosterTaskAssignmentLink.roster_assignment_id == assignment.id,
+        models.RosterTaskAssignmentLink.id == link_id,
+    ).first()
+    if not link:
+        raise _error("Roster task link not found", error_code="ROSTER_TASK_LINK_NOT_FOUND", status_code=404)
+    try:
+        services.delete_task_link(db, link=link, actor_user_id=current_user.id, reason=payload.reason)
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_TASK_UNLINK_FAILED") from exc
 
 
 @router.post("/assignments/{assignment_id}/task-allocations", response_model=schemas.RosterTaskAssignmentLinkRead, status_code=status.HTTP_201_CREATED)

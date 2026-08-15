@@ -25,6 +25,7 @@ export type RosterCodeRegistryEntry = {
   counts_as_duty: boolean;
   is_active: boolean;
   description?: string | null;
+  department_ids: string[];
   policy: RosterCodePolicy;
   usage_count: number;
   can_delete: boolean;
@@ -34,6 +35,11 @@ export type StarterPackResult = {
   created_codes: string[];
   skipped_existing_codes: string[];
   recommended_codes: string[];
+};
+
+export type ShiftTemplateMergeResult = {
+  target_template: import("../types/rostering").ShiftTemplateRead;
+  moved_counts: Record<string, number>;
 };
 
 export type RosterLegacyAlias = {
@@ -54,9 +60,7 @@ export type RosterLegacyAliasCreate = {
 };
 
 export function listRosterCodeRegistry(): Promise<RosterCodeRegistryEntry[]> {
-  return apiJson("/rostering/shift-templates/code-registry", {
-    offline: { cacheTtlMs: 15 * 60_000 },
-  });
+  return apiJson("/rostering/shift-templates/code-registry");
 }
 
 export function installRecommendedRosterCodes(): Promise<StarterPackResult> {
@@ -76,6 +80,24 @@ export function updateRosterCodePolicy(
 export function deleteUnusedRosterCode(templateId: string): Promise<void> {
   return apiJson(`/rostering/shift-templates/${encodeURIComponent(templateId)}`, {
     method: "DELETE",
+  });
+}
+
+export function mergeDuplicateRosterCode(
+  sourceTemplateId: string,
+  targetTemplateId: string,
+  targetCode: string,
+  reason: string,
+  policyResolution: "REQUIRE_MATCH" | "KEEP_TARGET" | "KEEP_SOURCE" = "REQUIRE_MATCH",
+): Promise<ShiftTemplateMergeResult> {
+  return apiJson(`/rostering/shift-templates/${encodeURIComponent(sourceTemplateId)}/merge`, {
+    method: "POST",
+    body: jsonBody({
+      target_template_id: targetTemplateId,
+      target_code: targetCode,
+      reason,
+      policy_resolution: policyResolution,
+    }),
   });
 }
 

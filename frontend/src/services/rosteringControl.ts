@@ -1,5 +1,19 @@
 import { apiBlob, apiJson, downloadBlob, jsonBody } from "./typedApi";
 
+export const ROSTER_CALENDAR_QUERY_ROOT = [
+  "rostering",
+  "self-service",
+  "calendar-subscription",
+] as const;
+export const ROSTER_CALENDAR_LINK_QUERY_KEY = [
+  ...ROSTER_CALENDAR_QUERY_ROOT,
+  "link",
+] as const;
+export const ROSTER_CALENDAR_STATUS_QUERY_KEY = [
+  ...ROSTER_CALENDAR_QUERY_ROOT,
+  "status",
+] as const;
+
 export type ControlledRosterSettings = {
   form_number: string;
   revision_label?: string | null;

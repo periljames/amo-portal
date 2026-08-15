@@ -152,6 +152,11 @@ class PositionRead(GovernanceSchema):
     grade_id: str | None = None
     grade_name: str | None = None
     description: str | None = None
+    role_source: Literal["TENANT", "KCAR_2025"] = "TENANT"
+    role_key: str | None = None
+    management_level: Literal["STAFF", "SUPERVISOR", "MANAGER", "EXECUTIVE"] = "STAFF"
+    can_have_supervisor: bool = True
+    is_locked: bool = False
     is_supervisory: bool
     is_active: bool
 
@@ -162,8 +167,46 @@ class PositionWrite(GovernanceSchema):
     job_family_id: str | None = None
     grade_id: str | None = None
     description: str | None = Field(default=None, max_length=2000)
+    management_level: Literal["STAFF", "SUPERVISOR", "MANAGER", "EXECUTIVE"] = "STAFF"
+    tenant_function: Literal["HUMAN_RESOURCES", "INFORMATION_TECHNOLOGY", "FINANCE"] | None = None
     is_supervisory: bool = False
     is_active: bool = True
+
+
+class HierarchyRoleStatus(GovernanceSchema):
+    key: str
+    code: str
+    title: str
+    management_level: Literal["MANAGER", "EXECUTIVE"]
+    description: str
+    status: Literal["READY", "MATCH_AVAILABLE", "MISSING"]
+    position_id: str | None = None
+    can_have_supervisor: bool = False
+
+
+class TenantFunctionStatus(GovernanceSchema):
+    key: Literal["HUMAN_RESOURCES", "INFORMATION_TECHNOLOGY", "FINANCE"]
+    label: str
+    suggested_code: str
+    suggested_title: str
+    status: Literal["READY", "PENDING_TENANT_SETUP"]
+    position_id: str | None = None
+
+
+class HierarchyBlueprintRead(GovernanceSchema):
+    source_title: str
+    source_reference: str
+    source_url: str
+    regulatory_roles: list[HierarchyRoleStatus] = Field(default_factory=list)
+    tenant_functions: list[TenantFunctionStatus] = Field(default_factory=list)
+    required_role_count: int = 0
+    ready_role_count: int = 0
+    missing_role_count: int = 0
+    created_count: int = 0
+    adopted_count: int = 0
+    updated_count: int = 0
+    supervisor_links_cleared: int = 0
+    accounts_synced: int = 0
 
 
 class PlacementRead(GovernanceSchema):
@@ -200,6 +243,7 @@ class GovernedPersonReadiness(hr_schemas.HrPersonReadiness):
     grade_id: str | None = None
     grade_name: str | None = None
     supervisor_user_id: str | None = None
+    can_have_supervisor: bool = True
     secondary_org_units: list[PlacementRead] = Field(default_factory=list)
     matrix_org_units: list[PlacementRead] = Field(default_factory=list)
     secondary_base_station_id: str | None = None

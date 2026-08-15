@@ -44,6 +44,26 @@ def test_attendance_invalid_sequence_is_non_negative_and_reviewable():
     assert "Open clock-in requires correction" in totals.warnings
 
 
+def test_system_capped_session_surfaces_supervisor_review_warning():
+    totals = calculations.calculate_attendance_totals([
+        attendance(models.AttendanceEventType.CLOCK_IN, "2026-07-21T05:00:00", "1"),
+        attendance(
+            models.AttendanceEventType.CLOCK_OUT,
+            "2026-07-21T23:00:00",
+            "2",
+            {
+                "requires_review": True,
+                "review_reason": "Stale attendance session was capped at 18 hours and requires supervisor review",
+            },
+        ),
+    ])
+
+    assert totals.presence_minutes == 1080
+    assert totals.paid_minutes == 1080
+    assert totals.incomplete is False
+    assert "capped at 18 hours" in totals.warnings[0]
+
+
 def test_overnight_shift_is_converted_from_amo_local_time_to_utc():
     starts_at, ends_at, minutes = calculations.local_shift_window_to_utc(
         work_date=date(2026, 7, 21),

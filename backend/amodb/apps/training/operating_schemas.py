@@ -107,7 +107,7 @@ class TrainingOperatingSettingsBase(BaseModel):
     certificate_signatories: list[dict[str, str]] = Field(default_factory=list, max_length=10)
     certificate_public_privacy_text: str | None = Field(None, max_length=2000)
     default_committee_positions: list[str] = Field(
-        default_factory=lambda: ["HEAD_OF_QUALITY", "HEAD_OF_BASE_MAINTENANCE", "HEAD_OF_LINE_MAINTENANCE"],
+        default_factory=lambda: ["QUALITY_MANAGER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER"],
         max_length=20,
     )
     setup_status: Literal["DRAFT", "ACTIVE"] = "DRAFT"

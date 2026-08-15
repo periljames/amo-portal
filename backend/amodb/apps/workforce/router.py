@@ -58,9 +58,14 @@ def _permission(db: Session, user: account_models.User, code: permissions.Permis
 
 @router.get("/permissions/current", response_model=schemas.CurrentPermissionsRead)
 def current_permissions(
+    response: Response,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Vary"] = "Authorization, Cookie"
+    response.headers["X-Workforce-Permissions-Source"] = "live"
     return schemas.CurrentPermissionsRead(user_id=current_user.id, permissions=permissions.permissions_for_user(db, user=current_user))
 
 
@@ -191,11 +196,14 @@ def patch_employment_contract(
 
 @router.get("/work-patterns", response_model=list[schemas.WorkPatternRead])
 def list_work_patterns(
+    response: Response,
     include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _permission(db, current_user, permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return services.list_patterns(db, amo_id=_amo(current_user), include_inactive=include_inactive)
 
 
@@ -248,6 +256,36 @@ def patch_work_pattern(
         raise _error(str(exc), error_code="WORK_PATTERN_INVALID") from exc
 
 
+@router.delete("/work-patterns/{pattern_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_work_pattern(
+    pattern_id: str,
+    payload: schemas.WorkPatternDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _permission(db, current_user, permissions.PermissionCode.ROSTER_MANAGE_PATTERNS)
+    row = services.get_pattern(db, amo_id=_amo(current_user), pattern_id=pattern_id)
+    if not row:
+        raise _error("Work pattern not found", error_code="WORK_PATTERN_NOT_FOUND", status_code=404)
+    try:
+        services.delete_pattern(
+            db,
+            row=row,
+            actor_user_id=current_user.id,
+            reason=payload.reason,
+        )
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except ValueError as exc:
+        db.rollback()
+        raise _error(
+            str(exc),
+            error_code="WORK_PATTERN_DELETE_BLOCKED",
+            status_code=409,
+            conflicts=[{"pattern_id": pattern_id, "action": "RETIRE"}],
+        ) from exc
+
+
 @router.get("/work-pattern-assignments", response_model=list[schemas.EmployeeWorkPatternAssignmentRead])
 def list_work_pattern_assignments(
     user_id: Optional[str] = Query(default=None),
@@ -265,7 +303,7 @@ def create_work_pattern_assignment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _permission(db, current_user, permissions.PermissionCode.ROSTER_MANAGE_PATTERNS)
+    _permission(db, current_user, permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS)
     try:
         row = services.assign_pattern(db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload)
         _commit(db, row)
@@ -273,6 +311,53 @@ def create_work_pattern_assignment(
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="WORK_PATTERN_ASSIGNMENT_INVALID") from exc
+
+
+@router.patch("/work-pattern-assignments/{assignment_id}", response_model=schemas.EmployeeWorkPatternAssignmentRead)
+def patch_work_pattern_assignment(
+    assignment_id: str,
+    payload: schemas.EmployeeWorkPatternAssignmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _permission(db, current_user, permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS)
+    row = db.query(models.EmployeeWorkPatternAssignment).filter(
+        models.EmployeeWorkPatternAssignment.amo_id == _amo(current_user),
+        models.EmployeeWorkPatternAssignment.id == assignment_id,
+    ).first()
+    if not row:
+        raise _error("Work pattern assignment not found", error_code="WORK_PATTERN_ASSIGNMENT_NOT_FOUND", status_code=404)
+    try:
+        services.update_pattern_assignment(db, row=row, actor_user_id=current_user.id, payload=payload)
+        db.commit()
+        refreshed = services.list_pattern_assignments(db, amo_id=_amo(current_user), user_id=row.user_id)
+        return next(item for item in refreshed if item.id == row.id)
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), error_code="WORK_PATTERN_ASSIGNMENT_INVALID") from exc
+
+
+@router.delete("/work-pattern-assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_work_pattern_assignment(
+    assignment_id: str,
+    payload: schemas.EmployeeWorkPatternAssignmentDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _permission(db, current_user, permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS)
+    row = db.query(models.EmployeeWorkPatternAssignment).filter(
+        models.EmployeeWorkPatternAssignment.amo_id == _amo(current_user),
+        models.EmployeeWorkPatternAssignment.id == assignment_id,
+    ).first()
+    if not row:
+        raise _error("Work pattern assignment not found", error_code="WORK_PATTERN_ASSIGNMENT_NOT_FOUND", status_code=404)
+    try:
+        services.delete_pattern_assignment(db, row=row, actor_user_id=current_user.id, reason=payload.reason)
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), error_code="WORK_PATTERN_ASSIGNMENT_DELETE_FAILED") from exc
 
 
 @router.post("/work-patterns/{pattern_id}/preview", response_model=schemas.PatternPreviewResponse)
@@ -383,6 +468,37 @@ def list_leave_requests(
     return services.list_leave_requests(db, amo_id=_amo(current_user), page_number=page, page_size=page_size, user_id=user_id, department_id=department_id, request_status=request_status, from_date=from_date, to_date=to_date)
 
 
+@router.get("/leave-requests/export")
+def export_leave_requests(
+    user_id: Optional[str] = Query(default=None),
+    department_id: Optional[str] = Query(default=None),
+    request_status: Optional[models.LeaveRequestStatus] = Query(default=None, alias="status"),
+    from_date: Optional[date] = Query(default=None, alias="from"),
+    to_date: Optional[date] = Query(default=None, alias="to"),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not permissions.any_permission(db, user=current_user, permissions=[permissions.PermissionCode.LEAVE_REVIEW, permissions.PermissionCode.LEAVE_APPROVE]):
+        user_id = current_user.id
+        department_id = None
+    result = services.list_leave_requests(
+        db,
+        amo_id=_amo(current_user),
+        page_number=1,
+        page_size=10_000,
+        user_id=user_id,
+        department_id=department_id,
+        request_status=request_status,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return PlainTextResponse(
+        services.leave_requests_export_csv(result.items),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=workforce-leave-requests.csv"},
+    )
+
+
 @router.post("/leave-requests", response_model=schemas.LeaveRequestRead, status_code=status.HTTP_201_CREATED)
 def create_leave_request(
     payload: schemas.LeaveRequestCreate,
@@ -392,6 +508,8 @@ def create_leave_request(
     _permission(db, current_user, permissions.PermissionCode.LEAVE_REQUEST)
     try:
         row = services.create_leave_request(db, amo_id=_amo(current_user), actor=current_user, payload=payload)
+        if payload.submit_immediately:
+            services.submit_leave_request(db, row=row, actor=current_user)
         _commit(db, row)
         return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
     except ValueError as exc:
@@ -661,6 +779,33 @@ def get_attendance_events(
         _permission(db, current_user, permissions.PermissionCode.ATTENDANCE_MANAGE)
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == _amo(current_user)).first()
     return services.attendance_summary(db, amo_id=_amo(current_user), user_id=target_user_id, from_date=from_date, to_date=to_date, timezone_name=getattr(amo, "time_zone", None) or "UTC")
+
+
+@router.get("/attendance-events/export")
+def export_attendance_events(
+    from_date: date = Query(..., alias="from"),
+    to_date: date = Query(..., alias="to"),
+    user_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    target_user_id = user_id or current_user.id
+    if target_user_id != current_user.id:
+        _permission(db, current_user, permissions.PermissionCode.ATTENDANCE_MANAGE)
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == _amo(current_user)).first()
+    summary = services.attendance_summary(
+        db,
+        amo_id=_amo(current_user),
+        user_id=target_user_id,
+        from_date=from_date,
+        to_date=to_date,
+        timezone_name=getattr(amo, "time_zone", None) or "UTC",
+    )
+    return PlainTextResponse(
+        services.attendance_export_csv(summary),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=attendance-{from_date}-{to_date}.csv"},
+    )
 
 
 @router.post("/attendance-events", response_model=schemas.AttendanceEventRead, status_code=status.HTTP_201_CREATED)

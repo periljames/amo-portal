@@ -6,11 +6,15 @@ import { getApiBaseUrl } from "../../services/config";
 import { clearQmsApiResponseCache } from "../../services/apiClient";
 import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
-import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
+import { fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
 import type { BrokerState } from "../../services/realtime/types";
 import { RealtimeContext } from "./realtimeContext";
 import { isRealtimeEnabled } from "../../utils/featureFlags";
+import {
+  isPortalReady,
+  subscribePortalConnectivity,
+} from "../../services/portalConnectivity";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 export type BackendHealth = "ok" | "degraded";
@@ -77,7 +81,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const retryCount = useRef(0);
   const staleIntervalRef = useRef<number | null>(null);
   const [staleSeconds, setStaleSeconds] = useState(0);
-  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
+  const [isOnline, setIsOnline] = useState<boolean>(() => isPortalReady());
+  const portalReadyRef = useRef(isPortalReady());
   const [clockSource, setClockSource] = useState<"server" | "local">("local");
   const clockOffsetMsRef = useRef(0);
   const frozenClockRef = useRef<number | null>(null);
@@ -116,7 +121,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online", reason = "heartbeat", keepalive = false) => {
     if (isPlatformUser || isLoginSurface()) return;
     const token = getToken();
-    if (!token || !isRealtimeEnabled()) return;
+    if (!token || !isRealtimeEnabled() || !isPortalReady()) return;
     presenceStateRef.current = state;
     try {
       await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
@@ -171,7 +176,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setStatus("offline");
       return;
     }
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
+    if (!isPortalReady()) {
       setStatus("offline");
       setIsOnline(false);
       return;
@@ -249,8 +254,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     return onSessionEvent((detail) => {
       if (!isRealtimeEnabled()) return;
-      if (detail.type === "activity") {
-        lastPortalActivityRef.current = Date.now();
+      if (detail.type === "activity" && detail.at) {
+        lastPortalActivityRef.current = detail.at;
         if (presenceStateRef.current === "away") void sendPresenceHeartbeat("online", detail.reason || "activity");
       }
 
@@ -266,6 +271,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return;
         }
         if (!isRealtimeEnabled()) {
+          controllerRef.current?.abort();
+          setStatus("offline");
+          setBrokerState("offline");
+          return;
+        }
+        if (!isPortalReady()) {
           controllerRef.current?.abort();
           setStatus("offline");
           setBrokerState("offline");
@@ -314,6 +325,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       }
       if (!isRealtimeEnabled()) {
+        controllerRef.current?.abort();
+        setStatus("offline");
+        setBrokerState("offline");
+        return () => {
+          controllerRef.current?.abort();
+          if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        };
+      }
+      if (!isPortalReady()) {
         controllerRef.current?.abort();
         setStatus("offline");
         setBrokerState("offline");
@@ -375,56 +395,27 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => window.clearInterval(timer);
   }, [serverNow, clockSource]);
 
-  useEffect(() => {
-    const onOnline = () => {
-      setIsOnline(true);
+  useEffect(() => subscribePortalConnectivity((connectivity) => {
+    const ready = connectivity.state === "online" && connectivity.databaseReady;
+    setBackendHealth(ready ? "ok" : "degraded");
+    setIsOnline(ready);
+    if (ready === portalReadyRef.current) return;
+    portalReadyRef.current = ready;
+    if (ready) {
+      retryCount.current = 0;
       reconnectNow();
       void syncServerTime();
-    };
-    const onOffline = () => {
-      setIsOnline(false);
-      setStatus("offline");
-      setBrokerState("offline");
-      controllerRef.current?.abort();
-      if (frozenClockRef.current === null) frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
-    };
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, [reconnectNow, syncServerTime]);
+      return;
+    }
+    setStatus("offline");
+    setBrokerState("offline");
+    controllerRef.current?.abort();
+    mqttRef.current?.disconnect();
+    if (frozenClockRef.current === null) frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
+  }), [reconnectNow, syncServerTime]);
 
   useEffect(() => {
-    const refreshHealth = async () => {
-      try {
-        const health = await fetchHealthz();
-        setBackendHealth(health.status === "ok" ? "ok" : "degraded");
-      } catch {
-        setBackendHealth("degraded");
-      }
-    };
-
-    const hasToken = !!getToken();
-    const kickoff = () => {
-      if (hasToken) {
-        void syncServerTime();
-      }
-      void refreshHealth();
-    };
-    const initialTimer = window.setTimeout(kickoff, hasToken ? 2500 : 1000);
-    const timer = window.setInterval(() => {
-      void refreshHealth();
-    }, 180_000);
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(timer);
-    };
-  }, [syncServerTime]);
-
-  useEffect(() => {
-    if (isPlatformUser || isLoginSurface() || !getToken() || !isRealtimeEnabled()) return;
+    if (!isOnline || isPlatformUser || isLoginSurface() || !getToken() || !isRealtimeEnabled()) return;
 
     const resolvePresenceState = (): "online" | "away" => {
       if (typeof document !== "undefined" && document.hidden) return "away";
@@ -436,7 +427,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     pushPresence("start");
-    const timer = window.setInterval(() => pushPresence("heartbeat"), 5_000);
+    const timer = window.setInterval(() => pushPresence("heartbeat"), 20_000);
     const handleVisibility = () => pushPresence("visibility");
     const handlePageHide = () => {
       void sendPresenceHeartbeat("away", "pagehide", true);
@@ -450,7 +441,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("beforeunload", handlePageHide);
     };
-  }, [isPlatformUser, sendPresenceHeartbeat]);
+  }, [isOnline, isPlatformUser, sendPresenceHeartbeat]);
 
   const refreshData = useCallback(() => {
     queryClient.invalidateQueries();

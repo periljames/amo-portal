@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..accounts import models as account_models
+from ..accounts import models as account_models, role_registry
 from . import models
 
 
@@ -45,6 +45,7 @@ class PermissionCode(str, Enum):
     OVERTIME_APPROVE = "overtime.approve"
     PAYROLL_EXPORT = "payroll.export"
     WORKFORCE_MANAGE_CONTRACTS = "workforce.manage_contracts"
+    WORKFORCE_ASSIGN_PATTERNS = "workforce.assign_patterns"
     WORKFORCE_VIEW_SENSITIVE = "workforce.view_sensitive"
 
 
@@ -68,6 +69,7 @@ PLANNER = EMPLOYEE | {
     PermissionCode.ROSTER_SUBMIT.value,
     PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES.value,
     PermissionCode.ROSTER_MANAGE_PATTERNS.value,
+    PermissionCode.WORKFORCE_ASSIGN_PATTERNS.value,
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
 }
 
@@ -96,6 +98,16 @@ BASE_MANAGER = DEPARTMENT_HEAD | {
     PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES.value,
 }
 
+ACCOUNTABLE_EXECUTIVE = EMPLOYEE | {
+    PermissionCode.ROSTER_VIEW_ALL.value,
+    PermissionCode.ROSTER_VALIDATE.value,
+    PermissionCode.ROSTER_APPROVE.value,
+    PermissionCode.ROSTER_PUBLISH.value,
+    PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+    PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES.value,
+    PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
+}
+
 
 QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
@@ -118,6 +130,7 @@ HR = EMPLOYEE | {
     PermissionCode.TIMESHEET_APPROVE.value,
     PermissionCode.OVERTIME_APPROVE.value,
     PermissionCode.WORKFORCE_MANAGE_CONTRACTS.value,
+    PermissionCode.WORKFORCE_ASSIGN_PATTERNS.value,
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
@@ -132,6 +145,11 @@ PAYROLL = EMPLOYEE | {
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPERUSER": ALL_PERMISSIONS,
     "AMO_ADMIN": ALL_PERMISSIONS,
+    "USER": EMPLOYEE,
+    "ACCOUNTABLE_EXECUTIVE": ACCOUNTABLE_EXECUTIVE,
+    "BASE_MAINTENANCE_MANAGER": BASE_MANAGER,
+    "LINE_MAINTENANCE_MANAGER": DEPARTMENT_HEAD,
+    "WORKSHOP_MANAGER": DEPARTMENT_HEAD,
     "PLANNING_ENGINEER": PLANNER,
     "ROSTER_PLANNER": PLANNER,
     "PRODUCTION_ENGINEER": SUPERVISOR,
@@ -164,24 +182,25 @@ def _role_value(user: account_models.User) -> str:
 
 
 def _derived_role(user: account_models.User) -> Optional[str]:
-    """Support HR/planner titles without mutating the legacy AccountRole enum.
+    """Support exact regulated aliases and tenant support titles.
 
     Explicit permission grants remain authoritative.  This compatibility layer
-    lets existing user management records participate immediately and can be
-    removed after AccountRole is migrated to database-backed roles.
+    lets legacy KCAR 2018 titles participate during migration without treating
+    every free-text ``Head of`` title as a privileged management role.
     """
 
     title = str(getattr(user, "position_title", "") or "").lower()
     department = str(getattr(getattr(user, "department", None), "code", "") or "").lower()
+    regulated = role_registry.infer_regulated_role(title)
+    if regulated is not None:
+        return regulated.value
     if "human resource" in title or title.startswith("hr ") or department in {"hr", "human-resources", "human_resources"}:
         return "HR_MANAGER" if "manager" in title or "head" in title else "HR_OFFICER"
     if "payroll" in title:
         return "PAYROLL_OFFICER"
     if "roster" in title or "duty planner" in title:
         return "ROSTER_PLANNER"
-    if "base manager" in title:
-        return "BASE_MANAGER"
-    if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
+    if "department head" in title or "department manager" in title:
         return "DEPARTMENT_HEAD"
     if "supervisor" in title or "shift lead" in title:
         return "DEPARTMENT_SUPERVISOR"

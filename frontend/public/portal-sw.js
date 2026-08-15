@@ -6,19 +6,56 @@
  * the existing AeroDoc document-reader cache behaviour.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const DOCUMENT_CACHE = `aerodoc-hybrid-dms-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
 const SHELL_URLS = ["/", "/portal.webmanifest"];
 
+function manifestAssets(manifest) {
+  const assets = new Set();
+  Object.values(manifest || {}).forEach((entry) => {
+    if (!entry || typeof entry !== "object") return;
+    if (entry.file) assets.add(`/${String(entry.file).replace(/^\//, "")}`);
+    [...(entry.css || []), ...(entry.assets || [])].forEach((value) => {
+      assets.add(`/${String(value).replace(/^\//, "")}`);
+    });
+  });
+  return [...assets];
+}
+
+async function precacheApplicationShell() {
+  const shellCache = await caches.open(SHELL_CACHE);
+  const assetCache = await caches.open(ASSET_CACHE);
+  await Promise.all(SHELL_URLS.map((url) => shellCache.add(url).catch(() => undefined)));
+  for (const manifestUrl of ["/.vite/manifest.json", "/manifest.json"]) {
+    try {
+      const response = await fetch(manifestUrl, { cache: "no-store" });
+      if (!response.ok) continue;
+      const manifest = await response.json();
+      const assets = manifestAssets(manifest);
+      await Promise.all(assets.map((url) => assetCache.add(url).catch(() => undefined)));
+      break;
+    } catch {
+      // Some hosts do not expose the Vite manifest. Runtime asset caching still applies.
+    }
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_URLS))
+    precacheApplicationShell()
       .catch(() => undefined)
       .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener("sync", (event) => {
+  if (event.tag !== "amo-portal-outbox") return;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => clients.forEach((client) => client.postMessage({ type: "PORTAL_CONNECTIVITY_RECHECK" }))),
   );
 });
 

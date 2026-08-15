@@ -112,6 +112,25 @@ def test_default_day_bootstrap_creates_one_idempotent_assignment_on_postgresql()
         db.flush()
 
         db.add(
+            rostering_models.ShiftTemplate(
+                id=_id(),
+                amo_id=amo_id,
+                code="D",
+                label="Full Day",
+                kind=rostering_models.ShiftTemplateKind.DAY,
+                default_start_time="08:00",
+                default_end_time="17:00",
+                duration_minutes=480,
+                counts_as_duty=True,
+                is_active=True,
+                display_order=10,
+                created_by_user_id=user_id,
+                updated_by_user_id=user_id,
+            )
+        )
+        db.flush()
+
+        db.add(
             models.EmploymentContract(
                 id=_id(),
                 amo_id=amo_id,

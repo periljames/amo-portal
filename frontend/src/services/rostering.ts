@@ -173,6 +173,24 @@ export function createRosterAssignment(
   });
 }
 
+export function bulkCreateRosterAssignments(
+  versionId: string,
+  payload: Roster.RosterBulkAssignmentRequest,
+): Promise<Roster.RosterBulkAssignmentResult> {
+  const normalized: Roster.RosterBulkAssignmentRequest = {
+    ...payload,
+    assignments: payload.assignments.map((assignment) => ({
+      ...assignment,
+      status: normalizedAssignmentStatus(assignment.status),
+    })),
+  };
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/assignments/bulk`, {
+    method: "POST",
+    headers: { "Idempotency-Key": normalized.idempotency_key },
+    body: jsonBody(normalized),
+  });
+}
+
 export function updateRosterAssignment(
   assignmentId: string,
   payload: Roster.RosterAssignmentUpdate,
@@ -200,12 +218,38 @@ export function deleteRosterAssignment(
     method: "DELETE",
     headers: { "Idempotency-Key": idempotencyKey },
     body: jsonBody(payload),
-    offline: {
-      queueMutation: true,
-      entityType: "roster-assignment",
-      entityId: assignmentId,
-      idempotencyKey,
-    },
+    offline: { queueMutation: false },
+  });
+}
+
+export function generateRosterFromPattern(
+  versionId: string,
+  payload: Roster.PatternGenerationRequest,
+): Promise<Roster.RosterBulkAssignmentResult> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/generate-from-pattern`, {
+    method: "POST",
+    body: jsonBody(payload),
+    // The planner sends bounded personnel batches, but leave a larger
+    // backstop than the global write timeout for slower tenant databases.
+    timeoutMs: 60_000,
+  });
+}
+
+export function getRosterCoverageRecommendations(
+  versionId: string,
+): Promise<Roster.RosterCoverageRecommendationResponse> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/coverage-recommendations`, {
+    offline: { cacheTtlMs: 30_000 },
+  });
+}
+
+export function applyRosterCoverageRecommendation(
+  versionId: string,
+  payload: Roster.RosterCoverageRecommendationApplyRequest,
+): Promise<Roster.RosterCoverageRecommendationApplyResult> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/coverage-recommendations/apply`, {
+    method: "POST",
+    body: jsonBody(payload),
   });
 }
 
@@ -291,6 +335,31 @@ export function updateRosterRule(
   });
 }
 
+export function listRosterDemandRequirements(params: {
+  from?: string | null;
+  to?: string | null;
+  base_station_id?: string | null;
+  department_id?: string | null;
+  include_inactive?: boolean;
+} = {}): Promise<Roster.RosterDemandRequirementRead[]> {
+  return apiJson(`/rostering/demand-requirements${queryString(params)}`, {
+    offline: { cacheTtlMs: 2 * 60_000 },
+  });
+}
+
+export function createRosterDemandRequirement(
+  payload: Omit<Roster.RosterDemandRequirementRead, "id" | "amo_id" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">,
+): Promise<Roster.RosterDemandRequirementRead> {
+  return apiJson("/rostering/demand-requirements", { method: "POST", body: jsonBody(payload) });
+}
+
+export function retireRosterDemandRequirement(requirementId: string, reason: string): Promise<void> {
+  return apiJson(`/rostering/demand-requirements/${encodeURIComponent(requirementId)}`, {
+    method: "DELETE",
+    body: jsonBody({ reason }),
+  });
+}
+
 export function getRosterReportSummary(range: DateRange): Promise<Roster.RosterReportSummary> {
   return apiJson(`/rostering/reports/summary${queryString(range)}`, { offline: { cacheTtlMs: 2 * 60_000 } });
 }
@@ -319,6 +388,13 @@ export function linkRosterAssignmentToTaskAssignment(
   return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, {
     method: "POST",
     body: jsonBody(payload),
+  });
+}
+
+export function deleteRosterTaskLink(assignmentId: string, linkId: string, reason: string): Promise<void> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links/${encodeURIComponent(linkId)}`, {
+    method: "DELETE",
+    body: jsonBody({ reason }),
   });
 }
 
@@ -353,6 +429,16 @@ export function listRosterApprovalAuthorities(includeInactive = false): Promise<
 
 export function createRosterApprovalAuthority(payload: Roster.RosterApprovalAuthorityCreate): Promise<Roster.RosterApprovalAuthorityRead> {
   return apiJson("/rostering/approval-authorities", { method: "POST", body: jsonBody(payload) });
+}
+
+export function updateRosterApprovalAuthority(
+  authorityId: string,
+  payload: Roster.RosterApprovalAuthorityUpdate,
+): Promise<Roster.RosterApprovalAuthorityRead> {
+  return apiJson(`/rostering/approval-authorities/${encodeURIComponent(authorityId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
+  });
 }
 
 export function getRosterApprovalMatrix(versionId?: string | null): Promise<Roster.RosterApprovalMatrixResponse> {

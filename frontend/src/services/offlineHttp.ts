@@ -7,6 +7,12 @@ import {
   writeApiCache,
   type OfflineOutboxEntry,
 } from "./offlinePersistence";
+import {
+  getPortalConnectivitySnapshot,
+  notePortalResponse,
+  notePortalTransportFailure,
+  recommendedRequestTimeoutMs,
+} from "./portalConnectivity";
 
 export type PortalOfflineOptions = {
   cache?: boolean;
@@ -40,8 +46,6 @@ export function isOfflineQueuedError(error: unknown): error is OfflineQueuedErro
   );
 }
 
-const DEFAULT_GET_TIMEOUT_MS = 12_000;
-const DEFAULT_WRITE_TIMEOUT_MS = 30_000;
 const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
 
 const SENSITIVE_PATH_PARTS = [
@@ -53,6 +57,7 @@ const SENSITIVE_PATH_PARTS = [
   "/email-logs",
   "/email-settings",
   "/security",
+  "/permissions",
   "/diagnostics",
   "/platform/",
   "/attachments/",
@@ -86,7 +91,45 @@ export function isPortalCacheablePath(path: string): boolean {
 }
 
 function networkAvailable(): boolean {
-  return typeof navigator === "undefined" || navigator.onLine !== false;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const connectivity = getPortalConnectivitySnapshot();
+  return connectivity.state === "online" && connectivity.databaseReady;
+}
+
+const AUTHORITATIVE_PATH_MARKERS = [
+  "/approve",
+  "/reject",
+  "/submit",
+  "/publish",
+  "/certify",
+  "/sign-off",
+  "/signoff",
+  "/payroll",
+  "/permissions",
+  "/authorisations",
+  "/authorizations",
+  "/upload",
+  "/attachments",
+];
+
+export function isReplaySafeMutation(path: string, method: string): boolean {
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod === "DELETE") return false;
+  if (!["POST", "PUT", "PATCH"].includes(normalizedMethod)) return false;
+  const normalizedPath = normalizedCachePath(path).toLowerCase();
+  return !AUTHORITATIVE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker));
+}
+
+async function confirmedNotAccepted(response: Response): Promise<boolean> {
+  if (response.status !== 503) return false;
+  const detail = await response.clone().json().catch(() => null) as {
+    request_accepted?: unknown;
+    error_code?: unknown;
+    detail?: { request_accepted?: unknown; error_code?: unknown };
+  } | null;
+  const body = detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
+  return body?.request_accepted === false
+    && ["DB_TEMPORARILY_UNAVAILABLE", "DB_POOL_TIMEOUT"].includes(String(body?.error_code || ""));
 }
 
 function isAbortError(error: unknown): boolean {
@@ -96,7 +139,11 @@ function isAbortError(error: unknown): boolean {
 }
 
 function isNetworkFailure(error: unknown): boolean {
-  if (isAbortError(error)) return true;
+  // AbortError is also used for user cancellation, route teardown, timeouts and
+  // the portal-wide session guard. None of those are proof that the device is
+  // offline, so silently placing the mutation in the outbox would hide the
+  // real failure and can replay an action the user believes was rejected.
+  if (isAbortError(error)) return false;
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return message.includes("failed to fetch")
@@ -105,10 +152,6 @@ function isNetworkFailure(error: unknown): boolean {
     || message.includes("timed out")
     || message.includes("load failed")
     || message.includes("connection");
-}
-
-function isRetryableStatus(status: number): boolean {
-  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function assertRequestScope(scope: string): void {
@@ -187,6 +230,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const cacheEnabled = isGet && offline?.cache !== false && isPortalCacheablePath(path);
   const allowStaleFallback = offline?.allowStaleFallback !== false;
   const queueMutation = !isGet && offline?.queueMutation === true;
+  const replaySafe = isGet || isReplaySafeMutation(path, method);
   const cachePath = normalizedCachePath(path);
   const requestScope = currentOfflineScope();
 
@@ -196,7 +240,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       if (cached) return cached;
     }
     assertRequestScope(requestScope);
-    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
+    if (queueMutation && replaySafe) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "This data has not been cached on this device yet. Reconnect once to make it available offline."
       : "The server is offline. This operation requires a live connection.");
@@ -204,7 +248,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   const controller = new AbortController();
   const detachCallerSignal = combineAbortSignals(controller, signal);
-  const effectiveTimeout = timeoutMs ?? (isGet ? DEFAULT_GET_TIMEOUT_MS : DEFAULT_WRITE_TIMEOUT_MS);
+  const effectiveTimeout = timeoutMs ?? recommendedRequestTimeoutMs(method);
   const timeout = window.setTimeout(
     () => controller.abort(new DOMException(`Request timed out after ${Math.round(effectiveTimeout / 1000)} seconds`, "AbortError")),
     effectiveTimeout,
@@ -212,6 +256,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   try {
     const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
+    notePortalResponse(response);
     assertRequestScope(requestScope);
 
     if (response.ok) {
@@ -233,24 +278,44 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       return response;
     }
 
-    if (isRetryableStatus(response.status)) {
+    if (response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500) {
       if (cacheEnabled) {
         const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
         if (cached) return cached;
       }
-      assertRequestScope(requestScope);
-      if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     }
 
+    // Only a server response that explicitly guarantees the transaction was
+    // not accepted may be moved to the local outbox.  Generic 5xx responses
+    // remain visible because the server may have committed before failing.
+    if (queueMutation && replaySafe && await confirmedNotAccepted(response)) {
+      return queueRequest(cachePath, method, init, requestScope);
+    }
+
+    // An HTTP response proves the server was reached. Validation, permission,
+    // rate-limit and server errors must remain visible to the caller; only a
+    // confirmed offline state or a genuine transport failure may enter the
+    // offline outbox.
     return response;
   } catch (error) {
+    if (isAbortError(error)) {
+      // GET has no ambiguous commit outcome, so a slow-link timeout may safely
+      // fall back to the last encrypted device copy. Writes remain visible to
+      // the user because the server may have committed before the timeout.
+      if (cacheEnabled) {
+        const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
+        if (cached) return cached;
+      }
+      throw error;
+    }
     if (!isNetworkFailure(error)) throw error;
+    notePortalTransportFailure(error);
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
     }
     assertRequestScope(requestScope);
-    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
+    if (queueMutation && replaySafe) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "The server could not be reached and no cached copy is available."
       : "The server could not be reached. Reconnect and retry this operation.");

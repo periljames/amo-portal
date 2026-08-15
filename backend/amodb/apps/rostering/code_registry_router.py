@@ -11,7 +11,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
-from . import code_registry, common, models, services
+from . import code_registry, common, models, schemas, services, template_usage_policy
 from .code_registry_models import (
     RosterCalendarMode,
     RosterCodeVerificationStatus,
@@ -61,6 +61,7 @@ class RosterCodeRegistryEntry(BaseModel):
     counts_as_duty: bool
     is_active: bool
     description: Optional[str] = None
+    department_ids: list[str] = Field(default_factory=list)
     policy: ShiftPolicyRead
     usage_count: int
     can_delete: bool
@@ -70,6 +71,18 @@ class StarterPackResult(BaseModel):
     created_codes: list[str]
     skipped_existing_codes: list[str]
     recommended_codes: list[str]
+
+
+class ShiftTemplateMergeRequest(BaseModel):
+    target_template_id: str = Field(min_length=1)
+    target_code: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9]{1,2}$")
+    reason: str = Field(min_length=5, max_length=1000)
+    policy_resolution: str = Field(default="REQUIRE_MATCH", pattern=r"^(REQUIRE_MATCH|KEEP_TARGET|KEEP_SOURCE)$")
+
+
+class ShiftTemplateMergeResult(BaseModel):
+    target_template: schemas.ShiftTemplateRead
+    moved_counts: dict[str, int]
 
 
 def _amo(user: account_models.User) -> str:
@@ -153,6 +166,7 @@ def roster_code_registry(
                 counts_as_duty=row.counts_as_duty,
                 is_active=row.is_active,
                 description=row.description,
+                department_ids=row.department_ids,
                 policy=ShiftPolicyRead.model_validate(policy) if policy else _default_policy(row),
                 usage_count=usage,
                 can_delete=usage == 0,
@@ -251,6 +265,42 @@ def update_shift_policy(
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.post(
+    "/shift-templates/{template_id}/merge",
+    response_model=ShiftTemplateMergeResult,
+)
+def merge_duplicate_roster_code(
+    template_id: str,
+    payload: ShiftTemplateMergeRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_manage(db, current_user)
+    try:
+        target, moved_counts = template_usage_policy.merge_duplicate_template(
+            db,
+            amo_id=_amo(current_user),
+            source_template_id=template_id,
+            target_template_id=payload.target_template_id,
+            actor_user_id=current_user.id,
+            reason=payload.reason,
+            target_code=payload.target_code,
+            policy_resolution=payload.policy_resolution,
+        )
+        db.commit()
+        db.refresh(target)
+        return ShiftTemplateMergeResult(
+            target_template=schemas.ShiftTemplateRead.model_validate(target),
+            moved_counts=moved_counts,
+        )
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/shift-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)

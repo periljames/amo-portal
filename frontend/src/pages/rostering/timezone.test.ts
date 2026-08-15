@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { moveIntervalToZonedDay, templateWindowInZone, zonedWallTimeToIso } from "./timezone";
-import { newIdempotencyKey, weekBounds } from "./rosterUi";
+import { monthBounds, newIdempotencyKey, resolveRosterCalendarUrls, weekBounds } from "./rosterUi";
 
 describe("rostering timezone utilities", () => {
   it("converts Nairobi wall time to UTC", () => {
@@ -36,11 +36,35 @@ describe("planner utilities", () => {
     expect(value.days).toHaveLength(7);
   });
 
+  it("returns every calendar date in leap-year February", () => {
+    const value = monthBounds(new Date(2028, 1, 14));
+    expect(value.from).toBe("2028-02-01");
+    expect(value.to).toBe("2028-02-29");
+    expect(value.days).toHaveLength(29);
+  });
+
   it("creates distinct command idempotency keys", () => {
     const first = newIdempotencyKey("publish");
     const second = newIdempotencyKey("publish");
     expect(first.startsWith("publish:")).toBe(true);
     expect(second.startsWith("publish:")).toBe(true);
     expect(first).not.toBe(second);
+  });
+
+  it("resolves calendar links without assuming feed_path is present", () => {
+    expect(resolveRosterCalendarUrls({
+      https_url: "http://localhost:8080/rostering/calendar/feed/token.ics",
+      webcal_url: "",
+      refresh_interval_minutes: 60,
+      includes: [],
+    }, { browserOrigin: "https://portal.example.test" })).toEqual({
+      httpsUrl: "https://portal.example.test/rostering/calendar/feed/token.ics",
+      webcalUrl: "webcal://portal.example.test/rostering/calendar/feed/token.ics",
+      feedPath: "/rostering/calendar/feed/token.ics",
+    });
+  });
+
+  it("returns a recoverable empty state for a status-only calendar payload", () => {
+    expect(resolveRosterCalendarUrls({})).toBeNull();
   });
 });

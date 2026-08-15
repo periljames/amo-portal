@@ -565,6 +565,34 @@ def create_report_job(db: Session, *, actor: account_models.User, payload: schem
     return row
 
 
+def retry_report_job(
+    db: Session,
+    *,
+    actor: account_models.User,
+    job: models.TrainingReportJob,
+) -> models.TrainingReportJob:
+    if job.status != "FAILED":
+        raise HTTPException(status_code=409, detail="Only a failed Training report job can be retried.")
+    job.status = "QUEUED"
+    job.started_at = None
+    job.completed_at = None
+    job.artifact_path = None
+    job.artifact_checksum = None
+    job.error_text = None
+    job.requested_by_user_id = str(actor.id)
+    db.add(job)
+    db.flush()
+    _audit(
+        db,
+        actor=actor,
+        entity_type="training.report_job",
+        entity_id=str(job.id),
+        action="REQUEUED",
+        after={"status": "QUEUED", "scope_manifest": job.scope_manifest or {}},
+    )
+    return job
+
+
 def upsert_saved_view(db: Session, *, actor: account_models.User, payload: schemas.SavedViewCreate) -> models.TrainingSavedView:
     amo_id = tenant_id_for(actor)
     row = db.query(models.TrainingSavedView).filter(models.TrainingSavedView.amo_id == amo_id, models.TrainingSavedView.user_id == str(actor.id), models.TrainingSavedView.workspace == payload.workspace, models.TrainingSavedView.name == payload.name).first()

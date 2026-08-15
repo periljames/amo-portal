@@ -143,7 +143,7 @@ function nextGuide(detail: DocumentDetailResponse): PrimaryGuide {
   if (workflow.state === "QUALITY_APPROVED") {
     return {
       eyebrow: "Next lifecycle step",
-      title: "Submit to Accountable Manager",
+      title: "Submit to Accountable Executive",
       description: "Quality review is complete. Send the governed revision to the accountable approval stage.",
       label: "Submit to management",
       tab: "workflow",
@@ -153,7 +153,7 @@ function nextGuide(detail: DocumentDetailResponse): PrimaryGuide {
   if (workflow.state === "ACCOUNTABLE_MANAGER_APPROVAL") {
     return {
       eyebrow: "Decision required",
-      title: workflow.requires_authority ? "Complete management approval and authority submission" : "Complete Accountable Manager approval",
+      title: workflow.requires_authority ? "Complete management approval and authority submission" : "Complete Accountable Executive approval",
       description: workflow.requires_authority
         ? "The management decision must be recorded and the authority submission stage completed before effectivity can be scheduled."
         : "Record the accountable approval basis before the revision can be scheduled for effectivity.",

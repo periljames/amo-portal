@@ -32,6 +32,7 @@ from .schemas import (
 PROGRAM_WRITE_ROLES = [
     "SUPERUSER",
     "AMO_ADMIN",
+    "BASE_MAINTENANCE_MANAGER",
     "PLANNING_ENGINEER",
 ]
 

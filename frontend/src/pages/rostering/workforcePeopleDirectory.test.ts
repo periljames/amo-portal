@@ -31,7 +31,7 @@ describe("Scalable Workforce people directory", () => {
     expect(directorySource).toContain("Last page");
     expect(cssSource).toContain("max-height: min(65vh, 720px)");
     expect(cssSource).toContain("position: sticky");
-    expect(bulkCssSource).toContain("position:sticky");
+    expect(bulkCssSource).toContain("position: sticky");
     expect(governanceCssSource).toContain("position:sticky");
     expect(governanceSource).toContain("10,000 or fewer personnel");
   });
@@ -68,17 +68,36 @@ describe("Scalable Workforce people directory", () => {
   it("provides preview, idempotent submission, progress, failure export and retry", () => {
     expect(serviceSource).toContain("/people/contracts/preview");
     expect(serviceSource).toContain("/bulk-operations/contracts");
+    expect(serviceSource).toContain("/people/work-patterns/preview");
+    expect(serviceSource).toContain("/bulk-operations/work-patterns");
     expect(serviceSource).toContain("Idempotency-Key");
     expect(serviceSource).toContain("/failures.csv");
     expect(serviceSource).toContain("/retry");
     expect(serviceSource).toContain("/resume");
     expect(typeSource).toContain("HrBulkOperation");
     expect(bulkSource).toContain("Preview contract batch");
+    expect(bulkSource).toContain("Preview pattern changes");
+    expect(bulkSource).toContain("Select department");
+    expect(bulkSource).toContain("REPLACE_OVERLAPS");
     expect(bulkSource).toContain("Retry failed only");
     expect(bulkSource).toContain("Failure report");
+    expect(bulkSource).toContain("The request is accepted");
+    expect(bulkSource).toContain("Release queued job now");
+    expect(bulkSource).toContain("processing heartbeat is stale");
     expect(bulkSource).toContain("progress_percent");
+    expect(bulkSource).toContain('status: "RUNNING"');
+    expect(bulkSource).toContain("Estimated remaining");
+    expect(bulkSource).toContain("activeItem.full_name");
     expect(bulkSource).toContain("bulk_search");
     expect(governanceSource).toContain("submitWorkforceHrPersonnelMutation");
+  });
+
+  it("defaults batch filters to Any and keeps filters in a vertical rail", () => {
+    expect(bulkSource).toContain('value !== "ANY"');
+    expect(bulkSource).toContain("contract_state: selectedFilter");
+    expect(bulkSource).toContain("pattern_state: selectedFilter");
+    expect(bulkSource).toContain('className="workforce-bulk__filter-rail"');
+    expect(bulkCssSource).toContain("grid-template-columns: 1fr");
   });
 
   it("covers every governed personnel mutation through one durable operation contract", () => {
@@ -98,14 +117,21 @@ describe("Scalable Workforce people directory", () => {
     expect(serviceSource).toContain("/workforce/hr/people/governed/selection-preview");
   });
 
-  it("keeps default-pattern changes behind an eligibility snapshot", () => {
-    expect(serviceSource).toContain("/people/default-day-pattern/preview");
-    expect(serviceSource).toContain("/bulk-operations/default-day-pattern");
-    expect(serviceSource).toContain("expected_match_count");
-    expect(serviceSource).toContain("expected_selection_token");
-    expect(typeSource).toContain("selection_token");
-    expect(bulkSource).toContain("This never blindly processes the tenant");
-    expect(serviceSource).toContain("Tenant-wide bootstrap is default-denied");
+  it("keeps work-pattern generation in the scoped pattern studio", () => {
+    expect(bulkSource).not.toContain("managed default day pattern");
+    expect(bulkSource).not.toContain("Preview eligibility");
+    expect(bulkSource).toContain("Create employment contracts");
+    expect(bulkSource).toContain("Change work pattern");
+    expect(bulkSource).toContain("Assigned or automatic");
+  });
+
+  it("refreshes newly created rotations before batch assignment", () => {
+    expect(bulkSource).toContain('refetchOnMount: "always"');
+    expect(bulkSource).toContain('refetchOnWindowFocus: "always"');
+    expect(bulkSource).toContain('refetchOnReconnect: "always"');
+    expect(bulkSource).toContain("patterns.refetch()");
+    expect(bulkSource).toContain("Refresh people and rotations");
+    expect(serviceSource).toContain('cache: "no-store"');
   });
 
   it("separates the register, governance, batch setup and operational queues", () => {
@@ -113,6 +139,7 @@ describe("Scalable Workforce people directory", () => {
     expect(wrapperSource).toContain("People & contracts");
     expect(wrapperSource).toContain("Organization & roles");
     expect(wrapperSource).toContain("Batch setup");
+    expect(wrapperSource).toContain("Contracts and work patterns");
     expect(wrapperSource).toContain("Leave, time & patterns");
     expect(wrapperSource).toContain("WorkforceGovernancePanel");
     expect(wrapperSource).toContain("WorkforceOperationsWorkspace");

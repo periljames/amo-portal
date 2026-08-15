@@ -5,6 +5,7 @@ import {
   Check,
   Clock3,
   FilePlus2,
+  GitBranchPlus,
   Pencil,
   Plus,
   Save,
@@ -17,12 +18,13 @@ import {
   listRosterPeriods,
   updateRosterPeriod,
 } from "../../../services/rostering";
-import { getCurrentWorkforcePermissions } from "../../../services/workforce";
 import type {
   RosterPeriodRead,
   RosterPeriodStatus,
+  RosterAmendmentType,
 } from "../../../types/rostering";
 import { errorMessage, newIdempotencyKey } from "../rosterUi";
+import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import { StatusPill } from "./RosterShell";
 
 type PeriodDraft = {
@@ -34,6 +36,14 @@ type PeriodDraft = {
   timezone_name: string;
   notes: string;
   status: RosterPeriodStatus;
+};
+
+type AmendmentDraft = {
+  period: RosterPeriodRead;
+  sourceVersionId: string;
+  sourceVersionNo: number;
+  amendmentType: RosterAmendmentType;
+  reason: string;
 };
 
 type IntlTimeZoneSupport = typeof Intl & {
@@ -121,6 +131,7 @@ export function RosterPeriodQuickActions() {
   const queryClient = useQueryClient();
   const browserTimeZone = useMemo(detectedTimeZone, []);
   const [draft, setDraft] = useState<PeriodDraft | null>(null);
+  const [amendment, setAmendment] = useState<AmendmentDraft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,12 +141,7 @@ export function RosterPeriodQuickActions() {
     staleTime: 2 * 60_000,
     networkMode: "offlineFirst",
   });
-  const permissionsQuery = useQuery({
-    queryKey: ["rostering", "settings", "permissions"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 15 * 60_000,
-    networkMode: "offlineFirst",
-  });
+  const permissionsQuery = useWorkforcePermissions();
 
   const periods = useMemo(
     () => [...(periodsQuery.data || [])].sort((left, right) => right.starts_on.localeCompare(left.starts_on)),
@@ -181,22 +187,36 @@ export function RosterPeriodQuickActions() {
       setError("Select the timezone used for roster dates and shift boundaries.");
       return;
     }
+    const overlap = periods.find((period) => (
+      period.id !== draft.id
+      && period.status !== "ARCHIVED"
+      && period.starts_on <= draft.ends_on
+      && period.ends_on >= draft.starts_on
+    ));
+    if (!draft.id && overlap) {
+      setError(`This date range overlaps ${overlap.period_code} (${overlap.starts_on} to ${overlap.ends_on}). Archive or adjust the existing period first.`);
+      return;
+    }
 
     setBusy(draft.id ? `edit:${draft.id}` : "create");
     setError(null);
     try {
-      const payload = {
-        period_code: draft.period_code.trim().toUpperCase(),
-        name: draft.name.trim(),
-        starts_on: draft.starts_on,
-        ends_on: draft.ends_on,
-        timezone_name: draft.timezone_name,
-        notes: draft.notes.trim() || null,
-      };
       if (draft.id) {
-        await updateRosterPeriod(draft.id, { ...payload, status: draft.status });
+        await updateRosterPeriod(draft.id, {
+          name: draft.name.trim(),
+          timezone_name: draft.timezone_name,
+          notes: draft.notes.trim() || null,
+          status: draft.status,
+        });
       } else {
-        await createRosterPeriod(payload);
+        await createRosterPeriod({
+          period_code: draft.period_code.trim().toUpperCase(),
+          name: draft.name.trim(),
+          starts_on: draft.starts_on,
+          ends_on: draft.ends_on,
+          timezone_name: draft.timezone_name,
+          notes: draft.notes.trim() || null,
+        });
       }
       setDraft(null);
       await refresh();
@@ -215,6 +235,50 @@ export function RosterPeriodQuickActions() {
         title: `Draft v${period.versions.length + 1}`,
         idempotency_key: newIdempotencyKey("version"),
       });
+      await refresh();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const beginAmendment = (period: RosterPeriodRead) => {
+    const source = [...period.versions]
+      .filter((version) => version.status === "PUBLISHED")
+      .sort((left, right) => right.version_no - left.version_no)[0];
+    if (!source) {
+      void createDraftVersion(period);
+      return;
+    }
+    setError(null);
+    setAmendment({
+      period,
+      sourceVersionId: source.id,
+      sourceVersionNo: source.version_no,
+      amendmentType: "LEAVE",
+      reason: "",
+    });
+  };
+
+  const createAmendment = async () => {
+    if (!amendment) return;
+    if (amendment.reason.trim().length < 5) {
+      setError("Enter an audited reason for the published-roster amendment.");
+      return;
+    }
+    setBusy(`amend:${amendment.period.id}`);
+    setError(null);
+    try {
+      await createRosterVersion(amendment.period.id, {
+        title: `Amendment of v${amendment.sourceVersionNo}`,
+        copy_from_version_id: amendment.sourceVersionId,
+        amendment_type: amendment.amendmentType,
+        amendment_reason: amendment.reason.trim(),
+        change_summary: `Controlled ${amendment.amendmentType.toLowerCase()} amendment`,
+        idempotency_key: newIdempotencyKey("amendment"),
+      });
+      setAmendment(null);
       await refresh();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -273,8 +337,8 @@ export function RosterPeriodQuickActions() {
           <div className="wr-period-editor__grid">
             <label><span>Code</span><input value={draft.period_code} onChange={(event) => setDraft({ ...draft, period_code: event.target.value })} /></label>
             <label><span>Name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label><span>Starts</span><input type="date" value={draft.starts_on} onChange={(event) => setDraft({ ...draft, starts_on: event.target.value })} /></label>
-            <label><span>Ends</span><input type="date" value={draft.ends_on} onChange={(event) => setDraft({ ...draft, ends_on: event.target.value })} /></label>
+            <label><span>Starts</span><input type="date" value={draft.starts_on} disabled={Boolean(draft.id)} onChange={(event) => setDraft({ ...draft, starts_on: event.target.value })} />{draft.id ? <small>Dates are locked after creation to preserve version history.</small> : null}</label>
+            <label><span>Ends</span><input type="date" value={draft.ends_on} disabled={Boolean(draft.id)} onChange={(event) => setDraft({ ...draft, ends_on: event.target.value })} /></label>
             <label className="wr-period-editor__timezone">
               <span>Timezone</span>
               <select value={draft.timezone_name} onChange={(event) => setDraft({ ...draft, timezone_name: event.target.value })}>
@@ -296,6 +360,21 @@ export function RosterPeriodQuickActions() {
         </div>
       ) : null}
 
+      {amendment ? (
+        <div className="wr-period-editor" role="dialog" aria-modal="true" aria-label={`Amend ${amendment.period.period_code}`}>
+          <div className="wr-period-editor__heading">
+            <div><span className="wr-eyebrow">Published roster control</span><strong>Amend {amendment.period.period_code} from v{amendment.sourceVersionNo}</strong></div>
+            <button type="button" className="wr-icon-button" aria-label="Close amendment form" onClick={() => { setAmendment(null); setError(null); }}><X size={16} /></button>
+          </div>
+          <p className="wr-period-editor__guidance">The full published duty set, open task links and aircraft allocations will be copied into a new draft. Approved leave and scheduled classes remain protected so the planner can apply a ranked rotation.</p>
+          <div className="wr-period-editor__grid">
+            <label><span>Amendment type</span><select value={amendment.amendmentType} onChange={(event) => setAmendment({ ...amendment, amendmentType: event.target.value as RosterAmendmentType })}>{["LEAVE", "SICKNESS", "TRAINING", "COVERAGE", "OPERATIONAL", "CORRECTION", "OTHER"].map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label className="wr-period-editor__notes"><span>Audited reason</span><input value={amendment.reason} onChange={(event) => setAmendment({ ...amendment, reason: event.target.value })} placeholder="For example: approved annual leave for scheduled engineer" /></label>
+          </div>
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setAmendment(null)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || amendment.reason.trim().length < 5} onClick={() => void createAmendment()}><GitBranchPlus size={15} /> Create amendment draft</button></div>
+        </div>
+      ) : null}
+
       {recentPeriods.length ? (
         <div className="wr-period-quick__list">
           {recentPeriods.map((period) => (
@@ -308,7 +387,7 @@ export function RosterPeriodQuickActions() {
               <StatusPill value={period.status} />
               <div className="wr-actions">
                 {canEdit ? <button type="button" className="wr-button wr-button--small" onClick={() => setDraft(editDraft(period))}><Pencil size={14} /> Edit</button> : null}
-                {canCreate ? <button type="button" className="wr-button wr-button--small" disabled={busy === `version:${period.id}`} onClick={() => void createDraftVersion(period)}><FilePlus2 size={14} /> Draft</button> : null}
+                {canCreate ? <button type="button" className="wr-button wr-button--small" disabled={Boolean(busy)} onClick={() => beginAmendment(period)}>{period.versions.some((version) => version.status === "PUBLISHED") ? <GitBranchPlus size={14} /> : <FilePlus2 size={14} />} {period.versions.some((version) => version.status === "PUBLISHED") ? "Amend" : "Draft"}</button> : null}
               </div>
             </article>
           ))}

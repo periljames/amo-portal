@@ -1,6 +1,7 @@
 // src/App.tsx
 import React, { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { AppRouter } from "./router";
 import TenantRouteBoundary from "./app/TenantRouteBoundary";
@@ -9,6 +10,7 @@ import { useColorScheme } from "./hooks/useColorScheme";
 import { ToastProvider } from "./components/feedback/ToastProvider";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
+import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
 import { onSessionEvent } from "./services/auth";
 import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
@@ -22,6 +24,8 @@ import "./styles/auth.css";
 
 const App: React.FC = () => {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
 
@@ -56,9 +60,25 @@ const App: React.FC = () => {
         clearAllCachedAdminProfileStates();
         clearApiResponseCache();
         resetLoading();
+
+        const parts = location.pathname.split("/").filter(Boolean);
+        const isLoginRoute = location.pathname === "/login"
+          || (parts[0] === "maintenance" && parts[2] === "login");
+        if (isLoginRoute) return;
+
+        const tenant = (parts[0] === "maintenance" || parts[0] === "t") ? parts[1] : "";
+        const loginTarget = tenant ? `/maintenance/${encodeURIComponent(tenant)}/login` : "/login";
+        const shouldResume = detail.type === "expired" || detail.type === "idle-logout";
+        navigate(loginTarget, {
+          replace: true,
+          state: {
+            from: shouldResume ? `${location.pathname}${location.search}${location.hash}` : undefined,
+            sessionReason: detail.type,
+          },
+        });
       }
     });
-  }, [queryClient]);
+  }, [location.hash, location.pathname, location.search, navigate, queryClient]);
 
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
@@ -91,6 +111,7 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       <GlobalLoadingBar />
+      <PortalSessionLifecycle />
       <PortalErrorBoundary>
         <TenantRouteBoundary>
           <AppRouter />

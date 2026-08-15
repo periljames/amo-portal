@@ -1,4 +1,5 @@
 import type {
+  AttendanceEventRead,
   AttendanceSummaryRead,
   AvailabilityEventRead,
   CurrentPermissionsRead,
@@ -12,6 +13,7 @@ import type {
   PatternPreviewResponse,
   PayrollExportRow,
   PlannerPreferenceRead,
+  PublicHolidayRead,
   TimesheetRead,
   WorkPatternAssignmentRead,
   WorkPatternCreate,
@@ -58,7 +60,15 @@ export type WorkforcePeopleFilters = {
 };
 
 export function getCurrentWorkforcePermissions(): Promise<CurrentPermissionsRead> {
-  return apiJson(`${ROOT}/permissions/current`);
+  return apiJson(`${ROOT}/permissions/current`, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache" },
+    offline: {
+      cache: false,
+      allowStaleFallback: false,
+      queueMutation: false,
+    },
+  });
 }
 
 export function listWorkforcePeople(filters: WorkforcePeopleFilters = {}): Promise<WorkforcePersonRead[]> {
@@ -89,7 +99,10 @@ export function updateEmploymentContract(contractId: string, payload: Partial<Em
 }
 
 export function listWorkPatterns(includeInactive = false): Promise<WorkPatternRead[]> {
-  return apiJson(`${ROOT}/work-patterns${queryString({ include_inactive: includeInactive })}`);
+  return apiJson(`${ROOT}/work-patterns${queryString({ include_inactive: includeInactive })}`, {
+    cache: "no-store",
+    offline: { cacheTtlMs: 5 * 60_000 },
+  });
 }
 
 export function createWorkPattern(payload: WorkPatternCreate): Promise<WorkPatternRead> {
@@ -98,6 +111,13 @@ export function createWorkPattern(payload: WorkPatternCreate): Promise<WorkPatte
 
 export function updateWorkPattern(patternId: string, payload: Partial<WorkPatternCreate>): Promise<WorkPatternRead> {
   return apiJson(`${ROOT}/work-patterns/${encodeURIComponent(patternId)}`, { method: "PATCH", body: jsonBody(payload) });
+}
+
+export function deleteWorkPattern(patternId: string, reason: string): Promise<void> {
+  return apiJson(`${ROOT}/work-patterns/${encodeURIComponent(patternId)}`, {
+    method: "DELETE",
+    body: jsonBody({ reason }),
+  });
 }
 
 export function listWorkPatternAssignments(params: {
@@ -115,6 +135,26 @@ export function createWorkPatternAssignment(payload: {
   cycle_anchor_date: string;
 }): Promise<WorkPatternAssignmentRead> {
   return apiJson(`${ROOT}/work-pattern-assignments`, { method: "POST", body: jsonBody(payload) });
+}
+
+export function updateWorkPatternAssignment(patternAssignmentId: string, payload: {
+  work_pattern_id?: string;
+  effective_from?: string;
+  effective_to?: string | null;
+  cycle_anchor_date?: string;
+  reason: string;
+}): Promise<WorkPatternAssignmentRead> {
+  return apiJson(`${ROOT}/work-pattern-assignments/${encodeURIComponent(patternAssignmentId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
+  });
+}
+
+export function deleteWorkPatternAssignment(patternAssignmentId: string, reason: string): Promise<void> {
+  return apiJson(`${ROOT}/work-pattern-assignments/${encodeURIComponent(patternAssignmentId)}`, {
+    method: "DELETE",
+    body: jsonBody({ reason }),
+  });
 }
 
 export function previewWorkPattern(patternId: string, payload: {
@@ -240,8 +280,50 @@ export function createAttendanceEvent(payload: {
   idempotency_key: string;
   note?: string | null;
   metadata_json?: Record<string, unknown> | null;
-}) {
-  return apiJson(`${ROOT}/attendance-events`, { method: "POST", body: jsonBody(payload) });
+  location_latitude?: number | null;
+  location_longitude?: number | null;
+  location_accuracy_m?: number | null;
+  location_exception_reason?: string | null;
+}): Promise<AttendanceEventRead> {
+  const resilientPayload = {
+    ...payload,
+    metadata_json: {
+      ...(payload.metadata_json || {}),
+      client_capture_mode: "RESILIENT_DEVICE",
+      client_captured_at: payload.occurred_at,
+    },
+  };
+  return apiJson(`${ROOT}/attendance-events`, {
+    method: "POST",
+    headers: { "Idempotency-Key": payload.idempotency_key },
+    body: jsonBody(resilientPayload),
+    offline: {
+      queueMutation: true,
+      entityType: "attendance-event",
+      entityId: payload.idempotency_key,
+      idempotencyKey: payload.idempotency_key,
+    },
+  });
+}
+
+export function listPublicHolidays(params: { from?: string; to?: string } = {}): Promise<PublicHolidayRead[]> {
+  return apiJson(`${ROOT}/public-holidays${queryString(params)}`);
+}
+
+export async function downloadAttendanceExport(params: { user_id?: string | null; from: string; to: string }): Promise<void> {
+  const result = await apiBlob(`${ROOT}/attendance-events/export${queryString(params)}`);
+  downloadBlob(result.blob, result.filename || `attendance-${params.from}-${params.to}.csv`);
+}
+
+export async function downloadLeaveRequestsExport(params: {
+  user_id?: string | null;
+  department_id?: string | null;
+  status?: string | null;
+  from?: string | null;
+  to?: string | null;
+} = {}): Promise<void> {
+  const result = await apiBlob(`${ROOT}/leave-requests/export${queryString(params)}`);
+  downloadBlob(result.blob, result.filename || "workforce-leave-requests.csv");
 }
 
 export function listTimesheets(params: {

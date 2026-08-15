@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import inspect
 
-from amodb.apps.workforce import hr_router, hr_service, permissions
+from amodb.apps.accounts import personnel_import
+from amodb.apps.training import workbook_import
+from amodb.apps.workforce import hr_router, hr_service, permissions, router, services
 
 
 def test_current_permission_list_uses_effective_global_grants_only():
@@ -12,6 +14,12 @@ def test_current_permission_list_uses_effective_global_grants_only():
     assert "department_id.is_(None)" in source
     assert "base_station_id.is_(None)" in source
     assert "PermissionEffect.DENY in code_effects" in source
+
+
+def test_current_permission_response_is_never_browser_cached():
+    source = inspect.getsource(router.current_permissions)
+    assert '"Cache-Control"] = "private, no-store, max-age=0"' in source
+    assert '"X-Workforce-Permissions-Source"] = "live"' in source
 
 
 def test_hr_pattern_assignment_returns_created_record_id():
@@ -54,11 +62,30 @@ def test_hr_readiness_surfaces_the_next_future_contract():
     assert "has_effective_contract=contract_is_effective" in readiness_source
 
 
-def test_default_day_bootstrap_is_explicit_and_canonical():
+def test_imported_hire_date_replaces_placeholders_and_aligns_initial_contract():
+    training_source = inspect.getsource(workbook_import._upsert_person)
+    personnel_source = inspect.getsource(personnel_import.import_personnel_rows)
+    sync_source = inspect.getsource(services.sync_contract_start_from_hire_date)
+    readiness_source = inspect.getsource(hr_service._person_readiness_for_user)
+
+    assert "profile.hire_date = imported_hire_date" in training_source
+    assert "HIRE_DATE_IMPORT_APPLIED" in training_source
+    assert "HIRE_DATE_IMPORT_IGNORED" not in training_source
+    assert "PERSONNEL_IMPORT_HIREDATE" in personnel_source
+    assert "EmploymentContract.effective_from.asc()" in sync_source
+    assert "EmploymentContract.effective_from.desc()" not in sync_source
+    assert "Contract start must be aligned" not in readiness_source
+
+
+def test_default_day_bootstrap_reuses_tenant_day_shift_without_hidden_generation():
     source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    resolver_source = inspect.getsource(hr_service._resolve_existing_day_shift)
     assert hr_service._DEFAULT_DAY_SHIFT_CODE == "DEFAULT-DAY"
     assert hr_service._DEFAULT_DAY_PATTERN_CODE == "DEFAULT-DAY-5X2"
-    assert "code=_DEFAULT_DAY_SHIFT_CODE" in source
+    assert "_resolve_existing_day_shift" in source
+    assert "ShiftTemplate(" not in source
+    assert '== "D"' in resolver_source
+    assert "Create or activate a day-duty shift" in resolver_source
     assert "code=_DEFAULT_DAY_PATTERN_CODE" in source
     assert "EmployeeWorkPatternAssignment" in source
     assert "with_for_update" in source
@@ -75,6 +102,15 @@ def test_default_day_bootstrap_is_explicit_and_canonical():
 def test_active_user_readiness_uses_tenant_local_date():
     assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.list_people_page_v2)
     assert "datetime.now(_amo_zone" in inspect.getsource(hr_service.dashboard_v2)
+
+
+def test_readiness_recognizes_scoped_automatic_patterns():
+    resolver_source = inspect.getsource(hr_service._apply_automatic_pattern_readiness)
+    assert "preview_patterns" in resolver_source
+    assert 'resolution_source == "RULE"' in resolver_source
+    assert 'item.pattern_state = "ASSIGNED"' in resolver_source
+    assert "AMBIGUOUS_PATTERN_RULE" in resolver_source
+    assert "_apply_automatic_pattern_readiness" in inspect.getsource(hr_service.dashboard_v2)
 
 
 def test_effective_contract_gap_retains_future_starters():
@@ -94,15 +130,17 @@ def test_default_day_bootstrap_repairs_non_monday_reserved_anchor():
     assert "cycle_anchor_date=week_monday" in source
 
 
-def test_default_day_bootstrap_refuses_unowned_reserved_codes_and_uses_owned_ids():
+def test_default_day_bootstrap_uses_owned_pattern_id_and_existing_shift():
     source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    resolver_source = inspect.getsource(hr_service._resolve_existing_day_shift)
     identity_source = inspect.getsource(hr_service._default_day_system_id)
     assert "uuid5" in identity_source
     assert "amo-portal:{amo_id}:{system_key}" in identity_source
-    assert "shift_by_code" in source
+    assert "system_id" in resolver_source
+    assert "_DEFAULT_DAY_SHIFT_CODE" in resolver_source
     assert "pattern_by_code" in source
     assert "already owned by tenant configuration" in source
-    assert "id=shift_id" in source
+    assert "ShiftTemplate(" not in resolver_source
     assert "id=pattern_id" in source
     assert "current.work_pattern_id" in source
     assert "current.work_pattern.code" not in source
@@ -122,7 +160,7 @@ def test_default_day_bootstrap_audits_every_controlled_mutation():
         'action="bootstrap_assign"',
     ):
         assert action.replace('action="', '').replace('"', '') in source
-    assert 'entity_type="ShiftTemplate"' in source
+    assert 'entity_type="ShiftTemplate"' not in source
     assert 'entity_type="WorkPattern"' in source
     assert 'entity_type="EmployeeWorkPatternAssignment"' in source
     assert "before=current_before" in source
@@ -139,8 +177,6 @@ def test_readiness_labels_only_the_managed_default_pattern():
 
 
 def test_bootstrap_definition_snapshots_include_attribution_mutations():
-    shift_source = inspect.getsource(hr_service._shift_template_snapshot)
     pattern_source = inspect.getsource(hr_service._work_pattern_snapshot)
-    for source in (shift_source, pattern_source):
-        assert '"updated_by_user_id"' in source
-        assert '"updated_at"' in source
+    assert '"updated_by_user_id"' in pattern_source
+    assert '"updated_at"' in pattern_source

@@ -97,14 +97,55 @@ def test_productive_assignment_requires_active_contract_for_entire_window(monkey
         )
 
 
+def test_productive_assignment_rejects_an_existing_roster_overlap():
+    collision = SimpleNamespace(
+        starts_at=NOW - timedelta(hours=1),
+        ends_at=NOW + timedelta(hours=2),
+    )
+    database = _Database([collision])
+
+    with pytest.raises(ValueError, match="overlapping roster assignment"):
+        _ensure_source_owned_state(
+            database,
+            amo_id="amo-1",
+            user_id="user-1",
+            starts_at=NOW,
+            ends_at=NOW + timedelta(hours=8),
+            assignment_status="DUTY",
+            assignment_source="MANUAL",
+            source_reference_id=None,
+            version_id="version-1",
+        )
+
+
 def test_quality_audit_commitment_blocks_productive_assignment(monkeypatch):
     monkeypatch.setattr(
         "amodb.apps.rostering.services.workforce_services.active_contract_for_user",
         lambda *_args, **_kwargs: object(),
     )
-    database = _Database([None, None, object()])
+    database = _Database([None, None, None, object()])
 
     with pytest.raises(ValueError, match="Quality audit"):
+        _ensure_source_owned_state(
+            database,
+            amo_id="amo-1",
+            user_id="user-1",
+            starts_at=NOW,
+            ends_at=NOW + timedelta(hours=8),
+            assignment_status="DUTY",
+            assignment_source="MANUAL",
+            source_reference_id=None,
+        )
+
+
+def test_pending_leave_request_blocks_productive_assignment(monkeypatch):
+    monkeypatch.setattr(
+        "amodb.apps.rostering.services.workforce_services.active_contract_for_user",
+        lambda *_args, **_kwargs: object(),
+    )
+    database = _Database([None, object()])
+
+    with pytest.raises(ValueError, match="pending leave request"):
         _ensure_source_owned_state(
             database,
             amo_id="amo-1",

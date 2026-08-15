@@ -7,8 +7,8 @@ import {
   updateControlledRosterSettings,
   type ControlledRosterSettings,
 } from "../../../services/rosteringControl";
-import { getCurrentWorkforcePermissions } from "../../../services/workforce";
 import { errorMessage } from "../rosterUi";
+import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import { RosterLoading } from "./RosterShell";
 
 const SETTINGS_KEY = ["rostering", "settings", "controlled-document"] as const;
@@ -19,11 +19,7 @@ export function ControlledRosterSettingsPanel() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const settingsQuery = useQuery({ queryKey: SETTINGS_KEY, queryFn: getControlledRosterSettings, staleTime: 15 * 60_000 });
-  const permissionsQuery = useQuery({
-    queryKey: ["rostering", "settings", "permissions"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 15 * 60_000,
-  });
+  const permissionsQuery = useWorkforcePermissions();
   const canManage = (permissionsQuery.data?.permissions || []).includes("roster.manage_shift_templates");
 
   useEffect(() => {

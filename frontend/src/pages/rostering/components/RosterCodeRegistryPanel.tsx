@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock3, Plane, Plus, Save, Settings2, ShieldCheck, Tags, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { getCurrentWorkforcePermissions } from "../../../services/workforce";
 import {
   createRosterLegacyAlias,
   deleteRosterLegacyAlias,
@@ -18,6 +17,7 @@ import {
   type RosterDutySemantic,
 } from "../../../services/rosteringCodeRegistry";
 import { errorMessage } from "../rosterUi";
+import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import { RosterLoading, StatusPill } from "./RosterShell";
 
 const REGISTRY_KEY = ["rostering", "settings", "code-registry"] as const;
@@ -158,11 +158,7 @@ export function RosterCodeRegistryPanel() {
   const [aliasAircraft, setAliasAircraft] = useState("");
   const registryQuery = useQuery({ queryKey: REGISTRY_KEY, queryFn: listRosterCodeRegistry, staleTime: 5 * 60_000 });
   const aliasesQuery = useQuery({ queryKey: ALIASES_KEY, queryFn: () => listRosterLegacyAliases(), staleTime: 5 * 60_000 });
-  const permissionsQuery = useQuery({
-    queryKey: ["rostering", "settings", "permissions"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 15 * 60_000,
-  });
+  const permissionsQuery = useWorkforcePermissions();
   const rows = registryQuery.data || [];
   const aliases = aliasesQuery.data || [];
   const canManage = (permissionsQuery.data?.permissions || []).includes("roster.manage_shift_templates");
@@ -266,11 +262,11 @@ export function RosterCodeRegistryPanel() {
     <section className="wr-panel">
       <div className="wr-section-heading">
         <div>
-          <span className="wr-eyebrow">Tenant roster vocabulary</span>
-          <h2>Roster code registry</h2>
-          <p>Shift codes describe when a person works. Base stations, departments/work centres and aircraft allocations stay separate.</p>
+          <span className="wr-eyebrow">Advanced controls</span>
+          <h2>Code policy</h2>
+          <p>Review imported aliases and publication semantics.</p>
         </div>
-        <span className="wr-header-badge"><Settings2 size={15} /> 2-character codes recommended</span>
+        <span className="wr-header-badge"><Settings2 size={15} /> 1–2 characters required</span>
       </div>
 
       {actionError ? <div className="wr-inline-error" role="alert">{actionError}</div> : null}
@@ -288,7 +284,7 @@ export function RosterCodeRegistryPanel() {
             <Clock3 size={20} />
             <h3>Start blank</h3>
             <p>Keep the library empty and create tenant-specific codes manually. New codes remain unresolved until their semantic and source are reviewed here.</p>
-            <Link className="wr-button wr-button--secondary" to="?section=shifts">Open shift library</Link>
+            <Link className="wr-button wr-button--secondary" to="?section=patterns">Open shift types</Link>
           </article>
         </div>
       ) : (
@@ -320,7 +316,7 @@ export function RosterCodeRegistryPanel() {
           </section>
 
           <div className="wr-actions wr-actions--end">
-            <Link className="wr-button wr-button--secondary" to="?section=shifts"><Settings2 size={15} /> Edit shift times and labels</Link>
+            <Link className="wr-button wr-button--secondary" to="?section=patterns"><Settings2 size={15} /> Edit shift types</Link>
             {canManage ? <button type="button" className="wr-button wr-button--secondary" disabled={busy === "starter"} onClick={() => void install()}><Plus size={15} /> Add missing recommended codes</button> : null}
           </div>
         </>

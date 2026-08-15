@@ -364,11 +364,10 @@ def require_admin(
     """
     Dependency that enforces an admin-level role.
 
-    Allowed:
-    - SUPERUSER
-    - AMO_ADMIN
-    - QUALITY_MANAGER
-    - SAFETY_MANAGER
+    This is account/configuration administration, not regulatory management.
+    Only SUPERUSER and AMO_ADMIN pass. KCAR management roles receive their
+    workflow permissions through the relevant module guards and never inherit
+    tenant-administrator access merely because they are managers.
     """
     if getattr(current_user, "is_superuser", False) or getattr(
         current_user, "is_amo_admin", False
@@ -376,12 +375,6 @@ def require_admin(
         return current_user
 
     if current_user.role == AccountRole.AMO_ADMIN:
-        return current_user
-
-    if current_user.role in {
-        AccountRole.QUALITY_MANAGER,
-        AccountRole.SAFETY_MANAGER,
-    }:
         return current_user
 
     raise HTTPException(

@@ -52,6 +52,8 @@ describe("Training readiness architecture", () => {
     expect(source("src/components/training/TrainingSetupWorkspace.tsx")).toContain("Workbook import history");
     expect(source("src/components/training/TrainingSetupWorkspace.tsx")).toContain("downloadTrainingWorkbookTemplate");
     expect(source("src/components/training/TrainingReportsWorkspace.tsx")).toContain("downloadTrainingReportJob");
+    expect(source("src/components/training/TrainingReportsWorkspace.tsx")).toContain("retryTrainingReportJob");
+    expect(source("src/components/training/TrainingReportsWorkspace.tsx")).toContain("refetchInterval");
     expect(source("src/components/training/TrainingCertificatesWorkspace.tsx")).toContain("listCertificateEligibility");
     expect(source("src/components/training/TrainingCertificatesWorkspace.tsx")).toContain("batchIssueTrainingCertificates");
   });

@@ -1,12 +1,12 @@
 import "./components/roster-setup-refinement.css";
 
 import { lazy, Suspense, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Download, Settings2, UsersRound } from "lucide-react";
+import { CalendarDays, Download, UsersRound } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
-import { getCurrentWorkforcePermissions } from "../../services/workforce";
+import { errorMessage } from "./rosterUi";
 import { RosterError, RosterLoading, RosterShell } from "./components/RosterShell";
+import { useWorkforcePermissions } from "./hooks/useWorkforcePermissions";
 
 const LazyCalendarSubscriptionSecurityPanel = lazy(() => import("./components/CalendarSubscriptionSecurityPanel")
   .then((module) => ({ default: module.CalendarSubscriptionSecurityPanel })));
@@ -22,8 +22,8 @@ const LazyRosterOperationsWorkspace = lazy(() => import("./components/RosterOper
   .then((module) => ({ default: module.RosterOperationsWorkspace })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
-const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspaceWithCodeRegistry")
-  .then((module) => ({ default: module.RosteringSetupWorkspaceWithCodeRegistry })));
+const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspace")
+  .then((module) => ({ default: module.RosteringSetupWorkspace })));
 const LazyWorkforceHrWorkspace = lazy(() => import("./components/WorkforceHrWorkspaceV2")
   .then((module) => ({ default: module.WorkforceHrWorkspaceV2 })));
 
@@ -51,13 +51,11 @@ export function RosteringDashboardPage() {
 }
 
 export function RosterCalendarPage() {
-  const root = useRosterRoot();
   return (
     <RosterShell
       eyebrow="Planner workspace"
       title="Duty roster planner"
       description="Build controlled duty versions while seeing approved leave, training, unavailability and Quality commitments from their source records."
-      actions={<Link className="wr-button wr-button--secondary" to={`${root}/settings?section=overview`}><Settings2 size={16} /> Setup</Link>}
     >
       <DeferredWorkspace label="Opening duty planner…"><LazyUnifiedRosterPlanner /></DeferredWorkspace>
     </RosterShell>
@@ -95,13 +93,9 @@ export function TrainingImpactPage() {
 }
 
 export function WorkforceHrPage() {
-  const permissionsQuery = useQuery({
-    queryKey: ["workforce", "hr", "access"],
-    queryFn: getCurrentWorkforcePermissions,
-    staleTime: 5 * 60_000,
-    networkMode: "offlineFirst",
-  });
+  const permissionsQuery = useWorkforcePermissions();
   const canView = (permissionsQuery.data?.permissions || []).includes("workforce.view_sensitive");
+  const waitingForServer = permissionsQuery.isPending || permissionsQuery.fetchStatus === "paused";
 
   return (
     <RosterShell
@@ -110,11 +104,21 @@ export function WorkforceHrPage() {
       description="Manage employment readiness, leave, attendance, timesheets, payroll controls and employee work-pattern assignments without duplicating records in Rostering."
       actions={<span className="wr-header-badge"><UsersRound size={15} /> HR · Workforce · Time</span>}
     >
-      {permissionsQuery.isPending ? <RosterLoading label="Checking Workforce access…" /> : null}
-      {!permissionsQuery.isPending && !canView ? (
-        <RosterError message="This workspace requires the workforce.view_sensitive permission. Ask an AMO administrator to grant the correct Workforce scope." />
+      {waitingForServer ? <RosterLoading label="Waiting for the server to verify Workforce access…" /> : null}
+      {!waitingForServer && permissionsQuery.isError ? (
+        <RosterError
+          title="Could not verify Workforce access"
+          message={errorMessage(permissionsQuery.error)}
+          onRetry={() => void permissionsQuery.refetch()}
+        />
       ) : null}
-      {!permissionsQuery.isPending && canView ? (
+      {!waitingForServer && permissionsQuery.isSuccess && !canView ? (
+        <RosterError
+          title="Workforce access restricted"
+          message="Your live account permissions do not include Workforce sensitive-data access. Ask an AMO administrator to grant the appropriate Workforce scope."
+        />
+      ) : null}
+      {!waitingForServer && permissionsQuery.isSuccess && canView ? (
         <DeferredWorkspace label="Opening Workforce and HR…"><LazyWorkforceHrWorkspace /></DeferredWorkspace>
       ) : null}
     </RosterShell>
@@ -142,7 +146,7 @@ export function RosterSettingsPage() {
     <RosterShell
       eyebrow="Guided setup"
       title="Roster setup"
-      description="Check readiness, configure tenant roster codes, future periods and draft rotations, manage shifts and patterns, and review controlled policy."
+      description="Follow one clear path: define reusable rotations, create the month, then review and publish. Advanced controls stay collapsed until needed."
     >
       <DeferredWorkspace label="Opening roster setup…"><LazyRosteringSetupWorkspace /></DeferredWorkspace>
     </RosterShell>

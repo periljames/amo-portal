@@ -159,6 +159,31 @@ def test_dashboard_pending_counts_are_uncapped():
     assert hr_service._pending_queue_counts(db, amo_id="amo-1") == expected
 
 
+def test_leave_minutes_follow_work_pattern_instead_of_charging_24_hour_days(monkeypatch):
+    db = MagicMock()
+    db.query.return_value = _query_returning(SimpleNamespace(time_zone="Africa/Nairobi"))
+    monkeypatch.setattr(
+        services,
+        "preview_patterns",
+        lambda *_args, **_kwargs: SimpleNamespace(items=[
+            SimpleNamespace(planned_minutes=480),
+            SimpleNamespace(planned_minutes=0),
+            SimpleNamespace(planned_minutes=480),
+        ]),
+    )
+
+    requested = services._requested_minutes(
+        db,
+        amo_id="amo-1",
+        user_id="employee-1",
+        starts_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 8, 6, tzinfo=timezone.utc),
+        explicit=None,
+    )
+
+    assert requested == 960
+
+
 def test_attendance_exception_serializes_canonical_evidence():
     row = SimpleNamespace(
         id="variance-1",
@@ -181,6 +206,33 @@ def test_attendance_exception_serializes_canonical_evidence():
     assert result.roster_assignment_id == "assignment-1"
     assert result.variance_minutes == -50
     assert result.metadata_json == {"source": "attendance"}
+
+
+@pytest.mark.parametrize(
+    ("state", "event_type"),
+    [
+        ("CLOCKED_OUT", models.AttendanceEventType.CLOCK_IN),
+        ("WORKING", models.AttendanceEventType.BREAK_START),
+        ("WORKING", models.AttendanceEventType.CLOCK_OUT),
+        ("ON_BREAK", models.AttendanceEventType.BREAK_END),
+        ("ON_BREAK", models.AttendanceEventType.CLOCK_OUT),
+    ],
+)
+def test_attendance_live_state_accepts_only_valid_transitions(state, event_type):
+    services._validate_attendance_transition(state=state, event_type=event_type)
+
+
+@pytest.mark.parametrize(
+    ("state", "event_type"),
+    [
+        ("CLOCKED_OUT", models.AttendanceEventType.CLOCK_OUT),
+        ("WORKING", models.AttendanceEventType.CLOCK_IN),
+        ("ON_BREAK", models.AttendanceEventType.BREAK_START),
+    ],
+)
+def test_attendance_live_state_rejects_duplicate_or_impossible_transitions(state, event_type):
+    with pytest.raises(ValueError, match="not valid"):
+        services._validate_attendance_transition(state=state, event_type=event_type)
 
 
 class _ScalarQuery:

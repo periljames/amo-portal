@@ -12,6 +12,7 @@ from . import governance_schemas, models
 OperationType = Literal[
     "CREATE_CONTRACTS",
     "ASSIGN_DEFAULT_DAY_PATTERN",
+    "ASSIGN_WORK_PATTERN",
     "ASSIGN_ORGANIZATION",
     "ASSIGN_POSITION",
     "ASSIGN_BASES",
@@ -120,6 +121,64 @@ class ContractBatchSubmitRequest(ContractBatchPreviewRequest):
 
 class DefaultPatternBatchSubmitRequest(BulkSchema):
     selection: governance_schemas.GovernedPeopleSelection
+    expected_match_count: int = Field(ge=1, le=10000)
+    expected_selection_token: str = Field(min_length=16, max_length=128)
+
+
+class WorkPatternBatchOptions(BulkSchema):
+    work_pattern_id: str = Field(min_length=1, max_length=36)
+    effective_from: date
+    effective_to: date | None = None
+    cycle_anchor_date: date | None = None
+    conflict_strategy: Literal["REPLACE_OVERLAPS", "SKIP_ASSIGNED"] = "REPLACE_OVERLAPS"
+    reason: str = Field(default="Batch work-pattern change", min_length=5, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_pattern_dates(self):
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must be on or after effective_from")
+        if self.cycle_anchor_date is None:
+            self.cycle_anchor_date = self.effective_from
+        return self
+
+
+class WorkPatternBatchPreviewRequest(BulkSchema):
+    selection: governance_schemas.GovernedPeopleSelection
+    options: WorkPatternBatchOptions
+    preview_limit: int = Field(default=250, ge=1, le=1000)
+
+
+class WorkPatternPreviewRow(BulkSchema):
+    user_id: str
+    staff_code: str | None = None
+    full_name: str
+    department_name: str | None = None
+    current_pattern_code: str | None = None
+    current_pattern_name: str | None = None
+    target_pattern_code: str
+    target_pattern_name: str
+    action: Literal["ASSIGN", "REPLACE", "UNCHANGED", "SKIP", "BLOCKED"]
+    eligible: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
+class WorkPatternBatchPreview(BulkSchema):
+    selection_token: str
+    matched_count: int
+    eligible_count: int
+    blocked_count: int
+    assign_count: int
+    replace_count: int
+    unchanged_count: int
+    skipped_count: int
+    target_pattern_id: str
+    target_pattern_code: str
+    target_pattern_name: str
+    rows: list[WorkPatternPreviewRow]
+    rows_truncated: bool = False
+
+
+class WorkPatternBatchSubmitRequest(WorkPatternBatchPreviewRequest):
     expected_match_count: int = Field(ge=1, le=10000)
     expected_selection_token: str = Field(min_length=16, max_length=128)
 

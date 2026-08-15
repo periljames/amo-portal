@@ -35,7 +35,7 @@ const WORKFLOW_ACTIONS: Record<string, ActionOption[]> = {
     { action: "APPROVE_QUALITY", label: "Approve Quality review" },
     { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
   ],
-  QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Manager" }],
+  QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Executive" }],
   AUTHORITY_SUBMITTED: [
     { action: "MARK_AUTHORITY_APPROVED", label: "Confirm authority approval" },
     { action: "REQUEST_CORRECTIONS", label: "Return for corrections", danger: true },

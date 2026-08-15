@@ -76,6 +76,7 @@ export function userHasQmsRolePermission(
     return permission.startsWith("qms.");
   }
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
+  if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_VIEW_ONLY_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR") {
     return QMS_INSPECTOR_PERMISSIONS.has(permission);
   }
@@ -98,6 +99,9 @@ export function userHasTrainingRolePermission(
   if (user.is_superuser) return Boolean(getActiveAmoId()) && permission.startsWith("training.");
   if (!user.amo_id) return false;
   if (user.is_amo_admin || user.role === "AMO_ADMIN" || user.role === "QUALITY_MANAGER") return permission.startsWith("training.");
+  if (["ACCOUNTABLE_EXECUTIVE", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"].includes(user.role)) {
+    return TRAINING_READ.has(permission);
+  }
   const department = (contextDepartment || "").trim().toUpperCase().replaceAll("_", "-");
   if (["TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"].includes(department)) return permission.startsWith("training.");
   if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR" || department === "QUALITY" || department === "QUALITY-ASSURANCE") {

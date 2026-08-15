@@ -60,7 +60,7 @@ class TrainingOperatingSettings(Base):
     default_committee_positions = Column(
         JSON,
         nullable=False,
-        default=lambda: ["HEAD_OF_QUALITY", "HEAD_OF_BASE_MAINTENANCE", "HEAD_OF_LINE_MAINTENANCE"],
+        default=lambda: ["QUALITY_MANAGER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER"],
     )
     setup_status = Column(String(24), nullable=False, default="DRAFT")
     configuration_revision_no = Column(Integer, nullable=False, default=0)

@@ -7,10 +7,10 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..accounts import models as account_models
+from ..accounts import models as account_models, services as account_services
 from ..audit import services as audit_services
 from ..foundations import models as foundation_models
-from . import governance_models, models, permissions
+from . import governance_models, hierarchy_roles, models, permissions, supervisor_governance
 
 MUTATION_TYPES = {
     "ASSIGN_ORGANIZATION",
@@ -77,29 +77,13 @@ def _active_base(db: Session, *, amo_id: str, base_id: str | None, label: str):
 
 
 def _supervisor(db: Session, *, amo_id: str, supervisor_user_id: str, target_user_id: str, on_date: date):
-    if supervisor_user_id == target_user_id:
-        raise ValueError("A person cannot supervise themselves")
-    row = db.query(account_models.User).filter(
-        account_models.User.amo_id == amo_id,
-        account_models.User.id == supervisor_user_id,
-        account_models.User.is_active.is_(True),
-        account_models.User.is_system_account.is_(False),
-    ).first()
-    if row is None:
-        raise ValueError("The selected supervisor is not an active tenant user")
-    has_contract = db.query(models.EmploymentContract.id).filter(
-        models.EmploymentContract.amo_id == amo_id,
-        models.EmploymentContract.user_id == supervisor_user_id,
-        models.EmploymentContract.effective_from <= on_date,
-        or_(models.EmploymentContract.effective_to.is_(None), models.EmploymentContract.effective_to >= on_date),
-        models.EmploymentContract.employment_status.in_([
-            models.EmploymentStatus.ACTIVE,
-            models.EmploymentStatus.ONBOARDING,
-        ]),
-    ).first()
-    if has_contract is None:
-        raise ValueError("The selected supervisor has no active employment contract on the effective date")
-    return row
+    return supervisor_governance.require_supervisor(
+        db,
+        amo_id=amo_id,
+        supervisor_user_id=supervisor_user_id,
+        target_user_id=target_user_id,
+        on_date=on_date,
+    )
 
 
 def _contract_on(db: Session, *, amo_id: str, user_id: str, on_date: date):
@@ -247,7 +231,22 @@ def _assign_position(db: Session, *, amo_id: str, user, payload, actor_user_id: 
     if current is None:
         raise ValueError("Assign a primary organisation placement before assigning a canonical position")
     preferred_title = payload.get("preferred_title")
-    if str(current.position_id or "") == str(position.id) and (current.preferred_title or None) == (preferred_title or None):
+    source_contract = _contract_on(
+        db,
+        amo_id=amo_id,
+        user_id=str(user.id),
+        on_date=payload["effective_on"],
+    )
+    management_position = not hierarchy_roles.can_have_supervisor(position)
+    supervisor_present = bool(
+        current.supervisor_user_id
+        or (source_contract is not None and source_contract.supervisor_user_id)
+    )
+    if (
+        str(current.position_id or "") == str(position.id)
+        and (current.preferred_title or None) == (preferred_title or None)
+        and not (management_position and supervisor_present)
+    ):
         return "SKIPPED", "POSITION_ALREADY_ASSIGNED", "Canonical position already matches", {
             "position_id": str(position.id),
         }
@@ -261,9 +260,29 @@ def _assign_position(db: Session, *, amo_id: str, user, payload, actor_user_id: 
         source=current, position_id=str(position.id), preferred_title=preferred_title,
     )
     row.effective_to = old_end
+    supervisor_cleared = False
+    if management_position:
+        if row.supervisor_user_id:
+            row.supervisor_user_id = None
+            supervisor_cleared = True
+        if source_contract is not None and source_contract.supervisor_user_id:
+            contract = _version_contract(
+                db,
+                contract=source_contract,
+                effective_on=payload["effective_on"],
+                actor_user_id=actor_user_id,
+            )
+            contract.supervisor_user_id = None
+            contract.updated_by_user_id = actor_user_id
+            supervisor_cleared = True
     user.position_title = preferred_title or position.canonical_title
+    account_role_synced = hierarchy_roles.sync_account_for_position(db, user, position)
     return "SUCCEEDED", "POSITION_ASSIGNED", "Canonical position assigned", {
-        "placement_id": str(row.id), "position_id": str(position.id), "title": user.position_title,
+        "placement_id": str(row.id),
+        "position_id": str(position.id),
+        "title": user.position_title,
+        "supervisor_cleared": supervisor_cleared,
+        "account_role_synced": account_role_synced,
     }
 
 
@@ -297,9 +316,22 @@ def _assign_bases(db: Session, *, amo_id: str, user, payload, actor_user_id: str
 
 
 def _assign_supervisor(db: Session, *, amo_id: str, user, payload, actor_user_id: str):
+    hierarchy_roles.require_person_can_have_supervisor(
+        db,
+        amo_id=amo_id,
+        user_id=str(user.id),
+        on_date=payload["effective_on"],
+    )
     supervisor = _supervisor(
         db, amo_id=amo_id, supervisor_user_id=payload["supervisor_user_id"],
         target_user_id=str(user.id), on_date=payload["effective_on"],
+    )
+    hierarchy_roles.require_no_reporting_cycle(
+        db,
+        amo_id=amo_id,
+        user_id=str(user.id),
+        supervisor_user_id=str(supervisor.id),
+        on_date=payload["effective_on"],
     )
     source_contract = _contract_on(db, amo_id=amo_id, user_id=str(user.id), on_date=payload["effective_on"])
     if source_contract is None:
@@ -409,6 +441,7 @@ def _execute_offboarding(db: Session, *, plan, actor_user_id: str | None = None)
         user.deactivated_at = now
         user.deactivated_reason = plan.reason
         user.token_revoked_at = now
+        account_services.sync_regulated_postholder_assignment(db, user)
     if plan.end_contracts:
         contracts = db.query(models.EmploymentContract).filter(
             models.EmploymentContract.amo_id == plan.amo_id,

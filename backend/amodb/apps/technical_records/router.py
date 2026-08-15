@@ -25,6 +25,9 @@ router = APIRouter(prefix="/records", tags=["technical_records"], dependencies=[
 EDITOR_ROLES = {
     AccountRole.SUPERUSER,
     AccountRole.AMO_ADMIN,
+    AccountRole.BASE_MAINTENANCE_MANAGER,
+    AccountRole.LINE_MAINTENANCE_MANAGER,
+    AccountRole.WORKSHOP_MANAGER,
     AccountRole.PLANNING_ENGINEER,
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
@@ -38,6 +41,9 @@ PLANNING_EDITOR_ROLES = {
 PRODUCTION_EXECUTION_ROLES = {
     AccountRole.SUPERUSER,
     AccountRole.AMO_ADMIN,
+    AccountRole.BASE_MAINTENANCE_MANAGER,
+    AccountRole.LINE_MAINTENANCE_MANAGER,
+    AccountRole.WORKSHOP_MANAGER,
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,

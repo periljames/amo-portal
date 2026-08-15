@@ -412,6 +412,25 @@ def index_revision_references(db: Session, *, revision_id: str) -> dict:
 def index_revision_background(revision_id: str) -> None:
     db = WriteSessionLocal()
     try:
+        claim = (
+            db.query(km.DocumentationIndexJob)
+            .filter(
+                km.DocumentationIndexJob.revision_id == revision_id,
+                km.DocumentationIndexJob.status == "PENDING",
+            )
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if claim is None:
+            return
+        claim.status = "RUNNING"
+        claim.started_at = utcnow()
+        claim.completed_at = None
+        claim.error_summary = None
+        # Keep the claim lock and all index mutations in one transaction. If the
+        # process exits, PostgreSQL restores PENDING automatically; another
+        # worker can then claim the revision without overlapping a live indexer.
+        db.flush()
         index_revision_references(db, revision_id=revision_id)
         db.commit()
     except Exception as exc:

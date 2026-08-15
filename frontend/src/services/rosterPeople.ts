@@ -18,6 +18,8 @@ export type RosterPersonRead = {
   standby_eligible: boolean;
   active_authorisation_count: number;
   has_active_contract: boolean;
+  contract_effective_from?: string | null;
+  contract_effective_to?: string | null;
   is_active: boolean;
 };
 
@@ -45,6 +47,8 @@ export type RosterPeoplePageFilters = {
   base_station_id?: string | null;
   active_only?: boolean;
   roster_eligible_only?: boolean;
+  from?: string | null;
+  to?: string | null;
 };
 
 function fetchRosterPeoplePage(filters: RosterPeoplePageFilters): Promise<RosterPeoplePage> {

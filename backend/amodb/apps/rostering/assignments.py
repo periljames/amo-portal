@@ -168,6 +168,10 @@ def _validate_assignment_payload(
         explicit_base_station_id=payload.base_station_id,
     )
     shift = common.require_shift_template(db, amo_id=version.amo_id, shift_template_id=payload.shift_template_id)
+    common.require_shift_department_scope(
+        shift,
+        department_id=getattr(department, "id", None),
+    )
     if payload.ends_at <= payload.starts_at:
         raise ValueError("Assignment end must be after start")
     period_start = datetime.combine(version.period.starts_on, time.min, tzinfo=UTC)
@@ -275,8 +279,20 @@ def update_assignment(
             require_resolved=True,
         )
         row.base_station_id = resolved_base.id
-    if "shift_template_id" in fields:
-        common.require_shift_template(db, amo_id=row.amo_id, shift_template_id=row.shift_template_id)
+    scope_changed = (
+        ("shift_template_id" in fields and before["shift_template_id"] != row.shift_template_id)
+        or ("department_id" in fields and before["department_id"] != row.department_id)
+    )
+    if scope_changed:
+        shift = common.require_shift_template(
+            db,
+            amo_id=row.amo_id,
+            shift_template_id=row.shift_template_id,
+        )
+        common.require_shift_department_scope(
+            shift,
+            department_id=row.department_id,
+        )
     if "planned_minutes" not in fields:
         row.planned_minutes = workforce_calculations.duration_minutes(row.starts_at, row.ends_at)
     row.state_revision += 1
@@ -450,7 +466,7 @@ def generate_from_patterns(
             assignments=items,
             idempotency_key=f"{payload.idempotency_key}:bulk",
             expected_version_revision=version.state_revision,
-            atomic=True,
+            atomic=False,
         ),
     )
     response_json = {"version_id": version.id, "assignment_ids": [row.id for row in bulk.created], "skipped": skipped + bulk.skipped, "conflicts": bulk.conflicts}
@@ -476,6 +492,43 @@ def list_task_links(db: Session, *, amo_id: str, assignment_id: str) -> list[mod
         selectinload(models.RosterTaskAssignmentLink.roster_assignment).selectinload(models.RosterAssignment.base_station),
         selectinload(models.RosterTaskAssignmentLink.task_assignment).selectinload(work_models.TaskAssignment.task).selectinload(work_models.TaskCard.work_order).selectinload(work_models.WorkOrder.aircraft),
     ).filter(models.RosterTaskAssignmentLink.amo_id == amo_id, models.RosterTaskAssignmentLink.roster_assignment_id == assignment_id).order_by(models.RosterTaskAssignmentLink.created_at.asc(), models.RosterTaskAssignmentLink.id.asc()).all()
+
+
+def delete_task_link(
+    db: Session,
+    *,
+    link: models.RosterTaskAssignmentLink,
+    actor_user_id: str,
+    reason: str,
+) -> None:
+    assignment = link.roster_assignment
+    if not assignment:
+        raise ValueError("Roster assignment was not found for this task link")
+    version = common.get_version(db, amo_id=link.amo_id, version_id=assignment.version_id, lock=True)
+    if not version:
+        raise ValueError("Roster version not found")
+    common.ensure_draft(version)
+    before = {
+        "roster_assignment_id": link.roster_assignment_id,
+        "task_assignment_id": link.task_assignment_id,
+        "allocated_start": link.allocated_start.isoformat() if link.allocated_start else None,
+        "allocated_end": link.allocated_end.isoformat() if link.allocated_end else None,
+        "allocated_hours": link.allocated_hours,
+    }
+    db.delete(link)
+    common.bump_version(version)
+    db.add(version)
+    db.flush()
+    common.audit(
+        db,
+        amo_id=assignment.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="RosterTaskAssignmentLink",
+        entity_id=link.id,
+        action="delete",
+        before=before,
+        metadata={"version_id": version.id, "reason": reason.strip()},
+    )
 
 
 def serialize_task_link(link: models.RosterTaskAssignmentLink) -> schemas.RosterTaskAssignmentLinkRead:

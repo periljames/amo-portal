@@ -14,9 +14,8 @@ import string
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
 from fastapi import HTTPException
-from sqlalchemy import or_, func, text
+from sqlalchemy import inspect, or_, func, text
 from sqlalchemy.orm import Session, joinedload, noload
-from sqlalchemy import func
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from amodb.security import (
@@ -25,7 +24,7 @@ from amodb.security import (
     get_password_hash,
     verify_password,
 )
-from . import audit, models, schemas
+from . import audit, models, schemas, role_registry
 from .models import (
     MaintenanceScope,
     RegulatoryAuthority,
@@ -44,6 +43,10 @@ from .models import (
 # ---------------------------------------------------------------------------
 
 PASSWORD_RESET_TOKEN_TTL_MINUTES = 60 * 24  # 24 hours
+PORTAL_REFRESH_SESSION_HOURS = max(
+    3,
+    min(168, int(os.getenv("PORTAL_REFRESH_SESSION_HOURS", "12") or "12")),
+)
 MAX_LOGIN_ATTEMPTS = 3
 LOCKOUT_SCHEDULE_SECONDS = (30, 90, 900)
 MIN_PASSWORD_LENGTH = 12
@@ -473,6 +476,16 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         (data.full_name or "").strip()
         or f"{first_name} {last_name}".strip()
     )
+    inferred_role = role_registry.infer_regulated_role(data.position_title)
+    resolved_role = (
+        inferred_role
+        if data.role == models.AccountRole.USER and inferred_role is not None
+        else data.role
+    )
+    role_definition = role_registry.role_definition(resolved_role)
+    position_title = (data.position_title or "").strip() or (
+        role_definition.label if role_definition.regulated else None
+    )
 
     _validate_password_strength(data.password)
     hashed = get_password_hash(data.password)
@@ -497,8 +510,8 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         first_name=first_name,
         last_name=last_name,
         full_name=full_name,
-        role=data.role,
-        position_title=data.position_title,
+        role=resolved_role,
+        position_title=position_title,
         phone=data.phone,
         secondary_phone=data.secondary_phone,
         regulatory_authority=data.regulatory_authority,
@@ -508,19 +521,151 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         licence_expires_on=data.licence_expires_on,
         hashed_password=hashed,
         is_active=True,
-        is_amo_admin=data.role == models.AccountRole.AMO_ADMIN,
+        is_amo_admin=resolved_role == models.AccountRole.AMO_ADMIN,
         is_auditor=bool(
             data.is_auditor
             if data.is_auditor is not None
-            else data.role == models.AccountRole.AUDITOR
+            else resolved_role == models.AccountRole.AUDITOR
         ),
         must_change_password=True,
         # is_system_account defaults to False in the model â€“ human by default.
     )
     db.add(user)
+    db.flush()
+    sync_regulated_postholder_assignment(db, user)
     db.commit()
     db.refresh(user)
     return user
+
+
+def governed_workforce_role_for_user(db: Session, user: models.User) -> models.AccountRole | None:
+    """Return the effective regulated Workforce position role, when present.
+
+    The accounts package deliberately reads only the canonical role key. It
+    does not duplicate or mutate Workforce placement records.
+    """
+    if not (
+        inspect(db.get_bind()).has_table("workforce_person_placements")
+        and inspect(db.get_bind()).has_table("workforce_positions")
+    ):
+        return None
+    try:
+        value = db.execute(
+            text(
+                """
+                SELECT wp.role_key
+                FROM workforce_person_placements wpp
+                JOIN workforce_positions wp ON wp.id = wpp.position_id
+                WHERE wpp.amo_id = :amo_id
+                  AND wpp.user_id = :user_id
+                  AND wpp.placement_type = 'PRIMARY'
+                  AND wpp.effective_from <= CURRENT_DATE
+                  AND (wpp.effective_to IS NULL OR wpp.effective_to >= CURRENT_DATE)
+                  AND wp.role_source = 'KCAR_2025'
+                  AND wp.role_key IS NOT NULL
+                ORDER BY wpp.effective_from DESC, wpp.id DESC
+                LIMIT 1
+                """
+            ),
+            {"amo_id": str(user.amo_id), "user_id": str(user.id)},
+        ).scalar()
+    except (OperationalError, ProgrammingError):
+        return None
+    key = role_registry.canonical_role_key(value)
+    if key not in role_registry.REGULATED_MANAGEMENT_ROLE_KEYS:
+        return None
+    return models.AccountRole(key)
+
+
+def require_role_matches_workforce(
+    db: Session,
+    *,
+    user: models.User,
+    requested_role: models.AccountRole,
+) -> models.AccountRole:
+    governed_role = governed_workforce_role_for_user(db, user)
+    if governed_role is not None and governed_role != requested_role:
+        definition = role_registry.role_definition(governed_role)
+        raise ValueError(
+            f"This account is governed by the Workforce position {definition.label}; change the position in Workforce instead"
+        )
+    return governed_role or requested_role
+
+
+def clear_management_supervisor_links(db: Session, user: models.User) -> int:
+    definition = role_registry.role_definition(user.role)
+    if definition.can_have_supervisor:
+        return 0
+    changed = 0
+    statements = (
+        ("workforce_person_placements", """
+        UPDATE workforce_person_placements
+        SET supervisor_user_id = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE amo_id = :amo_id AND user_id = :user_id
+          AND effective_from <= CURRENT_DATE
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+          AND supervisor_user_id IS NOT NULL
+        """),
+        ("employment_contracts", """
+        UPDATE employment_contracts
+        SET supervisor_user_id = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE amo_id = :amo_id AND user_id = :user_id
+          AND effective_from <= CURRENT_DATE
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+          AND supervisor_user_id IS NOT NULL
+        """),
+    )
+    inspector = inspect(db.get_bind())
+    for table_name, statement in statements:
+        if not inspector.has_table(table_name):
+            continue
+        try:
+            result = db.execute(text(statement), {"amo_id": str(user.amo_id), "user_id": str(user.id)})
+            changed += max(0, int(result.rowcount or 0))
+        except (OperationalError, ProgrammingError):
+            continue
+    return changed
+
+
+def sync_regulated_postholder_assignment(db: Session, user: models.User) -> None:
+    """Keep the canonical authorization postholder record aligned to User.role."""
+    if user.amo_id is None or not inspect(db.get_bind()).has_table("auth_postholder_assignments"):
+        return
+    definition = role_registry.role_definition(user.role)
+    params = {"amo_id": str(user.amo_id), "user_id": str(user.id)}
+    db.execute(
+        text(
+            """
+            UPDATE auth_postholder_assignments
+            SET status = 'INACTIVE', valid_to = CURRENT_TIMESTAMP
+            WHERE amo_id = :amo_id AND user_id = :user_id
+              AND postholder_code IN (
+                  'ACCOUNTABLE_EXECUTIVE', 'BASE_MAINTENANCE_MANAGER',
+                  'LINE_MAINTENANCE_MANAGER', 'WORKSHOP_MANAGER',
+                  'QUALITY_MANAGER', 'SAFETY_MANAGER'
+              )
+              AND status = 'ACTIVE'
+            """
+        ),
+        params,
+    )
+    if not definition.regulated or not user.is_active:
+        return
+    db.execute(
+        text(
+            """
+            INSERT INTO auth_postholder_assignments (
+                id, amo_id, user_id, postholder_code, status, valid_from, created_at
+            ) VALUES (
+                md5(:amo_id || '|' || :user_id || '|' || :postholder_code),
+                :amo_id, :user_id, :postholder_code, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (amo_id, postholder_code, user_id) DO UPDATE SET
+                status = 'ACTIVE', valid_from = CURRENT_TIMESTAMP, valid_to = NULL
+            """
+        ),
+        {**params, "postholder_code": definition.key},
+    )
 
 
 def update_user(
@@ -541,13 +686,34 @@ def update_user(
     elif name_changed:
         user.full_name = f"{user.first_name} {user.last_name}".strip()
 
-    # Role / org placement
-    if data.role is not None:
-        user.role = data.role
-        if data.is_amo_admin is None:
-            user.is_amo_admin = data.role == models.AccountRole.AMO_ADMIN
-    if data.position_title is not None:
-        user.position_title = data.position_title
+    # Role / org placement. An explicitly selected role wins. When only the
+    # title changes, exact KCAR/legacy aliases promote the account to the
+    # matching canonical 2025 role rather than creating a parallel role.
+    explicit_role = "role" in data.model_fields_set and data.role is not None
+    explicit_title = "position_title" in data.model_fields_set
+    resolved_role = data.role if explicit_role else user.role
+    requested_title = data.position_title if explicit_title else user.position_title
+    if not explicit_role and explicit_title:
+        inferred_role = role_registry.infer_regulated_role(requested_title)
+        if inferred_role is not None:
+            resolved_role = inferred_role
+    resolved_role = require_role_matches_workforce(
+        db,
+        user=user,
+        requested_role=resolved_role,
+    )
+    workforce_governed = governed_workforce_role_for_user(db, user) is not None
+    definition = role_registry.role_definition(resolved_role)
+    if explicit_role or resolved_role != user.role:
+        user.role = resolved_role
+    if workforce_governed:
+        user.position_title = definition.label
+    elif explicit_title:
+        user.position_title = (requested_title or "").strip() or (
+            definition.label if definition.regulated else None
+        )
+    elif explicit_role and definition.regulated:
+        user.position_title = definition.label
     if data.phone is not None:
         user.phone = data.phone
     if data.secondary_phone is not None:
@@ -585,11 +751,19 @@ def update_user(
             user.deactivated_at = datetime.now(timezone.utc)
         user.is_active = data.is_active
 
-    if data.is_amo_admin is not None:
-        user.is_amo_admin = data.is_amo_admin
+    expected_amo_admin = bool(getattr(user, "is_superuser", False)) or user.role == models.AccountRole.AMO_ADMIN
+    if data.is_amo_admin is not None and bool(data.is_amo_admin) != expected_amo_admin:
+        raise ValueError("AMO administrator access is derived from the canonical AMO_ADMIN role")
+    if explicit_role or data.is_amo_admin is not None:
+        user.is_amo_admin = expected_amo_admin
 
     if data.is_auditor is not None:
         user.is_auditor = data.is_auditor
+    elif explicit_role:
+        user.is_auditor = user.role == models.AccountRole.AUDITOR
+
+    clear_management_supervisor_links(db, user)
+    sync_regulated_postholder_assignment(db, user)
 
     # Optional: allow marking system/service accounts via API if schema supports it
     if hasattr(data, "is_system_account") and getattr(
@@ -984,7 +1158,11 @@ def authenticate_user(
     return user
 
 
-def issue_access_token_for_user(user: models.User) -> Tuple[str, int]:
+def issue_access_token_for_user(
+    user: models.User,
+    *,
+    auth_session_id: str | None = None,
+) -> Tuple[str, int]:
     """
     Create a JWT access token for the user.
 
@@ -1005,12 +1183,100 @@ def issue_access_token_for_user(user: models.User) -> Tuple[str, int]:
         "is_amo_admin": bool(getattr(user, "is_amo_admin", False)),
         "is_system_account": bool(getattr(user, "is_system_account", False)),
     }
+    if auth_session_id:
+        payload["auth_session_id"] = str(auth_session_id)[:64]
 
     access_token = create_access_token(
         data=payload,
         expires_delta=expires_delta,
     )
     return access_token, int(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+
+
+def _refresh_token_hash(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def create_portal_refresh_session(
+    db: Session,
+    *,
+    user: models.User,
+    auth_session_id: str,
+    ip: str | None,
+    user_agent: str | None,
+) -> tuple[str, models.PortalRefreshSession]:
+    raw_token = secrets.token_urlsafe(48)
+    now = datetime.now(timezone.utc)
+    row = models.PortalRefreshSession(
+        user_id=str(user.id),
+        amo_id=None if bool(getattr(user, "is_superuser", False)) else user.amo_id,
+        auth_session_id=str(auth_session_id)[:64],
+        token_hash=_refresh_token_hash(raw_token),
+        issued_at=now,
+        expires_at=now + timedelta(hours=PORTAL_REFRESH_SESSION_HOURS),
+        created_ip=(ip or "")[:64] or None,
+        user_agent=(user_agent or "")[:1000] or None,
+    )
+    db.add(row)
+    db.flush()
+    return raw_token, row
+
+
+def resolve_portal_refresh_session(
+    db: Session,
+    *,
+    raw_token: str,
+) -> tuple[models.PortalRefreshSession, models.User] | None:
+    value = str(raw_token or "").strip()
+    if len(value) < 32 or len(value) > 512:
+        return None
+    now = datetime.now(timezone.utc)
+    row = (
+        db.query(models.PortalRefreshSession)
+        .filter(models.PortalRefreshSession.token_hash == _refresh_token_hash(value))
+        .first()
+    )
+    if row is None or row.revoked_at is not None:
+        return None
+    expires_at = row.expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at is None or expires_at <= now:
+        return None
+    user = row.user
+    if user is None or not bool(getattr(user, "is_active", False)):
+        return None
+    if row.amo_id is not None and str(getattr(user, "amo_id", "") or "") != str(row.amo_id):
+        return None
+    revoked_at = getattr(user, "token_revoked_at", None)
+    issued_at = row.issued_at
+    if revoked_at is not None:
+        if revoked_at.tzinfo is None:
+            revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+        if issued_at is not None and issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        if issued_at is None or revoked_at >= issued_at:
+            # A password reset, forced sign-out or administrator revocation must
+            # also invalidate an older outage-recovery credential.
+            row.revoked_at = now
+            return None
+    row.last_used_at = now
+    return row, user
+
+
+def revoke_portal_refresh_session(db: Session, *, raw_token: str | None) -> bool:
+    value = str(raw_token or "").strip()
+    if not value:
+        return False
+    row = (
+        db.query(models.PortalRefreshSession)
+        .filter(models.PortalRefreshSession.token_hash == _refresh_token_hash(value))
+        .first()
+    )
+    if row is None or row.revoked_at is not None:
+        return False
+    row.revoked_at = datetime.now(timezone.utc)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -2813,4 +3079,3 @@ def seed_default_departments(db: Session, *, amo_id: str) -> List[models.Departm
     if created:
         db.flush()
     return created
-

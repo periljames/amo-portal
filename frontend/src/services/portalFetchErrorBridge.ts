@@ -1,4 +1,5 @@
 import { reportPortalError, reportUploadError, type PortalErrorTarget } from "./portalError";
+import { ensureAuthenticatedRequestAllowed, handleAuthFailure } from "./auth";
 
 const INSTALL_FLAG = "__amoPortalFetchErrorBridgeInstalled";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -130,10 +131,21 @@ export function installPortalFetchErrorBridge(): () => void {
     const upload = isUpload(init, headers);
     const url = requestUrl(input);
     const silent = headers.get("X-AMO-Silent-Error") === "1" || isSilentBackgroundMutation(url);
+    const authenticatedRequest = (headers.get("Authorization") || "").startsWith("Bearer ");
+
+    if (authenticatedRequest && !silent && !ensureAuthenticatedRequestAllowed()) {
+      throw new DOMException("Session ended", "AbortError");
+    }
 
     try {
       const response = await originalFetch(input, init);
-      if (mutation && !silent && !response.ok) {
+      if (response.status === 401 && authenticatedRequest) {
+        // All modules share this bridge. End an invalid session once and let the
+        // app-level lifecycle redirect, instead of allowing every poller/form to
+        // render its own 401 error and keep retrying.
+        handleAuthFailure("unauthorized-response");
+      }
+      if (mutation && !silent && !response.ok && response.status !== 401) {
         const message = await responseMessage(response);
         const target = errorTarget(upload);
         const options = {

@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.foundations import models as foundation_models
-from amodb.apps.workforce import governance_directory, governance_models, governance_mutations, governance_schemas, models
+from amodb.apps.workforce import (
+    governance_directory,
+    governance_models,
+    governance_mutations,
+    governance_schemas,
+    hierarchy_roles,
+    models,
+)
 
 
 def _id() -> str:
@@ -53,6 +60,29 @@ def _operation(*, amo_id: str, actor_id: str, operation_type: str, payload: dict
 
 def _item(*, user_id: str, payload: dict):
     return SimpleNamespace(user_id=user_id, input_json=payload)
+
+
+def test_kcar_2025_management_catalogue_and_reporting_rule() -> None:
+    assert [role["key"] for role in hierarchy_roles.KCAR_ROLES] == [
+        "ACCOUNTABLE_EXECUTIVE",
+        "BASE_MAINTENANCE_MANAGER",
+        "LINE_MAINTENANCE_MANAGER",
+        "WORKSHOP_MANAGER",
+        "QUALITY_MANAGER",
+        "SAFETY_MANAGER",
+    ]
+    assert all(
+        hierarchy_roles.can_have_supervisor(
+            SimpleNamespace(management_level=role["management_level"])
+        ) is False
+        for role in hierarchy_roles.KCAR_ROLES
+    )
+    assert hierarchy_roles.can_have_supervisor(SimpleNamespace(management_level="SUPERVISOR")) is True
+    assert hierarchy_roles.TENANT_FUNCTION_KEYS == {
+        "HUMAN_RESOURCES",
+        "INFORMATION_TECHNOLOGY",
+        "FINANCE",
+    }
 
 
 @pytest.mark.skipif(

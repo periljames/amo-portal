@@ -141,6 +141,25 @@ def require_shift_template(db: Session, *, amo_id: str, shift_template_id: Optio
     return row
 
 
+def require_shift_department_scope(
+    shift: Optional[models.ShiftTemplate],
+    *,
+    department_id: Optional[str],
+) -> None:
+    """Reject a department-specific shift outside its configured scope.
+
+    An empty department list deliberately means tenant-wide availability so
+    existing shifts remain compatible after the scope migration.
+    """
+    if shift is None:
+        return
+    allowed = set(shift.department_ids)
+    if allowed and str(department_id or "") not in allowed:
+        raise ValueError(
+            f"Shift {shift.code} is not available for the selected department"
+        )
+
+
 def get_period(db: Session, *, amo_id: str, period_id: str) -> Optional[models.RosterPeriod]:
     return db.query(models.RosterPeriod).options(
         selectinload(models.RosterPeriod.versions)

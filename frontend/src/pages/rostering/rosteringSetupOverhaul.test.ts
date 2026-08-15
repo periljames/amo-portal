@@ -11,14 +11,17 @@ function readSource(relativePath: string): string {
 const pagesSource = readSource("./WorkforceRosteringPagesV2.tsx");
 const shellSource = readSource("./components/RosterShell.tsx");
 const setupSource = readSource("./components/RosteringSetupWorkspace.tsx");
+const studioSource = readSource("./components/WorkPatternStudio.tsx");
 const hrSource = readSource("./components/WorkforceHrWorkspace.tsx");
 const automationServiceSource = readSource("../../services/rosteringAutomation.ts");
-const legacyRouterSource = readSource("../../router.legacy.tsx");
+const portalRoutesSource = readSource("../../portalRoutes.tsx");
 
 
 describe("Rostering setup and Workforce ownership", () => {
   it("renders one canonical setup workspace instead of stacked duplicate forms", () => {
     expect(pagesSource).toContain("LazyRosteringSetupWorkspace");
+    expect(pagesSource).toContain('import("./components/RosteringSetupWorkspace")');
+    expect(pagesSource).not.toContain("RosteringSetupWorkspaceWithCodeRegistry");
     expect(pagesSource).not.toContain("LazyRosterPeriodQuickActions");
     expect(pagesSource).not.toContain("LazyRosterRuleQuickEditor");
     expect(pagesSource).not.toContain("LazyUnifiedRosterSettings");
@@ -27,7 +30,7 @@ describe("Rostering setup and Workforce ownership", () => {
   it("exposes clear automatic period and draft rotation controls", () => {
     expect(setupSource).toContain("Create future periods automatically");
     expect(setupSource).toContain("Generate duties from work patterns");
-    expect(setupSource).toContain("Automation creates a draft only");
+    expect(setupSource).toContain("Creates a draft only");
     expect(automationServiceSource).toContain("/automation/preview");
     expect(automationServiceSource).toContain("/automation/run");
   });
@@ -48,8 +51,17 @@ describe("Rostering setup and Workforce ownership", () => {
 
   it("uses the controlled automation timezone for work patterns", () => {
     expect(setupSource).toContain("timezoneName={readiness.policy.timezone_name}");
-    expect(setupSource).toContain("timezone_name: timezoneName");
-    expect(setupSource).not.toContain('timezone_name: "Africa/Nairobi"');
+    expect(studioSource).toContain("timezone_name: timezoneName");
+    expect(studioSource).not.toContain('timezone_name: "Africa/Nairobi"');
+  });
+
+  it("uses one compact shift vocabulary for setup and the planner", () => {
+    expect(studioSource).toContain("1–2 letters or numbers");
+    expect(studioSource).toContain("Apply automatically");
+    expect(studioSource).toContain("anchor_date: autoAssign ? anchorDate : null");
+    expect(studioSource).toContain("Add the real codes used by your organization");
+    expect(studioSource).toContain("Same type and hours as another code");
+    expect(studioSource).not.toContain("Apply default day pattern");
   });
 
   it("requires both create and pattern permissions before generation", () => {
@@ -78,8 +90,8 @@ describe("Rostering setup and Workforce ownership", () => {
   });
 
   it("lets live Workforce permission holders reach the permission-aware workspace", () => {
-    expect(legacyRouterSource).toContain('feature === "rostering.settings"');
-    expect(legacyRouterSource).toContain('get("section") === "workforce"');
+    expect(portalRoutesSource).toContain('feature === "rostering.settings"');
+    expect(portalRoutesSource).toContain('get("section") === "workforce"');
   });
 
   it("shows leave rejection only to effective leave reviewers", () => {
@@ -114,9 +126,10 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(hrSource).toContain("Every active tenant user appears here");
     expect(hrSource).toContain("Create contract");
     expect(hrSource).toContain("createEmploymentContract");
-    expect(hrSource).toContain("Apply default day pattern");
-    const workforceHrService = readSource("../../services/workforceHr.ts");
-    expect(workforceHrService).toContain("/workforce/hr/default-day-pattern");
+    expect(hrSource).not.toContain("Apply default day pattern");
+    expect(studioSource).toContain("Apply automatically");
+    expect(studioSource).toContain("Cycle day 1");
+    expect(studioSource).toContain("Contracts");
     const workforceTypes = readSource("../../types/workforce.ts");
     expect(workforceTypes).toContain('"TEMPORARY"');
     expect(workforceTypes).not.toContain('"CASUAL"');

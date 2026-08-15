@@ -11,7 +11,7 @@ from amodb.apps.accounts import models as account_models
 from . import domain_models as dm
 from . import governance_models as gm
 from .workspace_decision_policy import is_decision_approver
-from .workspace_service import WORKFLOW_TRANSITIONS, is_control_user, role_value
+from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is_control_user, role_value
 
 
 # A workflow decision is not authorized merely because a button is visible. These
@@ -116,8 +116,13 @@ def can_perform_workflow_action(
 
     responsibility_types = _ACTION_RESPONSIBILITIES.get(action)
     if responsibility_types:
+        management_fallback = (
+            is_accountable_approver(user)
+            if action == "APPROVE_ACCOUNTABLE_MANAGER"
+            else is_decision_approver(user)
+        )
         return bool(
-            is_decision_approver(user)
+            management_fallback
             or has_confirmed_responsibility(
                 db,
                 workflow=workflow,

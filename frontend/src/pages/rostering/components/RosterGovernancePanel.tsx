@@ -18,6 +18,7 @@ import {
   listRosterRules,
   listRosterRuleSets,
   requestRosterChanges,
+  updateRosterApprovalAuthority,
 } from "../../../services/rostering";
 import type { RosterPersonRead } from "../../../services/rosterPeople";
 import type {
@@ -89,6 +90,18 @@ export function RosterGovernancePanel({
       await queryClient.invalidateQueries({ queryKey: ["rostering", "governance"] });
     },
   });
+  const authorityUpdateMutation = useMutation({
+    mutationFn: ({ authorityId, canPublish: nextCanPublish, active }: { authorityId: string; canPublish?: boolean; active?: boolean }) => updateRosterApprovalAuthority(authorityId, {
+      ...(typeof nextCanPublish === "boolean" ? { can_publish: nextCanPublish } : {}),
+      ...(typeof active === "boolean" ? { is_active: active } : {}),
+      reason: typeof active === "boolean"
+        ? (active ? "Approval authority restored in Rostering setup" : "Approval authority retired in Rostering setup")
+        : "Publishing scope changed in Rostering setup",
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["rostering", "governance"] });
+    },
+  });
   const decisionMutation = useMutation({
     mutationFn: async ({ action }: { action: "approve" | "changes" }) => {
       const version = versions.find((row) => row.id === effectiveVersionId);
@@ -111,7 +124,7 @@ export function RosterGovernancePanel({
   });
 
   const loading = rulesQuery.isPending || setsQuery.isPending || authoritiesQuery.isPending;
-  const failure = rulesQuery.error || setsQuery.error || authoritiesQuery.error || matrixQuery.error || authorityMutation.error || decisionMutation.error;
+  const failure = rulesQuery.error || setsQuery.error || authoritiesQuery.error || matrixQuery.error || authorityMutation.error || authorityUpdateMutation.error || decisionMutation.error;
 
   return (
     <div className="wr-governance-stack">
@@ -155,7 +168,7 @@ export function RosterGovernancePanel({
             const person = people.find((row) => row.user_id === authority.user_id);
             const department = departments.find((row) => row.id === authority.department_id);
             const base = bases.find((row) => row.id === authority.base_station_id);
-            return <article key={authority.id} className="wr-data-row"><div><strong>{person?.full_name || authority.user_id}</strong><small>{authority.authority_level.replace(/_/g, " ")} · {base?.code || "All bases"} · {department?.label || "Base-wide"}</small></div><StatusPill value={authority.is_active ? "ACTIVE" : "INACTIVE"} /><span>{authority.can_publish ? "Approve + publish" : "Approve"}</span></article>;
+            return <article key={authority.id} className="wr-data-row"><div><strong>{person?.full_name || authority.user_id}</strong><small>{authority.authority_level.replace(/_/g, " ")} · {base?.code || "All bases"} · {department?.label || "Base-wide"}</small></div><StatusPill value={authority.is_active ? "ACTIVE" : "INACTIVE"} /><span>{authority.can_publish ? "Approve + publish" : "Approve only"}</span>{canManageAuthorities ? <div className="wr-actions"><button type="button" className="wr-button wr-button--small" disabled={authorityUpdateMutation.isPending || !authority.is_active} onClick={() => authorityUpdateMutation.mutate({ authorityId: authority.id, canPublish: !authority.can_publish })}>{authority.can_publish ? "Remove publish" : "Grant publish"}</button><button type="button" className={`wr-button wr-button--small${authority.is_active ? " is-danger" : ""}`} disabled={authorityUpdateMutation.isPending} onClick={() => authorityUpdateMutation.mutate({ authorityId: authority.id, active: !authority.is_active })}>{authority.is_active ? "Retire" : "Restore"}</button></div> : null}</article>;
           })}
         </div>
       </section>

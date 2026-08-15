@@ -34,7 +34,7 @@ from amodb.apps.tasks import models as task_models
 from amodb.security import get_current_active_user, require_admin, require_roles
 from amodb.apps.platform import models as platform_models
 from amodb.apps.platform import services as platform_services
-from . import models, schemas, services
+from . import models, schemas, services, role_registry
 from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
@@ -1925,6 +1925,35 @@ def deactivate_amo_asset(
 # ---------------------------------------------------------------------------
 
 
+@router.get(
+    "/role-catalogue",
+    response_model=schemas.AccountRoleCatalogueRead,
+    summary="List canonical account roles and accepted legacy aliases",
+)
+def get_account_role_catalogue(
+    current_user: models.User = Depends(require_admin),
+):
+    roles = role_registry.role_catalogue(include_superuser=bool(current_user.is_superuser))
+    return schemas.AccountRoleCatalogueRead(
+        source="KCAR 2025 canonical roles with KCAR 2018 and tenant aliases",
+        roles=[
+            schemas.AccountRoleCatalogueItem(
+                key=models.AccountRole(definition.key),
+                label=definition.label,
+                category=definition.category,
+                description=definition.description,
+                aliases=list(definition.aliases),
+                regulated=definition.regulated,
+                workforce_role_key=definition.workforce_role_key,
+                can_manage_accounts=definition.can_manage_accounts,
+                can_have_supervisor=definition.can_have_supervisor,
+                permission_summary=list(definition.permission_summary),
+            )
+            for definition in roles
+        ],
+    )
+
+
 @router.post(
     "/users",
     response_model=schemas.UserRead,
@@ -2536,9 +2565,20 @@ def bulk_user_action(
         elif payload.action == 'change_role':
             if payload.role is None:
                 raise HTTPException(status_code=400, detail='role is required for role changes.')
-            user.role = payload.role
-            user.is_amo_admin = payload.role == models.AccountRole.AMO_ADMIN
-            user.is_auditor = payload.role == models.AccountRole.AUDITOR
+            try:
+                resolved_role = services.require_role_matches_workforce(
+                    db, user=user, requested_role=payload.role,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            user.role = resolved_role
+            user.is_amo_admin = resolved_role == models.AccountRole.AMO_ADMIN
+            user.is_auditor = resolved_role == models.AccountRole.AUDITOR
+            definition = role_registry.role_definition(resolved_role)
+            if definition.regulated:
+                user.position_title = definition.label
+            services.clear_management_supervisor_links(db, user)
+            services.sync_regulated_postholder_assignment(db, user)
         elif payload.action == 'add_group':
             if user.amo_id != target_group.amo_id:
                 raise HTTPException(status_code=400, detail='Selected group does not belong to every chosen user.')
@@ -2563,6 +2603,7 @@ def bulk_user_action(
             continue
         else:
             raise HTTPException(status_code=400, detail='Unsupported bulk action.')
+        services.sync_regulated_postholder_assignment(db, user)
         db.add(user)
         affected_ids.append(str(user.id))
 
@@ -2601,15 +2642,30 @@ def user_employment_action(
     if payload.position_title is not None:
         user.position_title = (payload.position_title or '').strip() or None
     if payload.role is not None:
-        user.role = payload.role
-        user.is_amo_admin = payload.role == models.AccountRole.AMO_ADMIN
-        user.is_auditor = payload.role == models.AccountRole.AUDITOR
+        try:
+            resolved_role = services.require_role_matches_workforce(
+                db, user=user, requested_role=payload.role,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        user.role = resolved_role
+        user.is_amo_admin = resolved_role == models.AccountRole.AMO_ADMIN
+        user.is_auditor = resolved_role == models.AccountRole.AUDITOR
+        definition = role_registry.role_definition(resolved_role)
+        if definition.regulated:
+            user.position_title = definition.label
+        services.clear_management_supervisor_links(db, user)
+        services.sync_regulated_postholder_assignment(db, user)
 
     action = payload.action
+    lifecycle_start = payload.effective_from.date() if payload.effective_from else None
+    reemployment_contract_id = None
     if action == 'new_hire':
         user.is_active = True
         user.deactivated_at = None
         user.deactivated_reason = None
+        if profile is not None and profile.hire_date is None and lifecycle_start is not None:
+            profile.hire_date = lifecycle_start
         _set_profile_employment_state(
             profile,
             employment_status=payload.employment_status or 'Active',
@@ -2638,10 +2694,30 @@ def user_employment_action(
             employment_status=payload.employment_status or 'Resigned',
             status_value='Resigned',
         )
-    elif action == 'reinstate':
+    elif action in {'reinstate', 'reemploy'}:
+        if lifecycle_start is None:
+            raise HTTPException(
+                status_code=400,
+                detail='Provide the reinstatement/re-employment start date. It becomes the locked Workforce contract start.',
+            )
         user.is_active = True
         user.deactivated_at = None
         user.deactivated_reason = None
+        if profile is not None:
+            profile.hire_date = lifecycle_start
+        from ..workforce import services as workforce_services
+        try:
+            reemployment_contract = workforce_services.create_reemployment_contract(
+                db,
+                amo_id=user.amo_id,
+                user_id=str(user.id),
+                effective_from=lifecycle_start,
+                actor_user_id=str(current_user.id),
+                reason=(payload.note or action).strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        reemployment_contract_id = reemployment_contract.id if reemployment_contract else None
         _set_profile_employment_state(
             profile,
             employment_status=payload.employment_status or 'Active',
@@ -2660,6 +2736,7 @@ def user_employment_action(
     else:
         raise HTTPException(status_code=400, detail='Unsupported employment action.')
 
+    services.sync_regulated_postholder_assignment(db, user)
     db.add(user)
     if profile is not None:
         db.add(profile)
@@ -2677,6 +2754,8 @@ def user_employment_action(
             'department_id': user.department_id,
             'position_title': user.position_title,
             'is_active': user.is_active,
+            'hire_date': profile.hire_date.isoformat() if profile and profile.hire_date else None,
+            'reemployment_contract_id': reemployment_contract_id,
             'note': payload.note,
         },
         metadata={'module': 'accounts'},
@@ -4236,6 +4315,10 @@ def _manager_roles() -> set[models.AccountRole]:
     return {
         models.AccountRole.SUPERUSER,
         models.AccountRole.AMO_ADMIN,
+        models.AccountRole.ACCOUNTABLE_EXECUTIVE,
+        models.AccountRole.BASE_MAINTENANCE_MANAGER,
+        models.AccountRole.LINE_MAINTENANCE_MANAGER,
+        models.AccountRole.WORKSHOP_MANAGER,
         models.AccountRole.QUALITY_MANAGER,
         models.AccountRole.SAFETY_MANAGER,
         models.AccountRole.PLANNING_ENGINEER,

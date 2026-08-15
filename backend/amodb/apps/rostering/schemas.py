@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..work.models import TaskAssignmentStatusEnum, TaskRoleOnTaskEnum
 from . import models
@@ -35,6 +35,12 @@ class ShiftTemplateBase(RosterSchema):
     description: Optional[str] = None
     color_token: Optional[str] = Field(default=None, max_length=64)
     icon_name: Optional[str] = Field(default=None, max_length=64)
+    department_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("department_ids")
+    @classmethod
+    def normalize_department_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
 
 class ShiftTemplateCreate(ShiftTemplateBase):
@@ -54,6 +60,14 @@ class ShiftTemplateUpdate(RosterSchema):
     description: Optional[str] = None
     color_token: Optional[str] = Field(default=None, max_length=64)
     icon_name: Optional[str] = Field(default=None, max_length=64)
+    department_ids: Optional[list[str]] = None
+
+    @field_validator("department_ids")
+    @classmethod
+    def normalize_department_ids(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
 
 class ShiftTemplateRead(ShiftTemplateBase):
@@ -524,6 +538,57 @@ class PatternGenerationRequest(RosterSchema):
         return self
 
 
+class RosterCoverageCandidateRead(RosterSchema):
+    user_id: str
+    full_name: str
+    staff_code: str
+    score: int
+    workload_minutes: int = 0
+    department_match: bool = False
+    base_match: bool = False
+    role_match: bool = False
+    active_authorisation_count: int = 0
+    reasons: list[str] = Field(default_factory=list)
+
+
+class RosterCoverageRecommendationRead(RosterSchema):
+    assignment_id: str
+    assignment_state_revision: int
+    absent_user_id: str
+    absent_user_full_name: str
+    shift_code: Optional[str] = None
+    shift_label: Optional[str] = None
+    starts_at: datetime
+    ends_at: datetime
+    commitment_id: str
+    commitment_kind: str
+    commitment_title: str
+    commitment_source_module: str
+    linked_task_count: int = 0
+    aircraft_allocation_count: int = 0
+    candidates: list[RosterCoverageCandidateRead] = Field(default_factory=list)
+
+
+class RosterCoverageRecommendationResponse(RosterSchema):
+    version_id: str
+    generated_at: datetime
+    conflict_count: int
+    items: list[RosterCoverageRecommendationRead] = Field(default_factory=list)
+
+
+class RosterCoverageRecommendationApplyRequest(RosterSchema):
+    assignment_id: str
+    replacement_user_id: str
+    reason: str = Field(min_length=5)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    expected_assignment_revision: Optional[int] = Field(default=None, ge=1)
+
+
+class RosterCoverageRecommendationApplyResult(RosterSchema):
+    removed_assignment_id: str
+    replacement_assignment: RosterAssignmentRead
+
+
 class RosterDemandRequirementCreate(RosterSchema):
     base_station_id: Optional[str] = None
     department_id: Optional[str] = None
@@ -556,6 +621,10 @@ class RosterDemandRequirementRead(RosterDemandRequirementCreate):
     updated_by_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class RosterDemandRequirementRetireRequest(RosterSchema):
+    reason: str = Field(min_length=5)
 
 
 class MyRosterResponse(RosterSchema):
@@ -599,6 +668,10 @@ class RosterTaskAllocationCreate(RosterSchema):
         if self.allocated_start and self.allocated_end and self.allocated_end <= self.allocated_start:
             raise ValueError("allocated_end must be after allocated_start")
         return self
+
+
+class RosterTaskLinkDeleteRequest(RosterSchema):
+    reason: str = Field(min_length=5)
 
 
 class RosterTaskAssignmentLinkRead(RosterSchema):

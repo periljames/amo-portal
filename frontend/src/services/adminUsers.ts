@@ -17,6 +17,25 @@ import { BRANDING_EVENT } from "./branding";
 // Re-export these so pages can `import type { AccountRole } from "../services/adminUsers";`
 export type { AccountRole, RegulatoryAuthority };
 
+export interface AdminAccountRoleCatalogueItem {
+  key: AccountRole;
+  label: string;
+  category: "PLATFORM" | "ADMINISTRATION" | "KCAR_2025_MANAGEMENT" | "OPERATIONAL" | "SUPPORT" | "GENERAL";
+  description: string;
+  aliases: string[];
+  regulated: boolean;
+  workforce_role_key: string | null;
+  can_manage_accounts: boolean;
+  can_have_supervisor: boolean;
+  permission_summary: string[];
+}
+
+export interface AdminAccountRoleCatalogue {
+  source: string;
+  canonical_storage: boolean;
+  roles: AdminAccountRoleCatalogueItem[];
+}
+
 export interface AdminUserCreatePayload {
   // BACKEND: schemas.UserCreate
   amo_id?: string; // optional override (superuser only), otherwise resolved from context
@@ -412,6 +431,12 @@ export async function createAdminUser(
   };
 
   return apiPost<AdminUserRead>("/accounts/admin/users", JSON.stringify(body), {
+    headers: authHeaders(),
+  });
+}
+
+export async function getAdminAccountRoleCatalogue(): Promise<AdminAccountRoleCatalogue> {
+  return apiGet<AdminAccountRoleCatalogue>("/accounts/admin/role-catalogue", {
     headers: authHeaders(),
   });
 }
@@ -1054,6 +1079,7 @@ export interface UserEmploymentActionPayload {
     | "transfer"
     | "resign"
     | "reinstate"
+    | "reemploy"
     | "schedule_leave"
     | "return_from_leave";
   role?: AccountRole | null;

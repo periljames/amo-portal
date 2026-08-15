@@ -17,6 +17,7 @@ import type {
   AccountRole,
 } from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
+import { useAdminAccountRoles } from "../hooks/useAdminAccountRoles";
 import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import "../styles/admin-user-management.css";
@@ -25,22 +26,7 @@ type UrlParams = {
   amoCode?: string;
 };
 
-const DEFAULT_ROLE: AccountRole = "AMO_ADMIN";
-
-const ROLE_OPTIONS: Array<{ value: AccountRole; label: string }> = [
-  { value: "AMO_ADMIN", label: "AMO Admin" },
-  { value: "QUALITY_MANAGER", label: "Quality Manager" },
-  { value: "AUDITOR", label: "Auditor" },
-  { value: "SAFETY_MANAGER", label: "Safety Manager" },
-  { value: "PLANNING_ENGINEER", label: "Planning Engineer" },
-  { value: "PRODUCTION_ENGINEER", label: "Production Engineer" },
-  { value: "CERTIFYING_ENGINEER", label: "Certifying Engineer" },
-  { value: "CERTIFYING_TECHNICIAN", label: "Certifying Technician" },
-  { value: "TECHNICIAN", label: "Technician" },
-  { value: "STORES", label: "Stores" },
-  { value: "VIEW_ONLY", label: "View Only" },
-  { value: "SUPERUSER", label: "Platform Superuser" },
-];
+const DEFAULT_ROLE: AccountRole = "USER";
 
 const AdminUserNewPage: React.FC = () => {
   const navigate = useNavigate();
@@ -73,6 +59,7 @@ const AdminUserNewPage: React.FC = () => {
     password: "",
     confirmPassword: "",
   });
+  const roleCatalogue = useAdminAccountRoles(form.role);
   const [staffCodeOptions, setStaffCodeOptions] = useState<string[]>([]);
   const [staffCodeLoading, setStaffCodeLoading] = useState(false);
   const [staffCodeError, setStaffCodeError] = useState<string | null>(null);
@@ -111,6 +98,16 @@ const AdminUserNewPage: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
+    if (name === "role") {
+      const role = value as AccountRole;
+      const definition = roleCatalogue.roles.find((item) => item.key === role);
+      setForm((prev) => ({
+        ...prev,
+        role,
+        positionTitle: definition?.regulated ? definition.label : prev.positionTitle,
+      }));
+      return;
+    }
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -598,17 +595,17 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               disabled={submitting}
             >
-              {ROLE_OPTIONS.filter((r) => isSuperuser || r.value !== "SUPERUSER").map(
-                (r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
+              {roleCatalogue.roles.filter((role) => isSuperuser || role.key !== "SUPERUSER").map(
+                (role) => (
+                  <option key={role.key} value={role.key}>
+                    {role.regulated ? "KCAR 2025 · " : ""}{role.label}
                   </option>
                 )
               )}
             </select>
             <p className="form-hint">
-              Choose the closest operational role. Role controls permissions while department
-              controls the dashboard landing page.
+              {roleCatalogue.selected?.description || "Role controls access; position records remain in Workforce."}
+              {roleCatalogue.selected?.aliases.length ? ` Accepted aliases: ${roleCatalogue.selected.aliases.join(", ")}.` : ""}
             </p>
           </div>
 

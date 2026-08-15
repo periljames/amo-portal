@@ -447,6 +447,17 @@ def import_personnel_rows(
 
         if not dry_run and existing_user:
             profile.user_id = existing_user.id
+            if profile.hire_date:
+                from ..workforce import services as workforce_services
+
+                workforce_services.sync_contract_start_from_hire_date(
+                    db,
+                    amo_id=amo_id,
+                    user_id=str(existing_user.id),
+                    hire_date=profile.hire_date,
+                    actor_user_id=None,
+                    source="PERSONNEL_IMPORT_HIREDATE",
+                )
 
     if dry_run:
         db.rollback()

@@ -153,7 +153,7 @@ const TrainingOperatingSystemPage: React.FC = () => {
   const [assessmentForm, setAssessmentForm] = useState({ template_id: "", candidate_user_id: "", course_id: "", assessor_user_id: "" });
   const [assessmentResultForm, setAssessmentResultForm] = useState({ assessment_id: "", score: "", outcome: "", comments: "", review_decision: "APPROVED", review_comment: "" });
   const [caseForm, setCaseForm] = useState({ candidate_user_id: "", authorisation_type_id: "", requested_scope: "", required_assessment_types: ["WRITTEN", "PRACTICAL", "ORAL"] });
-  const [committeeForm, setCommitteeForm] = useState({ case_id: "", position_code: "HEAD_OF_QUALITY", decision: "APPROVE", comments: "" });
+  const [committeeForm, setCommitteeForm] = useState({ case_id: "", position_code: "QUALITY_MANAGER", decision: "APPROVE", comments: "" });
   const [issueForm, setIssueForm] = useState({ case_id: "", effective_from: today(), expires_at: "", restrictions: "" });
   const [authorizationAction, setAuthorizationAction] = useState({ case_id: "", action: "RECOMMEND_APPROVAL", reason: "", restrictions: "" });
   const [budgetForm, setBudgetForm] = useState({ plan_id: "", reporting_currency: "USD", rate_date: today(), rate_source: "Approved finance rate snapshot", exchange_rate: "1" });

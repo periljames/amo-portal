@@ -295,8 +295,12 @@ export async function createRevisionExport(
 export type ManualProcessingStatus = {
   revision_id: string;
   stage: string;
+  job_id?: string | null;
+  job_type?: "MANUAL_REVISION_PROCESS" | "MANUAL_REVISION_OCR" | null;
   actor_id?: string | null;
   at?: string | null;
+  error?: string | null;
+  result?: Record<string, unknown> | null;
 };
 
 export async function getProcessingStatus(tenantSlug: string, manualId: string, revId: string) {

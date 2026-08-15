@@ -9,7 +9,6 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -29,15 +28,12 @@ import {
   updateEmploymentContract,
 } from "../../../services/workforce";
 import {
-  applyWorkforceHrDefaultDayBatch,
   exportWorkforceHrPeople,
   getWorkforceHrPeopleFacets,
   listWorkforceHrPeople,
-  previewWorkforceHrDefaultDayBatch,
 } from "../../../services/workforceHr";
 import type { BaseStationRead } from "../../../types/foundations";
 import type {
-  HrDefaultDayBatchPreview,
   HrFilterOption,
   HrPeopleFilters,
   HrPeopleSelection,
@@ -72,10 +68,9 @@ type ContractDraft = {
 
 type Props = {
   canManageContracts: boolean;
-  canInitializeDefaults: boolean;
 };
 
-export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefaults }: Props) {
+export function WorkforcePeopleDirectory({ canManageContracts }: Props) {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const [filters, setFilters] = useState<HrPeopleFilters>(EMPTY_FILTERS);
@@ -84,7 +79,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
-  const [preview, setPreview] = useState<HrDefaultDayBatchPreview | null>(null);
   const [editing, setEditing] = useState<HrPersonReadiness | null>(null);
   const [draft, setDraft] = useState<ContractDraft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -130,7 +124,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
     setSelectedIds(new Set());
     setExcludedIds(new Set());
     setAllMatching(false);
-    setPreview(null);
   }, [filters]);
 
   const selection = useMemo<HrPeopleSelection>(() => {
@@ -166,7 +159,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
   };
 
   const togglePerson = (userId: string) => {
-    setPreview(null);
     if (allMatching) {
       setExcludedIds((current) => {
         const next = new Set(current);
@@ -185,7 +177,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
   };
 
   const togglePage = () => {
-    setPreview(null);
     const pageIds = people.map((person) => person.user_id);
     if (allMatching) {
       setExcludedIds((current) => {
@@ -212,14 +203,12 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
     setAllMatching(true);
     setSelectedIds(new Set());
     setExcludedIds(new Set());
-    setPreview(null);
   };
 
   const clearSelection = () => {
     setAllMatching(false);
     setSelectedIds(new Set());
     setExcludedIds(new Set());
-    setPreview(null);
   };
 
   const runAction = async (key: string, action: () => Promise<void>) => {
@@ -235,27 +224,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
     }
   };
 
-  const previewDefaultPattern = () => runAction("preview-default-pattern", async () => {
-    const result = await previewWorkforceHrDefaultDayBatch(selection);
-    setPreview(result);
-  });
-
-  const applyDefaultPattern = () => {
-    if (!preview) return;
-    void runAction("apply-default-pattern", async () => {
-      const result = await applyWorkforceHrDefaultDayBatch(selection, preview.matched_count);
-      setNotice(
-        `Default day pattern assigned to ${result.assigned_count} employees; `
-        + `${result.already_assigned_count} already had an active pattern and `
-        + `${result.ineligible_count} were not contract-eligible.`,
-      );
-      setPreview(null);
-      clearSelection();
-      await queryClient.invalidateQueries({ queryKey: ["workforce", "hr"] });
-      await queryClient.invalidateQueries({ queryKey: ["rostering"] });
-    });
-  };
-
   const exportSelection = () => runAction("export", async () => {
     await exportWorkforceHrPeople(selection);
     setNotice(`Export prepared for ${selectionCount} selected employees.`);
@@ -266,7 +234,7 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
     setDraft({
       contract_type: (person.contract_type || "PERMANENT") as ContractType,
       employment_status: (person.contract_id ? person.employment_status : "ACTIVE") as EmploymentStatus,
-      effective_from: person.contract_effective_from || isoDate(new Date()),
+      effective_from: person.hire_date || person.contract_effective_from || isoDate(new Date()),
       effective_to: person.contract_effective_to || "",
       primary_base_station_id: person.primary_base_station_id || "",
       standard_weekly_hours: String((person.standard_weekly_minutes || 2400) / 60),
@@ -392,7 +360,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
           {allMatching ? <span>All matching filters selected{excludedIds.size ? ` · ${excludedIds.size} excluded` : ""}</span> : null}
           <div className="workforce-directory__batch-actions">
             <button type="button" className="wr-button wr-button--secondary" disabled={Boolean(busy)} onClick={() => void exportSelection()}><Download size={14} /> Export CSV</button>
-            {canInitializeDefaults ? <button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy)} onClick={() => void previewDefaultPattern()}><CalendarDays size={14} /> Preview default pattern</button> : null}
             <button type="button" className="wr-button wr-button--secondary" onClick={clearSelection}>Clear selection</button>
           </div>
         </div>
@@ -435,15 +402,6 @@ export function WorkforcePeopleDirectory({ canManageContracts, canInitializeDefa
         <div><span>Rows per page</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number]); setPage(1); }}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select><span>{total ? `${((currentPage - 1) * pageSize + 1).toLocaleString()}–${Math.min(currentPage * pageSize, total).toLocaleString()} of ${total.toLocaleString()}` : "0 results"}</span></div>
         <div><button type="button" className="wr-icon-button" aria-label="First page" disabled={currentPage <= 1 || peopleQuery.isFetching} onClick={() => setPage(1)}><ChevronsLeft size={16} /></button><button type="button" className="wr-icon-button" aria-label="Previous page" disabled={currentPage <= 1 || peopleQuery.isFetching} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>Page <strong>{currentPage}</strong> of <strong>{pages || 1}</strong></span><button type="button" className="wr-icon-button" aria-label="Next page" disabled={!pages || currentPage >= pages || peopleQuery.isFetching} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button><button type="button" className="wr-icon-button" aria-label="Last page" disabled={!pages || currentPage >= pages || peopleQuery.isFetching} onClick={() => setPage(pages)}><ChevronsRight size={16} /></button></div>
       </footer>
-
-      {preview ? (
-        <div className="workforce-directory__dialog" role="dialog" aria-modal="true" aria-label="Preview default work pattern assignment">
-          <header><div><span className="wr-eyebrow">Controlled batch preview</span><h3>Apply default Monday–Friday pattern</h3></div><button type="button" className="wr-icon-button" aria-label="Close preview" onClick={() => setPreview(null)}><X size={16} /></button></header>
-          <div className="workforce-directory__preview-grid"><article><span>Matched</span><strong>{preview.matched_count.toLocaleString()}</strong></article><article><span>Assignable</span><strong>{preview.assignable_count.toLocaleString()}</strong></article><article><span>Already assigned</span><strong>{preview.already_assigned_count.toLocaleString()}</strong></article><article><span>Not eligible</span><strong>{preview.ineligible_count.toLocaleString()}</strong></article></div>
-          <p>The action applies only to the reviewed selection. Existing active patterns are preserved, and the backend rejects the action if the filtered population changes after this preview.</p>
-          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setPreview(null)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || preview.assignable_count === 0} onClick={applyDefaultPattern}><CalendarDays size={15} /> Apply to {preview.assignable_count.toLocaleString()}</button></div>
-        </div>
-      ) : null}
 
       {editing && draft ? <ContractEditor person={editing} draft={draft} setDraft={setDraft} bases={basesQuery.data || []} loadingBases={basesQuery.isPending} valid={validDraft} busy={Boolean(busy)} onClose={closeEditor} onSave={saveContract} /> : null}
     </section>
@@ -488,7 +446,7 @@ function filterLabels(filters: HrPeopleFilters, facets?: Awaited<ReturnType<type
 
 function ContractEditor({ person, draft, setDraft, bases, loadingBases, valid, busy, onClose, onSave }: { person: HrPersonReadiness; draft: ContractDraft; setDraft: (draft: ContractDraft) => void; bases: BaseStationRead[]; loadingBases: boolean; valid: boolean; busy: boolean; onClose: () => void; onSave: () => void }) {
   const update = <K extends keyof ContractDraft>(key: K, value: ContractDraft[K]) => setDraft({ ...draft, [key]: value });
-  return <div className="workforce-directory__dialog workforce-directory__contract" role="dialog" aria-modal="true" aria-label={`Employment contract for ${person.full_name}`}><header><div><span className="wr-eyebrow">Effective-dated Workforce record</span><h3>{person.full_name}</h3><p>{person.staff_code} · {person.position_title || formatValue(person.account_role)}</p></div><button type="button" className="wr-icon-button" aria-label="Close contract editor" onClick={onClose}><X size={16} /></button></header><div className="workforce-directory__contract-grid"><label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => update("contract_type", event.target.value as ContractType)}>{["PERMANENT", "FIXED_TERM", "TEMPORARY", "CONTRACTOR", "INTERN"].map((value) => <option key={value}>{value}</option>)}</select></label><label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => update("employment_status", event.target.value as EmploymentStatus)}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED"].map((value) => <option key={value}>{value}</option>)}</select></label><label><span>Effective from</span><input type="date" value={draft.effective_from} onChange={(event) => update("effective_from", event.target.value)} /></label><label><span>Effective to</span><input type="date" min={draft.effective_from} value={draft.effective_to} onChange={(event) => update("effective_to", event.target.value)} /></label><label><span>Primary base</span><select value={draft.primary_base_station_id} disabled={loadingBases} onChange={(event) => update("primary_base_station_id", event.target.value)}><option value="">Select canonical base</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label><label><span>FTE percentage</span><input type="number" min="1" max="100" step="0.1" value={draft.fte_percentage} onChange={(event) => update("fte_percentage", event.target.value)} /></label><label><span>Weekly hours</span><input type="number" min="0" step="0.25" value={draft.standard_weekly_hours} onChange={(event) => update("standard_weekly_hours", event.target.value)} /></label><label><span>Daily hours</span><input type="number" min="0" step="0.25" value={draft.standard_daily_hours} onChange={(event) => update("standard_daily_hours", event.target.value)} /></label><label><span>Payroll number</span><input value={draft.payroll_number} onChange={(event) => update("payroll_number", event.target.value)} /></label><label><span>Cost centre</span><input value={draft.cost_centre} onChange={(event) => update("cost_centre", event.target.value)} /></label></div><div className="workforce-directory__flags">{(["overtime_eligible", "night_shift_eligible", "standby_eligible"] as const).map((key) => <label key={key}><input type="checkbox" checked={draft[key]} onChange={(event: ChangeEvent<HTMLInputElement>) => update(key, event.target.checked)} /> {key === "overtime_eligible" ? "Overtime eligible" : key === "night_shift_eligible" ? "Night duty eligible" : "Standby eligible"}</label>)}</div>{!loadingBases && !bases.length ? <div className="wr-inline-error">No active canonical base exists. Create one before saving this contract.</div> : null}<div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={busy || !valid} onClick={onSave}><Save size={15} /> {person.contract_id ? "Save contract" : "Create contract"}</button></div></div>;
+  return <div className="workforce-directory__dialog workforce-directory__contract" role="dialog" aria-modal="true" aria-label={`Employment contract for ${person.full_name}`}><header><div><span className="wr-eyebrow">Effective-dated Workforce record</span><h3>{person.full_name}</h3><p>{person.staff_code} · {person.position_title || formatValue(person.account_role)}</p></div><button type="button" className="wr-icon-button" aria-label="Close contract editor" onClick={onClose}><X size={16} /></button></header><div className="workforce-directory__contract-grid"><label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => update("contract_type", event.target.value as ContractType)}>{["PERMANENT", "FIXED_TERM", "TEMPORARY", "CONTRACTOR", "INTERN"].map((value) => <option key={value}>{value}</option>)}</select></label><label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => update("employment_status", event.target.value as EmploymentStatus)}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED"].map((value) => <option key={value}>{value}</option>)}</select></label><label className={person.hire_date ? "wr-locked-field" : undefined}><span>Workforce start</span><input type="date" value={draft.effective_from} disabled={Boolean(person.hire_date)} onChange={(event) => update("effective_from", event.target.value)} />{person.hire_date ? <small>Imported hire date · re-import the personnel source to correct it.</small> : null}</label><label><span>Effective to</span><input type="date" min={draft.effective_from} value={draft.effective_to} onChange={(event) => update("effective_to", event.target.value)} /></label><label><span>Primary base</span><select value={draft.primary_base_station_id} disabled={loadingBases} onChange={(event) => update("primary_base_station_id", event.target.value)}><option value="">Select canonical base</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label><label><span>FTE percentage</span><input type="number" min="1" max="100" step="0.1" value={draft.fte_percentage} onChange={(event) => update("fte_percentage", event.target.value)} /></label><label><span>Weekly hours</span><input type="number" min="0" step="0.25" value={draft.standard_weekly_hours} onChange={(event) => update("standard_weekly_hours", event.target.value)} /></label><label><span>Daily hours</span><input type="number" min="0" step="0.25" value={draft.standard_daily_hours} onChange={(event) => update("standard_daily_hours", event.target.value)} /></label><label><span>Payroll number</span><input value={draft.payroll_number} onChange={(event) => update("payroll_number", event.target.value)} /></label><label><span>Cost centre</span><input value={draft.cost_centre} onChange={(event) => update("cost_centre", event.target.value)} /></label></div><div className="workforce-directory__flags">{(["overtime_eligible", "night_shift_eligible", "standby_eligible"] as const).map((key) => <label key={key}><input type="checkbox" checked={draft[key]} onChange={(event: ChangeEvent<HTMLInputElement>) => update(key, event.target.checked)} /><span>{key === "overtime_eligible" ? "Overtime eligible" : key === "night_shift_eligible" ? "Night duty eligible" : "Standby eligible"}</span></label>)}</div>{!loadingBases && !bases.length ? <div className="wr-inline-error">No active canonical base exists. Create one before saving this contract.</div> : null}<div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={busy || !valid} onClick={onSave}><Save size={15} /> {person.contract_id ? "Save contract" : "Create contract"}</button></div></div>;
 }
 
 function contractDateLabel(person: HrPersonReadiness): string {

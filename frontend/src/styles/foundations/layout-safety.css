@@ -16,6 +16,16 @@ body {
   overflow-x: hidden;
 }
 
+/* Component-level `overflow-wrap:anywhere` rules used to split ordinary labels
+ * into single characters when a grid/flex child became narrow. Preserve normal
+ * word boundaries portal-wide; long identifiers can still break before they
+ * overflow their container. Code and preformatted evidence retain their own
+ * explicit wrapping behaviour. */
+body :where(*):not(pre):not(code) {
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
+}
+
 :where(
   main,
   section,
@@ -58,7 +68,7 @@ body {
   max-width: 100%;
 }
 
-:where(.table-wrap, .data-table-wrap, .responsive-table, [data-table-scroll="true"]) {
+:where(.table-wrap, .table-shell, .data-table-wrap, .data-table-shell, .responsive-table, [class*="table-wrap"], [class*="table-shell"], [data-table-scroll="true"]) {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
@@ -69,8 +79,49 @@ body {
 
 :where(table) { border-collapse: collapse; }
 
-:where(td, th, p, li, dd, dt, label, .description, .subtitle, .copy) {
-  overflow-wrap: anywhere;
+:where(p, li, dd, dt, .description, .subtitle, .copy) {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+:where(label, legend, th, button, [role="button"], .field-label, .form-label, .pill, .badge, .chip, .tab) {
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+:where(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [contenteditable="true"]) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(form, fieldset, [role="dialog"], .dialog, .modal, .drawer) :where(.form-grid, .field-grid, .fields, [class*="form-grid"], [class*="field-grid"]) > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(button, [role="button"], .btn, .button, .pill, .badge, .chip, .tab) {
+  max-width: 100%;
+}
+
+:where(th) {
+  white-space: nowrap;
+}
+
+:where(td) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(td) > :where(strong, span, small, a) {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :where(.toolbar, .page-actions, .header-actions, .form-actions, .dialog-actions) {
@@ -79,6 +130,11 @@ body {
   gap: var(--space-2, 0.5rem);
   min-width: 0;
   flex-wrap: wrap;
+}
+
+:where(.toolbar, .page-actions, .header-actions, .form-actions, .dialog-actions) > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 :where(.dashboard-grid, .card-grid, .metric-grid, .form-grid) > * { min-width: 0; }

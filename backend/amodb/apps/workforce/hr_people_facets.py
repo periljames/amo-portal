@@ -12,6 +12,11 @@ from . import hr_people_directory, hr_schemas, hr_service, models
 def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets:
     today = hr_people_directory._today(db, amo_id=amo_id)
     now = hr_service._utcnow()
+    automatic_ids, ambiguous_ids = hr_people_directory._automatic_pattern_resolution(
+        db,
+        amo_id=amo_id,
+        today=today,
+    )
     human_filter = (
         account_models.User.amo_id == amo_id,
         account_models.User.is_active.is_(True),
@@ -26,6 +31,8 @@ def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets
             filters=filters,
             today=today,
             now=now,
+            automatic_patterned_user_ids=automatic_ids,
+            ambiguous_pattern_user_ids=ambiguous_ids,
         )
         return int(query.order_by(None).count())
 
@@ -174,8 +181,8 @@ def list_people_facets(db: Session, *, amo_id: str) -> hr_schemas.HrPeopleFacets
             ("MISSING", "No contract"),
         )),
         pattern_states=static_options("pattern_state", (
-            ("DEFAULT", "Default day pattern"),
-            ("ASSIGNED", "Other assigned pattern"),
-            ("MISSING", "No active pattern"),
+            ("DEFAULT", "Legacy default"),
+            ("ASSIGNED", "Assigned or automatic"),
+            ("MISSING", "No matching pattern"),
         )),
     )

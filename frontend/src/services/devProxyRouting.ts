@@ -1,7 +1,7 @@
 export const PLATFORM_OPS_DEV_PROXY_PATTERN = "^/ops(?:/|$|\\?)";
 
 export const DEV_API_PROXY_PATTERN =
-  "^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|public|quality|qms|platform|reliability|audit|audit-events|bootstrap|integrations|api|notifications|email-logs|tasks|health|healthz|time|manuals|doc-control|records|foundations|rostering|workforce)(?:/|$|\\?)";
+  "^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|public|quality|qms|platform|reliability|audit|audit-events|bootstrap|integrations|api|notifications|email-logs|tasks|health|healthz|livez|readyz|time|manuals|doc-control|records|foundations|rostering|workforce)(?:/|$|\\?)";
 
 const PLATFORM_OPS_DEV_PATH = new RegExp(PLATFORM_OPS_DEV_PROXY_PATTERN, "i");
 const DEV_API_PATH = new RegExp(DEV_API_PROXY_PATTERN, "i");

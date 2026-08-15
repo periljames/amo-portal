@@ -48,14 +48,14 @@ AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
 )
 
 STARTER_CODES = tuple(item.code for item in AMO_STARTER_SHIFTS)
-SHIFT_CODE_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
+SHIFT_CODE_PATTERN = re.compile(r"^[A-Z0-9]{1,2}$")
 
 
 def normalize_shift_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if not SHIFT_CODE_PATTERN.fullmatch(code):
         raise ValueError(
-            "Roster code must be 2-8 uppercase letters/numbers. Two characters are recommended; punctuation such as H.A is not a canonical code."
+            "Shift code must be one or two uppercase letters/numbers (for example D, N1 or OF)."
         )
     return code
 

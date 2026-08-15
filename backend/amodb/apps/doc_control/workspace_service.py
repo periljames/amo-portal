@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import role_registry
 from amodb.apps.manuals import models as manual_models
 from amodb.apps.manuals.router_legacy import _tenant_by_slug
 from amodb.security import get_current_actor_id
@@ -28,8 +29,8 @@ CONTROL_ROLES = {
 APPROVER_ROLES = {
     "SUPERUSER",
     "AMO_ADMIN",
+    "ACCOUNTABLE_EXECUTIVE",
     "QUALITY_MANAGER",
-    "QUALITY_INSPECTOR",
 }
 
 WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
@@ -100,13 +101,25 @@ def is_approver(user: account_models.User) -> bool:
     )
 
 
+def is_accountable_approver(user: account_models.User) -> bool:
+    role = role_value(user)
+    inferred = role_registry.infer_regulated_role(getattr(user, "position_title", None))
+    return bool(
+        getattr(user, "is_superuser", False)
+        or getattr(user, "is_amo_admin", False)
+        or role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE.value
+        or inferred == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE
+    )
+
+
 def require_control_user(user: account_models.User) -> None:
     if not is_control_user(user):
         raise HTTPException(status_code=403, detail="Document Control privileges required")
 
 
-def require_approver(user: account_models.User) -> None:
-    if not is_approver(user):
+def require_approver(user: account_models.User, *, action: str | None = None) -> None:
+    allowed = is_accountable_approver(user) if action == "APPROVE_ACCOUNTABLE_MANAGER" else is_approver(user)
+    if not allowed:
         raise HTTPException(status_code=403, detail="Document approval privileges required")
 
 

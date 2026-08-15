@@ -11,7 +11,15 @@ from sqlalchemy.orm import Session, aliased, joinedload
 
 from ..accounts import models as account_models
 from ..foundations import models as foundation_models
-from . import governance_models, governance_schemas, hr_people_directory, hr_schemas, hr_service, models
+from . import (
+    governance_models,
+    governance_schemas,
+    hierarchy_roles,
+    hr_people_directory,
+    hr_schemas,
+    hr_service,
+    models,
+)
 
 MAX_BATCH_USERS = 10_000
 
@@ -218,13 +226,22 @@ def upsert_grade(db: Session, *, amo_id: str, payload, row_id: str | None = None
 
 
 def _position_read(row):
+    role_source = str(getattr(row, "role_source", "TENANT") or "TENANT")
+    management_level = str(getattr(row, "management_level", "STAFF") or "STAFF")
     return governance_schemas.PositionRead(
         id=str(row.id), code=row.code, canonical_title=row.canonical_title,
         job_family_id=str(row.job_family_id) if row.job_family_id else None,
         job_family_name=getattr(getattr(row, "job_family", None), "name", None),
         grade_id=str(row.grade_id) if row.grade_id else None,
         grade_name=getattr(getattr(row, "grade", None), "name", None),
-        description=row.description, is_supervisory=bool(row.is_supervisory), is_active=bool(row.is_active),
+        description=row.description,
+        role_source=role_source,
+        role_key=getattr(row, "role_key", None),
+        management_level=management_level,
+        can_have_supervisor=hierarchy_roles.can_have_supervisor(row),
+        is_locked=role_source == "KCAR_2025",
+        is_supervisory=bool(row.is_supervisory),
+        is_active=bool(row.is_active),
     )
 
 
@@ -241,6 +258,31 @@ def _validate_position_references(db: Session, *, amo_id: str, payload):
         raise ValueError("Grade not found")
 
 
+def _validate_unique_position_fields(
+    db: Session,
+    *,
+    amo_id: str,
+    code: str,
+    role_key: str | None,
+    row_id: str | None,
+):
+    duplicate_code = db.query(governance_models.WorkforcePosition.id).filter(
+        governance_models.WorkforcePosition.amo_id == amo_id,
+        func.upper(governance_models.WorkforcePosition.code) == code.upper(),
+        governance_models.WorkforcePosition.id != (row_id or "__new__"),
+    ).first()
+    if duplicate_code is not None:
+        raise ValueError("Position code is already in use")
+    if role_key:
+        duplicate_role = db.query(governance_models.WorkforcePosition.id).filter(
+            governance_models.WorkforcePosition.amo_id == amo_id,
+            governance_models.WorkforcePosition.role_key == role_key,
+            governance_models.WorkforcePosition.id != (row_id or "__new__"),
+        ).first()
+        if duplicate_role is not None:
+            raise ValueError("This tenant function already has a canonical position")
+
+
 def list_positions(db: Session, *, amo_id: str, include_inactive: bool = False):
     query = db.query(governance_models.WorkforcePosition).options(
         joinedload(governance_models.WorkforcePosition.job_family),
@@ -255,10 +297,58 @@ def list_positions(db: Session, *, amo_id: str, include_inactive: bool = False):
 
 def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = None):
     _validate_position_references(db, amo_id=amo_id, payload=payload)
-    return _simple_upsert(
-        db, model=governance_models.WorkforcePosition,
-        schema=governance_schemas.PositionRead, amo_id=amo_id, payload=payload, row_id=row_id,
+    row = None
+    if row_id:
+        row = db.query(governance_models.WorkforcePosition).filter(
+            governance_models.WorkforcePosition.amo_id == amo_id,
+            governance_models.WorkforcePosition.id == row_id,
+        ).with_for_update().first()
+        if row is None:
+            raise ValueError("Governed Workforce record not found")
+    regulatory = row is not None and str(row.role_source or "TENANT") == "KCAR_2025"
+    code = payload.code.strip().upper()
+    title = payload.canonical_title.strip()
+    role_key = row.role_key if regulatory else payload.tenant_function
+    if regulatory:
+        if code != row.code or title != row.canonical_title:
+            raise ValueError("KCAR position identity is protected; only its family, grade and description may be edited")
+        if payload.management_level != row.management_level or payload.tenant_function:
+            raise ValueError("KCAR management classification is protected")
+        if not payload.is_active or not payload.is_supervisory:
+            raise ValueError("Required KCAR management positions must remain active and supervisory")
+    _validate_unique_position_fields(
+        db,
+        amo_id=amo_id,
+        code=code,
+        role_key=role_key,
+        row_id=row_id,
     )
+    if row is None:
+        row = governance_models.WorkforcePosition(amo_id=amo_id, role_source="TENANT")
+        db.add(row)
+    row.code = code
+    row.canonical_title = title
+    row.job_family_id = payload.job_family_id
+    row.grade_id = payload.grade_id
+    row.description = payload.description
+    if not regulatory:
+        row.role_source = "TENANT"
+        row.role_key = role_key
+        row.management_level = payload.management_level
+        row.is_supervisory = bool(
+            payload.is_supervisory or payload.management_level in {"SUPERVISOR", "MANAGER", "EXECUTIVE"}
+        )
+        row.is_active = payload.is_active
+    db.flush()
+    if not hierarchy_roles.can_have_supervisor(row):
+        hierarchy_roles.clear_current_management_supervisors(
+            db,
+            amo_id=amo_id,
+            position_id=str(row.id),
+            on_date=_today(db, amo_id=amo_id),
+        )
+        db.flush()
+    return _position_read(row)
 
 
 def _placement_exists(*, amo_id: str, today: date, conditions: list):
@@ -497,6 +587,7 @@ def _enrich_people(db: Session, *, amo_id: str, users, base_items, today: date):
             grade_name=getattr(grade, "name", None),
             supervisor_user_id=(str(primary.supervisor_user_id) if primary and primary.supervisor_user_id else
                                 (str(contract.supervisor_user_id) if contract and contract.supervisor_user_id else None)),
+            can_have_supervisor=position is None or hierarchy_roles.can_have_supervisor(position),
             secondary_org_units=secondary, matrix_org_units=matrix,
             secondary_base_station_id=str(contract.secondary_base_station_id) if contract and contract.secondary_base_station_id else None,
             secondary_base_code=getattr(secondary_base, "code", None), lifecycle_state=lifecycle,

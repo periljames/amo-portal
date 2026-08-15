@@ -140,6 +140,11 @@ def calculate_attendance_totals(
         if window_end and at >= ensure_aware(window_end):
             continue
         event_type = event.event_type
+        metadata = event.metadata_json or {}
+        if metadata.get("requires_review"):
+            warning = str(metadata.get("review_reason") or "Attendance event requires supervisor review")
+            if warning not in warnings:
+                warnings.append(warning)
         if event_type == models.AttendanceEventType.CLOCK_IN:
             if active_start is not None:
                 warnings.append("Duplicate clock-in ignored")
@@ -177,7 +182,6 @@ def calculate_attendance_totals(
             active_start = None
             break_start = None
         elif event_type == models.AttendanceEventType.MANUAL_ADJUSTMENT:
-            metadata = event.metadata_json or {}
             try:
                 manual += int(metadata.get("minutes", 0))
             except (TypeError, ValueError):

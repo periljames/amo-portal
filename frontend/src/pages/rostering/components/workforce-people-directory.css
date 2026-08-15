@@ -341,19 +341,56 @@
   margin: 14px 0;
 }
 
+.workforce-directory__contract-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workforce-directory__contract-grid label > span:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workforce-directory__contract-grid :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .workforce-directory__flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  align-items: center;
+  gap: 10px 24px;
   margin-bottom: 14px;
   color: var(--text-muted, #64748b);
   font-size: .72rem;
 }
 
 .workforce-directory__flags label {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: 18px max-content;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.workforce-directory__flags input[type="checkbox"] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.workforce-directory__flags span {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 [data-theme="dark"] .workforce-directory__search,
@@ -395,6 +432,10 @@
   }
 
   .workforce-directory__filters {
+    grid-template-columns: 1fr;
+  }
+
+  .workforce-directory__flags {
     grid-template-columns: 1fr;
   }
 }

@@ -2,12 +2,14 @@ import "./workforce-governance.css";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, RefreshCw, Save, ShieldCheck, UsersRound } from "lucide-react";
+import { BadgeCheck, Building2, CircleAlert, Landmark, Plus, RefreshCw, Save, ShieldCheck, UsersRound } from "lucide-react";
 
 import { listBaseStations } from "../../../services/foundations";
 import {
   getWorkforceHrBulkOperation,
+  getWorkforceHrHierarchyBlueprint,
   getWorkforceHrPeopleFacets,
+  initializeWorkforceHrKcars2025Hierarchy,
   listWorkforceHrGrades,
   listWorkforceHrJobFamilies,
   listWorkforceHrOrgUnits,
@@ -25,13 +27,16 @@ import type {
   HrBulkOperation,
   HrFilterOption,
   HrGrade,
+  HrHierarchyBlueprint,
   HrJobFamily,
+  HrManagementLevel,
   HrOrgUnit,
   HrPeopleFilters,
   HrPeopleSelection,
   HrPersonnelMutationPayload,
   HrPersonnelMutationType,
   HrPosition,
+  HrTenantFunction,
 } from "../../../types/workforceHr";
 import { errorMessage, isoDate } from "../rosterUi";
 import { RosterLoading, StatusPill } from "./RosterShell";
@@ -65,22 +70,29 @@ const initialGovernanceFilters = (): HrPeopleFilters => {
 };
 
 type Props = { canManage: boolean };
-type Catalogue = "org" | "family" | "grade" | "position";
+type Catalogue = "hierarchy" | "org" | "family" | "grade" | "position";
 
 type OrgDraft = { id?: string; parent_id: string; legacy_department_id: string; code: string; name: string; unit_type: string; description: string; is_active: boolean; sort_order: number };
 type FamilyDraft = { id?: string; code: string; name: string; description: string; is_active: boolean };
 type GradeDraft = { id?: string; code: string; name: string; rank_order: number; description: string; is_active: boolean };
-type PositionDraft = { id?: string; code: string; canonical_title: string; job_family_id: string; grade_id: string; description: string; is_supervisory: boolean; is_active: boolean };
+type PositionDraft = {
+  id?: string; code: string; canonical_title: string; job_family_id: string; grade_id: string;
+  description: string; management_level: HrManagementLevel; tenant_function: HrTenantFunction | "";
+  role_source: "TENANT" | "KCAR_2025"; is_supervisory: boolean; is_active: boolean;
+};
 
 const emptyOrg = (): OrgDraft => ({ parent_id: "", legacy_department_id: "", code: "", name: "", unit_type: "TEAM", description: "", is_active: true, sort_order: 100 });
 const emptyFamily = (): FamilyDraft => ({ code: "", name: "", description: "", is_active: true });
 const emptyGrade = (): GradeDraft => ({ code: "", name: "", rank_order: 100, description: "", is_active: true });
-const emptyPosition = (): PositionDraft => ({ code: "", canonical_title: "", job_family_id: "", grade_id: "", description: "", is_supervisory: false, is_active: true });
+const emptyPosition = (): PositionDraft => ({
+  code: "", canonical_title: "", job_family_id: "", grade_id: "", description: "",
+  management_level: "STAFF", tenant_function: "", role_source: "TENANT", is_supervisory: false, is_active: true,
+});
 
 export function WorkforceGovernancePanel({ canManage }: Props) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"structure" | "personnel">("structure");
-  const [catalogue, setCatalogue] = useState<Catalogue>("org");
+  const [catalogue, setCatalogue] = useState<Catalogue>("hierarchy");
   const [orgDraft, setOrgDraft] = useState<OrgDraft>(emptyOrg);
   const [familyDraft, setFamilyDraft] = useState<FamilyDraft>(emptyFamily);
   const [gradeDraft, setGradeDraft] = useState<GradeDraft>(emptyGrade);
@@ -93,6 +105,7 @@ export function WorkforceGovernancePanel({ canManage }: Props) {
   const families = useQuery({ queryKey: ["workforce", "governance", "families"], queryFn: () => listWorkforceHrJobFamilies(true) });
   const grades = useQuery({ queryKey: ["workforce", "governance", "grades"], queryFn: () => listWorkforceHrGrades(true) });
   const positions = useQuery({ queryKey: ["workforce", "governance", "positions"], queryFn: () => listWorkforceHrPositions(true) });
+  const hierarchy = useQuery({ queryKey: ["workforce", "governance", "hierarchy"], queryFn: getWorkforceHrHierarchyBlueprint });
   const peopleFacets = useQuery({ queryKey: ["workforce", "hr", "people", "facets"], queryFn: getWorkforceHrPeopleFacets });
 
   const run = async (key: string, action: () => Promise<void>) => {
@@ -124,19 +137,44 @@ export function WorkforceGovernancePanel({ canManage }: Props) {
     await saveWorkforceHrPosition({
       code: positionDraft.code, canonical_title: positionDraft.canonical_title,
       job_family_id: positionDraft.job_family_id || null, grade_id: positionDraft.grade_id || null,
-      description: positionDraft.description || null, is_supervisory: positionDraft.is_supervisory,
+      description: positionDraft.description || null, management_level: positionDraft.management_level,
+      tenant_function: positionDraft.tenant_function || null, is_supervisory: positionDraft.is_supervisory,
       is_active: positionDraft.is_active,
     }, positionDraft.id);
     setPositionDraft(emptyPosition()); setNotice("Canonical position saved."); await refreshCatalogues();
   });
 
-  if (orgUnits.isPending || families.isPending || grades.isPending || positions.isPending || peopleFacets.isPending) {
+  const initializeHierarchy = () => void run("initialize-hierarchy", async () => {
+    const result = await initializeWorkforceHrKcars2025Hierarchy();
+    const outcomes: string[] = [];
+    if (result.accounts_synced) outcomes.push(`${result.accounts_synced} account role${result.accounts_synced === 1 ? "" : "s"} aligned`);
+    if (result.supervisor_links_cleared) outcomes.push(`${result.supervisor_links_cleared} invalid supervisor link${result.supervisor_links_cleared === 1 ? "" : "s"} cleared`);
+    setNotice(outcomes.length ? `KCAR hierarchy ready: ${outcomes.join(" · ")}.` : "KCAR hierarchy ready.");
+    await refreshCatalogues();
+  });
+
+  const configureTenantFunction = (key: HrTenantFunction, code: string, title: string, positionId?: string | null) => {
+    const existing = (positions.data || []).find((position) => position.id === positionId || position.role_key === key);
+    setPositionDraft(existing ? {
+      id: existing.id, code: existing.code, canonical_title: existing.canonical_title,
+      job_family_id: existing.job_family_id || "", grade_id: existing.grade_id || "",
+      description: existing.description || "", management_level: existing.management_level,
+      tenant_function: key, role_source: existing.role_source, is_supervisory: existing.is_supervisory,
+      is_active: existing.is_active,
+    } : {
+      ...emptyPosition(), code, canonical_title: title, management_level: "MANAGER",
+      tenant_function: key, is_supervisory: true,
+    });
+    setCatalogue("position");
+  };
+
+  if (orgUnits.isPending || families.isPending || grades.isPending || positions.isPending || hierarchy.isPending || peopleFacets.isPending) {
     return <RosterLoading label="Loading Workforce governance…" />;
   }
 
   return <section className="wr-panel workforce-governance">
     <header className="workforce-governance__header">
-      <div><span className="wr-eyebrow">Governed organization model</span><h2>Structure, positions and controlled personnel changes</h2><p>Maintain the canonical hierarchy and apply dated changes through durable, auditable operations.</p></div>
+      <div><span className="wr-eyebrow">Workforce hierarchy</span><h2>Define roles, then assign people</h2><p>KCAR management is controlled here. Tenant support roles stay yours.</p></div>
       <button type="button" className="wr-icon-button" aria-label="Refresh governance" onClick={() => void refreshCatalogues()}><RefreshCw size={16} /></button>
     </header>
     <nav className="workforce-governance__mode">
@@ -148,6 +186,7 @@ export function WorkforceGovernancePanel({ canManage }: Props) {
     {mode === "structure" ? <StructureEditor
       catalogue={catalogue} setCatalogue={setCatalogue} canManage={canManage} busy={busy}
       orgUnits={orgUnits.data || []} families={families.data || []} grades={grades.data || []} positions={positions.data || []}
+      hierarchy={hierarchy.data!} initializeHierarchy={initializeHierarchy} configureTenantFunction={configureTenantFunction}
       departments={peopleFacets.data?.departments || []}
       orgDraft={orgDraft} setOrgDraft={setOrgDraft} familyDraft={familyDraft} setFamilyDraft={setFamilyDraft}
       gradeDraft={gradeDraft} setGradeDraft={setGradeDraft} positionDraft={positionDraft} setPositionDraft={setPositionDraft}
@@ -162,6 +201,8 @@ export function WorkforceGovernancePanel({ canManage }: Props) {
 function StructureEditor(props: {
   catalogue: Catalogue; setCatalogue: (value: Catalogue) => void; canManage: boolean; busy: string | null;
   orgUnits: HrOrgUnit[]; families: HrJobFamily[]; grades: HrGrade[]; positions: HrPosition[]; departments: HrFilterOption[];
+  hierarchy: HrHierarchyBlueprint; initializeHierarchy: () => void;
+  configureTenantFunction: (key: HrTenantFunction, code: string, title: string, positionId?: string | null) => void;
   orgDraft: OrgDraft; setOrgDraft: (value: OrgDraft) => void; familyDraft: FamilyDraft; setFamilyDraft: (value: FamilyDraft) => void;
   gradeDraft: GradeDraft; setGradeDraft: (value: GradeDraft) => void; positionDraft: PositionDraft; setPositionDraft: (value: PositionDraft) => void;
   saveOrg: () => void; saveFamily: () => void; saveGrade: () => void; savePosition: () => void;
@@ -169,8 +210,15 @@ function StructureEditor(props: {
   const { catalogue, setCatalogue } = props;
   return <div className="workforce-governance__structure">
     <nav className="workforce-governance__catalogue-tabs">
-      {(["org", "family", "grade", "position"] as Catalogue[]).map((value) => <button type="button" key={value} className={catalogue === value ? "is-active" : ""} onClick={() => setCatalogue(value)}>{value === "org" ? "Hierarchy" : value === "family" ? "Job families" : value === "grade" ? "Grades" : "Positions"}</button>)}
+      {(["hierarchy", "position", "org", "family", "grade"] as Catalogue[]).map((value) => <button type="button" key={value} className={catalogue === value ? "is-active" : ""} onClick={() => setCatalogue(value)}>{value === "hierarchy" ? "Role hierarchy" : value === "org" ? "Organization" : value === "family" ? "Job families" : value === "grade" ? "Grades" : "Positions"}</button>)}
     </nav>
+    {catalogue === "hierarchy" ? <HierarchySetup
+      blueprint={props.hierarchy}
+      canManage={props.canManage}
+      busy={props.busy === "initialize-hierarchy"}
+      onInitialize={props.initializeHierarchy}
+      onConfigureTenant={props.configureTenantFunction}
+    /> : null}
     {catalogue === "org" ? <div className="workforce-governance__split"><CatalogueTable
       headers={["Code", "Unit", "Type", "Path", "State"]}
       rows={props.orgUnits.map((row) => ({ id: row.id, cells: [row.code, row.name, row.unit_type, row.path_names.join(" / "), row.is_active ? "Active" : "Inactive"], edit: () => props.setOrgDraft({ id: row.id, parent_id: row.parent_id || "", legacy_department_id: row.legacy_department_id || "", code: row.code, name: row.name, unit_type: row.unit_type, description: row.description || "", is_active: row.is_active, sort_order: row.sort_order }) }))}
@@ -186,7 +234,94 @@ function StructureEditor(props: {
     </Editor></div> : null}
     {catalogue === "family" ? <div className="workforce-governance__split"><CatalogueTable headers={["Code", "Family", "State"]} rows={props.families.map((row) => ({ id: row.id, cells: [row.code, row.name, row.is_active ? "Active" : "Inactive"], edit: () => props.setFamilyDraft({ id: row.id, code: row.code, name: row.name, description: row.description || "", is_active: row.is_active }) }))} /><Editor title={props.familyDraft.id ? "Edit family" : "Add family"} disabled={!props.canManage || props.busy === "save-family"} onSave={props.saveFamily} onReset={() => props.setFamilyDraft(emptyFamily())}><Field label="Code"><input value={props.familyDraft.code} onChange={(e) => props.setFamilyDraft({ ...props.familyDraft, code: e.target.value })} /></Field><Field label="Name"><input value={props.familyDraft.name} onChange={(e) => props.setFamilyDraft({ ...props.familyDraft, name: e.target.value })} /></Field><Field label="Description"><textarea value={props.familyDraft.description} onChange={(e) => props.setFamilyDraft({ ...props.familyDraft, description: e.target.value })} /></Field><Check label="Active" checked={props.familyDraft.is_active} onChange={(value) => props.setFamilyDraft({ ...props.familyDraft, is_active: value })} /></Editor></div> : null}
     {catalogue === "grade" ? <div className="workforce-governance__split"><CatalogueTable headers={["Code", "Grade", "Rank", "State"]} rows={props.grades.map((row) => ({ id: row.id, cells: [row.code, row.name, String(row.rank_order), row.is_active ? "Active" : "Inactive"], edit: () => props.setGradeDraft({ id: row.id, code: row.code, name: row.name, rank_order: row.rank_order, description: row.description || "", is_active: row.is_active }) }))} /><Editor title={props.gradeDraft.id ? "Edit grade" : "Add grade"} disabled={!props.canManage || props.busy === "save-grade"} onSave={props.saveGrade} onReset={() => props.setGradeDraft(emptyGrade())}><Field label="Code"><input value={props.gradeDraft.code} onChange={(e) => props.setGradeDraft({ ...props.gradeDraft, code: e.target.value })} /></Field><Field label="Name"><input value={props.gradeDraft.name} onChange={(e) => props.setGradeDraft({ ...props.gradeDraft, name: e.target.value })} /></Field><Field label="Rank"><input type="number" value={props.gradeDraft.rank_order} onChange={(e) => props.setGradeDraft({ ...props.gradeDraft, rank_order: Number(e.target.value) })} /></Field><Field label="Description"><textarea value={props.gradeDraft.description} onChange={(e) => props.setGradeDraft({ ...props.gradeDraft, description: e.target.value })} /></Field><Check label="Active" checked={props.gradeDraft.is_active} onChange={(value) => props.setGradeDraft({ ...props.gradeDraft, is_active: value })} /></Editor></div> : null}
-    {catalogue === "position" ? <div className="workforce-governance__split"><CatalogueTable headers={["Code", "Canonical title", "Family", "Grade", "Supervisor", "State"]} rows={props.positions.map((row) => ({ id: row.id, cells: [row.code, row.canonical_title, row.job_family_name || "—", row.grade_name || "—", row.is_supervisory ? "Yes" : "No", row.is_active ? "Active" : "Inactive"], edit: () => props.setPositionDraft({ id: row.id, code: row.code, canonical_title: row.canonical_title, job_family_id: row.job_family_id || "", grade_id: row.grade_id || "", description: row.description || "", is_supervisory: row.is_supervisory, is_active: row.is_active }) }))} /><Editor title={props.positionDraft.id ? "Edit position" : "Add position"} disabled={!props.canManage || props.busy === "save-position"} onSave={props.savePosition} onReset={() => props.setPositionDraft(emptyPosition())}><Field label="Code"><input value={props.positionDraft.code} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, code: e.target.value })} /></Field><Field label="Canonical title"><input value={props.positionDraft.canonical_title} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, canonical_title: e.target.value })} /></Field><Field label="Job family"><select value={props.positionDraft.job_family_id} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, job_family_id: e.target.value })}><option value="">None</option>{props.families.filter((x) => x.is_active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Grade"><select value={props.positionDraft.grade_id} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, grade_id: e.target.value })}><option value="">None</option>{props.grades.filter((x) => x.is_active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Description"><textarea value={props.positionDraft.description} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, description: e.target.value })} /></Field><Check label="Supervisory position" checked={props.positionDraft.is_supervisory} onChange={(value) => props.setPositionDraft({ ...props.positionDraft, is_supervisory: value })} /><Check label="Active" checked={props.positionDraft.is_active} onChange={(value) => props.setPositionDraft({ ...props.positionDraft, is_active: value })} /></Editor></div> : null}
+    {catalogue === "position" ? <div className="workforce-governance__split"><CatalogueTable
+      headers={["Code", "Position", "Source", "Level", "Supervisor allowed", "State"]}
+      rows={props.positions.map((row) => ({
+        id: row.id,
+        cells: [
+          row.code,
+          row.canonical_title,
+          row.role_source === "KCAR_2025" ? "KCAR 2025" : "Tenant",
+          row.management_level,
+          row.can_have_supervisor ? "Yes" : "No",
+          row.is_active ? "Active" : "Inactive",
+        ],
+        edit: () => props.setPositionDraft({
+          id: row.id,
+          code: row.code,
+          canonical_title: row.canonical_title,
+          job_family_id: row.job_family_id || "",
+          grade_id: row.grade_id || "",
+          description: row.description || "",
+          management_level: row.management_level,
+          tenant_function: (["HUMAN_RESOURCES", "INFORMATION_TECHNOLOGY", "FINANCE"].includes(row.role_key || "")
+            ? row.role_key as HrTenantFunction
+            : ""),
+          role_source: row.role_source,
+          is_supervisory: row.is_supervisory,
+          is_active: row.is_active,
+        }),
+      }))}
+    /><Editor title={props.positionDraft.id ? "Edit position" : "Create position"} disabled={!props.canManage || props.busy === "save-position"} onSave={props.savePosition} onReset={() => props.setPositionDraft(emptyPosition())}>
+      {props.positionDraft.role_source === "KCAR_2025" ? <div className="workforce-governance__locked"><ShieldCheck size={15} /><span>KCAR identity and management level are protected.</span></div> : null}
+      <Field label="Code"><input disabled={props.positionDraft.role_source === "KCAR_2025"} value={props.positionDraft.code} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, code: e.target.value })} /></Field>
+      <Field label="Position title"><input disabled={props.positionDraft.role_source === "KCAR_2025"} value={props.positionDraft.canonical_title} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, canonical_title: e.target.value })} /></Field>
+      <Field label="Role level"><select disabled={props.positionDraft.role_source === "KCAR_2025"} value={props.positionDraft.management_level} onChange={(e) => {
+        const managementLevel = e.target.value as HrManagementLevel;
+        props.setPositionDraft({ ...props.positionDraft, management_level: managementLevel, is_supervisory: managementLevel !== "STAFF" });
+      }}><option value="STAFF">Staff</option><option value="SUPERVISOR">Supervisor</option><option value="MANAGER">Manager</option><option value="EXECUTIVE">Executive</option></select></Field>
+      {props.positionDraft.role_source === "TENANT" ? <Field label="Tenant function"><select value={props.positionDraft.tenant_function} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, tenant_function: e.target.value as HrTenantFunction | "" })}><option value="">General / operational</option><option value="HUMAN_RESOURCES">Human Resources</option><option value="INFORMATION_TECHNOLOGY">Information Technology</option><option value="FINANCE">Finance</option></select></Field> : null}
+      <Field label="Job family"><select value={props.positionDraft.job_family_id} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, job_family_id: e.target.value })}><option value="">None</option>{props.families.filter((x) => x.is_active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+      <Field label="Grade"><select value={props.positionDraft.grade_id} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, grade_id: e.target.value })}><option value="">None</option>{props.grades.filter((x) => x.is_active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+      <Field label="Description"><textarea value={props.positionDraft.description} onChange={(e) => props.setPositionDraft({ ...props.positionDraft, description: e.target.value })} /></Field>
+      {props.positionDraft.management_level === "MANAGER" || props.positionDraft.management_level === "EXECUTIVE" ? <div className="workforce-governance__rule"><CircleAlert size={15} /><span>This role cannot be assigned a supervisor.</span></div> : null}
+      {props.positionDraft.role_source === "TENANT" ? <Check label="Active" checked={props.positionDraft.is_active} onChange={(value) => props.setPositionDraft({ ...props.positionDraft, is_active: value })} /> : null}
+    </Editor></div> : null}
+  </div>;
+}
+
+function HierarchySetup({
+  blueprint,
+  canManage,
+  busy,
+  onInitialize,
+  onConfigureTenant,
+}: {
+  blueprint: HrHierarchyBlueprint;
+  canManage: boolean;
+  busy: boolean;
+  onInitialize: () => void;
+  onConfigureTenant: (key: HrTenantFunction, code: string, title: string, positionId?: string | null) => void;
+}) {
+  const complete = blueprint.missing_role_count === 0;
+  return <div className="workforce-governance__hierarchy-setup">
+    <section className="workforce-governance__hierarchy-card">
+      <header>
+        <div><span className="wr-eyebrow">KCAR 2025 · regulations 19–21</span><h3>Required AMO management</h3></div>
+        <button type="button" className="wr-button wr-button--primary" disabled={!canManage || busy || complete} onClick={onInitialize}>
+          {complete ? <BadgeCheck size={15} /> : <Landmark size={15} />}{complete ? "Roles ready" : busy ? "Applying…" : `Apply ${blueprint.required_role_count} roles`}
+        </button>
+      </header>
+      <div className="workforce-governance__role-grid">
+        {blueprint.regulatory_roles.map((role) => <article key={role.key} className="workforce-governance__role">
+          <span className="workforce-governance__role-code">{role.code}</span>
+          <div><strong>{role.title}</strong><small>{role.management_level === "EXECUTIVE" ? "Executive" : "Manager"} · no supervisor</small></div>
+          <StatusPill value={role.status === "MATCH_AVAILABLE" ? "REVIEW" : role.status} />
+        </article>)}
+      </div>
+    </section>
+    <section className="workforce-governance__hierarchy-card">
+      <header><div><span className="wr-eyebrow">Tenant-owned</span><h3>Support functions</h3></div><small>Not prescribed by KCAR</small></header>
+      <div className="workforce-governance__tenant-functions">
+        {blueprint.tenant_functions.map((item) => <article key={item.key}>
+          <div><strong>{item.label}</strong><StatusPill value={item.status === "READY" ? "READY" : "PENDING"} /></div>
+          <button type="button" disabled={!canManage} onClick={() => onConfigureTenant(item.key, item.suggested_code, item.suggested_title, item.position_id)}>
+            {item.status === "READY" ? "Edit" : <><Plus size={14} /> Configure</>}
+          </button>
+        </article>)}
+      </div>
+    </section>
+    <div className="workforce-governance__hierarchy-rule"><ShieldCheck size={16} /><span>Manager and executive roles cannot receive a supervisor. Reporting cycles are blocked by the server.</span></div>
   </div>;
 }
 
@@ -330,6 +465,7 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
     || (mutation === "UPDATE_CONTRACT_SETTINGS" && (contractStatus || contractType || contractEnd || weeklyHours || dailyHours || fte || costCentre || overtimeEligible || nightEligible || standbyEligible))
     || (mutation === "SCHEDULE_OFFBOARDING" && offboardingReason.trim().length >= 3)
   );
+  const selectedPosition = positions.find((position) => position.id === positionId);
   const doPreview = async () => {
     setBusy(true); setError(null);
     try { setPreview(await previewWorkforceHrSelection(selection)); }
@@ -429,7 +565,7 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
         <Field label="Change type"><select value={mutation} onChange={(e) => { setMutation(e.target.value as HrPersonnelMutationType); setPreview(null); }}><option value="ASSIGN_ORGANIZATION">Assign organization</option><option value="ASSIGN_POSITION">Assign position</option><option value="ASSIGN_BASES">Assign bases</option><option value="ASSIGN_SUPERVISOR">Assign supervisor</option><option value="UPDATE_GROUPS">Update groups</option><option value="UPDATE_CONTRACT_SETTINGS">Update contract settings</option><option value="SCHEDULE_OFFBOARDING">Schedule offboarding</option></select></Field>
         <Field label="Effective date"><input type="date" value={effectiveOn} onChange={(e) => { setEffectiveOn(e.target.value); setPreview(null); }} /></Field>
         {mutation === "ASSIGN_ORGANIZATION" ? <><Field label="Organisation"><select value={orgUnitId} onChange={(e) => { setOrgUnitId(e.target.value); setPreview(null); }}><option value="">Select unit</option>{orgUnits.map((x) => <option key={x.id} value={x.id}>{"—".repeat(x.depth)} {x.name}</option>)}</select></Field><Field label="Placement"><select value={placementType} onChange={(e) => { setPlacementType(e.target.value as typeof placementType); setPreview(null); }}><option>PRIMARY</option><option>SECONDARY</option><option>MATRIX</option></select></Field></> : null}
-        {mutation === "ASSIGN_POSITION" ? <><Field label="Canonical position"><select value={positionId} onChange={(e) => { setPositionId(e.target.value); setPreview(null); }}><option value="">Select position</option>{positions.map((x) => <option key={x.id} value={x.id}>{x.canonical_title}</option>)}</select></Field><Field label="Preferred title"><input value={preferredTitle} onChange={(e) => { setPreferredTitle(e.target.value); setPreview(null); }} placeholder="Optional display title" /></Field></> : null}
+        {mutation === "ASSIGN_POSITION" ? <><Field label="Canonical position"><select value={positionId} onChange={(e) => { setPositionId(e.target.value); setPreview(null); }}><option value="">Select position</option>{positions.map((x) => <option key={x.id} value={x.id}>{x.code} · {x.canonical_title}</option>)}</select></Field><Field label="Preferred title"><input value={preferredTitle} onChange={(e) => { setPreferredTitle(e.target.value); setPreview(null); }} placeholder="Optional display title" /></Field>{selectedPosition && !selectedPosition.can_have_supervisor ? <div className="workforce-governance__rule"><ShieldCheck size={15} /><span>Management assignment: any existing supervisor link will be removed on the effective date.</span></div> : null}</> : null}
         {mutation === "ASSIGN_BASES" ? <><Field label="Primary base"><select value={primaryBaseId} onChange={(e) => { setPrimaryBaseId(e.target.value); setPreview(null); }}><option value="">Select base</option>{bases.data?.map((x) => <option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field><Field label="Secondary base"><select value={secondaryBaseId} onChange={(e) => { setSecondaryBaseId(e.target.value); setPreview(null); }}><option value="">None</option>{bases.data?.map((x) => <option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</select></Field></> : null}
         {mutation === "ASSIGN_SUPERVISOR" ? <><Field label="Find supervisor"><input value={supervisorSearch} onChange={(e) => setSupervisorSearch(e.target.value)} placeholder="Name, staff or position" /></Field><Field label="Supervisor"><select value={supervisorId} onChange={(e) => { setSupervisorId(e.target.value); setPreview(null); }}><option value="">Select governed supervisor</option>{supervisors.data?.items.map((x) => <option key={x.user_id} value={x.user_id}>{x.full_name} · {x.position_title || x.staff_code}{x.org_unit_name ? ` · ${x.org_unit_name}` : ""}{x.is_supervisory_position ? " · Supervisory" : ""}</option>)}</select></Field></> : null}
         {mutation === "UPDATE_GROUPS" ? <><Field label="Mode"><select value={groupMode} onChange={(e) => { setGroupMode(e.target.value as typeof groupMode); setPreview(null); }}><option>ADD</option><option>REMOVE</option><option>REPLACE</option></select></Field><Field label="Groups"><select multiple value={groupIds} onChange={(e) => { setGroupIds([...e.target.selectedOptions].map((x) => x.value)); setPreview(null); }}>{facets.data?.groups.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field></> : null}

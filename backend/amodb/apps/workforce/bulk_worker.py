@@ -5,10 +5,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.orm import lazyload
+
 from ...database import WriteSessionLocal
 from ..accounts import models as account_models
 from ..audit import services as audit_services
-from . import bulk_contracts, bulk_models, governance_mutations
+from . import bulk_contracts, bulk_models, bulk_patterns, governance_mutations
 
 logger = logging.getLogger(__name__)
 PROCESS_CHUNK_SIZE = 100
@@ -79,12 +81,24 @@ def process_operation(operation_id: str) -> None:
                     db.commit()
                     return
 
-                items = db.query(bulk_models.WorkforceBulkOperationItem).filter(
-                    bulk_models.WorkforceBulkOperationItem.operation_id == operation_id,
-                    bulk_models.WorkforceBulkOperationItem.status == "PENDING",
-                ).order_by(
-                    bulk_models.WorkforceBulkOperationItem.sequence.asc()
-                ).limit(PROCESS_CHUNK_SIZE).with_for_update(skip_locked=True).all()
+                items = (
+                    db.query(bulk_models.WorkforceBulkOperationItem)
+                    # The item's operation relationship is joined by default.
+                    # Suppress it for the claim so PostgreSQL is never asked to
+                    # lock the nullable side of an outer join.
+                    .options(lazyload(bulk_models.WorkforceBulkOperationItem.operation))
+                    .filter(
+                        bulk_models.WorkforceBulkOperationItem.operation_id == operation_id,
+                        bulk_models.WorkforceBulkOperationItem.status == "PENDING",
+                    )
+                    .order_by(bulk_models.WorkforceBulkOperationItem.sequence.asc())
+                    .limit(PROCESS_CHUNK_SIZE)
+                    .with_for_update(
+                        of=bulk_models.WorkforceBulkOperationItem,
+                        skip_locked=True,
+                    )
+                    .all()
+                )
                 if not items:
                     _refresh_counts(db, operation)
                     operation.status = "COMPLETED_WITH_ERRORS" if operation.failed_count else "COMPLETED"
@@ -113,7 +127,13 @@ def process_operation(operation_id: str) -> None:
                     item.status = "RUNNING"
                     item.started_at = _utcnow()
                     item.attempt_count += 1
-                    db.flush()
+                    item.outcome_code = "PROCESSING"
+                    item.outcome_message = "Processing this personnel record"
+                    operation.heartbeat_at = _utcnow()
+                    # Publish the claimed item before doing the work.  The
+                    # operation API can now report the current person instead
+                    # of remaining at 0 until the whole chunk is finished.
+                    db.commit()
                     try:
                         with db.begin_nested():
                             if operation.operation_type == "CREATE_CONTRACTS":
@@ -122,6 +142,10 @@ def process_operation(operation_id: str) -> None:
                                 )
                             elif operation.operation_type == "ASSIGN_DEFAULT_DAY_PATTERN":
                                 outcome = bulk_contracts.process_default_pattern_item(
+                                    db, operation=operation, item=item, actor=actor
+                                )
+                            elif operation.operation_type == "ASSIGN_WORK_PATTERN":
+                                outcome = bulk_patterns.process_work_pattern_item(
                                     db, operation=operation, item=item, actor=actor
                                 )
                             elif operation.operation_type in governance_mutations.MUTATION_TYPES:
@@ -149,10 +173,12 @@ def process_operation(operation_id: str) -> None:
                             message=str(exc)[:2000],
                         )
                     db.add(item)
-
-                _refresh_counts(db, operation)
-                operation.heartbeat_at = _utcnow()
-                db.commit()
+                    _refresh_counts(db, operation)
+                    operation.heartbeat_at = _utcnow()
+                    # Each completed record is its own durable progress
+                    # checkpoint.  A crash can resume safely and the frontend
+                    # receives steadily increasing counts and heartbeat data.
+                    db.commit()
     except Exception as exc:
         logger.exception("Workforce bulk operation failed", extra={"operation_id": operation_id})
         with WriteSessionLocal() as db:

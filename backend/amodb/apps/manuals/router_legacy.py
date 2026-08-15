@@ -23,6 +23,7 @@ from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AMO
+from amodb.apps.platform import saas_models, saas_queue
 
 from . import models
 from .schemas import (
@@ -2036,22 +2037,141 @@ def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
     return manual
 
 
+def _revision_job_status(value: str) -> str:
+    if value in {"PENDING", "RETRY"}:
+        return "queued"
+    if value == "RUNNING":
+        return "running"
+    if value == "SUCCEEDED":
+        return "completed"
+    if value == "CANCELLED":
+        return "cancelled"
+    return "failed"
+
+
+def _queue_manual_revision_job(
+    db: Session,
+    *,
+    tenant: models.Tenant,
+    manual: models.Manual,
+    revision: models.ManualRevision,
+    job_type: str,
+    actor_id: str | None,
+):
+    idempotency_key = f"{job_type.lower()}:{revision.id}:{revision.source_sha256 or 'no-checksum'}"
+    existing = db.query(saas_models.SaaSJob).filter(
+        saas_models.SaaSJob.job_type == job_type,
+        saas_models.SaaSJob.tenant_scope == str(tenant.amo_id),
+        saas_models.SaaSJob.idempotency_key == idempotency_key,
+    ).first()
+    if existing is not None:
+        if existing.status in saas_queue.RETRYABLE_MANUAL_STATUSES:
+            return saas_queue.retry_job(db, existing, actor_user_id=actor_id)
+        if existing.status == "SUCCEEDED":
+            # These two handlers are deliberately idempotent: processing
+            # rebuilds immutable reader caches/index intent and OCR only stores
+            # non-authoritative detection aids. An explicit Run action therefore
+            # means rerun, even when the source checksum is unchanged.
+            existing.status = "PENDING"
+            existing.attempt_count = 0
+            existing.available_at = saas_queue.utcnow()
+            existing.locked_at = None
+            existing.locked_by = None
+            existing.lease_token = None
+            existing.lease_expires_at = None
+            existing.result_json = None
+            existing.last_error = None
+            existing.finished_at = None
+            existing.created_by = actor_id
+            saas_queue.add_event(db, existing, "PENDING", "Manual revision action explicitly requeued.")
+            db.flush()
+        return existing
+    return saas_queue.enqueue_job(
+        db,
+        job_type=job_type,
+        queue_name="default",
+        tenant_id=str(tenant.amo_id),
+        payload={"manual_id": manual.id, "revision_id": revision.id},
+        idempotency_key=idempotency_key,
+        correlation_id=revision.id,
+        created_by=actor_id,
+        max_attempts=3,
+        priority=60,
+        commit=False,
+    )
+
+
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/run")
-def run_processor(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+def run_processor(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_manual_control_user(current_user)
     tenant = _tenant_by_slug(db, tenant_slug)
-    actor_id = get_current_actor_id()
-    _audit(db, tenant.id, actor_id, "revision.processing.run", "manual_revision", rev_id, request, {"stage": "queued"})
+    revision = db.query(models.ManualRevision).join(
+        models.Manual, models.Manual.id == models.ManualRevision.manual_id,
+    ).filter(
+        models.Manual.id == manual_id,
+        models.Manual.tenant_id == tenant.id,
+        models.ManualRevision.id == rev_id,
+    ).first()
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    manual = db.get(models.Manual, revision.manual_id)
+    actor_id = str(current_user.id)
+    job = _queue_manual_revision_job(
+        db,
+        tenant=tenant,
+        manual=manual,
+        revision=revision,
+        job_type="MANUAL_REVISION_PROCESS",
+        actor_id=actor_id,
+    )
+    _audit(db, tenant.id, actor_id, "revision.processing.run", "manual_revision", rev_id, request, {"stage": "queued", "job_id": job.id})
     db.commit()
-    return {"status": "queued", "job_id": str(uuid4())}
+    return {"status": _revision_job_status(job.status), "job_id": job.id}
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/ocr/run")
-def run_ocr(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+def run_ocr(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_manual_control_user(current_user)
     tenant = _tenant_by_slug(db, tenant_slug)
-    actor_id = get_current_actor_id()
-    _audit(db, tenant.id, actor_id, "revision.ocr.run", "manual_revision", rev_id, request, {"stage": "queued"})
+    revision = db.query(models.ManualRevision).join(
+        models.Manual, models.Manual.id == models.ManualRevision.manual_id,
+    ).filter(
+        models.Manual.id == manual_id,
+        models.Manual.tenant_id == tenant.id,
+        models.ManualRevision.id == rev_id,
+    ).first()
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    source_type = str(getattr(revision.source_type_enum, "value", revision.source_type_enum or "")).upper()
+    if source_type != "PDF":
+        raise HTTPException(status_code=409, detail="Controlled OCR is available only for PDF revisions")
+    manual = db.get(models.Manual, revision.manual_id)
+    actor_id = str(current_user.id)
+    job = _queue_manual_revision_job(
+        db,
+        tenant=tenant,
+        manual=manual,
+        revision=revision,
+        job_type="MANUAL_REVISION_OCR",
+        actor_id=actor_id,
+    )
+    _audit(db, tenant.id, actor_id, "revision.ocr.run", "manual_revision", rev_id, request, {"stage": "queued", "job_id": job.id})
     db.commit()
-    return {"status": "queued", "job_id": str(uuid4())}
+    return {"status": _revision_job_status(job.status), "job_id": job.id}
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/ocr/verify", response_model=OCRVerifyOut)
@@ -2162,12 +2282,26 @@ def create_stamped_overlay(
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/status")
 def processing_status(tenant_slug: str, manual_id: str, rev_id: str, db: Session = Depends(get_db)):
     tenant = _tenant_by_slug(db, tenant_slug)
-    _ = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
-    rows = _query_audit_rows(db, models.ManualAuditLog.entity_id == rev_id, models.ManualAuditLog.action.in_(["revision.processing.run", "revision.ocr.run"]), limit=1)
-    row = rows[0] if rows else None
-    if not row:
-        return {"revision_id": rev_id, "stage": "idle", "actor_id": None, "at": None}
-    return {"revision_id": rev_id, "stage": row.diff_json.get("stage", "queued"), "actor_id": row.actor_id, "at": row.at}
+    revision = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    job = db.query(saas_models.SaaSJob).filter(
+        saas_models.SaaSJob.tenant_scope == str(tenant.amo_id),
+        saas_models.SaaSJob.correlation_id == rev_id,
+        saas_models.SaaSJob.job_type.in_(("MANUAL_REVISION_PROCESS", "MANUAL_REVISION_OCR")),
+    ).order_by(saas_models.SaaSJob.created_at.desc()).first()
+    if job is None:
+        return {"revision_id": rev_id, "stage": "idle", "job_id": None, "job_type": None, "actor_id": None, "at": None, "error": None, "result": None}
+    return {
+        "revision_id": rev_id,
+        "stage": _revision_job_status(job.status),
+        "job_id": job.id,
+        "job_type": job.job_type,
+        "actor_id": job.created_by,
+        "at": job.updated_at,
+        "error": job.last_error,
+        "result": job.result_json,
+    }
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/outline/generate")

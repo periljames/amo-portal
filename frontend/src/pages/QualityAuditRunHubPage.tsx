@@ -135,7 +135,7 @@ const dateFmt = (value: string | null | undefined) => (value ? new Date(value).t
 const dateTimeFmt = (value: string | null | undefined) => (value ? new Date(value).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 const REPORT_SHARE_GROUP_LABELS: Record<string, string> = {
-  accountable_manager: "Accountable Manager",
+  accountable_manager: "Accountable Executive",
   quality_manager: "Quality Manager",
   department_heads: "Department Heads",
   audited_department: "Audited department personnel",
@@ -2143,7 +2143,7 @@ const QualityAuditRunHubPage: React.FC = () => {
                         </div>
                       ))}
                       {isEscalated ? (
-                        <div className="audit-car-locked-note">Escalated to Accountable Manager. This item is view-only from the audit workspace.</div>
+                        <div className="audit-car-locked-note">Escalated to Accountable Executive. This item is view-only from the audit workspace.</div>
                       ) : null}
                       {car.status === "CLOSED" ? (
                         <div className="audit-car-locked-note">Closed. The linked finding and CAR are read-only.</div>
@@ -2239,7 +2239,7 @@ const QualityAuditRunHubPage: React.FC = () => {
               </div>
               <div className="audit-report-share-actions">
                 <span className="audit-soft-badge">{audit.report_file_ref ? "Uploaded" : "Pending"}</span>
-                <button type="button" className="secondary-chip-btn" disabled={!audit.report_file_ref || shareReportMutation.isPending} onClick={() => setPendingReportShareGroups(["accountable_manager"])}><Share2 size={14} /> Accountable Manager</button>
+                <button type="button" className="secondary-chip-btn" disabled={!audit.report_file_ref || shareReportMutation.isPending} onClick={() => setPendingReportShareGroups(["accountable_manager"])}><Share2 size={14} /> Accountable Executive</button>
                 <button type="button" className="secondary-chip-btn" disabled={!audit.report_file_ref || shareReportMutation.isPending} onClick={() => setPendingReportShareGroups(["quality_manager"])}><Share2 size={14} /> Quality Manager</button>
                 <button type="button" className="secondary-chip-btn" disabled={!audit.report_file_ref || shareReportMutation.isPending} onClick={() => setPendingReportShareGroups(["department_heads", "audited_department", "shop_personnel", "facility_personnel"])}><Share2 size={14} /> Department / shop</button>
               </div>

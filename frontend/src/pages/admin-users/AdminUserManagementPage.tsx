@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import { useAdminAccountRoles } from "../../hooks/useAdminAccountRoles";
 import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
 import {
   LS_ACTIVE_AMO_ID,
@@ -63,27 +64,6 @@ import "../../styles/admin-user-management-v2.css";
 type UrlParams = { amoCode?: string };
 type WorkspaceTab = "directory" | "groups" | "permissions" | "lifecycle";
 type BatchAction = BulkUserActionPayload["action"] | "export_csv" | "";
-
-const ROLE_OPTIONS: AccountRole[] = [
-  "SUPERUSER",
-  "AMO_ADMIN",
-  "QUALITY_MANAGER",
-  "AUDITOR",
-  "SAFETY_MANAGER",
-  "PLANNING_ENGINEER",
-  "PRODUCTION_ENGINEER",
-  "CERTIFYING_ENGINEER",
-  "CERTIFYING_TECHNICIAN",
-  "TECHNICIAN",
-  "STORES",
-  "VIEW_ONLY",
-  "FINANCE_MANAGER",
-  "ACCOUNTS_OFFICER",
-  "STORES_MANAGER",
-  "STOREKEEPER",
-  "PROCUREMENT_OFFICER",
-  "QUALITY_INSPECTOR",
-];
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -215,6 +195,7 @@ export default function AdminUserManagementPage() {
   const [lifecycleNote, setLifecycleNote] = useState("");
   const [lifecycleFrom, setLifecycleFrom] = useState("");
   const [lifecycleTo, setLifecycleTo] = useState("");
+  const roleCatalogue = useAdminAccountRoles(batchRole || lifecycleRole || (roleFilter === "all" ? "" : roleFilter));
 
   useEffect(() => {
     return onSessionEvent((detail) => {
@@ -521,7 +502,7 @@ export default function AdminUserManagementPage() {
               </label>
               <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as AccountRole | "all")} aria-label="Filter by role">
                 <option value="all">All roles</option>
-                {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{formatRole(role)}</option>)}
+                {roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.label}</option>)}
               </select>
               <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} aria-label="Filter by department">
                 <option value="all">All departments</option>
@@ -568,7 +549,7 @@ export default function AdminUserManagementPage() {
                 {batchAction === "change_role" ? (
                   <select value={batchRole} onChange={(event) => setBatchRole(event.target.value as AccountRole | "")} aria-label="Target role">
                     <option value="">Choose role</option>
-                    {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{formatRole(role)}</option>)}
+                    {roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}
                   </select>
                 ) : null}
                 <button type="button" className="aum2-compact-action" onClick={executeBatch} disabled={!batchAction || bulkMutation.isPending}>Apply</button>
@@ -723,14 +704,14 @@ export default function AdminUserManagementPage() {
             <div className="aum2-form-grid is-lifecycle">
               <label className="is-wide"><span>Find user</span><input value={lifecycleSearch} onChange={(event) => setLifecycleSearch(event.target.value)} placeholder="Search name, email or staff code" /></label>
               <label className="is-wide"><span>User</span><select value={lifecycleUserId} onChange={(event) => setLifecycleUserId(event.target.value)}><option value="">Choose user</option>{(lifecycleUsersQuery.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.full_name} · {user.staff_code}</option>)}</select></label>
-              <label><span>Action</span><select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option></select></label>
-              <label><span>Role</span><select value={lifecycleRole} onChange={(event) => setLifecycleRole(event.target.value as AccountRole | "")}><option value="">No role change</option>{ROLE_OPTIONS.map((role) => <option key={role} value={role}>{formatRole(role)}</option>)}</select></label>
+              <label><span>Action</span><select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option></select></label>
+              <label><span>Role</span><select value={lifecycleRole} onChange={(event) => { const role = event.target.value as AccountRole | ""; const definition = roleCatalogue.roles.find((item) => item.key === role); setLifecycleRole(role); if (definition?.regulated) setLifecycleTitle(definition.label); }}><option value="">No role change</option>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select></label>
               <label><span>Department</span><select value={lifecycleDepartmentId} onChange={(event) => setLifecycleDepartmentId(event.target.value)}><option value="">No department change</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
               <label><span>Position title</span><input value={lifecycleTitle} onChange={(event) => setLifecycleTitle(event.target.value)} /></label>
-              <label><span>Effective from</span><input type="datetime-local" value={lifecycleFrom} onChange={(event) => setLifecycleFrom(event.target.value)} /></label>
+              <label><span>{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? "New workforce start" : "Effective from"}</span><input type="datetime-local" required={lifecycleAction === "reinstate" || lifecycleAction === "reemploy"} value={lifecycleFrom} onChange={(event) => setLifecycleFrom(event.target.value)} />{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? <small>This starts a new contract period and becomes the locked workforce date.</small> : null}</label>
               <label><span>Effective to</span><input type="datetime-local" value={lifecycleTo} onChange={(event) => setLifecycleTo(event.target.value)} /></label>
               <label className="is-wide"><span>Audit note</span><textarea rows={3} value={lifecycleNote} onChange={(event) => setLifecycleNote(event.target.value)} /></label>
-              <button type="button" className="aum2-primary-action" disabled={!lifecycleUserId || lifecycleMutation.isPending} onClick={() => lifecycleMutation.mutate()}><UserCheck size={16} />Apply lifecycle action</button>
+              <button type="button" className="aum2-primary-action" disabled={!lifecycleUserId || lifecycleMutation.isPending || ((lifecycleAction === "reinstate" || lifecycleAction === "reemploy") && !lifecycleFrom)} onClick={() => lifecycleMutation.mutate()}><UserCheck size={16} />Apply lifecycle action</button>
             </div>
           </section>
         ) : null}

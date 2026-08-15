@@ -30,6 +30,13 @@ SUPPORTED_DEPARTMENTS = {
 }
 
 ROLE_DEPARTMENTS: dict[str, set[str]] = {
+    "ACCOUNTABLE_EXECUTIVE": {
+        "planning", "production", "maintenance", "quality", "document-control",
+        "reliability", "safety", "stores", "workshops",
+    },
+    "BASE_MAINTENANCE_MANAGER": {"production", "maintenance"},
+    "LINE_MAINTENANCE_MANAGER": {"production", "maintenance"},
+    "WORKSHOP_MANAGER": {"maintenance", "workshops"},
     "PLANNING_ENGINEER": {"planning"},
     "PRODUCTION_ENGINEER": {"production", "maintenance"},
     "CERTIFYING_ENGINEER": {"production", "maintenance"},

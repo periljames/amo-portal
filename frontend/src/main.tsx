@@ -2,7 +2,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { QueryClient } from "@tanstack/react-query";
+import { onlineManager, QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
@@ -10,7 +10,13 @@ import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRo
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
-import { onSessionEvent } from "./services/auth";
+import {
+  flushPendingSessionRevocation,
+  getToken,
+  getTokenSecondsRemaining,
+  onSessionEvent,
+  recoverSession,
+} from "./services/auth";
 import { BRANDING_EVENT } from "./services/branding";
 import {
   clearAllPortalApiCaches,
@@ -20,6 +26,12 @@ import {
   replayOfflineMutations,
 } from "./services/offlinePersistence";
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
+import {
+  isPortalReady,
+  probePortalConnectivity,
+  startPortalConnectivityMonitor,
+  subscribePortalConnectivity,
+} from "./services/portalConnectivity";
 import "./styles/index.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -35,6 +47,7 @@ const SENSITIVE_QUERY_MARKERS = [
   "security",
   "diagnostic",
   "platform-control",
+  "permission",
   "attachment",
   "download",
   "export",
@@ -154,6 +167,8 @@ const queryPersister = createPortalQueryPersister((_previousScope, nextScope) =>
 
 installActiveAmoStorageGuard();
 ensureManifest();
+onlineManager.setOnline(false);
+startPortalConnectivityMonitor();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -161,7 +176,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       client={queryClient}
       persistOptions={{
         persister: queryPersister,
-        buster: "amo-portal-query-v3",
+        buster: "amo-portal-query-v4",
         maxAge: QUERY_MAX_AGE_MS,
         dehydrateOptions: {
           shouldDehydrateQuery: shouldPersistQuery,
@@ -169,8 +184,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         },
       }}
       onSuccess={() => {
-        void queryClient.resumePausedMutations();
-        void replayOfflineMutations();
+        // The readiness subscriber owns recovery ordering: revoke a pending
+        // logout, recover authentication, then resume work. Hydration alone is
+        // never permission to send persisted mutations.
+        if (isPortalReady()) void probePortalConnectivity("query-cache-restored");
       }}
     >
       <RealtimeProvider>
@@ -228,10 +245,45 @@ async function configurePortalServiceWorker(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
+  let wasPortalReady = false;
+  let recoverySequence: Promise<void> | null = null;
+  subscribePortalConnectivity((connectivity) => {
+    const ready = connectivity.state === "online" && connectivity.databaseReady;
+    if (!ready) {
+      wasPortalReady = false;
+      onlineManager.setOnline(false);
+      return;
+    }
+    if (wasPortalReady) return;
+    wasPortalReady = true;
+    recoverySequence = (async () => {
+      await flushPendingSessionRevocation();
+      const remaining = getTokenSecondsRemaining();
+      if (getToken() && remaining !== null && remaining <= 0) {
+        await recoverSession("server-recovered");
+        const recoveredRemaining = getTokenSecondsRemaining();
+        if (getToken() && recoveredRemaining !== null && recoveredRemaining <= 0) {
+          wasPortalReady = false;
+          onlineManager.setOnline(false);
+          window.setTimeout(() => void probePortalConnectivity("session-recovery-retry"), 2_000);
+          return;
+        }
+      }
+      onlineManager.setOnline(true);
+      await queryClient.resumePausedMutations();
+      await replayOfflineMutations();
+      await queryClient.invalidateQueries();
+    })().finally(() => {
+      recoverySequence = null;
+    });
+  });
+
   onSessionEvent((detail) => {
     if (detail.type === "authenticated") {
       clearIfTenantScopeChanged();
-      void replayOfflineMutations();
+      void queryClient.invalidateQueries({ queryKey: ["workforce", "permissions"] });
+      if (!recoverySequence) void replayOfflineMutations();
+      if (detail.reason === "session-recovered") void queryClient.invalidateQueries();
       return;
     }
 
@@ -264,8 +316,13 @@ if (typeof window !== "undefined") {
     void queryClient.invalidateQueries();
   });
 
-  window.addEventListener("online", () => void replayOfflineMutations());
   window.addEventListener("load", () => {
     void configurePortalServiceWorker().catch((error) => console.warn("[offline] Service worker unavailable", error));
+  });
+
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    if (event.data?.type === "PORTAL_CONNECTIVITY_RECHECK") {
+      void probePortalConnectivity("service-worker");
+    }
   });
 }

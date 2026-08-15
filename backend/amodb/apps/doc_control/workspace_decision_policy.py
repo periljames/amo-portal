@@ -14,6 +14,7 @@ from .workspace_service import role_value
 DECISION_APPROVER_ROLES = {
     "SUPERUSER",
     "AMO_ADMIN",
+    "ACCOUNTABLE_EXECUTIVE",
     "QUALITY_MANAGER",
 }
 

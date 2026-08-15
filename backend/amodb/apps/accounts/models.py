@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -23,6 +23,7 @@ from sqlalchemy.orm import relationship
 from amodb.database import Base
 # GUID-like IDs for portability and multi-tenant separation
 from amodb.user_id import generate_user_id
+from .role_registry import AccountRole
 
 
 # ---------------------------------------------------------------------------
@@ -36,33 +37,6 @@ class RegulatoryAuthority(str, enum.Enum):
     KCAA = "KCAA"
     CAA_UK = "CAA_UK"
     OTHER = "OTHER"
-
-
-class AccountRole(str, enum.Enum):
-    """High-level roles used across the portal.
-
-    Fine-grained privileges for maintenance / CRS are defined via
-    AuthorisationType + UserAuthorisation.
-    """
-
-    SUPERUSER = "SUPERUSER"           # Platform owner
-    AMO_ADMIN = "AMO_ADMIN"           # AMO specific admin
-    QUALITY_MANAGER = "QUALITY_MANAGER"
-    SAFETY_MANAGER = "SAFETY_MANAGER"
-    PLANNING_ENGINEER = "PLANNING_ENGINEER"
-    PRODUCTION_ENGINEER = "PRODUCTION_ENGINEER"
-    CERTIFYING_ENGINEER = "CERTIFYING_ENGINEER"
-    CERTIFYING_TECHNICIAN = "CERTIFYING_TECHNICIAN"
-    TECHNICIAN = "TECHNICIAN"
-    STORES = "STORES"
-    VIEW_ONLY = "VIEW_ONLY"
-    FINANCE_MANAGER = "FINANCE_MANAGER"
-    ACCOUNTS_OFFICER = "ACCOUNTS_OFFICER"
-    STORES_MANAGER = "STORES_MANAGER"
-    STOREKEEPER = "STOREKEEPER"
-    PROCUREMENT_OFFICER = "PROCUREMENT_OFFICER"
-    QUALITY_INSPECTOR = "QUALITY_INSPECTOR"
-    AUDITOR = "AUDITOR"
 
 
 class DataMode(str, enum.Enum):
@@ -332,7 +306,7 @@ class User(Base):
     role = Column(
         Enum(AccountRole, name="account_role_enum"),
         nullable=False,
-        default=AccountRole.TECHNICIAN,
+        default=AccountRole.USER,
         index=True,
     )
 
@@ -788,6 +762,48 @@ class UserAuthorisation(Base):
 
     def __repr__(self) -> str:
         return f"<UserAuthorisation user={self.user_id} type={self.authorisation_type_id}>"
+
+
+# ---------------------------------------------------------------------------
+# PORTAL REFRESH SESSIONS
+# ---------------------------------------------------------------------------
+
+
+class PortalRefreshSession(Base):
+    """Revocable, device/session-scoped recovery credential.
+
+    The raw secret is held only in an HttpOnly cookie.  PostgreSQL stores a
+    SHA-256 digest so a database read cannot reveal a usable browser token.
+    """
+
+    __tablename__ = "portal_refresh_sessions"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_portal_refresh_session_token_hash"),
+        Index("ix_portal_refresh_session_user_expiry", "user_id", "expires_at"),
+        Index("ix_portal_refresh_session_auth_session", "auth_session_id", "expires_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    auth_session_id = Column(String(64), nullable=False)
+    token_hash = Column(String(64), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_ip = Column(String(64), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    user = relationship("User", lazy="joined")
 
 
 # ---------------------------------------------------------------------------

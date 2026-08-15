@@ -19,7 +19,7 @@ export type HrPersonReadiness = {
   has_effective_contract: boolean; uses_default_day_pattern: boolean; account_role?: string | null;
   position_title?: string | null; department_id?: string | null; department_code?: string | null;
   department_name?: string | null; employment_status?: string | null; contract_type?: string | null;
-  contract_state: HrContractState; contract_effective_from?: string | null; contract_effective_to?: string | null;
+  contract_state: HrContractState; hire_date?: string | null; contract_effective_from?: string | null; contract_effective_to?: string | null;
   primary_base_station_id?: string | null; primary_base_code?: string | null; supervisor_name?: string | null;
   standard_weekly_minutes: number; standard_daily_minutes: number; fte_percentage: number;
   cost_centre?: string | null; payroll_number?: string | null; overtime_eligible: boolean;
@@ -30,7 +30,7 @@ export type HrPersonReadiness = {
   primary_org_unit_id?: string | null; primary_org_unit_name?: string | null; primary_org_path?: string[];
   canonical_position_id?: string | null; canonical_position_title?: string | null; preferred_title?: string | null;
   job_family_id?: string | null; job_family_name?: string | null; grade_id?: string | null; grade_name?: string | null;
-  supervisor_user_id?: string | null; secondary_org_units?: HrPlacement[]; matrix_org_units?: HrPlacement[];
+  supervisor_user_id?: string | null; can_have_supervisor?: boolean; secondary_org_units?: HrPlacement[]; matrix_org_units?: HrPlacement[];
   secondary_base_station_id?: string | null; secondary_base_code?: string | null;
   lifecycle_state?: HrLifecycleState; offboarding_effective_on?: string | null;
 };
@@ -85,10 +85,10 @@ export type HrAttendanceException = {
   classification: string; metadata_json?: Record<string, unknown> | null; calculated_at: string;
 };
 export type HrDashboard = {
-  generated_at: string; can_manage_contracts: boolean; can_initialize_default_day_pattern: boolean;
+  generated_at: string; can_manage_contracts: boolean; can_manage_patterns: boolean; can_assign_patterns: boolean; can_initialize_default_day_pattern: boolean;
   can_manage_leave_balances: boolean; can_review_leave: boolean; can_approve_leave: boolean;
   can_approve_timesheet_supervisor: boolean; can_approve_timesheet_hr: boolean;
-  can_approve_overtime_supervisor: boolean; can_approve_overtime_hr: boolean; can_export_payroll: boolean;
+  can_approve_overtime_supervisor: boolean; can_approve_overtime_hr: boolean; can_manage_attendance: boolean; can_export_payroll: boolean;
   active_employee_count: number; employees_without_contract_count: number; onboarding_employee_count: number;
   suspended_employee_count: number; contracts_expiring_soon_count: number; employees_without_pattern_count: number;
   employees_without_base_count: number; pending_leave_count: number; pending_timesheet_count: number;
@@ -125,7 +125,24 @@ export type HrContractBatchPreview = {
   already_contracted_count: number; rows: HrContractPreviewRow[]; rows_truncated: boolean;
 };
 
-export type HrBulkOperationType = "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN" | "ASSIGN_ORGANIZATION" |
+export type HrWorkPatternBatchOptions = {
+  work_pattern_id: string; effective_from: string; effective_to?: string | null;
+  cycle_anchor_date?: string | null; conflict_strategy: "REPLACE_OVERLAPS" | "SKIP_ASSIGNED"; reason: string;
+};
+export type HrWorkPatternPreviewRow = {
+  user_id: string; staff_code?: string | null; full_name: string; department_name?: string | null;
+  current_pattern_code?: string | null; current_pattern_name?: string | null;
+  target_pattern_code: string; target_pattern_name: string;
+  action: "ASSIGN" | "REPLACE" | "UNCHANGED" | "SKIP" | "BLOCKED"; eligible: boolean; reasons: string[];
+};
+export type HrWorkPatternBatchPreview = {
+  selection_token: string; matched_count: number; eligible_count: number; blocked_count: number;
+  assign_count: number; replace_count: number; unchanged_count: number; skipped_count: number;
+  target_pattern_id: string; target_pattern_code: string; target_pattern_name: string;
+  rows: HrWorkPatternPreviewRow[]; rows_truncated: boolean;
+};
+
+export type HrBulkOperationType = "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN" | "ASSIGN_WORK_PATTERN" | "ASSIGN_ORGANIZATION" |
   "ASSIGN_POSITION" | "ASSIGN_BASES" | "ASSIGN_SUPERVISOR" | "UPDATE_GROUPS" |
   "UPDATE_CONTRACT_SETTINGS" | "SCHEDULE_OFFBOARDING";
 export type HrBulkOperationStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "COMPLETED_WITH_ERRORS" | "FAILED";
@@ -152,12 +169,38 @@ export type HrJobFamily = { id: string; code: string; name: string; description?
 export type HrJobFamilyWrite = Omit<HrJobFamily, "id">;
 export type HrGrade = { id: string; code: string; name: string; rank_order: number; description?: string | null; is_active: boolean };
 export type HrGradeWrite = Omit<HrGrade, "id">;
-export type HrPosition = { id: string; code: string; canonical_title: string; job_family_id?: string | null; job_family_name?: string | null; grade_id?: string | null; grade_name?: string | null; description?: string | null; is_supervisory: boolean; is_active: boolean };
-export type HrPositionWrite = Omit<HrPosition, "id" | "job_family_name" | "grade_name">;
+export type HrManagementLevel = "STAFF" | "SUPERVISOR" | "MANAGER" | "EXECUTIVE";
+export type HrTenantFunction = "HUMAN_RESOURCES" | "INFORMATION_TECHNOLOGY" | "FINANCE";
+export type HrPosition = {
+  id: string; code: string; canonical_title: string; job_family_id?: string | null; job_family_name?: string | null;
+  grade_id?: string | null; grade_name?: string | null; description?: string | null;
+  role_source: "TENANT" | "KCAR_2025"; role_key?: string | null; management_level: HrManagementLevel;
+  can_have_supervisor: boolean; is_locked: boolean; is_supervisory: boolean; is_active: boolean;
+};
+export type HrPositionWrite = {
+  code: string; canonical_title: string; job_family_id?: string | null; grade_id?: string | null;
+  description?: string | null; management_level: HrManagementLevel; tenant_function?: HrTenantFunction | null;
+  is_supervisory: boolean; is_active: boolean;
+};
+export type HrHierarchyRoleStatus = {
+  key: string; code: string; title: string; management_level: "MANAGER" | "EXECUTIVE";
+  description: string; status: "READY" | "MATCH_AVAILABLE" | "MISSING";
+  position_id?: string | null; can_have_supervisor: false;
+};
+export type HrTenantFunctionStatus = {
+  key: HrTenantFunction; label: string; suggested_code: string; suggested_title: string;
+  status: "READY" | "PENDING_TENANT_SETUP"; position_id?: string | null;
+};
+export type HrHierarchyBlueprint = {
+  source_title: string; source_reference: string; source_url: string;
+  regulatory_roles: HrHierarchyRoleStatus[]; tenant_functions: HrTenantFunctionStatus[];
+  required_role_count: number; ready_role_count: number; missing_role_count: number;
+  created_count: number; adopted_count: number; updated_count: number; supervisor_links_cleared: number; accounts_synced: number;
+};
 export type HrSupervisorOption = { user_id: string; staff_code: string; full_name: string; position_title?: string | null; org_unit_name?: string | null; is_supervisory_position: boolean };
 export type HrSupervisorOptionsPage = { items: HrSupervisorOption[]; page: number; page_size: number; total: number; pages: number };
 
-export type HrPersonnelMutationType = Exclude<HrBulkOperationType, "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN">;
+export type HrPersonnelMutationType = Exclude<HrBulkOperationType, "CREATE_CONTRACTS" | "ASSIGN_DEFAULT_DAY_PATTERN" | "ASSIGN_WORK_PATTERN">;
 export type HrContractSettingsMutation = {
   contract_type?: string | null; employment_status?: string | null; effective_to?: string | null;
   standard_weekly_minutes?: number | null; standard_daily_minutes?: number | null; fte_percentage?: number | null;

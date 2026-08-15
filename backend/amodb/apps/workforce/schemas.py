@@ -109,6 +109,26 @@ class WorkPatternDayInput(WorkforceSchema):
         return self
 
 
+class WorkPatternApplicability(WorkforceSchema):
+    """Deterministic rule used only when a person has no explicit pattern assignment."""
+
+    auto_assign: bool = False
+    department_ids: list[str] = Field(default_factory=list)
+    position_ids: list[str] = Field(default_factory=list)
+    contract_types: list[models.ContractType] = Field(default_factory=list)
+    anchor_date: Optional[date] = None
+    priority: int = Field(default=100, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def validate_automatic_rule(self):
+        self.department_ids = sorted({value.strip() for value in self.department_ids if value.strip()})
+        self.position_ids = sorted({value.strip() for value in self.position_ids if value.strip()})
+        self.contract_types = sorted(set(self.contract_types), key=lambda value: value.value)
+        if self.auto_assign and self.anchor_date is None:
+            raise ValueError("anchor_date is required when automatic assignment is enabled")
+        return self
+
+
 class WorkPatternCreate(WorkforceSchema):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
@@ -116,6 +136,7 @@ class WorkPatternCreate(WorkforceSchema):
     cycle_length_days: int = Field(ge=1, le=366)
     is_active: bool = True
     timezone_name: str = Field(default="UTC", min_length=1, max_length=64)
+    applicability: WorkPatternApplicability = Field(default_factory=WorkPatternApplicability)
     days: list[WorkPatternDayInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -135,7 +156,19 @@ class WorkPatternUpdate(WorkforceSchema):
     cycle_length_days: Optional[int] = Field(default=None, ge=1, le=366)
     is_active: Optional[bool] = None
     timezone_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    applicability: Optional[WorkPatternApplicability] = None
     days: Optional[list[WorkPatternDayInput]] = None
+
+    @model_validator(mode="after")
+    def validate_days(self):
+        if self.days is None:
+            return self
+        indexes = [row.cycle_day_index for row in self.days]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("cycle_day_index values must be unique")
+        if self.cycle_length_days is not None and any(index >= self.cycle_length_days for index in indexes):
+            raise ValueError("cycle_day_index must be below cycle_length_days")
+        return self
 
 
 class WorkPatternDayRead(WorkPatternDayInput):
@@ -157,12 +190,17 @@ class WorkPatternRead(WorkforceSchema):
     cycle_length_days: int
     is_active: bool
     timezone_name: str
+    applicability: WorkPatternApplicability = Field(default_factory=WorkPatternApplicability)
     days: list[WorkPatternDayRead] = Field(default_factory=list)
     assigned_employee_count: int = 0
     created_by_user_id: Optional[str] = None
     updated_by_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class WorkPatternDeleteRequest(WorkforceSchema):
+    reason: str = Field(min_length=5, max_length=500)
 
 
 class EmployeeWorkPatternAssignmentCreate(WorkforceSchema):
@@ -190,6 +228,18 @@ class EmployeeWorkPatternAssignmentRead(EmployeeWorkPatternAssignmentCreate):
     updated_at: datetime
 
 
+class EmployeeWorkPatternAssignmentUpdate(WorkforceSchema):
+    work_pattern_id: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    cycle_anchor_date: Optional[date] = None
+    reason: str = Field(min_length=5)
+
+
+class EmployeeWorkPatternAssignmentDeleteRequest(WorkforceSchema):
+    reason: str = Field(min_length=5)
+
+
 class PatternPreviewRequest(WorkforceSchema):
     from_date: date
     to_date: date
@@ -214,6 +264,9 @@ class PatternPreviewRow(WorkforceSchema):
     planned_minutes: int
     shift_template_id: Optional[str] = None
     shift_code: Optional[str] = None
+    pattern_id: Optional[str] = None
+    pattern_code: Optional[str] = None
+    resolution_source: str = "EXPLICIT"
     base_station_id: Optional[str] = None
     source_reference_id: str
     duplicate: bool = False
@@ -300,6 +353,7 @@ class LeaveRequestCreate(WorkforceSchema):
     requested_minutes: Optional[int] = Field(default=None, gt=0)
     reason: Optional[str] = None
     attachment_reference: Optional[str] = Field(default=None, max_length=255)
+    submit_immediately: bool = False
 
     @model_validator(mode="after")
     def validate_times(self):
@@ -446,6 +500,21 @@ class AttendanceEventCreate(WorkforceSchema):
     idempotency_key: str = Field(min_length=8, max_length=128)
     note: Optional[str] = None
     metadata_json: Optional[dict[str, Any]] = None
+    location_latitude: Optional[float] = Field(default=None, ge=-90, le=90, exclude=True)
+    location_longitude: Optional[float] = Field(default=None, ge=-180, le=180, exclude=True)
+    location_accuracy_m: Optional[float] = Field(default=None, gt=0, le=5000, exclude=True)
+    location_exception_reason: Optional[str] = Field(default=None, max_length=500, exclude=True)
+
+    @model_validator(mode="after")
+    def validate_location_evidence(self):
+        supplied = (
+            self.location_latitude is not None,
+            self.location_longitude is not None,
+            self.location_accuracy_m is not None,
+        )
+        if any(supplied) and not all(supplied):
+            raise ValueError("Latitude, longitude and location accuracy must be supplied together")
+        return self
 
 
 class AttendanceEventRead(AttendanceEventCreate):
@@ -466,6 +535,10 @@ class AttendanceSummaryRead(WorkforceSchema):
     break_minutes: int
     paid_minutes: int
     incomplete: bool
+    current_state: str = "CLOCKED_OUT"
+    current_since: Optional[datetime] = None
+    current_session_minutes: int = 0
+    requires_review_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     events: list[AttendanceEventRead] = Field(default_factory=list)
 

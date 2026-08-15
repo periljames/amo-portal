@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  CheckCircle2,
   CloudOff,
   CloudUpload,
   RefreshCw,
@@ -9,52 +10,80 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { MessagingHub } from "../messaging/MessagingHub";
 import { getCachedUser, getToken } from "../../services/auth";
 import { hasTenantMessagingContext } from "../../services/messaging";
 import {
   discardOfflineMutation,
   getOfflineOutboxSummary,
   listOfflineMutations,
+  onOfflineReplayProgress,
   onOfflineStateChanged,
   replayOfflineMutations,
   retryOfflineMutation,
   type OfflineOutboxEntry,
   type OfflineOutboxSummary,
+  type OfflineReplayProgress,
 } from "../../services/offlinePersistence";
+import {
+  getPortalConnectivitySnapshot,
+  probePortalConnectivity,
+  subscribePortalConnectivity,
+  type PortalConnectivitySnapshot,
+} from "../../services/portalConnectivity";
+import { MessagingHub } from "../messaging/MessagingHub";
 import "../../styles/components/messaging.css";
 
 const EMPTY: OfflineOutboxSummary = { queued: 0, syncing: 0, conflict: 0, failed: 0, total: 0 };
+const EMPTY_PROGRESS: OfflineReplayProgress = {
+  scope: "",
+  phase: "idle",
+  current: 0,
+  total: 0,
+  synced: 0,
+};
 
-type IndicatorState = "online" | "offline" | "queued" | "syncing" | "conflict";
+type IndicatorState = "online" | "offline" | "degraded" | "queued" | "syncing" | "conflict";
 
 function entryLabel(entry: OfflineOutboxEntry): string {
-  const entity = entry.entityType?.replace(/-/g, " ") || "offline change";
-  return entry.entityId ? `${entity} ${entry.entityId}` : entity;
+  const entity = entry.entityType?.replace(/-/g, " ") || "local change";
+  return entity.replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatLastReady(value: number | null): string {
+  if (!value) return "Not yet connected";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
 }
 
 export function OfflineSyncIndicator() {
-  const [online, setOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine);
+  const [connectivity, setConnectivity] = useState<PortalConnectivitySnapshot>(getPortalConnectivitySnapshot);
   const [summary, setSummary] = useState<OfflineOutboxSummary>(EMPTY);
-  const [reviewEntries, setReviewEntries] = useState<OfflineOutboxEntry[]>([]);
+  const [entries, setEntries] = useState<OfflineOutboxEntry[]>([]);
+  const [progress, setProgress] = useState<OfflineReplayProgress>(EMPTY_PROGRESS);
   const [manualSync, setManualSync] = useState(false);
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const online = connectivity.state === "online" && connectivity.databaseReady;
 
   const refresh = useCallback(async () => {
-    const [nextSummary, entries] = await Promise.all([
+    const [nextSummary, nextEntries] = await Promise.all([
       getOfflineOutboxSummary().catch(() => EMPTY),
       listOfflineMutations().catch(() => [] as OfflineOutboxEntry[]),
     ]);
     setSummary(nextSummary);
-    const unresolved = entries.filter((entry) => entry.status === "conflict" || entry.status === "failed");
-    setReviewEntries(unresolved);
-    if (!unresolved.length) setOpen(false);
+    setEntries(nextEntries);
   }, []);
 
   const sync = useCallback(async () => {
-    if (manualSync || !online) return;
+    if (manualSync) return;
+    if (!online) {
+      void probePortalConnectivity("manual-sync");
+      return;
+    }
     setManualSync(true);
     setActionError(null);
     try {
@@ -101,22 +130,28 @@ export function OfflineSyncIndicator() {
   }, [busyId, refresh]);
 
   useEffect(() => {
-    const handleOnline = () => {
-      setOnline(true);
-      void replayOfflineMutations().then(setSummary).catch(() => undefined);
-    };
-    const handleOffline = () => setOnline(false);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    const removeOfflineListener = onOfflineStateChanged(() => void refresh());
+    const removeConnectivity = subscribePortalConnectivity((next) => {
+      setConnectivity(next);
+      void refresh();
+    });
+    const removeState = onOfflineStateChanged(() => void refresh());
+    const removeProgress = onOfflineReplayProgress((next) => {
+      setProgress(next);
+      void refresh();
+    });
     void refresh();
-    if (navigator.onLine) void replayOfflineMutations().then(setSummary).catch(() => undefined);
     return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      removeOfflineListener();
+      removeConnectivity();
+      removeState();
+      removeProgress();
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!online || summary.queued <= 0) return;
+    const timer = window.setInterval(() => void replayOfflineMutations().then(() => refresh()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [online, refresh, summary.queued]);
 
   useEffect(() => {
     if (!open) return;
@@ -129,39 +164,39 @@ export function OfflineSyncIndicator() {
 
   const state: IndicatorState = useMemo(() => {
     if (summary.conflict > 0 || summary.failed > 0) return "conflict";
+    if (manualSync || progress.phase === "sending" || summary.syncing > 0) return "syncing";
+    if (connectivity.state === "degraded" || connectivity.state === "recovering") return "degraded";
     if (!online) return "offline";
-    if (manualSync || summary.syncing > 0) return "syncing";
     if (summary.queued > 0) return "queued";
     return "online";
-  }, [manualSync, online, summary]);
-  const showMessaging = hasTenantMessagingContext(getCachedUser(), getToken());
+  }, [connectivity.state, manualSync, online, progress.phase, summary]);
 
+  const showMessaging = hasTenantMessagingContext(getCachedUser(), getToken());
   if (state === "online") return showMessaging ? <MessagingHub /> : null;
 
-  const pending = summary.queued + summary.syncing + summary.conflict + summary.failed;
-  const title = state === "offline"
-    ? `${pending ? `${pending} change${pending === 1 ? "" : "s"} stored locally. ` : ""}Offline mode: cached data remains available.`
-    : state === "conflict"
-      ? `${summary.conflict + summary.failed} offline change${summary.conflict + summary.failed === 1 ? "" : "s"} need review.`
-      : state === "syncing"
-        ? `Synchronising ${pending} local change${pending === 1 ? "" : "s"}.`
-        : `${summary.queued} change${summary.queued === 1 ? "" : "s"} waiting to sync.`;
+  const pending = summary.total;
+  const issueCount = summary.conflict + summary.failed;
+  const title = state === "degraded"
+    ? "Server reachable; database recovery in progress"
+    : state === "offline"
+      ? `${pending ? `${pending} change${pending === 1 ? "" : "s"} saved locally. ` : ""}Portal connection unavailable.`
+      : state === "conflict"
+        ? `${issueCount} local change${issueCount === 1 ? "" : "s"} need review.`
+        : state === "syncing"
+          ? progress.message || `Synchronising ${pending} local change${pending === 1 ? "" : "s"}.`
+          : `${summary.queued} change${summary.queued === 1 ? "" : "s"} waiting to sync.`;
 
   const Icon = state === "offline"
     ? CloudOff
     : state === "conflict"
       ? AlertTriangle
-      : state === "syncing"
+      : state === "syncing" || state === "degraded"
         ? RefreshCw
         : CloudUpload;
-
-  const handleIndicatorClick = () => {
-    if (state === "conflict") {
-      setOpen((value) => !value);
-      return;
-    }
-    void sync();
-  };
+  const progressPercent = progress.total > 0
+    ? Math.min(100, Math.max(4, Math.round((progress.current / progress.total) * 100)))
+    : state === "syncing" ? 8 : 0;
+  const reviewEntries = entries.filter((entry) => entry.status === "conflict" || entry.status === "failed");
 
   return (
     <>
@@ -171,17 +206,16 @@ export function OfflineSyncIndicator() {
         className="portal-offline-indicator"
         data-state={state}
         aria-label={title}
-        aria-expanded={state === "conflict" ? open : undefined}
-        aria-controls={state === "conflict" ? "portal-offline-recovery" : undefined}
+        aria-expanded={open}
+        aria-controls="portal-offline-recovery"
         title={title}
-        onClick={handleIndicatorClick}
-        disabled={manualSync || (state !== "conflict" && !online)}
+        onClick={() => setOpen((value) => !value)}
       >
         <Icon size={18} aria-hidden="true" />
         {pending > 0 ? <span className="portal-offline-indicator__count">{pending > 99 ? "99+" : pending}</span> : null}
       </button>
 
-      {open && state === "conflict" ? (
+      {open ? (
         <section
           id="portal-offline-recovery"
           className="portal-offline-recovery"
@@ -191,55 +225,74 @@ export function OfflineSyncIndicator() {
         >
           <header className="portal-offline-recovery__header">
             <div>
-              <strong id="portal-offline-recovery-title">Offline changes need review</strong>
-              <span>{online ? "Retry after resolving the server record, or discard the local edit." : "Reconnect to retry, or discard the local edit."}</span>
+              <strong id="portal-offline-recovery-title">Connection &amp; sync</strong>
+              <span>{title}</span>
             </div>
-            <button
-              type="button"
-              className="portal-offline-recovery__close"
-              onClick={() => setOpen(false)}
-              aria-label="Close offline change review"
-            >
+            <button type="button" className="portal-offline-recovery__close" onClick={() => setOpen(false)} aria-label="Close connection and sync panel">
               <X size={17} aria-hidden="true" />
             </button>
           </header>
 
+          <div className="portal-offline-recovery__status" data-state={state}>
+            {online ? <CheckCircle2 size={17} aria-hidden="true" /> : <Icon size={17} aria-hidden="true" />}
+            <div>
+              <strong>{online ? "Server ready" : connectivity.reason || "Connection unavailable"}</strong>
+              <span>Last connected {formatLastReady(connectivity.lastReadyAt)}</span>
+            </div>
+          </div>
+
+          {(progress.phase === "sending" || manualSync) ? (
+            <div className="portal-offline-recovery__progress" aria-live="polite">
+              <div><strong>{progress.message || "Synchronising local changes"}</strong><span>{progressPercent}%</span></div>
+              <progress max="100" value={progressPercent}>{progressPercent}%</progress>
+            </div>
+          ) : null}
+
+          <div className="portal-offline-recovery__summary">
+            <span><strong>{summary.queued + summary.syncing}</strong> waiting</span>
+            <span><strong>{issueCount}</strong> review</span>
+            <span><strong>{connectivity.latencyMs ?? "—"}</strong> ms</span>
+          </div>
+
           {actionError ? <p className="portal-offline-recovery__error" role="alert">{actionError}</p> : null}
 
-          <div className="portal-offline-recovery__list">
-            {reviewEntries.map((entry) => {
-              const busy = busyId === entry.id;
-              return (
-                <article className="portal-offline-recovery__item" key={entry.id}>
-                  <div className="portal-offline-recovery__item-copy">
-                    <strong>{entryLabel(entry)}</strong>
-                    <code>{entry.method} {entry.path}</code>
-                    <span>{entry.error || "The server rejected this local change."}</span>
-                  </div>
-                  <div className="portal-offline-recovery__actions">
-                    <button
-                      type="button"
-                      onClick={() => void retryEntry(entry)}
-                      disabled={!online || Boolean(busyId)}
-                      title={!online ? "Reconnect before retrying" : "Retry this local change"}
-                    >
-                      <RotateCcw size={15} aria-hidden="true" />
-                      {busy ? "Working…" : "Retry"}
-                    </button>
-                    <button
-                      type="button"
-                      className="portal-offline-recovery__discard"
-                      onClick={() => void discardEntry(entry)}
-                      disabled={Boolean(busyId)}
-                    >
-                      <Trash2 size={15} aria-hidden="true" />
-                      Discard
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          {reviewEntries.length ? (
+            <div className="portal-offline-recovery__list">
+              {reviewEntries.map((entry) => {
+                const busy = busyId === entry.id;
+                return (
+                  <article className="portal-offline-recovery__item" key={entry.id}>
+                    <div className="portal-offline-recovery__item-copy">
+                      <strong>{entryLabel(entry)}</strong>
+                      <span>{entry.serverDetail || entry.error || "The server rejected this local change."}</span>
+                      {entry.retryable === false ? <small>Correct the source record, then recreate this item.</small> : null}
+                    </div>
+                    <div className="portal-offline-recovery__actions">
+                      {entry.retryable !== false ? (
+                        <button type="button" onClick={() => void retryEntry(entry)} disabled={!online || Boolean(busyId)}>
+                          <RotateCcw size={15} aria-hidden="true" />{busy ? "Working…" : "Retry"}
+                        </button>
+                      ) : null}
+                      <button type="button" className="portal-offline-recovery__discard" onClick={() => void discardEntry(entry)} disabled={Boolean(busyId)}>
+                        <Trash2 size={15} aria-hidden="true" />Discard
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <footer className="portal-offline-recovery__footer">
+            <button type="button" onClick={() => void probePortalConnectivity("panel")} disabled={manualSync}>
+              <RefreshCw size={15} aria-hidden="true" />Check server
+            </button>
+            {summary.queued > 0 ? (
+              <button type="button" className="portal-offline-recovery__primary" onClick={() => void sync()} disabled={!online || manualSync}>
+                <CloudUpload size={15} aria-hidden="true" />Sync now
+              </button>
+            ) : null}
+          </footer>
         </section>
       ) : null}
     </>
