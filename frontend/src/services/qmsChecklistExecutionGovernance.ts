@@ -1,6 +1,9 @@
 import { apiRequest, qmsPath } from "./apiClient";
 
 export type CanonicalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+export type FieldworkFindingResponse = "NONCOMPLIANT" | "OBSERVATION";
+export type FieldworkFindingLevel = "LEVEL_1" | "LEVEL_2" | "LEVEL_3" | "LEVEL_4";
+export type FieldworkFindingSeverity = "MINOR" | "MAJOR" | "CRITICAL";
 
 export type ChecklistExecutionGovernanceRow = {
   checklist_item_id: string;
@@ -43,8 +46,28 @@ export type FieldworkMutationResult = {
   row: ChecklistExecutionGovernanceRow;
 };
 
+export type AtomicFieldworkFindingResult = FieldworkMutationResult & {
+  finding: { id: string; finding_ref?: string | null; [key: string]: unknown };
+  car_id?: string | null;
+  car_number?: string | null;
+};
+
 export type FieldworkMutationPayload = {
   canonical_response_status: CanonicalChecklistResponse;
+  auditor_notes?: string | null;
+  evidence_references?: Array<Record<string, unknown> | string>;
+  reason: string;
+};
+
+export type AtomicFieldworkFindingPayload = {
+  canonical_response_status: FieldworkFindingResponse;
+  severity: FieldworkFindingSeverity;
+  level: FieldworkFindingLevel;
+  requirement_ref?: string | null;
+  description: string;
+  objective_evidence?: string | null;
+  safety_sensitive?: boolean;
+  target_close_date?: string | null;
   auditor_notes?: string | null;
   evidence_references?: Array<Record<string, unknown> | string>;
   reason: string;
@@ -73,8 +96,6 @@ export function nextQmsFieldworkDeviceSequence(): number {
   if (typeof window === "undefined") return Date.now();
   const raw = Number(window.localStorage.getItem(FIELDWORK_SEQUENCE_KEY) || "0");
   const prior = Number.isSafeInteger(raw) && raw >= 0 ? raw : 0;
-  // Use the wall clock as a floor so independent tabs do not commonly reuse
-  // the same sequence even when they read localStorage at nearly the same time.
   const next = Math.max(prior + 1, Date.now());
   window.localStorage.setItem(FIELDWORK_SEQUENCE_KEY, String(next));
   return next;
@@ -82,6 +103,16 @@ export function nextQmsFieldworkDeviceSequence(): number {
 
 export function newQmsFieldworkMutationId(): string {
   return randomIdentifier("qms-fieldwork");
+}
+
+function fieldworkEnvelope(clientMutationId: string, baseVersion: number) {
+  return {
+    client_mutation_id: clientMutationId,
+    device_id: qmsFieldworkDeviceId(),
+    device_sequence: nextQmsFieldworkDeviceSequence(),
+    client_timestamp: new Date().toISOString(),
+    base_version: baseVersion,
+  };
 }
 
 export function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
@@ -115,10 +146,7 @@ export function mutateChecklistFieldwork(
   clientMutationId = newQmsFieldworkMutationId(),
 ) {
   const body = {
-    client_mutation_id: clientMutationId,
-    device_id: qmsFieldworkDeviceId(),
-    device_sequence: nextQmsFieldworkDeviceSequence(),
-    base_version: item.entity_version,
+    ...fieldworkEnvelope(clientMutationId, item.entity_version),
     operation: "CHECKLIST_UPDATE" as const,
     canonical_response_status: payload.canonical_response_status,
     auditor_notes: payload.auditor_notes ?? null,
@@ -129,6 +157,44 @@ export function mutateChecklistFieldwork(
     qmsPath(
       amoCode,
       `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(item.checklist_item_id)}/fieldwork-mutations`,
+    ),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": clientMutationId,
+      },
+      body: JSON.stringify(body),
+      offline: {
+        queueMutation: true,
+        entityType: "qms-audit-checklist-item",
+        entityId: item.checklist_item_id,
+        idempotencyKey: clientMutationId,
+      },
+    },
+  );
+}
+
+export function createAtomicChecklistFinding(
+  amoCode: string,
+  auditId: string,
+  item: Pick<ChecklistExecutionGovernanceRow, "checklist_item_id" | "entity_version">,
+  payload: AtomicFieldworkFindingPayload,
+  clientMutationId = newQmsFieldworkMutationId(),
+) {
+  const body = {
+    ...fieldworkEnvelope(clientMutationId, item.entity_version),
+    operation: "CREATE_FINDING" as const,
+    ...payload,
+    safety_sensitive: payload.safety_sensitive ?? false,
+    target_close_date: payload.target_close_date ?? null,
+    auditor_notes: payload.auditor_notes ?? null,
+    evidence_references: payload.evidence_references ?? [],
+  };
+  return apiRequest<AtomicFieldworkFindingResult>(
+    qmsPath(
+      amoCode,
+      `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(item.checklist_item_id)}/fieldwork-findings`,
     ),
     {
       method: "POST",
