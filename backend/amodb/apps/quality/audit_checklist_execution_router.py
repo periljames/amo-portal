@@ -44,6 +44,7 @@ class FieldworkMutation(BaseModel):
     client_mutation_id: str = Field(min_length=8, max_length=128)
     device_id: str = Field(min_length=8, max_length=128)
     device_sequence: int = Field(ge=0)
+    client_timestamp: datetime
     base_version: int = Field(ge=0)
     operation: Literal["CHECKLIST_UPDATE"] = "CHECKLIST_UPDATE"
     canonical_response_status: CanonicalResponse
@@ -56,6 +57,7 @@ class FieldworkFindingMutation(BaseModel):
     client_mutation_id: str = Field(min_length=8, max_length=128)
     device_id: str = Field(min_length=8, max_length=128)
     device_sequence: int = Field(ge=0)
+    client_timestamp: datetime
     base_version: int = Field(ge=0)
     operation: Literal["CREATE_FINDING"] = "CREATE_FINDING"
     canonical_response_status: FindingResponse
@@ -73,6 +75,10 @@ class FieldworkFindingMutation(BaseModel):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalise_client_timestamp(value: datetime) -> datetime:
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _canonical_from_legacy(value: str | None) -> CanonicalResponse:
@@ -241,16 +247,10 @@ def _publish_persisted_event(row: audit_models.AuditEvent) -> None:
             metadata={"amoId": row.amo_id, **(row.metadata_json or {})},
         ))
     except Exception:
-        # The durable audit_events row is the replay source of truth. A transient
-        # in-process publish failure must not turn a committed fieldwork write
-        # into a false client failure or duplicate replay.
         return
 
 
 def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid.UUID):
-    # Import lazily so the established Quality router can finish registering its
-    # canonical endpoints before this focused execution router reuses its
-    # assignment and CAR helpers.
     from . import router as quality_router
 
     audit = db.query(models.QMSAudit).filter(
@@ -352,6 +352,7 @@ def _fieldwork_event(
     client_mutation_id: str,
     device_id: str,
     device_sequence: int,
+    client_timestamp: datetime,
     current_version: int,
     committed_version: int,
     response: str,
@@ -372,6 +373,7 @@ def _fieldwork_event(
             "clientMutationId": client_mutation_id,
             "deviceId": device_id,
             "deviceSequence": device_sequence,
+            "clientTimestamp": _normalise_client_timestamp(client_timestamp).isoformat(),
             "entityVersion": committed_version,
         },
     )
@@ -433,8 +435,6 @@ def mutate_live_fieldwork(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    """Apply one replay-safe Live Audit checklist mutation."""
-
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
@@ -480,6 +480,7 @@ def mutate_live_fieldwork(
         client_mutation_id=payload.client_mutation_id,
         device_id=payload.device_id,
         device_sequence=payload.device_sequence,
+        client_timestamp=_normalise_client_timestamp(payload.client_timestamp),
         base_version=payload.base_version,
         committed_version=committed_version,
         operation=payload.operation,
@@ -495,6 +496,7 @@ def mutate_live_fieldwork(
         client_mutation_id=payload.client_mutation_id,
         device_id=payload.device_id,
         device_sequence=payload.device_sequence,
+        client_timestamp=payload.client_timestamp,
         current_version=current_version,
         committed_version=committed_version,
         response=payload.canonical_response_status,
@@ -520,14 +522,6 @@ def create_atomic_fieldwork_finding(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    """Create finding + governed checklist response in one transaction.
-
-    This endpoint deliberately reuses the established Quality finding helpers
-    for finding numbering, due-date policy, CAR creation, task creation and
-    audit assignment access. No checklist state is committed if any finding,
-    CAR, task, receipt or event write fails.
-    """
-
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     payload_hash = _mutation_hash(payload)
@@ -645,6 +639,7 @@ def create_atomic_fieldwork_finding(
             client_mutation_id=payload.client_mutation_id,
             device_id=payload.device_id,
             device_sequence=payload.device_sequence,
+            client_timestamp=_normalise_client_timestamp(payload.client_timestamp),
             base_version=payload.base_version,
             committed_version=committed_version,
             operation=payload.operation,
@@ -673,6 +668,7 @@ def create_atomic_fieldwork_finding(
                 "auditId": str(audit_id),
                 "checklistItemId": str(item_id),
                 "clientMutationId": payload.client_mutation_id,
+                "clientTimestamp": _normalise_client_timestamp(payload.client_timestamp).isoformat(),
             },
         )
         fieldwork_event = _fieldwork_event(
@@ -682,6 +678,7 @@ def create_atomic_fieldwork_finding(
             client_mutation_id=payload.client_mutation_id,
             device_id=payload.device_id,
             device_sequence=payload.device_sequence,
+            client_timestamp=payload.client_timestamp,
             current_version=current_version,
             committed_version=committed_version,
             response=payload.canonical_response_status,
@@ -697,7 +694,11 @@ def create_atomic_fieldwork_finding(
                 actor_user_id=ctx.user_id,
                 after={"finding_id": str(finding.id), "car_number": linked_car.car_number},
                 correlation_id=payload.client_mutation_id,
-                metadata_json={"module": "quality", "auditId": str(audit_id)},
+                metadata_json={
+                    "module": "quality",
+                    "auditId": str(audit_id),
+                    "clientTimestamp": _normalise_client_timestamp(payload.client_timestamp).isoformat(),
+                },
             )
             db.add(car_event)
             published_events.append(car_event)
