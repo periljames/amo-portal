@@ -18,19 +18,15 @@ import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import { listOfflineMutations } from "../../../services/offlinePersistence";
+import { qmsListFindings, qmsResolveAudit } from "../../../services/qms";
 import {
-  qmsCreateFinding,
-  qmsListFindings,
-  qmsResolveAudit,
-  qmsUpdateAuditChecklistItem,
-  type QMSFindingCreatePayload,
-} from "../../../services/qms";
-import {
+  createAtomicChecklistFinding,
   listChecklistExecutionGovernance,
   mutateChecklistFieldwork,
-  updateChecklistExecutionGovernance,
   type CanonicalChecklistResponse,
   type ChecklistExecutionGovernanceRow,
+  type FieldworkFindingLevel,
+  type FieldworkFindingSeverity,
 } from "../../../services/qmsChecklistExecutionGovernance";
 import { getAuditSession } from "../../../services/qmsAuditSession";
 import { auditSessionPath } from "./auditSessionRoutes";
@@ -65,36 +61,17 @@ type FieldworkUpdateInput = {
   auditorNotes: string;
 };
 
-const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: string }> = [
+const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: FieldworkFindingSeverity }> = [
   { value: "LEVEL_1", label: "Level 1 · Critical", severity: "CRITICAL" },
   { value: "LEVEL_2", label: "Level 2 · Major", severity: "MAJOR" },
   { value: "LEVEL_3", label: "Level 3 · Minor", severity: "MINOR" },
 ];
 
-function findingPayload(draft: FindingDraft): QMSFindingCreatePayload {
-  if (draft.mode === "OBSERVATION") {
-    return {
-      finding_type: "OBSERVATION",
-      severity: "MINOR",
-      level: "LEVEL_4",
-      requirement_ref: draft.item.requirement_ref || draft.item.checklist_ref || null,
-      description: draft.statement.trim(),
-      objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
-      safety_sensitive: false,
-    };
-  }
-
+function findingClassification(draft: FindingDraft): { severity: FieldworkFindingSeverity; level: FieldworkFindingLevel } {
+  if (draft.mode === "OBSERVATION") return { severity: "MINOR", level: "LEVEL_4" };
   const selected = NONCONFORMITY_LEVELS.find((candidate) => candidate.value === draft.level);
   if (!selected) throw new Error("Select the governed non-conformity classification before creating the finding.");
-  return {
-    finding_type: "NON_CONFORMITY",
-    severity: selected.severity,
-    level: selected.value,
-    requirement_ref: draft.item.requirement_ref || draft.item.checklist_ref || null,
-    description: draft.statement.trim(),
-    objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
-    safety_sensitive: false,
-  };
+  return { severity: selected.severity, level: selected.value };
 }
 
 function fieldworkConflictMessage(error: unknown): string | null {
@@ -111,6 +88,9 @@ function fieldworkConflictMessage(error: unknown): string | null {
   }
   if (code === "FIELDWORK_IDEMPOTENCY_CONFLICT") {
     return "The same offline mutation identifier was received with different content. The portal rejected it to prevent duplicate or ambiguous fieldwork.";
+  }
+  if (code === "FIELDWORK_FINDING_ALREADY_LINKED") {
+    return "This checklist item already has a governed finding. Review the existing finding instead of creating a duplicate.";
   }
   return typeof detail.message === "string" ? detail.message : error.message;
 }
@@ -218,34 +198,44 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const findingMutation = useMutation({
     mutationFn: async (draft: FindingDraft) => {
-      // Finding creation still uses the existing governed finding/CAR/task path.
-      // It is deliberately not queued offline until checklist + finding creation
-      // can be committed atomically without bypassing that existing governance.
-      const finding = await qmsCreateFinding(auditId, findingPayload(draft));
-      await qmsUpdateAuditChecklistItem(auditId, draft.item.checklist_item_id, { finding_id: finding.id });
+      const classification = findingClassification(draft);
       const auditorNotes = noteDrafts[draft.item.checklist_item_id] ?? draft.item.auditor_notes ?? "";
-      await updateChecklistExecutionGovernance(amoCode, auditId, draft.item.checklist_item_id, {
+      return createAtomicChecklistFinding(amoCode, auditId, draft.item, {
         canonical_response_status: draft.mode,
+        severity: classification.severity,
+        level: classification.level,
+        requirement_ref: draft.item.requirement_ref || draft.item.checklist_ref || null,
+        description: draft.statement.trim(),
+        objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
+        safety_sensitive: false,
         auditor_notes: auditorNotes.trim() || null,
         evidence_references: draft.item.evidence_references || [],
-        reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded with governed finding ${finding.id}.`,
+        reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded atomically with the governed checklist response.`,
       });
-      return finding;
     },
-    onSuccess: async (_finding, draft) => {
+    onSuccess: async (_result, draft) => {
       setFindingDraft(null);
       setLocalError(null);
-      setSyncNotice("Finding recorded through the governed Quality finding/CAR workflow.");
+      setSyncNotice("Finding, checklist response and governed CAR/task consequences committed as one authoritative transaction.");
       setNoteDrafts((current) => {
         const next = { ...current };
         delete next[draft.item.checklist_item_id];
         return next;
       });
       await refreshFieldwork();
+      void outboxQuery.refetch();
     },
     onError: (error) => {
+      if (isOfflineQueuedError(error)) {
+        setFindingDraft(null);
+        setLocalError(null);
+        setSyncNotice("Finding captured securely on this device as one atomic intent · pending ordered sync. No server finding, CAR or checklist response exists until the complete transaction is accepted.");
+        void outboxQuery.refetch();
+        return;
+      }
       setSyncNotice(null);
-      setLocalError(error instanceof Error ? error.message : "Finding creation failed.");
+      setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Finding creation failed."));
+      void outboxQuery.refetch();
     },
   });
 
