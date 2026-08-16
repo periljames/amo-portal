@@ -17,6 +17,7 @@ depends_on = None
 
 RECEIPT_TABLE = "quality_audit_fieldwork_mutation_receipts"
 GOVERNANCE_TABLE = "quality_audit_checklist_execution_governance"
+EVENT_TABLE = "quality_audit_checklist_execution_events"
 
 
 def _is_postgresql() -> bool:
@@ -27,6 +28,30 @@ def upgrade() -> None:
     op.add_column(
         GOVERNANCE_TABLE,
         sa.Column("entity_version", sa.Integer(), server_default="1", nullable=False),
+    )
+    op.add_column(
+        GOVERNANCE_TABLE,
+        sa.Column("updated_by_participant_id", sa.String(length=36), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_quality_checklist_execution_participant",
+        GOVERNANCE_TABLE,
+        "quality_audit_participants",
+        ["updated_by_participant_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.add_column(
+        EVENT_TABLE,
+        sa.Column("actor_participant_id", sa.String(length=36), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_quality_checklist_execution_event_participant",
+        EVENT_TABLE,
+        "quality_audit_participants",
+        ["actor_participant_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
     op.create_table(
@@ -45,16 +70,19 @@ def upgrade() -> None:
         sa.Column("payload_hash", sa.String(length=64), nullable=False),
         sa.Column("result_snapshot", sa.JSON(), nullable=False),
         sa.Column("actor_user_id", sa.String(length=36), nullable=True),
+        sa.Column("actor_participant_id", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["checklist_item_id"], ["quality_audit_checklist_items.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["actor_participant_id"], ["quality_audit_participants.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_fieldwork_client_mutation"),
         sa.CheckConstraint("base_version >= 0", name="ck_quality_fieldwork_base_version"),
         sa.CheckConstraint("committed_version >= 1", name="ck_quality_fieldwork_committed_version"),
         sa.CheckConstraint("device_sequence >= 0", name="ck_quality_fieldwork_device_sequence"),
+        sa.CheckConstraint("NOT (actor_user_id IS NOT NULL AND actor_participant_id IS NOT NULL)", name="ck_quality_fieldwork_single_actor"),
     )
     op.create_index(
         "ix_quality_fieldwork_receipt_audit_item",
@@ -102,4 +130,8 @@ def downgrade() -> None:
     op.drop_index("ix_quality_fieldwork_receipt_device", table_name=RECEIPT_TABLE)
     op.drop_index("ix_quality_fieldwork_receipt_audit_item", table_name=RECEIPT_TABLE)
     op.drop_table(RECEIPT_TABLE)
+    op.drop_constraint("fk_quality_checklist_execution_event_participant", EVENT_TABLE, type_="foreignkey")
+    op.drop_column(EVENT_TABLE, "actor_participant_id")
+    op.drop_constraint("fk_quality_checklist_execution_participant", GOVERNANCE_TABLE, type_="foreignkey")
+    op.drop_column(GOVERNANCE_TABLE, "updated_by_participant_id")
     op.drop_column(GOVERNANCE_TABLE, "entity_version")
