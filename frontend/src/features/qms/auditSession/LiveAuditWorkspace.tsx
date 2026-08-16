@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { hasQmsRolePermission } from "../../../app/routeGuards";
 import {
   qmsCreateFinding,
   qmsListFindings,
@@ -44,20 +45,41 @@ const RESPONSE_OPTIONS: Array<{
 ];
 
 type Props = { amoCode: string; auditKey: string };
+type NonconformityLevel = "LEVEL_1" | "LEVEL_2" | "LEVEL_3";
 
 type FindingDraft = {
   mode: "NONCOMPLIANT" | "OBSERVATION";
   item: ChecklistExecutionGovernanceRow;
+  level: NonconformityLevel | "";
   statement: string;
   objectiveEvidence: string;
 };
 
+const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: string }> = [
+  { value: "LEVEL_1", label: "Level 1 · Critical", severity: "CRITICAL" },
+  { value: "LEVEL_2", label: "Level 2 · Major", severity: "MAJOR" },
+  { value: "LEVEL_3", label: "Level 3 · Minor", severity: "MINOR" },
+];
+
 function findingPayload(draft: FindingDraft): QMSFindingCreatePayload {
-  const nonconformity = draft.mode === "NONCOMPLIANT";
+  if (draft.mode === "OBSERVATION") {
+    return {
+      finding_type: "OBSERVATION",
+      severity: "MINOR",
+      level: "LEVEL_4",
+      requirement_ref: draft.item.requirement_ref || draft.item.checklist_ref || null,
+      description: draft.statement.trim(),
+      objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
+      safety_sensitive: false,
+    };
+  }
+
+  const selected = NONCONFORMITY_LEVELS.find((candidate) => candidate.value === draft.level);
+  if (!selected) throw new Error("Select the governed non-conformity classification before creating the finding.");
   return {
-    finding_type: nonconformity ? "NON_CONFORMITY" : "OBSERVATION",
-    severity: nonconformity ? "MAJOR" : "MINOR",
-    level: nonconformity ? "LEVEL_2" : "LEVEL_4",
+    finding_type: "NON_CONFORMITY",
+    severity: selected.severity,
+    level: selected.value,
     requirement_ref: draft.item.requirement_ref || draft.item.checklist_ref || null,
     description: draft.statement.trim(),
     objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
@@ -67,6 +89,7 @@ function findingPayload(draft: FindingDraft): QMSFindingCreatePayload {
 
 const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
+  const canManage = hasQmsRolePermission("qms.audit.manage");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
@@ -112,6 +135,14 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setNotes(selected?.auditor_notes || "");
   }, [selected?.auditor_notes, selected?.checklist_item_id]);
 
+  const refreshFieldwork = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms-live-audit-checklist", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-live-audit-findings", auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+    ]);
+  };
+
   const updateMutation = useMutation({
     mutationFn: ({ item, response, auditorNotes }: { item: ChecklistExecutionGovernanceRow; response: CanonicalChecklistResponse; auditorNotes: string }) =>
       updateChecklistExecutionGovernance(amoCode, auditId, item.checklist_item_id, {
@@ -120,24 +151,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         evidence_references: item.evidence_references || [],
         reason: "Live audit fieldwork checklist update.",
       }),
-    onSuccess: async (updated, variables) => {
+    onSuccess: async () => {
       setLocalError(null);
-      queryClient.setQueryData(
-        ["qms-live-audit-checklist", amoCode, auditId],
-        (current: typeof checklistQuery.data) => current ? {
-          ...current,
-          items: current.items.map((item) => item.checklist_item_id === updated.checklist_item_id ? updated : item),
-        } : current,
-      );
-      if (variables.response === "NONCOMPLIANT" || variables.response === "OBSERVATION") {
-        setFindingDraft({
-          mode: variables.response,
-          item: updated,
-          statement: "",
-          objectiveEvidence: updated.objective_evidence || "",
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] });
+      await refreshFieldwork();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Checklist update failed."),
   });
@@ -146,16 +162,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     mutationFn: async (draft: FindingDraft) => {
       const finding = await qmsCreateFinding(auditId, findingPayload(draft));
       await qmsUpdateAuditChecklistItem(auditId, draft.item.checklist_item_id, { finding_id: finding.id });
+      await updateChecklistExecutionGovernance(amoCode, auditId, draft.item.checklist_item_id, {
+        canonical_response_status: draft.mode,
+        auditor_notes: notes.trim() || draft.item.auditor_notes || null,
+        evidence_references: draft.item.evidence_references || [],
+        reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded with governed finding ${finding.id}.`,
+      });
       return finding;
     },
     onSuccess: async () => {
       setFindingDraft(null);
       setLocalError(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["qms-live-audit-findings", auditId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-live-audit-checklist", amoCode, auditId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
-      ]);
+      await refreshFieldwork();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Finding creation failed."),
   });
@@ -181,6 +199,21 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setSelectedId(items[nextIndex].checklist_item_id);
   };
 
+  const selectResponse = (item: ChecklistExecutionGovernanceRow, response: CanonicalChecklistResponse) => {
+    if (!canManage) return;
+    if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
+      setFindingDraft({
+        mode: response,
+        item,
+        level: "",
+        statement: "",
+        objectiveEvidence: item.objective_evidence || "",
+      });
+      return;
+    }
+    updateMutation.mutate({ item, response, auditorNotes: notes });
+  };
+
   if (auditQuery.isLoading || checklistQuery.isLoading) {
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
   }
@@ -202,6 +235,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <h1>{auditQuery.data.audit_ref} · {auditQuery.data.title}</h1>
         </div>
         <div className="qms-live-audit-focus__header-meta">
+          <span>{canManage ? "AUDITOR MODE" : "READ-ONLY MODE"}</span>
           <span>{sessionQuery.data ? `Authoritative stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span>
           <span>{completed}/{items.length} complete · {percent}%</span>
           <Link to={auditSessionPath(amoCode, auditKey, "prepare")}><X size={16} /> Exit field mode</Link>
@@ -251,8 +285,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       type="button"
                       key={option.value}
                       className={selected.canonical_response_status === option.value ? "is-active" : ""}
-                      disabled={updateMutation.isPending}
-                      onClick={() => updateMutation.mutate({ item: selected, response: option.value, auditorNotes: notes })}
+                      disabled={!canManage || updateMutation.isPending || findingMutation.isPending}
+                      onClick={() => selectResponse(selected, option.value)}
                     >
                       <Icon size={17} /> {option.label}
                     </button>
@@ -262,12 +296,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               <label className="qms-live-audit-focus__notes">
                 <span>Auditor note</span>
-                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={5} placeholder="Record objective, attributable fieldwork notes." />
+                <textarea readOnly={!canManage} value={notes} onChange={(event) => setNotes(event.target.value)} rows={5} placeholder="Record objective, attributable fieldwork notes." />
               </label>
               <div className="qms-live-audit-focus__note-actions">
                 <button
                   type="button"
-                  disabled={updateMutation.isPending}
+                  disabled={!canManage || updateMutation.isPending}
                   onClick={() => updateMutation.mutate({ item: selected, response: selected.canonical_response_status, auditorNotes: notes })}
                 >Save note</button>
               </div>
@@ -320,10 +354,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <section className="qms-live-audit-finding" role="dialog" aria-modal="true" aria-label="Raise finding">
             <header><div><span>{findingDraft.mode === "NONCOMPLIANT" ? "NON-CONFORMITY" : "OBSERVATION"}</span><h2>Raise finding from checklist</h2></div><button type="button" onClick={() => setFindingDraft(null)} aria-label="Close finding composer"><X size={18} /></button></header>
             <dl><div><dt>Requirement</dt><dd>{findingDraft.item.requirement_ref || findingDraft.item.checklist_ref || "—"}</dd></div></dl>
+            {findingDraft.mode === "NONCOMPLIANT" ? (
+              <label><span>Classification</span><select value={findingDraft.level} onChange={(event) => setFindingDraft((current) => current ? { ...current, level: event.target.value as NonconformityLevel } : current)}><option value="">Select governed level</option>{NONCONFORMITY_LEVELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}</select></label>
+            ) : null}
             <label><span>Finding statement</span><textarea rows={5} value={findingDraft.statement} onChange={(event) => setFindingDraft((current) => current ? { ...current, statement: event.target.value } : current)} /></label>
             <label><span>Objective evidence</span><textarea rows={4} value={findingDraft.objectiveEvidence} onChange={(event) => setFindingDraft((current) => current ? { ...current, objectiveEvidence: event.target.value } : current)} /></label>
-            <p>{findingDraft.mode === "NONCOMPLIANT" ? "Default classification is Level 2 / Major. Review can be refined in the governed Findings workspace." : "This creates a governed observation linked to the exact checklist item."}</p>
-            <footer><button type="button" onClick={() => setFindingDraft(null)}>Cancel</button><button type="button" className="is-primary" disabled={findingDraft.statement.trim().length < 8 || findingMutation.isPending} onClick={() => findingMutation.mutate(findingDraft)}>{findingMutation.isPending ? "Creating…" : "Create finding"}</button></footer>
+            <p>{findingDraft.mode === "NONCOMPLIANT" ? "Select the applicable governed finding level. The workspace does not infer severity from the checklist response." : "This creates a governed observation linked to the exact checklist item."}</p>
+            <footer><button type="button" onClick={() => setFindingDraft(null)}>Cancel</button><button type="button" className="is-primary" disabled={findingDraft.statement.trim().length < 8 || (findingDraft.mode === "NONCOMPLIANT" && !findingDraft.level) || findingMutation.isPending} onClick={() => findingMutation.mutate(findingDraft)}>{findingMutation.isPending ? "Creating…" : "Create finding"}</button></footer>
           </section>
         </div>
       ) : null}
