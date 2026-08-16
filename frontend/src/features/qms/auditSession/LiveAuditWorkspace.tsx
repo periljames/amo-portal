@@ -17,6 +17,7 @@ import { Link } from "react-router-dom";
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
+import { listOfflineMutations } from "../../../services/offlinePersistence";
 import {
   qmsCreateFinding,
   qmsListFindings,
@@ -147,6 +148,17 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
+  const outboxQuery = useQuery({
+    queryKey: ["qms", "live-audit-outbox", auditId],
+    queryFn: async () => {
+      const auditMarker = `/audits/${encodeURIComponent(auditId)}/`;
+      const entries = await listOfflineMutations();
+      return entries.filter((entry) => entry.entityType === "qms-audit-checklist-item" && entry.path.includes(auditMarker));
+    },
+    enabled: Boolean(auditId),
+    staleTime: 500,
+    refetchInterval: 2_000,
+  });
 
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
   const effectiveSelectedId = useMemo(() => {
@@ -161,6 +173,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const notes = selected
     ? noteDrafts[selected.checklist_item_id] ?? selected.auditor_notes ?? ""
     : "";
+  const outboxEntries = outboxQuery.data ?? [];
+  const outbox = useMemo(() => ({
+    queued: outboxEntries.filter((entry) => entry.status === "queued" || entry.status === "syncing").length,
+    conflicts: outboxEntries.filter((entry) => entry.status === "conflict").length,
+    failed: outboxEntries.filter((entry) => entry.status === "failed").length,
+  }), [outboxEntries]);
 
   const refreshFieldwork = async () => {
     await queryClient.invalidateQueries({ queryKey: ["qms"] });
@@ -183,15 +201,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         return next;
       });
       await refreshFieldwork();
+      void outboxQuery.refetch();
     },
     onError: (error) => {
       if (isOfflineQueuedError(error)) {
         setLocalError(null);
         setSyncNotice("Saved securely on this device · pending ordered sync. The authoritative audit state will not change until the server accepts the mutation.");
+        void outboxQuery.refetch();
         return;
       }
       setSyncNotice(null);
       setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Checklist update failed."));
+      void outboxQuery.refetch();
     },
   });
 
@@ -289,6 +310,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <span>{canManage ? "AUDITOR MODE" : "READ-ONLY MODE"}</span>
           <span>{sessionQuery.data ? `Authoritative stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span>
           <span>{completed}/{items.length} complete · {percent}%</span>
+          {outbox.queued || outbox.conflicts || outbox.failed ? <span>DEVICE SYNC · {outbox.queued} pending · {outbox.conflicts} conflict · {outbox.failed} failed</span> : <span>DEVICE SYNC · clear</span>}
           <Link to={auditSessionPath(amoCode, auditKey, "prepare")}><X size={16} /> Exit field mode</Link>
         </div>
       </header>
@@ -396,6 +418,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <div><strong>{counts.NONCOMPLIANT}</strong><span>NCR</span></div>
             <div><strong>{counts.OBSERVATION}</strong><span>Observations</span></div>
             <div><strong>{counts.NOT_VERIFIED}</strong><span>Pending</span></div>
+          </section>
+          <section>
+            <span>Device sync</span>
+            <strong>{outbox.queued + outbox.conflicts + outbox.failed}</strong>
+            <small>{outbox.queued} pending · {outbox.conflicts} conflict · {outbox.failed} failed. Conflicts require review; they are never silently overwritten.</small>
           </section>
           <section>
             <span>Findings</span>
