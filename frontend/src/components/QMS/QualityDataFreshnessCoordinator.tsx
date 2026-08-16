@@ -11,11 +11,11 @@ const MUTATION_REFRESH_DELAYS_MS = [1_200, 4_500] as const;
 const MUTATION_ACTION_PATTERN = /\b(save|create|update|submit|approve|issue|run|schedule|reschedule|delete|restore|close|reopen|verify|complete|publish|assign)\b/i;
 
 function isQualityPath(pathname: string): boolean {
-  return /^\/maintenance\/[^/]+\/quality(?:\/|$)/i.test(pathname);
+  return /^\/maintenance\/[^/]+\/(?:quality|qms)(?:\/|$)/i.test(pathname);
 }
 
 function qualityAmoCode(pathname: string): string | null {
-  const match = pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/|$)/i);
+  const match = pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)(?:\/|$)/i);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -78,7 +78,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     if (!qualityActive) return;
     const params = new URLSearchParams(location.search);
     const createIntent = params.get("create") === "1";
-    const plannerRoute = /\/quality\/audits\/(?:plan|schedule)\/?$/i.test(location.pathname);
+    const plannerRoute = /\/(?:quality|qms)\/audits\/(?:plan|schedule)\/?$/i.test(location.pathname);
     if (!createIntent || !plannerRoute) return;
 
     let attempts = 0;
