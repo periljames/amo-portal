@@ -5,15 +5,21 @@ on:
     paths:
       - "backend/amodb/alembic/versions/quality_260816_external_access.py"
       - "backend/amodb/alembic/versions/quality_260816_guest_documents.py"
+      - "backend/amodb/alembic/versions/quality_260816_report_composition.py"
+      - "backend/amodb/alembic/versions/quality_260816_fieldwork_sync.py"
       - "backend/amodb/apps/quality/audit_session_*.py"
       - "backend/amodb/apps/quality/audit_external_access_*.py"
       - "backend/amodb/apps/quality/audit_finding_release_status_router.py"
       - "backend/amodb/apps/quality/audit_guest_document_*.py"
       - "backend/amodb/apps/quality/audit_guest_documents_router.py"
+      - "backend/amodb/apps/quality/audit_report_composition*.py"
+      - "backend/amodb/apps/quality/audit_checklist_execution_*.py"
       - "backend/amodb/apps/quality/car_control_loop_route_order.py"
       - "backend/amodb/apps/quality/tests/test_audit_session_projection.py"
       - "backend/amodb/apps/quality/tests/test_audit_external_access_contract.py"
       - "backend/amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py"
+      - "backend/amodb/apps/quality/tests/test_audit_report_composition_contract.py"
+      - "backend/amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py"
       - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
       - "frontend/src/App.tsx"
       - "frontend/src/pages/PublicAuditAccessPage.tsx"
@@ -21,6 +27,8 @@ on:
       - "frontend/src/services/qmsAuditSession.ts"
       - "frontend/src/services/qmsAuditPreparationRoom.ts"
       - "frontend/src/services/qmsAuditExternalAccess.ts"
+      - "frontend/src/services/qmsAuditReportComposition.ts"
+      - "frontend/src/services/qmsChecklistExecutionGovernance.ts"
       - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
       - "frontend/src/styles/qms-audit-session.css"
       - "frontend/src/styles/qms-live-audit-workspace.css"
@@ -28,8 +36,10 @@ on:
       - "frontend/src/styles/qms-audit-prepare-workspace.css"
       - "frontend/src/styles/qms-audit-external-participants.css"
       - "frontend/src/styles/qms-audit-document-review.css"
+      - "frontend/src/styles/qms-audit-closing-workspace.css"
       - "frontend/src/styles/qms-public-audit-access.css"
       - "frontend/src/styles/qms-public-audit-document-submit.css"
+      - "frontend/tests/e2e/qms-live-audit-public-access.spec.ts"
       - "docs/quality/QMS_LIVE_AUDIT_*.md"
       - "docs/quality/QMS_PENDING_PR_RECONCILIATION.md"
       - ".github/workflows/qms-live-audit-ci.yml"
@@ -78,12 +88,22 @@ jobs:
           amodb/apps/quality/audit_guest_document_models.py
           amodb/apps/quality/audit_guest_document_storage.py
           amodb/apps/quality/audit_guest_documents_router.py
+          amodb/apps/quality/audit_report_composition.py
+          amodb/apps/quality/audit_report_composition_models.py
+          amodb/apps/quality/audit_report_composition_router.py
+          amodb/apps/quality/audit_report_composition_route_order.py
+          amodb/apps/quality/audit_checklist_execution_models.py
+          amodb/apps/quality/audit_checklist_execution_router.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
       - name: Test external access token and scope contract
         run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py
       - name: Test guest document storage controls
         run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
+      - name: Test deterministic report composition helpers
+        run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
+      - name: Test idempotent fieldwork sync contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
       - name: Prove authoritative workflow contract remains green
         run: pytest -q amodb/apps/quality/tests/test_audit_workflow_contract.py
 
@@ -125,7 +145,7 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Upgrade PostgreSQL through all Alembic heads
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Verify external access RLS and append-only contract
+      - name: Verify live audit RLS, versioning and append-only contract
         run: python -m amodb.apps.quality.tests.postgres_audit_external_access_probe
 
   frontend-contract:
@@ -155,13 +175,20 @@ jobs:
           src/features/qms/auditSession/GuestDocumentSubmit.tsx
           src/features/qms/auditSession/LiveAuditWorkspace.tsx
           src/features/qms/auditSession/LiveFindingReleasePanel.tsx
+          src/features/qms/auditSession/AuditClosingWorkspace.tsx
           src/features/qms/auditSession/auditSessionRoutes.ts
           src/features/qms/auditSession/auditSessionRoutes.test.ts
           src/services/qmsAuditSession.ts
           src/services/qmsAuditPreparationRoom.ts
           src/services/qmsAuditExternalAccess.ts
+          src/services/qmsAuditReportComposition.ts
+          src/services/qmsChecklistExecutionGovernance.ts
           src/components/QMS/QualityEnhancementsHost.tsx
       - name: Test route compatibility
         run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts
       - name: Production frontend build
         run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Public audit access browser acceptance
+        run: npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts --project=chromium
