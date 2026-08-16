@@ -16,6 +16,9 @@ const AuditPrepareWorkspace = lazy(
 const LiveAuditWorkspace = lazy(
   () => import("../../features/qms/auditSession/LiveAuditWorkspace"),
 );
+const LiveFindingReleasePanel = lazy(
+  () => import("../../features/qms/auditSession/LiveFindingReleasePanel"),
+);
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
@@ -257,6 +260,7 @@ const QualityEnhancementsHost: React.FC = () => {
           {auditSessionStage === "live" ? (
             <Suspense fallback={null}>
               <LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <LiveFindingReleasePanel amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
         </>
