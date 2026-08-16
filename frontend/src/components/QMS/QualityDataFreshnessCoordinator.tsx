@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest, qmsPath } from "../../services/apiClient";
+import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
 
 
@@ -148,6 +149,16 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       });
     };
 
+    const replayAndRefresh = async () => {
+      try {
+        const summary = await replayOfflineMutations();
+        refresh(true, summary.conflict > 0 || summary.failed > 0);
+      } catch (error) {
+        console.warn("[qms-offline] replay did not complete", error);
+        refresh(true);
+      }
+    };
+
     const scheduleRefresh = (delay: number, force = true) => {
       const timer = window.setTimeout(() => {
         pendingTimers.current = pendingTimers.current.filter((candidate) => candidate !== timer);
@@ -157,7 +168,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     };
 
     const onFocus = () => refresh(false);
-    const onOnline = () => refresh(true);
+    const onOnline = () => { void replayAndRefresh(); };
     const onVisibility = () => {
       if (document.visibilityState === "visible") refresh(false);
     };
@@ -179,7 +190,10 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       MUTATION_REFRESH_DELAYS_MS.forEach((delay) => scheduleRefresh(delay));
     };
 
-    const initialTimer = window.setTimeout(() => refresh(true), 900);
+    const initialTimer = window.setTimeout(() => {
+      if (navigator.onLine) void replayAndRefresh();
+      else refresh(true);
+    }, 900);
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible" && navigator.onLine) refresh(true);
     }, ACTIVE_REFRESH_INTERVAL_MS);
