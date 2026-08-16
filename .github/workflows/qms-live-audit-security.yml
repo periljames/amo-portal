@@ -1,0 +1,79 @@
+name: QMS Live Audit Security
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/**"
+      - "backend/amodb/alembic/versions/quality_260816_*.py"
+      - "backend/requirements.txt"
+      - "frontend/src/features/qms/**"
+      - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/qms-live-audit-security.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-dependencies:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install exact frontend dependency graph
+        run: npm ci --no-audit --no-fund
+      - name: Audit production dependency graph
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --audit-level=high --json | tee ../qms-live-audit-npm-audit.json
+      - name: Upload npm audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-npm-audit
+          path: qms-live-audit-npm-audit.json
+          if-no-files-found: warn
+
+  backend-dependencies:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install audit tooling
+        run: python -m pip install --disable-pip-version-check "pip-audit>=2.9,<3"
+      - name: Audit backend requirements
+        run: |
+          set -o pipefail
+          pip-audit -r requirements.txt --format json --output ../qms-live-audit-pip-audit.json
+      - name: Upload pip-audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-pip-audit
+          path: qms-live-audit-pip-audit.json
+          if-no-files-found: warn
