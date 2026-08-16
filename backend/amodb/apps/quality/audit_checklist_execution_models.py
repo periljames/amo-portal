@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid, BigInteger
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import relationship
 
 from amodb.database import Base
@@ -96,6 +96,7 @@ class QualityAuditFieldworkMutationReceipt(Base):
     client_mutation_id = Column(String(128), nullable=False)
     device_id = Column(String(128), nullable=False)
     device_sequence = Column(BigInteger, nullable=False)
+    client_timestamp = Column(DateTime(timezone=True), nullable=False)
     base_version = Column(Integer, nullable=False)
     committed_version = Column(Integer, nullable=False)
     operation = Column(String(48), nullable=False)
