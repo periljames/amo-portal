@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from "./config";
-import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel, FieldworkFindingLevel, FieldworkFindingSeverity } from "./qmsAuditExternalAccess";
+import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
+import type { FieldworkFindingLevel, FieldworkFindingSeverity } from "./qmsChecklistExecutionGovernance";
 
 export type ExternalFindingDraftStatus = "CREATED" | "SUBMITTED" | "RETURNED" | "PROMOTED" | "WITHDRAWN";
 export type ExternalFindingDraftType = "NON_CONFORMITY" | "OBSERVATION";
