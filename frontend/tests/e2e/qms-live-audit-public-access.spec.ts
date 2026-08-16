@@ -283,5 +283,5 @@ test("external auditor executes assigned checklist and submits governed finding 
   expect(draftCsrfHeader).toBe("csrf-bound-to-external-session");
   await page.getByLabel("External finding drafts").getByRole("button", { name: /Submit to Quality/ }).click();
   await expect.poll(() => draftSubmitCount).toBe(1);
-  await expect(page.getByLabel("External finding drafts").getByText("SUBMITTED")).toBeVisible();
+  await expect(page.getByLabel("External finding drafts").getByText("SUBMITTED", { exact: true })).toBeVisible();
 });
