@@ -2,6 +2,8 @@ import { expect, test, type Route } from "@playwright/test";
 
 const RELEASED_FINDING_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
+const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
+const CHECKLIST_ITEM_ID = "44444444-4444-4444-8444-444444444444";
 
 function readModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,7 +22,7 @@ function readModel(overrides: Record<string, unknown> = {}) {
       "audit:acknowledge",
     ],
     audit: {
-      id: "33333333-3333-4333-8333-333333333333",
+      id: AUDIT_ID,
       audit_ref: "QAR-MO-26-021",
       title: "Quality system audit",
       scope: "Quality management system and controlled processes.",
@@ -155,4 +157,91 @@ test("auditee can submit a requested document through the scoped guest session",
 
   await expect.poll(() => uploadCount).toBe(1);
   await expect(page.getByText(/UPLOADED/i)).toBeVisible();
+});
+
+test("external auditor executes only the assigned checklist with session-bound CSRF", async ({ page }) => {
+  const externalSession = readModel({
+    participant: {
+      display_name: "Independent Auditor",
+      organisation: "External Assurance Ltd",
+      participant_type: "EXTERNAL_AUDITOR",
+      role: "AUDITOR",
+      expires_at: "2026-08-20T18:00:00Z",
+    },
+    permissions: ["audit:read_assigned", "audit:read_summary", "audit:read_progress", "audit:checklist_execute", "audit:finding_draft"],
+    released_findings: [],
+    document_requests: [],
+  });
+  let fieldwork = {
+    audit_id: AUDIT_ID,
+    participant_id: "participant-external-1",
+    csrf_token: "csrf-bound-to-external-session",
+    can_execute_checklist: true,
+    can_draft_findings: false,
+    finding_draft_blocker: "The grant includes audit:finding_draft, but the current governed finding model has no DRAFT→QUALITY_REVIEW→PROMOTED state.",
+    items: [
+      {
+        checklist_item_id: CHECKLIST_ITEM_ID,
+        section: "Document control",
+        checklist_ref: "CHK-4.2.3",
+        requirement_ref: "QMSM 4.2.3",
+        prompt: "Verify only the current controlled procedure is available at the sampled point of use.",
+        canonical_response_status: "NOT_VERIFIED",
+        entity_version: 1,
+        finding_id: null,
+        my_auditor_notes: null,
+        my_evidence_references: [],
+        my_last_contribution_at: null,
+        updated_at: "2026-08-19T08:00:00Z",
+      },
+    ],
+  };
+  let mutationCount = 0;
+  let csrfHeader: string | undefined;
+
+  await page.route("**/quality/audit-access/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") {
+      return respond(route, externalSession);
+    }
+    if (path.endsWith("/quality/audit-access/fieldwork") && request.method() === "GET") {
+      return respond(route, fieldwork);
+    }
+    if (path.endsWith(`/quality/audit-access/fieldwork/checklist-items/${CHECKLIST_ITEM_ID}/mutations`) && request.method() === "POST") {
+      mutationCount += 1;
+      csrfHeader = request.headers()["x-qms-csrf"];
+      fieldwork = {
+        ...fieldwork,
+        items: fieldwork.items.map((item) => ({
+          ...item,
+          canonical_response_status: "COMPLIANT",
+          entity_version: 2,
+          my_auditor_notes: "Verified against the controlled DMS revision.",
+          my_last_contribution_at: "2026-08-19T08:15:00Z",
+        })),
+      };
+      return respond(route, {
+        client_mutation_id: "qms-external-fieldwork-test",
+        committed_version: 2,
+        replayed: false,
+        row: fieldwork.items[0],
+      });
+    }
+    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") {
+      return respond(route, externalSession);
+    }
+    return respond(route, { detail: "Not configured in external auditor fixture." }, 404);
+  });
+
+  await page.goto("/qms/audit-access/signed-external-auditor-token", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Assigned audit checklist")).toBeVisible();
+  await expect(page.getByText(/DRAFT→QUALITY_REVIEW→PROMOTED/)).toBeVisible();
+  await page.getByLabel("External auditor fieldwork").getByRole("textbox", { name: "My attributable fieldwork note" }).fill("Verified against the controlled DMS revision.");
+  await page.getByLabel("External auditor fieldwork").getByRole("button", { name: "Compliant" }).click();
+
+  await expect.poll(() => mutationCount).toBe(1);
+  expect(csrfHeader).toBe("csrf-bound-to-external-session");
+  await expect(page.getByText(/COMPLIANT · v2/)).toBeVisible();
+  await expect(page.getByText(/participant attribution/)).toBeVisible();
 });
