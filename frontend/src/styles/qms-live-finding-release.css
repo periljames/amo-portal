@@ -1,0 +1,207 @@
+.qms-live-release-launcher {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1260;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 14px 40px rgb(15 23 42 / 24%);
+}
+
+.qms-live-release-launcher span {
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 16%);
+  font-size: 0.7rem;
+}
+
+.qms-live-release-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 4.2rem;
+  z-index: 1260;
+  width: min(430px, calc(100vw - 2rem));
+  max-height: min(72vh, 720px);
+  overflow: auto;
+  padding: 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 20px 70px rgb(15 23 42 / 26%);
+}
+
+.qms-live-release-panel > header,
+.qms-live-release-decision > header,
+.qms-live-release-decision > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qms-live-release-panel > header span,
+.qms-live-release-panel article span {
+  display: block;
+  color: #64748b;
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.qms-live-release-panel > header strong,
+.qms-live-release-panel > header span { display: block; }
+
+.qms-live-release-panel > header button,
+.qms-live-release-panel article > button,
+.qms-live-release-decision button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 2.2rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: inherit;
+  font-weight: 700;
+}
+
+.qms-live-release-panel > header button {
+  width: 2.2rem;
+  padding: 0;
+}
+
+.qms-live-release-panel > p,
+.qms-live-release-decision > p {
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.qms-live-release-panel__error {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.75rem;
+}
+
+.qms-live-release-panel__list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.qms-live-release-panel article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.qms-live-release-panel article > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.qms-live-release-panel article strong,
+.qms-live-release-panel article small {
+  display: block;
+}
+
+.qms-live-release-panel article p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.qms-live-release-panel__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.qms-live-release-panel__empty {
+  padding: 1rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.qms-live-release-decision-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1320;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 56%);
+}
+
+.qms-live-release-decision {
+  width: min(520px, 100%);
+  padding: 1rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 20px 70px rgb(15 23 42 / 30%);
+}
+
+.qms-live-release-decision label {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.75rem;
+  font-weight: 700;
+}
+
+.qms-live-release-decision__check {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 0.45rem !important;
+  font-size: 0.8rem;
+}
+
+.qms-live-release-decision textarea {
+  width: 100%;
+  padding: 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  font: inherit;
+}
+
+.qms-live-release-decision > footer {
+  justify-content: flex-end;
+  margin-top: 0.8rem;
+}
+
+.qms-live-release-decision button.is-primary {
+  background: #0f172a;
+  color: #fff;
+}
+
+@media (max-width: 560px) {
+  .qms-live-release-launcher {
+    right: 0.5rem;
+    bottom: 0.5rem;
+  }
+
+  .qms-live-release-panel {
+    right: 0.5rem;
+    bottom: 3.8rem;
+    width: calc(100vw - 1rem);
+  }
+}
