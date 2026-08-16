@@ -108,8 +108,8 @@ jobs:
         working-directory: backend
     env:
       APP_ENV: test
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
-      DATABASE_WRITE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
       SECRET_KEY: qms-live-audit-ci-secret
       QUALITY_SCHEMA_STRICT: "1"
     steps:
