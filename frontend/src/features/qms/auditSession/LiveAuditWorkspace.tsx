@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -91,7 +91,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -120,20 +120,19 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 2_000,
   });
 
-  const items = checklistQuery.data?.items || [];
-  const selectedIndex = Math.max(0, items.findIndex((item) => item.checklist_item_id === selectedId));
-  const selected = items[selectedIndex] || null;
-
-  useEffect(() => {
-    if (!items.length) return;
-    if (selectedId && items.some((item) => item.checklist_item_id === selectedId)) return;
-    const next = items.find((item) => item.canonical_response_status === "NOT_VERIFIED") || items[0];
-    setSelectedId(next.checklist_item_id);
+  const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
+  const effectiveSelectedId = useMemo(() => {
+    if (!items.length) return null;
+    if (selectedId && items.some((item) => item.checklist_item_id === selectedId)) return selectedId;
+    return (items.find((item) => item.canonical_response_status === "NOT_VERIFIED") || items[0]).checklist_item_id;
   }, [items, selectedId]);
-
-  useEffect(() => {
-    setNotes(selected?.auditor_notes || "");
-  }, [selected?.auditor_notes, selected?.checklist_item_id]);
+  const selectedIndex = effectiveSelectedId
+    ? items.findIndex((item) => item.checklist_item_id === effectiveSelectedId)
+    : -1;
+  const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
+  const notes = selected
+    ? noteDrafts[selected.checklist_item_id] ?? selected.auditor_notes ?? ""
+    : "";
 
   const refreshFieldwork = async () => {
     await Promise.all([
@@ -151,8 +150,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         evidence_references: item.evidence_references || [],
         reason: "Live audit fieldwork checklist update.",
       }),
-    onSuccess: async () => {
+    onSuccess: async (_result, variables) => {
       setLocalError(null);
+      setNoteDrafts((current) => {
+        const next = { ...current };
+        delete next[variables.item.checklist_item_id];
+        return next;
+      });
       await refreshFieldwork();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Checklist update failed."),
@@ -162,17 +166,23 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     mutationFn: async (draft: FindingDraft) => {
       const finding = await qmsCreateFinding(auditId, findingPayload(draft));
       await qmsUpdateAuditChecklistItem(auditId, draft.item.checklist_item_id, { finding_id: finding.id });
+      const auditorNotes = noteDrafts[draft.item.checklist_item_id] ?? draft.item.auditor_notes ?? "";
       await updateChecklistExecutionGovernance(amoCode, auditId, draft.item.checklist_item_id, {
         canonical_response_status: draft.mode,
-        auditor_notes: notes.trim() || draft.item.auditor_notes || null,
+        auditor_notes: auditorNotes.trim() || null,
         evidence_references: draft.item.evidence_references || [],
         reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded with governed finding ${finding.id}.`,
       });
       return finding;
     },
-    onSuccess: async () => {
+    onSuccess: async (_finding, draft) => {
       setFindingDraft(null);
       setLocalError(null);
+      setNoteDrafts((current) => {
+        const next = { ...current };
+        delete next[draft.item.checklist_item_id];
+        return next;
+      });
       await refreshFieldwork();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Finding creation failed."),
@@ -194,7 +204,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const findings = findingsQuery.data || [];
 
   const move = (offset: number) => {
-    if (!items.length) return;
+    if (!items.length || selectedIndex < 0) return;
     const nextIndex = Math.min(items.length - 1, Math.max(0, selectedIndex + offset));
     setSelectedId(items[nextIndex].checklist_item_id);
   };
@@ -296,7 +306,16 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               <label className="qms-live-audit-focus__notes">
                 <span>Auditor note</span>
-                <textarea readOnly={!canManage} value={notes} onChange={(event) => setNotes(event.target.value)} rows={5} placeholder="Record objective, attributable fieldwork notes." />
+                <textarea
+                  readOnly={!canManage}
+                  value={notes}
+                  onChange={(event) => {
+                    if (!selected) return;
+                    setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }));
+                  }}
+                  rows={5}
+                  placeholder="Record objective, attributable fieldwork notes."
+                />
               </label>
               <div className="qms-live-audit-focus__note-actions">
                 <button
@@ -315,7 +334,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               <footer className="qms-live-audit-focus__nav">
                 <button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button>
-                <button type="button" onClick={() => move(1)} disabled={selectedIndex >= items.length - 1}>Next <ArrowRight size={16} /></button>
+                <button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= items.length - 1}>Next <ArrowRight size={16} /></button>
               </footer>
             </>
           ) : <div className="qms-live-audit-focus__empty">No governed checklist items are bound to this audit.</div>}
