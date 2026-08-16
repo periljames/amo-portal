@@ -142,7 +142,29 @@ jobs:
         run: npx playwright test tests/e2e/qms-excellence-cockpit.spec.ts --workers=1
 
       - name: Browser - My Quality Work and bounded registers
-        run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-operational-ui-registers.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 120 /tmp/qms-operational-ui-registers.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS bounded-register browser failure::$summary"
+          fi
+          exit "$status"
+
+      - name: Retain bounded-register browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-operational-ui-registers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-operational-ui-registers.log
+            /tmp/qms-operational-ui-preview.log
+            /tmp/qms-operational-ui-readiness.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Browser - CAR usability
         run: npx playwright test tests/e2e/qms-usability-enhancements.spec.ts --workers=1
