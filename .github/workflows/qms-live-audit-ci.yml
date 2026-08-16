@@ -221,4 +221,24 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Public and responsive audit access browser acceptance
-        run: npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 100 /tmp/qms-live-audit-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS live audit browser failure::$summary"
+          fi
+          exit "$status"
+      - name: Retain live audit browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-live-audit-playwright.log
+            /tmp/qms-live-audit-preview.log
+          if-no-files-found: warn
+          retention-days: 14
