@@ -102,3 +102,31 @@ class QualityAuditFieldworkMutationReceipt(Base):
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     actor_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class QualityAuditFieldworkParticipantContribution(Base):
+    """Append-only external-auditor notes/evidence attached to a governed item."""
+
+    __tablename__ = "quality_audit_fieldwork_participant_contributions"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_fieldwork_participant_contribution_mutation"),
+        CheckConstraint(
+            "canonical_response_status IN ('COMPLIANT','NONCOMPLIANT','OBSERVATION','NOT_APPLICABLE','NOT_VERIFIED')",
+            name="ck_quality_fieldwork_participant_response_status",
+        ),
+        Index(
+            "ix_quality_fieldwork_participant_contribution_item",
+            "amo_id", "audit_id", "checklist_item_id", "participant_id", "created_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
+    checklist_item_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_checklist_items.id", ondelete="CASCADE"), nullable=False)
+    participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="CASCADE"), nullable=False)
+    client_mutation_id = Column(String(128), nullable=False)
+    canonical_response_status = Column(String(24), nullable=False)
+    auditor_notes = Column(Text, nullable=True)
+    evidence_references = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
