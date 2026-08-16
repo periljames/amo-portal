@@ -8,6 +8,7 @@ import {
   type ExternalAuditorFieldworkModel,
   type ExternalChecklistResponse,
 } from "../../../services/qmsAuditExternalAccess";
+import ExternalAuditorFindingDraftPanel from "./ExternalAuditorFindingDraftPanel";
 
 const ALLOWED_RESPONSES: Array<{ value: ExternalChecklistResponse; label: string }> = [
   { value: "COMPLIANT", label: "Compliant" },
@@ -118,6 +119,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
             <label><span>My attributable fieldwork note</span><textarea rows={5} value={notes[selected.checklist_item_id] ?? selected.my_auditor_notes ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
             <label><span>My evidence references · one per line</span><textarea rows={4} value={evidence[selected.checklist_item_id] ?? evidenceText(selected.my_evidence_references)} onChange={(event) => setEvidence((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
             <button type="button" className="qms-external-auditor-fieldwork__save" disabled={!model.can_execute_checklist || saving} onClick={() => void save(selected, selected.canonical_response_status)}><Save size={15} /> {saving ? "Saving…" : "Save note / evidence"}</button>
+
+            {model.can_draft_findings ? <ExternalAuditorFindingDraftPanel model={model} item={selected} /> : null}
           </div>
         ) : <p className="qms-public-audit__empty">No governed checklist items are assigned to this audit.</p>}
       </div>
