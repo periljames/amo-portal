@@ -10,6 +10,7 @@ on:
       - "frontend/src/services/qmsAuditSession.ts"
       - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
       - "frontend/src/styles/qms-audit-session.css"
+      - "frontend/src/styles/qms-live-audit-workspace.css"
       - "docs/quality/QMS_LIVE_AUDIT_*.md"
       - "docs/quality/QMS_PENDING_PR_RECONCILIATION.md"
       - ".github/workflows/qms-live-audit-ci.yml"
@@ -73,6 +74,7 @@ jobs:
         run: >-
           npx eslint
           src/features/qms/auditSession/AuditLifecycleRail.tsx
+          src/features/qms/auditSession/LiveAuditWorkspace.tsx
           src/features/qms/auditSession/auditSessionRoutes.ts
           src/features/qms/auditSession/auditSessionRoutes.test.ts
           src/services/qmsAuditSession.ts
