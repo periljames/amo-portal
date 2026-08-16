@@ -1,0 +1,83 @@
+name: QMS Live Audit CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/audit_session_*.py"
+      - "backend/amodb/apps/quality/car_control_loop_route_order.py"
+      - "backend/amodb/apps/quality/tests/test_audit_session_projection.py"
+      - "frontend/src/features/qms/auditSession/**"
+      - "frontend/src/services/qmsAuditSession.ts"
+      - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
+      - "frontend/src/styles/qms-audit-session.css"
+      - "docs/quality/QMS_LIVE_AUDIT_*.md"
+      - "docs/quality/QMS_PENDING_PR_RECONCILIATION.md"
+      - ".github/workflows/qms-live-audit-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: qms-live-audit-ci-secret
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile live audit contract
+        run: python -m compileall -q amodb/apps/quality/audit_session_router.py amodb/apps/quality/audit_session_route_order.py
+      - name: Test session projection
+        run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
+      - name: Prove authoritative workflow contract remains green
+        run: pytest -q amodb/apps/quality/tests/test_audit_workflow_contract.py
+
+  frontend-contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint live audit foundation
+        run: >-
+          npx eslint
+          src/features/qms/auditSession/AuditLifecycleRail.tsx
+          src/features/qms/auditSession/auditSessionRoutes.ts
+          src/features/qms/auditSession/auditSessionRoutes.test.ts
+          src/services/qmsAuditSession.ts
+          src/components/QMS/QualityEnhancementsHost.tsx
+      - name: Test route compatibility
+        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts
+      - name: Production frontend build
+        run: npm run build
