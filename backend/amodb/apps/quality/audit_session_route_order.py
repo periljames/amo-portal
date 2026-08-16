@@ -42,3 +42,10 @@ for api_router in (router, legacy_router):
 # session projection. Loading here guarantees their ORM metadata and canonical
 # routes exist without changing the historical central Quality bootstrap order.
 from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
+
+# Deterministic report composition and closing assurance are part of the same
+# governed audit occurrence. Register their exact routes ahead of the legacy
+# generic QMS catch-all so the closing workspace never falls through to a broad
+# module-path handler.
+from . import audit_report_composition_route_order as _audit_report_composition_route_order  # noqa: F401,E402
+from . import audit_closing_assurance_route_order as _audit_closing_assurance_route_order  # noqa: F401,E402
