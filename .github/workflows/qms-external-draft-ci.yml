@@ -158,4 +158,24 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: External auditor draft browser acceptance
-        run: npx playwright test tests/e2e/qms-external-auditor-finding-drafts.spec.ts
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-external-auditor-finding-drafts.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-external-draft-playwright.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 80 /tmp/qms-external-draft-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS external draft browser failure::$summary"
+          fi
+          exit "$status"
+      - name: Retain external draft browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-external-draft-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-external-draft-playwright.log
+            /tmp/qms-external-draft-preview.log
+          if-no-files-found: warn
+          retention-days: 14
