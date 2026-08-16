@@ -1,0 +1,184 @@
+.qms-audit-document-review-launcher {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 1255;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f172a;
+  font-weight: 800;
+  box-shadow: 0 12px 36px rgb(15 23 42 / 16%);
+}
+
+.qms-audit-document-review-launcher span {
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-size: 0.68rem;
+}
+
+.qms-audit-document-review {
+  position: fixed;
+  left: 1rem;
+  bottom: 4.2rem;
+  z-index: 1255;
+  width: min(620px, calc(100vw - 2rem));
+  max-height: min(78vh, 760px);
+  overflow: auto;
+  padding: 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 20px 70px rgb(15 23 42 / 24%);
+}
+
+.qms-audit-document-review > header,
+.qms-audit-document-review > section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.qms-audit-document-review > header span {
+  display: block;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.qms-audit-document-review > header strong,
+.qms-audit-document-review > section > header strong,
+.qms-audit-document-review > section > header small {
+  display: block;
+}
+
+.qms-audit-document-review > header > button {
+  width: 2.2rem;
+  min-height: 2.2rem;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.qms-audit-document-review__error {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.qms-audit-document-review__requests {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  margin: 0.7rem 0;
+  padding-bottom: 0.25rem;
+}
+
+.qms-audit-document-review__requests > button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 190px;
+  padding: 0.55rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+
+.qms-audit-document-review__requests > button.is-active {
+  border-color: #0f172a;
+  background: #f8fafc;
+}
+
+.qms-audit-document-review__requests strong,
+.qms-audit-document-review__requests small {
+  display: block;
+}
+
+.qms-audit-document-review__requests small,
+.qms-audit-document-review > section > header small,
+.qms-audit-document-review__submissions small {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.qms-audit-document-review__submissions {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.qms-audit-document-review__submissions article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.qms-audit-document-review__submissions article strong,
+.qms-audit-document-review__submissions article small,
+.qms-audit-document-review__submissions article code {
+  display: block;
+}
+
+.qms-audit-document-review__submissions article code {
+  overflow: hidden;
+  margin-top: 0.2rem;
+  color: #475569;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-audit-document-review__submissions blockquote {
+  margin: 0.4rem 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid #cbd5e1;
+  color: #475569;
+}
+
+.qms-audit-document-review__submissions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.3rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  font-weight: 700;
+}
+
+@media (max-width: 620px) {
+  .qms-audit-document-review-launcher {
+    left: 0.5rem;
+    bottom: 0.5rem;
+  }
+
+  .qms-audit-document-review {
+    left: 0.5rem;
+    bottom: 3.8rem;
+    width: calc(100vw - 1rem);
+  }
+
+  .qms-audit-document-review__submissions article {
+    grid-template-columns: 1fr;
+  }
+}
