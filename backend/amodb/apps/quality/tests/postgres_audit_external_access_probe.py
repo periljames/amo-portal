@@ -7,17 +7,23 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 
-TARGET_REVISION = "quality_260816_external_access"
+TARGET_REVISION = "quality_260816_fieldwork_sync"
 TABLES = (
     "quality_external_identities",
     "quality_audit_participants",
     "quality_audit_access_grants",
     "quality_audit_access_events",
     "quality_audit_finding_release_events",
+    "quality_audit_document_submissions",
+    "quality_audit_report_artifacts",
+    "quality_audit_fieldwork_mutation_receipts",
 )
 APPEND_ONLY_TABLES = (
     "quality_audit_access_events",
     "quality_audit_finding_release_events",
+    "quality_audit_document_submissions",
+    "quality_audit_report_artifacts",
+    "quality_audit_fieldwork_mutation_receipts",
 )
 
 
@@ -82,6 +88,21 @@ def main() -> None:
         }
         assert existing == set(TABLES), existing
 
+        columns = {
+            str(row[0])
+            for row in connection.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'quality_audit_checklist_execution_governance'
+                    """
+                )
+            ).all()
+        }
+        assert "entity_version" in columns, columns
+
         for table_name in TABLES:
             _assert_rls(connection, table_name)
 
@@ -102,7 +123,7 @@ def main() -> None:
         for table_name in APPEND_ONLY_TABLES:
             assert any(table == table_name and "append_only" in trigger for table, trigger in triggers), (table_name, triggers)
 
-    print("External audit access migration, RLS and append-only history verified")
+    print("Live audit migrations, RLS, versioning and append-only history verified")
 
 
 if __name__ == "__main__":
