@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("client_mutation_id", sa.String(length=128), nullable=False),
         sa.Column("device_id", sa.String(length=128), nullable=False),
         sa.Column("device_sequence", sa.BigInteger(), nullable=False),
+        sa.Column("client_timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column("base_version", sa.Integer(), nullable=False),
         sa.Column("committed_version", sa.Integer(), nullable=False),
         sa.Column("operation", sa.String(length=48), nullable=False),
