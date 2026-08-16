@@ -40,8 +40,14 @@ describe("development proxy routing", () => {
     });
   });
 
-  it("still serves Platform HTML navigation through the SPA", () => {
+  it("serves SPA-owned HTML navigation before overlapping API proxies", () => {
     expect(shouldServePlatformSpa("GET", "/platform/operations", "text/html")).toBe(true);
+    expect(shouldServePlatformSpa("GET", "/qms/audit-access/signed-token", "text/html,application/xhtml+xml")).toBe(true);
+    expect(shouldServePlatformSpa("HEAD", "/qms/car-access/signed-token", "text/html")).toBe(true);
+
     expect(shouldServePlatformSpa("GET", "/ops/v1/bootstrap", "text/html")).toBe(false);
+    expect(shouldServePlatformSpa("GET", "/qms/internal-api", "text/html")).toBe(false);
+    expect(shouldServePlatformSpa("GET", "/qms/audit-access/signed-token", "application/json")).toBe(false);
+    expect(shouldServePlatformSpa("POST", "/qms/audit-access/signed-token", "text/html")).toBe(false);
   });
 });
