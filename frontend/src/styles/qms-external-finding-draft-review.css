@@ -1,0 +1,61 @@
+.qms-external-draft-review {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1260;
+  width: min(390px, calc(100vw - 2rem));
+}
+
+.qms-external-draft-review__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  float: right;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 800;
+  box-shadow: 0 8px 28px rgb(15 23 42 / 16%);
+}
+
+.qms-external-draft-review__body {
+  clear: both;
+  max-height: min(68vh, 650px);
+  margin-top: 0.5rem;
+  overflow: auto;
+  border: 1px solid #d8dee8;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 20px 60px rgb(15 23 42 / 22%);
+}
+
+.qms-external-draft-review__body > header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+.qms-external-draft-review__body > header strong,
+.qms-external-draft-review__body > header small { display: block; }
+.qms-external-draft-review__body > header small { color: #64748b; }
+.qms-external-draft-review__body > header button { border: 0; background: transparent; }
+
+.qms-external-draft-review__list { display: grid; gap: 0.6rem; padding: 0.7rem; }
+.qms-external-draft-review__list article { padding: 0.7rem; border: 1px solid #e2e8f0; border-radius: 9px; }
+.qms-external-draft-review__list article > span { color: #b45309; font-size: 0.68rem; font-weight: 800; }
+.qms-external-draft-review__list article > strong { display: block; margin-top: 0.15rem; }
+.qms-external-draft-review__list article > p { margin: 0.35rem 0; }
+.qms-external-draft-review__list article > small { color: #64748b; }
+.qms-external-draft-review__list label { display: grid; gap: 0.25rem; margin-top: 0.55rem; font-size: 0.72rem; font-weight: 700; }
+.qms-external-draft-review__list textarea { width: 100%; resize: vertical; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; }
+.qms-external-draft-review__list footer { display: grid; gap: 0.35rem; margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0; }
+.qms-external-draft-review__list footer button { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.45rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; font-weight: 700; }
+.qms-external-draft-review__list footer span { color: #64748b; font-size: 0.68rem; }
