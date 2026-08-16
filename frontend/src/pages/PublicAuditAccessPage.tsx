@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileClock, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
+import ExternalAuditorFieldworkWorkspace from "../features/qms/auditSession/ExternalAuditorFieldworkWorkspace";
 import GuestDocumentSubmit from "../features/qms/auditSession/GuestDocumentSubmit";
 import {
   acknowledgeGuestFinding,
@@ -51,7 +52,7 @@ const PublicAuditAccessPage: React.FC = () => {
   useEffect(() => {
     void load(inviteToken);
     // The raw invitation token is exchanged only when the URL changes. The
-    // server then owns the HTTP-only guest session.
+    // server then owns the HTTP-only external audit session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteToken]);
 
@@ -93,6 +94,7 @@ const PublicAuditAccessPage: React.FC = () => {
     );
   }
 
+  const isExternalAuditor = data.participant.participant_type === "EXTERNAL_AUDITOR";
   const canAcknowledge = data.permissions.includes("audit:acknowledge");
   const canSubmitDocuments = data.permissions.includes("audit:document_submit");
 
@@ -100,7 +102,7 @@ const PublicAuditAccessPage: React.FC = () => {
     <main className="qms-public-audit">
       <header className="qms-public-audit__header">
         <div>
-          <span>SECURE AUDIT WORKSPACE</span>
+          <span>{isExternalAuditor ? "SECURE EXTERNAL AUDITOR WORKSPACE" : "SECURE AUDITEE WORKSPACE"}</span>
           <h1>{data.audit.audit_ref || "Audit"} · {data.audit.title || "Quality audit"}</h1>
           <p>{data.participant.display_name}{data.participant.organisation ? ` · ${data.participant.organisation}` : ""}</p>
         </div>
@@ -122,7 +124,11 @@ const PublicAuditAccessPage: React.FC = () => {
             <div><dt>Planned start</dt><dd>{dateTime(data.audit.planned_start)}</dd></div>
             <div><dt>Planned end</dt><dd>{dateTime(data.audit.planned_end)}</dd></div>
           </dl>
-          <p className="qms-public-audit__privacy-note">Private auditor notes, draft findings, internal Quality deliberations and unrelated assurance data are never sent to this page.</p>
+          <p className="qms-public-audit__privacy-note">
+            {isExternalAuditor
+              ? "Your assigned checklist, your own contributed notes/evidence, and explicitly scoped audit data are available here. Internal-only Quality deliberations and unrelated tenant data are not sent to this page."
+              : "Private auditor notes, draft findings, internal Quality deliberations and unrelated assurance data are never sent to this page."}
+          </p>
         </section>
 
         {data.progress ? (
@@ -133,39 +139,43 @@ const PublicAuditAccessPage: React.FC = () => {
           </section>
         ) : null}
 
-        <section className="qms-public-audit__card">
-          <header><FileClock size={19} /><div><strong>Preparation requests</strong><small>Only requests assigned to this audit are shown.</small></div></header>
-          {!data.document_requests.length ? <p className="qms-public-audit__empty">No preparation documents are currently requested.</p> : (
-            <div className="qms-public-audit__requests">
-              {data.document_requests.map((request) => (
-                <article key={request.id}>
-                  <div><strong>{request.title}</strong><p>{request.description || "No additional instructions."}</p><small>Due {request.due_date || "not specified"} · {request.status.replaceAll("_", " ")}</small>{request.review_note ? <blockquote>{request.review_note}</blockquote> : null}</div>
-                  {canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <GuestDocumentSubmit requestId={request.id} onSubmitted={() => load(null)} /> : null}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+        {isExternalAuditor ? <ExternalAuditorFieldworkWorkspace /> : (
+          <>
+            <section className="qms-public-audit__card">
+              <header><FileClock size={19} /><div><strong>Preparation requests</strong><small>Only requests assigned to this audit are shown.</small></div></header>
+              {!data.document_requests.length ? <p className="qms-public-audit__empty">No preparation documents are currently requested.</p> : (
+                <div className="qms-public-audit__requests">
+                  {data.document_requests.map((request) => (
+                    <article key={request.id}>
+                      <div><strong>{request.title}</strong><p>{request.description || "No additional instructions."}</p><small>Due {request.due_date || "not specified"} · {request.status.replaceAll("_", " ")}</small>{request.review_note ? <blockquote>{request.review_note}</blockquote> : null}</div>
+                      {canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <GuestDocumentSubmit requestId={request.id} onSubmitted={() => load(null)} /> : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
 
-        <section className="qms-public-audit__card">
-          <header><AlertTriangle size={19} /><div><strong>Released findings</strong><small>Draft auditor findings do not appear here.</small></div></header>
-          {!data.released_findings.length ? <p className="qms-public-audit__empty">No findings have been formally released to this workspace.</p> : (
-            <div className="qms-public-audit__findings">
-              {data.released_findings.map((finding) => (
-                <article key={finding.id}>
-                  <div className="qms-public-audit__finding-heading"><span>{finding.level.replaceAll("_", " ")} · {finding.severity}</span><strong>{finding.finding_ref || "Finding"}</strong></div>
-                  <dl><div><dt>Requirement</dt><dd>{finding.requirement_ref || "—"}</dd></div></dl>
-                  <p>{finding.description}</p>
-                  {finding.objective_evidence ? <div className="qms-public-audit__released-evidence"><strong>Released objective evidence</strong><p>{finding.objective_evidence}</p></div> : null}
-                  {finding.released_evidence_refs.length ? <ul>{finding.released_evidence_refs.map((evidence, index) => <li key={index}>{typeof evidence === "string" ? evidence : JSON.stringify(evidence)}</li>)}</ul> : null}
-                  <footer>
-                    {finding.acknowledged_at ? <span><CheckCircle2 size={14} /> Acknowledged {dateTime(finding.acknowledged_at)}</span> : canAcknowledge ? <button type="button" disabled={actionId === finding.id} onClick={() => void acknowledge(finding.id)}>{actionId === finding.id ? "Recording…" : "Acknowledge finding"}</button> : null}
-                  </footer>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+            <section className="qms-public-audit__card">
+              <header><AlertTriangle size={19} /><div><strong>Released findings</strong><small>Draft auditor findings do not appear here.</small></div></header>
+              {!data.released_findings.length ? <p className="qms-public-audit__empty">No findings have been formally released to this workspace.</p> : (
+                <div className="qms-public-audit__findings">
+                  {data.released_findings.map((finding) => (
+                    <article key={finding.id}>
+                      <div className="qms-public-audit__finding-heading"><span>{finding.level.replaceAll("_", " ")} · {finding.severity}</span><strong>{finding.finding_ref || "Finding"}</strong></div>
+                      <dl><div><dt>Requirement</dt><dd>{finding.requirement_ref || "—"}</dd></div></dl>
+                      <p>{finding.description}</p>
+                      {finding.objective_evidence ? <div className="qms-public-audit__released-evidence"><strong>Released objective evidence</strong><p>{finding.objective_evidence}</p></div> : null}
+                      {finding.released_evidence_refs.length ? <ul>{finding.released_evidence_refs.map((evidence, index) => <li key={index}>{typeof evidence === "string" ? evidence : JSON.stringify(evidence)}</li>)}</ul> : null}
+                      <footer>
+                        {finding.acknowledged_at ? <span><CheckCircle2 size={14} /> Acknowledged {dateTime(finding.acknowledged_at)}</span> : canAcknowledge ? <button type="button" disabled={actionId === finding.id} onClick={() => void acknowledge(finding.id)}>{actionId === finding.id ? "Recording…" : "Acknowledge finding"}</button> : null}
+                      </footer>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
 
         <section className="qms-public-audit__card qms-public-audit__report-status">
           <strong>Issued report</strong>
