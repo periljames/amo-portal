@@ -147,4 +147,4 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: External auditor draft browser acceptance
-        run: npx playwright test tests/e2e/qms-external-auditor-finding-drafts.spec.ts --project=chromium
+        run: npx playwright test tests/e2e/qms-external-auditor-finding-drafts.spec.ts
