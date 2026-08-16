@@ -10,6 +10,8 @@ on:
       - "backend/amodb/apps/quality/tests/test_audit_session_projection.py"
       - "backend/amodb/apps/quality/tests/test_audit_external_access_contract.py"
       - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
+      - "frontend/src/App.tsx"
+      - "frontend/src/pages/PublicAuditAccessPage.tsx"
       - "frontend/src/features/qms/auditSession/**"
       - "frontend/src/services/qmsAuditSession.ts"
       - "frontend/src/services/qmsAuditPreparationRoom.ts"
@@ -19,6 +21,7 @@ on:
       - "frontend/src/styles/qms-live-audit-workspace.css"
       - "frontend/src/styles/qms-audit-prepare-workspace.css"
       - "frontend/src/styles/qms-audit-external-participants.css"
+      - "frontend/src/styles/qms-public-audit-access.css"
       - "docs/quality/QMS_LIVE_AUDIT_*.md"
       - "docs/quality/QMS_PENDING_PR_RECONCILIATION.md"
       - ".github/workflows/qms-live-audit-ci.yml"
@@ -130,6 +133,8 @@ jobs:
       - name: Lint live audit foundation
         run: >-
           npx eslint
+          src/App.tsx
+          src/pages/PublicAuditAccessPage.tsx
           src/features/qms/auditSession/AuditLifecycleRail.tsx
           src/features/qms/auditSession/AuditPrepareWorkspace.tsx
           src/features/qms/auditSession/LiveAuditWorkspace.tsx
