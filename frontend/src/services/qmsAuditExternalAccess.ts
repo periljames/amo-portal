@@ -33,6 +33,16 @@ export type ExternalParticipantCreate = {
   expires_at: string;
 };
 
+export type AuditFindingReleaseState = {
+  finding_id: string;
+  action: "RELEASED" | "WITHDRAWN";
+  include_objective_evidence: boolean;
+  released_evidence_refs: Array<Record<string, unknown> | string>;
+  reason: string;
+  actor_user_id: string | null;
+  created_at: string;
+};
+
 export type AuditGuestReadModel = {
   participant: {
     display_name: string | null;
@@ -98,6 +108,14 @@ export function revokeExternalAuditParticipant(amoCode: string, auditId: string,
   return apiRequest<ExternalAuditParticipant>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/external-participants/${encodeURIComponent(participantId)}/revoke`), {
     method: "POST",
     timeoutMs: 30_000,
+  });
+}
+
+export function listAuditFindingReleases(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: AuditFindingReleaseState[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/finding-releases`), {
+    timeoutMs: 15_000,
+    cacheTtlMs: 1_500,
+    signal,
   });
 }
 
