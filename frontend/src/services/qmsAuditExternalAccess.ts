@@ -148,7 +148,7 @@ export function listExternalAuditParticipants(amoCode: string, auditId: string, 
 export function createExternalAuditParticipant(amoCode: string, auditId: string, payload: ExternalParticipantCreate) {
   return apiRequest<ExternalAuditParticipant>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/external-participants`), {
     method: "POST",
-    body: payload,
+    body: JSON.stringify(payload),
     timeoutMs: 30_000,
   });
 }
@@ -176,7 +176,7 @@ export function releaseAuditFinding(
 ) {
   return apiRequest(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/findings/${encodeURIComponent(findingId)}/release`), {
     method: "POST",
-    body: payload,
+    body: JSON.stringify(payload),
     timeoutMs: 30_000,
   });
 }
