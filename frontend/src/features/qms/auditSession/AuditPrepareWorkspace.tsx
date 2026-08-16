@@ -6,17 +6,27 @@ import {
   BookOpenCheck,
   CheckCircle2,
   ClipboardList,
+  Copy,
   FileCheck2,
   FileClock,
   History,
   Plus,
   ShieldAlert,
+  UserPlus,
+  UserX,
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { qmsResolveAudit } from "../../../services/qms";
+import {
+  createExternalAuditParticipant,
+  listExternalAuditParticipants,
+  revokeExternalAuditParticipant,
+  type ExternalAuditAssuranceLevel,
+  type ExternalParticipantType,
+} from "../../../services/qmsAuditExternalAccess";
 import {
   createAuditDocumentRequest,
   listAuditDocumentRequests,
@@ -36,15 +46,70 @@ type NewRequest = {
   dueDate: string;
 };
 
+type ExternalParticipantDraft = {
+  participantType: ExternalParticipantType;
+  displayName: string;
+  email: string;
+  organisation: string;
+  role: string;
+  assuranceLevel: ExternalAuditAssuranceLevel;
+  expiresAt: string;
+  readProgress: boolean;
+  readReleasedEvidence: boolean;
+  executeChecklist: boolean;
+  createEvidence: boolean;
+  draftFinding: boolean;
+};
+
+const emptyExternalParticipant: ExternalParticipantDraft = {
+  participantType: "AUDITEE_GUEST",
+  displayName: "",
+  email: "",
+  organisation: "",
+  role: "AUDITEE",
+  assuranceLevel: "EMAIL_LINK",
+  expiresAt: "",
+  readProgress: false,
+  readReleasedEvidence: false,
+  executeChecklist: false,
+  createEvidence: false,
+  draftFinding: false,
+};
+
 function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function participantPermissions(draft: ExternalParticipantDraft): string[] {
+  if (draft.participantType === "AUDITEE_GUEST") {
+    return [
+      "audit:read_summary",
+      "audit:read_released_findings",
+      "audit:document_submit",
+      "audit:acknowledge",
+      "car:respond",
+      ...(draft.readProgress ? ["audit:read_progress"] : []),
+      ...(draft.readReleasedEvidence ? ["audit:read_released_evidence"] : []),
+    ];
+  }
+  return [
+    "audit:read_assigned",
+    "audit:read_summary",
+    ...(draft.readProgress ? ["audit:read_progress"] : []),
+    ...(draft.executeChecklist ? ["audit:checklist_execute"] : []),
+    ...(draft.createEvidence ? ["audit:evidence_create"] : []),
+    ...(draft.draftFinding ? ["audit:finding_draft"] : []),
+  ];
 }
 
 const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const [showRequestForm, setShowRequestForm] = useState(false);
+  const [showParticipantForm, setShowParticipantForm] = useState(false);
   const [newRequest, setNewRequest] = useState<NewRequest>({ title: "", description: "", dueDate: "" });
+  const [participantDraft, setParticipantDraft] = useState<ExternalParticipantDraft>(emptyExternalParticipant);
+  const [oneTimeAccessUrl, setOneTimeAccessUrl] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -66,6 +131,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
+  const participantsQuery = useQuery({
+    queryKey: ["qms-audit-external-participants", amoCode, auditId],
+    queryFn: ({ signal }) => listExternalAuditParticipants(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 2_000,
+  });
   const sessionQuery = useQuery({
     queryKey: ["qms-audit-session", amoCode, auditId],
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
@@ -77,6 +148,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
     ]);
   };
@@ -110,7 +182,39 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Document review decision failed."),
   });
 
+  const participantMutation = useMutation({
+    mutationFn: () => createExternalAuditParticipant(amoCode, auditId, {
+      email: participantDraft.email.trim(),
+      display_name: participantDraft.displayName.trim(),
+      organisation: participantDraft.organisation.trim() || null,
+      participant_type: participantDraft.participantType,
+      role: participantDraft.role.trim(),
+      permissions: participantPermissions(participantDraft),
+      assurance_level: participantDraft.assuranceLevel,
+      expires_at: new Date(participantDraft.expiresAt).toISOString(),
+    }),
+    onSuccess: async (participant) => {
+      const relative = participant.access_url || null;
+      setOneTimeAccessUrl(relative ? `${window.location.origin}${relative}` : null);
+      setParticipantDraft(emptyExternalParticipant);
+      setShowParticipantForm(false);
+      setLocalError(null);
+      await refresh();
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "External participant could not be invited."),
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: (participantId: string) => revokeExternalAuditParticipant(amoCode, auditId, participantId),
+    onSuccess: async () => {
+      setLocalError(null);
+      await refresh();
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "External participant access could not be revoked."),
+  });
+
   const requests = requestsQuery.data || [];
+  const participants = participantsQuery.data?.items || [];
   const context = contextQuery.data;
   const readiness = useMemo(() => {
     const required = requests.filter((request) => request.status !== "WAIVED");
@@ -119,11 +223,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return { accepted, total, percent: total ? Math.round((accepted / total) * 100) : 100 };
   }, [requests]);
 
-  if (auditQuery.isLoading || contextQuery.isLoading || requestsQuery.isLoading) {
+  if (auditQuery.isLoading || contextQuery.isLoading || requestsQuery.isLoading || participantsQuery.isLoading) {
     return <div className="qms-audit-prepare qms-audit-prepare--loading">Loading governed preparation workspace…</div>;
   }
 
-  const loadError = auditQuery.error || contextQuery.error || requestsQuery.error;
+  const loadError = auditQuery.error || contextQuery.error || requestsQuery.error || participantsQuery.error;
   if (loadError || !auditQuery.data) {
     return <div className="qms-audit-prepare qms-audit-prepare--loading" role="alert"><AlertTriangle size={20} /> {loadError instanceof Error ? loadError.message : "Preparation workspace unavailable."}</div>;
   }
@@ -190,6 +294,49 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ))}
             </div>
           </section>
+
+          <section className="qms-audit-prepare__card qms-audit-prepare__participants">
+            <header>
+              <UserPlus size={18} />
+              <div><strong>External participants</strong><small>Scoped audit access without creating employee accounts.</small></div>
+              {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}
+            </header>
+
+            {oneTimeAccessUrl ? (
+              <div className="qms-audit-prepare__one-time-link" role="status">
+                <div><strong>One-time invitation link created</strong><small>Copy it now. The server stores only its SHA-256 hash and cannot reveal this token again.</small></div>
+                <code>{oneTimeAccessUrl}</code>
+                <button type="button" onClick={() => void navigator.clipboard.writeText(oneTimeAccessUrl)}><Copy size={15} /> Copy link</button>
+                <button type="button" onClick={() => setOneTimeAccessUrl(null)}>Dismiss</button>
+              </div>
+            ) : null}
+
+            {showParticipantForm ? (
+              <form className="qms-audit-prepare__participant-form" onSubmit={(event) => { event.preventDefault(); participantMutation.mutate(); }}>
+                <label><span>Participant type</span><select value={participantDraft.participantType} onChange={(event) => { const participantType = event.target.value as ExternalParticipantType; setParticipantDraft((current) => ({ ...current, participantType, role: participantType === "AUDITEE_GUEST" ? "AUDITEE" : "AUDITOR", readProgress: participantType === "EXTERNAL_AUDITOR" })); }}><option value="AUDITEE_GUEST">Auditee / external representative</option><option value="EXTERNAL_AUDITOR">External auditor</option></select></label>
+                <label><span>Role</span><input required value={participantDraft.role} onChange={(event) => setParticipantDraft((current) => ({ ...current, role: event.target.value }))} /></label>
+                <label><span>Full name</span><input required minLength={2} value={participantDraft.displayName} onChange={(event) => setParticipantDraft((current) => ({ ...current, displayName: event.target.value }))} /></label>
+                <label><span>Email</span><input required type="email" value={participantDraft.email} onChange={(event) => setParticipantDraft((current) => ({ ...current, email: event.target.value }))} /></label>
+                <label><span>Organisation</span><input value={participantDraft.organisation} onChange={(event) => setParticipantDraft((current) => ({ ...current, organisation: event.target.value }))} /></label>
+                <label><span>Access expires</span><input required type="datetime-local" value={participantDraft.expiresAt} onChange={(event) => setParticipantDraft((current) => ({ ...current, expiresAt: event.target.value }))} /></label>
+                <label><span>Identity assurance</span><select value={participantDraft.assuranceLevel} onChange={(event) => setParticipantDraft((current) => ({ ...current, assuranceLevel: event.target.value as ExternalAuditAssuranceLevel }))}><option value="EMAIL_LINK">Email link</option><option value="MFA">MFA required</option><option value="PASSKEY">Passkey required</option></select></label>
+                <fieldset className="is-wide"><legend>Scoped access</legend><label><input type="checkbox" checked={participantDraft.readProgress} onChange={(event) => setParticipantDraft((current) => ({ ...current, readProgress: event.target.checked }))} /> View fieldwork progress</label>{participantDraft.participantType === "AUDITEE_GUEST" ? <label><input type="checkbox" checked={participantDraft.readReleasedEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, readReleasedEvidence: event.target.checked }))} /> View evidence explicitly released with findings</label> : <><label><input type="checkbox" checked={participantDraft.executeChecklist} onChange={(event) => setParticipantDraft((current) => ({ ...current, executeChecklist: event.target.checked }))} /> Execute assigned checklist</label><label><input type="checkbox" checked={participantDraft.createEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, createEvidence: event.target.checked }))} /> Add audit evidence</label><label><input type="checkbox" checked={participantDraft.draftFinding} onChange={(event) => setParticipantDraft((current) => ({ ...current, draftFinding: event.target.checked }))} /> Draft findings</label></>}</fieldset>
+                <p className="is-wide">Auditees receive only released findings and their own preparation requests. External auditors receive only the capabilities explicitly selected here.</p>
+                <footer><button type="button" onClick={() => setShowParticipantForm(false)}>Cancel</button><button type="submit" className="is-primary" disabled={!participantDraft.expiresAt || participantMutation.isPending}>{participantMutation.isPending ? "Creating access…" : "Create invitation"}</button></footer>
+              </form>
+            ) : null}
+
+            <div className="qms-audit-prepare__participant-list">
+              {!participants.length ? <p className="qms-audit-prepare__empty">No external audit participants have been invited.</p> : null}
+              {participants.map((participant) => (
+                <article key={participant.id}>
+                  <div><span className="qms-audit-prepare__status">{statusLabel(participant.status)} · {statusLabel(participant.participant_type)}</span><strong>{participant.display_name || participant.email}</strong><small>{participant.role} · {participant.organisation || "External organisation not recorded"}</small><small>{participant.email} · expires {new Date(participant.expires_at).toLocaleString()}</small></div>
+                  <div className="qms-audit-prepare__permission-tags">{participant.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
+                  {canManage && participant.status !== "REVOKED" ? <button type="button" onClick={() => revokeMutation.mutate(participant.id)} disabled={revokeMutation.isPending}><UserX size={15} /> Revoke</button> : null}
+                </article>
+              ))}
+            </div>
+          </section>
         </main>
 
         <aside>
@@ -201,7 +348,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <div><dt>Prior related audits</dt><dd>{context?.prior_audit_history.items.length || 0}</dd></div>
               <div><dt>Prior findings</dt><dd>{context?.prior_findings.total || 0}</dd></div>
               <div><dt>Open CAR exposure</dt><dd>{context?.car_exposure.open_count || 0}</dd></div>
-              <div><dt>Checklist bindings</dt><dd>{context?.controlled_preparation.checklist_bindings.length || 0}</dd></div>
+              <div><dt>External participants</dt><dd>{participants.filter((participant) => participant.status !== "REVOKED").length}</dd></div>
             </dl>
           </section>
 
@@ -212,8 +359,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </section>
 
           <section className="qms-audit-prepare__card qms-audit-prepare__external-gap">
-            <header><ShieldAlert size={18} /><div><strong>External auditee room</strong><small>Security boundary not yet enabled.</small></div></header>
-            <p>The existing document-request records are now presented as one preparation queue. A guest upload/link flow will be enabled only after purpose-bound, expiring, server-authorized audit access grants are implemented.</p>
+            <header><ShieldAlert size={18} /><div><strong>Released-data boundary</strong><small>Server enforced.</small></div></header>
+            <p>External auditees do not receive private auditor notes, unreleased draft findings, internal assurance intelligence, or unrelated tenant records. A finding appears externally only after an explicit release event.</p>
           </section>
 
           <Link className="qms-audit-prepare__continue" to={auditSessionPath(amoCode, auditKey, "live")}>
