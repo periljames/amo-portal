@@ -47,7 +47,7 @@ export function listAuditDocumentRequests(amoCode: string, auditId: string, sign
 export function createAuditDocumentRequest(amoCode: string, auditId: string, payload: AuditDocumentRequestCreate) {
   return apiRequest<AuditDocumentRequest>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/document-requests`), {
     method: "POST",
-    body: payload,
+    body: JSON.stringify(payload),
     timeoutMs: 30_000,
   });
 }
@@ -55,7 +55,7 @@ export function createAuditDocumentRequest(amoCode: string, auditId: string, pay
 export function updateAuditDocumentRequest(amoCode: string, auditId: string, requestId: string, payload: AuditDocumentRequestUpdate) {
   return apiRequest<AuditDocumentRequest>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/document-requests/${encodeURIComponent(requestId)}`), {
     method: "PATCH",
-    body: payload,
+    body: JSON.stringify(payload),
     timeoutMs: 30_000,
   });
 }
