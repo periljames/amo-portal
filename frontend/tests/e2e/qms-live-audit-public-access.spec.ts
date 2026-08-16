@@ -4,6 +4,7 @@ const RELEASED_FINDING_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
 const CHECKLIST_ITEM_ID = "44444444-4444-4444-8444-444444444444";
+const DRAFT_ID = "draft-external-0001";
 
 function readModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -74,9 +75,7 @@ test("external audit access exchanges the raw token and renders released-only da
 
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
-    const url = new URL(request.url());
-    const path = url.pathname;
-
+    const path = new URL(request.url()).pathname;
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") {
       exchangeCount += 1;
       return respond(route, session);
@@ -88,14 +87,11 @@ test("external audit access exchanges the raw token and renders released-only da
       });
       return respond(route, { finding_id: RELEASED_FINDING_ID, acknowledged_at: "2026-08-19T09:30:00Z" });
     }
-    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") {
-      return respond(route, session);
-    }
+    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") return respond(route, session);
     return respond(route, { detail: "Not configured in QMS public-access fixture." }, 404);
   });
 
   await page.goto("/qms/audit-access/signed-test-invitation-token", { waitUntil: "domcontentloaded" });
-
   await expect(page.getByRole("heading", { name: /QAR-MO-26-021 · Quality system audit/i })).toBeVisible();
   await expect.poll(() => exchangeCount).toBe(1);
   await expect(page).toHaveURL(/\/qms\/audit-access$/);
@@ -115,10 +111,7 @@ test("auditee can submit a requested document through the scoped guest session",
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-
-    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") {
-      return respond(route, session);
-    }
+    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, session);
     if (path.endsWith(`/quality/audit-access/document-requests/${REQUEST_ID}/submit`) && request.method() === "POST") {
       uploadCount += 1;
       session = readModel({
@@ -139,9 +132,7 @@ test("auditee can submit a requested document through the scoped guest session",
         created_at: "2026-08-16T10:00:00Z",
       }, 201);
     }
-    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") {
-      return respond(route, session);
-    }
+    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") return respond(route, session);
     return respond(route, { detail: "Not configured in QMS upload fixture." }, 404);
   });
 
@@ -154,12 +145,11 @@ test("auditee can submit a requested document through the scoped guest session",
   });
   await page.getByPlaceholder("Optional note for the audit team").fill("Requested register and sample certificates.");
   await page.getByRole("button", { name: "Submit securely" }).click();
-
   await expect.poll(() => uploadCount).toBe(1);
   await expect(page.getByText(/UPLOADED/i)).toBeVisible();
 });
 
-test("external auditor executes only the assigned checklist with session-bound CSRF", async ({ page }) => {
+test("external auditor executes assigned checklist and submits governed finding drafts with session-bound CSRF", async ({ page }) => {
   const externalSession = readModel({
     participant: {
       display_name: "Independent Auditor",
@@ -177,8 +167,8 @@ test("external auditor executes only the assigned checklist with session-bound C
     participant_id: "participant-external-1",
     csrf_token: "csrf-bound-to-external-session",
     can_execute_checklist: true,
-    can_draft_findings: false,
-    finding_draft_blocker: "The grant includes audit:finding_draft, but the current governed finding model has no DRAFT→QUALITY_REVIEW→PROMOTED state.",
+    can_draft_findings: true,
+    finding_draft_blocker: null,
     items: [
       {
         checklist_item_id: CHECKLIST_ITEM_ID,
@@ -196,17 +186,59 @@ test("external auditor executes only the assigned checklist with session-bound C
       },
     ],
   };
+  let drafts: Array<Record<string, unknown>> = [];
   let mutationCount = 0;
+  let draftCreateCount = 0;
+  let draftSubmitCount = 0;
   let csrfHeader: string | undefined;
+  let draftCsrfHeader: string | undefined;
+
+  const draft = (status: string) => ({
+    id: DRAFT_ID,
+    audit_id: AUDIT_ID,
+    checklist_item_id: CHECKLIST_ITEM_ID,
+    participant_id: "participant-external-1",
+    client_mutation_id: "qms-external-draft-test",
+    client_timestamp: "2026-08-19T08:16:00Z",
+    draft_type: "NON_CONFORMITY",
+    proposed_severity: "MAJOR",
+    proposed_level: "LEVEL_2",
+    requirement_ref: "QMSM 4.2.3",
+    description: "Obsolete controlled procedure revision was available at the sampled point of use.",
+    objective_evidence: "Sampled workstation displayed superseded revision 3.",
+    evidence_references: ["DMS:PROC-DC-001:REV3"],
+    supersedes_draft_id: null,
+    status,
+    created_at: "2026-08-19T08:16:00Z",
+    events: [{
+      id: `event-${status.toLowerCase()}`,
+      event_type: status,
+      reason: status === "CREATED" ? "External auditor created finding draft." : "External auditor submitted the draft for Quality review.",
+      review_note: null,
+      actor_user_id: null,
+      actor_participant_id: "participant-external-1",
+      promoted_finding_id: null,
+      created_at: "2026-08-19T08:16:00Z",
+    }],
+  });
 
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") {
-      return respond(route, externalSession);
+    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, externalSession);
+    if (path.endsWith("/quality/audit-access/fieldwork") && request.method() === "GET") return respond(route, fieldwork);
+    if (path.endsWith("/quality/audit-access/finding-drafts") && request.method() === "GET") return respond(route, { items: drafts });
+    if (path.endsWith(`/quality/audit-access/fieldwork/checklist-items/${CHECKLIST_ITEM_ID}/finding-drafts`) && request.method() === "POST") {
+      draftCreateCount += 1;
+      draftCsrfHeader = request.headers()["x-qms-csrf"];
+      drafts = [draft("CREATED")];
+      return respond(route, drafts[0], 201);
     }
-    if (path.endsWith("/quality/audit-access/fieldwork") && request.method() === "GET") {
-      return respond(route, fieldwork);
+    if (path.endsWith(`/quality/audit-access/finding-drafts/${DRAFT_ID}/submit`) && request.method() === "POST") {
+      draftSubmitCount += 1;
+      draftCsrfHeader = request.headers()["x-qms-csrf"];
+      drafts = [draft("SUBMITTED")];
+      return respond(route, drafts[0]);
     }
     if (path.endsWith(`/quality/audit-access/fieldwork/checklist-items/${CHECKLIST_ITEM_ID}/mutations`) && request.method() === "POST") {
       mutationCount += 1;
@@ -228,20 +260,28 @@ test("external auditor executes only the assigned checklist with session-bound C
         row: fieldwork.items[0],
       });
     }
-    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") {
-      return respond(route, externalSession);
-    }
+    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") return respond(route, externalSession);
     return respond(route, { detail: "Not configured in external auditor fixture." }, 404);
   });
 
   await page.goto("/qms/audit-access/signed-external-auditor-token", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Assigned audit checklist")).toBeVisible();
-  await expect(page.getByText(/DRAFT→QUALITY_REVIEW→PROMOTED/)).toBeVisible();
+  await expect(page.getByLabel("External finding drafts")).toBeVisible();
+  await expect(page.getByText(/DRAFT→QUALITY_REVIEW→PROMOTED/)).toHaveCount(0);
+
   await page.getByLabel("External auditor fieldwork").getByRole("textbox", { name: "My attributable fieldwork note" }).fill("Verified against the controlled DMS revision.");
   await page.getByLabel("External auditor fieldwork").getByRole("button", { name: "Compliant" }).click();
-
   await expect.poll(() => mutationCount).toBe(1);
   expect(csrfHeader).toBe("csrf-bound-to-external-session");
   await expect(page.getByText(/COMPLIANT · v2/)).toBeVisible();
-  await expect(page.getByText(/participant attribution/)).toBeVisible();
+
+  await page.getByLabel("External finding drafts").getByLabel("Finding statement").fill("Obsolete controlled procedure revision was available at the sampled point of use.");
+  await page.getByLabel("External finding drafts").getByLabel("Objective evidence").fill("Sampled workstation displayed superseded revision 3.");
+  await page.getByLabel("External finding drafts").getByLabel(/Evidence references/).fill("DMS:PROC-DC-001:REV3");
+  await page.getByLabel("External finding drafts").getByRole("button", { name: "Save draft" }).click();
+  await expect.poll(() => draftCreateCount).toBe(1);
+  expect(draftCsrfHeader).toBe("csrf-bound-to-external-session");
+  await page.getByLabel("External finding drafts").getByRole("button", { name: /Submit to Quality/ }).click();
+  await expect.poll(() => draftSubmitCount).toBe(1);
+  await expect(page.getByLabel("External finding drafts").getByText("SUBMITTED")).toBeVisible();
 });
