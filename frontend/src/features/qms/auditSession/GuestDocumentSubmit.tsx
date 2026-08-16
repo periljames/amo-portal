@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { FileUp } from "lucide-react";
 
 import { submitAuditGuestDocument } from "../../../services/qmsAuditExternalAccess";
+import "../../../styles/qms-public-audit-document-submit.css";
 
 type Props = {
   requestId: string;
