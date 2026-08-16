@@ -243,4 +243,24 @@ jobs:
           cat /tmp/qms-car-preview.log
           exit 1
       - name: Browser - staged CAR control loop and live CAR performance report
-        run: npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-car-playwright.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 120 /tmp/qms-car-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS CAR browser failure::$summary"
+          fi
+          exit "$status"
+      - name: Retain CAR browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-car-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-car-playwright.log
+            /tmp/qms-car-preview.log
+          if-no-files-found: warn
+          retention-days: 14
