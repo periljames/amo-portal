@@ -75,6 +75,7 @@ jobs:
           amodb/apps/quality/audit_external_access_models.py
           amodb/apps/quality/audit_external_access_router.py
           amodb/apps/quality/audit_external_access_route_order.py
+          amodb/apps/quality/audit_external_report_acknowledgement_router.py
           amodb/apps/quality/audit_external_participant_guard_router.py
           amodb/apps/quality/audit_external_session_guard_router.py
           amodb/apps/quality/audit_external_fieldwork_router.py
@@ -99,8 +100,8 @@ jobs:
           amodb/apps/quality/audit_checklist_execution_router.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
-      - name: Test external access token, scope and CSRF contract
-        run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py
+      - name: Test external access token, scope, CSRF and issued-report receipt contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py amodb/apps/quality/tests/test_audit_external_report_acknowledgement_contract.py
       - name: Test external finding draft and promotion contract
         run: pytest -q amodb/apps/quality/tests/test_audit_external_finding_draft_contract.py amodb/apps/quality/tests/test_audit_external_finding_promotion_contract.py
       - name: Test guest document storage controls
