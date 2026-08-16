@@ -15,6 +15,8 @@ import {
 import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
+import { ApiClientError } from "../../../services/apiClient";
+import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import {
   qmsCreateFinding,
   qmsListFindings,
@@ -24,6 +26,7 @@ import {
 } from "../../../services/qms";
 import {
   listChecklistExecutionGovernance,
+  mutateChecklistFieldwork,
   updateChecklistExecutionGovernance,
   type CanonicalChecklistResponse,
   type ChecklistExecutionGovernanceRow,
@@ -53,6 +56,12 @@ type FindingDraft = {
   level: NonconformityLevel | "";
   statement: string;
   objectiveEvidence: string;
+};
+
+type FieldworkUpdateInput = {
+  item: ChecklistExecutionGovernanceRow;
+  response: CanonicalChecklistResponse;
+  auditorNotes: string;
 };
 
 const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: string }> = [
@@ -87,6 +96,24 @@ function findingPayload(draft: FindingDraft): QMSFindingCreatePayload {
   };
 }
 
+function fieldworkConflictMessage(error: unknown): string | null {
+  if (!(error instanceof ApiClientError) || error.status !== 409) return null;
+  const body = error.body as { detail?: unknown } | null;
+  const detail = body?.detail && typeof body.detail === "object"
+    ? body.detail as Record<string, unknown>
+    : null;
+  if (!detail) return error.message;
+  const code = String(detail.code || "");
+  if (code === "FIELDWORK_VERSION_CONFLICT") {
+    const serverVersion = detail.server_version;
+    return `Conflict detected: another auditor or device changed this checklist item${typeof serverVersion === "number" ? ` to version ${serverVersion}` : ""}. Refresh and review the server record before retrying; the portal will not silently overwrite it.`;
+  }
+  if (code === "FIELDWORK_IDEMPOTENCY_CONFLICT") {
+    return "The same offline mutation identifier was received with different content. The portal rejected it to prevent duplicate or ambiguous fieldwork.";
+  }
+  return typeof detail.message === "string" ? detail.message : error.message;
+}
+
 const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
@@ -94,27 +121,28 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-live-audit-resolve", auditKey],
+    queryKey: ["qms", "live-audit-resolve", auditKey],
     queryFn: () => qmsResolveAudit(auditKey),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
   const checklistQuery = useQuery({
-    queryKey: ["qms-live-audit-checklist", amoCode, auditId],
+    queryKey: ["qms", "live-audit-checklist", amoCode, auditId],
     queryFn: ({ signal }) => listChecklistExecutionGovernance(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 1_500,
   });
   const findingsQuery = useQuery({
-    queryKey: ["qms-live-audit-findings", auditId],
+    queryKey: ["qms", "live-audit-findings", auditId],
     queryFn: () => qmsListFindings(auditId),
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
   const sessionQuery = useQuery({
-    queryKey: ["qms-audit-session", amoCode, auditId],
+    queryKey: ["qms", "audit-session", amoCode, auditId],
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
@@ -135,16 +163,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     : "";
 
   const refreshFieldwork = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["qms-live-audit-checklist", amoCode, auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms-live-audit-findings", auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
-    ]);
+    await queryClient.invalidateQueries({ queryKey: ["qms"] });
   };
 
   const updateMutation = useMutation({
-    mutationFn: ({ item, response, auditorNotes }: { item: ChecklistExecutionGovernanceRow; response: CanonicalChecklistResponse; auditorNotes: string }) =>
-      updateChecklistExecutionGovernance(amoCode, auditId, item.checklist_item_id, {
+    mutationFn: ({ item, response, auditorNotes }: FieldworkUpdateInput) =>
+      mutateChecklistFieldwork(amoCode, auditId, item, {
         canonical_response_status: response,
         auditor_notes: auditorNotes.trim() || null,
         evidence_references: item.evidence_references || [],
@@ -152,6 +176,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       }),
     onSuccess: async (_result, variables) => {
       setLocalError(null);
+      setSyncNotice("Saved to the authoritative audit record.");
       setNoteDrafts((current) => {
         const next = { ...current };
         delete next[variables.item.checklist_item_id];
@@ -159,11 +184,22 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
       await refreshFieldwork();
     },
-    onError: (error) => setLocalError(error instanceof Error ? error.message : "Checklist update failed."),
+    onError: (error) => {
+      if (isOfflineQueuedError(error)) {
+        setLocalError(null);
+        setSyncNotice("Saved securely on this device · pending ordered sync. The authoritative audit state will not change until the server accepts the mutation.");
+        return;
+      }
+      setSyncNotice(null);
+      setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Checklist update failed."));
+    },
   });
 
   const findingMutation = useMutation({
     mutationFn: async (draft: FindingDraft) => {
+      // Finding creation still uses the existing governed finding/CAR/task path.
+      // It is deliberately not queued offline until checklist + finding creation
+      // can be committed atomically without bypassing that existing governance.
       const finding = await qmsCreateFinding(auditId, findingPayload(draft));
       await qmsUpdateAuditChecklistItem(auditId, draft.item.checklist_item_id, { finding_id: finding.id });
       const auditorNotes = noteDrafts[draft.item.checklist_item_id] ?? draft.item.auditor_notes ?? "";
@@ -178,6 +214,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onSuccess: async (_finding, draft) => {
       setFindingDraft(null);
       setLocalError(null);
+      setSyncNotice("Finding recorded through the governed Quality finding/CAR workflow.");
       setNoteDrafts((current) => {
         const next = { ...current };
         delete next[draft.item.checklist_item_id];
@@ -185,7 +222,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
       await refreshFieldwork();
     },
-    onError: (error) => setLocalError(error instanceof Error ? error.message : "Finding creation failed."),
+    onError: (error) => {
+      setSyncNotice(null);
+      setLocalError(error instanceof Error ? error.message : "Finding creation failed.");
+    },
   });
 
   const counts = useMemo(() => {
@@ -211,6 +251,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const selectResponse = (item: ChecklistExecutionGovernanceRow, response: CanonicalChecklistResponse) => {
     if (!canManage) return;
+    setSyncNotice(null);
     if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
       setFindingDraft({
         mode: response,
@@ -253,6 +294,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
 
       {localError ? <div className="qms-live-audit-focus__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
+      {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
 
       <div className="qms-live-audit-focus__body">
         <aside className="qms-live-audit-focus__sections" aria-label="Checklist questions">
@@ -284,7 +326,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <dl className="qms-live-audit-focus__references">
                 <div><dt>Checklist ref</dt><dd>{selected.checklist_ref || "—"}</dd></div>
                 <div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div>
-                <div><dt>Current</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")}</dd></div>
+                <div><dt>Current</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div>
               </dl>
 
               <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
@@ -321,7 +363,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <button
                   type="button"
                   disabled={!canManage || updateMutation.isPending}
-                  onClick={() => updateMutation.mutate({ item: selected, response: selected.canonical_response_status, auditorNotes: notes })}
+                  onClick={() => {
+                    setSyncNotice(null);
+                    updateMutation.mutate({ item: selected, response: selected.canonical_response_status, auditorNotes: notes });
+                  }}
                 >Save note</button>
               </div>
 
@@ -359,8 +404,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </section>
           <section className="qms-live-audit-focus__sharing">
             <span>Auditee live view</span>
-            <strong>Not enabled yet</strong>
-            <small>This branch does not expose private checklist state through an ungoverned share link.</small>
+            <strong>Released-data boundary active</strong>
+            <small>Auditees receive only server-released findings and permitted progress/evidence projections; private checklist notes remain internal.</small>
           </section>
           <Link className="qms-live-audit-focus__closing-link" to={auditSessionPath(amoCode, auditKey, "closing")}>
             <ClipboardCheck size={16} /> Go to Closing
