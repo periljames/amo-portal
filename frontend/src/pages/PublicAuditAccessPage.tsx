@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileClock, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
+import GuestDocumentSubmit from "../features/qms/auditSession/GuestDocumentSubmit";
 import {
   acknowledgeGuestFinding,
   endAuditGuestSession,
@@ -139,7 +140,7 @@ const PublicAuditAccessPage: React.FC = () => {
               {data.document_requests.map((request) => (
                 <article key={request.id}>
                   <div><strong>{request.title}</strong><p>{request.description || "No additional instructions."}</p><small>Due {request.due_date || "not specified"} · {request.status.replaceAll("_", " ")}</small>{request.review_note ? <blockquote>{request.review_note}</blockquote> : null}</div>
-                  {canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <span className="qms-public-audit__pending-control">Secure file submission is being connected to the governed evidence store.</span> : null}
+                  {canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <GuestDocumentSubmit requestId={request.id} onSubmitted={() => load(null)} /> : null}
                 </article>
               ))}
             </div>
