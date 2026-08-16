@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest, qmsPath } from "../../services/apiClient";
+import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
 
 
 const ACTIVE_REFRESH_INTERVAL_MS = 45_000;
@@ -30,6 +31,20 @@ function isQualityQueryKey(queryKey: readonly unknown[]): boolean {
     "management-review",
     "training-competence",
   ].some((value) => marker.includes(value));
+}
+
+function isQualityRealtimeEvent(event: QmsAuditRealtimeEvent): boolean {
+  if (event.event === "reset") return true;
+  const payload = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
+  const type = String(payload.type || event.event || "").toLowerCase();
+  const entityType = String(payload.entityType || "").toLowerCase();
+  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata as Record<string, unknown> : {};
+  const module = String(metadata.module || "").toLowerCase();
+  return module === "quality"
+    || type.startsWith("qms.")
+    || type.startsWith("quality.")
+    || entityType.startsWith("qms.")
+    || entityType.startsWith("quality.");
 }
 
 function canonicalRefreshButton(): HTMLButtonElement | null {
@@ -86,6 +101,31 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
 
   useEffect(() => {
     if (!qualityActive) return;
+    const stop = startQmsAuditRealtimeStream({
+      onState: (state) => {
+        document.documentElement.dataset.qmsRealtimeState = state;
+      },
+      onEvent: (event) => {
+        if (!isQualityRealtimeEvent(event)) return;
+        if (event.event === "reset") {
+          void queryClient.refetchQueries({ type: "active" });
+        } else {
+          void queryClient.invalidateQueries({
+            predicate: (query) => isQualityQueryKey(query.queryKey),
+            refetchType: "active",
+          });
+        }
+        window.dispatchEvent(new CustomEvent("amo:qms:realtime", { detail: event.data }));
+      },
+    });
+    return () => {
+      stop();
+      delete document.documentElement.dataset.qmsRealtimeState;
+    };
+  }, [qualityActive, queryClient]);
+
+  useEffect(() => {
+    if (!qualityActive) return;
 
     const refresh = (force = false, includeAllActive = false) => {
       const now = Date.now();
@@ -93,9 +133,6 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       lastRefreshAt.current = now;
 
       if (includeAllActive) {
-        // Explicit user/system refreshes must bypass stale-time heuristics and
-        // immediately execute every mounted query, including legacy keys that do
-        // not contain a predictable QMS marker.
         void queryClient.refetchQueries({ type: "active" });
       } else {
         void queryClient.invalidateQueries({
@@ -128,10 +165,6 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       refresh(true, true);
       const amoCode = qualityAmoCode(location.pathname);
       if (!amoCode) return;
-      // A bounded authoritative probe guarantees that an explicit refresh always
-      // reaches the tenant backend even when the current legacy page is not backed
-      // by a mounted React Query observer. The page queries are still revalidated
-      // above, and probe failure does not interrupt the workspace.
       void apiRequest<Record<string, unknown>>(qmsPath(amoCode, "/dashboard-lite"), {
         timeoutMs: 8_000,
         cacheTtlMs: 0,
