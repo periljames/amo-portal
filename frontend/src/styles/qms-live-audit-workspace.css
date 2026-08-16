@@ -59,7 +59,8 @@
   text-decoration: none;
 }
 
-.qms-live-audit-focus__error {
+.qms-live-audit-focus__error,
+.qms-live-audit-focus__sync-notice {
   position: absolute;
   top: 4.25rem;
   left: 50%;
@@ -67,12 +68,23 @@
   display: flex;
   transform: translateX(-50%);
   gap: 0.4rem;
-  max-width: 760px;
+  max-width: min(760px, calc(100vw - 2rem));
   padding: 0.65rem 0.8rem;
-  border: 1px solid #fecaca;
   border-radius: 8px;
+  box-shadow: 0 8px 30px rgb(15 23 42 / 10%);
+}
+
+.qms-live-audit-focus__error {
+  border: 1px solid #fecaca;
   background: #fef2f2;
   color: #991b1b;
+}
+
+.qms-live-audit-focus__sync-notice {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-weight: 700;
 }
 
 .qms-live-audit-focus__body {
