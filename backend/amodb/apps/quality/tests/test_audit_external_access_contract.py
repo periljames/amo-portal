@@ -12,6 +12,8 @@ from amodb.apps.quality.audit_external_access_router import (
     _make_access_token,
     _scope_for,
 )
+from amodb.apps.quality.audit_external_fieldwork_router import _csrf_for_session, _require_csrf
+from amodb.apps.quality.audit_external_participant_guard_router import create_external_participant_guarded
 
 
 def _future() -> datetime:
@@ -61,6 +63,22 @@ def test_auditee_permissions_are_bounded_to_released_data_contract():
     assert "audit:finding_draft" not in scope
 
 
+def test_external_auditor_scope_is_assignment_bounded():
+    payload = ExternalParticipantCreate(
+        email="external.auditor@example.test",
+        display_name="External Auditor",
+        participant_type="EXTERNAL_AUDITOR",
+        role="AUDITOR",
+        permissions=["audit:read_assigned", "audit:read_progress", "audit:checklist_execute", "audit:finding_draft"],
+        expires_at=_future(),
+    )
+    scope = set(_scope_for(payload))
+    assert scope <= EXTERNAL_AUDITOR_ALLOWED
+    assert "audit:checklist_execute" in scope
+    assert "audit:finding_draft" in scope
+    assert "audit:read_released_findings" not in scope
+
+
 def test_external_auditor_cannot_request_auditee_only_permission():
     payload = ExternalParticipantCreate(
         email="external.auditor@example.test",
@@ -74,3 +92,35 @@ def test_external_auditor_cannot_request_auditee_only_permission():
         _scope_for(payload)
     assert exc.value.status_code == 422
     assert "audit:acknowledge" not in EXTERNAL_AUDITOR_ALLOWED
+
+
+def test_external_audit_fieldwork_csrf_is_session_bound():
+    token_a = _make_access_token(amo_id="tenant-a", grant_id="grant-a", expires_at=_future())
+    token_b = _make_access_token(amo_id="tenant-a", grant_id="grant-b", expires_at=_future())
+    csrf_a = _csrf_for_session(token_a)
+    assert len(csrf_a) == 64
+    assert csrf_a != _csrf_for_session(token_b)
+    _require_csrf(token_a, csrf_a)
+    with pytest.raises(HTTPException) as exc:
+        _require_csrf(token_a, _csrf_for_session(token_b))
+    assert exc.value.status_code == 403
+
+
+def test_unenforced_mfa_and_passkey_invitations_fail_closed_before_db_write():
+    for assurance in ("MFA", "PASSKEY"):
+        payload = ExternalParticipantCreate(
+            email=f"{assurance.lower()}@example.test",
+            display_name="External Auditor",
+            participant_type="EXTERNAL_AUDITOR",
+            role="AUDITOR",
+            assurance_level=assurance,
+            expires_at=_future(),
+        )
+        with pytest.raises(HTTPException) as exc:
+            create_external_participant_guarded(
+                audit_id=__import__("uuid").uuid4(),
+                payload=payload,
+                ctx=None,  # rejected before tenant/database access
+                db=None,
+            )
+        assert exc.value.status_code == 422
