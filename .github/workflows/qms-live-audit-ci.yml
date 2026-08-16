@@ -24,6 +24,7 @@ on:
       - "frontend/src/services/qmsExternalFindingDraft*.ts"
       - "frontend/src/services/qmsChecklistExecutionGovernance.ts"
       - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
+      - "frontend/src/components/QMS/QualityDataFreshnessCoordinator.tsx"
       - "frontend/src/styles/qms-audit-*.css"
       - "frontend/src/styles/qms-live-*.css"
       - "frontend/src/styles/qms-external-*.css"
@@ -108,6 +109,8 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
       - name: Test idempotent fieldwork sync contract
         run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
+      - name: Test realtime reconnect and tenant replay contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_realtime_contract.py
       - name: Test closing and archive governance helpers
         run: pytest -q amodb/apps/quality/tests/test_audit_closing_assurance_contract.py amodb/apps/quality/tests/test_audit_archive_governance_contract.py
       - name: Prove authoritative workflow contract remains green
@@ -194,12 +197,14 @@ jobs:
           src/services/qmsAuditReportComposition.ts
           src/services/qmsAuditClosingAssurance.ts
           src/services/qmsAuditArchiveGovernance.ts
+          src/services/qmsAuditRealtime.ts
           src/services/qmsExternalFindingDrafts.ts
           src/services/qmsExternalFindingDraftReview.ts
           src/services/qmsChecklistExecutionGovernance.ts
           src/components/QMS/QualityEnhancementsHost.tsx
-      - name: Test route compatibility
-        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts
+          src/components/QMS/QualityDataFreshnessCoordinator.tsx
+      - name: Test route and realtime compatibility
+        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts src/services/qmsAuditRealtime.test.ts
       - name: Production frontend build
         run: npm run build
       - name: Start production preview
