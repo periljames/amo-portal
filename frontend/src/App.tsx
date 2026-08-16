@@ -11,6 +11,7 @@ import { ToastProvider } from "./components/feedback/ToastProvider";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
+import PublicAuditAccessPage from "./pages/PublicAuditAccessPage";
 import { onSessionEvent } from "./services/auth";
 import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
@@ -28,6 +29,7 @@ const App: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
+  const isPublicAuditAccess = /^\/qms\/audit-access(?:\/[^/]+)?\/?$/i.test(location.pathname);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -61,6 +63,10 @@ const App: React.FC = () => {
         clearApiResponseCache();
         resetLoading();
 
+        // External audit access is an independent, purpose-bound HTTP-only
+        // guest session. Employee-session expiry must not redirect it to login.
+        if (isPublicAuditAccess) return;
+
         const parts = location.pathname.split("/").filter(Boolean);
         const isLoginRoute = location.pathname === "/login"
           || (parts[0] === "maintenance" && parts[2] === "login");
@@ -78,7 +84,7 @@ const App: React.FC = () => {
         });
       }
     });
-  }, [location.hash, location.pathname, location.search, navigate, queryClient]);
+  }, [isPublicAuditAccess, location.hash, location.pathname, location.search, navigate, queryClient]);
 
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
@@ -107,6 +113,14 @@ const App: React.FC = () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, []);
+
+  if (isPublicAuditAccess) {
+    return (
+      <PortalErrorBoundary>
+        <PublicAuditAccessPage />
+      </PortalErrorBoundary>
+    );
+  }
 
   return (
     <ToastProvider>
