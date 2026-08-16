@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 
-TARGET_REVISION = "quality_260816_closing_assurance"
+TARGET_REVISION = "quality_260816_archive_package_artifact"
 TABLES = (
     "quality_external_identities",
     "quality_audit_participants",
@@ -18,6 +18,15 @@ TABLES = (
     "quality_audit_report_artifacts",
     "quality_audit_fieldwork_mutation_receipts",
     "quality_audit_fieldwork_participant_contributions",
+    "quality_audit_output_policy_revisions",
+    "quality_audit_signature_attempts",
+    "quality_audit_signature_evidence",
+    "quality_audit_assurance_artifacts",
+    "quality_audit_retention_policy_revisions",
+    "quality_audit_archive_manifests",
+    "quality_audit_archive_manifest_items",
+    "quality_audit_legal_hold_events",
+    "quality_audit_disposition_events",
 )
 APPEND_ONLY_TABLES = (
     "quality_audit_access_events",
@@ -26,6 +35,15 @@ APPEND_ONLY_TABLES = (
     "quality_audit_report_artifacts",
     "quality_audit_fieldwork_mutation_receipts",
     "quality_audit_fieldwork_participant_contributions",
+    "quality_audit_output_policy_revisions",
+    "quality_audit_signature_attempts",
+    "quality_audit_signature_evidence",
+    "quality_audit_assurance_artifacts",
+    "quality_audit_retention_policy_revisions",
+    "quality_audit_archive_manifests",
+    "quality_audit_archive_manifest_items",
+    "quality_audit_legal_hold_events",
+    "quality_audit_disposition_events",
 )
 
 
@@ -113,6 +131,16 @@ def main() -> None:
         assert "actor_participant_id" in event_columns, event_columns
         receipt_columns = _columns(connection, "quality_audit_fieldwork_mutation_receipts")
         assert {"client_timestamp", "actor_participant_id", "actor_user_id"} <= receipt_columns, receipt_columns
+        manifest_columns = _columns(connection, "quality_audit_archive_manifests")
+        assert {
+            "manifest_sha256",
+            "package_file_ref",
+            "package_filename",
+            "package_size_bytes",
+            "package_sha256",
+        } <= manifest_columns, manifest_columns
+        disposition_columns = _columns(connection, "quality_audit_disposition_events")
+        assert {"inventory_sha256", "package_sha256", "action_ref"} <= disposition_columns, disposition_columns
 
         for table_name in TABLES:
             _assert_rls(connection, table_name)
@@ -134,7 +162,7 @@ def main() -> None:
         for table_name in APPEND_ONLY_TABLES:
             assert any(table == table_name and "append_only" in trigger for table, trigger in triggers), (table_name, triggers)
 
-    print("Live audit migrations, RLS, versioning, participant attribution and append-only history verified")
+    print("Live audit migrations, RLS, package integrity columns, participant attribution and append-only history verified")
 
 
 if __name__ == "__main__":
