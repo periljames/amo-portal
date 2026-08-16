@@ -10,6 +10,9 @@ import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/qms-text-scale-override.css";
 
+const AuditPrepareWorkspace = lazy(
+  () => import("../../features/qms/auditSession/AuditPrepareWorkspace"),
+);
 const LiveAuditWorkspace = lazy(
   () => import("../../features/qms/auditSession/LiveAuditWorkspace"),
 );
@@ -244,6 +247,11 @@ const QualityEnhancementsHost: React.FC = () => {
             <Suspense fallback={null}>
               <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
               <QualityChecklistPdfFormEditorHost />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "prepare" ? (
+            <Suspense fallback={null}>
+              <AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "live" ? (
