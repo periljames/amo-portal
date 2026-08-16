@@ -8,7 +8,7 @@ on:
       - "backend/amodb/alembic/versions/quality_260816_report_composition.py"
       - "backend/amodb/alembic/versions/quality_260816_fieldwork_sync.py"
       - "backend/amodb/apps/quality/audit_session_*.py"
-      - "backend/amodb/apps/quality/audit_external_access_*.py"
+      - "backend/amodb/apps/quality/audit_external_*.py"
       - "backend/amodb/apps/quality/audit_finding_release_status_router.py"
       - "backend/amodb/apps/quality/audit_guest_document_*.py"
       - "backend/amodb/apps/quality/audit_guest_documents_router.py"
@@ -84,6 +84,9 @@ jobs:
           amodb/apps/quality/audit_external_access_models.py
           amodb/apps/quality/audit_external_access_router.py
           amodb/apps/quality/audit_external_access_route_order.py
+          amodb/apps/quality/audit_external_participant_guard_router.py
+          amodb/apps/quality/audit_external_session_guard_router.py
+          amodb/apps/quality/audit_external_fieldwork_router.py
           amodb/apps/quality/audit_finding_release_status_router.py
           amodb/apps/quality/audit_guest_document_models.py
           amodb/apps/quality/audit_guest_document_storage.py
@@ -96,7 +99,7 @@ jobs:
           amodb/apps/quality/audit_checklist_execution_router.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
-      - name: Test external access token and scope contract
+      - name: Test external access token, scope and CSRF contract
         run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py
       - name: Test guest document storage controls
         run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
@@ -145,7 +148,7 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Upgrade PostgreSQL through all Alembic heads
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Verify live audit RLS, versioning and append-only contract
+      - name: Verify live audit RLS, attribution, versioning and append-only contract
         run: python -m amodb.apps.quality.tests.postgres_audit_external_access_probe
 
   frontend-contract:
@@ -173,6 +176,7 @@ jobs:
           src/features/qms/auditSession/AuditPrepareWorkspace.tsx
           src/features/qms/auditSession/AuditDocumentSubmissionReviewPanel.tsx
           src/features/qms/auditSession/GuestDocumentSubmit.tsx
+          src/features/qms/auditSession/ExternalAuditorFieldworkWorkspace.tsx
           src/features/qms/auditSession/LiveAuditWorkspace.tsx
           src/features/qms/auditSession/LiveFindingReleasePanel.tsx
           src/features/qms/auditSession/AuditClosingWorkspace.tsx
