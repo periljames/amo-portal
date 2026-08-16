@@ -195,4 +195,4 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Public audit access browser acceptance
-        run: npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts --project=chromium
+        run: npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts
