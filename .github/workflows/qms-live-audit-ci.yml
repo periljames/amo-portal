@@ -192,6 +192,17 @@ jobs:
         run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts
       - name: Production frontend build
         run: npm run build
+      - name: Start production preview
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-live-audit-preview.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-live-audit-preview.log
+          exit 1
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Public audit access browser acceptance
