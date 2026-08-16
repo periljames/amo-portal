@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { getApiBaseUrl } from "./config";
 
 export type ExternalParticipantType = "EXTERNAL_AUDITOR" | "AUDITEE_GUEST";
 export type ExternalAuditAssuranceLevel = "EMAIL_LINK" | "MFA" | "PASSKEY";
@@ -114,7 +115,7 @@ export function releaseAuditFinding(
 }
 
 async function publicRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...options,
     headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
     credentials: "include",
