@@ -6,6 +6,7 @@ from . import audit_external_access_models as _audit_external_access_models  # n
 from . import audit_guest_document_models as _audit_guest_document_models  # noqa: F401
 from . import audit_external_access_router
 from . import audit_external_fieldwork_router as _audit_external_fieldwork_router  # noqa: F401
+from . import audit_external_session_guard_router as _audit_external_session_guard_router  # noqa: F401
 from . import audit_external_participant_guard_router
 from . import audit_finding_release_status_router
 from . import audit_guest_documents_router
