@@ -5,6 +5,8 @@ const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
 const CHECKLIST_ITEM_ID = "44444444-4444-4444-8444-444444444444";
 const DRAFT_ID = "draft-external-0001";
+const REPORT_REVISION_ID = "55555555-5555-4555-8555-555555555555";
+const REPORT_HASH = "b".repeat(64);
 
 function readModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -147,6 +149,76 @@ test("auditee can submit a requested document through the scoped guest session",
   await page.getByRole("button", { name: "Submit securely" }).click();
   await expect.poll(() => uploadCount).toBe(1);
   await expect(page.getByText(/UPLOADED/i)).toBeVisible();
+});
+
+test("auditee downloads and acknowledges the exact issued closing report revision", async ({ page }) => {
+  const session = readModel({ issued_report_available: true });
+  let acknowledgedAt: string | null = null;
+  let reportStatusCount = 0;
+  let reportDownloadCount = 0;
+  let reportAcknowledgeCount = 0;
+
+  const reportStatus = () => ({
+    available: true,
+    report: {
+      id: REPORT_REVISION_ID,
+      revision_no: 3,
+      filename: "QAR-MO-26-021-issued.pdf",
+      content_type: "application/pdf",
+      size_bytes: 42,
+      sha256: REPORT_HASH,
+      issued_at: "2026-08-19T12:30:00Z",
+      acknowledged_at: acknowledgedAt,
+    },
+    acknowledgement_statement: "I acknowledge receipt of this issued audit report revision. This acknowledgement records receipt and does not waive any response, corrective-action, review or appeal rights.",
+  });
+
+  await page.route("**/quality/audit-access/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, session);
+    if (path.endsWith("/quality/audit-access/issued-report") && request.method() === "GET") {
+      reportStatusCount += 1;
+      return respond(route, reportStatus());
+    }
+    if (path.endsWith("/quality/audit-access/issued-report/download") && request.method() === "GET") {
+      reportDownloadCount += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: { "Content-Disposition": 'attachment; filename="QAR-MO-26-021-issued.pdf"' },
+        body: "%PDF-1.7\nissued closing report\n%%EOF",
+      });
+    }
+    if (path.endsWith("/quality/audit-access/issued-report/acknowledge") && request.method() === "POST") {
+      reportAcknowledgeCount += 1;
+      acknowledgedAt = "2026-08-19T12:45:00Z";
+      return respond(route, {
+        report_revision_id: REPORT_REVISION_ID,
+        report_sha256: REPORT_HASH,
+        acknowledged_at: acknowledgedAt,
+        acknowledgement_statement: reportStatus().acknowledgement_statement,
+      });
+    }
+    if (path.endsWith("/quality/audit-access/session") && request.method() === "GET") return respond(route, session);
+    return respond(route, { detail: "Not configured in issued-report fixture." }, 404);
+  });
+
+  await page.goto("/qms/audit-access/signed-auditee-report-token", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => reportStatusCount).toBe(1);
+  const reportCard = page.getByLabel("Issued audit report");
+  await expect(reportCard.getByText("QAR-MO-26-021-issued.pdf")).toBeVisible();
+  await expect(reportCard.getByText(/bbbbbbbbbbbb…bbbbbbbb/)).toBeVisible();
+  await expect(reportCard.getByText(/does not waive any response, corrective-action, review or appeal rights/i)).toBeVisible();
+
+  await reportCard.getByRole("button", { name: "Download issued report" }).click();
+  await expect.poll(() => reportDownloadCount).toBe(1);
+
+  await reportCard.getByRole("button", { name: "Acknowledge issued report" }).click();
+  await expect.poll(() => reportAcknowledgeCount).toBe(1);
+  await expect.poll(() => reportStatusCount).toBe(2);
+  await expect(reportCard.getByText(/Receipt acknowledged/)).toBeVisible();
+  await expect(reportCard.getByRole("button", { name: "Acknowledge issued report" })).toHaveCount(0);
 });
 
 test("external auditor executes assigned checklist and submits governed finding drafts with session-bound CSRF", async ({ page }) => {
