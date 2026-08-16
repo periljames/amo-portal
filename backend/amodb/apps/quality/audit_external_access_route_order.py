@@ -5,6 +5,8 @@ from fastapi import APIRouter
 from . import audit_external_access_models as _audit_external_access_models  # noqa: F401
 from . import audit_guest_document_models as _audit_guest_document_models  # noqa: F401
 from . import audit_external_access_router
+from . import audit_external_fieldwork_router as _audit_external_fieldwork_router  # noqa: F401
+from . import audit_external_participant_guard_router
 from . import audit_finding_release_status_router
 from . import audit_guest_documents_router
 from .canonical_router import legacy_router, router
@@ -26,8 +28,25 @@ def _is_generic_catchall(route_item) -> bool:
     return path.endswith("/{module_path:path}") and bool(methods & {"GET", "POST", "PATCH", "DELETE"})
 
 
+def _has_route(api_router: APIRouter, *, path_fragment: str, method: str | None = None, name: str | None = None) -> bool:
+    for item in api_router.routes:
+        if path_fragment not in str(getattr(item, "path", "")):
+            continue
+        if method and method not in set(getattr(item, "methods", None) or ()):
+            continue
+        if name and str(getattr(item, "name", "")) != name:
+            continue
+        return True
+    return False
+
+
 def _register(api_router: APIRouter) -> None:
-    if not any("/external-participants" in str(getattr(item, "path", "")) for item in api_router.routes):
+    # The assurance guard intentionally precedes the legacy create route. It
+    # delegates valid EMAIL_LINK invitations and rejects unenforced MFA/PASSKEY
+    # labels before the older handler can persist them.
+    if not _has_route(api_router, path_fragment="/external-participants", name="create_external_participant_guarded"):
+        api_router.include_router(audit_external_participant_guard_router.router)
+    if not _has_route(api_router, path_fragment="/external-participants", method="GET"):
         api_router.include_router(audit_external_access_router.router)
     if not any(str(getattr(item, "path", "")).endswith("/finding-releases") for item in api_router.routes):
         api_router.include_router(audit_finding_release_status_router.router)
