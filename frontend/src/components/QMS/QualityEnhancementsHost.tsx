@@ -4,11 +4,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 
 import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
+import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/qms-text-scale-override.css";
 
+const LiveAuditWorkspace = lazy(
+  () => import("../../features/qms/auditSession/LiveAuditWorkspace"),
+);
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
@@ -202,6 +206,7 @@ const QualityEnhancementsHost: React.FC = () => {
   const location = useLocation();
   const amoCode = useQualityAmoCode();
   const route = useAuditRoute();
+  const auditSessionStage = auditSessionStageFromPath(location.pathname);
 
   if (/^\/car-invite\/?$/i.test(location.pathname)) {
     return <CarInviteResponsiveStyleLoader />;
@@ -239,6 +244,11 @@ const QualityEnhancementsHost: React.FC = () => {
             <Suspense fallback={null}>
               <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
               <QualityChecklistPdfFormEditorHost />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "live" ? (
+            <Suspense fallback={null}>
+              <LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
         </>
