@@ -1,0 +1,331 @@
+.qms-public-audit {
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.qms-public-audit--center {
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.qms-public-audit__message {
+  width: min(520px, 100%);
+  padding: 1.4rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+  box-shadow: 0 18px 50px rgb(15 23 42 / 10%);
+}
+
+.qms-public-audit__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem clamp(1rem, 4vw, 2.5rem);
+  border-bottom: 1px solid #e2e8f0;
+  background: rgb(255 255 255 / 96%);
+  backdrop-filter: blur(12px);
+}
+
+.qms-public-audit__header span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.qms-public-audit__header h1 {
+  margin: 0.15rem 0;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+}
+
+.qms-public-audit__header p {
+  margin: 0;
+  color: #475569;
+}
+
+.qms-public-audit__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.qms-public-audit button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 700;
+}
+
+.qms-public-audit button:disabled {
+  opacity: 0.55;
+}
+
+.qms-public-audit button:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+.qms-public-audit__error {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 1100px;
+  margin: 0.8rem auto 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.qms-public-audit__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 1rem;
+  width: min(1180px, calc(100% - 2rem));
+  margin: 1rem auto 3rem;
+}
+
+.qms-public-audit__card {
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(15 23 42 / 4%);
+}
+
+.qms-public-audit__summary,
+.qms-public-audit__card:nth-of-type(3),
+.qms-public-audit__card:nth-of-type(4) {
+  grid-column: 1;
+}
+
+.qms-public-audit__progress,
+.qms-public-audit__report-status {
+  grid-column: 2;
+}
+
+.qms-public-audit__progress {
+  grid-row: 1;
+}
+
+.qms-public-audit__report-status {
+  align-self: start;
+}
+
+.qms-public-audit__card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.qms-public-audit__card > header strong,
+.qms-public-audit__card > header small {
+  display: block;
+}
+
+.qms-public-audit__card > header small,
+.qms-public-audit__card small,
+.qms-public-audit__empty {
+  color: #64748b;
+}
+
+.qms-public-audit__summary dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.qms-public-audit__summary dl > div,
+.qms-public-audit__findings dl > div {
+  padding: 0.55rem;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.qms-public-audit dt {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.qms-public-audit dd {
+  margin: 0.15rem 0 0;
+  font-weight: 700;
+}
+
+.qms-public-audit__privacy-note {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem;
+  border-left: 3px solid #0f172a;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.qms-public-audit__meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.qms-public-audit__meter span {
+  display: block;
+  height: 100%;
+  background: #16a34a;
+}
+
+.qms-public-audit__progress > strong {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 1.6rem;
+}
+
+.qms-public-audit__requests,
+.qms-public-audit__findings {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.qms-public-audit__requests article,
+.qms-public-audit__findings article {
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+
+.qms-public-audit__requests article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.qms-public-audit__requests p,
+.qms-public-audit__findings p {
+  margin: 0.3rem 0;
+}
+
+.qms-public-audit__requests blockquote {
+  margin: 0.45rem 0 0;
+  padding-left: 0.55rem;
+  border-left: 2px solid #cbd5e1;
+  color: #475569;
+}
+
+.qms-public-audit__pending-control {
+  max-width: 230px;
+  padding: 0.5rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 7px;
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.qms-public-audit__finding-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.qms-public-audit__finding-heading span {
+  color: #b45309;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.qms-public-audit__released-evidence {
+  margin-top: 0.65rem;
+  padding: 0.55rem;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.qms-public-audit__findings ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1rem;
+  color: #475569;
+}
+
+.qms-public-audit__findings footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.qms-public-audit__findings footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #15803d;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.qms-public-audit__report-status {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.qms-public-audit__report-status span {
+  color: #475569;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 820px) {
+  .qms-public-audit__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qms-public-audit__header-actions {
+    justify-content: flex-start;
+  }
+
+  .qms-public-audit__content {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-public-audit__summary,
+  .qms-public-audit__card:nth-of-type(3),
+  .qms-public-audit__card:nth-of-type(4),
+  .qms-public-audit__progress,
+  .qms-public-audit__report-status {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .qms-public-audit__summary dl,
+  .qms-public-audit__requests article {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-public-audit__pending-control {
+    max-width: none;
+  }
+}
