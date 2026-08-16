@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { getToken } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 export type ExternalParticipantType = "EXTERNAL_AUDITOR" | "AUDITEE_GUEST";
@@ -40,6 +41,21 @@ export type AuditFindingReleaseState = {
   released_evidence_refs: Array<Record<string, unknown> | string>;
   reason: string;
   actor_user_id: string | null;
+  created_at: string;
+};
+
+export type AuditDocumentSubmission = {
+  id: string;
+  audit_id: string;
+  document_request_id: string;
+  source_type: "UPLOAD";
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  sha256: string;
+  response_comment: string | null;
+  participant_id: string | null;
+  submitted_by_user_id: string | null;
   created_at: string;
 };
 
@@ -132,10 +148,29 @@ export function releaseAuditFinding(
   });
 }
 
+export function listAuditDocumentSubmissions(amoCode: string, auditId: string, requestId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: AuditDocumentSubmission[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/document-requests/${encodeURIComponent(requestId)}/submissions`), {
+    timeoutMs: 15_000,
+    cacheTtlMs: 1_500,
+    signal,
+  });
+}
+
+export async function downloadAuditDocumentSubmission(amoCode: string, auditId: string, requestId: string, submissionId: string): Promise<Blob> {
+  const token = getToken();
+  const response = await fetch(`${getApiBaseUrl()}${qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/document-requests/${encodeURIComponent(requestId)}/submissions/${encodeURIComponent(submissionId)}/download`)}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error(`Document download failed with status ${response.status}.`);
+  return response.blob();
+}
+
 async function publicRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...options,
-    headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
+    headers: { Accept: "application/json", ...(!isFormData && options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
     credentials: "include",
   });
   if (!response.ok) {
@@ -159,6 +194,16 @@ export function getAuditGuestSession() {
 
 export function acknowledgeGuestFinding(findingId: string) {
   return publicRequest<{ finding_id: string; acknowledged_at: string }>(`/quality/audit-access/findings/${encodeURIComponent(findingId)}/acknowledge`, { method: "POST" });
+}
+
+export function submitAuditGuestDocument(requestId: string, file: File, responseComment?: string) {
+  const form = new FormData();
+  form.append("file", file);
+  if (responseComment?.trim()) form.append("response_comment", responseComment.trim());
+  return publicRequest<AuditDocumentSubmission>(`/quality/audit-access/document-requests/${encodeURIComponent(requestId)}/submit`, {
+    method: "POST",
+    body: form,
+  });
 }
 
 export function endAuditGuestSession() {
