@@ -17,6 +17,7 @@ TABLES = (
     "quality_audit_document_submissions",
     "quality_audit_report_artifacts",
     "quality_audit_fieldwork_mutation_receipts",
+    "quality_audit_fieldwork_participant_contributions",
 )
 APPEND_ONLY_TABLES = (
     "quality_audit_access_events",
@@ -24,6 +25,7 @@ APPEND_ONLY_TABLES = (
     "quality_audit_document_submissions",
     "quality_audit_report_artifacts",
     "quality_audit_fieldwork_mutation_receipts",
+    "quality_audit_fieldwork_participant_contributions",
 )
 
 
@@ -64,6 +66,23 @@ def _assert_rls(connection: sa.Connection, table_name: str) -> None:
     assert "app.tenant_id" in policy_text, (table_name, policy_text)
 
 
+def _columns(connection: sa.Connection, table_name: str) -> set[str]:
+    return {
+        str(row[0])
+        for row in connection.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        ).all()
+    }
+
+
 def main() -> None:
     engine = create_engine(os.environ["DATABASE_URL"])
     _run_alembic("upgrade", "heads")
@@ -88,20 +107,12 @@ def main() -> None:
         }
         assert existing == set(TABLES), existing
 
-        columns = {
-            str(row[0])
-            for row in connection.execute(
-                text(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'quality_audit_checklist_execution_governance'
-                    """
-                )
-            ).all()
-        }
-        assert "entity_version" in columns, columns
+        governance_columns = _columns(connection, "quality_audit_checklist_execution_governance")
+        assert {"entity_version", "updated_by_participant_id"} <= governance_columns, governance_columns
+        event_columns = _columns(connection, "quality_audit_checklist_execution_events")
+        assert "actor_participant_id" in event_columns, event_columns
+        receipt_columns = _columns(connection, "quality_audit_fieldwork_mutation_receipts")
+        assert {"client_timestamp", "actor_participant_id", "actor_user_id"} <= receipt_columns, receipt_columns
 
         for table_name in TABLES:
             _assert_rls(connection, table_name)
@@ -123,7 +134,7 @@ def main() -> None:
         for table_name in APPEND_ONLY_TABLES:
             assert any(table == table_name and "append_only" in trigger for table, trigger in triggers), (table_name, triggers)
 
-    print("Live audit migrations, RLS, versioning and append-only history verified")
+    print("Live audit migrations, RLS, versioning, participant attribution and append-only history verified")
 
 
 if __name__ == "__main__":
