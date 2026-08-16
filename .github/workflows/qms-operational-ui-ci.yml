@@ -75,7 +75,7 @@ jobs:
 
       - name: Start mocked portal readiness
         run: |
-          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(404,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-operational-ui-readiness.log 2>&1 &
+          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(503,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; retry direct mocked backend"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-operational-ui-readiness.log 2>&1 &
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
               exit 0
