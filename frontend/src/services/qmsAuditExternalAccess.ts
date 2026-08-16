@@ -60,6 +60,28 @@ export type AuditDocumentSubmission = {
   created_at: string;
 };
 
+export type IssuedAuditReportStatus = {
+  available: boolean;
+  report: {
+    id: string;
+    revision_no: number;
+    filename: string | null;
+    content_type: string | null;
+    size_bytes: number;
+    sha256: string;
+    issued_at: string | null;
+    acknowledged_at: string | null;
+  } | null;
+  acknowledgement_statement: string;
+};
+
+export type IssuedAuditReportAcknowledgement = {
+  report_revision_id: string;
+  report_sha256: string;
+  acknowledged_at: string;
+  acknowledgement_statement: string;
+};
+
 export type AuditGuestReadModel = {
   participant: {
     display_name: string | null;
@@ -228,6 +250,26 @@ export function exchangeAuditGuestToken(token: string) {
 
 export function getAuditGuestSession() {
   return publicRequest<AuditGuestReadModel>("/quality/audit-access/session");
+}
+
+export function getIssuedAuditReportStatus() {
+  return publicRequest<IssuedAuditReportStatus>("/quality/audit-access/issued-report");
+}
+
+export async function downloadIssuedAuditReport(): Promise<Blob> {
+  const response = await fetch(`${getApiBaseUrl()}/quality/audit-access/issued-report/download`, {
+    headers: { Accept: "application/pdf,application/octet-stream" },
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(payload?.detail || `Issued audit report download failed with status ${response.status}.`);
+  }
+  return response.blob();
+}
+
+export function acknowledgeIssuedAuditReport() {
+  return publicRequest<IssuedAuditReportAcknowledgement>("/quality/audit-access/issued-report/acknowledge", { method: "POST" });
 }
 
 export function getExternalAuditorFieldwork() {
