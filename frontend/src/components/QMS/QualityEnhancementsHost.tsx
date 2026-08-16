@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 
+import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
@@ -225,6 +226,7 @@ const QualityEnhancementsHost: React.FC = () => {
 
       {route ? (
         <>
+          <AuditLifecycleRail amoCode={route.amoCode} auditKey={route.auditKey} />
           <WorkflowIntegrityGuard route={route} />
           <Suspense fallback={null}>
             <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
