@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from types import SimpleNamespace
 
-import pytest
-
-from amodb.apps.quality import audit_external_finding_draft_router as draft_router
+from amodb.apps.quality import audit_external_finding_promotion_router as promotion_router
 from amodb.apps.quality.audit_official_finding_service import create_official_finding_transaction
 from amodb.apps.quality.enums import FindingLevel, QMSFindingSeverity
 
@@ -28,7 +25,7 @@ def test_shared_service_accepts_same_governed_classification_vocabulary():
 
 
 def test_promotion_route_is_quality_owned_and_uses_shared_transaction_source():
-    source = inspect.getsource(draft_router.promote_external_finding_draft)
+    source = inspect.getsource(promotion_router.promote_external_finding_draft)
     assert 'assert_quality_permission(db, ctx, "qms.audit.manage")' in source
     assert "create_official_finding_transaction(" in source
     assert 'event_type="PROMOTED"' in source
@@ -38,7 +35,7 @@ def test_promotion_route_is_quality_owned_and_uses_shared_transaction_source():
 
 
 def test_promotion_route_never_writes_external_participant_into_employee_actor():
-    source = inspect.getsource(draft_router.promote_external_finding_draft)
+    source = inspect.getsource(promotion_router.promote_external_finding_draft)
     assert "actor_user_id=ctx.user_id" in source
     assert '"externalParticipantId": row.participant_id' in source
     assert "actor_user_id=row.participant_id" not in source
