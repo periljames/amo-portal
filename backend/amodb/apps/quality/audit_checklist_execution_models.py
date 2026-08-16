@@ -14,13 +14,7 @@ def _utcnow() -> datetime:
 
 
 class QualityAuditChecklistExecutionGovernance(Base):
-    """Governance metadata for the authoritative legacy checklist execution row.
-
-    The existing ``quality_audit_checklist_items`` row remains the execution record.
-    This one-to-one record adds the canonical MD response vocabulary, auditor notes,
-    structured evidence references and attributable change history without creating a
-    second checklist engine or rewriting historical ``NON_CONFORMING`` values.
-    """
+    """Governance metadata for the authoritative legacy checklist execution row."""
 
     __tablename__ = "quality_audit_checklist_execution_governance"
     __table_args__ = (
@@ -41,6 +35,7 @@ class QualityAuditChecklistExecutionGovernance(Base):
     evidence_references = Column(JSON, nullable=False, default=list)
     entity_version = Column(Integer, nullable=False, default=1, server_default="1")
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
@@ -71,6 +66,7 @@ class QualityAuditChecklistExecutionEvent(Base):
     before_snapshot = Column(JSON, nullable=True)
     after_snapshot = Column(JSON, nullable=False)
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     governance = relationship("QualityAuditChecklistExecutionGovernance", back_populates="events", lazy="joined")
@@ -85,6 +81,7 @@ class QualityAuditFieldworkMutationReceipt(Base):
         CheckConstraint("base_version >= 0", name="ck_quality_fieldwork_base_version"),
         CheckConstraint("committed_version >= 1", name="ck_quality_fieldwork_committed_version"),
         CheckConstraint("device_sequence >= 0", name="ck_quality_fieldwork_device_sequence"),
+        CheckConstraint("NOT (actor_user_id IS NOT NULL AND actor_participant_id IS NOT NULL)", name="ck_quality_fieldwork_single_actor"),
         Index("ix_quality_fieldwork_receipt_audit_item", "amo_id", "audit_id", "checklist_item_id", "created_at"),
         Index("ix_quality_fieldwork_receipt_device", "amo_id", "device_id", "device_sequence"),
     )
@@ -103,4 +100,5 @@ class QualityAuditFieldworkMutationReceipt(Base):
     payload_hash = Column(String(64), nullable=False)
     result_snapshot = Column(JSON, nullable=False)
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
