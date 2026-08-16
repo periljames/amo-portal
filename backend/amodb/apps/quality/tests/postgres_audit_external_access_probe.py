@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 
-TARGET_REVISION = "quality_260816_fieldwork_sync"
+TARGET_REVISION = "quality_260816_closing_assurance"
 TABLES = (
     "quality_external_identities",
     "quality_audit_participants",
