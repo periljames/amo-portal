@@ -1,20 +1,18 @@
 # QMS Live Audit Architecture
 
 **Branch:** `agent/qms-live-audit-operating-workspace`  
-**Implementation contract:** `deep-research-report.md` supplied for this work  
-**Status:** Incremental implementation; this document distinguishes implemented from pending scope.
+**Implementation contract:** uploaded QMS Frontend Deep Research and Fullstack Execution Specification  
+**Architecture rule:** orchestrate the governed QMS domain; do not create parallel audit, finding, report, CAR/CAPA or closeout engines.
 
-## Objective
+## Occurrence model
 
-Preserve the governed Quality domain introduced by merged PRs #488 and #499 while compressing the operator journey around one audit occurrence:
+One audit occurrence is presented through:
 
 `SETUP → PREPARE → LIVE → CLOSING → FOLLOW-UP → ARCHIVE`
 
-The occurrence experience is an orchestration layer. It does not replace the authoritative Audit Programme, Planner, preparation revision, notice, checklist, finding, report revision, CAR/CAPA, effectiveness, closeout or archive engines.
+The rail is a projection of authoritative backend state. Visiting a route never changes lifecycle completion.
 
-## Current route model
-
-The existing audit route remains the compatibility owner and accepts occurrence-stage tails:
+Internal occurrence routes remain additive under the existing Quality route model:
 
 ```text
 /maintenance/:amoCode/quality/audits/:auditRef/setup
@@ -25,39 +23,36 @@ The existing audit route remains the compatibility owner and accepts occurrence-
 /maintenance/:amoCode/quality/audits/:auditRef/archive
 ```
 
-Public purpose-bound access:
+Purpose-bound external access uses:
 
 ```text
-/qms/audit-access/:token     one-time invitation exchange
-/qms/audit-access            HTTP-only guest session workspace
+/qms/audit-access/:token     one-time signed invitation exchange
+/qms/audit-access            HTTP-only scoped guest session
+/qms/car-access/:token       governed CAR external response path
 ```
 
-The six-stage lifecycle rail is derived from the existing authoritative seven-stage workflow facts. Visiting a page never changes lifecycle completion.
+Vite development and production-preview middleware explicitly preserve these signed HTML deep links as SPA routes while JSON/API requests remain proxied.
 
-## Implemented frontend workspaces
+## Prepare architecture
 
-### PREPARE
-
-`AuditPrepareWorkspace.tsx`
-
-Uses existing governed data for:
+`AuditPrepareWorkspace.tsx` composes existing governed preparation data with:
 
 - scope and criteria;
 - preparation revision state;
 - checklist bindings;
-- prior audit history and CAR exposure;
-- existing `QualityAuditDocumentRequest` records;
+- prior audit/CAR exposure;
+- document requests and controlled guest submissions;
 - Quality acceptance/return decisions;
-- first-class external auditee/external-auditor participants;
-- bounded participant permissions, expiry and revocation.
+- first-class auditee/external-auditor participants;
+- bounded permissions, expiry and revocation.
 
-`AuditDocumentSubmissionReviewPanel.tsx` exposes controlled guest submissions to authorised Quality users without exposing private storage locators.
+External participants are not fake tenant employees. Their identity/grant/session data is tenant-owned and protected by PostgreSQL RLS/FORCE RLS.
 
-### LIVE
+EMAIL_LINK is the implemented assurance mode. MFA/PASSKEY labels fail closed until a real ceremony exists.
 
-`LiveAuditWorkspace.tsx`
+## Live architecture
 
-Uses the existing governed checklist execution engine. The response vocabulary remains:
+`LiveAuditWorkspace.tsx` reuses the canonical checklist execution vocabulary:
 
 ```text
 COMPLIANT
@@ -67,119 +62,105 @@ NOT_APPLICABLE
 NOT_VERIFIED
 ```
 
-The page keeps checklist response, notes, evidence references and inline finding creation in one fieldwork surface.
+Internal fieldwork mutations include client mutation ID, device ID/sequence, client timestamp and base version. The server records idempotent mutation receipts and rejects stale versions instead of applying last-write-wins.
 
-`LiveFindingReleasePanel.tsx` adds an explicit disclosure boundary. A finding is not externally visible merely because it exists. Append-only `RELEASED` / `WITHDRAWN` events control auditee visibility.
+### Realtime
 
-### CLOSING
+Committed Quality audit events are published through the existing realtime broker only after the authoritative transaction commits. `qmsAuditRealtime.ts` handles occurrence-scoped connection/replay. The global Quality freshness coordinator starts that stream only on audit-occurrence routes, preventing Live Audit traffic from coupling People, Assurance, Intelligence or register workspaces.
 
-`AuditClosingWorkspace.tsx`
+### Offline
 
-Uses the new report-composition service to build a deterministic PDF from a frozen canonical snapshot. Generation is blocked until:
+Internal employee Live Audit work reuses the encrypted portal mutation outbox. Online recovery replays governed QMS mutations idempotently and surfaces conflicts/failures rather than silently discarding them.
 
-- fieldwork has an `actual_end`; and
-- no governed checklist execution row remains `NOT_VERIFIED`.
+External guest-cookie sessions do **not** reuse this employee bearer-token outbox. A separate guest-specific encrypted replay contract is required before external-auditor offline work can be enabled safely.
 
-Generated artifacts record:
+### Findings and disclosure
 
-- source snapshot SHA-256;
-- PDF SHA-256;
-- template version;
-- renderer version;
-- actor/time;
-- private storage reference.
+Official finding creation remains atomic with the canonical finding/CAR workflow.
 
-Generation does **not** equal formal issue. Existing report revision governance remains authoritative for review, approval, issue and supersession.
+External auditors have a separate attributable **draft** lifecycle. Drafts can be submitted, returned/revised, withdrawn and promoted/reviewed by Quality into the canonical official finding workflow. They are not official findings until that governed promotion occurs.
 
-## External participant model
+`LiveFindingReleasePanel.tsx` provides an explicit release boundary. The auditee projection includes only released findings/evidence; private auditor notes and draft findings are not serialized to the external client.
 
-New tenant-owned models:
+## External document exchange
 
-```text
-quality_external_identities
-quality_audit_participants
-quality_audit_access_grants
-quality_audit_access_events
-quality_audit_finding_release_events
-quality_audit_document_submissions
-```
+Guest submissions are append-only evidence records with safe filename, content type, byte size, SHA-256, participant identity, response comment, private storage locator and creation time.
 
-External participants are not represented as fake tenant employees.
+The external read model is server-filtered and audit-bound. It exposes only granted audit identity/scope/criteria, optional progress, document requests, released findings/evidence, acknowledgement state and issued-report availability.
 
-Invitation tokens are:
+## Closing architecture
 
-- high entropy;
-- audit/grant/tenant bound;
-- signed before tenant context is trusted;
-- expiring;
-- revocable;
-- stored as SHA-256 hashes only.
+`AuditClosingWorkspace.tsx` composes a deterministic report from canonical audit state. Generation requires governed fieldwork completion and records frozen source/artifact hashes, template/renderer versions, actor/time and private storage reference.
 
-The raw token is exchanged once for an HTTP-only strict-SameSite guest session and then removed from the browser URL.
+Generated composition is adopted into the existing report revision lifecycle rather than creating a competing issue engine.
 
-## External released-data projection
+### Approval and signature
 
-The public browser never receives the internal audit object. The backend constructs an explicit projection containing only granted fields such as:
+The existing report approval/issue lifecycle remains authoritative. Closing assurance adds electronic signature evidence over the exact issued report using:
 
-- audit identity/scope/criteria;
-- optional progress;
-- document requests;
-- explicitly released findings/evidence;
-- finding acknowledgement state;
-- issued-report availability.
+- `PASSWORD_REAUTH`;
+- signer identity;
+- report revision ID and SHA-256;
+- reason;
+- nonce and timestamp;
+- HMAC signature digest;
+- configured failed-attempt/rate-limit policy.
 
-Private auditor notes, unreleased findings, internal assurance intelligence, competence/privilege data and unrelated records are not serialized to the external client.
+This is **not** WebAuthn/passkey signing and must not be represented as such.
 
-## Document exchange
+### Output policy
 
-Guest submissions are stored as append-only evidence records with:
-
-- safe filename;
-- content type;
-- byte size;
-- SHA-256;
-- participant;
-- response comment;
-- private storage locator;
-- creation time.
-
-The legacy request `file_ref` receives an opaque `audit-submission:<id>` reference rather than the filesystem path.
-
-## Database controls
-
-New tenant-owned tables use PostgreSQL RLS and `FORCE ROW LEVEL SECURITY` following current Quality patterns. Append-only history applies to external access events, finding release events, document submissions and generated report artifacts.
-
-## Implemented migrations
+Versioned policy controls whether a closing occurrence may generate:
 
 ```text
-quality_260816_external_access
-quality_260816_guest_documents
-quality_260816_report_composition
+NONE
+REPORT_ONLY
+APPROVAL_LETTER
+CERTIFICATE
+ATTESTATION
 ```
 
-The exact Alembic head topology remains subject to CI verification on the current PR head.
+A generated assurance artifact retains report/signature/policy integrity lineage and its own checksum.
+
+### Auditee issued-report receipt
+
+The auditee workspace exposes only the latest formally `ISSUED` report. Download verifies the controlled path and SHA-256 before release.
+
+Receipt acknowledgement is idempotent and appended to the existing external-access event ledger with participant identity, exact report revision ID/hash and timestamp. The acknowledgement records receipt without waiving response, corrective-action, review or appeal rights.
+
+## Follow-up architecture
+
+CAR/CAPA remains the governed #499 control loop: sharing, RCA/CAP, Quality accept/return/reject, reminders, escalation, risk-controlled extension, effectiveness and close authority all remain there.
+
+Audit execution closure remains separate from assurance follow-up completion.
+
+## Archive architecture
+
+Archive governance extends the existing archive/evidence domain with:
+
+- versioned retention policy revisions;
+- immutable manifest inventory carrying authoritative record IDs/revisions and content hashes;
+- generated package filename/size/SHA-256;
+- append-only legal-hold placement/release;
+- disposition request/approval/rejection/execution history;
+- actor/reason and package/inventory integrity evidence.
+
+Archive is the final occurrence workspace, not a deletion shortcut.
+
+## Database and security controls
+
+New external-access, fieldwork-sync, closing-assurance and archive records are tenant-bound. PostgreSQL all-head validation exercises RLS/FORCE RLS, append-only/immutability constraints, attribution and package integrity.
+
+The historical Workforce `applicability_json` migration includes a schema-aware guard because clean multi-head upgrades can legitimately encounter that column from an earlier head. The guard is required for `alembic upgrade heads` compatibility and does not alter the QMS domain model.
 
 ## Deliberately not duplicated
 
-The branch does not create new engines for:
+This branch does not create replacement engines for programme/risk planning, scheduling/conflicts, notice governance, checklist template governance, canonical checklist semantics, official finding/CAR association, CAR/CAPA milestones/escalation/effectiveness, formal report revision transitions, or execution-close/follow-up separation.
 
-- audit programme/risk planning;
-- planner scheduling/conflicts;
-- notice governance;
-- checklist template governance;
-- checklist execution semantics;
-- finding/CAR association;
-- CAR/CAPA milestones/deadline/escalation;
-- effectiveness;
-- formal report revision transitions;
-- execution-close/follow-up separation.
+## Remaining hardening, not missing core architecture
 
-## Current incomplete architecture slices
-
-1. QMS-specific use of the existing portal realtime publisher is not yet wired.
-2. Controlled offline mutation idempotency/conflict semantics are not yet implemented.
-3. Generated report artifact adoption into the existing governed report revision lifecycle is not yet implemented.
-4. Electronic signature/passkey evidence is not yet ported from historical PR #280.
-5. Audit-type artifact policy (`NONE`, `REPORT_ONLY`, `APPROVAL_LETTER`, `CERTIFICATE`, `ATTESTATION`) is not yet implemented.
-6. Retention/legal-hold/disposition policy is not yet implemented.
-7. Follow-up/archive occurrence pages still rely on existing specialist surfaces rather than final compressed workspaces.
+1. Guest external-auditor offline replay needs its own session/CSRF-safe encrypted contract.
+2. A dedicated simultaneous two-internal-browser E2E would strengthen realtime proof.
+3. A dedicated evidence-link open/download E2E would strengthen evidence proof.
+4. A dedicated adversarial direct-object/IDOR suite would strengthen already-proven tenant/RLS boundaries.
+5. WebAuthn/passkey signing remains a future enhancement; current signing is explicitly `PASSWORD_REAUTH`.
