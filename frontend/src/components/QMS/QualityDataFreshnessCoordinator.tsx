@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest, qmsPath } from "../../services/apiClient";
+import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
 import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
 
@@ -67,6 +68,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   const lastRefreshAt = useRef(0);
   const pendingTimers = useRef<number[]>([]);
   const qualityActive = isQualityPath(location.pathname);
+  const auditSessionStage = auditSessionStageFromPath(location.pathname);
+  const auditOccurrenceActive = auditSessionStage !== null;
+  const liveAuditActive = auditSessionStage === "live";
 
   useEffect(() => {
     return () => {
@@ -101,7 +105,10 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   }, [location.pathname, location.search, qualityActive]);
 
   useEffect(() => {
-    if (!qualityActive) return;
+    // Realtime audit traffic is occurrence-scoped. Opening the People,
+    // Assurance, Intelligence, programme or register workspaces must not create
+    // an unrelated live-audit subscription or invalidate their active queries.
+    if (!qualityActive || !auditOccurrenceActive) return;
     const stop = startQmsAuditRealtimeStream({
       onState: (state) => {
         document.documentElement.dataset.qmsRealtimeState = state;
@@ -123,7 +130,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       stop();
       delete document.documentElement.dataset.qmsRealtimeState;
     };
-  }, [qualityActive, queryClient]);
+  }, [auditOccurrenceActive, qualityActive, queryClient]);
 
   useEffect(() => {
     if (!qualityActive) return;
@@ -150,6 +157,14 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     };
 
     const replayAndRefresh = async () => {
+      // The encrypted mutation outbox belongs to day-of-audit fieldwork. Do not
+      // replay it merely because another Quality workspace is mounted: that can
+      // refetch otherwise stable portfolio/person data and creates cross-workspace
+      // coupling that the live-audit specification explicitly avoids.
+      if (!liveAuditActive) {
+        refresh(true);
+        return;
+      }
       try {
         const summary = await replayOfflineMutations();
         refresh(true, summary.conflict > 0 || summary.failed > 0);
@@ -213,7 +228,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("click", onClick, true);
     };
-  }, [location.pathname, location.search, qualityActive, queryClient]);
+  }, [liveAuditActive, location.pathname, location.search, qualityActive, queryClient]);
 
   return null;
 };
