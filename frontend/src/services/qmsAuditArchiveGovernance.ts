@@ -1,4 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { getToken } from "./auth";
+import { getApiBaseUrl } from "./config";
 
 export type AuditRetentionStart = "EXECUTION_CLOSED" | "FOLLOW_UP_COMPLETE";
 export type AuditDispositionMode = "PRESERVE_METADATA_DELETE_PACKAGE" | "TRANSFER_PACKAGE" | "NO_DISPOSITION";
@@ -100,10 +102,7 @@ export function getAuditArchiveGovernance(amoCode: string, auditId: string, sign
 }
 
 export function createAuditRetentionPolicyRevision(amoCode: string, payload: AuditRetentionPolicyCreate) {
-  return apiRequest<AuditRetentionPolicy>(
-    qmsPath(amoCode, "/audit-retention-policy/revisions"),
-    json("POST", payload),
-  );
+  return apiRequest<AuditRetentionPolicy>(qmsPath(amoCode, "/audit-retention-policy/revisions"), json("POST", payload));
 }
 
 export function generateAuditArchiveManifest(amoCode: string, auditId: string) {
@@ -137,13 +136,7 @@ export function releaseAuditLegalHold(
   );
 }
 
-export function reviewAuditDisposition(
-  amoCode: string,
-  auditId: string,
-  manifestId: string,
-  approved: boolean,
-  reason: string,
-) {
+export function reviewAuditDisposition(amoCode: string, auditId: string, manifestId: string, approved: boolean, reason: string) {
   return apiRequest<{ event_type: "APPROVED" | "REJECTED"; inventory_sha256: string; created_at: string }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/archive-manifests/${encodeURIComponent(manifestId)}/disposition-review`),
     json("POST", { approved, reason }),
@@ -167,8 +160,12 @@ export function executeAuditDisposition(amoCode: string, auditId: string, manife
 }
 
 export async function downloadAuditArchivePackage(amoCode: string, auditId: string, manifestId: string): Promise<Blob> {
+  const token = getToken();
   const path = qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/archive-manifests/${encodeURIComponent(manifestId)}/download`);
-  const response = await fetch(path, { credentials: "include" });
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: "include",
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: unknown } | null;
     throw new Error(typeof body?.detail === "string" ? body.detail : `Archive download failed (${response.status}).`);
