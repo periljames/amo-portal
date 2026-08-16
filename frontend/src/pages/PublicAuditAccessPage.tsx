@@ -1,15 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileClock, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileCheck2, FileClock, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import ExternalAuditorFieldworkWorkspace from "../features/qms/auditSession/ExternalAuditorFieldworkWorkspace";
 import GuestDocumentSubmit from "../features/qms/auditSession/GuestDocumentSubmit";
 import {
   acknowledgeGuestFinding,
+  acknowledgeIssuedAuditReport,
+  downloadIssuedAuditReport,
   endAuditGuestSession,
   exchangeAuditGuestToken,
   getAuditGuestSession,
+  getIssuedAuditReportStatus,
   type AuditGuestReadModel,
+  type IssuedAuditReportStatus,
 } from "../services/qmsAuditExternalAccess";
 import "../styles/qms-public-audit-access.css";
 
@@ -24,12 +28,19 @@ function dateTime(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
+function shortHash(value?: string | null): string {
+  if (!value) return "—";
+  return value.length > 20 ? `${value.slice(0, 12)}…${value.slice(-8)}` : value;
+}
+
 const PublicAuditAccessPage: React.FC = () => {
   const location = useLocation();
   const inviteToken = useMemo(() => tokenFromPath(location.pathname), [location.pathname]);
   const [data, setData] = useState<AuditGuestReadModel | null>(null);
+  const [issuedReport, setIssuedReport] = useState<IssuedAuditReportStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState<"download" | "acknowledge" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async (token: string | null = null) => {
@@ -38,11 +49,22 @@ const PublicAuditAccessPage: React.FC = () => {
     try {
       const next = token ? await exchangeAuditGuestToken(token) : await getAuditGuestSession();
       setData(next);
+      if (next.participant.participant_type === "AUDITEE_GUEST" && next.issued_report_available) {
+        try {
+          setIssuedReport(await getIssuedAuditReportStatus());
+        } catch (cause) {
+          setIssuedReport(null);
+          setError(cause instanceof Error ? cause.message : "Issued report status could not be loaded.");
+        }
+      } else {
+        setIssuedReport(null);
+      }
       if (token) {
         window.history.replaceState(window.history.state, document.title, "/qms/audit-access");
       }
     } catch (cause) {
       setData(null);
+      setIssuedReport(null);
       setError(cause instanceof Error ? cause.message : "Audit access is unavailable.");
     } finally {
       setLoading(false);
@@ -69,11 +91,46 @@ const PublicAuditAccessPage: React.FC = () => {
     }
   };
 
+  const downloadReport = async () => {
+    if (!issuedReport?.report) return;
+    setReportBusy("download");
+    setError(null);
+    try {
+      const blob = await downloadIssuedAuditReport();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = issuedReport.report.filename || `issued-audit-report-r${issuedReport.report.revision_no}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Issued report download failed.");
+    } finally {
+      setReportBusy(null);
+    }
+  };
+
+  const acknowledgeReport = async () => {
+    setReportBusy("acknowledge");
+    setError(null);
+    try {
+      await acknowledgeIssuedAuditReport();
+      setIssuedReport(await getIssuedAuditReportStatus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Issued report acknowledgement failed.");
+    } finally {
+      setReportBusy(null);
+    }
+  };
+
   const signOut = async () => {
     try {
       await endAuditGuestSession();
     } finally {
       setData(null);
+      setIssuedReport(null);
       setError("This audit access session has ended. Reopen the original invitation link if access is still valid.");
     }
   };
@@ -174,13 +231,46 @@ const PublicAuditAccessPage: React.FC = () => {
                 </div>
               )}
             </section>
+
+            <section className="qms-public-audit__card qms-public-audit__report-status" aria-label="Issued audit report">
+              <header><FileCheck2 size={19} /><div><strong>Issued audit report</strong><small>Only the formally issued immutable revision is exposed here.</small></div></header>
+              {!data.issued_report_available || !issuedReport?.available || !issuedReport.report ? (
+                <p className="qms-public-audit__empty">The governed report has not been issued yet.</p>
+              ) : (
+                <div className="qms-public-audit__issued-report">
+                  <dl>
+                    <div><dt>File</dt><dd>{issuedReport.report.filename || `Report revision ${issuedReport.report.revision_no}`}</dd></div>
+                    <div><dt>Revision</dt><dd>{issuedReport.report.revision_no}</dd></div>
+                    <div><dt>Issued</dt><dd>{dateTime(issuedReport.report.issued_at)}</dd></div>
+                    <div><dt>SHA-256</dt><dd title={issuedReport.report.sha256}>{shortHash(issuedReport.report.sha256)}</dd></div>
+                  </dl>
+                  <div className="qms-public-audit__report-actions">
+                    <button type="button" disabled={reportBusy !== null} onClick={() => void downloadReport()}>
+                      <Download size={15} /> {reportBusy === "download" ? "Preparing…" : "Download issued report"}
+                    </button>
+                    {issuedReport.report.acknowledged_at ? (
+                      <span><CheckCircle2 size={15} /> Receipt acknowledged {dateTime(issuedReport.report.acknowledged_at)}</span>
+                    ) : canAcknowledge ? (
+                      <div className="qms-public-audit__report-acknowledgement">
+                        <p>{issuedReport.acknowledgement_statement}</p>
+                        <button type="button" disabled={reportBusy !== null} onClick={() => void acknowledgeReport()}>
+                          {reportBusy === "acknowledge" ? "Recording…" : "Acknowledge issued report"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </section>
           </>
         )}
 
-        <section className="qms-public-audit__card qms-public-audit__report-status">
-          <strong>Issued report</strong>
-          <span>{data.issued_report_available ? "An issued report exists for this audit." : "The governed report has not been issued yet."}</span>
-        </section>
+        {isExternalAuditor ? (
+          <section className="qms-public-audit__card qms-public-audit__report-status">
+            <strong>Issued report</strong>
+            <span>{data.issued_report_available ? "An issued report exists for this audit." : "The governed report has not been issued yet."}</span>
+          </section>
+        ) : null}
       </div>
     </main>
   );
