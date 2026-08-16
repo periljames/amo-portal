@@ -273,7 +273,7 @@ test("external auditor executes assigned checklist and submits governed finding 
   await page.getByLabel("External auditor fieldwork").getByRole("button", { name: "Compliant" }).click();
   await expect.poll(() => mutationCount).toBe(1);
   expect(csrfHeader).toBe("csrf-bound-to-external-session");
-  await expect(page.getByText(/COMPLIANT · v2/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "CHK-4.2.3 COMPLIANT · v2" })).toBeVisible();
 
   await page.getByLabel("External finding drafts").getByLabel("Finding statement").fill("Obsolete controlled procedure revision was available at the sampled point of use.");
   await page.getByLabel("External finding drafts").getByLabel("Objective evidence").fill("Sampled workstation displayed superseded revision 3.");
