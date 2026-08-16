@@ -28,6 +28,9 @@ const ExternalFindingDraftReviewPanel = lazy(
 const AuditClosingWorkspace = lazy(
   () => import("../../features/qms/auditSession/AuditClosingWorkspace"),
 );
+const AuditArchiveWorkspace = lazy(
+  () => import("../../features/qms/auditSession/AuditArchiveWorkspace"),
+);
 const QualityChecklistPdfFormEditorHost = lazy(
   () => import("./QualityChecklistPdfFormEditorHost"),
 );
@@ -277,6 +280,11 @@ const QualityEnhancementsHost: React.FC = () => {
           {auditSessionStage === "closing" ? (
             <Suspense fallback={null}>
               <AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "archive" ? (
+            <Suspense fallback={null}>
+              <AuditArchiveWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
         </>
