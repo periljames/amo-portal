@@ -1,0 +1,139 @@
+.qms-audit-session-rail {
+  position: sticky;
+  top: 0;
+  z-index: 45;
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border, #d8dee8);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface, #fff) 94%, transparent);
+  box-shadow: 0 6px 24px rgb(15 23 42 / 8%);
+  backdrop-filter: blur(12px);
+}
+
+.qms-audit-session-rail__meta,
+.qms-audit-session-rail__authority {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.qms-audit-session-rail__meta > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.qms-audit-session-rail__meta span,
+.qms-audit-session-rail__authority {
+  color: var(--text-muted, #64748b);
+  font-size: 0.75rem;
+}
+
+.qms-audit-session-rail__meta strong {
+  overflow: hidden;
+  color: var(--text, #0f172a);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-audit-session-rail__degraded {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--danger, #b91c1c) !important;
+}
+
+.qms-audit-session-rail__steps {
+  display: grid;
+  grid-template-columns: auto minmax(18px, 1fr) auto minmax(18px, 1fr) auto minmax(18px, 1fr) auto minmax(18px, 1fr) auto minmax(18px, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.qms-audit-session-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: max-content;
+  padding: 0.4rem 0.55rem;
+  border-radius: 999px;
+  color: var(--text-muted, #64748b);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.qms-audit-session-step:hover,
+.qms-audit-session-step:focus-visible {
+  background: var(--surface-subtle, #f1f5f9);
+  color: var(--text, #0f172a);
+}
+
+.qms-audit-session-step:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.qms-audit-session-step.is-selected {
+  background: var(--surface-subtle, #eef2ff);
+  color: var(--accent, #3730a3);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.qms-audit-session-step.is-complete .qms-audit-session-step__icon {
+  background: var(--success-surface, #dcfce7);
+  color: var(--success, #15803d);
+}
+
+.qms-audit-session-step__icon {
+  display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-subtle, #f1f5f9);
+}
+
+.qms-audit-session-step__line {
+  height: 1px;
+  min-width: 18px;
+  background: var(--border, #d8dee8);
+}
+
+.qms-audit-session-rail__authority {
+  justify-content: flex-start;
+  min-height: 1.2rem;
+}
+
+@media (max-width: 900px) {
+  .qms-audit-session-rail {
+    margin: 0.5rem;
+    padding: 0.65rem;
+  }
+
+  .qms-audit-session-rail__meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .qms-audit-session-rail__authority {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qms-audit-session-step {
+    transition: none;
+  }
+}
