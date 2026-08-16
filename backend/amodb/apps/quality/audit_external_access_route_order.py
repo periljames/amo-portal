@@ -8,6 +8,8 @@ from . import audit_external_access_router
 from . import audit_external_fieldwork_router as _audit_external_fieldwork_router  # noqa: F401
 from . import audit_external_session_guard_router as _audit_external_session_guard_router  # noqa: F401
 from . import audit_external_participant_guard_router
+from . import audit_external_finding_draft_router
+from . import audit_external_finding_promotion_router
 from . import audit_finding_release_status_router
 from . import audit_guest_documents_router
 from .canonical_router import legacy_router, router
@@ -17,6 +19,7 @@ def _is_external_access_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
     return (
         "/external-participants" in path
+        or "/external-finding-drafts" in path
         or path.endswith("/finding-releases")
         or "/document-requests/" in path and "/submissions" in path
         or ("/findings/" in path and path.endswith("/release"))
@@ -49,6 +52,10 @@ def _register(api_router: APIRouter) -> None:
         api_router.include_router(audit_external_participant_guard_router.router)
     if not _has_route(api_router, path_fragment="/external-participants", method="GET"):
         api_router.include_router(audit_external_access_router.router)
+    if not _has_route(api_router, path_fragment="/external-finding-drafts", method="GET"):
+        api_router.include_router(audit_external_finding_draft_router.router)
+    if not _has_route(api_router, path_fragment="/external-finding-drafts", name="promote_external_finding_draft"):
+        api_router.include_router(audit_external_finding_promotion_router.router)
     if not any(str(getattr(item, "path", "")).endswith("/finding-releases") for item in api_router.routes):
         api_router.include_router(audit_finding_release_status_router.router)
     if not any("/document-requests/" in str(getattr(item, "path", "")) and "/submissions" in str(getattr(item, "path", "")) for item in api_router.routes):
