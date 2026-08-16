@@ -13,6 +13,9 @@ import "../../styles/qms-text-scale-override.css";
 const AuditPrepareWorkspace = lazy(
   () => import("../../features/qms/auditSession/AuditPrepareWorkspace"),
 );
+const AuditDocumentSubmissionReviewPanel = lazy(
+  () => import("../../features/qms/auditSession/AuditDocumentSubmissionReviewPanel"),
+);
 const LiveAuditWorkspace = lazy(
   () => import("../../features/qms/auditSession/LiveAuditWorkspace"),
 );
@@ -255,6 +258,7 @@ const QualityEnhancementsHost: React.FC = () => {
           {auditSessionStage === "prepare" ? (
             <Suspense fallback={null}>
               <AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "live" ? (
