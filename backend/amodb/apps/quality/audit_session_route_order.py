@@ -49,3 +49,8 @@ from . import audit_external_access_route_order as _audit_external_access_route_
 # module-path handler.
 from . import audit_report_composition_route_order as _audit_report_composition_route_order  # noqa: F401,E402
 from . import audit_closing_assurance_route_order as _audit_closing_assurance_route_order  # noqa: F401,E402
+
+# Archive is a governed continuation of the same occurrence after assurance
+# follow-up. Retention, hold and disposition routes therefore share the same
+# canonical occurrence chain and remain ahead of the generic catch-all.
+from . import audit_archive_governance_route_order as _audit_archive_governance_route_order  # noqa: F401,E402
