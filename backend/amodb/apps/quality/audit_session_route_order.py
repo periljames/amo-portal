@@ -37,3 +37,8 @@ def _promote(api_router: APIRouter) -> None:
 for api_router in (router, legacy_router):
     _register(api_router)
     _promote(api_router)
+
+# External participants and auditee released-data access are additive to the
+# session projection. Loading here guarantees their ORM metadata and canonical
+# routes exist without changing the historical central Quality bootstrap order.
+from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
