@@ -154,17 +154,14 @@ def get_external_auditor_fieldwork(
         audit_id=grant.audit_id,
         participant_id=participant.id,
     )
+    can_draft_findings = "audit:finding_draft" in scope
     return {
         "audit_id": str(grant.audit_id),
         "participant_id": participant.id,
         "csrf_token": _csrf_for_session(amo_qms_audit_guest),
         "can_execute_checklist": "audit:checklist_execute" in scope,
-        "can_draft_findings": False,
-        "finding_draft_blocker": (
-            "The grant includes audit:finding_draft, but the current governed finding model has no DRAFT→QUALITY_REVIEW→PROMOTED state. "
-            "Formal finding creation remains disabled until that state is implemented."
-            if "audit:finding_draft" in scope else None
-        ),
+        "can_draft_findings": can_draft_findings,
+        "finding_draft_blocker": None if can_draft_findings else "This external audit assignment does not permit finding drafts.",
         "items": [
             _external_item_dict(item, by_item.get(item.id), contributions.get(item.id))
             for item in items
@@ -191,7 +188,7 @@ def mutate_external_auditor_checklist(
             status_code=409,
             detail={
                 "code": "EXTERNAL_FINDING_DRAFT_REQUIRED",
-                "message": "External auditors must use the governed finding-draft workflow for non-compliance or observations. That draft/promote state is not enabled yet.",
+                "message": "External auditors must use the governed finding-draft workflow for non-compliance or observations; formal promotion remains a Quality-owned action.",
             },
         )
 
