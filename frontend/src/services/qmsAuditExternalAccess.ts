@@ -4,6 +4,7 @@ import { getApiBaseUrl } from "./config";
 
 export type ExternalParticipantType = "EXTERNAL_AUDITOR" | "AUDITEE_GUEST";
 export type ExternalAuditAssuranceLevel = "EMAIL_LINK" | "MFA" | "PASSKEY";
+export type ExternalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
 
 export type ExternalAuditParticipant = {
   id: string;
@@ -104,6 +105,38 @@ export type AuditGuestReadModel = {
   issued_report_available: boolean;
 };
 
+export type ExternalAuditorFieldworkItem = {
+  checklist_item_id: string;
+  section: string | null;
+  checklist_ref: string | null;
+  requirement_ref: string | null;
+  prompt: string;
+  canonical_response_status: ExternalChecklistResponse;
+  entity_version: number;
+  finding_id: string | null;
+  my_auditor_notes: string | null;
+  my_evidence_references: Array<Record<string, unknown> | string>;
+  my_last_contribution_at: string | null;
+  updated_at: string | null;
+};
+
+export type ExternalAuditorFieldworkModel = {
+  audit_id: string;
+  participant_id: string;
+  csrf_token: string;
+  can_execute_checklist: boolean;
+  can_draft_findings: boolean;
+  finding_draft_blocker: string | null;
+  items: ExternalAuditorFieldworkItem[];
+};
+
+export type ExternalAuditorMutationResult = {
+  client_mutation_id: string;
+  committed_version: number;
+  replayed: boolean;
+  row: ExternalAuditorFieldworkItem;
+};
+
 export function listExternalAuditParticipants(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: ExternalAuditParticipant[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/external-participants`), {
     timeoutMs: 15_000,
@@ -175,7 +208,12 @@ async function publicRequest<T>(path: string, options: RequestInit = {}): Promis
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw new Error(typeof payload?.detail === "string" ? payload.detail : `Audit access request failed with status ${response.status}.`);
+    const detail = payload?.detail;
+    if (detail && typeof detail === "object") {
+      const objectDetail = detail as Record<string, unknown>;
+      throw new Error(typeof objectDetail.message === "string" ? objectDetail.message : `Audit access request failed with status ${response.status}.`);
+    }
+    throw new Error(typeof detail === "string" ? detail : `Audit access request failed with status ${response.status}.`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -190,6 +228,52 @@ export function exchangeAuditGuestToken(token: string) {
 
 export function getAuditGuestSession() {
   return publicRequest<AuditGuestReadModel>("/quality/audit-access/session");
+}
+
+export function getExternalAuditorFieldwork() {
+  return publicRequest<ExternalAuditorFieldworkModel>("/quality/audit-access/fieldwork");
+}
+
+export function mutateExternalAuditorChecklist(
+  model: Pick<ExternalAuditorFieldworkModel, "csrf_token">,
+  item: ExternalAuditorFieldworkItem,
+  payload: {
+    canonical_response_status: ExternalChecklistResponse;
+    auditor_notes?: string | null;
+    evidence_references?: Array<Record<string, unknown> | string>;
+    reason: string;
+  },
+) {
+  const clientMutationId = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? `qms-external-fieldwork-${crypto.randomUUID()}`
+    : `qms-external-fieldwork-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const deviceIdKey = "amo:qms:external-fieldwork-device-id";
+  const deviceSequenceKey = "amo:qms:external-fieldwork-sequence";
+  let deviceId = typeof window !== "undefined" ? window.localStorage.getItem(deviceIdKey) : null;
+  if (!deviceId) {
+    deviceId = `qms-external-device-${clientMutationId.slice(-24)}`;
+    if (typeof window !== "undefined") window.localStorage.setItem(deviceIdKey, deviceId);
+  }
+  const priorSequence = typeof window !== "undefined" ? Number(window.localStorage.getItem(deviceSequenceKey) || "0") : 0;
+  const deviceSequence = Math.max(Number.isSafeInteger(priorSequence) ? priorSequence + 1 : 1, Date.now());
+  if (typeof window !== "undefined") window.localStorage.setItem(deviceSequenceKey, String(deviceSequence));
+
+  return publicRequest<ExternalAuditorMutationResult>(`/quality/audit-access/fieldwork/checklist-items/${encodeURIComponent(item.checklist_item_id)}/mutations`, {
+    method: "POST",
+    headers: { "X-QMS-CSRF": model.csrf_token },
+    body: JSON.stringify({
+      client_mutation_id: clientMutationId,
+      device_id: deviceId,
+      device_sequence: deviceSequence,
+      client_timestamp: new Date().toISOString(),
+      base_version: item.entity_version,
+      operation: "CHECKLIST_UPDATE",
+      canonical_response_status: payload.canonical_response_status,
+      auditor_notes: payload.auditor_notes ?? null,
+      evidence_references: payload.evidence_references ?? [],
+      reason: payload.reason,
+    }),
+  });
 }
 
 export function acknowledgeGuestFinding(findingId: string) {
