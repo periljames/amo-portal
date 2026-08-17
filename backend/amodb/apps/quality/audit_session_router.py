@@ -45,7 +45,7 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
     return {
         "id": str(audit.id),
         "domain": getattr(getattr(audit, "domain", None), "value", audit.domain),
-        "kind": audit.kind,
+        "kind": getattr(getattr(audit, "kind", None), "value", audit.kind),
         "audit_scope_id": str(audit.audit_scope_id) if getattr(audit, "audit_scope_id", None) else None,
         "audit_scope_code": getattr(audit, "audit_scope_code", None),
         "status": getattr(getattr(audit, "status", None), "value", audit.status),
@@ -59,6 +59,7 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "external_auditees": audit.external_auditees,
         "notify_auditors": audit.notify_auditors,
         "notify_auditees": audit.notify_auditees,
         "reminder_interval_days": audit.reminder_interval_days,
@@ -72,7 +73,6 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "upcoming_notice_sent_at": audit.upcoming_notice_sent_at.isoformat() if audit.upcoming_notice_sent_at else None,
         "day_of_notice_sent_at": audit.day_of_notice_sent_at.isoformat() if audit.day_of_notice_sent_at else None,
         "created_at": audit.created_at.isoformat() if audit.created_at else None,
-        "updated_at": audit.updated_at.isoformat() if audit.updated_at else None,
         "deleted_at": audit.deleted_at.isoformat() if audit.deleted_at else None,
         "deleted_by_user_id": audit.deleted_by_user_id,
         "delete_reason": audit.delete_reason,
@@ -107,11 +107,7 @@ def resolve_audit_occurrence(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """Resolve exactly one tenant audit by immutable ID or human audit reference.
-
-    Canonical occurrence pages use this bounded lookup instead of enumerating
-    the audit register and filtering client-side.
-    """
+    """Resolve exactly one tenant audit by immutable ID or human audit reference."""
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _audit_payload(_resolve_audit(db, amo_id=ctx.amo_id, audit_key=audit_key))
 
@@ -124,12 +120,6 @@ def project_audit_session(
     follow_up_status: str,
     archive_count: int,
 ) -> dict[str, Any]:
-    """Compress the governed seven-stage audit workflow into the operator timeline.
-
-    This is a read model only. It never advances the audit and deliberately reuses
-    the authoritative #488/#499 workflow, preparation, closure and archive state.
-    """
-
     war_room = _workflow_stage(workflow, "war-room")
     checklist = _workflow_stage(workflow, "checklist")
     findings = _workflow_stage(workflow, "findings")
@@ -154,18 +144,14 @@ def project_audit_session(
 
     current_stage = next((stage for stage in SESSION_STAGE_ORDER if not complete_by_stage[stage]), "archive")
     completed = sum(1 for stage in SESSION_STAGE_ORDER if complete_by_stage[stage])
-
-    stages = [
-        {
-            "id": stage,
-            "label": SESSION_STAGE_LABELS[stage],
-            "complete": complete_by_stage[stage],
-            "active": stage == current_stage,
-            "legacy_tab": SESSION_STAGE_TABS[stage],
-            "helper": helper_by_stage[stage],
-        }
-        for stage in SESSION_STAGE_ORDER
-    ]
+    stages = [{
+        "id": stage,
+        "label": SESSION_STAGE_LABELS[stage],
+        "complete": complete_by_stage[stage],
+        "active": stage == current_stage,
+        "legacy_tab": SESSION_STAGE_TABS[stage],
+        "helper": helper_by_stage[stage],
+    } for stage in SESSION_STAGE_ORDER]
     return {
         "audit_id": str(workflow.audit_id),
         "current_stage_id": current_stage,
