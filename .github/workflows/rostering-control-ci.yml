@@ -91,6 +91,7 @@ jobs:
           pytest -q \
             backend/amodb/apps/rostering/tests/test_application_bootstrap.py \
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
+            backend/amodb/apps/rostering/tests/test_consent_exemption_contract.py \
             backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
             backend/amodb/apps/rostering/tests/test_roster_control_contract.py
 
