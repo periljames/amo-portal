@@ -1,44 +1,81 @@
-name: PR 506 Training Hardening Patch
+name: Training Record Redesign Validation
 
 on:
   push:
     branches:
       - codex/training-record-redesign-20260817
+  pull_request:
+    paths:
+      - "backend/amodb/apps/training/**"
+      - "backend/scripts/reconcile_training_synthetic_recurrent.py"
+      - "frontend/src/**/training/**"
+      - "frontend/src/pages/TrainingCompetencePage.tsx"
+      - "frontend/src/utils/trainingPresentation*"
+      - ".github/workflows/training-record-redesign-validation.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: pr506-training-hardening-patch
-  cancel-in-progress: false
+  group: training-record-redesign-validation-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: training-record-redesign-validation-secret
     steps:
       - uses: actions/checkout@v6
         with:
           show-progress: false
-          fetch-depth: 0
-      - name: Keep workflow publication outside the runner commit
-        shell: bash
-        run: sed -i '/^[[:space:]]*patch_validation_workflow()$/d' scripts/pr506_training_hardening_patch.py
-      - name: Apply audited Training hardening patch
-        run: python scripts/pr506_training_hardening_patch.py
-      - name: Verify forbidden legacy semantics are gone
-        shell: bash
-        run: |
-          ! grep -R "_seed_refresher_records_from_initial\|AUTO-SEEDED FROM INITIAL" backend/amodb/apps/training/router.py
-          ! grep -n "function coursePhase\|function familyKey" frontend/src/pages/TrainingCompetencePage.tsx
-          ! grep -n "_normalized_course_text" backend/amodb/apps/training/compliance.py
-          test ! -e scripts/pr506_training_hardening_patch.py
-      - name: Commit patched source files
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "Harden Training lifecycle and governed records"
-          git push origin HEAD:codex/training-record-redesign-20260817
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check -r requirements.txt opencv-python-headless
+      - name: Compile changed Training backend
+        working-directory: backend
+        run: python -m compileall -q amodb/apps/training scripts/reconcile_training_synthetic_recurrent.py
+      - name: Run Training domain, privacy, QR and PDF tests
+        working-directory: backend
+        run: >-
+          pytest -q
+          amodb/apps/training/tests/test_course_lifecycle.py
+          amodb/apps/training/tests/test_record_presentation.py
+          amodb/apps/training/tests/test_record_presentation_privacy_and_grouping.py
+          amodb/apps/training/tests/test_no_heuristic_course_family.py
+          amodb/apps/training/tests/test_training_record_pdf_layout.py
+          amodb/apps/training/tests/test_integration_status.py
+          amodb/apps/training/tests/test_operating_rules.py
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Run Training presentation unit tests
+        working-directory: frontend
+        run: npx vitest run src/utils/trainingPresentation.test.ts
+      - name: Lint changed Training frontend
+        working-directory: frontend
+        run: >-
+          npx eslint
+          src/utils/trainingPresentation.ts
+          src/utils/trainingPresentation.test.ts
+          src/components/training/TrainingRequirementList.tsx
+          src/components/training/TrainingPlanMatrix.tsx
+          src/pages/TrainingCompetencePage.tsx
+      - name: Typecheck and production build
+        working-directory: frontend
+        run: npm run build
