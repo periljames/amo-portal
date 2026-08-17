@@ -10,6 +10,8 @@ on:
       - "backend/amodb/apps/quality/models.py"
       - "backend/amodb/apps/quality/enums.py"
       - "backend/amodb/scripts/seed_qms_live_audit_e2e.py"
+      - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
+      - "frontend/src/components/QMS/QualityDataFreshnessCoordinator.tsx"
       - "frontend/src/pages/PublicAuditAccessPage.tsx"
       - "frontend/src/features/qms/auditSession/**"
       - "frontend/src/services/qmsAudit*.ts"
@@ -78,9 +80,11 @@ jobs:
       - name: Upgrade clean PostgreSQL through all Alembic heads
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Seed signed external-auditor and auditee browser fixture
+      - name: Seed signed external participants and authenticated Quality users
         working-directory: backend
-        run: python amodb/scripts/seed_qms_live_audit_e2e.py
+        run: |
+          python amodb/scripts/seed_qms_live_audit_e2e.py
+          python amodb/scripts/complete_qms_live_audit_onboarding_e2e.py
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -112,7 +116,7 @@ jobs:
             sleep 1
           done
 
-      - name: Run no-mock two-party Live Audit browser journey
+      - name: Run no-mock Live Audit browser journeys
         working-directory: frontend
         run: npm exec -- playwright test tests/e2e/qms-live-audit-real.spec.ts --project=chromium
 
@@ -137,6 +141,7 @@ jobs:
           fixture = json.loads(Path(os.environ["E2E_QMS_LIVE_FIXTURE"]).read_text(encoding="utf-8"))
           checklist_item_id = uuid.UUID(fixture["checklist_item_id"])
           finding_id = uuid.UUID(fixture["finding_id"])
+          realtime_checklist_item_id = uuid.UUID(fixture["realtime_checklist_item_id"])
 
           db = WriteSessionLocal()
           try:
@@ -156,7 +161,14 @@ jobs:
               finding = db.get(models.QMSAuditFinding, finding_id)
               assert finding is not None and finding.acknowledged_at is not None
               assert finding.acknowledged_by_email == "auditee@example.com"
-              print("Real browser offline replay, lost-response idempotency, stale conflict rejection, participant attribution and auditee acknowledgement persisted exactly in PostgreSQL")
+
+              realtime = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=realtime_checklist_item_id).one()
+              assert realtime.canonical_response_status == "COMPLIANT", realtime.canonical_response_status
+              assert realtime.entity_version == 2, realtime.entity_version
+              assert realtime.updated_by_user_id == fixture["realtime_user_a_id"], realtime.updated_by_user_id
+              assert realtime.auditor_notes == "Committed by Quality Alpha and delivered to Quality Bravo by the authenticated SSE stream."
+
+              print("Real browser offline/idempotency/conflict persistence and two-user authenticated SSE propagation are committed in PostgreSQL")
           finally:
               db.close()
           PY
