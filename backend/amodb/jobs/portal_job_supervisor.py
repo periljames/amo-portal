@@ -33,8 +33,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def embedded_worker_enabled() -> bool:
-    # Background queues are isolated by default. A small single-process
-    # deployment may opt in explicitly, but it will still use bounded cycles.
     return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", False)
 
 
@@ -130,9 +128,6 @@ class WorkerFamily:
 
 
 def _families() -> tuple[WorkerFamily, ...]:
-    # Imports intentionally live inside each runner. A broken optional worker
-    # family must be reported as DEGRADED without preventing the API (and all
-    # other job families) from starting.
     return (
         WorkerFamily(
             "workforce",
@@ -229,8 +224,6 @@ class PortalJobSupervisor:
     def _heartbeat(self, family: WorkerFamily, *, status: str, metadata: dict[str, Any], slot: int = 1) -> None:
         if not database_circuit.allow_request():
             return
-        # Heartbeats are low-priority. Do not let a burst of heartbeat writes
-        # bypass the same concurrency guard as real background work.
         if not self._work_slots.acquire(timeout=0.05):
             return
         db = None
@@ -286,9 +279,6 @@ class PortalJobSupervisor:
                 if not database_circuit.allow_request() and not probe_database():
                     raise ConnectionError("DATABASE_UNAVAILABLE")
 
-                # Bound total active queue families inside this process. This is
-                # the key guard that keeps parallelism useful instead of turning
-                # it into database-pool contention.
                 acquired = self._work_slots.acquire(timeout=0.5)
                 if not acquired:
                     self._stop.wait(0.05)
@@ -362,3 +352,15 @@ class PortalJobSupervisor:
 
 
 supervisor = PortalJobSupervisor()
+
+
+def start_portal_job_supervisor() -> bool:
+    return supervisor.start()
+
+
+def stop_portal_job_supervisor() -> None:
+    supervisor.stop()
+
+
+def portal_job_supervisor_status() -> dict[str, Any]:
+    return supervisor.status()
