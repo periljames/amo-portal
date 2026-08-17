@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 
-TARGET_REVISION = "quality_260817_occurrence_frontend_completion"
+TARGET_REVISION = "quality_260817_canonical_document_bridge"
 TABLES = (
     "quality_external_identities",
     "quality_audit_participants",
@@ -36,6 +36,7 @@ TABLES = (
     "quality_audit_presence",
     "quality_audit_document_request_metadata",
     "quality_audit_controlled_document_submissions",
+    "quality_audit_canonical_document_submissions",
     "quality_audit_meetings",
     "quality_audit_closing_narratives",
     "quality_audit_assignment_decisions",
@@ -121,25 +122,44 @@ def _assert_runtime_rls_isolation(connection: sa.Connection) -> None:
     """Prove the policy with a non-owner/non-superuser role, not only metadata.
 
     PostgreSQL owners and superusers can bypass ordinary RLS, so metadata-only
-    inspection can create a false positive. Seed two disposable tenant-tagged
-    rows as the CI owner with FK triggers temporarily disabled, switch to a
-    LOGIN-less application-style role, set the same tenant GUC used by the
-    policies, and prove both reads and writes are bounded to that tenant.
+    inspection can create a false positive. The fixture first creates two valid
+    AMO parent rows and then their external identities with all FK/trigger
+    enforcement active. A LOGIN-less application-style role is used to prove
+    that reads and writes remain bounded to the tenant GUC used by production.
     """
     tenant_a = str(uuid.uuid4())
     tenant_b = str(uuid.uuid4())
     identity_a = str(uuid.uuid4())
     identity_b = str(uuid.uuid4())
+    suffix_a = identity_a.replace("-", "")[:12]
+    suffix_b = identity_b.replace("-", "")[:12]
     role_name = "qms_live_audit_rls_probe"
 
     connection.execute(text(f"DROP ROLE IF EXISTS {role_name}"))
     connection.execute(text(f"CREATE ROLE {role_name} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"))
     connection.execute(text(f"GRANT SELECT, UPDATE ON quality_external_identities TO {role_name}"))
 
-    # These rows deliberately exercise the RLS policy itself without requiring
-    # unrelated AMO bootstrap fixtures. The CI owner may bypass FK triggers only
-    # during setup; the probe role never receives that privilege.
-    connection.execute(text("SET LOCAL session_replication_role = replica"))
+    # Seed legitimate tenant parents. The probe must never bypass the FK or
+    # triggers merely to reach the RLS assertion.
+    connection.execute(
+        text(
+            """
+            INSERT INTO amos
+                (id, amo_code, name, login_slug, is_demo, is_active, created_at, updated_at)
+            VALUES
+                (:tenant_a, :amo_code_a, 'RLS Probe Tenant A', :slug_a, false, true, now(), now()),
+                (:tenant_b, :amo_code_b, 'RLS Probe Tenant B', :slug_b, false, true, now(), now())
+            """
+        ),
+        {
+            "tenant_a": tenant_a,
+            "tenant_b": tenant_b,
+            "amo_code_a": f"RLSA{suffix_a}".upper(),
+            "amo_code_b": f"RLSB{suffix_b}".upper(),
+            "slug_a": f"rls-probe-a-{suffix_a}",
+            "slug_b": f"rls-probe-b-{suffix_b}",
+        },
+    )
     connection.execute(
         text(
             """
@@ -159,7 +179,6 @@ def _assert_runtime_rls_isolation(connection: sa.Connection) -> None:
             "email_b": f"tenant-b-{identity_b}@example.invalid",
         },
     )
-    connection.execute(text("SET LOCAL session_replication_role = origin"))
 
     connection.execute(text(f"SET LOCAL ROLE {role_name}"))
     connection.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_a})
@@ -235,7 +254,23 @@ def main() -> None:
         presence_columns = _columns(connection, "quality_audit_presence")
         assert {"actor_type", "actor_key", "user_id", "participant_id", "last_seen_at"} <= presence_columns, presence_columns
         document_metadata_columns = _columns(connection, "quality_audit_document_request_metadata")
-        assert {"source_mode", "controlled_document_id", "controlled_revision_id"} <= document_metadata_columns, document_metadata_columns
+        assert {
+            "source_mode",
+            "controlled_source_system",
+            "controlled_document_id",
+            "controlled_revision_id",
+            "canonical_document_id",
+            "canonical_revision_id",
+        } <= document_metadata_columns, document_metadata_columns
+        canonical_submission_columns = _columns(connection, "quality_audit_canonical_document_submissions")
+        assert {
+            "amo_id",
+            "audit_id",
+            "request_id",
+            "participant_id",
+            "document_id",
+            "revision_id",
+        } <= canonical_submission_columns, canonical_submission_columns
 
         for table_name in TABLES:
             _assert_rls(connection, table_name)
@@ -263,8 +298,9 @@ def main() -> None:
             assert any(table == table_name and "immutable" in trigger for table, trigger in triggers), (table_name, triggers)
 
     print(
-        "Live audit final-head migrations, forced RLS metadata and non-superuser runtime tenant isolation, "
-        "WebAuthn/verification, evidence, presence, package integrity, participant attribution and immutable history verified"
+        "Live audit canonical Document Control bridge, final-head migrations, forced RLS metadata and "
+        "non-superuser runtime tenant isolation, WebAuthn/verification, evidence, presence, package "
+        "integrity, participant attribution and immutable history verified"
     )
 
 
