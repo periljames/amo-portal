@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
+import amodb.apps.quality.audit_external_access_router as access_router
 from amodb.apps.quality.audit_external_access_router import (
     AUDITEE_ALLOWED,
     EXTERNAL_AUDITOR_ALLOWED,
@@ -141,3 +143,32 @@ def test_existing_external_identity_assurance_cannot_be_silently_changed():
         with pytest.raises(HTTPException) as exc:
             _assert_identity_assurance_stable(existing, requested)
         assert exc.value.status_code == 409
+
+
+def test_regular_exchange_rejects_passkey_external_auditor_before_session_mutation(monkeypatch):
+    identity = SimpleNamespace(assurance_level="PASSKEY")
+    participant = SimpleNamespace(
+        participant_type="EXTERNAL_AUDITOR",
+        external_identity=identity,
+        accepted_at=None,
+        status="INVITED",
+    )
+    grant = SimpleNamespace(participant=participant, last_used_at=None)
+    commits: list[bool] = []
+    db = SimpleNamespace(commit=lambda: commits.append(True))
+    monkeypatch.setattr(access_router, "_active_grant", lambda _db, _token: grant)
+
+    response = Response()
+    request = SimpleNamespace(url=SimpleNamespace(scheme="https"))
+    payload = access_router.AuditAccessExchange(token="x" * 32)
+
+    with pytest.raises(HTTPException) as exc:
+        access_router.exchange_audit_access(payload=payload, request=request, response=response, db=db)
+
+    assert exc.value.status_code == 403
+    assert "passkey assurance" in str(exc.value.detail).lower()
+    assert grant.last_used_at is None
+    assert participant.accepted_at is None
+    assert participant.status == "INVITED"
+    assert commits == []
+    assert response.headers.get("set-cookie") is None
