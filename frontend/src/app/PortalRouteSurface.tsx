@@ -9,6 +9,7 @@ const DepartmentHomePage = lazy(() => import("../pages/DepartmentHomePage"));
 const EhmDashboardPage = lazy(() => import("../pages/ehm/EhmDashboardPage"));
 const EhmTrendsPage = lazy(() => import("../pages/ehm/EhmTrendsPage"));
 const EhmUploadsPage = lazy(() => import("../pages/ehm/EhmUploadsPage"));
+const QualityAuditOccurrenceStageShell = lazy(() => import("../pages/qualityAudits/QualityAuditOccurrenceStageShell"));
 
 const DEPARTMENT_HOMES = new Set([
   "planning",
@@ -19,6 +20,7 @@ const DEPARTMENT_HOMES = new Set([
   "workshops",
 ]);
 const SIMPLE_DEPARTMENT_VIEWS = new Set(["operations", "settings"]);
+const CANONICAL_AUDIT_STAGES = new Set(["setup", "prepare", "live", "closing", "follow-up", "archive"]);
 
 function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean).map((value) => {
@@ -81,6 +83,18 @@ export const AppRouter: React.FC = () => {
   }, [isTenantPath, module, view]);
 
   if (!isTenantPath) return <PortalRoutes />;
+
+  const canonicalAuditStage = (module === "quality" || module === "qms")
+    && view === "audits"
+    && Boolean(parts[4])
+    && CANONICAL_AUDIT_STAGES.has((parts[5] || "").toLowerCase());
+  if (canonicalAuditStage) {
+    return (
+      <AuthenticatedSurface amoCode={amoCode} label="audit occurrence">
+        <QualityAuditOccurrenceStageShell amoCode={amoCode} />
+      </AuthenticatedSurface>
+    );
+  }
 
   if (
     DEPARTMENT_HOMES.has(module)
