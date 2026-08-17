@@ -16,6 +16,7 @@ branch_labels = None
 depends_on = None
 
 DOC_META = "quality_audit_document_request_metadata"
+CONTROLLED_LINK = "quality_audit_controlled_document_submissions"
 MEETING = "quality_audit_meetings"
 NARRATIVE = "quality_audit_closing_narratives"
 
@@ -77,6 +78,29 @@ def upgrade() -> None:
     _enable_rls(DOC_META)
 
     op.create_table(
+        CONTROLLED_LINK,
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("amo_id", sa.String(length=36), nullable=False),
+        sa.Column("audit_id", sa.Uuid(), nullable=False),
+        sa.Column("request_id", sa.Uuid(), nullable=False),
+        sa.Column("participant_id", sa.String(length=36), nullable=False),
+        sa.Column("document_id", sa.Uuid(), nullable=False),
+        sa.Column("revision_id", sa.Uuid(), nullable=True),
+        sa.Column("response_comment", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["request_id"], ["quality_audit_document_requests.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["participant_id"], ["quality_audit_participants.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["document_id"], ["qms_documents.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["revision_id"], ["qms_document_revisions.id"], ondelete="RESTRICT"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.CheckConstraint("revision_id IS NULL OR document_id IS NOT NULL", name="ck_quality_audit_controlled_link_revision_document"),
+    )
+    op.create_index("ix_quality_audit_controlled_link_request", CONTROLLED_LINK, ["amo_id", "audit_id", "request_id", "created_at"])
+    _enable_rls(CONTROLLED_LINK)
+
+    op.create_table(
         MEETING,
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("amo_id", sa.String(length=36), nullable=False),
@@ -127,11 +151,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in (NARRATIVE, MEETING, DOC_META):
+    for table in (NARRATIVE, MEETING, CONTROLLED_LINK, DOC_META):
         _disable_rls(table)
     op.drop_index("ix_quality_audit_closing_narrative_audit", table_name=NARRATIVE)
     op.drop_table(NARRATIVE)
     op.drop_index("ix_quality_audit_meeting_audit", table_name=MEETING)
     op.drop_table(MEETING)
+    op.drop_index("ix_quality_audit_controlled_link_request", table_name=CONTROLLED_LINK)
+    op.drop_table(CONTROLLED_LINK)
     op.drop_index("ix_quality_audit_doc_meta_audit", table_name=DOC_META)
     op.drop_table(DOC_META)
