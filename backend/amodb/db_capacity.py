@@ -12,6 +12,10 @@ def _number(name: str, default: int, *, minimum: int = 0) -> int:
         raise RuntimeError(f"{name} must be an integer") from exc
 
 
+def _pool_capacity(size_name: str, overflow_name: str, default_size: int, default_overflow: int) -> int:
+    return _number(size_name, default_size) + _number(overflow_name, default_overflow)
+
+
 @dataclass(frozen=True)
 class ConnectionBudget:
     database_max: int
@@ -36,6 +40,7 @@ def connection_budget() -> ConnectionBudget:
     migration = _number("DB_MIGRATION_CONNECTION_RESERVE", 5)
     usable = maximum - admin - migration
     external = (os.getenv("DB_EXTERNAL_POOLER") or "").lower() in {"1", "true", "yes", "on"}
+
     if external:
         roles = {
             "api": _number("PGBOUNCER_API_POOL_SIZE", 90),
@@ -45,12 +50,54 @@ def connection_budget() -> ConnectionBudget:
             "read": _number("PGBOUNCER_READ_POOL_SIZE", 30),
         }
     else:
-        per_process = _number("DB_POOL_SIZE", 20) + _number("DB_MAX_OVERFLOW", 20)
+        api_pool = _pool_capacity("DB_POOL_SIZE", "DB_MAX_OVERFLOW", 20, 10)
+        worker_pool = _pool_capacity(
+            "PORTAL_WORKER_DB_POOL_SIZE",
+            "PORTAL_WORKER_DB_MAX_OVERFLOW",
+            2,
+            1,
+        )
+        scheduled_pool = _pool_capacity(
+            "PORTAL_SCHEDULED_DB_POOL_SIZE",
+            "PORTAL_SCHEDULED_DB_MAX_OVERFLOW",
+            2,
+            1,
+        )
+        evidence_pool = _pool_capacity(
+            "DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE",
+            "DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW",
+            1,
+            1,
+        )
+        ops_gateway_pool = _pool_capacity(
+            "PLATFORM_OPS_DB_POOL_SIZE",
+            "PLATFORM_OPS_DB_MAX_OVERFLOW",
+            3,
+            2,
+        )
+        ops_worker_pool = _pool_capacity(
+            "PLATFORM_OPS_WORKER_DB_POOL_SIZE",
+            "PLATFORM_OPS_WORKER_DB_MAX_OVERFLOW",
+            2,
+            1,
+        )
+        roster_pool = _pool_capacity(
+            "ROSTER_AUTOMATION_DB_POOL_SIZE",
+            "ROSTER_AUTOMATION_DB_MAX_OVERFLOW",
+            1,
+            1,
+        )
+
         roles = {
-            "api": _number("PORTAL_API_PROCESS_COUNT", 3, minimum=1) * per_process,
-            "worker": _number("PORTAL_WORKER_PROCESS_COUNT", 4) * per_process,
-            "scheduled_worker": _number("PORTAL_SCHEDULED_PROCESS_COUNT", 1) * per_process,
+            "api": _number("PORTAL_API_PROCESS_COUNT", 1, minimum=1) * api_pool,
+            "worker": _number("PORTAL_WORKER_PROCESS_COUNT", 0) * worker_pool,
+            "scheduled_worker": _number("PORTAL_SCHEDULED_PROCESS_COUNT", 0) * scheduled_pool,
+            "evidence_worker": _number("DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT", 0) * evidence_pool,
+            "platform_ops_gateway": _number("PLATFORM_OPS_GATEWAY_PROCESS_COUNT", 0) * ops_gateway_pool,
+            "platform_ops_worker": _number("PLATFORM_OPS_WORKER_PROCESS_COUNT", 0) * ops_worker_pool,
+            "rostering_automation": _number("ROSTER_AUTOMATION_PROCESS_COUNT", 0) * roster_pool,
         }
+
     return ConnectionBudget(maximum, admin, migration, usable, sum(roles.values()), external, roles)
 
 

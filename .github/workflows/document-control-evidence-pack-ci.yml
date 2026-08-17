@@ -8,10 +8,14 @@ name: Document Control Evidence Pack CI
       - "backend/amodb/apps/doc_control/workspace_evidence_pack_job_router.py"
       - "backend/amodb/apps/doc_control/evidence_pack_job_service.py"
       - "backend/amodb/apps/doc_control/evidence_pack_job_lifecycle_router.py"
+      - "backend/amodb/apps/doc_control/evidence_pack_worker_main.py"
       - "backend/amodb/apps/doc_control/evidence_pack_runtime_guard.py"
       - "backend/amodb/apps/doc_control/workspace_evidence_router.py"
       - "backend/amodb/apps/doc_control/evidence_models.py"
       - "backend/amodb/apps/doc_control/router.py"
+      - "backend/amodb/storage.py"
+      - "backend/deploy/kubernetes/portal-resilience.yaml"
+      - "docker-compose.prod.yml"
       - "backend/amodb/apps/doc_control/tests/test_document_evidence_pack_contract.py"
       - "backend/amodb/apps/doc_control/tests/test_document_evidence_pack_job_contract.py"
       - "frontend/src/pages/documentControl/DocumentEvidencePackAction.tsx"
@@ -52,6 +56,7 @@ jobs:
             amodb/apps/doc_control/workspace_evidence_pack_job_router.py \
             amodb/apps/doc_control/evidence_pack_job_service.py \
             amodb/apps/doc_control/evidence_pack_job_lifecycle_router.py \
+            amodb/apps/doc_control/evidence_pack_worker_main.py \
             amodb/apps/doc_control/router.py
       - name: Run evidence-pack contracts
         working-directory: backend

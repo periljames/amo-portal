@@ -34,6 +34,47 @@ class ConnectionBudgetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 validate_connection_budget()
 
+    def test_direct_pool_budget_counts_isolated_runtime_roles(self) -> None:
+        values = {
+            "DB_EXTERNAL_POOLER": "false",
+            "DB_MAX_CONNECTIONS": "100",
+            "DB_ADMIN_CONNECTION_RESERVE": "10",
+            "DB_MIGRATION_CONNECTION_RESERVE": "5",
+            "DB_POOL_SIZE": "10",
+            "DB_MAX_OVERFLOW": "5",
+            "PORTAL_API_PROCESS_COUNT": "1",
+            "PORTAL_WORKER_PROCESS_COUNT": "5",
+            "PORTAL_WORKER_DB_POOL_SIZE": "2",
+            "PORTAL_WORKER_DB_MAX_OVERFLOW": "1",
+            "PORTAL_SCHEDULED_PROCESS_COUNT": "1",
+            "PORTAL_SCHEDULED_DB_POOL_SIZE": "2",
+            "PORTAL_SCHEDULED_DB_MAX_OVERFLOW": "1",
+            "DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT": "1",
+            "DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE": "1",
+            "DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW": "1",
+            "PLATFORM_OPS_GATEWAY_PROCESS_COUNT": "1",
+            "PLATFORM_OPS_DB_POOL_SIZE": "3",
+            "PLATFORM_OPS_DB_MAX_OVERFLOW": "2",
+            "PLATFORM_OPS_WORKER_PROCESS_COUNT": "1",
+            "PLATFORM_OPS_WORKER_DB_POOL_SIZE": "2",
+            "PLATFORM_OPS_WORKER_DB_MAX_OVERFLOW": "1",
+            "ROSTER_AUTOMATION_PROCESS_COUNT": "1",
+            "ROSTER_AUTOMATION_DB_POOL_SIZE": "1",
+            "ROSTER_AUTOMATION_DB_MAX_OVERFLOW": "1",
+        }
+        with patch.dict(os.environ, values, clear=False):
+            budget = validate_connection_budget()
+        self.assertTrue(budget.valid)
+        self.assertEqual(budget.roles["api"], 15)
+        self.assertEqual(budget.roles["worker"], 15)
+        self.assertEqual(budget.roles["scheduled_worker"], 3)
+        self.assertEqual(budget.roles["evidence_worker"], 2)
+        self.assertEqual(budget.roles["platform_ops_gateway"], 5)
+        self.assertEqual(budget.roles["platform_ops_worker"], 3)
+        self.assertEqual(budget.roles["rostering_automation"], 2)
+        self.assertEqual(budget.projected, 45)
+        self.assertEqual(budget.usable, 85)
+
 
 if __name__ == "__main__":
     unittest.main()

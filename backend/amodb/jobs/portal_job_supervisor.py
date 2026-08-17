@@ -1,8 +1,10 @@
 """Durable-job runtime shared by embedded development and dedicated workers.
 
 Production keeps workers outside Uvicorn so CPU-heavy jobs cannot starve API
-requests or multiply its connection pool.  Development may explicitly opt in
-to embedded threads with ``PORTAL_EMBEDDED_JOB_WORKER=1``.
+requests or multiply its connection pool. Development may explicitly opt in to
+embedded threads with ``PORTAL_EMBEDDED_JOB_WORKER=1``. Embedded execution is
+also guarded by a bounded work semaphore so queue families cannot all contend
+for the API database pool at once.
 """
 from __future__ import annotations
 
@@ -31,16 +33,22 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def embedded_worker_enabled() -> bool:
-    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
-    # Preserve the existing one-command local workflow when APP_ENV is unset.
-    # Real deployments must identify themselves and keep workers isolated.
-    default_enabled = app_env not in {"prod", "production", "staging"}
-    return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", default_enabled)
+    # Background queues are isolated by default. A small single-process
+    # deployment may opt in explicitly, but it will still use bounded cycles.
+    return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", False)
 
 
 def _bounded_float(name: str, default: float, minimum: float, maximum: float) -> float:
     try:
         value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         value = default
     return max(minimum, min(value, maximum))
@@ -168,6 +176,13 @@ class PortalJobSupervisor:
         self._mode = mode
         self._selected_families = selected_families
         self._concurrency = max(1, min(int(concurrency), 32))
+        max_active_cycles = (
+            _bounded_int("PORTAL_EMBEDDED_JOB_MAX_ACTIVE_CYCLES", 2, 1, 16)
+            if mode == "embedded"
+            else max(1, self._concurrency)
+        )
+        self._work_slots = threading.BoundedSemaphore(max_active_cycles)
+        self._max_active_cycles = max_active_cycles
 
     def start(self) -> bool:
         if self._mode == "embedded" and not embedded_worker_enabled():
@@ -191,14 +206,24 @@ class PortalJobSupervisor:
                     )
                     self._threads[thread_name] = thread
                     thread.start()
-        logger.info("Started %s durable-job workers: %s", self._mode, ", ".join(sorted(self._threads)))
+        logger.info(
+            "Started %s durable-job workers (max active cycles=%s): %s",
+            self._mode,
+            self._max_active_cycles,
+            ", ".join(sorted(self._threads)),
+        )
         return True
 
     def _heartbeat(self, family: WorkerFamily, *, status: str, metadata: dict[str, Any], slot: int = 1) -> None:
         if not database_circuit.allow_request():
             return
-        db = WriteSessionLocal()
+        # Heartbeats are low-priority. Do not let a burst of seven heartbeat
+        # writes bypass the same concurrency guard as real background work.
+        if not self._work_slots.acquire(timeout=0.05):
+            return
+        db = None
         try:
+            db = WriteSessionLocal()
             worker_name = f"{_identity()}:{self._mode}:{family.name}:{slot}"[:128]
             row = db.query(platform_models.PlatformWorkerHeartbeat).filter(
                 platform_models.PlatformWorkerHeartbeat.worker_name == worker_name,
@@ -216,20 +241,23 @@ class PortalJobSupervisor:
                 "poll_seconds": family.poll_seconds,
                 "mode": self._mode,
                 "slot": slot,
+                "max_active_cycles": self._max_active_cycles,
                 **metadata,
             }
             db.commit()
         except Exception as exc:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             if is_database_disconnect(exc):
                 database_circuit.mark_failure(exc)
             else:
                 logger.debug("Could not record %s worker heartbeat", family.name, exc_info=True)
         finally:
             close_session_safely(db)
+            self._work_slots.release()
 
     def _run_family(self, family: WorkerFamily, slot: int = 1) -> None:
         last_heartbeat = 0.0
@@ -241,9 +269,19 @@ class PortalJobSupervisor:
             recovered_this_cycle = False
             metadata: dict[str, Any]
             activity = 0
+            acquired = False
             try:
                 if not database_circuit.allow_request() and not probe_database():
                     raise ConnectionError("DATABASE_UNAVAILABLE")
+
+                # Bound total active queue families inside this process. This is
+                # the key guard that keeps parallelism useful instead of turning
+                # it into database-pool contention.
+                acquired = self._work_slots.acquire(timeout=0.5)
+                if not acquired:
+                    self._stop.wait(0.05)
+                    continue
+
                 result = family.run_once()
                 activity = _activity(result)
                 metadata = {"last_result": result if isinstance(result, (dict, int, bool)) else str(result)}
@@ -265,6 +303,9 @@ class PortalJobSupervisor:
                     outage_logged = True
                 elif failure_streak % 10 == 0:
                     logger.info("%s worker remains paused after %s checks", family.name, failure_streak)
+            finally:
+                if acquired:
+                    self._work_slots.release()
 
             now = time.monotonic()
             # A database heartbeat during an outage is another failed database
@@ -311,6 +352,7 @@ class PortalJobSupervisor:
             "mode": self._mode,
             "running": any(thread.is_alive() for thread in threads.values()),
             "families": {name: thread.is_alive() for name, thread in threads.items()},
+            "max_active_cycles": self._max_active_cycles,
         }
 
 
