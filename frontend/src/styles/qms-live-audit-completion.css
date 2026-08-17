@@ -1,0 +1,264 @@
+.qms-live-audit-focus__evidence > header,
+.qms-external-auditor-fieldwork__evidence > header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+}
+
+.qms-live-audit-focus__evidence > header div,
+.qms-external-auditor-fieldwork__evidence > header div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.qms-live-audit-focus__evidence > header small,
+.qms-external-auditor-fieldwork__evidence > header small,
+.qms-live-audit-focus__presence small {
+  color: var(--text-muted, #64748b);
+}
+
+.qms-live-audit-focus__evidence ul,
+.qms-external-auditor-fieldwork__evidence ul,
+.qms-public-audit__released-files ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qms-live-audit-focus__evidence li,
+.qms-public-audit__released-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.qms-live-audit-focus__evidence li > div,
+.qms-public-audit__released-files li > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.qms-live-audit-focus__evidence li span,
+.qms-public-audit__released-files li > span,
+.qms-external-auditor-fieldwork__evidence li {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.qms-live-audit-focus__evidence li small,
+.qms-public-audit__released-files li small,
+.qms-external-auditor-fieldwork__evidence li small {
+  color: var(--text-muted, #64748b);
+  font-size: 0.72rem;
+}
+
+.qms-live-audit-focus__evidence-upload,
+.qms-external-auditor-fieldwork__evidence,
+.qms-public-audit__closing-form,
+.qms-audit-closing__passkey-setup,
+.qms-audit-closing__passkey-sign,
+.qms-audit-closing__verification {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border, #d8dee8);
+  border-radius: 9px;
+  background: var(--surface-subtle, #f8fafc);
+}
+
+.qms-live-audit-focus__evidence-upload label,
+.qms-external-auditor-fieldwork__evidence label,
+.qms-public-audit__closing-form label,
+.qms-audit-closing__passkey-setup label,
+.qms-audit-closing__passkey-sign label,
+.qms-public-audit__card > label {
+  display: grid;
+  gap: 0.3rem;
+  font-weight: 700;
+}
+
+.qms-live-audit-focus__evidence-upload input,
+.qms-external-auditor-fieldwork__evidence input,
+.qms-public-audit__closing-form input,
+.qms-public-audit__closing-form select,
+.qms-public-audit__closing-form textarea,
+.qms-audit-closing__passkey-setup input,
+.qms-audit-closing__passkey-sign textarea,
+.qms-public-audit__card > label input {
+  width: 100%;
+  padding: 0.62rem 0.7rem;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.qms-live-audit-focus__evidence-upload button,
+.qms-external-auditor-fieldwork__evidence button,
+.qms-public-audit__closing-form button,
+.qms-public-audit__released-files button,
+.qms-audit-closing__passkey-setup button,
+.qms-audit-closing__passkey-sign button,
+.qms-audit-closing__verification button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font-weight: 750;
+}
+
+.qms-live-audit-focus__presence > span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.qms-live-audit-focus__presence li b,
+.qms-live-audit-focus__presence li small {
+  display: block;
+}
+
+.qms-audit-closing__success,
+.qms-public-audit__success,
+.qms-external-auditor-fieldwork__notice,
+.qms-public-audit__closing-recorded {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.qms-audit-closing__verification a {
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.qms-external-auditor-fieldwork__sync {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border, #d8dee8);
+  border-radius: 8px;
+  background: var(--surface-subtle, #f8fafc);
+}
+
+.qms-external-auditor-fieldwork__sync span {
+  flex: 1;
+}
+
+.qms-external-auditor-fieldwork__evidence {
+  margin-top: 1rem;
+}
+
+.qms-public-audit__released-files,
+.qms-public-audit__released-evidence {
+  margin-top: 0.8rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-subtle, #f8fafc);
+}
+
+.qms-public-audit__closing-ack code,
+.qms-audit-closing code {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
+.qms-public-audit__closing-recorded > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.qms-public-audit__closing-recorded p {
+  margin: 0.25rem 0 0;
+  color: inherit;
+}
+
+.qms-public-audit__closing-form > p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.qms-public-audit__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.qms-public-audit__header-actions > span,
+.qms-public-audit__header-actions > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.qms-live-release-decision__evidence {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border, #d8dee8);
+  border-radius: 8px;
+}
+
+.qms-live-release-decision__evidence label {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.45rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.qms-live-release-decision__evidence label span,
+.qms-live-release-decision__evidence label strong,
+.qms-live-release-decision__evidence label small {
+  display: block;
+}
+
+.qms-live-release-decision__evidence label small {
+  margin-top: 0.1rem;
+  color: var(--text-muted, #64748b);
+}
+
+@media (max-width: 720px) {
+  .qms-public-audit__header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .qms-live-audit-focus__evidence li,
+  .qms-public-audit__released-files li,
+  .qms-external-auditor-fieldwork__sync {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
