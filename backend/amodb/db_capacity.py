@@ -81,6 +81,12 @@ def connection_budget() -> ConnectionBudget:
             2,
             1,
         )
+        roster_pool = _pool_capacity(
+            "ROSTER_AUTOMATION_DB_POOL_SIZE",
+            "ROSTER_AUTOMATION_DB_MAX_OVERFLOW",
+            1,
+            1,
+        )
 
         roles = {
             "api": _number("PORTAL_API_PROCESS_COUNT", 1, minimum=1) * api_pool,
@@ -89,6 +95,7 @@ def connection_budget() -> ConnectionBudget:
             "evidence_worker": _number("DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT", 0) * evidence_pool,
             "platform_ops_gateway": _number("PLATFORM_OPS_GATEWAY_PROCESS_COUNT", 0) * ops_gateway_pool,
             "platform_ops_worker": _number("PLATFORM_OPS_WORKER_PROCESS_COUNT", 0) * ops_worker_pool,
+            "rostering_automation": _number("ROSTER_AUTOMATION_PROCESS_COUNT", 0) * roster_pool,
         }
 
     return ConnectionBudget(maximum, admin, migration, usable, sum(roles.values()), external, roles)
