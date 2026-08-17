@@ -1,10 +1,10 @@
-"""Seed a deterministic real QMS Live Audit browser-acceptance fixture.
+"""Seed deterministic real QMS Live Audit browser-acceptance fixtures.
 
 This script is only intended for the disposable PostgreSQL service created by
-QMS Live Audit CI. It deliberately uses the production ORM, signed external
-access-grant format and tenant-scoped audit models so Playwright can exercise a
-real browser -> Vite preview -> FastAPI -> PostgreSQL journey without route
-mocks or production credentials.
+QMS Live Audit CI. It uses the production ORM, password hashing, signed external
+access-grant format and tenant-scoped audit models so Playwright can exercise
+real browser -> production preview -> FastAPI -> PostgreSQL journeys without
+route mocks or production credentials.
 """
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-# Importing the application registers the complete ORM graph before rows are
-# created in the disposable CI database.
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
@@ -43,6 +41,7 @@ from amodb.apps.quality.enums import (  # noqa: E402
     QMSFindingType,
 )
 from amodb.database import WriteSessionLocal  # noqa: E402
+from amodb.security import get_password_hash  # noqa: E402
 
 AMO_ID = "00000000-0000-4000-8000-000000000701"
 AUDIT_ID = uuid.UUID("00000000-0000-4000-8000-000000000702")
@@ -57,9 +56,21 @@ AUDITEE_GRANT_ID = "00000000-0000-4000-8000-000000000710"
 GOVERNANCE_ID = "00000000-0000-4000-8000-000000000711"
 RELEASE_EVENT_ID = "00000000-0000-4000-8000-000000000712"
 
+QUALITY_DEPARTMENT_ID = "00000000-0000-4000-8000-000000000713"
+REALTIME_USER_A_ID = "00000000-0000-4000-8000-000000000714"
+REALTIME_USER_B_ID = "00000000-0000-4000-8000-000000000715"
+REALTIME_AUDIT_ID = uuid.UUID("00000000-0000-4000-8000-000000000716")
+REALTIME_CHECKLIST_ITEM_ID = uuid.UUID("00000000-0000-4000-8000-000000000717")
+REALTIME_GOVERNANCE_ID = "00000000-0000-4000-8000-000000000718"
+QUALITY_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8000-000000000719"
+
 AMO_CODE = "QMSLIVE"
 AMO_SLUG = "qmslive"
 AUDIT_REF = "QAR-MO-26-990"
+REALTIME_AUDIT_REF = "QAR-MO-26-991"
+REALTIME_USER_A_EMAIL = "qms-live-a@example.com"
+REALTIME_USER_B_EMAIL = "qms-live-b@example.com"
+REALTIME_PASSWORD = "QmsLive!2026-Local"
 FIXTURE_PATH = Path(os.environ.get("E2E_QMS_LIVE_FIXTURE", "/tmp/qms-live-audit-real-e2e.json"))
 
 
@@ -67,6 +78,38 @@ def _grant_token(*, amo_id: str, grant: QualityAuditAccessGrant) -> str:
     token = _make_access_token(amo_id=amo_id, grant_id=grant.id, expires_at=grant.expires_at)
     grant.token_hash = _hash_token(token)
     return token
+
+
+def _quality_user(
+    *,
+    user_id: str,
+    amo_id: str,
+    department_id: str,
+    email: str,
+    first_name: str,
+    last_name: str,
+    staff_code: str,
+) -> account_models.User:
+    return account_models.User(
+        id=user_id,
+        amo_id=amo_id,
+        department_id=department_id,
+        staff_code=staff_code,
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        full_name=f"{first_name} {last_name}",
+        role=account_models.AccountRole.QUALITY_MANAGER,
+        position_title="Quality Manager",
+        hashed_password=get_password_hash(REALTIME_PASSWORD),
+        is_active=True,
+        is_amo_admin=False,
+        is_superuser=False,
+        is_auditor=True,
+        is_system_account=False,
+        must_change_password=False,
+        password_changed_at=datetime.now(timezone.utc),
+    )
 
 
 def seed() -> None:
@@ -87,6 +130,52 @@ def seed() -> None:
         db.add(amo)
         db.flush()
 
+        department = account_models.Department(
+            id=QUALITY_DEPARTMENT_ID,
+            amo_id=amo.id,
+            code="quality",
+            name="Quality",
+            default_route=f"/maintenance/{AMO_SLUG}/quality",
+            is_active=True,
+            sort_order=10,
+        )
+        db.add(department)
+        db.flush()
+
+        user_a = _quality_user(
+            user_id=REALTIME_USER_A_ID,
+            amo_id=amo.id,
+            department_id=department.id,
+            email=REALTIME_USER_A_EMAIL,
+            first_name="Quality",
+            last_name="Alpha",
+            staff_code="QMS-LIVE-A",
+        )
+        user_b = _quality_user(
+            user_id=REALTIME_USER_B_ID,
+            amo_id=amo.id,
+            department_id=department.id,
+            email=REALTIME_USER_B_EMAIL,
+            first_name="Quality",
+            last_name="Bravo",
+            staff_code="QMS-LIVE-B",
+        )
+        db.add_all([user_a, user_b])
+        db.flush()
+
+        # A direct tenant module subscription is sufficient for module gating in
+        # this disposable acceptance tenant and avoids inventing a commercial SKU.
+        db.add(account_models.ModuleSubscription(
+            id=QUALITY_MODULE_SUBSCRIPTION_ID,
+            amo_id=amo.id,
+            module_code="quality",
+            status=account_models.ModuleSubscriptionStatus.ENABLED,
+            effective_from=now - timedelta(minutes=5),
+            effective_to=now + timedelta(days=1),
+            plan_code="CI-QMS-LIVE",
+            metadata_json=json.dumps({"source": "qms_live_audit_real_browser_ci"}),
+        ))
+
         audit = quality_models.QMSAudit(
             id=AUDIT_ID,
             amo_id=amo.id,
@@ -106,6 +195,8 @@ def seed() -> None:
             planned_start=date.today(),
             planned_end=date.today() + timedelta(days=1),
             actual_start=date.today(),
+            lead_auditor_user_id=user_a.id,
+            observer_auditor_user_id=user_b.id,
             notify_auditors=False,
             notify_auditees=False,
         )
@@ -126,12 +217,61 @@ def seed() -> None:
         )
         db.add(checklist_item)
         db.flush()
-
         db.add(QualityAuditChecklistExecutionGovernance(
             id=GOVERNANCE_ID,
             amo_id=amo.id,
             audit_id=audit.id,
             checklist_item_id=checklist_item.id,
+            canonical_response_status="NOT_VERIFIED",
+            auditor_notes=None,
+            evidence_references=[],
+            entity_version=1,
+        ))
+
+        realtime_audit = quality_models.QMSAudit(
+            id=REALTIME_AUDIT_ID,
+            amo_id=amo.id,
+            domain=QMSDomain.AMO,
+            kind=QMSAuditKind.INTERNAL,
+            status=QMSAuditStatus.IN_PROGRESS,
+            audit_ref=REALTIME_AUDIT_REF,
+            reference_family="QAR",
+            unit_code="MO",
+            ref_year=26,
+            ref_sequence=991,
+            title="Concurrent realtime browser acceptance",
+            scope="Two authenticated Quality users collaborating on the same live audit.",
+            criteria="QMS live-audit realtime event propagation contract.",
+            auditee="Internal realtime fixture",
+            planned_start=date.today(),
+            planned_end=date.today() + timedelta(days=1),
+            actual_start=date.today(),
+            lead_auditor_user_id=user_a.id,
+            observer_auditor_user_id=user_b.id,
+            notify_auditors=False,
+            notify_auditees=False,
+        )
+        db.add(realtime_audit)
+        db.flush()
+        realtime_item = quality_models.QualityAuditChecklistItem(
+            id=REALTIME_CHECKLIST_ITEM_ID,
+            amo_id=amo.id,
+            audit_id=realtime_audit.id,
+            section="Realtime collaboration",
+            checklist_ref="CHK-RT-001",
+            requirement_ref="QMS-RT-001",
+            prompt="Verify concurrent authenticated browsers receive committed fieldwork updates without manual refresh.",
+            response_status="PENDING",
+            objective_evidence=None,
+            sort_order=10,
+        )
+        db.add(realtime_item)
+        db.flush()
+        db.add(QualityAuditChecklistExecutionGovernance(
+            id=REALTIME_GOVERNANCE_ID,
+            amo_id=amo.id,
+            audit_id=realtime_audit.id,
+            checklist_item_id=realtime_item.id,
             canonical_response_status="NOT_VERIFIED",
             auditor_notes=None,
             evidence_references=[],
@@ -264,8 +404,19 @@ def seed() -> None:
             "finding_id": str(FINDING_ID),
             "external_auditor_token": external_token,
             "auditee_token": auditee_token,
+            "realtime_audit_id": str(REALTIME_AUDIT_ID),
+            "realtime_audit_ref": REALTIME_AUDIT_REF,
+            "realtime_checklist_item_id": str(REALTIME_CHECKLIST_ITEM_ID),
+            "realtime_user_a_id": REALTIME_USER_A_ID,
+            "realtime_user_a_email": REALTIME_USER_A_EMAIL,
+            "realtime_user_b_id": REALTIME_USER_B_ID,
+            "realtime_user_b_email": REALTIME_USER_B_EMAIL,
+            "realtime_password": REALTIME_PASSWORD,
         }, indent=2), encoding="utf-8")
         print(f"Seeded real QMS Live Audit browser fixture at {FIXTURE_PATH}")
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
