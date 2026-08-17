@@ -25,6 +25,7 @@ from . import (
     protected_rest_exact_policy,
     roster_control,
     shift_scheduling_policy,
+    starter_shift_semantics_policy,
     statutory_rule_policy,
     structured_error_policy,
     template_usage_policy,
@@ -71,6 +72,7 @@ roster_control.revoke_calendar_subscription = calendar_subscriptions.revoke_cale
 roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_calendar_subscription
 
 template_usage_policy.install_code_registry_policy(code_registry)
+starter_shift_semantics_policy.install(code_registry)
 compliance_policy.install_validation_policy()
 # Replace candidate sampling with exact continuous interval coverage before any
 # validation request can run. The compatibility seam inside compliance_policy
