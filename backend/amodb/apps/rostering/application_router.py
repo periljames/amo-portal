@@ -15,6 +15,7 @@ from . import (
     consent_notification_policy,
     consent_policy,
     exemption_policy,
+    extended_duty_day_policy,
     extended_duty_policy,
     extended_duty_validation_policy,
     lineage,
@@ -92,6 +93,9 @@ version_copy_policy.install_service_policy(rostering_route_module.services)
 # installing mutation/lifecycle hooks; the hooks call the wrapped service at
 # runtime, so create/edit/accept/decline/supervisor actions share one channel.
 consent_notification_policy.install()
+# A controlled extension must also be expressly permitted by the active daily
+# duty rule. This wraps only the extension service and then revalidates it.
+extended_duty_day_policy.install()
 # Controlled unserviceability extensions then bind themselves to the same
 # consent functions. A material assignment edit cancels the extension consent;
 # supervisor approval still re-runs the ordinary statutory validation engine.
