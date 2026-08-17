@@ -271,8 +271,9 @@ test("creates a draft programme and requires a reason before review transition",
   await page.getByLabel("Programme transition reason").fill("Ready for independent Quality review.");
   await expect(submitReview).toBeEnabled();
   await submitReview.click();
-  await expect(page.getByText("Under Review", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
+  const detailHeader = page.locator(".qms-audit-programme__detail-header");
+  await expect(detailHeader.getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".qms-audit-programme__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
