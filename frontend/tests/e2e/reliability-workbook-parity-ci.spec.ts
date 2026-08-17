@@ -104,9 +104,9 @@ async function fulfilApi(route: Route): Promise<void> {
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
   // apiClient intentionally uses same-origin first on Vite preview surfaces. Mock
-  // the Reliability API before the preview-origin pass-through so Vite's SPA
-  // fallback cannot return index.html for an API request and hide the fixture.
-  if (path.includes("/reliability/workbook-parity")) {
+  // only the Reliability API prefix, not the UI navigation path under
+  // /maintenance/:tenant/reliability/workbook-parity.
+  if (path.startsWith("/reliability/workbook-parity")) {
     if (path.endsWith("/catalog")) return json(catalog());
     if (path.endsWith("/imports/csv-preview") && route.request().method() === "POST") return json(csvPreview(), 201);
     if (path.endsWith("/imports/501/commit") && route.request().method() === "POST") {
