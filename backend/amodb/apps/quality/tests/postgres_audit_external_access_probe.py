@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 
-TARGET_REVISION = "quality_260816_archive_package_artifact"
+TARGET_REVISION = "quality_260817_occurrence_frontend_completion"
 TABLES = (
     "quality_external_identities",
     "quality_audit_participants",
@@ -27,6 +27,17 @@ TABLES = (
     "quality_audit_archive_manifest_items",
     "quality_audit_legal_hold_events",
     "quality_audit_disposition_events",
+    "quality_audit_webauthn_credentials",
+    "quality_audit_webauthn_challenges",
+    "quality_audit_closing_acknowledgements",
+    "quality_audit_verification_tokens",
+    "quality_audit_evidence_artifacts",
+    "quality_audit_presence",
+    "quality_audit_document_request_metadata",
+    "quality_audit_controlled_document_submissions",
+    "quality_audit_meetings",
+    "quality_audit_closing_narratives",
+    "quality_audit_assignment_decisions",
 )
 APPEND_ONLY_TABLES = (
     "quality_audit_access_events",
@@ -44,6 +55,10 @@ APPEND_ONLY_TABLES = (
     "quality_audit_archive_manifest_items",
     "quality_audit_legal_hold_events",
     "quality_audit_disposition_events",
+    "quality_audit_closing_acknowledgements",
+)
+IMMUTABLE_TABLES = (
+    "quality_audit_evidence_artifacts",
 )
 
 
@@ -141,10 +156,29 @@ def main() -> None:
         } <= manifest_columns, manifest_columns
         disposition_columns = _columns(connection, "quality_audit_disposition_events")
         assert {"inventory_sha256", "package_sha256", "action_ref"} <= disposition_columns, disposition_columns
+        signature_columns = _columns(connection, "quality_audit_signature_evidence")
+        assert {
+            "credential_id_hash",
+            "webauthn_sign_count",
+            "webauthn_origin",
+            "webauthn_rp_id",
+            "ceremony_sha256",
+        } <= signature_columns, signature_columns
+        credential_columns = _columns(connection, "quality_audit_webauthn_credentials")
+        assert {"owner_type", "credential_id", "public_key", "sign_count", "is_active"} <= credential_columns, credential_columns
+        verification_columns = _columns(connection, "quality_audit_verification_tokens")
+        assert {"token_hash", "expires_at", "revoked_at", "last_verified_at"} <= verification_columns, verification_columns
+        evidence_columns = _columns(connection, "quality_audit_evidence_artifacts")
+        assert {"sha256", "uploaded_by_user_id", "uploaded_by_participant_id", "client_mutation_id"} <= evidence_columns, evidence_columns
+        presence_columns = _columns(connection, "quality_audit_presence")
+        assert {"actor_type", "actor_key", "user_id", "participant_id", "last_seen_at"} <= presence_columns, presence_columns
+        document_metadata_columns = _columns(connection, "quality_audit_document_request_metadata")
+        assert {"source_mode", "controlled_document_id", "controlled_revision_id"} <= document_metadata_columns, document_metadata_columns
 
         for table_name in TABLES:
             _assert_rls(connection, table_name)
 
+        trigger_tables = list(APPEND_ONLY_TABLES) + list(IMMUTABLE_TABLES)
         triggers = {
             (str(row.table_name), str(row.trigger_name))
             for row in connection.execute(
@@ -156,13 +190,18 @@ def main() -> None:
                       AND event_object_table = ANY(:tables)
                     """
                 ),
-                {"tables": list(APPEND_ONLY_TABLES)},
+                {"tables": trigger_tables},
             ).mappings()
         }
         for table_name in APPEND_ONLY_TABLES:
             assert any(table == table_name and "append_only" in trigger for table, trigger in triggers), (table_name, triggers)
+        for table_name in IMMUTABLE_TABLES:
+            assert any(table == table_name and "immutable" in trigger for table, trigger in triggers), (table_name, triggers)
 
-    print("Live audit migrations, RLS, package integrity columns, participant attribution and append-only history verified")
+    print(
+        "Live audit final-head migrations, RLS, WebAuthn/verification, evidence, presence, "
+        "package integrity, participant attribution and immutable history verified"
+    )
 
 
 if __name__ == "__main__":
