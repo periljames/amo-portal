@@ -1,9 +1,9 @@
 """Tenant-safe scheduled Training compliance notifications.
 
-This job creates durable, deduplicated in-app actions from the authoritative
-Training compliance engine. External delivery remains a separate channel concern;
-this scheduler never marks an email/WhatsApp message as delivered merely because
-an in-app notification was created.
+This worker materialises authoritative in-app Training actions, runs governed
+workflow escalations, and processes the durable external delivery outbox.  It
+never treats creation of an in-app row as proof that an external provider sent
+or delivered a message.
 """
 from __future__ import annotations
 
@@ -141,6 +141,7 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
         "deduped": 0,
         "disabled": 0,
         "failed_tenants": 0,
+        "errors": 0,
     }
     try:
         settings_rows = (
@@ -198,9 +199,6 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
                                 db.add(notification)
                                 db.flush()
                         except IntegrityError:
-                            # Concurrent workers are protected by the database
-                            # unique constraint without rolling back other tenant
-                            # notifications already created in this transaction.
                             summary["deduped"] += 1
                             continue
                         summary["created"] += 1
@@ -221,6 +219,23 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
             db.rollback()
             summary["errors"] += 1
             logger.exception("Training workflow escalation pass failed")
+
+        try:
+            from amodb.apps.training.notification_dispatch import process_outbox, sync_notifications_to_outbox
+
+            sync_summary = sync_notifications_to_outbox(db)
+            db.commit()
+            for key, value in sync_summary.items():
+                summary[f"outbox_{key}"] = int(value)
+
+            delivery_summary = process_outbox(db, now=clock)
+            db.commit()
+            for key, value in delivery_summary.items():
+                summary[f"delivery_{key}"] = int(value)
+        except Exception:
+            db.rollback()
+            summary["errors"] += 1
+            logger.exception("Training durable notification dispatch pass failed")
 
         return summary
     finally:
