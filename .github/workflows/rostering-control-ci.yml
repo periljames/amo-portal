@@ -7,7 +7,7 @@ on:
       - "backend/amodb/alembic/versions/rostering_*"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
-      - "frontend/src/types/rostering.ts"
+      - "frontend/src/types/rostering*.ts"
       - ".github/workflows/rostering-control-ci.yml"
   push:
     branches: [main]
@@ -16,7 +16,7 @@ on:
       - "backend/amodb/alembic/versions/rostering_*"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
-      - "frontend/src/types/rostering.ts"
+      - "frontend/src/types/rostering*.ts"
       - ".github/workflows/rostering-control-ci.yml"
 
 permissions:
@@ -66,11 +66,14 @@ jobs:
             backend/amodb/apps/rostering/code_registry.py \
             backend/amodb/apps/rostering/code_registry_models.py \
             backend/amodb/apps/rostering/code_registry_router.py \
+            backend/amodb/apps/rostering/compliance_audit_policy.py \
             backend/amodb/apps/rostering/compliance_policy.py \
+            backend/amodb/apps/rostering/protected_rest_exact_policy.py \
             backend/amodb/apps/rostering/statutory_rule_policy.py \
             backend/amodb/apps/rostering/consent_models.py \
             backend/amodb/apps/rostering/consent_service.py \
             backend/amodb/apps/rostering/consent_notification_policy.py \
+            backend/amodb/apps/rostering/consent_revalidation_policy.py \
             backend/amodb/apps/rostering/consent_policy.py \
             backend/amodb/apps/rostering/consent_router.py \
             backend/amodb/apps/rostering/exemption_service.py \
@@ -82,6 +85,12 @@ jobs:
             backend/amodb/apps/rostering/extended_duty_validation_policy.py \
             backend/amodb/apps/rostering/extended_duty_policy.py \
             backend/amodb/apps/rostering/extended_duty_router.py \
+            backend/amodb/apps/rostering/shift_semantics_router.py \
+            backend/amodb/apps/rostering/shift_scheduling_policy.py \
+            backend/amodb/apps/rostering/starter_shift_semantics_policy.py \
+            backend/amodb/apps/rostering/workflow_state_router.py \
+            backend/amodb/apps/rostering/lifecycle_error_policy.py \
+            backend/amodb/apps/rostering/structured_error_policy.py \
             backend/amodb/apps/rostering/controlled_exports.py \
             backend/amodb/apps/rostering/lineage.py \
             backend/amodb/apps/rostering/roster_control.py \
@@ -101,7 +110,9 @@ jobs:
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
             backend/amodb/apps/rostering/tests/test_consent_exemption_contract.py \
             backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
-            backend/amodb/apps/rostering/tests/test_roster_control_contract.py
+            backend/amodb/apps/rostering/tests/test_protected_rest_exact_policy.py \
+            backend/amodb/apps/rostering/tests/test_roster_control_contract.py \
+            backend/amodb/apps/rostering/tests/test_shift_operational_policy_contract.py
 
   frontend-controlled-roster:
     runs-on: ubuntu-24.04
