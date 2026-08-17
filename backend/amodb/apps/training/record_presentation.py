@@ -19,6 +19,7 @@ from sqlalchemy.orm import noload
 
 from ..accounts import models as accounts_models
 from . import compliance as training_compliance
+from . import course_lifecycle as training_course_lifecycle
 from . import models as training_models
 from . import record_lifecycle as training_record_lifecycle
 
@@ -34,20 +35,7 @@ _STATUS_LABELS = {
 
 
 def normalized_training_kind(value: Any) -> str:
-    """Return the canonical lifecycle type without mutating historical codes.
-
-    REFRESHER remains readable from legacy rows but is presented and evaluated as
-    RECURRENT. CONTINUATION is also recurrent lifecycle training, not a third
-    user-facing primary type.
-    """
-
-    raw = getattr(value, "value", value)
-    normalized = str(raw or "").strip().upper()
-    if normalized in {"REFRESHER", "RECURRENT", "CONTINUATION", "RENEWAL"}:
-        return "RECURRENT"
-    if normalized == "INITIAL":
-        return "INITIAL"
-    return normalized or "OTHER"
+    return training_course_lifecycle.normalized_training_kind(value)
 
 
 def training_type_label(value: Any) -> str:
@@ -60,40 +48,15 @@ def training_type_label(value: Any) -> str:
 
 
 def is_initial_course_explicit(course: training_models.TrainingCourse) -> bool:
-    if normalized_training_kind(getattr(course, "kind", None)) == "INITIAL":
-        return True
-    return str(getattr(course, "status", "") or "").strip().upper() == "INITIAL"
+    return training_course_lifecycle.is_initial_course(course)
 
 
 def is_recurrent_course_explicit(course: training_models.TrainingCourse) -> bool:
-    if normalized_training_kind(getattr(course, "kind", None)) == "RECURRENT":
-        return True
-    return str(getattr(course, "status", "") or "").strip().upper() in {"RECURRENT", "REFRESHER", "CONTINUATION", "RENEWAL"}
+    return training_course_lifecycle.is_recurrent_course(course)
 
 
 def explicit_recurrence_key(course: training_models.TrainingCourse, courses: Iterable[training_models.TrainingCourse] = ()) -> str:
-    """Group only when the catalogue declares the relationship.
-
-    `group_code` is preferred. A declared prerequisite relationship is the
-    compatibility fallback. Course-code suffixes and title words are never used.
-    """
-
-    group_code = str(getattr(course, "group_code", "") or "").strip()
-    if group_code:
-        return f"group:{group_code.casefold()}"
-
-    prereq = str(getattr(course, "prerequisite_course_id", "") or "").strip()
-    if prereq:
-        return f"prerequisite:{prereq.casefold()}"
-
-    code = str(getattr(course, "course_id", "") or "").strip()
-    if code:
-        for candidate in courses:
-            declared = str(getattr(candidate, "prerequisite_course_id", "") or "").strip()
-            if declared and declared.casefold() == code.casefold():
-                return f"prerequisite:{code.casefold()}"
-
-    return f"course:{getattr(course, 'id', code)}"
+    return training_course_lifecycle.explicit_recurrence_key(course, courses)
 
 
 def mask_public_phone(value: Optional[str]) -> Optional[str]:
@@ -148,7 +111,7 @@ def _canonical_origin_candidates(db, amo: Optional[accounts_models.AMO]) -> list
             settings = None
         if settings is not None and getattr(settings, "api_base_url", None):
             candidates.append(str(settings.api_base_url))
-    for env_name in ("APP_PUBLIC_BASE_URL", "PUBLIC_APP_URL", "PLATFORM_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"):
+    for env_name in ("APP_PUBLIC_BASE_URL", "PLATFORM_API_BASE_URL", "PUBLIC_APP_URL", "PLATFORM_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"):
         value = os.getenv(env_name)
         if value:
             candidates.append(value)
@@ -314,7 +277,7 @@ def _build_requirement_rows(db, *, amo_id: str, user: accounts_models.User) -> l
                 "course_code": getattr(record_course, "course_id", None),
                 "completed": _iso(record.completion_date),
                 "next_due": _iso(record.valid_until),
-                "hours": getattr(record, "training_hours", None),
+                "hours": getattr(record, "hours_completed", None),
                 "score": getattr(record, "exam_score", None),
                 "certificate_reference": getattr(record, "certificate_reference", None),
                 "evidence_available": str(record.id) in evidence_record_ids,
@@ -352,12 +315,41 @@ def _augment_public_payload(original_payload, db, *, amo_id: str, user_id: str, 
     if user is None:
         return payload
 
+    legacy_records = list(payload.get("records") or [])
     rows = _build_requirement_rows(db, amo_id=amo_id, user=user)
     if record_id:
         rows = [
             row for row in rows
             if any(str(history.get("record_id")) == str(record_id) for history in row.get("history") or [])
         ]
+        if not rows:
+            selected = next((entry for entry in legacy_records if str(entry.get("record_id")) == str(record_id)), None)
+            if selected is not None:
+                rows = [{
+                    "requirement_key": f"record:{record_id}",
+                    "course_pk": None,
+                    "course_id": str(selected.get("course_id") or ""),
+                    "course_name": str(selected.get("course_name") or "Training record"),
+                    "course_type": "Training",
+                    "last_completed": selected.get("completion_date"),
+                    "next_due": selected.get("valid_until"),
+                    "scheduled": None,
+                    "compliance_status": "Completed",
+                    "evidence_available": False,
+                    "record_count": 1,
+                    "history": [{
+                        "record_id": str(record_id),
+                        "type": "Training",
+                        "course_code": selected.get("course_id"),
+                        "completed": selected.get("completion_date"),
+                        "next_due": selected.get("valid_until"),
+                        "hours": None,
+                        "score": None,
+                        "certificate_reference": selected.get("certificate_reference"),
+                        "evidence_available": False,
+                        "verification_status": selected.get("verification_status"),
+                    }],
+                }]
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
         counts[row["compliance_status"]] += 1
@@ -498,8 +490,9 @@ document.querySelectorAll('[data-action-row]').forEach(row=>{{
 
 
 class _NumberedCanvas(canvas.Canvas):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, training_pdf_meta=None, **kwargs):
         self._saved_pages = []
+        self._training_pdf_meta = training_pdf_meta or {}
         super().__init__(*args, **kwargs)
 
     def showPage(self):
@@ -510,13 +503,22 @@ class _NumberedCanvas(canvas.Canvas):
         page_count = len(self._saved_pages)
         for state in self._saved_pages:
             self.__dict__.update(state)
+            meta = self._training_pdf_meta or {}
             self.setFont("Helvetica", 7.5)
             self.setFillColor(colors.HexColor("#667085"))
-            self.drawString(14 * mm, 9 * mm, "Controlled Training Record")
-            self.drawCentredString(A4[0] / 2, 9 * mm, "QAM/49A Rev 00")
+            self.drawString(14 * mm, 9 * mm, str(meta.get("footer_note") or "Controlled Training Record")[:88])
+            form_no = str(meta.get("form_no") or "QAM/49A")
+            revision = str(meta.get("revision") or "00")
+            self.drawCentredString(A4[0] / 2, 9 * mm, f"{form_no} Rev {revision}")
             self.drawRightString(A4[0] - 14 * mm, 9 * mm, f"Page {self._pageNumber} of {page_count}")
             super().showPage()
         super().save()
+
+
+def _numbered_canvas_maker(meta: dict[str, Any]):
+    def maker(*args, **kwargs):
+        return _NumberedCanvas(*args, training_pdf_meta=meta, **kwargs)
+    return maker
 
 
 def _group_pdf_status_items(status_items: list[Any], course_by_id: dict[str, Any]) -> list[Any]:
@@ -546,6 +548,7 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
         upcoming_events = kwargs.get("upcoming_events") or []
         verification_url = kwargs.get("verification_url")
         report_settings = kwargs.get("report_settings") or {}
+        deferrals = kwargs.get("deferrals") or []
         status_items = _group_pdf_status_items(status_items, course_by_id)
     except Exception:
         return original_builder(*args, **kwargs)
@@ -555,8 +558,19 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
     if not verification_url or urlsplit(str(verification_url)).scheme != "https" or not urlsplit(str(verification_url)).netloc:
         raise RuntimeError("Training record PDF requires an absolute HTTPS verification URL.")
 
+    show_compliance_summary = report_settings.get("show_compliance_summary", True) is not False
+    show_training_history = report_settings.get("show_training_history", True) is not False
+    show_scheduled_events = report_settings.get("show_scheduled_events", True) is not False
+    show_deferrals = report_settings.get("show_deferrals", True) is not False
+    report_title = str(report_settings.get("title") or "Individual Training & Compliance Record")
+    report_subtitle = str(report_settings.get("subtitle") or "")
+    form_no = str(report_settings.get("form_no") or "QAM/49A")
+    issue_date = str(report_settings.get("issue_date") or "")
+    revision = str(report_settings.get("revision") or "00")
+    footer_note = str(report_settings.get("footer_note") or "Controlled Training Record")
+
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=13*mm, bottomMargin=16*mm)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=13*mm, bottomMargin=16*mm, title=report_title)
     styles = getSampleStyleSheet()
     body = ParagraphStyle("BodyCompact", parent=styles["BodyText"], fontSize=7.6, leading=9.2, spaceAfter=0)
     small = ParagraphStyle("Small", parent=body, fontSize=6.8, leading=8, textColor=colors.HexColor("#667085"))
@@ -571,7 +585,9 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
         except Exception:
             logo = None
     masthead_left = logo or Paragraph(html.escape(str(getattr(amo, "name", None) or "AMO")), title_style)
-    masthead = Table([[masthead_left, Paragraph(f"<b>{html.escape(str(getattr(amo,'name',None) or 'Approved Maintenance Organisation'))}</b><br/><b>INDIVIDUAL TRAINING &amp; COMPLIANCE RECORD</b>", body), Paragraph("<b>QAM/49A</b><br/>Rev 00", body)]], colWidths=[30*mm, 118*mm, 28*mm])
+    masthead_title = html.escape(report_title.upper())
+    masthead_meta = f"<b>{html.escape(form_no)}</b><br/>Rev {html.escape(revision)}" + (f"<br/>{html.escape(issue_date)}" if issue_date else "")
+    masthead = Table([[masthead_left, Paragraph(f"<b>{html.escape(str(getattr(amo,'name',None) or 'Approved Maintenance Organisation'))}</b><br/><b>{masthead_title}</b>" + (f"<br/><font color='#667085'>{html.escape(report_subtitle)}</font>" if report_subtitle else ""), body), Paragraph(masthead_meta, body)]], colWidths=[30*mm, 118*mm, 28*mm])
     masthead.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LINEBELOW",(0,0),(-1,-1),1.2,accent),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
     story.extend([masthead, Spacer(1,3*mm)])
 
@@ -601,7 +617,8 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
         counts[str(getattr(item,"status","") or "").upper()]+=1
     band = Table([[f"{counts['OK']} Current", f"{counts['DUE_SOON']} Due Soon", f"{counts['OVERDUE']} Overdue", f"{counts['DEFERRED']} Deferred"]], colWidths=[44*mm]*4)
     band.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f8fafc")),("BOX",(0,0),(-1,-1),.5,colors.HexColor("#d0d5dd")),("ALIGN",(0,0),(-1,-1),"CENTER"),("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7.5),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
-    story.extend([band, Spacer(1,2.5*mm)])
+    if show_compliance_summary:
+        story.extend([band, Spacer(1,2.5*mm)])
 
     item_by_code={str(getattr(item,"course_id",'')):item for item in status_items}
     table_data=[[Paragraph("<b>Training</b>",small),Paragraph("<b>Completed</b>",small),Paragraph("<b>Next Due</b>",small),Paragraph("<b>Scheduled</b>",small),Paragraph("<b>Status</b>",small)]]
@@ -622,7 +639,48 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
     training_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#f2f4f7")),("GRID",(0,0),(-1,-1),.3,colors.HexColor("#d0d5dd")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),3),("RIGHTPADDING",(0,0),(-1,-1),3),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
     story.append(training_table)
 
-    doc.build(story, canvasmaker=_NumberedCanvas)
+    if show_training_history and records:
+        history_data = [[Paragraph("<b>Course</b>", small), Paragraph("<b>Completed</b>", small), Paragraph("<b>Valid until</b>", small), Paragraph("<b>Certificate</b>", small)]]
+        for record in sorted(records, key=lambda row: (getattr(row, "completion_date", None) or date.min, str(getattr(row, "created_at", ""))), reverse=True):
+            course = course_by_id.get(str(getattr(record, "course_id", "")))
+            history_data.append([
+                Paragraph(html.escape(str(getattr(course, "course_name", None) or getattr(record, "course_id", "Training"))), body),
+                Paragraph(_pdf_date(getattr(record, "completion_date", None)), body),
+                Paragraph(_pdf_date(getattr(record, "valid_until", None)), body),
+                Paragraph(html.escape(str(getattr(record, "certificate_reference", None) or "—")), body),
+            ])
+        history_table = Table(history_data, colWidths=[86*mm, 30*mm, 30*mm, 32*mm], repeatRows=1)
+        history_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#f2f4f7")),("GRID",(0,0),(-1,-1),.3,colors.HexColor("#d0d5dd")),("VALIGN",(0,0),(-1,-1),"TOP"),("FONTSIZE",(0,0),(-1,-1),6.8)]))
+        story.extend([Spacer(1,2.5*mm), Paragraph("<b>Training record log</b>", body), history_table])
+
+    if show_scheduled_events and upcoming_events:
+        event_data = [[Paragraph("<b>Scheduled training</b>", small), Paragraph("<b>Starts</b>", small), Paragraph("<b>Status</b>", small)]]
+        for event in sorted(upcoming_events, key=lambda row: (getattr(row, "starts_on", None) or date.max, str(getattr(row, "title", "")) )):
+            course = course_by_id.get(str(getattr(event, "course_id", "")))
+            event_data.append([
+                Paragraph(html.escape(str(getattr(event, "title", None) or getattr(course, "course_name", None) or "Training event")), body),
+                Paragraph(_pdf_date(getattr(event, "starts_on", None)), body),
+                Paragraph(html.escape(str(getattr(getattr(event, "status", None), "value", getattr(event, "status", None)) or "—")), body),
+            ])
+        event_table = Table(event_data, colWidths=[108*mm, 34*mm, 36*mm], repeatRows=1)
+        event_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#f2f4f7")),("GRID",(0,0),(-1,-1),.3,colors.HexColor("#d0d5dd")),("VALIGN",(0,0),(-1,-1),"TOP")]))
+        story.extend([Spacer(1,2.5*mm), Paragraph("<b>Scheduled training and events</b>", body), event_table])
+
+    if show_deferrals and deferrals:
+        deferral_data = [[Paragraph("<b>Course</b>", small), Paragraph("<b>Original due</b>", small), Paragraph("<b>Extended due</b>", small), Paragraph("<b>Status</b>", small)]]
+        for item in deferrals:
+            course = course_by_id.get(str(getattr(item, "course_id", "")))
+            deferral_data.append([
+                Paragraph(html.escape(str(getattr(course, "course_name", None) or getattr(item, "course_id", "Training"))), body),
+                Paragraph(_pdf_date(getattr(item, "original_due_date", None)), body),
+                Paragraph(_pdf_date(getattr(item, "requested_new_due_date", None)), body),
+                Paragraph(html.escape(str(getattr(getattr(item, "status", None), "value", getattr(item, "status", None)) or "—")), body),
+            ])
+        deferral_table = Table(deferral_data, colWidths=[76*mm, 34*mm, 34*mm, 34*mm], repeatRows=1)
+        deferral_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#f2f4f7")),("GRID",(0,0),(-1,-1),.3,colors.HexColor("#d0d5dd")),("VALIGN",(0,0),(-1,-1),"TOP")]))
+        story.extend([Spacer(1,2.5*mm), Paragraph("<b>Deferral and extension history</b>", body), deferral_table])
+
+    doc.build(story, canvasmaker=_numbered_canvas_maker({"form_no": form_no, "revision": revision, "footer_note": footer_note}))
     return buffer.getvalue()
 
 

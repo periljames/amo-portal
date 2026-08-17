@@ -328,108 +328,6 @@ def _extract_training_event_metadata(notes: Optional[str]) -> tuple[dict, Option
     return meta if isinstance(meta, dict) else {}, remainder.strip() or None
 
 
-def _course_family_key_from_course(course: training_models.TrainingCourse) -> str:
-    values: list[str] = []
-    for attr in ("course_id", "course_name", "category_raw", "scope", "regulatory_reference"):
-        value = getattr(course, attr, None)
-        if isinstance(value, str) and value.strip():
-            values.append(value.strip().lower())
-    blob = " ".join(values)
-    if not blob:
-        return ""
-    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|one[ _-]?off)\b", " ", blob)
-    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
-    return cleaned
-
-
-def _find_related_refresher_courses(
-    db: Session,
-    *,
-    amo_id: str,
-    initial_course: training_models.TrainingCourse,
-) -> list[training_models.TrainingCourse]:
-    courses = (
-        db.query(training_models.TrainingCourse)
-        .filter(
-            training_models.TrainingCourse.amo_id == amo_id,
-            training_models.TrainingCourse.is_active.is_(True),
-        )
-        .all()
-    )
-    initial_family = _course_family_key_from_course(initial_course)
-    initial_code = (getattr(initial_course, "course_id", "") or "").strip().upper()
-    related: list[training_models.TrainingCourse] = []
-    for course in courses:
-        if course.id == initial_course.id:
-            continue
-        if not training_compliance.is_refresher_course(course):
-            continue
-        prerequisite_code = (getattr(course, "prerequisite_course_id", "") or "").strip().upper()
-        if prerequisite_code and prerequisite_code == initial_code:
-            related.append(course)
-            continue
-        course_family = _course_family_key_from_course(course)
-        if initial_family and course_family and course_family == initial_family:
-            related.append(course)
-    return related
-
-
-def _seed_refresher_records_from_initial(
-    db: Session,
-    *,
-    amo_id: str,
-    trainee_id: str,
-    initial_course: training_models.TrainingCourse,
-    completion_date: date,
-    event_id: Optional[str],
-    remarks: Optional[str],
-    is_manual_entry: bool,
-    created_by_user_id: Optional[str],
-) -> list[training_models.TrainingRecord]:
-    seeded: list[training_models.TrainingRecord] = []
-    for refresher in _find_related_refresher_courses(db, amo_id=amo_id, initial_course=initial_course):
-        try:
-            seeded_record_id, _renewed_for_seed = training_record_lifecycle.prepare_training_record_insert(
-                db,
-                amo_id=amo_id,
-                user_id=trainee_id,
-                course_id=refresher.id,
-                completion_date=completion_date,
-                confirm_renewal=True,
-                actor_user_id=created_by_user_id,
-            )
-        except ValueError as exc:
-            if str(exc) == "DUPLICATE_TRAINING_RECORD":
-                continue
-            raise
-        valid_until = _add_months(completion_date, refresher.frequency_months) if refresher.frequency_months else None
-        note_parts = [part for part in [remarks, f"AUTO-SEEDED FROM INITIAL {initial_course.course_id}"] if part]
-        seeded_record = training_models.TrainingRecord(
-            id=seeded_record_id,
-            amo_id=amo_id,
-            user_id=trainee_id,
-            course_id=refresher.id,
-            event_id=event_id,
-            completion_date=completion_date,
-            valid_until=valid_until,
-            hours_completed=getattr(refresher, "nominal_hours", None),
-            exam_score=None,
-            certificate_reference=None,
-            remarks=" | ".join(note_parts) if note_parts else None,
-            is_manual_entry=is_manual_entry,
-            created_by_user_id=created_by_user_id,
-            record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
-            source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
-            verification_status=training_models.TrainingRecordVerificationStatus.VERIFIED,
-            verified_at=datetime.now(timezone.utc),
-            verified_by_user_id=created_by_user_id,
-            verification_comment="Derived from a verified initial-course completion.",
-        )
-        db.add(seeded_record)
-        seeded.append(seeded_record)
-    return seeded
-
-
 def _get_amo_logo_path(db: Session, amo_id: str) -> Optional[str]:
     logo_asset = (
         db.query(accounts_models.AMOAsset)
@@ -4456,26 +4354,11 @@ def create_training_record(
     record.verified_by_user_id = current_user.id
     record.verification_comment = "Captured by authorized training editor."
 
-    seeded_refresher_records: list[training_models.TrainingRecord] = []
-    if training_compliance.is_initial_course(course):
-        seeded_refresher_records = _seed_refresher_records_from_initial(
-            db,
-            amo_id=current_user.amo_id,
-            trainee_id=trainee.id,
-            initial_course=course,
-            completion_date=payload.completion_date,
-            event_id=payload.event_id,
-            remarks=payload.remarks,
-            is_manual_entry=payload.is_manual_entry,
-            created_by_user_id=current_user.id,
-        )
 
     notif_title = "Training record updated"
     notif_body = f"A training record for '{course.course_name}' has been added/updated on your profile."
     if renewed_records:
         notif_body += f" The previous active entr{'y was' if len(renewed_records) == 1 else 'ies were'} marked as renewed and hidden from the current record view."
-    if seeded_refresher_records:
-        notif_body += f" {len(seeded_refresher_records)} linked refresher entr{'y' if len(seeded_refresher_records) == 1 else 'ies'} were auto-seeded from the initial completion."
     _create_notification(
         db,
         amo_id=current_user.amo_id,
@@ -4502,7 +4385,6 @@ def create_training_record(
             "course_id": course.id,
             "completion_date": str(payload.completion_date),
             "renewed_record_ids": [row.id for row in renewed_records],
-            "auto_seeded_refresher_count": len(seeded_refresher_records),
         },
     )
 
