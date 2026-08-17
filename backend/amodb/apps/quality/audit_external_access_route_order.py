@@ -8,6 +8,7 @@ from . import audit_external_access_router
 from . import audit_external_report_acknowledgement_router as _audit_external_report_acknowledgement_router  # noqa: F401
 from . import audit_external_fieldwork_router as _audit_external_fieldwork_router  # noqa: F401
 from . import audit_external_session_guard_router as _audit_external_session_guard_router  # noqa: F401
+from . import audit_external_passkey_router as _audit_external_passkey_router  # noqa: F401
 from . import audit_external_participant_guard_router
 from . import audit_external_finding_draft_router
 from . import audit_external_finding_promotion_router
@@ -47,9 +48,8 @@ def _has_route(api_router: APIRouter, *, path_fragment: str, method: str | None 
 
 
 def _register(api_router: APIRouter) -> None:
-    # The assurance guard intentionally precedes the legacy create route. It
-    # delegates valid EMAIL_LINK invitations and rejects unenforced MFA/PASSKEY
-    # labels before the older handler can persist them.
+    # The assurance guard permits only modes backed by an implemented ceremony:
+    # EMAIL_LINK and external-auditor PASSKEY. MFA remains fail-closed.
     if not _has_route(api_router, path_fragment="/external-participants", name="create_external_participant_guarded"):
         api_router.include_router(audit_external_participant_guard_router.router)
     if not _has_route(api_router, path_fragment="/external-participants", method="GET"):
