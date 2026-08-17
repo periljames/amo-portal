@@ -18,11 +18,11 @@
     "test:tenant-render": "playwright test --config playwright.tenant.config.ts",
     "test:aircraft-architecture": "vitest run src/services/dailyUtilisation.test.ts",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
-    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/pages/qms/routes/qmsWorkspaceRegistry.test.ts src/components/Layout/qmsSidebarNavigation.test.ts src/pages/qms/planner/qmsPlannerModel.test.ts src/pages/qms/planner/qmsPlannerClock.test.ts",
+    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/pages/qms/routes/qmsWorkspaceRegistry.test.ts src/components/Layout/qmsSidebarNavigation.test.ts src/pages/qms/planner/qmsPlannerModel.test.ts src/pages/qms/planner/qmsPlannerClock.test.ts src/services/apiClientLatency.contract.test.ts src/services/portalRequestEligibility.test.ts",
     "test:qms-planner": "vitest run src/pages/qms/planner/qmsPlannerModel.test.ts src/pages/qms/planner/qmsPlannerClock.test.ts",
     "test:qms-overview": "vitest run src/services/qmsDashboard.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/pages/qms/routes/qmsWorkspaceRegistry.test.ts",
     "test:tenant-shell": "vitest run src/app/portalRouteManifest.test.ts src/services/adminProfileMode.test.ts src/services/departmentHome.test.ts && npm run check:css",
-    "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts src/services/devProxyRouting.test.ts"
+    "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts src/services/devProxyRouting.test.ts src/services/apiClientLatency.contract.test.ts src/services/portalRequestEligibility.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -62,9 +62,9 @@
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "baseline-browser-mapping": "^2.9.17",
     "@vitejs/plugin-react": "^5.1.0",
     "@zxing/browser": "^0.1.5",
-    "baseline-browser-mapping": "^2.9.17",
     "concurrently": "^9.2.1",
     "eslint": "9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

@@ -10,12 +10,13 @@ import {
 import { assertOfflineReplayAllowed, classifyOfflineMutation } from "./offlineCapabilities";
 import {
   getPortalConnectivity,
-  isPortalReady,
   notePortalNetworkFailure,
   notePortalResponse,
+  probePortalReadiness,
   recommendedRequestTimeoutMs,
   waitForPortalReadiness,
 } from "./portalConnectivity";
+import { isPortalRequestNetworkEligible } from "./portalRequestEligibility";
 
 export type PortalOfflineOptions = {
   cache?: boolean;
@@ -31,6 +32,12 @@ export type PortalFetchInit = RequestInit & {
   timeoutMs?: number;
   offline?: PortalOfflineOptions;
 };
+
+export const PROXY_TRANSPORT_ERROR_HEADER = "X-AMO-Proxy-Transport-Error";
+
+export function isProxyTransportFailureResponse(response: Response): boolean {
+  return response.headers.get(PROXY_TRANSPORT_ERROR_HEADER) === "1";
+}
 
 export class OfflineQueuedError extends Error {
   readonly operation: OfflineOutboxEntry;
@@ -109,8 +116,12 @@ async function confirmedNotAccepted(response: Response): Promise<boolean> {
     && ["DB_TEMPORARILY_UNAVAILABLE", "DB_POOL_TIMEOUT"].includes(String(body?.error_code || ""));
 }
 
-function networkAvailable(): boolean {
-  return typeof navigator === "undefined" || isPortalReady();
+function networkAvailable(method = "GET"): boolean {
+  return isPortalRequestNetworkEligible(
+    method,
+    getPortalConnectivity().state,
+    typeof navigator === "undefined" || navigator.onLine !== false,
+  );
 }
 
 function isAbortError(error: unknown): boolean {
@@ -215,12 +226,22 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const queueMutation = !isGet && offline?.queueMutation === true;
   const cachePath = normalizedCachePath(path);
   const requestScope = currentOfflineScope();
+  const isAbsoluteTransportAttempt = /^https?:\/\//i.test(path);
+  const connectivityState = getPortalConnectivity().state;
 
-  if (getPortalConnectivity().state === "RECOVERING") {
-    await waitForPortalReadiness();
+  if (connectivityState === "RECOVERING") {
+    // Navigation/read requests are never blocked by the control-plane probe.
+    // Probe concurrently so the shared status can converge in the background.
+    if (isGet) void probePortalReadiness();
+    else await waitForPortalReadiness();
   }
 
-  if (!networkAvailable()) {
+  // apiClient's alternate backend is an absolute URL. If the primary route
+  // just failed and marked the shared portal state OFFLINE, that direct probe
+  // must still be allowed to run; otherwise the fallback is blocked by the
+  // very failure it is meant to recover from. Browser-online reads also bypass
+  // stale shared OFFLINE state so navigation can recover without a health gate.
+  if (!networkAvailable(method) && !isAbsoluteTransportAttempt) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
@@ -242,8 +263,14 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   try {
     const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
-    notePortalResponse(response);
+    const proxyTransportFailure = isProxyTransportFailureResponse(response);
+    // A Vite proxy connection failure is an HTTP-shaped transport error. Do
+    // not classify it as a backend response or replace it with stale cache;
+    // apiClient needs the marker so it can try the independently configured
+    // direct backend exactly once.
+    if (!proxyTransportFailure) notePortalResponse(response);
     assertRequestScope(requestScope);
+    if (proxyTransportFailure) return response;
 
     if (response.ok) {
       if (cacheEnabled) {
