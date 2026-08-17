@@ -293,6 +293,7 @@ async function prepareLifecycle(page: Page): Promise<void> {
   await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
+  await page.route("**/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
