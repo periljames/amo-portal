@@ -5,7 +5,10 @@ import type {
   ExternalAuditorMutationResult,
   ExternalChecklistResponse,
 } from "./qmsAuditExternalAccess";
-import type { ExternalAuditOutboxMutation } from "./qmsExternalAuditOutbox";
+import {
+  clearExternalAuditMutations,
+  type ExternalAuditOutboxMutation,
+} from "./qmsExternalAuditOutbox";
 
 export class ExternalAuditMutationError extends Error {
   status: number;
@@ -89,6 +92,12 @@ export async function commitExternalAuditorMutation(
     }),
   });
   if (!response.ok) {
+    // A revoked, expired or no-longer-purpose-bound guest identity must not leave
+    // confidential queued fieldwork lingering on the device. Purge only this
+    // audit/participant scope; unrelated offline work remains isolated.
+    if ([401, 403, 404].includes(response.status)) {
+      await clearExternalAuditMutations({ auditId: model.audit_id, participantId: model.participant_id }).catch(() => undefined);
+    }
     const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
     const detail = payload?.detail;
     let message = `External checklist update failed with status ${response.status}.`;
