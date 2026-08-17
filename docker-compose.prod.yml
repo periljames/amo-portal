@@ -8,6 +8,20 @@ services:
     environment:
       AMO_REQUIRE_SHARED_STORAGE: "true"
       AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING: "true"
+      # User-facing API capacity is reserved for HTTP/realtime traffic. Durable
+      # and scheduled work runs in the isolated services below.
+      PORTAL_EMBEDDED_JOB_WORKER: "false"
+      PORTAL_EMBEDDED_SCHEDULED_WORKER: "false"
+      DOCUMENT_EVIDENCE_PACK_EMBEDDED_WORKER: "false"
+      DB_POOL_SIZE: "${PORTAL_DB_POOL_SIZE:-20}"
+      DB_MAX_OVERFLOW: "${PORTAL_DB_MAX_OVERFLOW:-10}"
+      DB_POOL_TIMEOUT: "${PORTAL_DB_POOL_TIMEOUT:-5}"
+      PORTAL_API_PROCESS_COUNT: "1"
+      PORTAL_WORKER_PROCESS_COUNT: "${PORTAL_WORKER_PROCESS_COUNT:-5}"
+      PORTAL_SCHEDULED_PROCESS_COUNT: "${PORTAL_SCHEDULED_PROCESS_COUNT:-1}"
+      DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT: "${DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT:-1}"
+      PLATFORM_OPS_GATEWAY_PROCESS_COUNT: "1"
+      PLATFORM_OPS_WORKER_PROCESS_COUNT: "1"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -18,6 +32,66 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+
+  portal-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORTAL_WORKER_FAMILIES: "${PORTAL_WORKER_FAMILIES:-workforce,saas,training-workbooks,training-reports,document-indexing}"
+      PORTAL_WORKER_CONCURRENCY: "${PORTAL_WORKER_CONCURRENCY:-1}"
+      PORTAL_WORKER_DB_POOL_SIZE: "${PORTAL_WORKER_DB_POOL_SIZE:-2}"
+      PORTAL_WORKER_DB_MAX_OVERFLOW: "${PORTAL_WORKER_DB_MAX_OVERFLOW:-1}"
+      PORTAL_WORKER_DB_POOL_TIMEOUT: "${PORTAL_WORKER_DB_POOL_TIMEOUT:-3}"
+    command: ["python", "-m", "amodb.jobs.portal_worker_main"]
+    restart: unless-stopped
+    cpus: "${PORTAL_WORKER_CPU_LIMIT:-2.0}"
+    mem_limit: "${PORTAL_WORKER_MEMORY_LIMIT:-2g}"
+    pids_limit: 256
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  portal-scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORTAL_SCHEDULED_DB_POOL_SIZE: "${PORTAL_SCHEDULED_DB_POOL_SIZE:-2}"
+      PORTAL_SCHEDULED_DB_MAX_OVERFLOW: "${PORTAL_SCHEDULED_DB_MAX_OVERFLOW:-1}"
+      PORTAL_SCHEDULED_DB_POOL_TIMEOUT: "${PORTAL_SCHEDULED_DB_POOL_TIMEOUT:-3}"
+    command: ["python", "-m", "amodb.jobs.portal_scheduler_main"]
+    restart: unless-stopped
+    cpus: "${PORTAL_SCHEDULER_CPU_LIMIT:-0.5}"
+    mem_limit: "${PORTAL_SCHEDULER_MEMORY_LIMIT:-512m}"
+    pids_limit: 128
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  document-evidence-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE: "${DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE:-1}"
+      DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW: "${DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW:-1}"
+      DOCUMENT_EVIDENCE_PACK_DB_POOL_TIMEOUT: "${DOCUMENT_EVIDENCE_PACK_DB_POOL_TIMEOUT:-3}"
+      DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS: "${DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS:-2}"
+    command: ["python", "-m", "amodb.apps.doc_control.evidence_pack_worker_main"]
+    restart: unless-stopped
+    cpus: "${DOCUMENT_EVIDENCE_WORKER_CPU_LIMIT:-1.0}"
+    mem_limit: "${DOCUMENT_EVIDENCE_WORKER_MEMORY_LIMIT:-1g}"
+    pids_limit: 128
+    depends_on:
+      backend:
+        condition: service_healthy
 
   platform-ops-gateway:
     build:
