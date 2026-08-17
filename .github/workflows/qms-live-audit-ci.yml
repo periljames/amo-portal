@@ -4,8 +4,15 @@ on:
   pull_request:
     paths:
       - "backend/amodb/alembic/versions/quality_260816_*.py"
+      - "backend/amodb/alembic/versions/quality_260817_*.py"
       - "backend/amodb/apps/quality/audit_session_*.py"
       - "backend/amodb/apps/quality/audit_external_*.py"
+      - "backend/amodb/apps/quality/audit_occurrence_*.py"
+      - "backend/amodb/apps/quality/audit_live_completion_*.py"
+      - "backend/amodb/apps/quality/audit_evidence_*.py"
+      - "backend/amodb/apps/quality/audit_presence_*.py"
+      - "backend/amodb/apps/quality/audit_controlled_document_collaboration_router.py"
+      - "backend/amodb/apps/quality/audit_generated_report_adoption_router.py"
       - "backend/amodb/apps/quality/audit_finding_release_status_router.py"
       - "backend/amodb/apps/quality/audit_guest_document_*.py"
       - "backend/amodb/apps/quality/audit_guest_documents_router.py"
@@ -19,8 +26,11 @@ on:
       - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
       - "frontend/src/App.tsx"
       - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/pages/PublicAuditVerificationPage.tsx"
       - "frontend/src/features/qms/auditSession/**"
       - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsExternalAuditOutbox.ts"
+      - "frontend/src/services/qmsExternalAuditorMutations.ts"
       - "frontend/src/services/qmsExternalFindingDraft*.ts"
       - "frontend/src/services/qmsChecklistExecutionGovernance.ts"
       - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
@@ -78,9 +88,26 @@ jobs:
           amodb/apps/quality/audit_external_report_acknowledgement_router.py
           amodb/apps/quality/audit_external_participant_guard_router.py
           amodb/apps/quality/audit_external_session_guard_router.py
+          amodb/apps/quality/audit_external_passkey_router.py
           amodb/apps/quality/audit_external_fieldwork_router.py
           amodb/apps/quality/audit_external_finding_draft_router.py
           amodb/apps/quality/audit_external_finding_promotion_router.py
+          amodb/apps/quality/audit_occurrence_assignment_router.py
+          amodb/apps/quality/audit_occurrence_completion_models.py
+          amodb/apps/quality/audit_occurrence_completion_router.py
+          amodb/apps/quality/audit_occurrence_completion_route_order.py
+          amodb/apps/quality/audit_live_completion_models.py
+          amodb/apps/quality/audit_live_completion_router.py
+          amodb/apps/quality/audit_live_completion_route_order.py
+          amodb/apps/quality/audit_evidence_models.py
+          amodb/apps/quality/audit_evidence_storage.py
+          amodb/apps/quality/audit_evidence_router.py
+          amodb/apps/quality/audit_evidence_route_order.py
+          amodb/apps/quality/audit_presence_models.py
+          amodb/apps/quality/audit_presence_router.py
+          amodb/apps/quality/audit_presence_route_order.py
+          amodb/apps/quality/audit_controlled_document_collaboration_router.py
+          amodb/apps/quality/audit_generated_report_adoption_router.py
           amodb/apps/quality/audit_finding_release_status_router.py
           amodb/apps/quality/audit_guest_document_models.py
           amodb/apps/quality/audit_guest_document_storage.py
@@ -155,7 +182,7 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Upgrade PostgreSQL through all Alembic heads
         run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Verify live audit RLS, package integrity, attribution and append-only contract
+      - name: Verify final live audit schema, RLS, integrity and immutable history
         run: python -m amodb.apps.quality.tests.postgres_audit_external_access_probe
 
   frontend-contract:
@@ -179,7 +206,10 @@ jobs:
           npx eslint
           src/App.tsx
           src/pages/PublicAuditAccessPage.tsx
+          src/pages/PublicAuditVerificationPage.tsx
           src/features/qms/auditSession/AuditLifecycleRail.tsx
+          src/features/qms/auditSession/AuditSetupWorkspace.tsx
+          src/features/qms/auditSession/AuditAssignmentGovernancePanel.tsx
           src/features/qms/auditSession/AuditPrepareWorkspace.tsx
           src/features/qms/auditSession/AuditDocumentSubmissionReviewPanel.tsx
           src/features/qms/auditSession/GuestDocumentSubmit.tsx
@@ -187,18 +217,31 @@ jobs:
           src/features/qms/auditSession/ExternalAuditorFindingDraftPanel.tsx
           src/features/qms/auditSession/ExternalFindingDraftReviewPanel.tsx
           src/features/qms/auditSession/LiveAuditWorkspace.tsx
+          src/features/qms/auditSession/LiveAuditEvidenceStrip.tsx
           src/features/qms/auditSession/LiveFindingReleasePanel.tsx
+          src/features/qms/auditSession/AuditClosingNarrativePanel.tsx
           src/features/qms/auditSession/AuditClosingWorkspace.tsx
+          src/features/qms/auditSession/AuditFollowUpWorkspace.tsx
           src/features/qms/auditSession/AuditArchiveWorkspace.tsx
+          src/features/qms/auditSession/MobileAuditDeepLinkState.tsx
           src/features/qms/auditSession/auditSessionRoutes.ts
           src/features/qms/auditSession/auditSessionRoutes.test.ts
           src/services/qmsAuditSession.ts
           src/services/qmsAuditPreparationRoom.ts
           src/services/qmsAuditExternalAccess.ts
+          src/services/qmsAuditExternalPasskey.ts
+          src/services/qmsAuditOccurrenceResolver.ts
+          src/services/qmsAuditOccurrenceCompletion.ts
+          src/services/qmsAuditEvidence.ts
+          src/services/qmsAuditPresence.ts
+          src/services/qmsAuditGuestClosing.ts
+          src/services/qmsAuditVerification.ts
           src/services/qmsAuditReportComposition.ts
           src/services/qmsAuditClosingAssurance.ts
           src/services/qmsAuditArchiveGovernance.ts
           src/services/qmsAuditRealtime.ts
+          src/services/qmsExternalAuditOutbox.ts
+          src/services/qmsExternalAuditorMutations.ts
           src/services/qmsExternalFindingDrafts.ts
           src/services/qmsExternalFindingDraftReview.ts
           src/services/qmsChecklistExecutionGovernance.ts
