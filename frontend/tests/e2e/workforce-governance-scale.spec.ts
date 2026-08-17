@@ -327,6 +327,10 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();
   await expect(page.locator(".workforce-governance__people-table tbody tr")).toHaveCount(50);
+  // The production personnel search is debounced for 250 ms. The fixture is
+  // intentionally zero-latency, so let the mount-time debounce settle before
+  // exercising pagination rather than racing it back to page 1.
+  await page.waitForTimeout(300);
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByText("51-100 of 10,000")).toBeVisible();
   expect(pageSizes.every((size) => size <= 250)).toBeTruthy();
