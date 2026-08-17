@@ -59,7 +59,12 @@ def _supervisor_recipients(db, assignment: models.RosterAssignment) -> Iterable[
 
 
 def install() -> None:
-    """Use the existing notification service for all consent workflow events."""
+    """Use the existing notification service for all consent workflow events.
+
+    The base consent service already sends the initial consent-requested message.
+    This wrapper adds change/invalidation and supervisor workflow events without
+    ever claiming the full roster is ready merely because one consent was approved.
+    """
 
     global _INSTALLED
     if _INSTALLED:
@@ -178,8 +183,8 @@ def install() -> None:
             db,
             amo_id=row.amo_id,
             recipient=_user_email(db, amo_id=row.amo_id, user_id=row.proposed_by_user_id),
-            event="roster_ready_for_approval" if approve else "roster_supervisor_rejected",
-            subject="Roster consent workflow complete" if approve else "Roster supervisor rejected assignment",
+            event="roster_supervisor_approved" if approve else "roster_supervisor_rejected",
+            subject="Roster supervisor approval recorded" if approve else "Roster supervisor rejected assignment",
             consent_id=row.id,
             fingerprint=row.assignment_fingerprint,
             context={
