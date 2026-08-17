@@ -67,6 +67,7 @@ jobs:
             backend/amodb/apps/rostering/code_registry_models.py \
             backend/amodb/apps/rostering/code_registry_router.py \
             backend/amodb/apps/rostering/compliance_policy.py \
+            backend/amodb/apps/rostering/statutory_rule_policy.py \
             backend/amodb/apps/rostering/consent_models.py \
             backend/amodb/apps/rostering/consent_service.py \
             backend/amodb/apps/rostering/consent_notification_policy.py \
@@ -77,6 +78,7 @@ jobs:
             backend/amodb/apps/rostering/exemption_router.py \
             backend/amodb/apps/rostering/extended_duty_models.py \
             backend/amodb/apps/rostering/extended_duty_service.py \
+            backend/amodb/apps/rostering/extended_duty_validation_policy.py \
             backend/amodb/apps/rostering/extended_duty_policy.py \
             backend/amodb/apps/rostering/extended_duty_router.py \
             backend/amodb/apps/rostering/controlled_exports.py \
