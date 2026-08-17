@@ -173,6 +173,43 @@ def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permis
         return None
 
 
+def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
+    """Honor an explicit tenant Quality subscription disable at the API boundary.
+
+    Some older installations predate module-subscription rows, so absence remains
+    backward-compatible. Once a Quality subscription exists, disabled, suspended,
+    not-yet-effective and expired states must not be bypassable through a direct
+    Quality deep link or API call.
+    """
+    subscription = (
+        db.query(account_models.ModuleSubscription)
+        .filter(
+            account_models.ModuleSubscription.amo_id == str(amo_id),
+            account_models.ModuleSubscription.module_code == "quality",
+        )
+        .first()
+    )
+    if subscription is None:
+        return
+    state = _normalise(subscription.status).upper()
+    if state not in {
+        account_models.ModuleSubscriptionStatus.ENABLED.value,
+        account_models.ModuleSubscriptionStatus.TRIAL.value,
+    }:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module is not enabled for this AMO tenant.")
+    now = datetime.now(timezone.utc)
+    effective_from = subscription.effective_from
+    effective_to = subscription.effective_to
+    if effective_from is not None:
+        effective_from = effective_from if effective_from.tzinfo else effective_from.replace(tzinfo=timezone.utc)
+        if effective_from > now:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module subscription is not effective yet.")
+    if effective_to is not None:
+        effective_to = effective_to if effective_to.tzinfo else effective_to.replace(tzinfo=timezone.utc)
+        if effective_to <= now:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module subscription has expired.")
+
+
 def set_postgres_tenant_context(db: Session, *, amo_id: str, user_id: str) -> None:
     """Set request-local PostgreSQL context used by RLS policies."""
     bind = db.get_bind()
@@ -215,6 +252,7 @@ def _active_support_session(db: Session, *, amo_id: str, platform_user_id: str) 
 
 def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.User, db: Session) -> TenantContext:
     amo = _resolve_amo(db, amo_code)
+    _assert_quality_module_available(db, amo_id=str(amo.id))
     if _is_platform_superuser(current_user):
         session = _active_support_session(db, amo_id=str(amo.id), platform_user_id=str(current_user.id))
         if not session:
