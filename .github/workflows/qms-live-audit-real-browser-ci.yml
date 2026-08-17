@@ -13,6 +13,7 @@ on:
       - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
       - "frontend/src/components/QMS/QualityDataFreshnessCoordinator.tsx"
       - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/pages/PublicAuditVerificationPage.tsx"
       - "frontend/src/features/qms/auditSession/**"
       - "frontend/src/services/qmsAudit*.ts"
       - "frontend/src/services/qmsExternal*.ts"
@@ -29,9 +30,9 @@ concurrency:
 
 jobs:
   real-browser-postgres:
-    name: Real browser -> FastAPI -> PostgreSQL two-party journey
+    name: Real browser -> FastAPI -> PostgreSQL governed lifecycle
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -120,10 +121,11 @@ jobs:
         working-directory: frontend
         run: npm exec -- playwright test tests/e2e/qms-live-audit-real.spec.ts --project=chromium
 
-      - name: Prove browser mutations persisted exactly in PostgreSQL
+      - name: Prove browser lifecycle persisted exactly in PostgreSQL
         working-directory: backend
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -131,17 +133,39 @@ jobs:
 
           from amodb.main import app as _app  # noqa: F401
           from amodb.apps.quality import models
+          from amodb.apps.quality.audit_archive_governance_models import (
+              QualityAuditArchiveManifest,
+              QualityAuditLegalHoldEvent,
+          )
           from amodb.apps.quality.audit_checklist_execution_models import (
               QualityAuditChecklistExecutionGovernance,
               QualityAuditFieldworkMutationReceipt,
               QualityAuditFieldworkParticipantContribution,
           )
+          from amodb.apps.quality.audit_closing_assurance_models import QualityAuditSignatureEvidence
+          from amodb.apps.quality.audit_closure_models import QualityAuditClosureState
+          from amodb.apps.quality.audit_live_completion_models import (
+              QualityAuditClosingAcknowledgement,
+              QualityAuditVerificationToken,
+              QualityAuditWebAuthnChallenge,
+              QualityAuditWebAuthnCredential,
+          )
+          from amodb.apps.quality.audit_report_governance_models import QualityAuditReportRevision
           from amodb.database import WriteSessionLocal
+
+          def sha256(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
 
           fixture = json.loads(Path(os.environ["E2E_QMS_LIVE_FIXTURE"]).read_text(encoding="utf-8"))
           checklist_item_id = uuid.UUID(fixture["checklist_item_id"])
           finding_id = uuid.UUID(fixture["finding_id"])
           realtime_checklist_item_id = uuid.UUID(fixture["realtime_checklist_item_id"])
+          ceremony_audit_id = uuid.UUID(fixture["ceremony_audit_id"])
+          ceremony_car_id = uuid.UUID(fixture["ceremony_car_id"])
 
           db = WriteSessionLocal()
           try:
@@ -168,7 +192,70 @@ jobs:
               assert realtime.updated_by_user_id == fixture["realtime_user_a_id"], realtime.updated_by_user_id
               assert realtime.auditor_notes == "Committed by Quality Alpha and delivered to Quality Bravo by the authenticated SSE stream."
 
-              print("Real browser offline/idempotency/conflict persistence and two-user authenticated SSE propagation are committed in PostgreSQL")
+              report = db.query(QualityAuditReportRevision).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert report.status == "ISSUED", report.status
+              assert report.revision_no == 1, report.revision_no
+              assert report.issued_at is not None
+              report_path = Path(report.file_ref)
+              assert report_path.is_file(), report_path
+              assert sha256(report_path) == report.sha256
+
+              ack = db.query(QualityAuditClosingAcknowledgement).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert ack.report_revision_id == report.id
+              assert ack.report_sha256 == report.sha256
+              assert ack.acknowledgement_status == "ACKNOWLEDGED"
+
+              signature = db.query(QualityAuditSignatureEvidence).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert signature.method == "WEBAUTHN", signature.method
+              assert signature.purpose == "APPROVED_REPORT", signature.purpose
+              assert signature.report_revision_id == report.id
+              assert signature.artifact_sha256 == report.sha256
+              assert signature.credential_id_hash
+              assert signature.ceremony_sha256
+              assert signature.webauthn_origin
+              assert signature.webauthn_rp_id
+
+              credentials = db.query(QualityAuditWebAuthnCredential).filter_by(amo_id=fixture["amo_id"], user_id=fixture["realtime_user_a_id"]).all()
+              assert len(credentials) == 1, len(credentials)
+              assert credentials[0].is_active is True
+              assert credentials[0].last_used_at is not None
+
+              challenges = db.query(QualityAuditWebAuthnChallenge).filter_by(amo_id=fixture["amo_id"], user_id=fixture["realtime_user_a_id"]).all()
+              assert {row.challenge_type for row in challenges} >= {"REGISTRATION", "REPORT_SIGNATURE"}
+              assert all(row.consumed_at is not None for row in challenges), [(row.challenge_type, row.consumed_at) for row in challenges]
+
+              verification = db.query(QualityAuditVerificationToken).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert verification.report_revision_id == report.id
+              assert verification.signature_evidence_id == signature.id
+              assert verification.revoked_at is None
+              assert verification.last_verified_at is not None
+
+              closure = db.query(QualityAuditClosureState).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert closure.execution_status == "CLOSED", closure.execution_status
+              assert closure.execution_closed_at is not None
+              assert closure.follow_up_status == "OPEN", closure.follow_up_status
+              assert closure.follow_up_completed_at is None
+
+              car = db.get(models.CorrectiveActionRequest, ceremony_car_id)
+              assert car is not None
+              assert str(getattr(car.status, "value", car.status)) == "OPEN"
+              assert str(car.finding_id) == fixture["ceremony_finding_id"]
+
+              manifest = db.query(QualityAuditArchiveManifest).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).order_by(QualityAuditArchiveManifest.manifest_version.desc()).first()
+              assert manifest is not None
+              assert manifest.manifest_version == 1
+              item_types = {item.item_type for item in manifest.items}
+              assert {"AUDIT", "CHECKLIST_EXECUTION", "FINDING", "CAR", "REPORT_REVISION", "SIGNATURE_EVIDENCE"}.issubset(item_types), item_types
+              assert len(manifest.manifest_sha256) == 64
+              assert manifest.package_file_ref and manifest.package_sha256
+              package_path = Path(manifest.package_file_ref)
+              assert package_path.is_file(), package_path
+              assert sha256(package_path) == manifest.package_sha256
+
+              hold_events = db.query(QualityAuditLegalHoldEvent).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id, hold_key="CASE-QMS-LIVE-992").order_by(QualityAuditLegalHoldEvent.created_at.asc()).all()
+              assert [row.event_type for row in hold_events] == ["PLACED", "RELEASED"], [row.event_type for row in hold_events]
+
+              print("Real browser lifecycle is committed through PostgreSQL: offline/exactly-once/conflict, SSE, exact-SHA acknowledgement, WebAuthn issue, verification, execution closure, open CAR separation and archive/legal hold")
           finally:
               db.close()
           PY
