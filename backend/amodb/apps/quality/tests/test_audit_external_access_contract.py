@@ -13,7 +13,10 @@ from amodb.apps.quality.audit_external_access_router import (
     _scope_for,
 )
 from amodb.apps.quality.audit_external_fieldwork_router import _csrf_for_session, _require_csrf
-from amodb.apps.quality.audit_external_participant_guard_router import create_external_participant_guarded
+from amodb.apps.quality.audit_external_participant_guard_router import (
+    _assert_identity_assurance_stable,
+    create_external_participant_guarded,
+)
 
 
 def _future() -> datetime:
@@ -106,13 +109,17 @@ def test_external_audit_fieldwork_csrf_is_session_bound():
     assert exc.value.status_code == 403
 
 
-def test_unenforced_mfa_and_passkey_invitations_fail_closed_before_db_write():
-    for assurance in ("MFA", "PASSKEY"):
+def test_unimplemented_mfa_and_auditee_passkey_fail_closed_before_db_write():
+    cases = (
+        ("MFA", "EXTERNAL_AUDITOR"),
+        ("PASSKEY", "AUDITEE_GUEST"),
+    )
+    for assurance, participant_type in cases:
         payload = ExternalParticipantCreate(
-            email=f"{assurance.lower()}@example.test",
-            display_name="External Auditor",
-            participant_type="EXTERNAL_AUDITOR",
-            role="AUDITOR",
+            email=f"{assurance.lower()}.{participant_type.lower()}@example.test",
+            display_name="External Participant",
+            participant_type=participant_type,
+            role="AUDITOR" if participant_type == "EXTERNAL_AUDITOR" else "AUDITEE",
             assurance_level=assurance,
             expires_at=_future(),
         )
@@ -124,3 +131,13 @@ def test_unenforced_mfa_and_passkey_invitations_fail_closed_before_db_write():
                 db=None,
             )
         assert exc.value.status_code == 422
+
+
+def test_existing_external_identity_assurance_cannot_be_silently_changed():
+    _assert_identity_assurance_stable("PASSKEY", "PASSKEY")
+    _assert_identity_assurance_stable("EMAIL_LINK", "EMAIL_LINK")
+
+    for existing, requested in (("PASSKEY", "EMAIL_LINK"), ("EMAIL_LINK", "PASSKEY")):
+        with pytest.raises(HTTPException) as exc:
+            _assert_identity_assurance_stable(existing, requested)
+        assert exc.value.status_code == 409
