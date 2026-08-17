@@ -25,6 +25,7 @@ from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
+from ..workforce import pattern_rest_policy
 from ..workforce import pay_policy_store
 from ..workforce import services as workforce_services
 from ..workforce import timesheet_pay_policy
@@ -54,9 +55,14 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 template_usage_policy.install_code_registry_policy(code_registry)
 compliance_policy.install_validation_policy()
 
-# Attach the contract-owned floors before the timesheet classifier runs. This
-# keeps supervisor/request payloads out of entitlement resolution: a stored
-# contractual rate may raise the floor, never lower the statutory minimum.
+# All planners share the same rest semantics: an OFF pattern day without an
+# explicit template is persisted as canonical RD rather than anonymous empty
+# calendar space. This also upgrades the older 5D/2O recipe behavior.
+pattern_rest_policy.install_service_policy(workforce_services)
+
+# Attach contract-owned floors before the timesheet classifier runs. A stored
+# contractual rate may raise the entitlement floor; user/supervisor input may
+# never lower it.
 pay_policy_store.install_timesheet_policy(timesheet_pay_policy)
 timesheet_pay_policy.install_service_policy(workforce_services)
 
