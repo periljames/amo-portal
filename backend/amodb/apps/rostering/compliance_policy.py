@@ -6,10 +6,12 @@ from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 from . import models, validation
+from .code_registry_models import RosterDutySemantic, RosterShiftTemplatePolicy
 
 
 STATUTORY_TOTAL_HOURS_RULE = "MAX_DUTY_14D_116H"
 NORMAL_HOURS_CLASSIFICATION_RULE = "MAX_NORMAL_DUTY_7D_52H"
+CONSECUTIVE_DUTY_RULE = "MAX_CONSECUTIVE_DUTY_DAYS_6"
 PROTECTED_REST_RULE = "REST_DAY_24H_IN_7D"
 PROTECTED_REST_FINDING = "PROTECTED_REST_NOT_ASSIGNED"
 
@@ -32,17 +34,39 @@ def assignment_counts_as_duty(row: Any) -> bool:
     }
 
 
-def assignment_is_protected_rest(row: Any) -> bool:
-    """A protected rest assignment is an explicit non-duty OFF template."""
+def assignment_is_protected_rest(
+    row: Any,
+    *,
+    policies: dict[str, RosterShiftTemplatePolicy] | None = None,
+) -> bool:
+    """Resolve protected rest from configured semantics rather than code text.
+
+    OFF and REST are equivalent protected-rest semantics. A future tenant code
+    can therefore become protected rest without changing the validator, while
+    leave/sickness/non-duty categories are not silently treated as weekly rest.
+    """
 
     template = getattr(row, "shift_template", None)
-    if template is None or bool(getattr(template, "counts_as_duty", False)):
+    if template is None:
+        return getattr(row, "status", None) == models.RosterAssignmentStatus.OFF
+    if bool(getattr(template, "counts_as_duty", False)):
         return False
+    if policies is not None:
+        policy = policies.get(str(getattr(template, "id", "")))
+        if policy is not None:
+            return policy.duty_semantic in {
+                RosterDutySemantic.REST,
+                RosterDutySemantic.OFF,
+            }
     return getattr(template, "kind", None) == models.ShiftTemplateKind.OFF
 
 
 def statutory_rule_is_non_overridable(code: str) -> bool:
-    return str(code or "").upper() in {STATUTORY_TOTAL_HOURS_RULE, PROTECTED_REST_RULE}
+    return str(code or "").upper() in {
+        STATUTORY_TOTAL_HOURS_RULE,
+        CONSECUTIVE_DUTY_RULE,
+        PROTECTED_REST_RULE,
+    }
 
 
 def _govern_rule(row: models.RosterRule) -> None:
@@ -51,6 +75,12 @@ def _govern_rule(row: models.RosterRule) -> None:
         parameters["window_days"] = 14
         configured = int(parameters.get("maximum_minutes") or _STATUTORY_TOTAL_MINUTES)
         parameters["maximum_minutes"] = min(configured, _STATUTORY_TOTAL_MINUTES)
+        row.parameters_json = parameters
+        row.severity = models.RosterValidationSeverity.BLOCKER
+        row.allow_override = False
+    elif row.code == CONSECUTIVE_DUTY_RULE:
+        configured = int(parameters.get("maximum_days") or 6)
+        parameters["maximum_days"] = min(configured, 6)
         row.parameters_json = parameters
         row.severity = models.RosterValidationSeverity.BLOCKER
         row.allow_override = False
@@ -65,10 +95,13 @@ def _govern_rule(row: models.RosterRule) -> None:
         parameters["window_days"] = 7
         configured = int(parameters.get("maximum_minutes") or _NORMAL_WEEK_MINUTES)
         parameters["maximum_minutes"] = min(configured, _NORMAL_WEEK_MINUTES)
+        parameters.setdefault("classification", "ORDINARY_OT")
+        parameters.setdefault("minimum_multiplier", 1.5)
         row.parameters_json = parameters
         # Crossing normal hours classifies excess time as overtime. It is not
         # the separate rolling total-hours illegality threshold.
         row.severity = models.RosterValidationSeverity.WARNING
+        row.allow_override = False
 
 
 def _local_date(row: Any, timezone_name: str) -> date:
@@ -103,13 +136,15 @@ def _protected_rest_specs(
     version: models.RosterVersion,
     assignments: Sequence[models.RosterAssignment],
     rules: Sequence[models.RosterRule],
+    *,
+    policies: dict[str, RosterShiftTemplatePolicy] | None = None,
 ) -> list[validation.FindingSpec]:
     """Add explicit protected-rest blockers without inventing code semantics.
 
-    The existing REQUIRED_DAYS_OFF rule remains the general 24-hour-in-seven
-    statutory check. This companion rule closes two operational gaps:
-    seven consecutive local duty dates cannot be published, and a rostered
-    OFF/RD date that is worked must have another explicit protected rest date.
+    The existing REQUIRED_DAYS_OFF rule remains the continuous-hours check.
+    This companion rule closes two operational gaps: seven consecutive local
+    duty dates cannot be published, and a rostered protected-rest date that is
+    worked must have another explicit protected-rest date assigned.
     """
 
     timezone_name = version.period.timezone_name or "UTC"
@@ -118,7 +153,7 @@ def _protected_rest_specs(
     for row in assignments:
         if assignment_counts_as_duty(row):
             duty_by_user[row.user_id].append(row)
-        elif assignment_is_protected_rest(row):
+        elif assignment_is_protected_rest(row, policies=policies):
             rest_by_user[row.user_id].append(row)
 
     findings: list[validation.FindingSpec] = []
@@ -166,8 +201,7 @@ def _protected_rest_specs(
         for worked_rest in worked_rest_dates:
             replacement_end = min(worked_rest + timedelta(days=7), period_end)
             replacements = sorted(
-                day for day in valid_rest_dates
-                if worked_rest < day <= replacement_end
+                day for day in valid_rest_dates if worked_rest < day <= replacement_end
             )
             if replacements:
                 continue
@@ -209,7 +243,20 @@ def install_validation_policy() -> None:
     def governed_build_findings(db, *, version, rules):
         specs = original_build_findings(db, version=version, rules=rules)
         assignments = [row for row in version.assignments or [] if row.deleted_at is None]
-        specs.extend(_protected_rest_specs(version, assignments, rules))
+        policies = {
+            str(row.shift_template_id): row
+            for row in db.query(RosterShiftTemplatePolicy)
+            .filter(RosterShiftTemplatePolicy.amo_id == version.amo_id)
+            .all()
+        }
+        specs.extend(
+            _protected_rest_specs(
+                version,
+                assignments,
+                rules,
+                policies=policies,
+            )
+        )
         return specs
 
     validation._is_productive = assignment_counts_as_duty
@@ -219,6 +266,7 @@ def install_validation_policy() -> None:
 
 
 __all__ = [
+    "CONSECUTIVE_DUTY_RULE",
     "NORMAL_HOURS_CLASSIFICATION_RULE",
     "PROTECTED_REST_FINDING",
     "PROTECTED_REST_RULE",
