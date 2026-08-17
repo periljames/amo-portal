@@ -28,8 +28,6 @@ jobs:
     name: Audit lifecycle Playwright — governed acceptance
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    env:
-      VITE_API_BASE_URL: http://127.0.0.1:8080
     defaults:
       run:
         working-directory: frontend
