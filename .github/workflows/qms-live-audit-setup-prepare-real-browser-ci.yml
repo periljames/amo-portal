@@ -1,0 +1,184 @@
+name: QMS Live Audit Setup Prepare Real Browser CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/quality/**"
+      - "backend/amodb/scripts/seed_qms_live_audit_e2e.py"
+      - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
+      - "frontend/src/features/qms/auditSession/AuditSetupWorkspace.tsx"
+      - "frontend/src/features/qms/auditSession/AuditPrepareWorkspace.tsx"
+      - "frontend/src/features/qms/auditSession/GuestDocumentSubmit.tsx"
+      - "frontend/src/services/qmsAuditGovernance.ts"
+      - "frontend/src/services/qmsAuditPreparationRoom.ts"
+      - "frontend/tests/e2e/qms-live-audit-setup-prepare-real.spec.ts"
+      - ".github/workflows/qms-live-audit-setup-prepare-real-browser-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-setup-prepare-real-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup-prepare-real:
+    name: Setup + Prepare browser -> FastAPI -> PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_qms_setup_prepare_real
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_qms_setup_prepare_real"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: qms-setup-prepare-real-browser-ci-secret
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_setup_prepare_real
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_setup_prepare_real
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_setup_prepare_real
+      QUALITY_SCHEMA_STRICT: "1"
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_QMS_LIVE_FIXTURE: /tmp/qms-live-audit-real-e2e.json
+    steps:
+      - uses: actions/checkout@v6
+        with: { show-progress: false }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Generate disposable CI encryption key
+        shell: bash
+        run: echo "PLATFORM_SECRETS_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+      - name: Install backend and migrate all heads
+        working-directory: backend
+        run: |
+          pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+          alembic -c amodb/alembic.ini upgrade heads
+          python amodb/scripts/seed_qms_live_audit_e2e.py
+          python amodb/scripts/complete_qms_live_audit_onboarding_e2e.py
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit --fund=false
+          npm exec -- eslint tests/e2e/qms-live-audit-setup-prepare-real.spec.ts
+          npm run build
+          npx playwright install --with-deps chromium
+      - name: Start production-like stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/qms-setup-prepare-backend.log 2>&1 & echo $! > /tmp/qms-setup-prepare-backend.pid)
+          for attempt in $(seq 1 60); do
+            curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null && break
+            [ "$attempt" -lt 60 ] || { cat /tmp/qms-setup-prepare-backend.log; exit 1; }
+            sleep 1
+          done
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-setup-prepare-frontend.log 2>&1 & echo $! > /tmp/qms-setup-prepare-frontend.pid)
+          for attempt in $(seq 1 60); do
+            curl --silent --fail http://127.0.0.1:4173/qms/audit-access >/dev/null && break
+            [ "$attempt" -lt 60 ] || { cat /tmp/qms-setup-prepare-frontend.log; exit 1; }
+            sleep 1
+          done
+      - name: Run real Setup/Prepare browsers
+        working-directory: frontend
+        run: npm exec -- playwright test tests/e2e/qms-live-audit-setup-prepare-real.spec.ts --project=chromium
+      - name: Prove Setup/Prepare persistence in PostgreSQL
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, uuid
+          from pathlib import Path
+          from sqlalchemy import MetaData, Table, inspect, select
+          from amodb.main import app as _app  # noqa: F401
+          from amodb.apps.quality import models
+          from amodb.apps.quality.audit_external_access_models import QualityAuditAccessGrant, QualityAuditParticipant, QualityExternalIdentity
+          from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
+          from amodb.apps.quality.audit_occurrence_completion_models import QualityAuditMeeting
+          from amodb.database import WriteSessionLocal, write_engine
+
+          f = json.loads(Path(os.environ["E2E_QMS_LIVE_FIXTURE"]).read_text())
+          audit_id = uuid.UUID(f["realtime_audit_id"])
+          db = WriteSessionLocal()
+          try:
+              audit = db.get(models.QMSAudit, audit_id)
+              assert audit.scope == "Real browser setup scope covering controlled maintenance and Quality records."
+              assert audit.criteria == "Approved QMS manual, controlled procedures and applicable aviation regulatory requirements."
+              assert audit.auditee == "Preparation Journey Auditee" and audit.auditee_email == "prepare.auditee@example.com"
+              assert (audit.planned_end - audit.planned_start).days == 1 and audit.reminder_interval_days == 5
+
+              meetings = db.query(QualityAuditMeeting).filter_by(amo_id=f["amo_id"], audit_id=audit_id).all()
+              assert {m.meeting_type for m in meetings} >= {"OPENING", "CLOSING"}
+              assert next(m for m in meetings if m.meeting_type == "OPENING").location == "Hangar briefing room"
+              assert next(m for m in meetings if m.meeting_type == "CLOSING").location == "Quality conference room"
+
+              request = db.query(models.QualityAuditDocumentRequest).filter_by(amo_id=f["amo_id"], audit_id=audit_id, title="Current authorization and competence evidence").one()
+              assert request.status == "ACCEPTED" and request.reviewed_by_user_id == f["realtime_user_a_id"] and request.reviewed_at
+              assert "Evidence reviewed against the linked criterion" in (request.review_note or "")
+              submission = db.query(QualityAuditDocumentSubmission).filter_by(amo_id=f["amo_id"], audit_id=audit_id, document_request_id=request.id).one()
+              assert submission.filename == "authorization-competence-evidence.txt" and len(submission.sha256) == 64
+              stored = Path(submission.storage_ref)
+              assert stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest() == submission.sha256
+              participant = db.get(QualityAuditParticipant, submission.participant_id)
+              identity = db.get(QualityExternalIdentity, participant.external_identity_id)
+              assert identity.email == "prepare.auditee@example.com" and identity.assurance_level == "EMAIL_LINK" and identity.amo_id == f["amo_id"]
+              grant = db.query(QualityAuditAccessGrant).filter_by(amo_id=f["amo_id"], audit_id=audit_id, participant_id=participant.id).one()
+              assert grant.revoked_at is None and grant.token_hash
+
+              candidates = []
+              inspector = inspect(write_engine)
+              for table_name in inspector.get_table_names():
+                  cols = {c["name"] for c in inspector.get_columns(table_name)}
+                  if {"audit_id", "status", "delivery_reference", "acknowledged_at"}.issubset(cols): candidates.append(table_name)
+              assert candidates
+              metadata, rows = MetaData(), []
+              for name in candidates:
+                  table = Table(name, metadata, autoload_with=write_engine)
+                  rows += [(name, row) for row in db.execute(select(table).where(table.c.audit_id == audit_id)).mappings()]
+              acknowledged = [(name, row) for name, row in rows if row.get("status") == "ACKNOWLEDGED"]
+              assert len(acknowledged) == 1
+              assert acknowledged[0][1]["delivery_reference"] == "Real-browser governed notice delivery" and acknowledged[0][1]["acknowledged_at"]
+              print("Setup/Prepare persistence proven")
+          finally:
+              db.close()
+          PY
+      - name: Reject runtime failures
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "UndefinedTable|UndefinedColumn|Traceback \(most recent call last\)|ERROR: +Exception in ASGI application" /tmp/qms-setup-prepare-backend.log 2>/dev/null; then cat /tmp/qms-setup-prepare-backend.log; exit 1; fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-setup-prepare-real-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+            /tmp/qms-setup-prepare-backend.log
+            /tmp/qms-setup-prepare-frontend.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop servers
+        if: always()
+        shell: bash
+        run: |
+          [ ! -f /tmp/qms-setup-prepare-frontend.pid ] || kill "$(cat /tmp/qms-setup-prepare-frontend.pid)" 2>/dev/null || true
+          [ ! -f /tmp/qms-setup-prepare-backend.pid ] || kill "$(cat /tmp/qms-setup-prepare-backend.pid)" 2>/dev/null || true
