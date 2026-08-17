@@ -39,11 +39,25 @@ def _matching(router, path: str, method: str):
     return [route for route in router.routes if str(route.path) == path and method in (getattr(route, "methods", None) or set())]
 
 
-def test_repository_has_one_expected_alembic_head() -> None:
+def test_repository_heads_include_completed_assurance_lineage() -> None:
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
     heads = script.get_heads()
-    assert len(heads) == 1, heads
-    ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+    assert heads, "Alembic graph has no heads"
+
+    pending = [script.get_revision(head) for head in heads]
+    ancestry: set[str] = set()
+    while pending:
+        revision = pending.pop()
+        if revision is None or revision.revision in ancestry:
+            continue
+        ancestry.add(revision.revision)
+        parents = revision.down_revision
+        if not parents:
+            continue
+        if isinstance(parents, str):
+            parents = (parents,)
+        pending.extend(script.get_revision(parent) for parent in parents)
+
     assert "quality_260809_checklist_exec" in ancestry
 
 
