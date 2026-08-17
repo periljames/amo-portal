@@ -50,6 +50,9 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/passkey/status") && request.method() === "POST") {
+      return respond(route, { detail: "Passkey assurance is only available to an assigned external auditor identity." }, 403);
+    }
     if (path.endsWith("/exchange") && request.method() === "POST") return respond(route, model);
     if (path.endsWith("/session") && request.method() === "GET") return respond(route, model);
     if (path.endsWith(`/findings/${FINDING_ID}/acknowledge`) && request.method() === "POST") {
