@@ -16,6 +16,18 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 router = APIRouter(tags=["Quality external audit access guard"])
 
 
+def _assert_identity_assurance_stable(existing_assurance: str | None, requested_assurance: str) -> None:
+    if existing_assurance and existing_assurance != requested_assurance:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This external identity already has a different assurance level. "
+                "Revoke or deliberately migrate its existing audit access before changing assurance; "
+                "participant creation cannot implicitly upgrade or downgrade active invitations."
+            ),
+        )
+
+
 @router.post("/audits/{audit_id}/external-participants", status_code=status.HTTP_201_CREATED)
 def create_external_participant_guarded(
     audit_id: uuid.UUID,
@@ -55,14 +67,9 @@ def create_external_participant_guarded(
         QualityExternalIdentity.amo_id == ctx.amo_id,
         QualityExternalIdentity.email == email,
     ).first()
-    if existing_identity is not None and existing_identity.assurance_level != payload.assurance_level:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This external identity already has a different assurance level. "
-                "Revoke or deliberately migrate its existing audit access before changing assurance; "
-                "participant creation cannot implicitly upgrade or downgrade active invitations."
-            ),
-        )
+    _assert_identity_assurance_stable(
+        existing_identity.assurance_level if existing_identity is not None else None,
+        payload.assurance_level,
+    )
 
     return create_external_participant(audit_id=audit_id, payload=payload, ctx=ctx, db=db)
