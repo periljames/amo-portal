@@ -34,6 +34,7 @@ class ConsentRead(BaseModel):
     duty_type: str
     planned_start: datetime
     planned_end: datetime
+    original_schedule_json: dict | None = None
     personnel_response: RosterConsentStatus
     personnel_response_at: datetime | None = None
     personnel_comment: str | None = None
@@ -41,6 +42,7 @@ class ConsentRead(BaseModel):
     supervisor_user_id: str | None = None
     supervisor_decision: RosterSupervisorDecision
     supervisor_decision_at: datetime | None = None
+    supervisor_decided_by_user_id: str | None = None
     supervisor_comment: str | None = None
     overtime_rest_day_classification: str | None = None
     replacement_rest_json: dict | None = None
