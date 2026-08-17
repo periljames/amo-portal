@@ -23,6 +23,7 @@ import { installPortalUploadGuard } from "./services/portalUploadGuard";
 import { preloadRoute } from "./app/routePreload";
 
 import "./styles/auth.css";
+import "./styles/qms-live-audit-completion.css";
 
 const App: React.FC = () => {
   const queryClient = useQueryClient();
