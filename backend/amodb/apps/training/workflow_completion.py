@@ -1,4 +1,5 @@
-from __future__ import annotations
+# Request models in this module are scoped with their route installers.
+# Keep annotations eager so FastAPI resolves those local request types correctly.
 
 """Completion layer for the governed Training workflows.
 
@@ -503,8 +504,12 @@ def install_training_workflow_completion(router_module) -> None:
         currency: str = Field("USD", min_length=3, max_length=3)
 
     class ExternalLearningTransition(BaseModel):
-        action: Literal["APPROVE", "RETURN", "REJECT", "SUBMIT_COMPLETION", "VERIFY_COMPLETION"]
+        action: Literal["APPROVE", "RETURN", "REJECT", "RESUBMIT_REQUEST", "SUBMIT_COMPLETION", "VERIFY_COMPLETION"]
         comment: str = Field(..., min_length=2, max_length=4000)
+        provider_name: str | None = Field(None, min_length=2, max_length=255)
+        planned_start: date | None = None
+        planned_end: date | None = None
+        reason: str | None = Field(None, min_length=2, max_length=4000)
         completion_date: date | None = None
         certificate_reference: str | None = Field(None, max_length=255)
         evidence_file_ids: list[str] = Field(default_factory=list)
@@ -611,11 +616,30 @@ def install_training_workflow_completion(router_module) -> None:
             _training_editor(router_module, current_user)
             if str(current_user.id) in {learner_id, str(data.get("requester_user_id") or "")}:
                 raise HTTPException(status_code=409, detail="Learner/requester cannot review their own external-learning workflow.")
-        elif payload.action == "SUBMIT_COMPLETION":
-            if str(current_user.id) != learner_id and not router_module._is_training_editor(current_user):
-                raise HTTPException(status_code=403, detail="Only the learner may submit external-learning completion evidence.")
+        elif payload.action in {"SUBMIT_COMPLETION", "RESUBMIT_REQUEST"}:
+            if str(current_user.id) not in {learner_id, str(data.get("requester_user_id") or "")} and not router_module._is_training_editor(current_user):
+                raise HTTPException(status_code=403, detail="Only the learner/requester may update this external-learning request.")
 
-        if payload.action == "APPROVE":
+        if payload.action == "RESUBMIT_REQUEST":
+            if prior != "RETURNED" or data.get("return_stage") == "COMPLETION":
+                raise HTTPException(status_code=409, detail="Only a request returned before approval may be corrected and resubmitted.")
+            next_start = payload.planned_start or (date.fromisoformat(str(data["planned_start"])) if data.get("planned_start") else None)
+            next_end = payload.planned_end or (date.fromisoformat(str(data["planned_end"])) if data.get("planned_end") else None)
+            if next_start and next_end and next_end < next_start:
+                raise HTTPException(status_code=422, detail="External learning end date cannot precede the start date.")
+            if payload.provider_name:
+                data["provider_name"] = payload.provider_name
+            if payload.planned_start:
+                data["planned_start"] = payload.planned_start.isoformat()
+            if payload.planned_end is not None:
+                data["planned_end"] = payload.planned_end.isoformat()
+            if payload.reason:
+                data["reason"] = payload.reason
+            data["request_resubmitted_at"] = _now().isoformat()
+            data.pop("return_stage", None)
+            workflow.status = "SUBMITTED"
+            workflow.submitted_at = _now()
+        elif payload.action == "APPROVE":
             if prior not in {"SUBMITTED", "RETURNED"}:
                 raise HTTPException(status_code=409, detail=f"Cannot approve external learning from {prior}.")
             workflow.status = "APPROVED"
@@ -629,14 +653,16 @@ def install_training_workflow_completion(router_module) -> None:
             workflow.reviewer_user_id = str(current_user.id)
             data["return_comment"] = payload.comment
             data["returned_at"] = _now().isoformat()
+            data["return_stage"] = "COMPLETION" if prior == "COMPLETION_SUBMITTED" else "REQUEST"
         elif payload.action == "REJECT":
             workflow.status = "REJECTED"
             workflow.reviewer_user_id = str(current_user.id)
             workflow.completed_at = _now()
             data["rejection_comment"] = payload.comment
         elif payload.action == "SUBMIT_COMPLETION":
-            if prior not in {"APPROVED", "RETURNED"}:
+            if prior != "APPROVED" and not (prior == "RETURNED" and data.get("return_stage") == "COMPLETION"):
                 raise HTTPException(status_code=409, detail=f"Cannot submit completion from {prior}.")
+            data.pop("return_stage", None)
             if payload.completion_date is None or not payload.evidence_file_ids:
                 raise HTTPException(status_code=422, detail="Completion date and at least one evidence file are required.")
             evidence = db.query(training_models.TrainingFile).filter(

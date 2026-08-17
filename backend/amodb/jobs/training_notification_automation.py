@@ -209,6 +209,19 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
                 db.rollback()
                 summary["failed_tenants"] += 1
                 logger.exception("Training notification automation failed for tenant %s", settings.amo_id)
+
+        try:
+            from amodb.apps.training.workflow_completion import run_workflow_escalations
+
+            workflow_summary = run_workflow_escalations(db, now=clock)
+            db.commit()
+            for key, value in workflow_summary.items():
+                summary[f"workflow_{key}"] = int(value)
+        except Exception:
+            db.rollback()
+            summary["errors"] += 1
+            logger.exception("Training workflow escalation pass failed")
+
         return summary
     finally:
         close_session_safely(db)
