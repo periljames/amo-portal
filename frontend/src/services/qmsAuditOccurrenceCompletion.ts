@@ -1,13 +1,35 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
 
+export type AuditControlledSourceSystem = "QMS_LOCAL" | "DOCUMENT_CONTROL";
+
 export type ControlledDocumentSubmission = {
   id: string;
   request_id: string;
+  source_system: AuditControlledSourceSystem;
   document_id: string;
   revision_id: string | null;
   response_comment: string | null;
   created_at: string;
+};
+
+export type CanonicalDocumentControlDocument = {
+  id: string;
+  code: string;
+  title: string;
+  manual_type: string;
+  status: string;
+  current_published_revision_id: string | null;
+};
+
+export type CanonicalDocumentControlRevision = {
+  id: string;
+  document_id: string;
+  issue_number: string | null;
+  revision_number: string;
+  status: string;
+  effective_date: string | null;
+  source_sha256: string | null;
 };
 
 export type GovernedAuditDocumentRequest = {
@@ -26,8 +48,11 @@ export type GovernedAuditDocumentRequest = {
   linked_criterion: string | null;
   is_required: boolean;
   source_mode: "UPLOAD" | "CONTROLLED_DMS" | "UPLOAD_OR_CONTROLLED";
+  controlled_source_system: AuditControlledSourceSystem;
   controlled_document_id: string | null;
   controlled_revision_id: string | null;
+  canonical_document_id: string | null;
+  canonical_revision_id: string | null;
 };
 
 export type PublicGovernedAuditDocumentRequest = Omit<GovernedAuditDocumentRequest, "audit_id" | "file_ref" | "uploaded_at" | "created_at" | "updated_at"> & {
@@ -113,6 +138,28 @@ export function listControlledDocumentSubmissions(amoCode: string, auditId: stri
   );
 }
 
+export function listCanonicalDocumentControlDocuments(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: CanonicalDocumentControlDocument[] }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/document-control/documents`),
+    { timeoutMs: 15_000, cacheTtlMs: 30_000, signal },
+  );
+}
+
+export function listCanonicalDocumentControlRevisions(
+  amoCode: string,
+  auditId: string,
+  documentId: string,
+  signal?: AbortSignal,
+) {
+  return apiRequest<{ items: CanonicalDocumentControlRevision[] }>(
+    qmsPath(
+      amoCode,
+      `/audits/${encodeURIComponent(auditId)}/document-control/documents/${encodeURIComponent(documentId)}/revisions`,
+    ),
+    { timeoutMs: 15_000, cacheTtlMs: 10_000, signal },
+  );
+}
+
 export function createGovernedAuditDocumentRequest(
   amoCode: string,
   auditId: string,
@@ -124,8 +171,11 @@ export function createGovernedAuditDocumentRequest(
     linked_criterion?: string | null;
     is_required: boolean;
     source_mode: GovernedAuditDocumentRequest["source_mode"];
+    controlled_source_system: AuditControlledSourceSystem;
     controlled_document_id?: string | null;
     controlled_revision_id?: string | null;
+    canonical_document_id?: string | null;
+    canonical_revision_id?: string | null;
   },
 ) {
   return apiRequest<GovernedAuditDocumentRequest>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/governed-document-requests`), json("POST", payload));
@@ -136,7 +186,9 @@ export function updateGovernedAuditDocumentRequest(
   auditId: string,
   requestId: string,
   payload: Partial<Pick<GovernedAuditDocumentRequest,
-    "status" | "review_note" | "request_type" | "linked_criterion" | "is_required" | "source_mode" | "controlled_document_id" | "controlled_revision_id">>,
+    "status" | "review_note" | "request_type" | "linked_criterion" | "is_required" | "source_mode" |
+    "controlled_source_system" | "controlled_document_id" | "controlled_revision_id" |
+    "canonical_document_id" | "canonical_revision_id">>,
 ) {
   return apiRequest<GovernedAuditDocumentRequest>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/governed-document-requests/${encodeURIComponent(requestId)}`),
@@ -196,7 +248,12 @@ export function listPublicGovernedAuditDocumentRequests() {
 
 export function linkPublicControlledDocumentRequest(
   requestId: string,
-  payload: { document_id: string; revision_id?: string | null; response_comment?: string | null },
+  payload: {
+    source_system: AuditControlledSourceSystem;
+    document_id: string;
+    revision_id?: string | null;
+    response_comment?: string | null;
+  },
 ) {
   return publicJson<ControlledDocumentSubmission>(
     `/quality/audit-access/document-requests/${encodeURIComponent(requestId)}/link-controlled`,
