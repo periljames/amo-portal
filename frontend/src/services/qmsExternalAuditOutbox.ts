@@ -203,3 +203,16 @@ export async function markExternalAuditMutationFailure(id: string, message: stri
     db.close();
   }
 }
+
+export async function clearExternalAuditMutations(scope: ExternalAuditOutboxScope): Promise<void> {
+  const db = await openDb();
+  try {
+    const tx = db.transaction(ENTRY_STORE, "readwrite");
+    const index = tx.objectStore(ENTRY_STORE).index("scope");
+    const keys = await requestResult(index.getAllKeys(IDBKeyRange.only([scope.auditId, scope.participantId])));
+    keys.forEach((key) => tx.objectStore(ENTRY_STORE).delete(key));
+    await transactionDone(tx);
+  } finally {
+    db.close();
+  }
+}
