@@ -12,6 +12,7 @@ from . import (
     calendar_subscriptions,
     code_registry,
     compliance_policy,
+    consent_notification_policy,
     consent_policy,
     exemption_policy,
     lineage,
@@ -75,6 +76,10 @@ timesheet_pay_policy.install_service_policy(workforce_services)
 
 roster_control.install_service_policy(rostering_route_module.services)
 version_copy_policy.install_service_policy(rostering_route_module.services)
+# Route consent events through the existing portal notification service before
+# installing mutation/lifecycle hooks; the hooks call the wrapped service at
+# runtime, so create/edit/accept/decline/supervisor actions share one channel.
+consent_notification_policy.install()
 # Consent generation and lifecycle gating are installed on the same canonical
 # public service facade so single, bulk and generated assignments cannot bypass
 # acknowledgement policy, and submit/approve/publish always re-check it.
