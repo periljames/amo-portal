@@ -9,8 +9,8 @@ from .canonical_router import legacy_router, router
 def _is_session_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
     return (
-        ("/quality/audits/" in path and path.endswith("/session"))
-        or ("/qms/audits/" in path and path.endswith("/session"))
+        ("/quality/audits/" in path or "/qms/audits/" in path)
+        and (path.endswith("/session") or "/audits/resolve/" in path)
     )
 
 
@@ -38,39 +38,11 @@ for api_router in (router, legacy_router):
     _register(api_router)
     _promote(api_router)
 
-# External participants and auditee released-data access are additive to the
-# session projection. Loading here guarantees their ORM metadata and canonical
-# routes exist without changing the historical central Quality bootstrap order.
 from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
-
-# Evidence is a first-class immutable artifact. Load its guarded release route
-# after the historical external-access router so raw path/free-form evidence
-# references cannot bypass purpose-bound artifact authorization.
 from . import audit_evidence_route_order as _audit_evidence_route_order  # noqa: F401,E402
-
-# Presence is an ephemeral collaboration projection. It is deliberately kept
-# separate from append-only audit evidence/events while remaining tenant scoped.
 from . import audit_presence_route_order as _audit_presence_route_order  # noqa: F401,E402
-
-# Complete the occurrence data contract used by Setup, Prepare, Closing and the
-# purpose-bound auditee workspace: governed document-request metadata, meetings,
-# closing narrative, and safe released-CAR collaboration.
 from . import audit_occurrence_completion_route_order as _audit_occurrence_completion_route_order  # noqa: F401,E402
-
-# Deterministic report composition and closing assurance are part of the same
-# governed audit occurrence. Register their exact routes ahead of the legacy
-# generic QMS catch-all so the closing workspace never falls through to a broad
-# module-path handler.
 from . import audit_report_composition_route_order as _audit_report_composition_route_order  # noqa: F401,E402
 from . import audit_closing_assurance_route_order as _audit_closing_assurance_route_order  # noqa: F401,E402
-
-# Archive is a governed continuation of the same occurrence after assurance
-# follow-up. Retention, hold and disposition routes therefore share the same
-# canonical occurrence chain and remain ahead of the generic catch-all.
 from . import audit_archive_governance_route_order as _audit_archive_governance_route_order  # noqa: F401,E402
-
-# Final completion semantics intentionally load after historical report/closing
-# routers. This layer adds auditee closing acknowledgement, WebAuthn signing and
-# public verification, and shadows the older ISSUE transition with stricter
-# exact-hash ceremony gates.
 from . import audit_live_completion_route_order as _audit_live_completion_route_order  # noqa: F401,E402
