@@ -24,6 +24,7 @@ import { preloadRoute } from "./app/routePreload";
 
 import "./styles/auth.css";
 import "./styles/qms-live-audit-completion.css";
+import "./styles/qms-audit-canonical-occurrence.css";
 
 const App: React.FC = () => {
   const queryClient = useQueryClient();
