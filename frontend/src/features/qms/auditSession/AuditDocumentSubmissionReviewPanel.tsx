@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, FileCheck2, Files, X } from "lucide-react";
+import { Download, FileCheck2, Files, Link2, X } from "lucide-react";
 
 import { qmsResolveAudit } from "../../../services/qms";
 import {
   downloadAuditDocumentSubmission,
   listAuditDocumentSubmissions,
 } from "../../../services/qmsAuditExternalAccess";
-import { listAuditDocumentRequests } from "../../../services/qmsAuditPreparationRoom";
+import { listGovernedAuditDocumentRequests } from "../../../services/qmsAuditOccurrenceCompletion";
 import { saveDownloadedFile } from "../../../utils/downloads";
 import "../../../styles/qms-audit-document-review.css";
 
@@ -33,12 +33,12 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
   });
   const auditId = auditQuery.data?.id || "";
   const requestsQuery = useQuery({
-    queryKey: ["qms-audit-document-requests", amoCode, auditId],
-    queryFn: ({ signal }) => listAuditDocumentRequests(amoCode, auditId, signal),
+    queryKey: ["qms-governed-audit-document-requests", amoCode, auditId],
+    queryFn: ({ signal }) => listGovernedAuditDocumentRequests(amoCode, auditId, signal),
     enabled: Boolean(open && auditId),
     staleTime: 2_000,
   });
-  const requests = requestsQuery.data || [];
+  const requests = requestsQuery.data?.items || [];
   const selectedRequest = useMemo(
     () => requests.find((request) => request.id === selectedRequestId) || requests.find((request) => request.status === "UPLOADED") || requests[0] || null,
     [requests, selectedRequestId],
@@ -73,13 +73,13 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
       </button>
       {open ? (
         <aside className="qms-audit-document-review" aria-label="Submitted pre-audit evidence">
-          <header><div><span>PRE-AUDIT EVIDENCE</span><strong>Submitted documents</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close document review"><X size={17} /></button></header>
+          <header><div><span>PRE-AUDIT EVIDENCE</span><strong>Governed submissions</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close document review"><X size={17} /></button></header>
           {error ? <div className="qms-audit-document-review__error" role="alert">{error}</div> : null}
           <div className="qms-audit-document-review__requests">
             {requests.map((request) => (
               <button key={request.id} type="button" className={selectedRequest?.id === request.id ? "is-active" : ""} onClick={() => setSelectedRequestId(request.id)}>
-                <div><strong>{request.title}</strong><small>{request.status.replaceAll("_", " ")}</small></div>
-                {request.uploaded_at ? <FileCheck2 size={15} /> : null}
+                <div><strong>{request.title}</strong><small>{request.request_type.replaceAll("_", " ")} · {request.status.replaceAll("_", " ")} · {request.is_required ? "required" : "optional"}</small></div>
+                {request.uploaded_at || request.controlled_document_id ? <FileCheck2 size={15} /> : null}
               </button>
             ))}
             {!requests.length ? <p>No document requests exist for this audit.</p> : null}
@@ -88,6 +88,8 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
           {selectedRequest ? (
             <section>
               <header><strong>{selectedRequest.title}</strong><small>{selectedRequest.description || "No additional request instructions."}</small></header>
+              {selectedRequest.linked_criterion ? <blockquote><strong>Criterion:</strong> {selectedRequest.linked_criterion}</blockquote> : null}
+              {selectedRequest.controlled_document_id ? <div className="qms-audit-document-review__controlled"><Link2 size={15} /><span><strong>Controlled DMS reference</strong><small>Document {selectedRequest.controlled_document_id}{selectedRequest.controlled_revision_id ? ` · revision ${selectedRequest.controlled_revision_id}` : " · authorised revision may be selected"}</small></span></div> : null}
               <div className="qms-audit-document-review__submissions">
                 {(submissionsQuery.data?.items || []).map((submission) => (
                   <article key={submission.id}>
@@ -96,7 +98,7 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
                   </article>
                 ))}
                 {submissionsQuery.isLoading ? <p>Loading submitted evidence…</p> : null}
-                {!submissionsQuery.isLoading && !(submissionsQuery.data?.items.length) ? <p>No controlled submissions are recorded for this request yet.</p> : null}
+                {!submissionsQuery.isLoading && !(submissionsQuery.data?.items.length) && !selectedRequest.controlled_document_id ? <p>No controlled submission is recorded for this request yet.</p> : null}
               </div>
             </section>
           ) : null}
