@@ -31,6 +31,11 @@ def exchange_audit_access_guarded(
     grant = _active_grant(db, payload.token)
     participant = grant.participant
     identity = participant.external_identity if participant else None
+    if identity is not None and identity.assurance_level == "PASSKEY":
+        raise HTTPException(
+            status_code=428,
+            detail="Passkey verification is required before this external-auditor audit session can be activated.",
+        )
     if identity is not None and identity.assurance_level != "EMAIL_LINK":
         raise HTTPException(
             status_code=403,
@@ -65,6 +70,6 @@ def end_audit_access_session_guarded(response: Response) -> Response:
     return response
 
 
-# These routes intentionally shadow the older exchange/delete endpoints. GET
-# session and other purpose-bound handlers continue to use the same grant model.
+# These routes intentionally shadow the older exchange/delete endpoints. PASSKEY
+# invitations must complete the dedicated WebAuthn flow before any cookie is set.
 public_router.routes[0:0] = list(router.routes)
