@@ -17,6 +17,8 @@ data:
   DB_CIRCUIT_MAX_RETRY_SECONDS: "60"
   PORTAL_EMBEDDED_JOB_WORKER: "false"
   PORTAL_EMBEDDED_SCHEDULED_WORKER: "false"
+  DOCUMENT_EVIDENCE_PACK_EMBEDDED_WORKER: "false"
+  DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS: "0.5"
   PORTAL_WORKER_PROCESS_POOLS: workforce=4
   DB_MAX_CONNECTIONS: "300"
   DB_ADMIN_CONNECTION_RESERVE: "20"
@@ -29,6 +31,11 @@ data:
   WORKFORCE_BULK_CHUNK_SIZE: "500"
   PRESENCE_MIN_WRITE_INTERVAL_SECONDS: "12"
   PRESENCE_HEARTBEAT_GRACE_SECONDS: "90"
+  # Horizontal API/worker replicas must share durable retained artifacts. The
+  # bucket name/credentials remain in amo-portal-secrets.
+  AMO_STORAGE_BACKEND: "s3"
+  AMO_REQUIRE_SHARED_STORAGE: "true"
+  AMO_STORAGE_S3_PREFIX: "amo-portal"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -164,6 +171,36 @@ spec:
             - platform-commands,saas,training-workbooks,training-reports,document-indexing
             - --concurrency
             - "1"
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-document-evidence-workers
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels: { app: amo-portal-document-evidence-worker }
+  template:
+    metadata:
+      labels: { app: amo-portal-document-evidence-worker }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: ghcr.io/replace/amo-portal-backend:replace
+          command: ["python", "-m", "amodb.apps.doc_control.evidence_pack_worker_main"]
+          args: ["--poll-seconds", "0.5"]
           envFrom:
             - configMapRef: { name: amo-portal-runtime }
             - secretRef: { name: amo-portal-secrets }
