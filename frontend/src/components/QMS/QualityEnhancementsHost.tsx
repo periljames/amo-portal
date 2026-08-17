@@ -4,12 +4,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 
 import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
+import MobileAuditDeepLinkState from "../../features/qms/auditSession/MobileAuditDeepLinkState";
 import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/qms-text-scale-override.css";
 
+const AuditSetupWorkspace = lazy(
+  () => import("../../features/qms/auditSession/AuditSetupWorkspace"),
+);
 const AuditPrepareWorkspace = lazy(
   () => import("../../features/qms/auditSession/AuditPrepareWorkspace"),
 );
@@ -27,6 +31,9 @@ const ExternalFindingDraftReviewPanel = lazy(
 );
 const AuditClosingWorkspace = lazy(
   () => import("../../features/qms/auditSession/AuditClosingWorkspace"),
+);
+const AuditFollowUpWorkspace = lazy(
+  () => import("../../features/qms/auditSession/AuditFollowUpWorkspace"),
 );
 const AuditArchiveWorkspace = lazy(
   () => import("../../features/qms/auditSession/AuditArchiveWorkspace"),
@@ -225,6 +232,7 @@ const QualityEnhancementsHost: React.FC = () => {
   const amoCode = useQualityAmoCode();
   const route = useAuditRoute();
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
+  const legacyOccurrence = Boolean(route && !auditSessionStage);
 
   if (/^\/car-invite\/?$/i.test(location.pathname)) {
     return <CarInviteResponsiveStyleLoader />;
@@ -243,7 +251,11 @@ const QualityEnhancementsHost: React.FC = () => {
           <QualityEffectivenessResponseHost amoCode={amoCode} />
           <QualityPlannerStrategicHost amoCode={amoCode} />
           <QualityProgrammeOccurrenceHost amoCode={amoCode} />
-          <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={route?.activeTab} />
+          <QualityChecklistTemplateHost
+            amoCode={amoCode}
+            auditKey={route?.auditKey}
+            activeTab={auditSessionStage === "prepare" ? "checklist" : auditSessionStage ? null : route?.activeTab}
+          />
         </Suspense>
       ) : null}
 
@@ -251,17 +263,29 @@ const QualityEnhancementsHost: React.FC = () => {
         <>
           <AuditLifecycleRail amoCode={route.amoCode} auditKey={route.auditKey} />
           <WorkflowIntegrityGuard route={route} />
-          <Suspense fallback={null}>
-            <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
-            <QualityAuditPreparationContextHost amoCode={route.amoCode} auditKey={route.auditKey} />
-            {route.activeTab === "report" || route.activeTab === "closeout" ? (
-              <QualityAuditReportCloseoutHost amoCode={route.amoCode} auditKey={route.auditKey} />
-            ) : null}
-          </Suspense>
-          {route.activeTab === "checklist" ? (
+          <MobileAuditDeepLinkState />
+
+          {legacyOccurrence ? (
+            <>
+              <Suspense fallback={null}>
+                <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
+                <QualityAuditPreparationContextHost amoCode={route.amoCode} auditKey={route.auditKey} />
+                {route.activeTab === "report" || route.activeTab === "closeout" ? (
+                  <QualityAuditReportCloseoutHost amoCode={route.amoCode} auditKey={route.auditKey} />
+                ) : null}
+              </Suspense>
+              {route.activeTab === "checklist" ? (
+                <Suspense fallback={null}>
+                  <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
+                  <QualityChecklistPdfFormEditorHost />
+                </Suspense>
+              ) : null}
+            </>
+          ) : null}
+
+          {auditSessionStage === "setup" ? (
             <Suspense fallback={null}>
-              <QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} />
-              <QualityChecklistPdfFormEditorHost />
+              <AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "prepare" ? (
@@ -280,6 +304,11 @@ const QualityEnhancementsHost: React.FC = () => {
           {auditSessionStage === "closing" ? (
             <Suspense fallback={null}>
               <AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "follow-up" ? (
+            <Suspense fallback={null}>
+              <AuditFollowUpWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "archive" ? (
