@@ -79,6 +79,7 @@ jobs:
           src/utils/trainingPresentation.ts
           src/utils/trainingPresentation.test.ts
           src/components/training/MyTrainingTaskInbox.tsx
+          src/components/training/TrainingInvitationInbox.tsx
           src/components/training/TrainingLearnerActionCentre.tsx
           src/components/training/TrainingRequirementList.tsx
           src/components/training/TrainingPlanMatrix.tsx
