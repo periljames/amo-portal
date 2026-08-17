@@ -48,6 +48,17 @@ jobs:
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+      - name: Start mocked portal readiness
+        run: |
+          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; Playwright should handle business API traffic"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-audit-lifecycle-readiness.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-audit-lifecycle-readiness.log
+          exit 1
       - name: Start QMS preview server
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-audit-lifecycle-preview.log 2>&1 &
@@ -60,15 +71,35 @@ jobs:
           done
           cat /tmp/qms-audit-lifecycle-preview.log
           exit 1
-      - name: Audit lifecycle Playwright — 18-scenario acceptance
-        run: >-
-          npx playwright test
-          tests/e2e/qms-audit-programme.spec.ts
-          tests/e2e/qms-modern-planner-live.spec.ts
-          tests/e2e/qms-planner-lifecycle.spec.ts
-          tests/e2e/qms-planner-audit-handoff.spec.ts
-          tests/e2e/qms-usability-enhancements.spec.ts
-          tests/e2e/qms-audit-governed-lifecycle.spec.ts
-          tests/e2e/qms-checklist-execution-governance.spec.ts
-          tests/e2e/qms-audit-lifecycle-traceability.spec.ts
-          --workers=1
+      - name: Audit lifecycle Playwright — governed acceptance
+        shell: bash
+        run: |
+          set +e
+          npx playwright test \
+            tests/e2e/qms-audit-programme.spec.ts \
+            tests/e2e/qms-modern-planner-live.spec.ts \
+            tests/e2e/qms-planner-lifecycle.spec.ts \
+            tests/e2e/qms-planner-audit-handoff.spec.ts \
+            tests/e2e/qms-usability-enhancements.spec.ts \
+            tests/e2e/qms-audit-governed-lifecycle.spec.ts \
+            tests/e2e/qms-checklist-execution-governance.spec.ts \
+            tests/e2e/qms-audit-lifecycle-traceability.spec.ts \
+            --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-audit-lifecycle-playwright.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 140 /tmp/qms-audit-lifecycle-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS audit lifecycle browser failure::$summary"
+          fi
+          exit "$status"
+      - name: Retain audit lifecycle browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-audit-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-audit-lifecycle-playwright.log
+            /tmp/qms-audit-lifecycle-preview.log
+            /tmp/qms-audit-lifecycle-readiness.log
+          if-no-files-found: warn
+          retention-days: 14
