@@ -15,6 +15,7 @@ from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_assignment_guard import evaluate_auditor_assignment
+from .audit_occurrence_completion_models import QualityAuditAssignmentDecision
 from .people_models import QualityIndependenceDeclaration
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -245,6 +246,16 @@ def update_audit_assignments(
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
     }
+    decision = QualityAuditAssignmentDecision(
+        amo_id=ctx.amo_id,
+        audit_id=audit.id,
+        reason=payload.reason.strip(),
+        before_snapshot=previous,
+        after_snapshot=current,
+        eligibility_snapshot=results,
+        actor_user_id=ctx.user_id,
+    )
+    db.add(decision)
     event = audit_models.AuditEvent(
         amo_id=ctx.amo_id,
         entity_type="qms.audit.assignment",
@@ -256,12 +267,19 @@ def update_audit_assignments(
         metadata_json={
             "module": "quality",
             "auditId": str(audit.id),
+            "assignmentDecisionId": str(decision.id),
             "reason": payload.reason.strip(),
             "assignmentGate": results,
         },
     )
     db.add(event)
     db.flush()
+    # Generate the decision UUID before the durable AuditEvent is committed so
+    # both records carry the same attributable correlation reference.
+    event.metadata_json = {
+        **(event.metadata_json or {}),
+        "assignmentDecisionId": str(decision.id),
+    }
     db.commit()
     db.refresh(audit)
     _publish_persisted_event(event)
@@ -272,5 +290,6 @@ def update_audit_assignments(
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
         "previous_assignments": previous,
         "assignment_gate": results,
+        "assignment_decision_id": str(decision.id),
         "reason": payload.reason.strip(),
     }
