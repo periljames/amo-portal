@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision = "rostering_20260815_pattern_scope"
@@ -17,15 +18,12 @@ depends_on = None
 
 
 def _has_column(table_name: str, column_name: str) -> bool:
-    """Return whether an earlier branch/head already materialised a column.
-
-    The repository has historical Alembic heads that can converge on the same
-    physical Workforce column. Keep this merge-path migration safe on a clean
-    all-head upgrade without masking any incompatible type/default change.
-    """
-
-    columns = sa.inspect(op.get_bind()).get_columns(table_name)
-    return any(str(column.get("name")) == column_name for column in columns)
+    """Handle all-head installs where another lineage materialised the column."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table(table_name):
+        return False
+    return column_name in {str(column["name"]) for column in inspector.get_columns(table_name)}
 
 
 def upgrade() -> None:
