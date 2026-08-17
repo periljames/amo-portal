@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, FileText, RefreshCw, Send, Users } from "lucide-react";
 
@@ -52,7 +52,7 @@ const emptyNarrative: AuditClosingNarrative = {
 const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
-  const [draft, setDraft] = useState<AuditClosingNarrative>(emptyNarrative);
+  const [draftOverride, setDraftOverride] = useState<AuditClosingNarrative | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -62,13 +62,15 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
-  const narrativeQuery = useQuery({ queryKey: ["qms-audit-closing-narrative", amoCode, auditId], queryFn: ({ signal }) => getAuditClosingNarrative(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
+  const narrativeQueryKey = ["qms-audit-closing-narrative", amoCode, auditId] as const;
+  const narrativeQuery = useQuery({ queryKey: narrativeQueryKey, queryFn: ({ signal }) => getAuditClosingNarrative(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const meetingsQuery = useQuery({ queryKey: ["qms-audit-meetings", amoCode, auditId], queryFn: ({ signal }) => listAuditMeetings(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const findingsQuery = useQuery({ queryKey: ["qms-closing-findings", amoCode, auditId], queryFn: () => qmsListFindings(auditId), enabled: Boolean(auditId), staleTime: 2_000 });
   const carsQuery = useQuery({ queryKey: ["qms-audit-cars", amoCode, auditId], queryFn: ({ signal }) => listAuditCars(auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const releasesQuery = useQuery({ queryKey: ["qms-closing-finding-releases", amoCode, auditId], queryFn: ({ signal }) => listAuditFindingReleases(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
-
-  useEffect(() => { if (narrativeQuery.data) setDraft(narrativeQuery.data); }, [narrativeQuery.data]);
+  const persistedNarrative = narrativeQuery.data ?? emptyNarrative;
+  const draft = draftOverride ?? persistedNarrative;
+  const updateDraft = (patch: Partial<AuditClosingNarrative>) => setDraftOverride((current) => ({ ...(current ?? persistedNarrative), ...patch }));
 
   const refresh = async () => {
     await Promise.all([
@@ -88,7 +90,13 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
       conclusion: draft.conclusion?.trim() || null,
       positive_practices: draft.positive_practices?.trim() || null,
     }),
-    onSuccess: async (row) => { setDraft(row); setLocalError(null); setNotice("Closing narrative saved. The next generated report hash will include this exact content."); await refresh(); },
+    onSuccess: async (row) => {
+      queryClient.setQueryData(narrativeQueryKey, row);
+      setDraftOverride(null);
+      setLocalError(null);
+      setNotice("Closing narrative saved. The next generated report hash will include this exact content.");
+      await refresh();
+    },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Closing narrative could not be saved."),
   });
 
@@ -136,9 +144,9 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
         <main>
           <article className="qms-occurrence-stage__card">
             <header><FileText size={18} /><div><strong>Governed report narrative</strong><small>All three statements must be intentionally completed before report generation.</small></div></header>
-            <label><span>Management summary</span><textarea rows={5} readOnly={!canManage} value={draft.management_summary || ""} onChange={(event) => setDraft((current) => ({ ...current, management_summary: event.target.value }))} placeholder="Concise management-level summary of audit purpose, coverage and outcome." /></label>
-            <label><span>Audit conclusion</span><textarea rows={5} readOnly={!canManage} value={draft.conclusion || ""} onChange={(event) => setDraft((current) => ({ ...current, conclusion: event.target.value }))} placeholder="Overall conformity/effectiveness conclusion supported by the fieldwork." /></label>
-            <label><span>Positive practices</span><textarea rows={4} readOnly={!canManage} value={draft.positive_practices || ""} onChange={(event) => setDraft((current) => ({ ...current, positive_practices: event.target.value }))} placeholder="Record observed positive practices, or explicitly state that none were noted." /></label>
+            <label><span>Management summary</span><textarea rows={5} readOnly={!canManage} value={draft.management_summary || ""} onChange={(event) => updateDraft({ management_summary: event.target.value })} placeholder="Concise management-level summary of audit purpose, coverage and outcome." /></label>
+            <label><span>Audit conclusion</span><textarea rows={5} readOnly={!canManage} value={draft.conclusion || ""} onChange={(event) => updateDraft({ conclusion: event.target.value })} placeholder="Overall conformity/effectiveness conclusion supported by the fieldwork." /></label>
+            <label><span>Positive practices</span><textarea rows={4} readOnly={!canManage} value={draft.positive_practices || ""} onChange={(event) => updateDraft({ positive_practices: event.target.value })} placeholder="Record observed positive practices, or explicitly state that none were noted." /></label>
             <div className="qms-occurrence-stage__actions">{canManage ? <button type="button" className="is-primary" disabled={!narrativeReady || saveMutation.isPending} onClick={() => saveMutation.mutate()}><FileText size={15} /> {saveMutation.isPending ? "Saving…" : "Save report narrative"}</button> : null}<span>{narrativeReady ? "Narrative complete" : "Narrative incomplete · report generation is blocked"}</span></div>
           </article>
 
