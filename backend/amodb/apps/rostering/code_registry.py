@@ -31,9 +31,10 @@ class StarterShift:
     description: str
 
 
-# Keep the starter registry intentionally small. Tenants define their own shift
-# windows and additional codes (SA, XH, nights, split duties, etc.) and choose
-# whether each template counts as duty. Nothing here assigns operational times.
+# Preserve the established AMO roster vocabulary while keeping all operational
+# windows tenant-configurable. The registry supplies only a recommended semantic
+# starting point; compliance still uses ShiftTemplate.counts_as_duty and policy
+# metadata rather than branching on any literal code name.
 AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
     StarterShift(
         "D",
@@ -46,7 +47,7 @@ AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
         0,
         RosterCalendarMode.TIMED,
         RosterDutySemantic.DUTY,
-        "Normal day duty. Configure the local start/end window for the tenant or work pattern.",
+        "Normal day duty. Configure local start/end times and breaks for the tenant or work pattern.",
     ),
     StarterShift(
         "X",
@@ -59,7 +60,163 @@ AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
         0,
         RosterCalendarMode.TIMED,
         RosterDutySemantic.STANDBY,
-        "On-site standby or duty. Configure the local window; it always participates in duty/rest calculations while counts_as_duty is enabled.",
+        "On-site standby or duty. Configure the local window and breaks; duty participation is controlled by template metadata.",
+    ),
+    StarterShift(
+        "DY",
+        "Day Duty",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established day-duty code retained for existing rosters. Configure local times and breaks per tenant.",
+    ),
+    StarterShift(
+        "AM",
+        "Morning Duty",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established morning-duty code retained without imposing a fixed clock window.",
+    ),
+    StarterShift(
+        "PM",
+        "Afternoon / Late Duty",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established afternoon/late-duty code retained without imposing a fixed clock window.",
+    ),
+    StarterShift(
+        "XD",
+        "Extended Day",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established extended-day code; exact duration, clock times and breaks remain tenant-configurable.",
+    ),
+    StarterShift(
+        "WD",
+        "Weekend Day",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established weekend-duty code; exact duration, clock times and breaks remain tenant-configurable.",
+    ),
+    StarterShift(
+        "NT",
+        "Night Duty",
+        models.ShiftTemplateKind.NIGHT,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established night-duty code retained without imposing a fixed clock window.",
+    ),
+    StarterShift(
+        "F1",
+        "Flight Duty - Early",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established early flight-engineering coverage code. Configure times separately from aircraft allocation.",
+    ),
+    StarterShift(
+        "F2",
+        "Flight Duty - Late",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established late flight-engineering coverage code. Configure times separately from aircraft allocation.",
+    ),
+    StarterShift(
+        "FD",
+        "Full Flight Duty",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Established full flight-engineering coverage code. Configure the actual operational window per tenant.",
+    ),
+    StarterShift(
+        "SB",
+        "Standby",
+        models.ShiftTemplateKind.STANDBY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.STANDBY,
+        "Established standby code retained with a tenant-configurable duty window.",
+    ),
+    StarterShift(
+        "TR",
+        "Training / Course",
+        models.ShiftTemplateKind.TRAINING,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.TRAINING,
+        "Training/course code retained; exact attendance window and breaks remain tenant-configurable.",
+    ),
+    StarterShift(
+        "OF",
+        "Off Duty",
+        models.ShiftTemplateKind.OFF,
+        None,
+        None,
+        0,
+        False,
+        0,
+        RosterCalendarMode.ALL_DAY,
+        RosterDutySemantic.OFF,
+        "Established off-duty code retained as a first-class protected non-duty assignment.",
     ),
     StarterShift(
         "RD",
@@ -72,7 +229,7 @@ AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
         0,
         RosterCalendarMode.ALL_DAY,
         RosterDutySemantic.REST,
-        "Explicit protected rest day. OFF and rest-day concepts are represented by this single canonical code.",
+        "Explicit protected rostered rest day.",
     ),
 )
 
@@ -80,7 +237,6 @@ STARTER_CODES = tuple(item.code for item in AMO_STARTER_SHIFTS)
 SHIFT_CODE_PATTERN = re.compile(r"^[A-Z0-9]{1,2}$")
 CANONICAL_CODE_EQUIVALENTS = {
     "O": "RD",
-    "OF": "RD",
     "RR": "RD",
 }
 
@@ -89,7 +245,7 @@ def normalize_shift_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if not SHIFT_CODE_PATTERN.fullmatch(code):
         raise ValueError(
-            "Shift code must be one or two uppercase letters/numbers (for example D, X or RD)."
+            "Shift code must be one or two uppercase letters/numbers (for example D, X, DY or RD)."
         )
     return CANONICAL_CODE_EQUIVALENTS.get(code, code)
 
@@ -166,16 +322,16 @@ def install_starter_pack(
     amo_id: str,
     actor_user_id: str,
 ) -> tuple[list[models.ShiftTemplate], list[str]]:
-    """Install canonical configurable D, X and RD templates.
+    """Install the preserved configurable AMO roster vocabulary.
 
-    Setup is deliberately destructive for equivalent historical rest codes:
-    O/OF/RR references are moved to RD and the duplicate templates are deleted
-    before the minimal starter registry is reconciled. Unrelated working codes
-    are left tenant-owned rather than guessed into another meaning.
+    O and RR are exact aliases of RD and are consolidated before the starter
+    registry is reconciled. OF remains a first-class off-duty code. All working
+    templates are installed without fixed clock times so the tenant owns the
+    operational windows and break configuration.
     """
 
     # Local import avoids a module cycle while making the normal setup action
-    # perform the requested destructive rest-code consolidation automatically.
+    # consolidate only exact legacy aliases automatically.
     from .rest_code_canonicalization import canonicalize_rest_codes
 
     try:
@@ -185,8 +341,7 @@ def install_starter_pack(
             actor_user_id=actor_user_id,
         )
     except LookupError:
-        # A new tenant may not have any historical rest template yet; RD will
-        # be created below as part of the canonical starter set.
+        # A new tenant may not have RD/O/RR yet; RD is created below.
         pass
 
     existing = {
@@ -228,7 +383,7 @@ def install_starter_pack(
             calendar_mode=item.calendar_mode,
             duty_semantic=item.duty_semantic,
             verification_status=RosterCodeVerificationStatus.CONFIRMED,
-            source_reference="AMO Portal minimal starter pack; tenant-owned after installation.",
+            source_reference="AMO Portal preserved configurable starter pack; tenant-owned after installation.",
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
         )
@@ -276,7 +431,7 @@ def delete_unused_template(
     usage = template_usage_count(db, amo_id=amo_id, template_id=template_id)
     if usage:
         raise ValueError(
-            "This code is still referenced by roster records. Reassign those records to the canonical replacement before deleting the template."
+            "This code is still referenced by roster records. Reassign those records before deleting the template."
         )
     before = {"code": row.code, "label": row.label, "is_active": row.is_active}
     db.delete(row)
