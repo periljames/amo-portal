@@ -1,6 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
+import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
 
 export type AuditEvidenceArtifact = {
   id: string;
@@ -53,6 +54,39 @@ export function uploadInternalAuditEvidence(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(checklistItemId)}/evidence`),
     { method: "POST", body: form, timeoutMs: 90_000, offline: { queueWhenOffline: false } },
   );
+}
+
+export async function uploadExternalAuditorEvidence(
+  model: Pick<ExternalAuditorFieldworkModel, "csrf_token">,
+  item: Pick<ExternalAuditorFieldworkItem, "checklist_item_id" | "entity_version">,
+  file: File,
+  description?: string | null,
+) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("base_version", String(item.entity_version));
+  form.append("client_mutation_id", createEvidenceMutationId());
+  if (description?.trim()) form.append("description", description.trim());
+  const response = await fetch(
+    `${getApiBaseUrl()}/quality/audit-access/fieldwork/checklist-items/${encodeURIComponent(item.checklist_item_id)}/evidence`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "X-QMS-CSRF": model.csrf_token },
+      credentials: "include",
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    const detail = payload?.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : detail && typeof detail === "object" && typeof (detail as { message?: unknown }).message === "string"
+        ? String((detail as { message: unknown }).message)
+        : `External evidence upload failed with status ${response.status}.`;
+    throw new Error(message);
+  }
+  return response.json() as Promise<{ artifact: AuditEvidenceArtifact; committed_version: number; replayed: boolean }>;
 }
 
 export async function downloadInternalAuditEvidence(amoCode: string, auditId: string, artifactId: string): Promise<Blob> {
