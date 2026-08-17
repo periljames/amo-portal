@@ -1,7 +1,7 @@
 """Dedicated Document Control evidence-pack worker.
 
 This process intentionally owns a small database pool that is separate from the
-HTTP API.  Run more worker processes only when evidence-pack throughput needs it;
+HTTP API. Run more worker processes only when evidence-pack throughput needs it;
 user-facing API connections must remain reserved for interactive work.
 """
 from __future__ import annotations
@@ -53,6 +53,13 @@ def main() -> None:
     _load_env_file(args.env_file)
     _configure_worker_pool()
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+    # Storage validation is intentionally before queue consumption. Horizontal
+    # production must never complete a job to container-local disk that an API
+    # replica cannot retrieve.
+    from amodb import storage
+
+    storage.validate_storage_configuration()
 
     # Import only after the worker-specific DB pool has been applied. database.py
     # creates SQLAlchemy engines at import time.
