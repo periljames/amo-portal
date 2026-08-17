@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from ..accounts import models as account_models
-from . import compliance_policy, exemption_service, models, validation
+from . import compliance_policy, exemption_service, models, statutory_rule_policy, validation
 
 _INSTALLED = False
 
@@ -21,7 +21,7 @@ def _rule_code(spec: validation.FindingSpec) -> str:
     return str((spec.details or {}).get("rule_code") or spec.code).upper()
 
 
-def _finding_date(spec: validation.FindingSpec, version) -> object:
+def _finding_date(spec: validation.FindingSpec, version):
     raw = (spec.details or {}).get("window_start")
     if raw:
         try:
@@ -32,12 +32,7 @@ def _finding_date(spec: validation.FindingSpec, version) -> object:
 
 
 def install_validation_policy() -> None:
-    """Replace an exempted statutory blocker with an auditable exemption result.
-
-    The underlying violation remains in details. Internal approvals never reach
-    this path; only a verified, in-date Authority record that explicitly covers
-    the statutory rule can change the publication result.
-    """
+    """Replace a covered hard rule only with a verified Authority exemption."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -46,13 +41,19 @@ def install_validation_policy() -> None:
 
     def governed_build_findings(db, *, version, rules):
         specs = original_build_findings(db, version=version, rules=rules)
+        rule_by_id = {row.id: row for row in rules}
         governed: list[validation.FindingSpec] = []
         user_cache: dict[str, account_models.User | None] = {}
         for spec in specs:
             rule_code = _rule_code(spec)
+            rule = rule_by_id.get(spec.rule_id) if spec.rule_id else None
             statutory = (
                 spec.severity == models.RosterValidationSeverity.BLOCKER
-                and compliance_policy.statutory_rule_is_non_overridable(rule_code)
+                and (
+                    compliance_policy.statutory_rule_is_non_overridable(rule_code)
+                    or statutory_rule_policy.is_hard_aviation_rule(rule)
+                    or spec.code == "ROSTER_RECOVERY_REST_REQUIRED"
+                )
             )
             if not statutory:
                 governed.append(spec)
