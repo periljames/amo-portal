@@ -221,12 +221,17 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const queueMutation = !isGet && offline?.queueMutation === true;
   const cachePath = normalizedCachePath(path);
   const requestScope = currentOfflineScope();
+  const isAbsoluteTransportAttempt = /^https?:\/\//i.test(path);
 
   if (getPortalConnectivity().state === "RECOVERING") {
     await waitForPortalReadiness();
   }
 
-  if (!networkAvailable()) {
+  // apiClient's alternate backend is an absolute URL. If the primary route
+  // just failed and marked the shared portal state OFFLINE, that direct probe
+  // must still be allowed to run; otherwise the fallback is blocked by the
+  // very failure it is meant to recover from.
+  if (!networkAvailable() && !isAbsoluteTransportAttempt) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
