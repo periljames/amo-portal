@@ -1,80 +1,129 @@
-# QMS Live Audit execution checkpoint
+# QMS Live Audit — Current Execution Checkpoint
 
-PR #502 now implements the Live Audit execution specification on top of the governed QMS Assurance OS and CAR control loop. It does not replace the existing Audit Programme, checklist, finding, report, CAR/CAPA or closeout state machines.
+PR #502 is at a **code-completion freeze** for the canonical audit occurrence:
 
-## Implemented operating flow
+`SETUP → PREPARE → LIVE → CLOSING → FOLLOW-UP → ARCHIVE`
 
-### 1. Setup and preparation
+The current branch is **not** being declared CI-green or merge-ready. Tests and repository CI were intentionally deferred while the implementation surface was completed and reconciled.
 
-- One audit occurrence projects through **Setup → Prepare → Live → Closing → Follow-up → Archive**.
-- Internal auditor assignment, eligibility/independence controls, scheduling and notice governance reuse the existing QMS baseline.
-- External auditors are first-class scoped participants; they are not represented as fake employee accounts.
-- EMAIL_LINK external access is supported. MFA/PASSKEY labels fail closed until a real authentication ceremony exists.
-- Auditees receive scoped document requests and can upload requested evidence through the secure external workspace.
-- Quality can review/download submitted preparation documents without exposing internal-only audit state.
+## What is complete in source
 
-### 2. Live fieldwork
+### Canonical occurrence routing
 
-- Canonical checklist responses persist through versioned, idempotent fieldwork mutations.
-- Internal mutations carry client mutation ID, device ID/sequence, client timestamp and base version.
-- Stale writes are rejected instead of silently applying last-write-wins.
-- Employee Live Audit work reuses the encrypted portal mutation outbox for offline queue/replay.
-- QMS audit events are committed with authoritative writes and published through the existing realtime broker only after commit.
-- Realtime subscription/replay is scoped to actual audit-occurrence routes; portfolio/People/Assurance/Intelligence pages do not inherit Live Audit replay behavior.
-- Atomic internal finding intent uses the canonical official finding/CAR transaction rather than a parallel finding state machine.
-- External auditors can execute only their assigned audit checklist, with participant attribution and CSRF-bound writes.
-- External auditor notes/evidence are retained as attributable contributions separate from internal Quality notes.
-- External finding drafts support create, submit, return for revision, revise, withdraw and governed promotion/review into the canonical official finding workflow.
-- Auditees receive only explicitly released findings/evidence. Drafts and private auditor deliberations are not sent to the public read model.
+Canonical six-stage URLs no longer mount the legacy Audit Run Hub cockpit. A lightweight Quality route shell preserves the portal layout while `QualityEnhancementsHost` owns the stage workspace, lifecycle rail, realtime coordination and mobile closeout state. Legacy non-stage audit URLs remain compatibility surfaces.
 
-### 3. Closing meeting and same-day output
+### Setup
 
-- Closing report composition is deterministic from canonical audit state and records frozen source/artifact hashes.
-- The existing governed report approval/issuance lifecycle remains authoritative.
-- Electronic signature evidence is available for the exact issued report using **PASSWORD_REAUTH** with configured failure-rate limits, signer identity, report SHA-256, reason, nonce, timestamp and HMAC signature digest.
-- This branch does **not** claim WebAuthn/passkey signing.
-- Versioned output policy controls `NONE`, `REPORT_ONLY`, `APPROVAL_LETTER`, `CERTIFICATE` and `ATTESTATION` behavior.
-- Policy-enabled assurance artifacts are generated from the issued report and signature evidence with their own checksum/integrity chain.
-- The auditee secure workspace exposes only the latest formally `ISSUED` report. Download verifies the controlled path and SHA-256 before release.
-- Auditee report receipt acknowledgement is idempotent and appended to the external-access ledger with participant identity, exact report revision ID/hash and timestamp. The acknowledgement explicitly records receipt and does not waive response, corrective-action, review or appeal rights.
+- audit scope, criteria, dates and auditee;
+- notification/reminder preferences;
+- governed opening and closing meeting records;
+- governed audit notice lifecycle;
+- internal auditor assignment through People & Privileges hard gates rather than a general audit PATCH.
 
-### 4. Follow-up and CAR/CAPA
+Assignment hard gates cover active identity, Quality privilege, authorised scope, required training, workload capacity and audit-specific independence.
 
-- CAR sharing, RCA/CAP submission, Quality return/reject/accept, reminders, escalation, controlled extensions, effectiveness review and final closure remain governed by the existing CAR control loop from #499.
-- Audit execution may close while CAR/CAPA follow-up remains open, preserving the existing QMS separation between fieldwork completion and corrective-action lifecycle.
+### Prepare
 
-### 5. Archive governance
+- governed document/record/manual/form/certificate/register request metadata;
+- linked criterion and required/optional control;
+- due date;
+- upload / controlled-DMS / upload-or-controlled source modes;
+- exact controlled document/revision selection;
+- secure auditee file submission;
+- auditee controlled-DMS linking without document-library enumeration;
+- internal review of both binary uploads and controlled-record responses;
+- accept / return / waive review states;
+- auditee EMAIL_LINK access;
+- external-auditor EMAIL_LINK or PASSKEY access;
+- unimplemented generic MFA omitted from UI and rejected by the backend.
 
-- Versioned retention policy revisions define retention class, start event, duration/indefinite retention, governing basis, review-before-disposition, legal-hold support and disposition mode.
-- Archive manifests retain authoritative record IDs/revisions, source system, retention role and content hashes.
-- Generated archive packages record package filename, size and SHA-256.
-- Legal-hold placement/release is append-only.
-- Disposition approval/rejection/execution is governed and retains inventory/package hashes and actor/reason history.
+### Live
 
-## Security and failure-handling posture
+- frozen checklist execution;
+- immutable source lineage projected beside each question;
+- expected-evidence statement projected from the checklist binding;
+- versioned/idempotent fieldwork writes;
+- conflict rejection instead of silent last-write-wins;
+- governed evidence artifacts;
+- atomic official finding/CAR creation;
+- explicit finding/evidence release boundary;
+- internal encrypted offline replay;
+- external-auditor encrypted offline replay;
+- presence and occurrence-scoped realtime refresh.
 
-- New external audit, fieldwork, report and archive tables use tenant-aware controls; the PostgreSQL all-head probe proves RLS/FORCE RLS, attribution, package integrity and append-only behavior.
-- Signed public workspace deep links remain React SPA routes in both Vite development and production preview; HTML navigation is not accidentally proxied to the API backend.
-- Browser CI now retains Playwright traces/screenshots/test results and preview logs for Live Audit, External Draft, CAR and the key Operational UI paths instead of returning opaque exit-code failures.
-- Historical Alembic heads can converge on the Workforce `applicability_json` column; the guarded Rostering migration is therefore retained as a required clean-`upgrade heads` compatibility measure, not an unrelated QMS feature.
+Realtime events belonging to other audits are ignored. A realtime reset refreshes only the active occurrence rather than all active application queries.
 
-## Verified baseline
+### Auditee collaboration
 
-On code baseline `2043d620f7b80316b647cb75b0be12b1a0dda5e4`:
+The purpose-bound external workspace can receive:
 
-- **QMS Live Audit CI** passed backend contracts, PostgreSQL `upgrade heads`, RLS/append-only/integrity probes, frontend lint/unit/build and public/responsive Chromium acceptance.
-- **QMS External Draft CI** passed.
-- **QMS CAR Control Loop CI** passed.
-- **QMS Live Audit Security** passed.
-- Platform dev-proxy, Assurance OS completion, Rostering control and Portal Error Feedback checks passed.
-- QMS Operational UI passed People, Assurance, Intelligence, semantic regressions, Codex regressions, Missions and Control Room; the bounded-register step remained red and is being rerun with retained diagnostics on the newer head.
+- scope/criteria/dates;
+- occurrence meetings;
+- preparation requests;
+- controlled-DMS/file responses;
+- permitted progress/presence;
+- released findings and released evidence;
+- CARs linked to currently released findings;
+- closing narrative;
+- exact-draft closing response;
+- exact-issued-report download and receipt acknowledgement.
 
-The final PR head must be revalidated after this documentation reconciliation before merge readiness is asserted.
+The server projection excludes private auditor notes, unreleased findings/evidence and unrelated tenant data.
 
-## Deliberately not overclaimed
+### Closing
 
-1. **External-auditor offline replay remains pending.** The employee encrypted outbox automatically carries employee bearer authentication and must not be reused blindly for guest cookie/CSRF sessions. A guest-specific replay contract is required before enabling this safely.
-2. **WebAuthn/passkey signing is not implemented.** Current electronic signature evidence is explicitly `PASSWORD_REAUTH`.
-3. **Cross-tenant RLS is proven**, but a dedicated adversarial direct-object/IDOR suite remains worthwhile hardening.
-4. **Realtime is implemented and contract-tested**, but a dedicated simultaneous two-internal-browser acceptance test remains worthwhile.
-5. **Evidence references are governed**, but a dedicated end-to-end evidence link/open/download acceptance test remains worthwhile.
+- persisted management summary, conclusion and positive-practices statement;
+- explicit closing-meeting lifecycle;
+- finding/CAR release action;
+- deterministic `QMS_AUDIT_REPORT_SNAPSHOT_V2` composition;
+- generated PDF source/artifact SHA-256;
+- generated artifact adoption into governed report DRAFT;
+- auditee closing response against exact draft revision/hash;
+- internal review and approval;
+- WebAuthn/passkey approval against exact APPROVED revision/hash;
+- server-gated immutable ISSUE;
+- independent execution closure;
+- policy-controlled assurance artifact;
+- public verification token and local SHA comparison.
+
+Report generation fails closed until fieldwork is ended, no checklist row remains `NOT_VERIFIED`, and all three closing narrative statements are saved.
+
+### Follow-up
+
+The dedicated Follow-up workspace uses one audit-filtered CAR register query and only one detailed CAR control-loop query for the selected CAR. It exposes health, risk, next action, milestones, deadline decisions and closure blockers, while the existing CAR domain continues to own RCA/CAPA review, extensions, escalation, reminders, evidence and effectiveness.
+
+### Archive
+
+The existing governed retention/archive domain remains authoritative for policy revision, immutable manifest/package hashes, legal hold and controlled disposition.
+
+## Code-completion defects corrected in the final pass
+
+- removed the canonical route's competing legacy occurrence cockpit and its duplicate queries;
+- removed auditor IDs from the general Setup PATCH and mounted the People-gated assignment flow;
+- mounted the occurrence assignment backend router;
+- corrected assignment/frontend contract drift;
+- removed assumptions that `QMSAudit` has `updated_at`/`updated_by_user_id` fields;
+- finished controlled-DMS reviewer visibility;
+- retained checklist source/expected-evidence projection without N+1 requests;
+- narrowed realtime invalidation to the active occurrence;
+- verified server-filtered auditee meeting/CAR projection;
+- verified closing report V2 consumes persisted narrative/meeting records;
+- verified mobile closeout is URL-derived and mounted;
+- verified MFA is non-selectable and fail-closed.
+
+## Validation deliberately deferred
+
+The current head still requires a validation-only phase. The next phase should not rewrite the workflow unless a test proves a source defect.
+
+Recommended order:
+
+1. Python import/syntax checks for new routers/models.
+2. Frontend typecheck/build.
+3. Clean Alembic `upgrade heads`.
+4. Targeted backend contracts for assignment gates, governed DMS requests, WebAuthn, closing issue gates, evidence, external PASSKEY/offline replay, public verification and presence.
+5. Targeted browser flows for canonical routing, auditee collaboration, two-party realtime, mobile closeout refresh and same-day closing.
+6. Fix only proven failures.
+7. Run full exact-head repository-required CI.
+8. Recheck current-main divergence, mergeability and unresolved review threads.
+
+No older CI result should be represented as proof for the current code-completion head.
