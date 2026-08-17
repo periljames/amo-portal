@@ -80,6 +80,7 @@ async function prepareAuditorReassignment(page: Page, state: { leadAuditor: stri
   const respond = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
   const fulfil = async (route: Route) => {
     const request = route.request();
+    if (request.resourceType() === "document") return route.continue();
     const path = new URL(request.url()).pathname;
     const method = request.method();
     const audit = baseAudit();
@@ -185,6 +186,7 @@ async function prepareFindingAndCar(page: Page, state: RunHubState): Promise<voi
 
   const fulfil = async (route: Route) => {
     const request = route.request();
+    if (request.resourceType() === "document") return route.continue();
     const path = new URL(request.url()).pathname;
     const method = request.method();
 
