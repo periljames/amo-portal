@@ -35,6 +35,28 @@ def _supporting_document(
     return document
 
 
+def exemption_record_is_in_force(
+    row: RosterRegulatoryExemption,
+    *,
+    amo_id: str,
+    on_date: date,
+) -> bool:
+    """Defense-in-depth validity check independent of the SQL predicate.
+
+    The database query already narrows these fields, but rechecking the material
+    Authority conditions here prevents a future query refactor, eager-loaded
+    object, or test adapter from accidentally applying an exemption outside the
+    tenant or its controlled validity window.
+    """
+
+    return bool(
+        row.amo_id == amo_id
+        and row.verified_at is not None
+        and not row.is_revoked
+        and row.effective_date <= on_date <= row.expiry_date
+    )
+
+
 def create_exemption(
     db: Session,
     *,
@@ -164,6 +186,8 @@ def applicable_exemption(
     role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")) or "").upper()
     requested_assignments = set(assignment_ids or [])
     for row in rows:
+        if not exemption_record_is_in_force(row, amo_id=amo_id, on_date=on_date):
+            continue
         try:
             _supporting_document(db, amo_id=amo_id, document_id=row.supporting_document_id)
         except ValueError:
