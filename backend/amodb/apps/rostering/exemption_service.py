@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
 from ..doc_control import models as doc_models
-from . import common, models
+from . import common
 from .consent_models import RosterRegulatoryExemption
 
 UTC = timezone.utc
@@ -31,9 +31,9 @@ def create_exemption(
 ) -> RosterRegulatoryExemption:
     if expiry_date < effective_date:
         raise ValueError("Exemption expiry date must be on or after its effective date")
-    document = db.query(doc_models.Document).filter(
-        doc_models.Document.amo_id == amo_id,
-        doc_models.Document.id == supporting_document_id,
+    document = db.query(doc_models.ControlledDocument).filter(
+        doc_models.ControlledDocument.tenant_id == amo_id,
+        doc_models.ControlledDocument.id == supporting_document_id,
     ).first()
     if document is None:
         raise ValueError("Supporting exemption document was not found in this tenant")
@@ -75,12 +75,7 @@ def create_exemption(
     return row
 
 
-def verify_exemption(
-    db: Session,
-    *,
-    row: RosterRegulatoryExemption,
-    actor_user_id: str,
-) -> RosterRegulatoryExemption:
+def verify_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_id: str) -> RosterRegulatoryExemption:
     if row.is_revoked:
         raise ValueError("A revoked regulatory exemption cannot be verified")
     row.verified_by_user_id = actor_user_id
@@ -104,13 +99,7 @@ def verify_exemption(
     return row
 
 
-def revoke_exemption(
-    db: Session,
-    *,
-    row: RosterRegulatoryExemption,
-    actor_user_id: str,
-    reason: str,
-) -> RosterRegulatoryExemption:
+def revoke_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_id: str, reason: str) -> RosterRegulatoryExemption:
     row.is_revoked = True
     row.revoked_at = datetime.now(UTC)
     row.revocation_reason = reason.strip()
@@ -166,8 +155,6 @@ def applicable_exemption(
         scoped_assignments = {str(item) for item in conditions.get("assignment_ids", [])}
         if scoped_assignments and not requested_assignments.intersection(scoped_assignments):
             continue
-        # Non-machine-readable conditions are never assumed satisfied. The
-        # verifier must explicitly attest them before the exemption can apply.
         if conditions.get("manual_conditions") and conditions.get("conditions_verified") is not True:
             continue
         return row
