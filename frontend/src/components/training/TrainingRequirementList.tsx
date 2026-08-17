@@ -57,6 +57,14 @@ function isHistorical(record: TrainingRecordRead): boolean {
   return ["RENEWED", "SUPERSEDED", "INACTIVE"].includes(state);
 }
 
+function latestEvidenceByRecord(files: TrainingFileRead[]): Map<string, TrainingFileRead> {
+  const result = new Map<string, TrainingFileRead>();
+  files.slice().sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at))).forEach((file) => {
+    if (file.record_id && !result.has(file.record_id)) result.set(file.record_id, file);
+  });
+  return result;
+}
+
 function RowActionMenu({ label, children }: { label: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const timer = useRef<number | null>(null);
@@ -128,10 +136,7 @@ function buildRows(items: TrainingStatusItem[], courses: TrainingCourseRead[], r
     grouped.set(key, list);
   });
 
-  const latestFileByRecord = new Map<string, TrainingFileRead>();
-  files.slice().sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at))).forEach((file) => {
-    if (file.record_id && !latestFileByRecord.has(file.record_id)) latestFileByRecord.set(file.record_id, file);
-  });
+  const latestFileByRecord = latestEvidenceByRecord(files);
 
   const rows: RequirementRow[] = [];
   grouped.forEach((members, key) => {
@@ -164,6 +169,16 @@ function buildRows(items: TrainingStatusItem[], courses: TrainingCourseRead[], r
 
 const TrainingRequirementList: React.FC<Props> = ({ items, courses, records, files, canEdit, onEditRecord, onDeleteRecord, onOpenEvidence, onUploadEvidence, onRecordCompletion }) => {
   const rows = useMemo(() => buildRows(items, courses, records, files), [items, courses, records, files]);
+  const latestFileByRecord = useMemo(() => latestEvidenceByRecord(files), [files]);
+  const requirementRecordIds = useMemo(() => {
+    const ids = new Set<string>();
+    rows.forEach((row) => row.history.forEach((record) => ids.add(record.id)));
+    return ids;
+  }, [rows]);
+  const additionalRecords = useMemo(
+    () => records.filter((record) => !requirementRecordIds.has(record.id)).slice().sort((a, b) => recordTime(b) - recordTime(a)),
+    [records, requirementRecordIds],
+  );
 
   const actions = (row: RequirementRow) => (
     <RowActionMenu label={row.item.course_name}>
@@ -175,38 +190,93 @@ const TrainingRequirementList: React.FC<Props> = ({ items, courses, records, fil
     </RowActionMenu>
   );
 
-  if (!rows.length) return <div className="trl-empty">No applicable training requirements are available for this person.</div>;
+  const additionalRecordActions = (record: TrainingRecordRead) => {
+    const course = byCourseForHistory(courses, record);
+    const label = course?.course_name || String(record.course_id || "Training record");
+    const evidence = latestFileByRecord.get(record.id) || null;
+    return (
+      <RowActionMenu label={label}>
+        {onEditRecord && canEdit ? <button type="button" role="menuitem" onClick={() => onEditRecord(record)}>Edit record</button> : null}
+        {evidence && onOpenEvidence ? <button type="button" role="menuitem" onClick={() => onOpenEvidence(evidence)}>Open certificate/evidence</button> : null}
+        {!evidence && onUploadEvidence ? <button type="button" role="menuitem" onClick={() => onUploadEvidence(record.id)}>Attach certificate/evidence</button> : null}
+        {onDeleteRecord && canEdit ? <button type="button" role="menuitem" className="trl-menu__danger" onClick={() => onDeleteRecord(record)}>Delete record</button> : null}
+      </RowActionMenu>
+    );
+  };
+
+  if (!rows.length && !additionalRecords.length) return <div className="trl-empty">No applicable training requirements or recorded completions are available for this person.</div>;
 
   return (
-    <div className="trl-shell" aria-label="Training requirements">
-      <div className="trl-table-view">
-        <table className="trl-table">
-          <thead><tr><th>Training</th><th>Last Completed</th><th>Next Due</th><th>Status</th><th>Evidence</th><th><span className="sr-only">Actions</span></th></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.key} onContextMenu={(event) => {
-            event.preventDefault();
-            event.currentTarget.querySelector("details")?.setAttribute("open", "");
-          }}>
-            <td><strong>{row.item.course_name}</strong><small>{row.course?.course_id || row.item.course_id} · {trainingTypeLabel(row.course)}</small><details className="trl-details"><summary>View details</summary><dl><dt>Compliance Status</dt><dd>{row.status}</dd><dt>Last Completed</dt><dd>{formatDate(row.item.last_completion_date)}</dd><dt>Next Due</dt><dd>{formatDate(dueDate(row.item))}</dd><dt>Scheduled</dt><dd>{row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "Not scheduled"}</dd></dl><h4>Training history</h4>{row.history.length ? <ul>{row.history.map((record) => { const course = byCourseForHistory(courses, record); return <li key={record.id}><b>{trainingTypeLabel(course)}</b> · Completed {formatDate(record.completion_date)}</li>; })}</ul> : <p>No verified completion history.</p>}</details></td>
-            <td>{formatDate(row.item.last_completion_date)}</td>
-            <td><strong>{formatDate(dueDate(row.item))}</strong><small>Scheduled {row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "—"}</small></td>
-            <td><span className={`trl-status trl-status--${row.status.toLocaleLowerCase().replaceAll(" ", "-")}`}>{row.status}</span></td>
-            <td>{row.evidence ? <button type="button" className="trl-evidence" onClick={() => onOpenEvidence?.(row.evidence!)}>Available</button> : "—"}</td>
-            <td>{actions(row)}</td>
-          </tr>)}</tbody>
-        </table>
-      </div>
-      <div className="trl-card-view">{rows.map((row) => <article className="trl-card" key={row.key}
-  onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}
-  onPointerDown={startRowLongPress}
-  onPointerUp={cancelRowLongPress}
-  onPointerCancel={cancelRowLongPress}
-  onPointerMove={cancelRowLongPress}
->
-        <header><div><h3>{row.item.course_name}</h3><small>{row.course?.course_id || row.item.course_id} · {trainingTypeLabel(row.course)}</small></div><span className={`trl-status trl-status--${row.status.toLocaleLowerCase().replaceAll(" ", "-")}`}>{row.status}</span></header>
-        <dl><dt>Completed</dt><dd>{formatDate(row.item.last_completion_date)}</dd><dt>Next Due</dt><dd>{formatDate(dueDate(row.item))}</dd><dt>Scheduled</dt><dd>{row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "—"}</dd></dl>
-        <footer><span>{row.evidence ? "Certificate/evidence available" : "No linked evidence"}</span>{actions(row)}</footer>
-        <details className="trl-details"><summary>View details and history</summary>{row.history.length ? <ul>{row.history.map((record) => { const course = byCourseForHistory(courses, record); return <li key={record.id}><b>{trainingTypeLabel(course)}</b> · Completed {formatDate(record.completion_date)}</li>; })}</ul> : <p>No verified completion history.</p>}</details>
-      </article>)}</div>
+    <div className="trl-shell" aria-label="Training requirements and record history">
+      {rows.length ? <>
+        <div className="trl-table-view">
+          <table className="trl-table">
+            <thead><tr><th>Training</th><th>Last Completed</th><th>Next Due</th><th>Status</th><th>Evidence</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.key} onContextMenu={(event) => {
+              event.preventDefault();
+              event.currentTarget.querySelector("details")?.setAttribute("open", "");
+            }}>
+              <td><strong>{row.item.course_name}</strong><small>{row.course?.course_id || row.item.course_id} · {trainingTypeLabel(row.course)}</small><details className="trl-details"><summary>View details</summary><dl><dt>Compliance Status</dt><dd>{row.status}</dd><dt>Last Completed</dt><dd>{formatDate(row.item.last_completion_date)}</dd><dt>Next Due</dt><dd>{formatDate(dueDate(row.item))}</dd><dt>Scheduled</dt><dd>{row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "Not scheduled"}</dd></dl><h4>Training history</h4>{row.history.length ? <ul>{row.history.map((record) => { const course = byCourseForHistory(courses, record); return <li key={record.id}><b>{trainingTypeLabel(course)}</b> · Completed {formatDate(record.completion_date)}</li>; })}</ul> : <p>No verified completion history.</p>}</details></td>
+              <td>{formatDate(row.item.last_completion_date)}</td>
+              <td><strong>{formatDate(dueDate(row.item))}</strong><small>Scheduled {row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "—"}</small></td>
+              <td><span className={`trl-status trl-status--${row.status.toLocaleLowerCase().replaceAll(" ", "-")}`}>{row.status}</span></td>
+              <td>{row.evidence ? <button type="button" className="trl-evidence" onClick={() => onOpenEvidence?.(row.evidence!)}>Available</button> : "—"}</td>
+              <td>{actions(row)}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <div className="trl-card-view">{rows.map((row) => <article className="trl-card" key={row.key}
+    onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}
+    onPointerDown={startRowLongPress}
+    onPointerUp={cancelRowLongPress}
+    onPointerCancel={cancelRowLongPress}
+    onPointerMove={cancelRowLongPress}
+  >
+          <header><div><h3>{row.item.course_name}</h3><small>{row.course?.course_id || row.item.course_id} · {trainingTypeLabel(row.course)}</small></div><span className={`trl-status trl-status--${row.status.toLocaleLowerCase().replaceAll(" ", "-")}`}>{row.status}</span></header>
+          <dl><dt>Completed</dt><dd>{formatDate(row.item.last_completion_date)}</dd><dt>Next Due</dt><dd>{formatDate(dueDate(row.item))}</dd><dt>Scheduled</dt><dd>{row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "—"}</dd></dl>
+          <footer><span>{row.evidence ? "Certificate/evidence available" : "No linked evidence"}</span>{actions(row)}</footer>
+          <details className="trl-details"><summary>View details and history</summary>{row.history.length ? <ul>{row.history.map((record) => { const course = byCourseForHistory(courses, record); return <li key={record.id}><b>{trainingTypeLabel(course)}</b> · Completed {formatDate(record.completion_date)}</li>; })}</ul> : <p>No verified completion history.</p>}</details>
+        </article>)}</div>
+      </> : <div className="trl-empty">No current policy requirements apply. Recorded training remains available below.</div>}
+
+      {additionalRecords.length ? <section className="trl-record-log" aria-label="Additional training record log">
+        <h3>Additional training record log</h3>
+        <p>Optional, historical, or no-longer-required completions are retained here without assigning a current compliance status.</p>
+        <div className="trl-table-view">
+          <table className="trl-table">
+            <thead><tr><th>Training</th><th>Completed</th><th>Recorded validity</th><th>Record state</th><th>Evidence</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>{additionalRecords.map((record) => {
+              const course = byCourseForHistory(courses, record);
+              const evidence = latestFileByRecord.get(record.id) || null;
+              const label = course?.course_name || String(record.course_id || "Training record");
+              return <tr key={record.id}>
+                <td><strong>{label}</strong><small>{course?.course_id || record.course_id} · {trainingTypeLabel(course)}</small></td>
+                <td>{formatDate(record.completion_date)}</td>
+                <td>{formatDate(record.valid_until)}</td>
+                <td>{isHistorical(record) ? "Historical" : "Recorded"}</td>
+                <td>{evidence ? <button type="button" className="trl-evidence" onClick={() => onOpenEvidence?.(evidence)}>Available</button> : "—"}</td>
+                <td>{additionalRecordActions(record)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+        <div className="trl-card-view">{additionalRecords.map((record) => {
+          const course = byCourseForHistory(courses, record);
+          const evidence = latestFileByRecord.get(record.id) || null;
+          const label = course?.course_name || String(record.course_id || "Training record");
+          return <article className="trl-card" key={record.id}
+            onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}
+            onPointerDown={startRowLongPress}
+            onPointerUp={cancelRowLongPress}
+            onPointerCancel={cancelRowLongPress}
+            onPointerMove={cancelRowLongPress}
+          >
+            <header><div><h3>{label}</h3><small>{course?.course_id || record.course_id} · {trainingTypeLabel(course)}</small></div><span>{isHistorical(record) ? "Historical" : "Recorded"}</span></header>
+            <dl><dt>Completed</dt><dd>{formatDate(record.completion_date)}</dd><dt>Recorded validity</dt><dd>{formatDate(record.valid_until)}</dd></dl>
+            <footer><span>{evidence ? "Certificate/evidence available" : "No linked evidence"}</span>{additionalRecordActions(record)}</footer>
+          </article>;
+        })}</div>
+      </section> : null}
     </div>
   );
 };
