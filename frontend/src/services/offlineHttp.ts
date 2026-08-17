@@ -10,9 +10,9 @@ import {
 import { assertOfflineReplayAllowed, classifyOfflineMutation } from "./offlineCapabilities";
 import {
   getPortalConnectivity,
-  isPortalReady,
   notePortalNetworkFailure,
   notePortalResponse,
+  probePortalReadiness,
   recommendedRequestTimeoutMs,
   waitForPortalReadiness,
 } from "./portalConnectivity";
@@ -115,8 +115,14 @@ async function confirmedNotAccepted(response: Response): Promise<boolean> {
     && ["DB_TEMPORARILY_UNAVAILABLE", "DB_POOL_TIMEOUT"].includes(String(body?.error_code || ""));
 }
 
-function networkAvailable(): boolean {
-  return typeof navigator === "undefined" || isPortalReady();
+function networkAvailable(method = "GET"): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const state = getPortalConnectivity().state;
+  if (state === "OFFLINE" || state === "SESSION_EXPIRED") return false;
+  // Reads are safe to attempt while a connectivity probe is still resolving or
+  // while the portal is degraded. This keeps normal navigation independent of
+  // the health-control loop. Writes remain protected until ONLINE is confirmed.
+  return method.toUpperCase() === "GET" || state === "ONLINE";
 }
 
 function isAbortError(error: unknown): boolean {
@@ -222,16 +228,20 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const cachePath = normalizedCachePath(path);
   const requestScope = currentOfflineScope();
   const isAbsoluteTransportAttempt = /^https?:\/\//i.test(path);
+  const connectivityState = getPortalConnectivity().state;
 
-  if (getPortalConnectivity().state === "RECOVERING") {
-    await waitForPortalReadiness();
+  if (connectivityState === "RECOVERING") {
+    // Navigation/read requests are never blocked by the control-plane probe.
+    // Probe concurrently so the shared status can converge in the background.
+    if (isGet) void probePortalReadiness();
+    else await waitForPortalReadiness();
   }
 
   // apiClient's alternate backend is an absolute URL. If the primary route
   // just failed and marked the shared portal state OFFLINE, that direct probe
   // must still be allowed to run; otherwise the fallback is blocked by the
   // very failure it is meant to recover from.
-  if (!networkAvailable() && !isAbsoluteTransportAttempt) {
+  if (!networkAvailable(method) && !isAbsoluteTransportAttempt) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
