@@ -38,3 +38,21 @@ def test_invitation_model_persists_rsvp_and_delivery_acknowledgements() -> None:
         'read_at = Column(DateTime(timezone=True), nullable=True)',
     ):
         assert contract in source
+
+
+def test_learner_invitation_projection_and_actions_are_mounted() -> None:
+    route_source = _source("backend/amodb/apps/training/learner_invitation_routes.py")
+    service_source = _source("frontend/src/services/trainingWorkflowCompletion.ts")
+    inbox_source = _source("frontend/src/components/training/TrainingInvitationInbox.tsx")
+    task_source = _source("frontend/src/components/training/MyTrainingTaskInbox.tsx")
+    assert '@router.get("/invitations/me")' in route_source
+    assert "TrainingSessionInvitation.amo_id == amo_id" in route_source
+    assert "TrainingSessionInvitation.user_id == str(current_user.id)" in route_source
+    assert "listMyTrainingInvitations" in service_source
+    assert "respondToTrainingInvitation" in service_source
+    assert "downloadTrainingInvitationCalendar" in service_source
+    assert "Accept" in inbox_source
+    assert "Tentative" in inbox_source
+    assert "Decline" in inbox_source
+    assert "Add to calendar" in inbox_source
+    assert "<TrainingInvitationInbox />" in task_source
