@@ -1,15 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BellRing, CalendarClock, CheckCircle2, ClipboardList, RefreshCw, Save, Send, Users, Video } from "lucide-react";
+import { AlertTriangle, BellRing, CalendarClock, CheckCircle2, ClipboardList, RefreshCw, Save, Send, Video } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import {
-  qmsListAuditPersonnelOptions,
-  qmsResolveAudit,
-  qmsUpdateAudit,
-  type QMSAuditOut,
-} from "../../../services/qms";
+import { qmsUpdateAudit, type QMSAuditOut } from "../../../services/qms";
 import {
   createAuditNotice,
   listAuditNotices,
@@ -23,7 +18,9 @@ import {
   updateAuditMeeting,
   type AuditMeeting,
 } from "../../../services/qmsAuditOccurrenceCompletion";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession } from "../../../services/qmsAuditSession";
+import AuditAssignmentGovernancePanel from "./AuditAssignmentGovernancePanel";
 import { auditSessionPath } from "./auditSessionRoutes";
 
 type Props = { amoCode: string; auditKey: string };
@@ -36,9 +33,6 @@ type SetupDraft = {
   auditeeEmail: string;
   plannedStart: string;
   plannedEnd: string;
-  leadAuditorUserId: string;
-  observerAuditorUserId: string;
-  assistantAuditorUserId: string;
   notifyAuditors: boolean;
   notifyAuditees: boolean;
   reminderIntervalDays: string;
@@ -63,9 +57,6 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
     auditeeEmail: audit.auditee_email || "",
     plannedStart: audit.planned_start || "",
     plannedEnd: audit.planned_end || "",
-    leadAuditorUserId: audit.lead_auditor_user_id || "",
-    observerAuditorUserId: audit.observer_auditor_user_id || "",
-    assistantAuditorUserId: audit.assistant_auditor_user_id || "",
     notifyAuditors: audit.notify_auditors !== false,
     notifyAuditees: audit.notify_auditees !== false,
     reminderIntervalDays: String(audit.reminder_interval_days || 7),
@@ -110,9 +101,12 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const auditQuery = useQuery({ queryKey: ["qms-setup-audit-resolve", auditKey], queryFn: () => qmsResolveAudit(auditKey), staleTime: 5_000 });
+  const auditQuery = useQuery({
+    queryKey: ["qms-setup-audit-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
+    staleTime: 5_000,
+  });
   const auditId = auditQuery.data?.id || "";
-  const personnelQuery = useQuery({ queryKey: ["qms-audit-personnel-options", amoCode], queryFn: () => qmsListAuditPersonnelOptions({ limit: 200 }), enabled: canManage, staleTime: 30_000 });
   const noticesQuery = useQuery({ queryKey: ["qms-audit-notices", amoCode, auditId], queryFn: ({ signal }) => listAuditNotices(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const policiesQuery = useQuery({ queryKey: ["qms-audit-notice-policies", amoCode], queryFn: ({ signal }) => listAuditNoticePolicies(amoCode, signal), enabled: Boolean(auditId), staleTime: 30_000 });
   const meetingsQuery = useQuery({ queryKey: ["qms-audit-meetings", amoCode, auditId], queryFn: ({ signal }) => listAuditMeetings(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
@@ -127,11 +121,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const refresh = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["qms-setup-audit-resolve", auditKey] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-setup-audit-resolve", amoCode, auditKey] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-notices", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-meetings", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms-audit-session-resolve", auditKey] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session-resolve", amoCode, auditKey] }),
     ]);
   };
 
@@ -139,15 +133,24 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     mutationFn: async () => {
       if (!draft || !auditId) throw new Error("Audit occurrence is not ready for setup changes.");
       return qmsUpdateAudit(auditId, {
-        title: draft.title.trim(), scope: draft.scope.trim() || null, criteria: draft.criteria.trim() || null,
-        auditee: draft.auditee.trim() || null, auditee_email: draft.auditeeEmail.trim() || null,
-        planned_start: draft.plannedStart || null, planned_end: draft.plannedEnd || null,
-        lead_auditor_user_id: draft.leadAuditorUserId || null, observer_auditor_user_id: draft.observerAuditorUserId || null,
-        assistant_auditor_user_id: draft.assistantAuditorUserId || null, notify_auditors: draft.notifyAuditors,
-        notify_auditees: draft.notifyAuditees, reminder_interval_days: Math.max(1, Number(draft.reminderIntervalDays) || 7),
+        title: draft.title.trim(),
+        scope: draft.scope.trim() || null,
+        criteria: draft.criteria.trim() || null,
+        auditee: draft.auditee.trim() || null,
+        auditee_email: draft.auditeeEmail.trim() || null,
+        planned_start: draft.plannedStart || null,
+        planned_end: draft.plannedEnd || null,
+        notify_auditors: draft.notifyAuditors,
+        notify_auditees: draft.notifyAuditees,
+        reminder_interval_days: Math.max(1, Number(draft.reminderIntervalDays) || 7),
       });
     },
-    onSuccess: async (row) => { setDraft(draftFromAudit(row)); setLocalError(null); setNotice("Audit setup saved to the authoritative occurrence."); await refresh(); },
+    onSuccess: async (row) => {
+      setDraft(draftFromAudit(row));
+      setLocalError(null);
+      setNotice("Audit definition and notification settings saved. Auditor assignments remain controlled by the governed assignment gate below.");
+      await refresh();
+    },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit setup could not be saved."),
   });
 
@@ -165,7 +168,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       };
       return row ? updateAuditMeeting(amoCode, auditId, row.id, payload) : createAuditMeeting(amoCode, auditId, payload);
     },
-    onSuccess: async (row) => { setLocalError(null); setNotice(`${row.meeting_type.toLowerCase()} meeting saved and available to authorised participants.`); await refresh(); },
+    onSuccess: async (row) => {
+      setLocalError(null);
+      setNotice(`${row.meeting_type.toLowerCase()} meeting saved and available to authorised participants.`);
+      await refresh();
+    },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit meeting could not be saved."),
   });
 
@@ -187,15 +194,16 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const transitionNoticeMutation = useMutation({
     mutationFn: ({ row, action }: { row: AuditNotice; action: NonNullable<ReturnType<typeof noticeNextAction>> }) => transitionAuditNotice(amoCode, auditId, row.id, {
-      action, reason: noticeReason.trim(), ...(action === "DELIVER" ? { delivery_channel: "PORTAL", delivery_reference: deliveryReference.trim() || "Portal audit notice" } : {}),
+      action,
+      reason: noticeReason.trim(),
+      ...(action === "DELIVER" ? { delivery_channel: "PORTAL", delivery_reference: deliveryReference.trim() || "Portal audit notice" } : {}),
     }),
     onSuccess: async (row) => { setLocalError(null); setNotice(`Audit notice is now ${row.status.replaceAll("_", " ").toLowerCase()}.`); await refresh(); },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit notice transition failed."),
   });
 
-  const personnel = personnelQuery.data || [];
   const latestNotice = useMemo(() => (noticesQuery.data?.items || []).slice().sort((a, b) => b.revision_no - a.revision_no)[0] || null, [noticesQuery.data?.items]);
-  const loadError = auditQuery.error || noticesQuery.error || policiesQuery.error || meetingsQuery.error || personnelQuery.error || sessionQuery.error;
+  const loadError = auditQuery.error || noticesQuery.error || policiesQuery.error || meetingsQuery.error || sessionQuery.error;
 
   if (auditQuery.isLoading || !draft) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit setup…</section>;
   if (loadError || !auditQuery.data) return <section className="qms-occurrence-stage qms-occurrence-stage--loading" role="alert"><AlertTriangle size={18} /> {loadError instanceof Error ? loadError.message : "Audit setup is unavailable."}</section>;
@@ -218,7 +226,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   return (
     <section className="qms-occurrence-stage" aria-label="Audit setup workspace">
       <header className="qms-occurrence-stage__header">
-        <div><span>SETUP · authoritative occurrence</span><h1>{auditQuery.data.audit_ref} · {auditQuery.data.title}</h1><p>Define the auditable occurrence once: scope, criteria, dates, auditee, accountable audit team, meetings and notice.</p></div>
+        <div><span>SETUP · authoritative occurrence</span><h1>{auditQuery.data.audit_ref} · {auditQuery.data.title}</h1><p>Define the auditable occurrence once: scope, criteria, dates, auditee, governed audit team, meetings and notice.</p></div>
         <div><span>{sessionQuery.data ? `Authoritative stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span><button type="button" onClick={() => void refresh()}><RefreshCw size={15} /> Refresh</button></div>
       </header>
       {localError ? <div className="qms-occurrence-stage__message is-error" role="alert"><AlertTriangle size={15} /> {localError}</div> : null}
@@ -227,7 +235,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <div className="qms-occurrence-stage__grid">
         <main>
           <article className="qms-occurrence-stage__card">
-            <header><ClipboardList size={18} /><div><strong>Audit definition</strong><small>This is the source used by preparation, fieldwork and closing.</small></div></header>
+            <header><ClipboardList size={18} /><div><strong>Audit definition</strong><small>This is the occurrence source used by preparation, fieldwork and closing.</small></div></header>
             <label><span>Audit title</span><input disabled={!canManage} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
             <label><span>Scope</span><textarea disabled={!canManage} rows={4} value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value })} /></label>
             <label><span>Criteria</span><textarea disabled={!canManage} rows={4} value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} /></label>
@@ -237,17 +245,14 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label><span>Planned start</span><input type="date" disabled={!canManage} value={draft.plannedStart} onChange={(event) => setDraft({ ...draft, plannedStart: event.target.value })} /></label>
               <label><span>Planned end</span><input type="date" disabled={!canManage} value={draft.plannedEnd} onChange={(event) => setDraft({ ...draft, plannedEnd: event.target.value })} /></label>
             </div>
-          </article>
-
-          <article className="qms-occurrence-stage__card">
-            <header><Users size={18} /><div><strong>Audit team</strong><small>Assignments reference existing personnel records; no shadow users are created.</small></div></header>
             <div className="qms-occurrence-stage__fields">
-              {(["leadAuditorUserId", "observerAuditorUserId", "assistantAuditorUserId"] as const).map((field, index) => <label key={field}><span>{["Lead auditor", "Observer auditor", "Assistant auditor"][index]}</span><select disabled={!canManage} value={draft[field]} onChange={(event) => setDraft({ ...draft, [field]: event.target.value })}><option value="">Unassigned</option>{personnel.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>)}
               <label><span>Reminder interval (days)</span><input type="number" min={1} max={90} disabled={!canManage} value={draft.reminderIntervalDays} onChange={(event) => setDraft({ ...draft, reminderIntervalDays: event.target.value })} /></label>
             </div>
             <div className="qms-occurrence-stage__checks"><label><input type="checkbox" disabled={!canManage} checked={draft.notifyAuditors} onChange={(event) => setDraft({ ...draft, notifyAuditors: event.target.checked })} /> Notify auditors</label><label><input type="checkbox" disabled={!canManage} checked={draft.notifyAuditees} onChange={(event) => setDraft({ ...draft, notifyAuditees: event.target.checked })} /> Notify auditee</label></div>
-            {canManage ? <button type="button" className="is-primary" disabled={saveMutation.isPending || draft.title.trim().length < 3 || !draft.plannedStart || !draft.plannedEnd} onClick={() => saveMutation.mutate()}><Save size={15} /> {saveMutation.isPending ? "Saving…" : "Save authoritative setup"}</button> : null}
+            {canManage ? <button type="button" className="is-primary" disabled={saveMutation.isPending || draft.title.trim().length < 3 || !draft.plannedStart || !draft.plannedEnd} onClick={() => saveMutation.mutate()}><Save size={15} /> {saveMutation.isPending ? "Saving…" : "Save audit definition"}</button> : null}
           </article>
+
+          <AuditAssignmentGovernancePanel amoCode={amoCode} auditKey={auditKey} />
           {renderMeeting("OPENING", openingMeeting, openingDraft, setOpeningDraft)}
           {renderMeeting("CLOSING", closingMeeting, closingDraft, setClosingDraft)}
         </main>
@@ -258,7 +263,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             {latestNotice ? <dl><div><dt>Status</dt><dd>{latestNotice.status.replaceAll("_", " ")}</dd></div><div><dt>Revision</dt><dd>{latestNotice.revision_no}</dd></div><div><dt>Required notice</dt><dd>{latestNotice.required_notice_days} days</dd></div><div><dt>Notice date</dt><dd>{latestNotice.notice_date}</dd></div></dl> : <p>No governed notice exists yet.</p>}
             {canManage ? <><label><span>Notice decision reason</span><textarea rows={3} value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} /></label>{latestNotice?.status === "GENERATED" ? <label><span>Delivery reference</span><input value={deliveryReference} onChange={(event) => setDeliveryReference(event.target.value)} placeholder="Email/message/reference" /></label> : null}<div className="qms-occurrence-stage__actions">{!latestNotice ? <button type="button" disabled={createNoticeMutation.isPending || noticeReason.trim().length < 8} onClick={() => createNoticeMutation.mutate()}><CalendarClock size={15} /> Create notice</button> : null}{latestNotice && noticeNextAction(latestNotice) ? <button type="button" className="is-primary" disabled={transitionNoticeMutation.isPending || noticeReason.trim().length < 8} onClick={() => transitionNoticeMutation.mutate({ row: latestNotice, action: noticeNextAction(latestNotice)! })}><Send size={15} /> {noticeNextAction(latestNotice)}</button> : null}</div></> : null}
           </article>
-          <article className="qms-occurrence-stage__card"><header><CalendarClock size={18} /><div><strong>Next stage</strong><small>Setup navigation does not mutate lifecycle state by itself.</small></div></header><Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Pre-Audit Room</Link></article>
+          <article className="qms-occurrence-stage__card"><header><CalendarClock size={18} /><div><strong>Next stage</strong><small>Navigation never manufactures lifecycle completion.</small></div></header><Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Pre-Audit Room</Link></article>
         </aside>
       </div>
     </section>
