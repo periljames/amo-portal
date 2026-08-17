@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -79,23 +79,42 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
     }
 
 
+def _normalised_audit_ref_expression() -> Any:
+    """Portable SQL normalisation matching the frontend audit-reference slug.
+
+    Audit refs such as ``QAR/MO/26/014`` are linked in the SPA as
+    ``qar-mo-26-014``. Resolve that form in the database rather than loading the
+    whole tenant audit register into the browser and filtering client-side.
+    """
+    value = func.lower(models.QMSAudit.audit_ref)
+    for separator in ("/", "_", " ", "."):
+        value = func.replace(value, separator, "-")
+    return value
+
+
 def _resolve_audit(db: Session, *, amo_id: str, audit_key: str) -> models.QMSAudit:
     key = audit_key.strip()
     if not key:
         raise HTTPException(status_code=404, detail="Audit occurrence not found.")
+
     id_value: uuid.UUID | None = None
     try:
         id_value = uuid.UUID(key)
     except (TypeError, ValueError):
         pass
+
     identity_filters = [models.QMSAudit.audit_ref == key]
     if id_value is not None:
         identity_filters.append(models.QMSAudit.id == id_value)
-    audit = db.query(models.QMSAudit).filter(
+
+    base_query = db.query(models.QMSAudit).filter(
         models.QMSAudit.amo_id == amo_id,
         models.QMSAudit.deleted_at.is_(None),
-        or_(*identity_filters),
-    ).first()
+    )
+    audit = base_query.filter(or_(*identity_filters)).first()
+    if audit is None:
+        normalised = key.lower().strip("-")
+        audit = base_query.filter(_normalised_audit_ref_expression() == normalised).first()
     if audit is None:
         raise HTTPException(status_code=404, detail="Audit occurrence not found.")
     return audit
@@ -107,7 +126,7 @@ def resolve_audit_occurrence(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """Resolve exactly one tenant audit by immutable ID or human audit reference."""
+    """Resolve exactly one tenant audit by immutable ID, reference or route slug."""
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _audit_payload(_resolve_audit(db, amo_id=ctx.amo_id, audit_key=audit_key))
 
