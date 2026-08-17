@@ -32,6 +32,12 @@ export type PortalFetchInit = RequestInit & {
   offline?: PortalOfflineOptions;
 };
 
+export const PROXY_TRANSPORT_ERROR_HEADER = "X-AMO-Proxy-Transport-Error";
+
+export function isProxyTransportFailureResponse(response: Response): boolean {
+  return response.headers.get(PROXY_TRANSPORT_ERROR_HEADER) === "1";
+}
+
 export class OfflineQueuedError extends Error {
   readonly operation: OfflineOutboxEntry;
   readonly queued = true;
@@ -242,8 +248,14 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   try {
     const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
-    notePortalResponse(response);
+    const proxyTransportFailure = isProxyTransportFailureResponse(response);
+    // A Vite proxy connection failure is an HTTP-shaped transport error. Do
+    // not classify it as a backend response or replace it with stale cache;
+    // apiClient needs the marker so it can try the independently configured
+    // direct backend exactly once.
+    if (!proxyTransportFailure) notePortalResponse(response);
     assertRequestScope(requestScope);
+    if (proxyTransportFailure) return response;
 
     if (response.ok) {
       if (cacheEnabled) {
