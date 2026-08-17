@@ -69,6 +69,7 @@ jobs:
             backend/amodb/apps/rostering/compliance_policy.py \
             backend/amodb/apps/rostering/consent_models.py \
             backend/amodb/apps/rostering/consent_service.py \
+            backend/amodb/apps/rostering/consent_notification_policy.py \
             backend/amodb/apps/rostering/consent_policy.py \
             backend/amodb/apps/rostering/consent_router.py \
             backend/amodb/apps/rostering/exemption_service.py \
