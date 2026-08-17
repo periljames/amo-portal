@@ -3,29 +3,50 @@ from __future__ import annotations
 from amodb.apps.rostering import code_registry, models
 
 
-def test_starter_registry_is_minimal_configurable_d_x_rd():
-    assert code_registry.STARTER_CODES == ("D", "X", "RD")
+def test_starter_registry_preserves_established_codes_without_fixed_working_times():
+    assert code_registry.STARTER_CODES == (
+        "D",
+        "X",
+        "DY",
+        "AM",
+        "PM",
+        "XD",
+        "WD",
+        "NT",
+        "F1",
+        "F2",
+        "FD",
+        "SB",
+        "TR",
+        "OF",
+        "RD",
+    )
     by_code = {row.code: row for row in code_registry.AMO_STARTER_SHIFTS}
 
+    working_codes = ("D", "X", "DY", "AM", "PM", "XD", "WD", "NT", "F1", "F2", "FD", "SB", "TR")
+    for code in working_codes:
+        assert by_code[code].counts_as_duty is True
+        assert by_code[code].start is None
+        assert by_code[code].end is None
+        assert by_code[code].duration_minutes is None
+        assert by_code[code].unpaid_break_minutes == 0
+
     assert by_code["D"].kind == models.ShiftTemplateKind.DAY
-    assert by_code["D"].counts_as_duty is True
-    assert by_code["D"].start is None
-    assert by_code["D"].end is None
-
     assert by_code["X"].kind == models.ShiftTemplateKind.STANDBY
-    assert by_code["X"].counts_as_duty is True
-    assert by_code["X"].start is None
-    assert by_code["X"].end is None
+    assert by_code["NT"].kind == models.ShiftTemplateKind.NIGHT
+    assert by_code["TR"].kind == models.ShiftTemplateKind.TRAINING
 
+    assert by_code["OF"].kind == models.ShiftTemplateKind.OFF
+    assert by_code["OF"].counts_as_duty is False
     assert by_code["RD"].kind == models.ShiftTemplateKind.OFF
     assert by_code["RD"].counts_as_duty is False
 
 
-def test_off_and_rest_aliases_normalize_destructively_to_rd():
+def test_only_exact_rest_aliases_normalize_to_rd_while_of_is_preserved():
     assert code_registry.normalize_shift_code("RD") == "RD"
     assert code_registry.normalize_shift_code("o") == "RD"
-    assert code_registry.normalize_shift_code("OF") == "RD"
     assert code_registry.normalize_shift_code("rr") == "RD"
+    assert code_registry.normalize_shift_code("OF") == "OF"
 
 
 def test_user_defined_working_codes_remain_user_defined():
