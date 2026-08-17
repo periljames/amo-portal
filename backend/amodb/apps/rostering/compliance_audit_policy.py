@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
+
 from ..accounts import models as account_models
 from . import common, consent_service, models, validation
 
 _INSTALLED = False
 
 
-def _key(row: models.RosterValidationFinding) -> tuple[str, str | None, str | None]:
-    return row.code, row.user_id, row.assignment_id
+def _key(row: Any) -> tuple[str, str | None, str | None]:
+    return str(row.code), getattr(row, "user_id", None), getattr(row, "assignment_id", None)
 
 
 def _planner_email(db, *, version: models.RosterVersion) -> str | None:
@@ -40,8 +42,10 @@ def install() -> None:
         previous = {_key(row) for row in previous_rows}
 
         result = original(db, version=version, actor_user_id=actor_user_id)
+        # Use the validator's returned result rather than an ORM relationship
+        # collection that may still contain the pre-delete identity-map rows.
         current_rows = [
-            row for row in (version.validation_findings or [])
+            row for row in result.findings
             if row.severity == models.RosterValidationSeverity.BLOCKER and not row.resolved
         ]
         current = {_key(row) for row in current_rows}
