@@ -47,7 +47,7 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
     enabled: Boolean(open && auditId),
     staleTime: 1_500,
   });
-  const requests = requestsQuery.data?.items || [];
+  const requests = useMemo(() => requestsQuery.data?.items ?? [], [requestsQuery.data?.items]);
   const controlledByRequest = useMemo(
     () => new Map((controlledQuery.data?.items || []).map((submission) => [submission.request_id, submission])),
     [controlledQuery.data?.items],
