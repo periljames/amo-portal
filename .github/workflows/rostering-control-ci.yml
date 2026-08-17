@@ -66,6 +66,14 @@ jobs:
             backend/amodb/apps/rostering/code_registry.py \
             backend/amodb/apps/rostering/code_registry_models.py \
             backend/amodb/apps/rostering/code_registry_router.py \
+            backend/amodb/apps/rostering/compliance_policy.py \
+            backend/amodb/apps/rostering/consent_models.py \
+            backend/amodb/apps/rostering/consent_service.py \
+            backend/amodb/apps/rostering/consent_policy.py \
+            backend/amodb/apps/rostering/consent_router.py \
+            backend/amodb/apps/rostering/exemption_service.py \
+            backend/amodb/apps/rostering/exemption_policy.py \
+            backend/amodb/apps/rostering/exemption_router.py \
             backend/amodb/apps/rostering/controlled_exports.py \
             backend/amodb/apps/rostering/lineage.py \
             backend/amodb/apps/rostering/roster_control.py \
@@ -81,7 +89,9 @@ jobs:
           PYTHONPATH: backend
         run: |
           pytest -q \
+            backend/amodb/apps/rostering/tests/test_application_bootstrap.py \
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
+            backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
             backend/amodb/apps/rostering/tests/test_roster_control_contract.py
 
   frontend-controlled-roster:
