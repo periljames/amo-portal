@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_write_db
 
-from .audit_external_access_router import ExternalParticipantCreate, create_external_participant
-from .tenant_security import TenantContext, require_quality_permission
+from .audit_external_access_models import QualityExternalIdentity
+from .audit_external_access_router import ExternalParticipantCreate, _normalise_email, create_external_participant
+from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
 router = APIRouter(tags=["Quality external audit access guard"])
@@ -28,6 +29,13 @@ def create_external_participant_guarded(
     participants. PASSKEY is available only to external auditors because the
     public bootstrap/assertion flow is purpose-bound to their assigned fieldwork
     identity. MFA remains fail-closed until a real MFA provider is integrated.
+
+    Assurance is identity-level, not grant-level. Reusing the same external
+    identity with a different assurance mode would retroactively change the
+    ceremony required by every active invitation for that identity. Reject that
+    implicit change so an existing PASSKEY assignment can never be silently
+    downgraded to EMAIL_LINK (or an EMAIL_LINK assignment unexpectedly upgraded)
+    by creating another audit role.
     """
 
     if payload.assurance_level == "MFA":
@@ -40,4 +48,21 @@ def create_external_participant_guarded(
             status_code=422,
             detail="PASSKEY assurance is currently supported only for assigned external auditors. Auditee guest access remains purpose-bound EMAIL_LINK access.",
         )
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    email = _normalise_email(payload.email)
+    existing_identity = db.query(QualityExternalIdentity).filter(
+        QualityExternalIdentity.amo_id == ctx.amo_id,
+        QualityExternalIdentity.email == email,
+    ).first()
+    if existing_identity is not None and existing_identity.assurance_level != payload.assurance_level:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This external identity already has a different assurance level. "
+                "Revoke or deliberately migrate its existing audit access before changing assurance; "
+                "participant creation cannot implicitly upgrade or downgrade active invitations."
+            ),
+        )
+
     return create_external_participant(audit_id=audit_id, payload=payload, ctx=ctx, db=db)
