@@ -10,6 +10,7 @@ export type TrainingCoursePresentationInput = {
 };
 
 export type CanonicalTrainingType = "INITIAL" | "RECURRENT";
+export type TrainingLifecyclePhase = "INITIAL" | "REFRESHER" | "ONE_OFF" | "UNKNOWN";
 
 export function canonicalTrainingType(course: TrainingCoursePresentationInput | null | undefined): CanonicalTrainingType | null {
   if (!course) return null;
@@ -19,6 +20,16 @@ export function canonicalTrainingType(course: TrainingCoursePresentationInput | 
   if (["RECURRENT", "REFRESHER", "CONTINUATION", "RENEWAL"].includes(kind)) return "RECURRENT";
   if (["RECURRENT", "REFRESHER", "CONTINUATION", "RENEWAL"].includes(status)) return "RECURRENT";
   return null;
+}
+
+export function trainingLifecyclePhase(course: TrainingCoursePresentationInput | null | undefined): TrainingLifecyclePhase {
+  const canonical = canonicalTrainingType(course);
+  if (canonical === "INITIAL") return "INITIAL";
+  if (canonical === "RECURRENT") return "REFRESHER";
+  const kind = String(course?.kind || "").trim().toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
+  const status = String(course?.status || "").trim().toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
+  if (kind === "ONE_OFF" || status === "ONE_OFF") return "ONE_OFF";
+  return "UNKNOWN";
 }
 
 export function trainingTypeLabel(course: TrainingCoursePresentationInput | null | undefined): string {
