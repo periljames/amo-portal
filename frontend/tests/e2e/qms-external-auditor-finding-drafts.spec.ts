@@ -72,6 +72,9 @@ test("external auditor saves and submits an immutable finding draft for Quality 
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
+    if (path.endsWith("/quality/audit-access/passkey/status") && request.method() === "POST") {
+      return json(route, { detail: "This external audit identity does not require passkey assurance." }, 409);
+    }
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return json(route, sessionModel());
     if (path.endsWith("/quality/audit-access/fieldwork") && request.method() === "GET") return json(route, fieldworkModel());
     if (path.endsWith("/quality/audit-access/finding-drafts") && request.method() === "GET") return json(route, { items: drafts });
