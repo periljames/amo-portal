@@ -15,6 +15,7 @@ from . import (
     consent_notification_policy,
     consent_policy,
     exemption_policy,
+    extended_duty_policy,
     lineage,
     roster_control,
     template_usage_policy,
@@ -28,6 +29,7 @@ from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
 from .consent_router import router as consent_router
 from .exemption_router import router as exemption_router
+from .extended_duty_router import router as extended_duty_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from ..workforce import pattern_rest_policy
@@ -80,6 +82,10 @@ version_copy_policy.install_service_policy(rostering_route_module.services)
 # installing mutation/lifecycle hooks; the hooks call the wrapped service at
 # runtime, so create/edit/accept/decline/supervisor actions share one channel.
 consent_notification_policy.install()
+# Controlled unserviceability extensions then bind themselves to the same
+# consent functions. A material assignment edit cancels the extension consent;
+# supervisor approval still re-runs the ordinary statutory validation engine.
+extended_duty_policy.install()
 # Consent generation and lifecycle gating are installed on the same canonical
 # public service facade so single, bulk and generated assignments cannot bypass
 # acknowledgement policy, and submit/approve/publish always re-check it.
@@ -92,6 +98,7 @@ router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
 router.include_router(consent_router)
 router.include_router(exemption_router)
+router.include_router(extended_duty_router)
 router.include_router(rest_code_canonicalization_router)
 router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
