@@ -52,7 +52,7 @@ export function uploadInternalAuditEvidence(
   if (options.findingId) form.append("finding_id", options.findingId);
   return apiRequest<{ artifact: AuditEvidenceArtifact; committed_version: number; replayed: boolean }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(checklistItemId)}/evidence`),
-    { method: "POST", body: form, timeoutMs: 90_000, offline: { queueWhenOffline: false } },
+    { method: "POST", body: form, timeoutMs: 90_000, offline: { queueMutation: false } },
   );
 }
 
