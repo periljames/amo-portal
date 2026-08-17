@@ -8,6 +8,7 @@ on:
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
       - "frontend/src/types/rostering*.ts"
+      - "frontend/tests/e2e/rostering-governed-workflows.spec.ts"
       - ".github/workflows/rostering-control-ci.yml"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
       - "frontend/src/types/rostering*.ts"
+      - "frontend/tests/e2e/rostering-governed-workflows.spec.ts"
       - ".github/workflows/rostering-control-ci.yml"
 
 permissions:
@@ -136,3 +138,50 @@ jobs:
       - name: Check rostering performance contract
         working-directory: frontend
         run: npm run perf:rostering
+
+  browser-governed-roster:
+    name: Governed rostering Chromium acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Start production preview
+        working-directory: frontend
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/rostering-preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/rostering-preview.log
+          exit 1
+      - name: Run governed rostering acceptance
+        working-directory: frontend
+        run: npx playwright test tests/e2e/rostering-governed-workflows.spec.ts --timeout=60000
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rostering-governed-browser-diagnostics
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            /tmp/rostering-preview.log
+          if-no-files-found: ignore
+          retention-days: 7
