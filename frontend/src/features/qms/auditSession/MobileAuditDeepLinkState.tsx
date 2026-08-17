@@ -3,22 +3,19 @@ import { ClipboardCheck } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 /**
- * Responsive audit run navigation historically collapses differently across
- * route generations. A deep link such as `?tab=closeout` must still project an
- * explicit, operable current-state control after a mobile reload even when the
- * wider desktop tab strip is not rendered.
- *
- * This component does not own lifecycle routing. It mirrors only the current
- * deep-linked state, and delegates scrolling/focus to the mounted closeout
- * workspace. Therefore it cannot create or switch an audit state on its own.
+ * Preserve an explicit mobile control for both the canonical Closing stage and
+ * legacy closeout deep links. The component never owns lifecycle state; it only
+ * focuses the already mounted canonical closing workspace.
  */
 const MobileAuditDeepLinkState: React.FC = () => {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const tab = (params.get("tab") || "").trim().toLowerCase();
-  const isAuditRun = /\/(?:qms|quality)\/audits\/[^/]+\/?$/i.test(location.pathname);
+  const canonicalClosing = /\/(?:qms|quality)\/audits\/[^/]+\/closing\/?$/i.test(location.pathname);
+  const legacyAuditRun = /\/(?:qms|quality)\/audits\/[^/]+\/?$/i.test(location.pathname);
+  const shouldRender = canonicalClosing || (legacyAuditRun && ["closeout", "report"].includes(tab));
 
-  if (!isAuditRun || tab !== "closeout") return null;
+  if (!shouldRender) return null;
 
   const focusCloseout = () => {
     const target = document.querySelector<HTMLElement>(
