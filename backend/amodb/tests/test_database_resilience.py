@@ -7,6 +7,10 @@ def test_database_circuit_opens_fails_fast_and_recovers() -> None:
     circuit = DatabaseCircuitBreaker()
 
     assert circuit.allow_request() is True
+    threshold = int(circuit.snapshot()["failure_threshold"])
+    for _ in range(threshold - 1):
+        assert circuit.mark_failure("server closed the connection unexpectedly") is False
+        assert circuit.allow_request() is True
     assert circuit.mark_failure("server closed the connection unexpectedly") is True
     assert circuit.allow_request() is False
     assert circuit.retry_after_seconds() >= 1

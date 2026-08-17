@@ -95,7 +95,8 @@ describe("Scalable Workforce people directory", () => {
   it("defaults batch filters to Any and keeps filters in a vertical rail", () => {
     expect(bulkSource).toContain('value !== "ANY"');
     expect(bulkSource).toContain("contract_state: selectedFilter");
-    expect(bulkSource).toContain("pattern_state: selectedFilter");
+    expect(bulkSource).toContain('selectedFilter(p.get("bulk_pattern"))');
+    expect(bulkSource).toContain("legacyPatternDefault ? null");
     expect(bulkSource).toContain('className="workforce-bulk__filter-rail"');
     expect(bulkCssSource).toContain("grid-template-columns: 1fr");
   });

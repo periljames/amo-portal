@@ -46,7 +46,8 @@ describe("rostering cross-module commitment integration", () => {
   it("uses one draggable personnel column across every date in the month", () => {
     expect(plannerSource).toContain('className="wr-roster-grid wr-roster-grid--month"');
     expect(plannerSource).toContain("data.month.days.map");
-    expect(plannerSource).toContain("<PersonCard person={person} />");
+    expect(plannerSource).toContain("<PersonCard person={person}");
+    expect(plannerSource).toContain("assignedDays={summary?.dates.size || 0}");
     expect(plannerSource).not.toContain('className="wr-people-panel"');
   });
 });

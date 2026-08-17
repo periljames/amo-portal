@@ -63,6 +63,59 @@ export type DocumentationTree = {
   capabilities: { read: boolean; control: boolean };
 };
 
+export type DocumentationConnection = {
+  id: string;
+  kind: "GOVERNED_RELATIONSHIP" | "DETECTED_REFERENCE";
+  direction: "OUTGOING" | "INCOMING";
+  relationship_type: string;
+  relationship_source?: string | null;
+  status: string;
+  source_manual_id: string;
+  target_manual_id?: string | null;
+  related_node: DocumentationTreeNode;
+  exact_token?: string | null;
+  exact_quote?: string | null;
+  raw_token?: string | null;
+  page_number?: number | null;
+  source_page_number?: number | null;
+  section_label?: string | null;
+  source_quote?: string | null;
+  confidence_percent: number;
+};
+
+export type DocumentationAssociatedRecord = {
+  id: string;
+  record_number: string;
+  status: string;
+  artifact_filename: string;
+  template_manual_id: string;
+  template?: { code: string; title: string } | null;
+  record_series_node_id?: string | null;
+  submitted_by_user_id?: string | null;
+  submitted_at?: string | null;
+  retention_years?: number | null;
+  download_url: string;
+};
+
+export type DocumentationNodeConnections = {
+  tenant_id: string;
+  node: DocumentationTreeNode;
+  breadcrumbs: DocumentationTreeNode[];
+  children: DocumentationTreeNode[];
+  record_series?: DocumentationTreeNode | null;
+  record_sources: DocumentationTreeNode[];
+  workflow_nodes: DocumentationTreeNode[];
+  governed_relationships: DocumentationConnection[];
+  detected_references: DocumentationConnection[];
+  records: {
+    items: DocumentationAssociatedRecord[];
+    total: number;
+    scope: "ALL" | "OWN";
+    limit: number;
+  };
+  capabilities: { read: boolean; control: boolean; records_scope: "ALL" | "OWN" };
+};
+
 export type DocumentationIndexState = {
   id?: string | null;
   manual_id?: string | null;
@@ -176,6 +229,16 @@ function tenantPath(tenant: string): string {
 
 export async function getDocumentationTree(tenant: string): Promise<DocumentationTree> {
   return apiGet<DocumentationTree>(`/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/tree`, { headers: authHeaders() });
+}
+
+export async function getDocumentationNodeConnections(
+  tenant: string,
+  nodeId: string,
+): Promise<DocumentationNodeConnections> {
+  return apiGet<DocumentationNodeConnections>(
+    `/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/nodes/${encodeURIComponent(nodeId)}/connections`,
+    { headers: authHeaders() },
+  );
 }
 
 export async function reconcileDocumentationTree(tenant: string): Promise<DocumentationTree> {

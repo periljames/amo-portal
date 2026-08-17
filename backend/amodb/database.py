@@ -56,7 +56,17 @@ POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE_SEC", "1800"))
 STATEMENT_TIMEOUT_MS = max(1000, min(600000, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000") or "30000")))
 IDLE_IN_TRANSACTION_TIMEOUT_MS = max(5000, min(1800000, int(os.getenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "60000") or "60000")))
 READ_ONLY_TRANSACTIONS = _env_bool("DB_READ_ONLY_TRANSACTIONS", False)
-CONNECT_TIMEOUT_SECONDS = max(2, min(30, int(os.getenv("DB_CONNECT_TIMEOUT_SEC", "8") or "8")))
+CONNECT_TIMEOUT_SECONDS = max(
+    2,
+    min(
+        30,
+        int(
+            os.getenv("DB_CONNECT_TIMEOUT_SECONDS")
+            or os.getenv("DB_CONNECT_TIMEOUT_SEC")
+            or "8"
+        ),
+    ),
+)
 TCP_KEEPALIVES_IDLE_SECONDS = max(10, min(600, int(os.getenv("DB_KEEPALIVES_IDLE_SEC", "30") or "30")))
 TCP_KEEPALIVES_INTERVAL_SECONDS = max(5, min(120, int(os.getenv("DB_KEEPALIVES_INTERVAL_SEC", "10") or "10")))
 TCP_KEEPALIVES_COUNT = max(2, min(10, int(os.getenv("DB_KEEPALIVES_COUNT", "3") or "3")))
@@ -110,6 +120,13 @@ else:
 
 
 def _install_disconnect_tracking(current_engine) -> None:
+    @event.listens_for(current_engine, "engine_connect")
+    def _track_connection_success(connection) -> None:
+        # A successful pre-ping/checkout clears sub-threshold transient errors.
+        # Recovery probes also call mark_success explicitly after SELECT 1.
+        if database_circuit.allow_request():
+            database_circuit.mark_success()
+
     @event.listens_for(current_engine, "handle_error")
     def _track_disconnect(context) -> None:
         error = context.original_exception or context.sqlalchemy_exception

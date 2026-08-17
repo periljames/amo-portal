@@ -298,17 +298,6 @@ function ShiftLibrary({ shifts, registryById, departments, loading, error, canMa
     if (!mergeSource || !mergeTargetId) return Promise.resolve();
     const target = shifts.find((shift) => shift.id === mergeTargetId);
     const canonicalCode = mergeCode.trim().toUpperCase();
-    const sourcePolicy = registryById.get(mergeSource.id)?.policy;
-    const targetPolicy = target ? registryById.get(target.id)?.policy : null;
-    const policiesDiffer = Boolean(sourcePolicy && targetPolicy && (
-      sourcePolicy.calendar_mode !== targetPolicy.calendar_mode
-      || sourcePolicy.duty_semantic !== targetPolicy.duty_semantic
-      || sourcePolicy.unpaid_break_minutes !== targetPolicy.unpaid_break_minutes
-      || sourcePolicy.verification_status !== targetPolicy.verification_status
-      || sourcePolicy.effective_from !== targetPolicy.effective_from
-      || sourcePolicy.effective_to !== targetPolicy.effective_to
-      || sourcePolicy.source_reference !== targetPolicy.source_reference
-    ));
     if (!mergePolicyResolution) return Promise.resolve();
     const resolution: "KEEP_SOURCE" | "KEEP_TARGET" = mergePolicyResolution;
     const keptPolicyLabel = resolution === "KEEP_SOURCE" ? mergeSource.code : canonicalCode;
@@ -425,7 +414,7 @@ function ShiftLibrary({ shifts, registryById, departments, loading, error, canMa
           return (
             <article key={shift.id} className={!shift.is_active ? "is-inactive" : mergeable ? "has-warning" : ""}>
               <span className={`rs-shift-code is-${shift.kind.toLowerCase()}`}>{shift.code}</span>
-              <div><strong>{shift.label}</strong>{invalidLegacyCode ? <small className="is-danger">Merge into {canonical?.code || "a canonical code"}</small> : mergeable ? <small className="is-warning">Same type and hours as {canonical?.code}</small> : duplicate ? <small>Canonical code · merge duplicates here</small> : <small>{shift.kind}</small>}</div>
+              <div><strong>{shift.label}</strong>{invalidLegacyCode ? <small className="is-danger">Merge into {canonical?.code || "a canonical code"}</small> : mergeable ? <small className="is-warning">Same type and hours as another code ({canonical?.code})</small> : duplicate ? <small>Canonical code · merge duplicates here</small> : <small>{shift.kind}</small>}</div>
               <span className="rs-shift-hours">{["OFF", "LEAVE"].includes(shift.kind) ? "—" : `${shift.default_start_time?.slice(0, 5) || "Flex"}–${shift.default_end_time?.slice(0, 5) || "Flex"}`}</span>
               <span className="rs-shift-scope">{shiftScope(shift)}</span>
               <StatusPill value={mergeable ? "DUPLICATE" : shift.is_active ? "ACTIVE" : "RETIRED"} tone={mergeable ? "warning" : shift.is_active ? "success" : "neutral"} />

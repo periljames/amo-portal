@@ -183,6 +183,46 @@ def _xml_local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
+def _parse_docx_xml(payload: bytes) -> ET.Element:
+    """Parse a DOCX XML part, tolerating vendor files with undeclared prefixes.
+
+    Valid Office Open XML declares prefixes such as ``w`` on the document
+    root. A small number of exporters omit those declarations even though the
+    remainder of the part is usable. ElementTree correctly rejects that input
+    as an unbound prefix, so retry only that precise failure after binding the
+    prefixes to private fallback namespaces. Other malformed XML remains an
+    invalid DOCX and is rejected by the upload workflow.
+    """
+
+    try:
+        return ET.fromstring(payload)
+    except ET.ParseError as exc:
+        if "unbound prefix" not in str(exc).lower():
+            raise
+
+    text = payload.decode("utf-8-sig")
+    prefixes = sorted(set(re.findall(r"</?([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*", text)))
+    if not prefixes or len(prefixes) > 32:
+        raise ET.ParseError("DOCX XML contains invalid namespace prefixes")
+
+    root = re.search(r"<([A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)(?=[\s>/])", text)
+    if root is None:
+        raise ET.ParseError("DOCX XML root element is missing")
+    opening_end = text.find(">", root.end())
+    if opening_end < 0:
+        raise ET.ParseError("DOCX XML root element is incomplete")
+
+    opening = text[root.start():opening_end]
+    declarations = "".join(
+        f' xmlns:{prefix}="urn:amo-portal:docx-fallback:{prefix}"'
+        for prefix in prefixes
+        if f"xmlns:{prefix}" not in opening
+    )
+    if not declarations:
+        raise ET.ParseError("DOCX XML namespace prefix could not be recovered")
+    return ET.fromstring(f"{text[:opening_end]}{declarations}{text[opening_end:]}")
+
+
 def _find_first_child(element: ET.Element, local_name: str) -> ET.Element | None:
     for child in list(element):
         if _xml_local_name(child.tag) == local_name:
@@ -297,7 +337,7 @@ def _extract_docx_style_map(zf: zipfile.ZipFile) -> dict[str, str]:
     if "word/styles.xml" not in zf.namelist():
         return style_map
     try:
-        root = ET.fromstring(zf.read("word/styles.xml"))
+        root = _parse_docx_xml(zf.read("word/styles.xml"))
     except Exception:
         return style_map
     for style in _find_descendants(root, "style"):
@@ -328,7 +368,7 @@ def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
             header_text = []
             for name in header_names:
                 try:
-                    root = ET.fromstring(zf.read(name))
+                    root = _parse_docx_xml(zf.read(name))
                 except Exception:
                     continue
                 text_parts = [node.text for node in _find_descendants(root, "t") if node.text]
@@ -363,13 +403,13 @@ def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
 def _extract_docx_content(content: bytes, filename: str | None = None) -> dict[str, object]:
     try:
         with zipfile.ZipFile(BytesIO(content)) as zf:
-            root = ET.fromstring(zf.read("word/document.xml"))
+            root = _parse_docx_xml(zf.read("word/document.xml"))
             style_map = _extract_docx_style_map(zf)
             header_metadata = _extract_docx_header_metadata(content)
             core_title = None
             if "docProps/core.xml" in zf.namelist():
                 try:
-                    core_root = ET.fromstring(zf.read("docProps/core.xml"))
+                    core_root = _parse_docx_xml(zf.read("docProps/core.xml"))
                     for node in core_root.iter():
                         if _xml_local_name(node.tag) == "title" and (node.text or "").strip():
                             core_title = _clean_docx_text(node.text or "")
@@ -721,7 +761,10 @@ def _table_exists(db: Session, table_name: str) -> bool:
     cache_key = f"{id(bind)}::{table_name}"
     if cache_key in _TABLE_EXISTS_CACHE:
         return _TABLE_EXISTS_CACHE[cache_key]
-    exists = inspect(bind).has_table(table_name)
+    # Inspect through the Session-owned connection. On SQLite/StaticPool,
+    # asking the Engine for a fresh inspection connection can operate on the
+    # same DBAPI connection and roll back the upload transaction on exit.
+    exists = inspect(db.connection()).has_table(table_name)
     _TABLE_EXISTS_CACHE[cache_key] = exists
     return exists
 

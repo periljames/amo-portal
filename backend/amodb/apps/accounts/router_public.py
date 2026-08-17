@@ -9,7 +9,6 @@ import threading
 import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlencode
-from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -28,48 +27,42 @@ from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.notifications import service as notification_service
 from amodb.security import get_current_active_user
-from . import models, schemas, services
+from . import models, schemas, services, session_service
 from ..training import compliance as training_compliance
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
-REFRESH_COOKIE_NAME = "amo_portal_refresh"
+REFRESH_COOKIE_NAME = os.getenv("PORTAL_REFRESH_COOKIE_NAME", "amo_refresh")
+_APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+REFRESH_COOKIE_SECURE = (
+    os.getenv("PORTAL_REFRESH_COOKIE_SECURE")
+    or os.getenv("REFRESH_COOKIE_SECURE")  # legacy name
+    or ("true" if _APP_ENV in {"prod", "production"} else "false")
+).lower() in {"1", "true", "yes"}
 
 
-def _refresh_cookie_secure(request: Request | None = None) -> bool:
-    explicit = (os.getenv("AUTH_COOKIE_SECURE") or "").strip().lower()
-    if explicit:
-        return explicit in {"1", "true", "yes", "on"}
-    environment_secure = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower() in {
-        "prod",
-        "production",
-    }
-    if request is None:
-        return environment_secure
-    forwarded_protocol = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
-    return environment_secure or request.url.scheme == "https" or forwarded_protocol == "https"
-
-
-def _set_refresh_cookie(response: Response, raw_token: str, request: Request) -> None:
+def _set_refresh_cookie(response: Response, *, raw_token: str, expires_at: datetime) -> None:
+    remaining = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=raw_token,
-        max_age=services.PORTAL_REFRESH_SESSION_HOURS * 60 * 60,
-        httponly=True,
-        secure=_refresh_cookie_secure(request),
-        samesite="lax",
+        max_age=remaining,
+        expires=expires_at,
         path="/auth",
+        secure=REFRESH_COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
     )
 
 
-def _clear_refresh_cookie(response: Response, request: Request) -> None:
+def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
-        httponly=True,
-        secure=_refresh_cookie_secure(request),
-        samesite="lax",
         path="/auth",
+        secure=REFRESH_COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
     )
 
 
@@ -309,28 +302,26 @@ def login(
                 detail=access_state.portal_lock_reason or "Portal access is blocked because mandatory training is overdue.",
             )
 
-    auth_session_id = str(uuid4())
+    issued_session = session_service.create_session(
+        db,
+        user=user,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+    )
     token, expires_in = services.issue_access_token_for_user(
         user,
-        auth_session_id=auth_session_id,
+        auth_session_id=issued_session.session_id,
+    )
+    _set_refresh_cookie(
+        response,
+        raw_token=issued_session.refresh_token,
+        expires_at=issued_session.expires_at,
     )
 
     response_amo = None if user.is_superuser else user.amo
     if user.is_superuser:
         services.set_user_active_context(db, user=user, active_amo_id=None, data_mode=models.DataMode.REAL)
-    services.revoke_portal_refresh_session(
-        db,
-        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
-    )
-    raw_refresh, _refresh_row = services.create_portal_refresh_session(
-        db,
-        user=user,
-        auth_session_id=auth_session_id,
-        ip=_client_ip(request),
-        user_agent=_user_agent(request),
-    )
-    db.commit()
-    _set_refresh_cookie(response, raw_refresh, request)
+        db.commit()
 
     return schemas.Token(
         access_token=token,
@@ -339,70 +330,6 @@ def login(
         amo=response_amo,
         department=user.department,
     )
-
-@router.post(
-    "/refresh-session",
-    response_model=schemas.Token,
-    summary="Recover a browser session after an extended connectivity outage",
-)
-def refresh_session(
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-):
-    _enforce_auth_rate_limit(request, "refresh-session")
-    if request.headers.get("X-Portal-Refresh") != "1":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Explicit portal refresh header is required.",
-        )
-    resolved = services.resolve_portal_refresh_session(
-        db,
-        raw_token=request.cookies.get(REFRESH_COOKIE_NAME) or "",
-    )
-    if resolved is None:
-        _clear_refresh_cookie(response, request)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="The recovery session is unavailable or expired. Sign in again.",
-        )
-    row, user = resolved
-    token, expires_in = services.issue_access_token_for_user(
-        user,
-        auth_session_id=row.auth_session_id,
-    )
-    db.commit()
-    return schemas.Token(
-        access_token=token,
-        expires_in=expires_in,
-        user=user,
-        amo=None if user.is_superuser else user.amo,
-        department=user.department,
-    )
-
-
-@router.post(
-    "/revoke-recovery-session",
-    summary="Revoke the HttpOnly browser recovery session",
-)
-def revoke_recovery_session(
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-):
-    if request.headers.get("X-Portal-Refresh") != "1":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Explicit portal refresh header is required.",
-        )
-    revoked = services.revoke_portal_refresh_session(
-        db,
-        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
-    )
-    db.commit()
-    _clear_refresh_cookie(response, request)
-    return {"ok": True, "revoked": revoked}
-
 
 @router.post(
     "/logout",
@@ -416,7 +343,6 @@ def logout(
     current_user=Depends(get_current_active_user),
 ):
     ended_at = datetime.now(timezone.utc)
-    current_user.token_revoked_at = ended_at
     reason = str(payload.reason if payload else "manual").strip().lower()[:32]
     if reason not in {"manual", "idle"}:
         reason = "manual"
@@ -425,10 +351,19 @@ def logout(
         or getattr(current_user, "_auth_session_id", None)
         or ""
     ).strip()
-    services.revoke_portal_refresh_session(
-        db,
-        raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
-    )
+    if auth_session_id:
+        ended_at = session_service.revoke_session(
+            db,
+            session_id=auth_session_id,
+            reason=reason,
+        )
+    elif request.cookies.get(REFRESH_COOKIE_NAME):
+        session_service.revoke_by_refresh_token(
+            db,
+            raw_token=request.cookies[REFRESH_COOKIE_NAME],
+            reason=reason,
+        )
+    _clear_refresh_cookie(response)
     try:
         audit_services.record_event(
             db,
@@ -449,20 +384,44 @@ def logout(
     except Exception:
         # Logout must not fail just because audit logging is unavailable.
         db.rollback()
-        current_user.token_revoked_at = ended_at
-        services.revoke_portal_refresh_session(
-            db,
-            raw_token=request.cookies.get(REFRESH_COOKIE_NAME),
-        )
+        if auth_session_id:
+            session_service.revoke_session(db, session_id=auth_session_id, reason=reason)
     db.commit()
-    _clear_refresh_cookie(response, request)
     return {
         "ok": True,
-        "token_revoked_at": current_user.token_revoked_at,
+        "token_revoked_at": ended_at,
         "auth_session_id": auth_session_id or None,
         "reason": reason,
         "ended_at": ended_at,
     }
+
+
+@router.post(
+    "/logout-session",
+    summary="Revoke the HttpOnly browser session even when its access token has expired",
+)
+def logout_browser_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Finish a local/offline sign-out without requiring a live access token.
+
+    The refresh credential is never exposed to JavaScript.  This endpoint lets
+    a browser persist a pending sign-out during an outage and revoke that exact
+    credential as soon as the server recovers.  It is intentionally idempotent.
+    """
+    _enforce_auth_rate_limit(request, "logout-session")
+    raw_token = str(request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
+    if raw_token:
+        session_service.revoke_by_refresh_token(
+            db,
+            raw_token=raw_token,
+            reason="browser_logout",
+        )
+        db.commit()
+    _clear_refresh_cookie(response)
+    return {"ok": True}
 
 
 @router.post(
@@ -512,6 +471,52 @@ def extend_session(
         user=current_user,
         amo=None if current_user.is_superuser else current_user.amo,
         department=current_user.department,
+    )
+
+
+@router.post(
+    "/refresh",
+    response_model=schemas.Token,
+    summary="Rotate the HttpOnly refresh credential and recover an access session",
+)
+def refresh_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    _enforce_auth_rate_limit(request, "refresh")
+    raw_token = str(request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
+    if not raw_token:
+        _clear_refresh_cookie(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh session is unavailable. Please sign in again.",
+        )
+    try:
+        rotated = session_service.rotate_session(db, raw_token=raw_token)
+    except session_service.RefreshRejected as exc:
+        db.rollback()
+        _clear_refresh_cookie(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    token, expires_in = services.issue_access_token_for_user(
+        rotated.user,
+        auth_session_id=rotated.session_id,
+    )
+    _set_refresh_cookie(
+        response,
+        raw_token=rotated.refresh_token,
+        expires_at=rotated.expires_at,
+    )
+    return schemas.Token(
+        access_token=token,
+        expires_in=expires_in,
+        user=rotated.user,
+        amo=None if rotated.user.is_superuser else rotated.user.amo,
+        department=rotated.user.department,
     )
 
 

@@ -226,6 +226,46 @@ class PresenceState(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+class PresenceSession(Base):
+    """One presence lease per authenticated browser/device session.
+
+    ``PresenceState`` remains the inexpensive tenant-directory projection. A
+    tab signing out or going idle must not mark the user offline while another
+    authenticated device is still active, so heartbeats are first recorded
+    here and then reduced into that projection.
+    """
+
+    __tablename__ = "presence_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "amo_id",
+            "user_id",
+            "session_id",
+            name="uq_presence_sessions_amo_user_session",
+        ),
+        Index("ix_presence_sessions_amo_fresh", "amo_id", "last_seen_at"),
+        Index(
+            "ix_presence_sessions_user_fresh",
+            "amo_id",
+            "user_id",
+            "last_seen_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False)
+    state = Column(
+        SAEnum(PresenceKind, name="presence_kind_enum", native_enum=False),
+        nullable=False,
+        default=PresenceKind.ONLINE,
+    )
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
 class RealtimeOutbox(Base):
     __tablename__ = "realtime_outbox"
     __table_args__ = (Index("ix_realtime_outbox_pending", "published_at", "created_at"),)

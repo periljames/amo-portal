@@ -28,6 +28,7 @@ def test_retention_runner_uses_valid_amo_id_for_audit(monkeypatch, db_session):
     db_session.commit()
 
     doc = quality_models.QMSDocument(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         doc_type=quality_models.QMSDocType.MANUAL,
         doc_code=f"DOC-{uuid4().hex[:6]}",
@@ -39,6 +40,7 @@ def test_retention_runner_uses_valid_amo_id_for_audit(monkeypatch, db_session):
     db_session.flush()
 
     rev = quality_models.QMSDocumentRevision(
+        amo_id=amo.id,
         document_id=doc.id,
         issue_no=1,
         rev_no=0,

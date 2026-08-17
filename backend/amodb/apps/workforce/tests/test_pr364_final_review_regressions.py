@@ -134,11 +134,13 @@ class _CountQuery:
 
 
 def test_dashboard_pending_counts_are_uncapped():
+    variance_count = 92
+    attendance_review_count = 11
     expected = {
         "leave": 73,
         "timesheet": 81,
         "overtime": 64,
-        "attendance_exception": 92,
+        "attendance_exception": variance_count + attendance_review_count,
     }
     db = MagicMock()
 
@@ -151,7 +153,9 @@ def test_dashboard_pending_counts_are_uncapped():
         if "overtime_requests" in rendered:
             return _CountQuery(expected["overtime"])
         if "roster_actual_variances" in rendered:
-            return _CountQuery(expected["attendance_exception"])
+            return _CountQuery(variance_count)
+        if "attendance_events" in rendered:
+            return _CountQuery(attendance_review_count)
         raise AssertionError(rendered)
 
     db.query.side_effect = query

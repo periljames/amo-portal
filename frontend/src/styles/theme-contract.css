@@ -226,6 +226,44 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   text-align: center;
 }
 
+.portal-offline-progress {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 5.25rem;
+  z-index: 1190;
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 0.75rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--portal-accent, #0f8f8b) 38%, var(--portal-border, #d5dee9));
+  border-radius: 0.75rem;
+  background: var(--portal-surface, #fff);
+  box-shadow: 0 14px 36px rgb(15 23 42 / 18%);
+}
+
+.portal-offline-progress > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+  white-space: nowrap;
+}
+
+.portal-offline-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.45rem;
+  accent-color: var(--portal-accent, #0f8f8b);
+}
+
+.portal-offline-progress small {
+  display: block;
+  margin-top: 0.4rem;
+  overflow: hidden;
+  color: var(--portal-text-muted, #526079);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .portal-offline-recovery {
   position: fixed;
   right: 14px;
@@ -352,6 +390,11 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   gap: 0.4rem;
   max-height: 15rem;
   overflow: auto;
+}
+
+.portal-offline-recovery__review-title {
+  color: var(--text-primary);
+  font-size: 0.72rem;
 }
 
 .portal-offline-recovery__item {

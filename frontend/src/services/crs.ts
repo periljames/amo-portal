@@ -20,6 +20,36 @@ type AppRequestInit = RequestInit & {
   offline?: PortalOfflineOptions;
 };
 
+// React pages, polling hooks and focus refreshes can ask for the same resource
+// during the same render window.  Coalesce identical in-flight GETs so one page
+// transition cannot multiply database work or amplify a temporary 503 into a
+// retry storm. Mutations are never coalesced.
+const inFlightGetRequests = new Map<string, Promise<unknown>>();
+
+function getRequestCoalescingKey(path: string, init: AppRequestInit): string | null {
+  // Different AbortSignals have independent cancellation ownership and must not
+  // share a promise.
+  if (init.signal) return null;
+
+  const headers = new Headers(authHeaders(init.headers));
+  const headerPairs = Array.from(headers.entries())
+    .sort(([left], [right]) => left.localeCompare(right));
+  const offline = init.offline;
+
+  return JSON.stringify([
+    path,
+    headerPairs,
+    init.credentials ?? "",
+    init.cache ?? "",
+    init.mode ?? "",
+    init.silent ?? false,
+    init.suppressAuthLogout ?? false,
+    offline?.cache ?? null,
+    offline?.cacheTtlMs ?? null,
+    offline?.allowStaleFallback ?? null,
+  ]);
+}
+
 function buildJsonMisrouteHint(url: string, contentType: string): string {
   if (!contentType.toLowerCase().includes("text/html")) {
     return `Expected JSON from ${url}, but got ${contentType || "unknown"}`;
@@ -152,8 +182,20 @@ export async function apiPut<T>(path: string, body?: unknown, init: AppRequestIn
   return request<T>("PUT", path, bodyInit, { ...init, headers });
 }
 
-export async function apiGet<T>(path: string, init: AppRequestInit = {}): Promise<T> {
-  return request<T>("GET", path, undefined, init);
+export function apiGet<T>(path: string, init: AppRequestInit = {}): Promise<T> {
+  const key = getRequestCoalescingKey(path, init);
+  if (!key) return request<T>("GET", path, undefined, init);
+
+  const existing = inFlightGetRequests.get(key);
+  if (existing) return existing as Promise<T>;
+
+  const pending = request<T>("GET", path, undefined, init).finally(() => {
+    if (inFlightGetRequests.get(key) === pending) {
+      inFlightGetRequests.delete(key);
+    }
+  });
+  inFlightGetRequests.set(key, pending as Promise<unknown>);
+  return pending;
 }
 
 export async function apiPatch<T>(path: string, body?: unknown, init: AppRequestInit = {}): Promise<T> {

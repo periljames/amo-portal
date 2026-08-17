@@ -352,6 +352,92 @@ def _get_managed_user_or_404(db: Session, *, current_user: models.User, user_id:
     return user
 
 
+def _canonical_tenant_admin(user: models.User) -> bool:
+    return bool(
+        user.amo_id
+        and not user.is_superuser
+        and user.is_active
+        and (user.is_amo_admin or user.role == models.AccountRole.AMO_ADMIN)
+    )
+
+
+def _validate_role_transition(
+    *,
+    actor: models.User,
+    user: models.User,
+    requested_role: models.AccountRole,
+) -> None:
+    """Keep the platform-superuser identity separate from tenant role edits."""
+    if requested_role == models.AccountRole.SUPERUSER and not user.is_superuser:
+        code = status.HTTP_403_FORBIDDEN if not actor.is_superuser else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(
+            status_code=code,
+            detail="Platform superuser identities must be created through the dedicated SUPERUSER creation workflow.",
+        )
+    if user.is_superuser and requested_role != models.AccountRole.SUPERUSER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A platform superuser cannot be converted into a tenant role.",
+        )
+
+
+def _protect_tenant_admin_continuity(
+    db: Session,
+    *,
+    actor: models.User,
+    users: list[models.User],
+    resulting_active: Optional[bool] = None,
+    resulting_role: Optional[models.AccountRole] = None,
+    deleting: bool = False,
+) -> None:
+    """Reject self-lockout and removal of a tenant's last canonical admin."""
+    removing: dict[str, set[str]] = {}
+    for user in users:
+        next_active = False if deleting else (user.is_active if resulting_active is None else resulting_active)
+        next_role = user.role if resulting_role is None else resulting_role
+        if str(actor.id) == str(user.id) and (deleting or not next_active):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot disable or delete the current signed-in user.",
+            )
+        next_admin = (
+            next_role == models.AccountRole.AMO_ADMIN
+            if resulting_role is not None
+            else bool(user.is_amo_admin or next_role == models.AccountRole.AMO_ADMIN)
+        )
+        removes_access = _canonical_tenant_admin(user) and not (next_active and next_admin)
+        if not removes_access:
+            continue
+        if str(actor.id) == str(user.id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot remove your own active tenant-administrator access.",
+            )
+        removing.setdefault(str(user.amo_id), set()).add(str(user.id))
+
+    for amo_id, removed_ids in removing.items():
+        remaining = (
+            db.query(func.count(models.User.id))
+            .filter(
+                models.User.amo_id == amo_id,
+                models.User.id.notin_(removed_ids),
+                models.User.is_active.is_(True),
+                models.User.is_superuser.is_(False),
+                or_(
+                    models.User.is_amo_admin.is_(True),
+                    models.User.role == models.AccountRole.AMO_ADMIN,
+                ),
+            )
+            .scalar()
+            or 0
+        )
+        if int(remaining) < 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Assign another active AMO administrator before removing the tenant's last administrator.",
+            )
+
+
 def _emit_user_command_event(
     db: Session,
     *,
@@ -938,9 +1024,18 @@ def _set_profile_employment_state(
         profile.position_title = position_title
 
 
-def _delete_user_hard(db: Session, *, actor: models.User, user: models.User) -> None:
+def _delete_user_hard(
+    db: Session,
+    *,
+    actor: models.User,
+    user: models.User,
+    commit: bool = True,
+    check_admin_continuity: bool = True,
+) -> None:
     if str(actor.id) == str(user.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='You cannot permanently delete the current signed-in user.')
+    if check_admin_continuity:
+        _protect_tenant_admin_continuity(db, actor=actor, users=[user], deleting=True)
 
     amo_id = str(user.amo_id)
     user_id = str(user.id)
@@ -968,14 +1063,15 @@ def _delete_user_hard(db: Session, *, actor: models.User, user: models.User) -> 
         db.delete(profile)
 
     db.delete(user)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'Unable to permanently delete this user because related operational records still require it: {getattr(exc, "orig", exc)}',
-        ) from exc
+    if commit:
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'Unable to permanently delete this user because related operational records still require it: {getattr(exc, "orig", exc)}',
+            ) from exc
 
     audit_services.log_event(
         db,
@@ -988,7 +1084,8 @@ def _delete_user_hard(db: Session, *, actor: models.User, user: models.User) -> 
         after=None,
         metadata={'module': 'accounts'},
     )
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def _build_user_export_payload(db: Session, *, user: models.User) -> dict:
@@ -1982,8 +2079,25 @@ def create_user_admin(
             detail="Only platform superuser can create superuser accounts.",
         )
 
-    if payload.role == models.AccountRole.SUPERUSER:
-        payload = payload.copy(update={"amo_id": None, "department_id": None})
+    creating_platform_superuser = payload.role == models.AccountRole.SUPERUSER
+    if creating_platform_superuser:
+        root_amo = (
+            db.query(models.AMO)
+            .filter(
+                or_(
+                    func.upper(models.AMO.amo_code) == "ROOT",
+                    func.lower(models.AMO.login_slug).in_(RESERVED_PLATFORM_SLUGS),
+                )
+            )
+            .order_by(models.AMO.created_at.asc(), models.AMO.id.asc())
+            .first()
+        )
+        if not root_amo:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The platform ROOT tenant must exist before another superuser can be created.",
+            )
+        payload = payload.model_copy(update={"amo_id": root_amo.id, "department_id": None})
 
     try:
         user = services.create_user(db, payload)
@@ -2106,6 +2220,16 @@ def update_user_admin(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You cannot assign SUPERUSER role.",
             )
+
+    if payload.role is not None:
+        _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
+    _protect_tenant_admin_continuity(
+        db,
+        actor=current_user,
+        users=[user],
+        resulting_active=payload.is_active,
+        resulting_role=payload.role,
+    )
 
     # NOTE: services.update_user() should also enforce what fields are allowed.
     try:
@@ -2335,6 +2459,12 @@ def command_disable_user(
     current_user: models.User = Depends(require_admin),
 ):
     user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    _protect_tenant_admin_continuity(
+        db,
+        actor=current_user,
+        users=[user],
+        resulting_active=False,
+    )
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
     user.deactivated_reason = "disabled_by_admin_command"
@@ -2526,6 +2656,21 @@ def bulk_user_action(
     if len(users) != len(set(user_ids)):
         raise HTTPException(status_code=404, detail='One or more selected users could not be found in scope.')
 
+    if payload.action == 'change_role' and payload.role is not None:
+        for user in users:
+            _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
+    if payload.action in {'disable', 'delete'} or (
+        payload.action == 'change_role' and payload.role != models.AccountRole.AMO_ADMIN
+    ):
+        _protect_tenant_admin_continuity(
+            db,
+            actor=current_user,
+            users=users,
+            resulting_active=False if payload.action in {'disable', 'delete'} else None,
+            resulting_role=payload.role if payload.action == 'change_role' else None,
+            deleting=payload.action == 'delete',
+        )
+
     affected_ids: list[str] = []
     target_department_name = None
     target_group = None
@@ -2572,7 +2717,11 @@ def bulk_user_action(
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             user.role = resolved_role
-            user.is_amo_admin = resolved_role == models.AccountRole.AMO_ADMIN
+            user.is_superuser = resolved_role == models.AccountRole.SUPERUSER
+            user.is_amo_admin = resolved_role in {
+                models.AccountRole.SUPERUSER,
+                models.AccountRole.AMO_ADMIN,
+            }
             user.is_auditor = resolved_role == models.AccountRole.AUDITOR
             definition = role_registry.role_definition(resolved_role)
             if definition.regulated:
@@ -2598,7 +2747,13 @@ def bulk_user_action(
                 effective_from=payload.effective_from, effective_to=payload.effective_to, actor_user_id=current_user.id
             )
         elif payload.action == 'delete':
-            _delete_user_hard(db, actor=current_user, user=user)
+            _delete_user_hard(
+                db,
+                actor=current_user,
+                user=user,
+                commit=False,
+                check_admin_continuity=False,
+            )
             affected_ids.append(str(user.id))
             continue
         else:
@@ -2609,6 +2764,15 @@ def bulk_user_action(
 
     if payload.action != 'delete':
         db.commit()
+    else:
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'No users were deleted because related operational records still require one or more selections: {getattr(exc, "orig", exc)}',
+            ) from exc
 
     return schemas.BulkUserActionResult(
         action=payload.action,
@@ -2631,6 +2795,15 @@ def user_employment_action(
 ):
     user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
     profile = _get_personnel_profile_for_user(db, user=user)
+    if payload.role is not None:
+        _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
+    _protect_tenant_admin_continuity(
+        db,
+        actor=current_user,
+        users=[user],
+        resulting_active=False if payload.action == 'resign' else None,
+        resulting_role=payload.role,
+    )
     department_name = None
     if payload.department_id:
         dept = db.query(models.Department).filter(models.Department.id == payload.department_id).first()
@@ -2649,7 +2822,11 @@ def user_employment_action(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         user.role = resolved_role
-        user.is_amo_admin = resolved_role == models.AccountRole.AMO_ADMIN
+        user.is_superuser = resolved_role == models.AccountRole.SUPERUSER
+        user.is_amo_admin = resolved_role in {
+            models.AccountRole.SUPERUSER,
+            models.AccountRole.AMO_ADMIN,
+        }
         user.is_auditor = resolved_role == models.AccountRole.AUDITOR
         definition = role_registry.role_definition(resolved_role)
         if definition.regulated:

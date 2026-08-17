@@ -2494,6 +2494,19 @@ def reconcile_open_attendance_sessions(
         if user_key in seen_users:
             continue
         seen_users.add(user_key)
+        # Dedicated workforce workers run concurrently. Claim the same user
+        # row used by live clock events so only one worker may remind or close
+        # an attendance session, while peers skip it without waiting.
+        user_claim = db.query(account_models.User.id).filter(
+            account_models.User.amo_id == latest.amo_id,
+            account_models.User.id == latest.user_id,
+        )
+        if db.get_bind().dialect.name == "postgresql":
+            user_claim = user_claim.with_for_update(skip_locked=True)
+        else:
+            user_claim = user_claim.with_for_update()
+        if user_claim.first() is None:
+            continue
         open_since = _open_attendance_started_at(
             db,
             amo_id=latest.amo_id,

@@ -536,31 +536,6 @@ function MonthCalendar({
   );
 }
 
-function tryGetUserIdFromStorage(): string | null {
-  const direct =
-    localStorage.getItem("user_id") ||
-    localStorage.getItem("userId") ||
-    localStorage.getItem("current_user_id");
-  if (direct && direct.trim()) return direct.trim();
-
-  const token =
-    localStorage.getItem("access_token") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("jwt");
-  if (!token) return null;
-
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = JSON.parse(atob(payload));
-    // Common JWT patterns: sub, user_id, uid
-    return (json?.user_id || json?.uid || json?.sub || null) as string | null;
-  } catch {
-    return null;
-  }
-}
-
 function MyTrainingPage() {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const amoCode = (params.amoCode || "AMO").trim();
@@ -1334,7 +1309,7 @@ function MyTrainingPage() {
         throw new Error("Please enter a valid requested due date.");
       }
 
-      const maybeUserId = tryGetUserIdFromStorage();
+      const maybeUserId = cachedUser?.id || null;
 
       // If backend accepts user_id omitted for self-requests, this still works.
       const payload: any = {

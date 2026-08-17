@@ -277,6 +277,24 @@ def get_current_user(
     if user is None:
         raise _credentials_exception()
 
+    # New sessions are independently revocable. Tokens issued before this
+    # migration remain valid through the legacy user-level revocation check
+    # below, which permits a zero-downtime deployment after migrations run.
+    auth_session = db.get(account_models.PortalAuthSession, auth_session_id)
+    if payload.get("auth_session_managed") is True and auth_session is None:
+        raise _credentials_exception()
+    if auth_session is not None:
+        session_expiry = auth_session.expires_at
+        if session_expiry is not None and session_expiry.tzinfo is None:
+            session_expiry = session_expiry.replace(tzinfo=timezone.utc)
+        if (
+            str(auth_session.user_id) != str(user.id)
+            or auth_session.revoked_at is not None
+            or session_expiry is None
+            or session_expiry <= datetime.now(timezone.utc)
+        ):
+            raise _credentials_exception()
+
     token_issued_at = payload.get("iat")
     revoked_at = getattr(user, "token_revoked_at", None)
     if revoked_at is not None:

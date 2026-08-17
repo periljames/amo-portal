@@ -22,6 +22,25 @@ def _bounded_float(name: str, default: float, minimum: float, maximum: float) ->
     return max(minimum, min(value, maximum))
 
 
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _bounded_float_alias(primary: str, legacy: str, default: float, minimum: float, maximum: float) -> float:
+    raw = os.getenv(primary)
+    if raw is None or not raw.strip():
+        raw = os.getenv(legacy)
+    try:
+        value = float(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
 class DatabaseCircuitBreaker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -34,8 +53,13 @@ class DatabaseCircuitBreaker:
         self._last_failure_at: float | None = None
         self._last_success_at = time.time()
         self._last_error: str | None = None
-        self._base_delay = _bounded_float("DB_CIRCUIT_BASE_DELAY_SEC", 2.0, 0.25, 30.0)
-        self._max_delay = _bounded_float("DB_CIRCUIT_MAX_DELAY_SEC", 60.0, 2.0, 300.0)
+        self._failure_threshold = _bounded_int("DB_CIRCUIT_FAILURE_THRESHOLD", 3, 1, 20)
+        self._base_delay = _bounded_float_alias(
+            "DB_CIRCUIT_BASE_RETRY_SECONDS", "DB_CIRCUIT_BASE_DELAY_SEC", 2.0, 0.25, 30.0
+        )
+        self._max_delay = _bounded_float_alias(
+            "DB_CIRCUIT_MAX_RETRY_SECONDS", "DB_CIRCUIT_MAX_DELAY_SEC", 60.0, 2.0, 300.0
+        )
 
     @staticmethod
     def _utc_iso(epoch: float | None) -> str | None:
@@ -53,15 +77,16 @@ class DatabaseCircuitBreaker:
         now_epoch = time.time()
         message = str(error).strip()[:500] or type(error).__name__
         with self._lock:
-            transitioned = self._state == "online"
-            self._state = "offline"
             self._consecutive_failures += 1
             self._probe_failures += 1
-            if self._opened_at is None:
-                self._opened_at = now_epoch
             self._last_failure_at = now_epoch
             self._last_error = message
-            self._next_probe_at = now_mono + self._delay()
+            transitioned = self._state == "online" and self._consecutive_failures >= self._failure_threshold
+            if transitioned:
+                self._state = "offline"
+                self._opened_at = self._opened_at or now_epoch
+            if self._state == "offline":
+                self._next_probe_at = now_mono + self._delay()
             return transitioned
 
     def mark_success(self) -> bool:
@@ -103,6 +128,7 @@ class DatabaseCircuitBreaker:
                 "state": self._state,
                 "available": self._state == "online",
                 "consecutive_failures": self._consecutive_failures,
+                "failure_threshold": self._failure_threshold,
                 "retry_after_seconds": max(
                     0,
                     int(max(0.0, self._next_probe_at - time.monotonic()) + 0.999),

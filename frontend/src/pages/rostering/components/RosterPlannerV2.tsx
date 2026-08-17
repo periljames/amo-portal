@@ -704,7 +704,7 @@ export function RosterPlannerV2() {
       setCellIssue({
         key: issueKey,
         title: `${sourceConflict.kind.replace(/_/g, " ")} is ${state}`,
-        message: `This time is protected by ${sourceConflict.source_module.toLowerCase()}.`,
+        message: `This time is protected by ${sourceConflict.source_module.toLowerCase()}. Resolve or reschedule it in ${sourceConflict.source_module.toLowerCase()} before assigning roster duty here.`,
       });
       return true;
     }
@@ -1281,7 +1281,7 @@ export function RosterPlannerV2() {
         <div className="wr-prefill-dialog" role="dialog" aria-modal="true" aria-labelledby="wr-prefill-title">
           <div className="wr-prefill-dialog__head"><div><span className="wr-eyebrow">Automation preview</span><h2 id="wr-prefill-title">Generate {format(data.month.days[0], "MMMM")} roster</h2><p>{period.starts_on}–{period.ends_on}</p></div><button type="button" className="wr-icon-button" aria-label="Close generation preview" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}><X size={17} /></button></div>
           <div className="wr-prefill-summary"><article><strong>{data.peopleTotal}</strong><span>Personnel</span></article><article><strong>{data.assignments.length}</strong><span>Existing duties kept</span></article><article><strong>{protectedCellCount}</strong><span>Protected dates</span></article><article><strong>{recommendationCount + openFindingCount}</strong><span>Current exceptions</span></article></div>
-          <ul className="wr-prefill-rules"><li><WandSparkles size={15} /> Saved start shifts continue each rotation</li><li><GraduationCap size={15} /> Leave and scheduled classes stay protected</li><li><ShieldCheck size={15} /> Occupied dates are skipped, never duplicated</li></ul>
+          <ul className="wr-prefill-rules"><li><WandSparkles size={15} /> Saved start shifts continue each rotation</li><li><GraduationCap size={15} /> Scheduled classes protected — leave stays protected too</li><li><ShieldCheck size={15} /> Collision-safe — occupied dates are skipped, never duplicated</li></ul>
           {generationProgress ? <div className="wr-prefill-batch-progress" role="status"><div><strong>{generationProgress.processedPeople}/{generationProgress.totalPeople} people</strong><span>{generationProgress.created} duties · {generationProgress.skipped} skipped</span></div><progress max={generationProgress.totalPeople} value={generationProgress.processedPeople} /></div> : null}
           <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || Boolean(rotationUpdatingUserId)} onClick={() => void prefillFromPatterns()}>{busy === "prefill-patterns" ? <RefreshCw size={15} className="is-spinning" /> : <WandSparkles size={15} />} {generationProgress ? "Generating…" : "Generate month"}</button></div>
         </div>

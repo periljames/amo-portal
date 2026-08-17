@@ -12,3 +12,12 @@ __pycache__/
 # Frontend dependency and build output
 frontend/node_modules/
 frontend/dist/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+.venv/
+venv/

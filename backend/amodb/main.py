@@ -16,7 +16,7 @@ from jose import JWTError, jwt
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
 from .database import (
     Base,
@@ -27,6 +27,8 @@ from .database import (
     probe_database,
 )
 from .database_resilience import database_circuit
+from .db_capacity import connection_budget, validate_connection_budget
+from .query_metrics import begin_counting, end_counting, query_count
 from .security import JWT_ALGORITHM, SECRET_KEY
 from .apps.accounts import models as accounts_models
 
@@ -70,6 +72,8 @@ from .apps.platform.router import router as platform_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
 from .apps.rostering.router import router as rostering_router
+from .apps.resilience.router import router as resilience_router
+from .apps.resilience import models as resilience_models  # noqa: F401 - register ORM tables
 from .jobs.portal_job_supervisor import (
     portal_job_supervisor_status,
     start_portal_job_supervisor,
@@ -289,10 +293,12 @@ def _enforce_schema_head_sync_if_configured() -> None:
 @app.on_event("startup")
 def _schema_preflight() -> None:
     app.state.is_shutting_down = False
+    app.state.connection_budget = validate_connection_budget().payload()
     _enforce_schema_head_sync_if_configured()
     realtime_gateway.connect()
-    reliability_scheduler.start_reliability_scheduler()
-    start_quality_planner_scheduler()
+    if os.getenv("PORTAL_EMBEDDED_SCHEDULED_WORKER", "false").lower() in {"1", "true", "yes", "on"}:
+        reliability_scheduler.start_reliability_scheduler()
+        start_quality_planner_scheduler()
     start_portal_job_supervisor()
 
 
@@ -404,6 +410,7 @@ _CIRCUIT_BYPASS_PATHS = frozenset({"/", "/health", "/healthz", "/livez", "/ready
 
 @app.middleware("http")
 async def meter_api_calls(request: Request, call_next):
+    query_token = begin_counting()
     started = time.perf_counter()
     status_code = 500
     timeout_error = False
@@ -427,6 +434,16 @@ async def meter_api_calls(request: Request, call_next):
         if database_circuit.mark_failure(exc):
             logger.warning("Database circuit opened; API requests will fail fast until readiness recovers")
         response = _database_unavailable_response()
+    except DBAPIError as exc:
+        # Constraint and validation failures are application errors. Only an
+        # invalidated connection represents dependency loss and may be retried.
+        if not bool(getattr(exc, "connection_invalidated", False)):
+            raise
+        timeout_error = True
+        status_code = 503
+        if database_circuit.mark_failure(exc):
+            logger.warning("Database circuit opened after an invalidated connection")
+        response = _database_unavailable_response()
     except RuntimeError as exc:
         if "No response returned" in str(exc):
             response = Response(status_code=499)
@@ -446,6 +463,10 @@ async def meter_api_calls(request: Request, call_next):
             )
         except Exception:
             logger.debug("Failed to record platform route metric", exc_info=True)
+        count = query_count()
+        end_counting(query_token)
+    if os.getenv("EXPOSE_DB_QUERY_COUNT_HEADER", "false").lower() in {"1", "true", "yes", "on"}:
+        response.headers["X-DB-Query-Count"] = str(count)
     if tenant_id and 200 <= status_code < 500:
         try:
             _queue_api_usage(str(tenant_id))
@@ -504,9 +525,18 @@ def _migration_readiness() -> tuple[bool, str | None]:
         script = ScriptDirectory.from_config(Config(str(Path(__file__).resolve().parent / "alembic.ini")))
         repository_heads = set(script.get_heads())
         database_heads = {str(row[0]) for row in db.execute(text("SELECT version_num FROM alembic_version")).fetchall()}
-        ready = database_heads == repository_heads
+        configured_heads = {
+            value.strip()
+            for value in (os.getenv("DATABASE_EXPECTED_ALEMBIC_HEADS") or "").split(",")
+            if value.strip()
+        }
+        required_heads = configured_heads or repository_heads
+        # Independent module branches may intentionally create multiple heads.
+        # A release can declare its required subset without reporting unrelated
+        # module heads as missing.
+        ready = bool(database_heads) and required_heads.issubset(database_heads)
         detail = None if ready else (
-            f"Database migrations {sorted(database_heads)} do not match repository heads {sorted(repository_heads)}"
+            f"Database migrations {sorted(database_heads)} do not include required heads {sorted(required_heads)}"
         )
     except Exception as exc:
         ready = False
@@ -540,6 +570,7 @@ def _readiness_response() -> JSONResponse:
         "broker": realtime_gateway.health(),
         "jobs": job_runtime,
         "database_circuit": circuit,
+        "connection_budget": connection_budget().payload(),
     }
     headers = {
         "Cache-Control": "no-store",
@@ -574,6 +605,7 @@ app.include_router(accounts_public_router)
 app.include_router(platform_router)
 app.include_router(foundations_router)
 app.include_router(rostering_router)
+app.include_router(resilience_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)

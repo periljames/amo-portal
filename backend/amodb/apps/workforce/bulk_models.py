@@ -91,6 +91,7 @@ class WorkforceBulkOperationItem(Base):
     __table_args__ = (
         UniqueConstraint("operation_id", "user_id", name="uq_workforce_bulk_operation_item_user"),
         Index("ix_workforce_bulk_item_status", "operation_id", "status", "sequence"),
+        Index("ix_workforce_bulk_item_claim", "status", "claim_expires_at", "sequence"),
         Index("ix_workforce_bulk_item_tenant_user", "amo_id", "user_id", "created_at"),
         CheckConstraint("sequence >= 0", name="ck_workforce_bulk_item_sequence"),
         CheckConstraint("attempt_count >= 0", name="ck_workforce_bulk_item_attempts"),
@@ -112,6 +113,9 @@ class WorkforceBulkOperationItem(Base):
     outcome_message = Column(Text, nullable=True)
     input_json = Column(JSON, nullable=True)
     result_json = Column(JSON, nullable=True)
+    claim_token = Column(String(64), nullable=True)
+    claimed_by = Column(String(128), nullable=True)
+    claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_
+from sqlalchemy.orm import lazyload
 
 from ...database import WriteSessionLocal
 from ..rostering import models as _rostering_models  # noqa: F401
@@ -20,6 +21,7 @@ def _recover_stale_operations(db) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
     query = (
         db.query(bulk_models.WorkforceBulkOperation)
+        .options(lazyload(bulk_models.WorkforceBulkOperation.items))
         .filter(
             bulk_models.WorkforceBulkOperation.status == "RUNNING",
             or_(
@@ -50,6 +52,9 @@ def _recover_stale_operations(db) -> int:
                     "The interrupted record was returned to the durable processing queue"
                 ),
                 bulk_models.WorkforceBulkOperationItem.completed_at: None,
+                bulk_models.WorkforceBulkOperationItem.claim_token: None,
+                bulk_models.WorkforceBulkOperationItem.claimed_by: None,
+                bulk_models.WorkforceBulkOperationItem.claim_expires_at: None,
             },
             synchronize_session=False,
         )
@@ -73,17 +78,21 @@ def run_once(*, operation_limit: int = 10) -> int:
         db.commit()
         operation_ids = [
             str(operation_id)
-            for (operation_id,) in db.query(bulk_models.WorkforceBulkOperation.id).filter(
-                bulk_models.WorkforceBulkOperation.status == "QUEUED"
+            for (operation_id,) in db.query(
+                bulk_models.WorkforceBulkOperation.id
+            ).filter(
+                bulk_models.WorkforceBulkOperation.status.in_(("QUEUED", "RUNNING"))
             ).order_by(
                 bulk_models.WorkforceBulkOperation.created_at.asc(),
                 bulk_models.WorkforceBulkOperation.id.asc(),
             ).limit(max(1, min(operation_limit, 100))).all()
         ]
+    claimed_items = 0
+    worker_id = f"{os.getpid()}:{time.monotonic_ns()}"
     for operation_id in operation_ids:
-        process_operation(operation_id)
+        claimed_items += process_operation(operation_id, max_chunks=1, worker_id=worker_id)
     return (
-        len(operation_ids)
+        claimed_items
         + completed_offboarding
         + recovered_operations
         + attendance_result["reminded"]

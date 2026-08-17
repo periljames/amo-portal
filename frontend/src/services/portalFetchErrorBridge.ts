@@ -1,5 +1,18 @@
 import { reportPortalError, reportUploadError, type PortalErrorTarget } from "./portalError";
-import { ensureAuthenticatedRequestAllowed, handleAuthFailure } from "./auth";
+import {
+  ensureAuthenticatedRequestAllowed,
+  getToken,
+  getTokenSecondsRemaining,
+  hasRecoverableSession,
+  handleAuthFailure,
+  recoverSessionAfterUnauthorized,
+} from "./auth";
+import {
+  markPortalSessionExpired,
+  notePortalNetworkFailure,
+  notePortalResponse,
+} from "./portalConnectivity";
+import { getApiBaseUrl } from "./config";
 
 const INSTALL_FLAG = "__amoPortalFetchErrorBridgeInstalled";
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -36,6 +49,72 @@ function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+function isAuthRecoveryUrl(url: string): boolean {
+  try {
+    return new URL(url, window.location.origin).pathname.replace(/\/+$/, "") === "/auth/refresh";
+  } catch {
+    return false;
+  }
+}
+
+function isPublicAuthUrl(url: string): boolean {
+  try {
+    const path = new URL(url, window.location.origin).pathname.replace(/\/+$/, "");
+    return path === "/auth/login"
+      || path === "/auth/login-context"
+      || path === "/auth/logout-session"
+      || path.startsWith("/auth/password-reset/")
+      || path === "/auth/dev-seed-login";
+  } catch {
+    return false;
+  }
+}
+
+function isPublicHealthUrl(url: string): boolean {
+  try {
+    const path = new URL(url, window.location.origin).pathname.replace(/\/+$/, "") || "/";
+    return path === "/" || ["/livez", "/readyz", "/healthz", "/health", "/time"].includes(path);
+  } catch {
+    return false;
+  }
+}
+
+function isPortalApiUrl(url: string): boolean {
+  try {
+    const requestUrl = new URL(url, window.location.origin);
+    const apiBase = new URL(getApiBaseUrl() || "/", window.location.origin);
+    if (requestUrl.origin !== apiBase.origin) return false;
+    const basePath = apiBase.pathname.replace(/\/+$/, "");
+    return !basePath || basePath === "/" || requestUrl.pathname.startsWith(`${basePath}/`);
+  } catch {
+    return false;
+  }
+}
+
+function withCurrentAccessToken(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  fallbackRequest?: Request | null,
+): [RequestInfo | URL, RequestInit | undefined] {
+  const token = getToken();
+  const headers = requestHeaders(fallbackRequest || input, init);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (fallbackRequest) return [new Request(fallbackRequest, { headers }), undefined];
+  return [input, { ...init, headers }];
+}
+
+function recoveryPendingResponse(): Response {
+  return new Response(JSON.stringify({
+    detail: "The saved session is waiting for the server to recover.",
+    error_code: "SESSION_RECOVERY_PENDING",
+    retryable: true,
+    request_accepted: false,
+  }), {
+    status: 503,
+    headers: { "Content-Type": "application/json", "Retry-After": "5" },
+  });
 }
 
 function isSilentBackgroundMutation(url: string): boolean {
@@ -130,21 +209,52 @@ export function installPortalFetchErrorBridge(): () => void {
     const mutation = MUTATION_METHODS.has(method);
     const upload = isUpload(init, headers);
     const url = requestUrl(input);
+    const authRecoveryRequest = isAuthRecoveryUrl(url);
+    const publicAuthRequest = isPublicAuthUrl(url);
+    const publicHealthRequest = isPublicHealthUrl(url);
     const silent = headers.get("X-AMO-Silent-Error") === "1" || isSilentBackgroundMutation(url);
-    const authenticatedRequest = (headers.get("Authorization") || "").startsWith("Bearer ");
+    const portalRequest = isPortalApiUrl(url);
+    const authenticatedRequest = portalRequest
+      && !authRecoveryRequest
+      && !publicAuthRequest
+      && !publicHealthRequest
+      && (
+      (headers.get("Authorization") || "").startsWith("Bearer ")
+      || hasRecoverableSession()
+    );
+    const retryRequest = typeof Request !== "undefined" && input instanceof Request ? input.clone() : null;
 
+    // Logout/presence are lifecycle beacons and are deliberately silent. They
+    // must not recursively trigger the idle guard that dispatched them.
     if (authenticatedRequest && !silent && !ensureAuthenticatedRequestAllowed()) {
       throw new DOMException("Session ended", "AbortError");
     }
 
+    let activeInput = input;
+    let activeInit = init;
+    if (
+      authenticatedRequest
+      && (!getToken() || (getTokenSecondsRemaining() ?? 1) <= 0)
+    ) {
+      const recovered = await recoverSessionAfterUnauthorized("access-expired-preflight");
+      if (!recovered) return recoveryPendingResponse();
+      [activeInput, activeInit] = withCurrentAccessToken(input, init, retryRequest);
+    }
+
     try {
-      const response = await originalFetch(input, init);
+      let response = await originalFetch(activeInput, activeInit);
       if (response.status === 401 && authenticatedRequest) {
-        // All modules share this bridge. End an invalid session once and let the
-        // app-level lifecycle redirect, instead of allowing every poller/form to
-        // render its own 401 error and keep retrying.
-        handleAuthFailure("unauthorized-response");
+        const recovered = await recoverSessionAfterUnauthorized("unauthorized-response");
+        if (recovered) {
+          const [retryInput, retryInit] = withCurrentAccessToken(input, init, retryRequest);
+          response = await originalFetch(retryInput, retryInit);
+        }
+        if (response.status === 401) {
+          markPortalSessionExpired("unauthorized-response");
+          handleAuthFailure("unauthorized-response");
+        }
       }
+      if (portalRequest) notePortalResponse(response);
       if (mutation && !silent && !response.ok && response.status !== 401) {
         const message = await responseMessage(response);
         const target = errorTarget(upload);
@@ -160,6 +270,9 @@ export function installPortalFetchErrorBridge(): () => void {
       }
       return response;
     } catch (error) {
+      if (portalRequest && !isAbort(error)) {
+        notePortalNetworkFailure(error instanceof Error ? error.message : "network-unreachable");
+      }
       if (mutation && !silent && !isAbort(error)) {
         const target = errorTarget(upload);
         const options = {

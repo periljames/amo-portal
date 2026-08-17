@@ -521,7 +521,12 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         licence_expires_on=data.licence_expires_on,
         hashed_password=hashed,
         is_active=True,
-        is_amo_admin=resolved_role == models.AccountRole.AMO_ADMIN,
+        # Keep the role and its privileged identity flags atomic. Creating a
+        # SUPERUSER with false flags, committing, and repairing it afterward
+        # leaves a real (if brief) inconsistent account state.
+        is_superuser=resolved_role == models.AccountRole.SUPERUSER,
+        is_amo_admin=resolved_role
+        in {models.AccountRole.SUPERUSER, models.AccountRole.AMO_ADMIN},
         is_auditor=bool(
             data.is_auditor
             if data.is_auditor is not None
@@ -544,9 +549,10 @@ def governed_workforce_role_for_user(db: Session, user: models.User) -> models.A
     The accounts package deliberately reads only the canonical role key. It
     does not duplicate or mutate Workforce placement records.
     """
+    inspector = inspect(db.connection())
     if not (
-        inspect(db.get_bind()).has_table("workforce_person_placements")
-        and inspect(db.get_bind()).has_table("workforce_positions")
+        inspector.has_table("workforce_person_placements")
+        and inspector.has_table("workforce_positions")
     ):
         return None
     try:
@@ -615,7 +621,7 @@ def clear_management_supervisor_links(db: Session, user: models.User) -> int:
           AND supervisor_user_id IS NOT NULL
         """),
     )
-    inspector = inspect(db.get_bind())
+    inspector = inspect(db.connection())
     for table_name, statement in statements:
         if not inspector.has_table(table_name):
             continue
@@ -629,7 +635,7 @@ def clear_management_supervisor_links(db: Session, user: models.User) -> int:
 
 def sync_regulated_postholder_assignment(db: Session, user: models.User) -> None:
     """Keep the canonical authorization postholder record aligned to User.role."""
-    if user.amo_id is None or not inspect(db.get_bind()).has_table("auth_postholder_assignments"):
+    if user.amo_id is None or not inspect(db.connection()).has_table("auth_postholder_assignments"):
         return
     definition = role_registry.role_definition(user.role)
     params = {"amo_id": str(user.amo_id), "user_id": str(user.id)}
@@ -693,10 +699,21 @@ def update_user(
     explicit_title = "position_title" in data.model_fields_set
     resolved_role = data.role if explicit_role else user.role
     requested_title = data.position_title if explicit_title else user.position_title
-    if not explicit_role and explicit_title:
+    # A title edit must never silently demote a platform or tenant
+    # administrator. Privileged role changes require the explicit role field
+    # so the route can enforce continuity and self-lockout controls.
+    if (
+        not explicit_role
+        and explicit_title
+        and user.role not in {models.AccountRole.SUPERUSER, models.AccountRole.AMO_ADMIN}
+    ):
         inferred_role = role_registry.infer_regulated_role(requested_title)
         if inferred_role is not None:
             resolved_role = inferred_role
+    if user.is_superuser and resolved_role != models.AccountRole.SUPERUSER:
+        raise ValueError("A platform superuser cannot be converted into a tenant role")
+    if not user.is_superuser and resolved_role == models.AccountRole.SUPERUSER:
+        raise ValueError("Platform superuser identities require the dedicated creation workflow")
     resolved_role = require_role_matches_workforce(
         db,
         user=user,
@@ -1183,8 +1200,15 @@ def issue_access_token_for_user(
         "is_amo_admin": bool(getattr(user, "is_amo_admin", False)),
         "is_system_account": bool(getattr(user, "is_system_account", False)),
     }
-    if auth_session_id:
-        payload["auth_session_id"] = str(auth_session_id)[:64]
+    stable_session_id = str(
+        auth_session_id
+        or getattr(user, "auth_session_id", None)
+        or getattr(user, "_auth_session_id", None)
+        or ""
+    ).strip()
+    if stable_session_id:
+        payload["auth_session_id"] = stable_session_id[:64]
+        payload["auth_session_managed"] = True
 
     access_token = create_access_token(
         data=payload,

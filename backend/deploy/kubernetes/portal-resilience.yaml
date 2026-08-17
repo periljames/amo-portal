@@ -1,0 +1,234 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amo-portal-runtime
+data:
+  APP_ENV: production
+  PORTAL_REFRESH_COOKIE_SECURE: "true"
+  PORTAL_AUTH_SESSION_HOURS: "12"
+  DB_EXTERNAL_POOLER: "true"
+  DB_POOL_TIMEOUT: "5"
+  DB_CONNECT_TIMEOUT_SECONDS: "5"
+  DB_STATEMENT_TIMEOUT_MS: "30000"
+  DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: "60000"
+  DATABASE_EXPECTED_ALEMBIC_HEADS: resilience_260816_commands
+  DB_CIRCUIT_FAILURE_THRESHOLD: "3"
+  DB_CIRCUIT_BASE_RETRY_SECONDS: "2"
+  DB_CIRCUIT_MAX_RETRY_SECONDS: "60"
+  PORTAL_EMBEDDED_JOB_WORKER: "false"
+  PORTAL_EMBEDDED_SCHEDULED_WORKER: "false"
+  DOCUMENT_EVIDENCE_PACK_EMBEDDED_WORKER: "false"
+  DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS: "0.5"
+  PORTAL_WORKER_PROCESS_POOLS: workforce=4
+  DB_MAX_CONNECTIONS: "300"
+  DB_ADMIN_CONNECTION_RESERVE: "20"
+  DB_MIGRATION_CONNECTION_RESERVE: "5"
+  PGBOUNCER_API_POOL_SIZE: "90"
+  PGBOUNCER_WORKFORCE_POOL_SIZE: "45"
+  PGBOUNCER_GENERAL_POOL_SIZE: "35"
+  PGBOUNCER_SCHEDULED_POOL_SIZE: "10"
+  PGBOUNCER_READ_POOL_SIZE: "30"
+  WORKFORCE_BULK_CHUNK_SIZE: "500"
+  PRESENCE_MIN_WRITE_INTERVAL_SECONDS: "12"
+  PRESENCE_HEARTBEAT_GRACE_SECONDS: "90"
+  # Horizontal API/worker replicas must share durable retained artifacts. The
+  # bucket name/credentials remain in amo-portal-secrets.
+  AMO_STORAGE_BACKEND: "s3"
+  AMO_REQUIRE_SHARED_STORAGE: "true"
+  AMO_STORAGE_S3_PREFIX: "amo-portal"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-api
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: { app: amo-portal-api }
+  template:
+    metadata:
+      labels: { app: amo-portal-api }
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: api
+          image: ghcr.io/replace/amo-portal-backend:replace
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn"]
+          args: ["amodb.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 4
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amo-portal-api
+spec:
+  selector: { app: amo-portal-api }
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: amo-portal-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: amo-portal-api }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: amo-portal-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: amo-portal-api
+  minReplicas: 3
+  maxReplicas: 12
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-workforce-workers
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: amo-portal-workforce-worker }
+  template:
+    metadata:
+      labels: { app: amo-portal-workforce-worker }
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: worker
+          image: ghcr.io/replace/amo-portal-backend:replace
+          command: ["python", "-m", "amodb.jobs.portal_worker_main"]
+          args: ["--families", "workforce", "--concurrency", "1"]
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 768Mi }
+            limits: { cpu: "2", memory: 2Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-general-workers
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: amo-portal-general-worker }
+  template:
+    metadata:
+      labels: { app: amo-portal-general-worker }
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: worker
+          image: ghcr.io/replace/amo-portal-backend:replace
+          command: ["python", "-m", "amodb.jobs.portal_worker_main"]
+          args:
+            - --families
+            - platform-commands,saas,training-workbooks,training-reports,document-indexing
+            - --concurrency
+            - "1"
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-document-evidence-workers
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels: { app: amo-portal-document-evidence-worker }
+  template:
+    metadata:
+      labels: { app: amo-portal-document-evidence-worker }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: ghcr.io/replace/amo-portal-backend:replace
+          command: ["python", "-m", "amodb.apps.doc_control.evidence_pack_worker_main"]
+          args: ["--poll-seconds", "0.5"]
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amo-portal-scheduled-worker
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: amo-portal-scheduled-worker }
+  template:
+    metadata:
+      labels: { app: amo-portal-scheduled-worker }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: scheduler
+          image: ghcr.io/replace/amo-portal-backend:replace
+          command: ["python", "-m", "amodb.jobs.portal_scheduler_main"]
+          envFrom:
+            - configMapRef: { name: amo-portal-runtime }
+            - secretRef: { name: amo-portal-secrets }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }

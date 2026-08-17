@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, lazyload
 
 from ..accounts import models as account_models
 from ..audit import services as audit_services
+from amodb.user_id import generate_user_id
 from . import bulk_models, bulk_schemas, hr_selection_integrity, models, permissions, services
 
 MAX_BULK_RECORDS = 10_000
@@ -38,11 +39,12 @@ def _overlapping_assignments(
     user_ids: list[str],
     effective_from: date,
     effective_to: date | None,
+    lock: bool = False,
 ) -> dict[str, list[models.EmployeeWorkPatternAssignment]]:
     result: dict[str, list[models.EmployeeWorkPatternAssignment]] = defaultdict(list)
     end = effective_to or date.max
     for chunk in _chunks(user_ids):
-        rows = db.query(models.EmployeeWorkPatternAssignment).options(
+        query = db.query(models.EmployeeWorkPatternAssignment).options(
             joinedload(models.EmployeeWorkPatternAssignment.work_pattern),
         ).filter(
             models.EmployeeWorkPatternAssignment.amo_id == amo_id,
@@ -55,7 +57,10 @@ def _overlapping_assignments(
         ).order_by(
             models.EmployeeWorkPatternAssignment.user_id.asc(),
             models.EmployeeWorkPatternAssignment.effective_from.asc(),
-        ).all()
+        )
+        if lock:
+            query = query.with_for_update(of=models.EmployeeWorkPatternAssignment)
+        rows = query.all()
         for row in rows:
             result[str(row.user_id)].append(row)
     return result
@@ -225,22 +230,24 @@ def _replace_assignment_window(
     operation: bulk_models.WorkforceBulkOperation,
     user: account_models.User,
     options: bulk_schemas.WorkPatternBatchOptions,
+    overlaps: list[models.EmployeeWorkPatternAssignment] | None = None,
 ) -> tuple[models.EmployeeWorkPatternAssignment, int, bool]:
     target_end = options.effective_to or date.max
-    overlaps = db.query(models.EmployeeWorkPatternAssignment).options(
-        lazyload(models.EmployeeWorkPatternAssignment.user),
-        lazyload(models.EmployeeWorkPatternAssignment.work_pattern),
-    ).filter(
-        models.EmployeeWorkPatternAssignment.amo_id == operation.amo_id,
-        models.EmployeeWorkPatternAssignment.user_id == user.id,
-        models.EmployeeWorkPatternAssignment.effective_from <= target_end,
-        or_(
-            models.EmployeeWorkPatternAssignment.effective_to.is_(None),
-            models.EmployeeWorkPatternAssignment.effective_to >= options.effective_from,
-        ),
-    ).order_by(models.EmployeeWorkPatternAssignment.effective_from.asc()).with_for_update(
-        of=models.EmployeeWorkPatternAssignment
-    ).all()
+    if overlaps is None:
+        overlaps = db.query(models.EmployeeWorkPatternAssignment).options(
+            lazyload(models.EmployeeWorkPatternAssignment.user),
+            lazyload(models.EmployeeWorkPatternAssignment.work_pattern),
+        ).filter(
+            models.EmployeeWorkPatternAssignment.amo_id == operation.amo_id,
+            models.EmployeeWorkPatternAssignment.user_id == user.id,
+            models.EmployeeWorkPatternAssignment.effective_from <= target_end,
+            or_(
+                models.EmployeeWorkPatternAssignment.effective_to.is_(None),
+                models.EmployeeWorkPatternAssignment.effective_to >= options.effective_from,
+            ),
+        ).order_by(models.EmployeeWorkPatternAssignment.effective_from.asc()).with_for_update(
+            of=models.EmployeeWorkPatternAssignment
+        ).all()
 
     if _same_pattern_covers_window(overlaps, options=options):
         return next(row for row in overlaps if str(row.work_pattern_id) == options.work_pattern_id), 0, True
@@ -255,6 +262,7 @@ def _replace_assignment_window(
         keeps_right = options.effective_to is not None and (row.effective_to is None or row.effective_to > options.effective_to)
         if keeps_left and keeps_right:
             suffix = models.EmployeeWorkPatternAssignment(
+                id=generate_user_id(),
                 amo_id=row.amo_id,
                 user_id=row.user_id,
                 work_pattern_id=row.work_pattern_id,
@@ -265,7 +273,6 @@ def _replace_assignment_window(
             )
             row.effective_to = options.effective_from - timedelta(days=1)
             db.add(suffix)
-            db.flush()
             _log_assignment_change(
                 db,
                 operation=operation,
@@ -283,7 +290,6 @@ def _replace_assignment_window(
             )
         elif keeps_left:
             row.effective_to = options.effective_from - timedelta(days=1)
-            db.flush()
             _log_assignment_change(
                 db,
                 operation=operation,
@@ -294,7 +300,6 @@ def _replace_assignment_window(
             )
         elif keeps_right:
             row.effective_from = options.effective_to + timedelta(days=1)
-            db.flush()
             _log_assignment_change(
                 db,
                 operation=operation,
@@ -312,9 +317,8 @@ def _replace_assignment_window(
                 before=before,
             )
             db.delete(row)
-    db.flush()
-
     assignment = models.EmployeeWorkPatternAssignment(
+        id=generate_user_id(),
         amo_id=operation.amo_id,
         user_id=user.id,
         work_pattern_id=options.work_pattern_id,
@@ -324,7 +328,6 @@ def _replace_assignment_window(
         created_by_user_id=operation.actor_user_id,
     )
     db.add(assignment)
-    db.flush()
     _log_assignment_change(
         db,
         operation=operation,
@@ -333,6 +336,108 @@ def _replace_assignment_window(
         after={**_assignment_snapshot(assignment), "reason": options.reason},
     )
     return assignment, replaced, False
+
+
+def process_work_pattern_items(
+    db: Session,
+    *,
+    operation: bulk_models.WorkforceBulkOperation,
+    items: list[bulk_models.WorkforceBulkOperationItem],
+    actor: account_models.User,
+) -> dict[str, tuple[str, str, str, dict[str, Any] | None]]:
+    """Process one claimed chunk with bounded set-based reads and one commit."""
+    if not items:
+        return {}
+    user_ids = [str(item.user_id) for item in items]
+    options = bulk_schemas.WorkPatternBatchOptions.model_validate(
+        items[0].input_json or operation.payload_json
+    )
+    pattern = services.get_pattern(
+        db,
+        amo_id=operation.amo_id,
+        pattern_id=options.work_pattern_id,
+    )
+    users = db.query(account_models.User).options(
+        lazyload(account_models.User.department),
+    ).filter(
+        account_models.User.amo_id == operation.amo_id,
+        account_models.User.id.in_(user_ids),
+    ).with_for_update(of=account_models.User).all()
+    users_by_id = {str(user.id): user for user in users}
+    overlaps_by_user = _overlapping_assignments(
+        db,
+        amo_id=operation.amo_id,
+        user_ids=user_ids,
+        effective_from=options.effective_from,
+        effective_to=options.effective_to,
+        lock=True,
+    )
+    permission_by_department = {
+        department_id: permissions.has_permission(
+            db,
+            user=actor,
+            permission=permissions.PermissionCode.WORKFORCE_ASSIGN_PATTERNS,
+            department_id=department_id,
+        )
+        for department_id in {user.department_id for user in users}
+    }
+    outcomes: dict[str, tuple[str, str, str, dict[str, Any] | None]] = {}
+    for item in items:
+        user = users_by_id.get(str(item.user_id))
+        if user is None:
+            outcomes[str(item.id)] = (
+                "FAILED", "USER_NOT_FOUND", "The selected user no longer exists in this tenant", None,
+            )
+            continue
+        if not user.is_active or user.is_system_account:
+            outcomes[str(item.id)] = (
+                "SKIPPED", "ACCOUNT_INELIGIBLE", "Inactive and system accounts cannot receive work patterns", None,
+            )
+            continue
+        if not permission_by_department.get(user.department_id, False):
+            outcomes[str(item.id)] = (
+                "FAILED", "OUTSIDE_PERMISSION_SCOPE", "The administrator is not authorized for this person's department", None,
+            )
+            continue
+        if pattern is None or not pattern.is_active:
+            outcomes[str(item.id)] = (
+                "FAILED", "PATTERN_NOT_ACTIVE", "The selected work pattern is no longer active", None,
+            )
+            continue
+        try:
+            services._validate_pattern_user_shift_scope(pattern, user=user)
+            assignment, replaced, unchanged = _replace_assignment_window(
+                db,
+                operation=operation,
+                user=user,
+                options=options,
+                overlaps=overlaps_by_user.get(str(user.id), []),
+            )
+        except LookupError as exc:
+            outcomes[str(item.id)] = (
+                "SKIPPED", "EXISTING_ASSIGNMENT_RETAINED", str(exc), None,
+            )
+            continue
+        except ValueError as exc:
+            outcomes[str(item.id)] = (
+                "FAILED", "PATTERN_DEPARTMENT_MISMATCH", str(exc), None,
+            )
+            continue
+        if unchanged:
+            outcomes[str(item.id)] = (
+                "SKIPPED",
+                "PATTERN_UNCHANGED",
+                "This employee already has the selected work pattern for the requested dates",
+                {"assignment_id": str(assignment.id)},
+            )
+        else:
+            outcomes[str(item.id)] = (
+                "SUCCEEDED",
+                "PATTERN_REPLACED" if replaced else "PATTERN_ASSIGNED",
+                "Work pattern changed" if replaced else "Work pattern assigned",
+                {"assignment_id": str(assignment.id), "replaced_assignment_count": replaced},
+            )
+    return outcomes
 
 
 def process_work_pattern_item(

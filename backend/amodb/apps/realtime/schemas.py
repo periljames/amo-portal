@@ -148,6 +148,7 @@ class RealtimeSyncResponse(BaseModel):
 class PresenceStateUpdateRequest(BaseModel):
     state: str = Field(pattern="^(online|away)$")
     reason: str | None = Field(default=None, max_length=64)
+    client_instance_id: str | None = Field(default=None, min_length=8, max_length=80)
 
 
 class PresenceStateRead(BaseModel):
@@ -157,3 +158,4 @@ class PresenceStateRead(BaseModel):
     last_seen_at: datetime
     updated_at: datetime
     reason: str | None = None
+    session_id: str | None = None

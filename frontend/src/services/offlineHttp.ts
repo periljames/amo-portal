@@ -7,11 +7,14 @@ import {
   writeApiCache,
   type OfflineOutboxEntry,
 } from "./offlinePersistence";
+import { assertOfflineReplayAllowed, classifyOfflineMutation } from "./offlineCapabilities";
 import {
-  getPortalConnectivitySnapshot,
+  getPortalConnectivity,
+  isPortalReady,
+  notePortalNetworkFailure,
   notePortalResponse,
-  notePortalTransportFailure,
   recommendedRequestTimeoutMs,
+  waitForPortalReadiness,
 } from "./portalConnectivity";
 
 export type PortalOfflineOptions = {
@@ -90,34 +93,8 @@ export function isPortalCacheablePath(path: string): boolean {
   return !SENSITIVE_PATH_PARTS.some((part) => normalized.includes(part));
 }
 
-function networkAvailable(): boolean {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
-  const connectivity = getPortalConnectivitySnapshot();
-  return connectivity.state === "online" && connectivity.databaseReady;
-}
-
-const AUTHORITATIVE_PATH_MARKERS = [
-  "/approve",
-  "/reject",
-  "/submit",
-  "/publish",
-  "/certify",
-  "/sign-off",
-  "/signoff",
-  "/payroll",
-  "/permissions",
-  "/authorisations",
-  "/authorizations",
-  "/upload",
-  "/attachments",
-];
-
 export function isReplaySafeMutation(path: string, method: string): boolean {
-  const normalizedMethod = method.toUpperCase();
-  if (normalizedMethod === "DELETE") return false;
-  if (!["POST", "PUT", "PATCH"].includes(normalizedMethod)) return false;
-  const normalizedPath = normalizedCachePath(path).toLowerCase();
-  return !AUTHORITATIVE_PATH_MARKERS.some((marker) => normalizedPath.includes(marker));
+  return classifyOfflineMutation(normalizedCachePath(path), method).capability === "draft-safe";
 }
 
 async function confirmedNotAccepted(response: Response): Promise<boolean> {
@@ -130,6 +107,10 @@ async function confirmedNotAccepted(response: Response): Promise<boolean> {
   const body = detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
   return body?.request_accepted === false
     && ["DB_TEMPORARILY_UNAVAILABLE", "DB_POOL_TIMEOUT"].includes(String(body?.error_code || ""));
+}
+
+function networkAvailable(): boolean {
+  return typeof navigator === "undefined" || isPortalReady();
 }
 
 function isAbortError(error: unknown): boolean {
@@ -202,11 +183,13 @@ async function queueRequest(
     || headers.get("Idempotency-Key")
     || newOfflineIdempotencyKey(method.toLowerCase());
   headers.set("Idempotency-Key", idempotencyKey);
+  const serializedBody = bodyAsString(init.body);
+  assertOfflineReplayAllowed(normalizedCachePath(path), method, serializedBody);
   const operation = await enqueueOfflineMutation({
     path: normalizedCachePath(path),
     method,
     headers,
-    body: bodyAsString(init.body),
+    body: serializedBody,
     entityType: init.offline?.entityType,
     entityId: init.offline?.entityId,
     idempotencyKey,
@@ -230,9 +213,12 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const cacheEnabled = isGet && offline?.cache !== false && isPortalCacheablePath(path);
   const allowStaleFallback = offline?.allowStaleFallback !== false;
   const queueMutation = !isGet && offline?.queueMutation === true;
-  const replaySafe = isGet || isReplaySafeMutation(path, method);
   const cachePath = normalizedCachePath(path);
   const requestScope = currentOfflineScope();
+
+  if (getPortalConnectivity().state === "RECOVERING") {
+    await waitForPortalReadiness();
+  }
 
   if (!networkAvailable()) {
     if (cacheEnabled) {
@@ -240,7 +226,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       if (cached) return cached;
     }
     assertRequestScope(requestScope);
-    if (queueMutation && replaySafe) return queueRequest(cachePath, method, init, requestScope);
+    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "This data has not been cached on this device yet. Reconnect once to make it available offline."
       : "The server is offline. This operation requires a live connection.");
@@ -249,7 +235,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const controller = new AbortController();
   const detachCallerSignal = combineAbortSignals(controller, signal);
   const effectiveTimeout = timeoutMs ?? recommendedRequestTimeoutMs(method);
-  const timeout = window.setTimeout(
+  const timeout = globalThis.setTimeout(
     () => controller.abort(new DOMException(`Request timed out after ${Math.round(effectiveTimeout / 1000)} seconds`, "AbortError")),
     effectiveTimeout,
   );
@@ -285,10 +271,10 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       }
     }
 
-    // Only a server response that explicitly guarantees the transaction was
-    // not accepted may be moved to the local outbox.  Generic 5xx responses
-    // remain visible because the server may have committed before failing.
-    if (queueMutation && replaySafe && await confirmedNotAccepted(response)) {
+    // Queue only when the server explicitly guarantees that it rejected the
+    // command before processing. Generic 5xx responses have an ambiguous
+    // commit outcome and must remain visible until their receipt is resolved.
+    if (queueMutation && await confirmedNotAccepted(response)) {
       return queueRequest(cachePath, method, init, requestScope);
     }
 
@@ -299,9 +285,6 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
     return response;
   } catch (error) {
     if (isAbortError(error)) {
-      // GET has no ambiguous commit outcome, so a slow-link timeout may safely
-      // fall back to the last encrypted device copy. Writes remain visible to
-      // the user because the server may have committed before the timeout.
       if (cacheEnabled) {
         const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
         if (cached) return cached;
@@ -309,18 +292,18 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       throw error;
     }
     if (!isNetworkFailure(error)) throw error;
-    notePortalTransportFailure(error);
+    notePortalNetworkFailure(error instanceof Error ? error.message : "network-unreachable");
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
     }
     assertRequestScope(requestScope);
-    if (queueMutation && replaySafe) return queueRequest(cachePath, method, init, requestScope);
+    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "The server could not be reached and no cached copy is available."
       : "The server could not be reached. Reconnect and retry this operation.");
   } finally {
-    window.clearTimeout(timeout);
+    globalThis.clearTimeout(timeout);
     detachCallerSignal();
   }
 }
