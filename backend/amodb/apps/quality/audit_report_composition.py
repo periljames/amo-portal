@@ -21,10 +21,11 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+from .audit_occurrence_completion_models import QualityAuditClosingNarrative, QualityAuditMeeting
 from .audit_report_composition_models import QualityAuditReportArtifact
 
 
-TEMPLATE_VERSION = "QMS_AUDIT_REPORT_V1"
+TEMPLATE_VERSION = "QMS_AUDIT_REPORT_V2"
 RENDERER_VERSION = "REPORTLAB_V1"
 _STORAGE_ROOT = Path(os.getenv("QMS_GENERATED_AUDIT_REPORT_DIR", "uploads/qms-generated-audit-reports")).resolve()
 
@@ -101,9 +102,18 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         models.QualityAuditDocumentRequest.amo_id == amo_id,
         models.QualityAuditDocumentRequest.audit_id == audit_id,
     ).order_by(models.QualityAuditDocumentRequest.created_at.asc()).all()
+    meetings = db.query(QualityAuditMeeting).filter(
+        QualityAuditMeeting.amo_id == amo_id,
+        QualityAuditMeeting.audit_id == audit_id,
+        QualityAuditMeeting.status != "CANCELLED",
+    ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
+    narrative = db.query(QualityAuditClosingNarrative).filter(
+        QualityAuditClosingNarrative.amo_id == amo_id,
+        QualityAuditClosingNarrative.audit_id == audit_id,
+    ).first()
 
     return _json_value({
-        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V1",
+        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V2",
         "audit": {
             "id": audit.id,
             "audit_ref": audit.audit_ref,
@@ -123,6 +133,26 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "observer_auditor_user_id": audit.observer_auditor_user_id,
             "assistant_auditor_user_id": audit.assistant_auditor_user_id,
         },
+        "closing_narrative": {
+            "management_summary": narrative.management_summary if narrative else None,
+            "conclusion": narrative.conclusion if narrative else None,
+            "positive_practices": narrative.positive_practices if narrative else None,
+            "updated_at": narrative.updated_at if narrative else None,
+            "updated_by_user_id": narrative.updated_by_user_id if narrative else None,
+        },
+        "meetings": [
+            {
+                "id": row.id,
+                "meeting_type": row.meeting_type,
+                "scheduled_start": row.scheduled_start,
+                "scheduled_end": row.scheduled_end,
+                "location": row.location,
+                "conference_url": row.conference_url,
+                "agenda": row.agenda,
+                "status": row.status,
+            }
+            for row in meetings
+        ],
         "checklist": [
             {
                 "checklist_item_id": row.checklist_item_id,
@@ -193,6 +223,8 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     styles.add(ParagraphStyle(name="QmsTitle", parent=styles["Title"], fontSize=17, leading=20, alignment=TA_LEFT, spaceAfter=8))
 
     audit = snapshot["audit"]
+    narrative = snapshot.get("closing_narrative") or {}
+    meetings = snapshot.get("meetings") or []
     checklist = snapshot["checklist"]
     findings = snapshot["findings"]
     cars = snapshot["cars"]
@@ -231,6 +263,35 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
         _p("Scope and criteria", styles["QmsSection"]),
         _p(f"Scope: {_text(audit.get('scope'))}", styles["QmsBody"]),
         _p(f"Criteria: {_text(audit.get('criteria'))}", styles["QmsBody"]),
+        _p("Management summary", styles["QmsSection"]),
+        _p(narrative.get("management_summary"), styles["QmsBody"]),
+        _p("Audit conclusion", styles["QmsSection"]),
+        _p(narrative.get("conclusion"), styles["QmsBody"]),
+        _p("Positive practices", styles["QmsSection"]),
+        _p(narrative.get("positive_practices"), styles["QmsBody"]),
+    ])
+
+    if meetings:
+        story.append(_p("Audit meetings", styles["QmsSection"]))
+        meeting_rows = [["Type", "Start", "End", "Location / link"]]
+        for row in meetings:
+            location = row.get("location") or row.get("conference_url") or "—"
+            meeting_rows.append([
+                _p(row.get("meeting_type"), styles["QmsSmall"]),
+                _p(row.get("scheduled_start"), styles["QmsSmall"]),
+                _p(row.get("scheduled_end"), styles["QmsSmall"]),
+                _p(location, styles["QmsSmall"]),
+            ])
+        meeting_table = Table(meeting_rows, colWidths=[28 * mm, 48 * mm, 48 * mm, 46 * mm], repeatRows=1)
+        meeting_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(meeting_table)
+
+    story.extend([
         _p("Fieldwork summary", styles["QmsSection"]),
         _p(
             f"Checklist: {len(checklist)} item(s) · Compliant {counts.get('COMPLIANT', 0)} · "
@@ -272,11 +333,7 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
         checklist_rows = [["#", "Response", "Objective evidence / auditor note"]]
         for index, row in enumerate(checklist, 1):
             evidence = row.get("objective_evidence") or row.get("auditor_notes") or "—"
-            checklist_rows.append([
-                str(index),
-                _p(row.get("canonical_response_status"), styles["QmsSmall"]),
-                _p(evidence, styles["QmsSmall"]),
-            ])
+            checklist_rows.append([str(index), _p(row.get("canonical_response_status"), styles["QmsSmall"]), _p(evidence, styles["QmsSmall"])])
         table = Table(checklist_rows, colWidths=[10 * mm, 34 * mm, 126 * mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
@@ -293,20 +350,14 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
         Spacer(1, 5 * mm),
         _p("Controlled report note", styles["QmsSection"]),
         _p(
-            "This PDF was generated from an immutable hash of authoritative audit data. Formal review, approval, issue and signature remain governed by the existing report lifecycle; generation alone does not issue the audit report.",
+            "This PDF was generated from an immutable hash of authoritative audit data, the saved closing narrative and occurrence meeting records. Formal review, approval, issue and signature remain governed by the report lifecycle; generation alone does not issue the audit report.",
             styles["QmsSmall"],
         ),
     ])
 
     document = SimpleDocTemplate(
-        str(destination),
-        pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
-        title=f"{_text(audit.get('audit_ref'))} Audit Report",
-        author="AMO Portal QMS",
+        str(destination), pagesize=A4, rightMargin=16 * mm, leftMargin=16 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
+        title=f"{_text(audit.get('audit_ref'))} Audit Report", author="AMO Portal QMS",
     )
     document.build(story)
 
@@ -325,6 +376,14 @@ def generate_report_artifact(
     pending = sum(1 for row in snapshot["checklist"] if row.get("canonical_response_status") == "NOT_VERIFIED")
     if pending:
         raise HTTPException(status_code=409, detail=f"{pending} checklist item(s) remain NOT_VERIFIED.")
+    narrative = snapshot.get("closing_narrative") or {}
+    missing_narrative = [label for key, label in (
+        ("management_summary", "management summary"),
+        ("conclusion", "audit conclusion"),
+        ("positive_practices", "positive-practices statement"),
+    ) if not str(narrative.get(key) or "").strip()]
+    if missing_narrative:
+        raise HTTPException(status_code=409, detail=f"Complete the governed closing narrative before report generation: {', '.join(missing_narrative)}.")
 
     source_hash = _canonical_hash(snapshot)
     root = _storage_root()
