@@ -31,33 +31,67 @@ class StarterShift:
     description: str
 
 
+# Keep the starter registry intentionally small. Tenants define their own shift
+# windows and additional codes (SA, XH, nights, split duties, etc.) and choose
+# whether each template counts as duty. Nothing here assigns operational times.
 AMO_STARTER_SHIFTS: tuple[StarterShift, ...] = (
-    StarterShift("DY", "Day Duty", models.ShiftTemplateKind.DAY, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "General day duty. Work centre, base and aircraft remain separate roster dimensions."),
-    StarterShift("AM", "Morning Duty", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Early day duty."),
-    StarterShift("PM", "Afternoon / Late Duty", models.ShiftTemplateKind.DAY, None, None, None, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Tenant-configured afternoon or late duty; assignment times remain explicit."),
-    StarterShift("XD", "Extended Day", models.ShiftTemplateKind.DAY, "06:00", "18:00", 720, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Extended daytime duty."),
-    StarterShift("WD", "Weekend Day", models.ShiftTemplateKind.DAY, "08:00", "18:00", 600, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Weekend daytime duty."),
-    StarterShift("NT", "Night Duty", models.ShiftTemplateKind.NIGHT, None, None, None, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Tenant-configured night duty; assignment times remain explicit."),
-    StarterShift("F1", "Flight Duty - Early", models.ShiftTemplateKind.DAY, "06:00", "15:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Early Flight Engineering coverage. Allocate the aircraft separately."),
-    StarterShift("F2", "Flight Duty - Late", models.ShiftTemplateKind.DAY, "12:00", "21:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Late Flight Engineering coverage. Allocate the aircraft separately."),
-    StarterShift("FD", "Full Flight Duty", models.ShiftTemplateKind.DAY, "06:00", "21:00", 900, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.DUTY, "Full Flight Engineering coverage; operational end may be amended to the actual last-flight return."),
-    StarterShift("SB", "Standby", models.ShiftTemplateKind.STANDBY, None, None, None, True, 0, RosterCalendarMode.TIMED, RosterDutySemantic.STANDBY, "Tenant-configured standby window."),
-    StarterShift("TR", "Training / Course", models.ShiftTemplateKind.TRAINING, "08:00", "17:00", 540, True, 60, RosterCalendarMode.TIMED, RosterDutySemantic.TRAINING, "Training occupies working time and participates in duty/rest validation."),
-    StarterShift("OF", "Off Duty", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, RosterDutySemantic.OFF, "Protected non-duty day."),
-    StarterShift("RD", "Rest Day", models.ShiftTemplateKind.OFF, None, None, 0, False, 0, RosterCalendarMode.ALL_DAY, RosterDutySemantic.REST, "Protected rostered rest day."),
+    StarterShift(
+        "D",
+        "Day Duty",
+        models.ShiftTemplateKind.DAY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.DUTY,
+        "Normal day duty. Configure the local start/end window for the tenant or work pattern.",
+    ),
+    StarterShift(
+        "X",
+        "On-site Standby / Duty",
+        models.ShiftTemplateKind.STANDBY,
+        None,
+        None,
+        None,
+        True,
+        0,
+        RosterCalendarMode.TIMED,
+        RosterDutySemantic.STANDBY,
+        "On-site standby or duty. Configure the local window; it always participates in duty/rest calculations while counts_as_duty is enabled.",
+    ),
+    StarterShift(
+        "RD",
+        "Rest Day",
+        models.ShiftTemplateKind.OFF,
+        None,
+        None,
+        0,
+        False,
+        0,
+        RosterCalendarMode.ALL_DAY,
+        RosterDutySemantic.REST,
+        "Explicit protected rest day. OFF and rest-day concepts are represented by this single canonical code.",
+    ),
 )
 
 STARTER_CODES = tuple(item.code for item in AMO_STARTER_SHIFTS)
 SHIFT_CODE_PATTERN = re.compile(r"^[A-Z0-9]{1,2}$")
+CANONICAL_CODE_EQUIVALENTS = {
+    "O": "RD",
+    "OF": "RD",
+    "RR": "RD",
+}
 
 
 def normalize_shift_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if not SHIFT_CODE_PATTERN.fullmatch(code):
         raise ValueError(
-            "Shift code must be one or two uppercase letters/numbers (for example D, N1 or OF)."
+            "Shift code must be one or two uppercase letters/numbers (for example D, X or RD)."
         )
-    return code
+    return CANONICAL_CODE_EQUIVALENTS.get(code, code)
 
 
 def _ensure_unique_code(
@@ -132,7 +166,7 @@ def install_starter_pack(
     amo_id: str,
     actor_user_id: str,
 ) -> tuple[list[models.ShiftTemplate], list[str]]:
-    """Install missing recommended AMO codes only when explicitly requested."""
+    """Install only the canonical configurable D, X and RD starter templates."""
 
     existing = {
         row.code.upper(): row
@@ -173,7 +207,7 @@ def install_starter_pack(
             calendar_mode=item.calendar_mode,
             duty_semantic=item.duty_semantic,
             verification_status=RosterCodeVerificationStatus.CONFIRMED,
-            source_reference="AMO Portal recommended starter pack; tenant-owned after installation.",
+            source_reference="AMO Portal minimal starter pack; tenant-owned after installation.",
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
         )
@@ -221,7 +255,7 @@ def delete_unused_template(
     usage = template_usage_count(db, amo_id=amo_id, template_id=template_id)
     if usage:
         raise ValueError(
-            "This code has roster history and cannot be deleted. Retire it by setting Active off so historical rosters retain their meaning."
+            "This code is still referenced by roster records. Reassign those records to the canonical replacement before deleting the template."
         )
     before = {"code": row.code, "label": row.label, "is_active": row.is_active}
     db.delete(row)
