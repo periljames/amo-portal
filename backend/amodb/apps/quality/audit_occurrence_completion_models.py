@@ -23,8 +23,18 @@ class QualityAuditDocumentRequestMetadata(Base):
     linked_criterion = Column(Text, nullable=True)
     is_required = Column(Boolean, nullable=False, default=True)
     source_mode = Column(String(32), nullable=False, default="UPLOAD_OR_CONTROLLED")
+
+    # Compatibility source: these UUIDs remain explicitly bound to the
+    # Quality-local qms_documents/qms_document_revisions tables.
     controlled_document_id = Column(UUID(as_uuid=True), ForeignKey("qms_documents.id", ondelete="SET NULL"), nullable=True, index=True)
     controlled_revision_id = Column(UUID(as_uuid=True), ForeignKey("qms_document_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Canonical source: portal-wide Document Control uses string identities from
+    # manuals/manual_revisions, so it must never be relabelled as the UUID source.
+    controlled_source_system = Column(String(32), nullable=False, default="QMS_LOCAL", index=True)
+    canonical_document_id = Column(String(36), ForeignKey("manuals.id", ondelete="SET NULL"), nullable=True, index=True)
+    canonical_revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="SET NULL"), nullable=True, index=True)
+
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -34,6 +44,8 @@ class QualityAuditDocumentRequestMetadata(Base):
 
 
 class QualityAuditControlledDocumentSubmission(Base):
+    """Compatibility submission backed by Quality-local QMS document UUIDs."""
+
     __tablename__ = "quality_audit_controlled_document_submissions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -47,6 +59,26 @@ class QualityAuditControlledDocumentSubmission(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (Index("ix_quality_audit_controlled_link_request", "amo_id", "audit_id", "request_id", "created_at"),)
+
+
+class QualityAuditCanonicalDocumentSubmission(Base):
+    """Submission backed by the portal-wide canonical Document Control repository."""
+
+    __tablename__ = "quality_audit_canonical_document_submissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id = Column(UUID(as_uuid=True), ForeignKey("quality_audit_document_requests.id", ondelete="CASCADE"), nullable=False, index=True)
+    participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(String(36), ForeignKey("manuals.id", ondelete="RESTRICT"), nullable=False)
+    revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="RESTRICT"), nullable=False)
+    response_comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_q_audit_canonical_link_request", "amo_id", "audit_id", "request_id", "created_at"),
+    )
 
 
 class QualityAuditMeeting(Base):
