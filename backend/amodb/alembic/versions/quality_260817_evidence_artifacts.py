@@ -31,6 +31,7 @@ def upgrade() -> None:
         sa.Column("checklist_item_id", sa.Uuid(), nullable=True),
         sa.Column("finding_id", sa.Uuid(), nullable=True),
         sa.Column("source_type", sa.String(length=24), nullable=False),
+        sa.Column("client_mutation_id", sa.String(length=128), nullable=True),
         sa.Column("file_ref", sa.String(length=1024), nullable=False),
         sa.Column("filename", sa.String(length=255), nullable=False),
         sa.Column("content_type", sa.String(length=128), nullable=True),
@@ -47,6 +48,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["uploaded_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["uploaded_by_participant_id"], ["quality_audit_participants.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_audit_evidence_client_mutation"),
         sa.CheckConstraint("source_type IN ('INTERNAL_USER','EXTERNAL_AUDITOR','AUDITEE_GUEST')", name="ck_quality_audit_evidence_source"),
         sa.CheckConstraint(
             "NOT (uploaded_by_user_id IS NOT NULL AND uploaded_by_participant_id IS NOT NULL)",
