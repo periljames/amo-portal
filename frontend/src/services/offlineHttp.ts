@@ -16,6 +16,7 @@ import {
   recommendedRequestTimeoutMs,
   waitForPortalReadiness,
 } from "./portalConnectivity";
+import { isPortalRequestNetworkEligible } from "./portalRequestEligibility";
 
 export type PortalOfflineOptions = {
   cache?: boolean;
@@ -116,13 +117,11 @@ async function confirmedNotAccepted(response: Response): Promise<boolean> {
 }
 
 function networkAvailable(method = "GET"): boolean {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
-  const state = getPortalConnectivity().state;
-  if (state === "OFFLINE" || state === "SESSION_EXPIRED") return false;
-  // Reads are safe to attempt while a connectivity probe is still resolving or
-  // while the portal is degraded. This keeps normal navigation independent of
-  // the health-control loop. Writes remain protected until ONLINE is confirmed.
-  return method.toUpperCase() === "GET" || state === "ONLINE";
+  return isPortalRequestNetworkEligible(
+    method,
+    getPortalConnectivity().state,
+    typeof navigator === "undefined" || navigator.onLine !== false,
+  );
 }
 
 function isAbortError(error: unknown): boolean {
@@ -240,7 +239,8 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   // apiClient's alternate backend is an absolute URL. If the primary route
   // just failed and marked the shared portal state OFFLINE, that direct probe
   // must still be allowed to run; otherwise the fallback is blocked by the
-  // very failure it is meant to recover from.
+  // very failure it is meant to recover from. Browser-online reads also bypass
+  // stale shared OFFLINE state so navigation can recover without a health gate.
   if (!networkAvailable(method) && !isAbsoluteTransportAttempt) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
