@@ -225,6 +225,7 @@ async function prepare(page: Page, state: TestState): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await page.route("**/quality/cars/register/paged**", fulfil);
   await page.route("**/quality/cars/assignees**", fulfil);
 }
 
