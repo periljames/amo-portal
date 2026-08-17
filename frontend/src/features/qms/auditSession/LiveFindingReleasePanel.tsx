@@ -110,7 +110,10 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
       setError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["qms-live-audit-finding-releases", amoCode, auditId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms"] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-live-audit-findings", auditId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", auditId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       ]);
     },
     onError: (cause) => setError(cause instanceof Error ? cause.message : "Finding release decision failed."),
