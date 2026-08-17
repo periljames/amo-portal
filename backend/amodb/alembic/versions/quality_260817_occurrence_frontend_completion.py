@@ -19,6 +19,7 @@ DOC_META = "quality_audit_document_request_metadata"
 CONTROLLED_LINK = "quality_audit_controlled_document_submissions"
 MEETING = "quality_audit_meetings"
 NARRATIVE = "quality_audit_closing_narratives"
+ASSIGNMENT_DECISION = "quality_audit_assignment_decisions"
 
 
 def _is_postgresql() -> bool:
@@ -149,10 +150,31 @@ def upgrade() -> None:
     op.create_index("ix_quality_audit_closing_narrative_audit", NARRATIVE, ["amo_id", "audit_id"])
     _enable_rls(NARRATIVE)
 
+    op.create_table(
+        ASSIGNMENT_DECISION,
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("amo_id", sa.String(length=36), nullable=False),
+        sa.Column("audit_id", sa.Uuid(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("before_snapshot", sa.JSON(), nullable=False),
+        sa.Column("after_snapshot", sa.JSON(), nullable=False),
+        sa.Column("eligibility_snapshot", sa.JSON(), nullable=False),
+        sa.Column("actor_user_id", sa.String(length=36), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_quality_audit_assignment_decision", ASSIGNMENT_DECISION, ["amo_id", "audit_id", "created_at"])
+    _enable_rls(ASSIGNMENT_DECISION)
+
 
 def downgrade() -> None:
-    for table in (NARRATIVE, MEETING, CONTROLLED_LINK, DOC_META):
+    for table in (ASSIGNMENT_DECISION, NARRATIVE, MEETING, CONTROLLED_LINK, DOC_META):
         _disable_rls(table)
+    op.drop_index("ix_quality_audit_assignment_decision", table_name=ASSIGNMENT_DECISION)
+    op.drop_table(ASSIGNMENT_DECISION)
     op.drop_index("ix_quality_audit_closing_narrative_audit", table_name=NARRATIVE)
     op.drop_table(NARRATIVE)
     op.drop_index("ix_quality_audit_meeting_audit", table_name=MEETING)
