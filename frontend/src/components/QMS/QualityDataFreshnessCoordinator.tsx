@@ -93,10 +93,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   const liveAuditActive = auditSessionStage === "live";
   const occurrenceKey = auditOccurrenceKey(location.pathname);
 
-  const occurrenceMarkers = (eventAuditId?: string | null): Set<string> => {
+  const occurrenceMarkers = (): Set<string> => {
     const markers = new Set<string>();
     if (occurrenceKey) markers.add(occurrenceKey);
-    if (eventAuditId) markers.add(eventAuditId);
     if (!occurrenceKey) return markers;
 
     for (const query of queryClient.getQueryCache().getAll()) {
@@ -118,6 +117,11 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       refetchType: "active",
     });
   };
+
+  const invalidateActiveQuality = () => queryClient.invalidateQueries({
+    predicate: (query) => isQualityQueryKey(query.queryKey),
+    refetchType: "active",
+  });
 
   useEffect(() => {
     return () => {
@@ -159,13 +163,18 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       },
       onEvent: (event) => {
         if (!isQualityRealtimeEvent(event)) return;
+        const currentMarkers = occurrenceMarkers();
         if (event.event === "reset") {
-          // A reset means the server's replay window cannot prove which events
-          // were missed. This is the one case where active queries are refetched.
-          void queryClient.refetchQueries({ type: "active" });
+          // Replay-window reset is scoped to the active Quality occurrence. It
+          // must not refetch unrelated modules or every active query in the app.
+          void invalidateOccurrence(currentMarkers);
         } else {
           const eventAuditId = realtimeAuditId(event);
-          void invalidateOccurrence(occurrenceMarkers(eventAuditId));
+          // Ignore Quality events belonging to another audit. Events without an
+          // audit identifier may still affect the active occurrence and are
+          // therefore scoped to this occurrence only.
+          if (eventAuditId && !currentMarkers.has(eventAuditId)) return;
+          void invalidateOccurrence(currentMarkers);
         }
         window.dispatchEvent(new CustomEvent("amo:qms:realtime", { detail: event.data }));
       },
@@ -187,12 +196,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       if (auditOccurrenceActive) {
         void invalidateOccurrence(occurrenceMarkers());
       } else if (includeAllActive) {
-        void queryClient.refetchQueries({ type: "active" });
+        void invalidateActiveQuality();
       } else {
-        void queryClient.invalidateQueries({
-          predicate: (query) => isQualityQueryKey(query.queryKey),
-          refetchType: "active",
-        });
+        void invalidateActiveQuality();
       }
 
       window.requestAnimationFrame(() => {
@@ -241,7 +247,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     const onClick = (event: MouseEvent) => {
       const element = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
       if (!element) return;
-      if (!element.closest(".qms-shell, .qms-ops-page, .audit-shell-content, .quality-context-bar")) return;
+      if (!element.closest(".qms-shell, .qms-ops-page, .audit-shell-content, .quality-context-bar, .qms-occurrence-stage, .qms-live-audit-focus")) return;
       const label = [element.textContent, element.getAttribute("aria-label"), element.title].filter(Boolean).join(" ");
       if (!MUTATION_ACTION_PATTERN.test(label)) return;
       MUTATION_REFRESH_DELAYS_MS.forEach((delay) => scheduleRefresh(delay));
