@@ -217,6 +217,14 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     const url = new URL(request.url());
     const path = url.pathname;
 
+    // The production shell performs a live readiness probe before sensitive
+    // authorization queries are allowed. This acceptance test mocks the
+    // backend, so it must also represent that backend as healthy; otherwise
+    // the shell correctly enters OFFLINE and TanStack pauses the permission
+    // query before the Workforce scenario can begin.
+    if (path.endsWith("/readyz") || path.endsWith("/healthz")) {
+      return json(route, { ready: true, status: "ok" });
+    }
     if (path.endsWith("/workforce/permissions/current")) return json(route, { user_id: "scale-technician", permissions });
     if (path.endsWith("/workforce/hr/dashboard")) return json(route, {
       generated_at: "2026-08-14T08:00:00Z",
