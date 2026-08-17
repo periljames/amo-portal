@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db, get_write_db
 
+from . import models
 from .audit_external_access_router import _GUEST_COOKIE, _active_grant, _utcnow
 from .audit_presence_models import QualityAuditPresence
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
@@ -29,6 +30,16 @@ def _value(value: object | None) -> str | None:
     if value is None:
         return None
     return str(getattr(value, "value", value) or "") or None
+
+
+def _require_tenant_audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> None:
+    exists = db.query(models.QMSAudit.id).filter(
+        models.QMSAudit.amo_id == amo_id,
+        models.QMSAudit.id == audit_id,
+        models.QMSAudit.deleted_at.is_(None),
+    ).first()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Audit occurrence not found.")
 
 
 def _row_dict(row: QualityAuditPresence) -> dict[str, Any]:
@@ -91,7 +102,11 @@ def heartbeat_internal_audit_presence(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    user = db.query(account_models.User).filter(account_models.User.id == ctx.user_id).first()
+    _require_tenant_audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    user = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.id == ctx.user_id,
+    ).first()
     if user is None:
         raise HTTPException(status_code=404, detail="Audit presence user not found.")
     display_name = str(getattr(user, "full_name", None) or getattr(user, "email", None) or ctx.user_id)
@@ -118,6 +133,7 @@ def list_internal_audit_presence(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _require_tenant_audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     cutoff = _utcnow() - timedelta(seconds=PRESENCE_TTL_SECONDS)
     rows = db.query(QualityAuditPresence).filter(
         QualityAuditPresence.amo_id == ctx.amo_id,
