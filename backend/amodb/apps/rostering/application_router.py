@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from . import (
     calendar_subscriptions,
     code_registry,
+    compliance_policy,
     lineage,
     roster_control,
     template_usage_policy,
@@ -58,6 +59,11 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 # them. Rules and Workforce patterns are first-class usage, not disposable
 # metadata.
 template_usage_policy.install_code_registry_policy(code_registry)
+
+# Duty/rest compliance is driven by the configured shift template rather than
+# display codes. Statutory protected-rest and rolling total-hours blockers are
+# non-overridable at the shared validation boundary.
+compliance_policy.install_validation_policy()
 
 # Install lifecycle/export policy at application import time. The public
 # service facade remains the compatibility boundary used by the existing
