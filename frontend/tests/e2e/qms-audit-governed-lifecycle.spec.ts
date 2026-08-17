@@ -137,6 +137,7 @@ async function prepareLifecycle(page: Page): Promise<void> {
 
   const fulfil = async (route: Route) => {
     const request = route.request();
+    if (request.resourceType() === "document") return route.continue();
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
