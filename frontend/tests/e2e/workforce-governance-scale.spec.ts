@@ -238,9 +238,6 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     const url = new URL(request.url());
     const path = url.pathname;
 
-    // Portal connectivity uses the lightweight /livez probe with /health as
-    // its compatibility fallback. Keep the older readiness aliases mocked as
-    // well so this scale fixture remains valid across adjacent shell versions.
     if (
       path.endsWith("/livez")
       || path.endsWith("/health")
@@ -330,15 +327,14 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();
   await expect(page.locator(".workforce-governance__people-table tbody tr")).toHaveCount(50);
-  // The production personnel search is debounced for 250 ms. The fixture is
-  // intentionally zero-latency, so let the mount-time debounce settle before
-  // exercising pagination rather than racing it back to page 1.
   await page.waitForTimeout(300);
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByText("51-100 of 10,000")).toBeVisible();
   expect(pageSizes.every((size) => size <= 250)).toBeTruthy();
 
-  await page.getByLabel("Organisation", { exact: true }).selectOption("org-quality");
+  const filters = page.locator(".workforce-governance__filters");
+  const mutationCard = page.locator(".workforce-governance__mutation-card");
+  await filters.getByLabel("Organisation", { exact: true }).selectOption("org-quality");
   await expect(page).toHaveURL(/gov_org=org-quality/);
   await expect(page.getByText("1-50 of 5,000")).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
@@ -346,9 +342,9 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await page.getByRole("button", { name: "Select all 10,000 matching" }).click();
   await expect(page.getByText("10,000 selected")).toBeVisible();
-  await page.getByLabel("Change type").selectOption("ASSIGN_ORGANIZATION");
-  await page.getByLabel("Organisation", { exact: true }).last().selectOption("org-line");
-  await page.getByLabel("Placement").last().selectOption("SECONDARY");
+  await mutationCard.getByLabel("Change type", { exact: true }).selectOption("ASSIGN_ORGANIZATION");
+  await mutationCard.getByLabel("Organisation", { exact: true }).selectOption("org-line");
+  await mutationCard.getByLabel("Placement", { exact: true }).selectOption("SECONDARY");
   await page.getByRole("button", { name: "Preview 10,000 selected" }).click();
   await page.getByRole("button", { name: "Confirm 10,000 changes" }).click();
 
