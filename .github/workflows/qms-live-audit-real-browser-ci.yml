@@ -141,16 +141,22 @@ jobs:
           db = WriteSessionLocal()
           try:
               governance = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=checklist_item_id).one()
-              assert governance.canonical_response_status == "COMPLIANT", governance.canonical_response_status
-              assert governance.entity_version == 2, governance.entity_version
+              assert governance.canonical_response_status == "NOT_APPLICABLE", governance.canonical_response_status
+              assert governance.entity_version == 5, governance.entity_version
               assert governance.updated_by_participant_id is not None
-              assert db.query(QualityAuditFieldworkMutationReceipt).filter_by(checklist_item_id=checklist_item_id).count() == 1
-              contribution = db.query(QualityAuditFieldworkParticipantContribution).filter_by(checklist_item_id=checklist_item_id).one()
-              assert contribution.auditor_notes == "Verified in the real browser against the controlled DMS revision."
+
+              receipts = db.query(QualityAuditFieldworkMutationReceipt).filter_by(checklist_item_id=checklist_item_id).all()
+              assert len(receipts) == 4, len(receipts)
+              assert len({row.client_mutation_id for row in receipts}) == 4
+
+              contributions = db.query(QualityAuditFieldworkParticipantContribution).filter_by(checklist_item_id=checklist_item_id).order_by(QualityAuditFieldworkParticipantContribution.created_at.asc()).all()
+              assert len(contributions) == 4, len(contributions)
+              assert contributions[-1].auditor_notes == "Authoritative v5 update from the first external-auditor browser."
+
               finding = db.get(models.QMSAuditFinding, finding_id)
               assert finding is not None and finding.acknowledged_at is not None
               assert finding.acknowledged_by_email == "auditee@example.com"
-              print("Real browser fieldwork, participant attribution, idempotency receipt and auditee acknowledgement persisted in PostgreSQL")
+              print("Real browser offline replay, lost-response idempotency, stale conflict rejection, participant attribution and auditee acknowledgement persisted exactly in PostgreSQL")
           finally:
               db.close()
           PY
