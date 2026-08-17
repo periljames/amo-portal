@@ -21,6 +21,9 @@ jobs:
         with:
           show-progress: false
           fetch-depth: 0
+      - name: Keep workflow publication outside the runner commit
+        shell: bash
+        run: sed -i '/^[[:space:]]*patch_validation_workflow()$/d' scripts/pr506_training_hardening_patch.py
       - name: Apply audited Training hardening patch
         run: python scripts/pr506_training_hardening_patch.py
       - name: Verify forbidden legacy semantics are gone
@@ -30,7 +33,7 @@ jobs:
           ! grep -n "function coursePhase\|function familyKey" frontend/src/pages/TrainingCompetencePage.tsx
           ! grep -n "_normalized_course_text" backend/amodb/apps/training/compliance.py
           test ! -e scripts/pr506_training_hardening_patch.py
-      - name: Commit patched sources and restored validation workflow
+      - name: Commit patched source files
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
