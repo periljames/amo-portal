@@ -166,7 +166,28 @@ def install_starter_pack(
     amo_id: str,
     actor_user_id: str,
 ) -> tuple[list[models.ShiftTemplate], list[str]]:
-    """Install only the canonical configurable D, X and RD starter templates."""
+    """Install canonical configurable D, X and RD templates.
+
+    Setup is deliberately destructive for equivalent historical rest codes:
+    O/OF/RR references are moved to RD and the duplicate templates are deleted
+    before the minimal starter registry is reconciled. Unrelated working codes
+    are left tenant-owned rather than guessed into another meaning.
+    """
+
+    # Local import avoids a module cycle while making the normal setup action
+    # perform the requested destructive rest-code consolidation automatically.
+    from .rest_code_canonicalization import canonicalize_rest_codes
+
+    try:
+        canonicalize_rest_codes(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+        )
+    except LookupError:
+        # A new tenant may not have any historical rest template yet; RD will
+        # be created below as part of the canonical starter set.
+        pass
 
     existing = {
         row.code.upper(): row
