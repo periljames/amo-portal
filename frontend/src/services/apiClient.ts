@@ -7,7 +7,11 @@ import {
   ensureAuthenticatedRequestAllowed,
 } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
-import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
+import {
+  isProxyTransportFailureResponse,
+  portalFetch,
+  type PortalOfflineOptions,
+} from "./offlineHttp";
 
 export type ApiClientOptions = RequestInit & {
   timeoutMs?: number;
@@ -20,12 +24,14 @@ export type ApiClientOptions = RequestInit & {
 export class ApiClientError extends Error {
   status: number;
   body: unknown;
+  transportFailure: boolean;
 
-  constructor(status: number, message: string, body: unknown) {
+  constructor(status: number, message: string, body: unknown, transportFailure = false) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.body = body;
+    this.transportFailure = transportFailure;
   }
 }
 
@@ -257,10 +263,11 @@ async function fetchOnce<T>(
 }
 
 function isRetryableNetworkError(error: unknown): boolean {
-  // An HTTP response proves that the backend was reached. Retrying a valid 5xx
-  // against another localhost alias only repeats the same expensive request and
-  // can turn one five-second backend timeout into a ten-second page stall.
-  if (error instanceof ApiClientError) return false;
+  // Valid backend HTTP failures are terminal. The only HTTP-shaped exception
+  // is a Vite-generated proxy transport failure carrying the explicit marker
+  // installed by vite.config.ts; that marker means the backend was never
+  // reached and the separately configured direct backend may be attempted.
+  if (error instanceof ApiClientError) return error.transportFailure;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     return message.includes("failed to fetch")
@@ -339,7 +346,12 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
         if (!response.ok) {
           const detail = errorMessageFromBody(response, responseBody);
           if (response.status === 401) handleAuthFailure("expired");
-          throw new ApiClientError(response.status, detail, responseBody);
+          throw new ApiClientError(
+            response.status,
+            detail,
+            responseBody,
+            isProxyTransportFailureResponse(response),
+          );
         }
 
         if (canUseCache && effectiveCacheTtlMs > 0) {
