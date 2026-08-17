@@ -7,6 +7,7 @@ export type StructuredApiError = Error & {
   fieldErrors: Record<string, string | string[]>;
   conflicts: Array<Record<string, unknown>>;
   retryable: boolean;
+  metadata: Record<string, unknown>;
   raw?: unknown;
 };
 
@@ -37,6 +38,7 @@ function structuredError(
     raw?: unknown;
     fieldErrors?: Record<string, string | string[]>;
     conflicts?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
   },
 ): StructuredApiError {
   const error = new Error(message) as StructuredApiError;
@@ -45,6 +47,7 @@ function structuredError(
   error.fieldErrors = options.fieldErrors || {};
   error.conflicts = options.conflicts || [];
   error.retryable = options.retryable === true;
+  error.metadata = options.metadata || {};
   error.raw = options.raw;
   return error;
 }
@@ -59,15 +62,25 @@ async function parseError(response: Response): Promise<StructuredApiError> {
     : {};
   const message = typeof payload.detail === "string"
     ? payload.detail
-    : typeof raw === "string" && raw.trim()
-      ? raw
-      : `${response.status} ${response.statusText}`;
+    : typeof payload.message === "string"
+      ? payload.message
+      : typeof raw === "string" && raw.trim()
+        ? raw
+        : `${response.status} ${response.statusText}`;
+  const details = payload.details && typeof payload.details === "object"
+    ? payload.details as Record<string, unknown>
+    : {};
+  const metadata = payload.metadata && typeof payload.metadata === "object"
+    ? payload.metadata as Record<string, unknown>
+    : details;
 
   return structuredError(message, {
     status: response.status,
     errorCode: typeof payload.error_code === "string"
       ? payload.error_code
-      : "API_REQUEST_FAILED",
+      : typeof payload.code === "string"
+        ? payload.code
+        : "API_REQUEST_FAILED",
     fieldErrors: payload.field_errors && typeof payload.field_errors === "object"
       ? payload.field_errors as Record<string, string | string[]>
       : {},
@@ -77,6 +90,7 @@ async function parseError(response: Response): Promise<StructuredApiError> {
         )
       : [],
     retryable: payload.retryable === true,
+    metadata,
     raw,
   });
 }
