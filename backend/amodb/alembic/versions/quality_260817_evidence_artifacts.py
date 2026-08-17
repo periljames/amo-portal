@@ -43,7 +43,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["checklist_item_id"], ["quality_audit_checklist_items.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["finding_id"], ["quality_audit_findings.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["finding_id"], ["qms_audit_findings.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["uploaded_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["uploaded_by_participant_id"], ["quality_audit_participants.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
