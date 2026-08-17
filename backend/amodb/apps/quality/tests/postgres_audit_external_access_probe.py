@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import uuid
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine, text
@@ -116,6 +117,79 @@ def _columns(connection: sa.Connection, table_name: str) -> set[str]:
     }
 
 
+def _assert_runtime_rls_isolation(connection: sa.Connection) -> None:
+    """Prove the policy with a non-owner/non-superuser role, not only metadata.
+
+    PostgreSQL owners and superusers can bypass ordinary RLS, so metadata-only
+    inspection can create a false positive. Seed two disposable tenant-tagged
+    rows as the CI owner with FK triggers temporarily disabled, switch to a
+    LOGIN-less application-style role, set the same tenant GUC used by the
+    policies, and prove both reads and writes are bounded to that tenant.
+    """
+    tenant_a = str(uuid.uuid4())
+    tenant_b = str(uuid.uuid4())
+    identity_a = str(uuid.uuid4())
+    identity_b = str(uuid.uuid4())
+    role_name = "qms_live_audit_rls_probe"
+
+    connection.execute(text(f"DROP ROLE IF EXISTS {role_name}"))
+    connection.execute(text(f"CREATE ROLE {role_name} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"))
+    connection.execute(text(f"GRANT SELECT, UPDATE ON quality_external_identities TO {role_name}"))
+
+    # These rows deliberately exercise the RLS policy itself without requiring
+    # unrelated AMO bootstrap fixtures. The CI owner may bypass FK triggers only
+    # during setup; the probe role never receives that privilege.
+    connection.execute(text("SET LOCAL session_replication_role = replica"))
+    connection.execute(
+        text(
+            """
+            INSERT INTO quality_external_identities
+                (id, amo_id, email, display_name, identity_status, assurance_level, created_at, updated_at)
+            VALUES
+                (:id_a, :tenant_a, :email_a, 'Tenant A External', 'ACTIVE', 'EMAIL_LINK', now(), now()),
+                (:id_b, :tenant_b, :email_b, 'Tenant B External', 'ACTIVE', 'EMAIL_LINK', now(), now())
+            """
+        ),
+        {
+            "id_a": identity_a,
+            "tenant_a": tenant_a,
+            "email_a": f"tenant-a-{identity_a}@example.invalid",
+            "id_b": identity_b,
+            "tenant_b": tenant_b,
+            "email_b": f"tenant-b-{identity_b}@example.invalid",
+        },
+    )
+    connection.execute(text("SET LOCAL session_replication_role = origin"))
+
+    connection.execute(text(f"SET LOCAL ROLE {role_name}"))
+    connection.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_a})
+    visible = connection.execute(
+        text("SELECT id, amo_id FROM quality_external_identities WHERE id IN (:id_a, :id_b) ORDER BY id"),
+        {"id_a": identity_a, "id_b": identity_b},
+    ).mappings().all()
+    assert visible == [{"id": identity_a, "amo_id": tenant_a}], visible
+
+    blocked = connection.execute(
+        text("UPDATE quality_external_identities SET display_name = 'MUST NOT CHANGE' WHERE id = :id"),
+        {"id": identity_b},
+    )
+    assert blocked.rowcount == 0, blocked.rowcount
+    allowed = connection.execute(
+        text("UPDATE quality_external_identities SET display_name = 'Tenant A Updated' WHERE id = :id"),
+        {"id": identity_a},
+    )
+    assert allowed.rowcount == 1, allowed.rowcount
+
+    connection.execute(text("RESET ROLE"))
+    owner_rows = connection.execute(
+        text("SELECT id, display_name FROM quality_external_identities WHERE id IN (:id_a, :id_b) ORDER BY id"),
+        {"id_a": identity_a, "id_b": identity_b},
+    ).mappings().all()
+    owner_by_id = {row["id"]: row["display_name"] for row in owner_rows}
+    assert owner_by_id[identity_a] == "Tenant A Updated"
+    assert owner_by_id[identity_b] == "Tenant B External"
+
+
 def main() -> None:
     engine = create_engine(os.environ["DATABASE_URL"])
     _run_alembic("upgrade", "heads")
@@ -147,23 +221,11 @@ def main() -> None:
         receipt_columns = _columns(connection, "quality_audit_fieldwork_mutation_receipts")
         assert {"client_timestamp", "actor_participant_id", "actor_user_id"} <= receipt_columns, receipt_columns
         manifest_columns = _columns(connection, "quality_audit_archive_manifests")
-        assert {
-            "manifest_sha256",
-            "package_file_ref",
-            "package_filename",
-            "package_size_bytes",
-            "package_sha256",
-        } <= manifest_columns, manifest_columns
+        assert {"manifest_sha256", "package_file_ref", "package_filename", "package_size_bytes", "package_sha256"} <= manifest_columns, manifest_columns
         disposition_columns = _columns(connection, "quality_audit_disposition_events")
         assert {"inventory_sha256", "package_sha256", "action_ref"} <= disposition_columns, disposition_columns
         signature_columns = _columns(connection, "quality_audit_signature_evidence")
-        assert {
-            "credential_id_hash",
-            "webauthn_sign_count",
-            "webauthn_origin",
-            "webauthn_rp_id",
-            "ceremony_sha256",
-        } <= signature_columns, signature_columns
+        assert {"credential_id_hash", "webauthn_sign_count", "webauthn_origin", "webauthn_rp_id", "ceremony_sha256"} <= signature_columns, signature_columns
         credential_columns = _columns(connection, "quality_audit_webauthn_credentials")
         assert {"owner_type", "credential_id", "public_key", "sign_count", "is_active"} <= credential_columns, credential_columns
         verification_columns = _columns(connection, "quality_audit_verification_tokens")
@@ -177,6 +239,8 @@ def main() -> None:
 
         for table_name in TABLES:
             _assert_rls(connection, table_name)
+
+        _assert_runtime_rls_isolation(connection)
 
         trigger_tables = list(APPEND_ONLY_TABLES) + list(IMMUTABLE_TABLES)
         triggers = {
@@ -199,8 +263,8 @@ def main() -> None:
             assert any(table == table_name and "immutable" in trigger for table, trigger in triggers), (table_name, triggers)
 
     print(
-        "Live audit final-head migrations, RLS, WebAuthn/verification, evidence, presence, "
-        "package integrity, participant attribution and immutable history verified"
+        "Live audit final-head migrations, forced RLS metadata and non-superuser runtime tenant isolation, "
+        "WebAuthn/verification, evidence, presence, package integrity, participant attribution and immutable history verified"
     )
 
 
