@@ -8,6 +8,7 @@ on:
       - "backend/amodb/apps/quality/router.py"
       - "backend/amodb/apps/quality/models.py"
       - "backend/amodb/scripts/seed_qms_live_audit_e2e.py"
+      - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
       - "backend/amodb/scripts/seed_qms_car_real_e2e.py"
       - "frontend/src/pages/PublicCarInvitePage.tsx"
       - "frontend/src/pages/CanonicalPublicCarAccessPage.tsx"
@@ -44,6 +45,7 @@ jobs:
     env:
       APP_ENV: test
       SECRET_KEY: qms-car-real-browser-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_car_real
       DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_car_real
       DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_qms_car_real
@@ -66,9 +68,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Generate disposable CI encryption key
-        shell: bash
-        run: echo "PLATFORM_SECRETS_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
       - name: Install backend, migrate all heads and seed CAR
         working-directory: backend
         run: |
