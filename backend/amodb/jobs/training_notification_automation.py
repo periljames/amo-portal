@@ -193,14 +193,14 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
                         if existing is not None:
                             summary["deduped"] += 1
                             continue
-                        db.add(notification)
                         try:
-                            db.flush()
+                            with db.begin_nested():
+                                db.add(notification)
+                                db.flush()
                         except IntegrityError:
-                            # Concurrent workers are protected by the DB unique
-                            # constraint. Roll back this savepoint-sized unit and
-                            # count it as deduplicated rather than duplicate work.
-                            db.rollback()
+                            # Concurrent workers are protected by the database
+                            # unique constraint without rolling back other tenant
+                            # notifications already created in this transaction.
                             summary["deduped"] += 1
                             continue
                         summary["created"] += 1
