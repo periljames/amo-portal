@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 
 from ...database import Base
@@ -31,6 +31,9 @@ class RosterDutyExtension(Base):
     __table_args__ = (
         Index("ix_roster_duty_extension_amo_status", "amo_id", "status"),
         Index("ix_roster_duty_extension_assignment", "assignment_id", "created_at"),
+        CheckConstraint("proposed_extended_end > original_planned_end", name="ck_roster_duty_extension_end_after_original"),
+        CheckConstraint("continuous_duty_minutes > 0", name="ck_roster_duty_extension_continuous_positive"),
+        CheckConstraint("required_recovery_rest_minutes >= 0", name="ck_roster_duty_extension_recovery_nonneg"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
