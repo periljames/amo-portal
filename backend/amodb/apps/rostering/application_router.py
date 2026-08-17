@@ -12,6 +12,7 @@ from . import (
     calendar_subscriptions,
     code_registry,
     compliance_policy,
+    consent_policy,
     lineage,
     roster_control,
     template_usage_policy,
@@ -23,6 +24,7 @@ from .automation_router import router as automation_router
 from .calendar_subscription_status_router import router as calendar_subscription_status_router
 from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
+from .consent_router import router as consent_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from ..workforce import pattern_rest_policy
@@ -68,12 +70,17 @@ timesheet_pay_policy.install_service_policy(workforce_services)
 
 roster_control.install_service_policy(rostering_route_module.services)
 version_copy_policy.install_service_policy(rostering_route_module.services)
+# Consent generation and lifecycle gating are installed on the same canonical
+# public service facade so single, bulk and generated assignments cannot bypass
+# acknowledgement policy, and submit/approve/publish always re-check it.
+consent_policy.install_service_policy(rostering_route_module.services)
 
 router = APIRouter()
 router.include_router(calendar_subscription_status_router)
 router.include_router(roster_control_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
+router.include_router(consent_router)
 router.include_router(rest_code_canonicalization_router)
 router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
