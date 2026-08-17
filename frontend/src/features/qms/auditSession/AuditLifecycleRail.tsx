@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Circle, ShieldAlert } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { qmsResolveAudit } from "../../../services/qms";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession, type AuditSessionStageId } from "../../../services/qmsAuditSession";
 import {
   AUDIT_SESSION_STAGES,
@@ -22,10 +22,7 @@ const STAGE_LABELS: Record<AuditSessionStageId, string> = {
   archive: "Archive",
 };
 
-type Props = {
-  amoCode: string;
-  auditKey: string;
-};
+type Props = { amoCode: string; auditKey: string };
 
 const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
@@ -33,8 +30,8 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const routeStage = auditSessionStageFromPath(location.pathname);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-audit-session-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-audit-session-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
@@ -60,58 +57,17 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     return AUDIT_SESSION_STAGES.map((id) => ({ id, server: serverStages.get(id) }));
   }, [sessionQuery.data?.stages]);
 
-  return (
-    <section className="qms-audit-session-rail" aria-label="Audit lifecycle">
-      <div className="qms-audit-session-rail__meta">
-        <div>
-          <span>Audit occurrence</span>
-          <strong>{auditQuery.data?.audit_ref || auditKey}</strong>
-        </div>
-        {sessionQuery.isError || auditQuery.isError ? (
-          <span className="qms-audit-session-rail__degraded" title="Authoritative session state could not be verified.">
-            <ShieldAlert size={14} /> State unavailable
-          </span>
-        ) : (
-          <span>
-            {sessionQuery.data ? `${sessionQuery.data.percent_complete}% governed lifecycle` : "Loading governed lifecycle…"}
-          </span>
-        )}
-      </div>
-
-      <nav className="qms-audit-session-rail__steps" aria-label="Audit occurrence stages">
-        {stageState.map(({ id, server }, index) => {
-          const selected = routeStage === id || (!routeStage && server?.active === true);
-          const complete = server?.complete === true;
-          const href = auditSessionPath(amoCode, auditKey, id);
-          return (
-            <React.Fragment key={id}>
-              <Link
-                to={href}
-                className={`qms-audit-session-step${selected ? " is-selected" : ""}${complete ? " is-complete" : ""}`}
-                aria-current={selected ? "step" : undefined}
-                title={server?.helper || `Open ${STAGE_LABELS[id]}`}
-              >
-                <span className="qms-audit-session-step__icon" aria-hidden="true">
-                  {complete ? <Check size={14} /> : <Circle size={10} />}
-                </span>
-                <span>{STAGE_LABELS[id]}</span>
-              </Link>
-              {index < stageState.length - 1 ? <span className="qms-audit-session-step__line" aria-hidden="true" /> : null}
-            </React.Fragment>
-          );
-        })}
-      </nav>
-
-      {sessionQuery.data ? (
-        <div className="qms-audit-session-rail__authority" role="status">
-          Authoritative next stage: <strong>{sessionQuery.data.current_stage_label}</strong>
-          {routeStage && routeStage !== sessionQuery.data.current_stage_id ? (
-            <span> · Viewing {STAGE_LABELS[routeStage]} without changing lifecycle state.</span>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
+  return <section className="qms-audit-session-rail" aria-label="Audit lifecycle">
+    <div className="qms-audit-session-rail__meta"><div><span>Audit occurrence</span><strong>{auditQuery.data?.audit_ref || auditKey}</strong></div>{sessionQuery.isError || auditQuery.isError ? <span className="qms-audit-session-rail__degraded" title="Authoritative session state could not be verified."><ShieldAlert size={14} /> State unavailable</span> : <span>{sessionQuery.data ? `${sessionQuery.data.percent_complete}% governed lifecycle` : "Loading governed lifecycle…"}</span>}</div>
+    <nav className="qms-audit-session-rail__steps" aria-label="Audit occurrence stages">
+      {stageState.map(({ id, server }, index) => {
+        const selected = routeStage === id || (!routeStage && server?.active === true);
+        const complete = server?.complete === true;
+        return <React.Fragment key={id}><Link to={auditSessionPath(amoCode, auditKey, id)} className={`qms-audit-session-step${selected ? " is-selected" : ""}${complete ? " is-complete" : ""}`} aria-current={selected ? "step" : undefined} title={server?.helper || `Open ${STAGE_LABELS[id]}`}><span className="qms-audit-session-step__icon" aria-hidden="true">{complete ? <Check size={14} /> : <Circle size={10} />}</span><span>{STAGE_LABELS[id]}</span></Link>{index < stageState.length - 1 ? <span className="qms-audit-session-step__line" aria-hidden="true" /> : null}</React.Fragment>;
+      })}
+    </nav>
+    {sessionQuery.data ? <div className="qms-audit-session-rail__authority" role="status">Authoritative next stage: <strong>{sessionQuery.data.current_stage_label}</strong>{routeStage && routeStage !== sessionQuery.data.current_stage_id ? <span> · Viewing {STAGE_LABELS[routeStage]} without changing lifecycle state.</span> : null}</div> : null}
+  </section>;
 };
 
 export default AuditLifecycleRail;
