@@ -300,7 +300,7 @@ def _build_requirement_rows(db, *, amo_id: str, user: accounts_models.User) -> l
         group_records: list[Any] = []
         for course in group_courses:
             group_records.extend(records_by_course.get(str(course.id), []))
-        group_records.sort(key=lambda record: (record.completion_date or date.min, record.created_at or datetime.min), reverse=True)
+        group_records.sort(key=lambda record: (record.completion_date or date.min, str(record.created_at or "")), reverse=True)
         latest_record = group_records[0] if group_records else None
         latest_course = course_by_id.get(str(getattr(latest_record, "course_id", ""))) if latest_record else None
         latest_type = training_type_label(getattr(latest_course or primary, "kind", None))
@@ -353,6 +353,11 @@ def _augment_public_payload(original_payload, db, *, amo_id: str, user_id: str, 
         return payload
 
     rows = _build_requirement_rows(db, amo_id=amo_id, user=user)
+    if record_id:
+        rows = [
+            row for row in rows
+            if any(str(history.get("record_id")) == str(record_id) for history in row.get("history") or [])
+        ]
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
         counts[row["compliance_status"]] += 1
@@ -367,8 +372,8 @@ def _augment_public_payload(original_payload, db, *, amo_id: str, user_id: str, 
 
     tenant = dict(payload.get("tenant") or {})
     tenant.setdefault("name", getattr(user.amo, "name", None) if getattr(user, "amo", None) else None)
-    tenant.setdefault("contact_email", mask_public_email(getattr(user.amo, "contact_email", None) if getattr(user, "amo", None) else None))
-    tenant.setdefault("contact_phone", mask_public_phone(getattr(user.amo, "contact_phone", None) if getattr(user, "amo", None) else None))
+    tenant.setdefault("contact_email", getattr(user.amo, "contact_email", None) if getattr(user, "amo", None) else None)
+    tenant.setdefault("contact_phone", getattr(user.amo, "contact_phone", None) if getattr(user, "amo", None) else None)
     try:
         settings = db.query(accounts_models.PlatformSettings).first()
     except Exception:
@@ -514,6 +519,22 @@ class _NumberedCanvas(canvas.Canvas):
         super().save()
 
 
+def _group_pdf_status_items(status_items: list[Any], course_by_id: dict[str, Any]) -> list[Any]:
+    courses = list(course_by_id.values())
+    grouped: dict[str, tuple[Any, Any]] = {}
+    for item in status_items:
+        code = str(getattr(item, "course_id", "") or "")
+        course = next((candidate for candidate in courses if str(getattr(candidate, "course_id", "")) == code or str(getattr(candidate, "id", "")) == code), None)
+        key = explicit_recurrence_key(course, courses) if course is not None else f"item:{code}"
+        current = grouped.get(key)
+        current_course = current[1] if current else None
+        candidate_rank = 2 if course is not None and is_recurrent_course_explicit(course) else 1 if course is not None and is_initial_course_explicit(course) else 0
+        current_rank = 2 if current_course is not None and is_recurrent_course_explicit(current_course) else 1 if current_course is not None and is_initial_course_explicit(current_course) else 0
+        if current is None or candidate_rank > current_rank:
+            grouped[key] = (item, course)
+    return [entry[0] for entry in grouped.values()]
+
+
 def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
     try:
         user = kwargs["user"]
@@ -525,6 +546,7 @@ def _compact_pdf_builder(original_builder, *args, **kwargs) -> bytes:
         upcoming_events = kwargs.get("upcoming_events") or []
         verification_url = kwargs.get("verification_url")
         report_settings = kwargs.get("report_settings") or {}
+        status_items = _group_pdf_status_items(status_items, course_by_id)
     except Exception:
         return original_builder(*args, **kwargs)
 

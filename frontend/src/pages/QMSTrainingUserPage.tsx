@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import PersonnelLicencePanel from "../components/training/PersonnelLicencePanel";
+import TrainingRequirementList from "../components/training/TrainingRequirementList";
 import type { AdminUserRead } from "../services/adminUsers";
 import { getCachedUser, getContext, type PortalUser } from "../services/auth";
 import {
@@ -31,6 +32,7 @@ import type {
 } from "../types/training";
 import "../styles/training.css";
 import { saveDownloadedFile } from "../utils/downloads";
+import { canonicalTrainingType, complianceStatusLabel, completedEventStatusWithoutRequirement, explicitTrainingRequirementKey } from "../utils/trainingPresentation";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type SortKey = "course" | "completion_date" | "valid_until" | "hours" | "score" | "certificate";
@@ -121,22 +123,17 @@ function addMonthsIso(dateValue: string, months: number | null | undefined): str
 }
 
 
-function coursePhase(course: TrainingCourseRead | null | undefined): "INITIAL" | "REFRESHER" | "ONE_OFF" | "UNKNOWN" {
+function coursePhase(course: TrainingCourseRead | null | undefined): "INITIAL" | "RECURRENT" | "ONE_OFF" | "UNKNOWN" {
   if (!course) return "UNKNOWN";
-  const blob = `${course.status || ""} ${course.kind || ""} ${course.course_id || ""} ${course.course_name || ""}`.toLowerCase();
-  if (/one[_ -]?off/.test(blob)) return "ONE_OFF";
-  if (/(init|initial|induction)/.test(blob)) return "INITIAL";
-  if (/(refresh|refresher|recurrent|continuation|ref)/.test(blob)) return "REFRESHER";
+  const canonical = canonicalTrainingType(course);
+  if (canonical) return canonical;
+  const status = String(course.status || "").trim().toUpperCase();
+  if (status === "ONE_OFF" || status === "ONE-OFF" || status === "ONE OFF") return "ONE_OFF";
   return "UNKNOWN";
 }
 
 function courseFamilyKey(course: TrainingCourseRead | null | undefined): string {
-  if (!course) return "";
-  return `${course.course_id || ""} ${course.course_name || ""}`
-    .toLowerCase()
-    .replace(/(init|initial|induction|refresh|refresher|recurrent|continuation|ref|rec|one[_ -]?off)/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return explicitTrainingRequirementKey(course);
 }
 
 function buildCourseLookup(courses: TrainingCourseRead[]): Map<string, TrainingCourseRead> {
@@ -233,23 +230,7 @@ function effectiveTrainingStatus(item: TrainingStatusItem | null | undefined): s
 
 function effectiveTrainingStatusForRecord(record: TrainingRecordRead | null | undefined, item: TrainingStatusItem | null | undefined): string {
   if (item) return effectiveTrainingStatus(item);
-  if (!record) return "NOT_DONE";
-  const due = record.valid_until || null;
-  if (due) {
-    const daysUntilDue = daysUntilDueFromItem({
-      course_id: record.course_id,
-      course_name: record.course_name || record.course_id,
-      valid_until: due,
-      extended_due_date: due,
-      status: "OK",
-    } as TrainingStatusItem);
-    if (daysUntilDue != null) {
-      if (daysUntilDue < 0) return "OVERDUE";
-      if (daysUntilDue <= 45) return "DUE_SOON";
-    }
-    return "OK";
-  }
-  return record.completion_date ? "OK" : "NOT_DONE";
+  return completedEventStatusWithoutRequirement(Boolean(record?.completion_date));
 }
 
 function normaliseRecordLifecycleStatus(record: TrainingRecordRead | null | undefined): string {
@@ -310,21 +291,7 @@ function trainingApiConflictFromError(error: any): { code: string; message: stri
 }
 
 function statusLabel(status: string): string {
-  switch (status) {
-    case "OVERDUE":
-      return "Overdue";
-    case "DUE_SOON":
-      return "Due soon";
-    case "DEFERRED":
-      return "Deferred";
-    case "SCHEDULED_ONLY":
-      return "Scheduled";
-    case "NOT_DONE":
-      return "Not done";
-    case "OK":
-    default:
-      return "Current";
-  }
+  return complianceStatusLabel(status);
 }
 
 function statusPillClass(status: string): string {
@@ -676,7 +643,7 @@ const QMSTrainingUserPage: React.FC = () => {
 
   const recordableCourses = useMemo(() => {
     return courses.filter((course) => {
-      if (coursePhase(course) !== "REFRESHER") return true;
+      if (coursePhase(course) !== "RECURRENT") return true;
       const family = courseFamilyKey(course);
       if (!family) return true;
       const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry) === family);
@@ -824,7 +791,7 @@ const QMSTrainingUserPage: React.FC = () => {
   const filteredMissingRows = useMemo(() => {
     const base = items.filter((item) => effectiveTrainingStatus(item) === "NOT_DONE").filter((item) => {
       const course = resolveCourse(courseLookup, item.course_id) || courses.find((entry) => entry.course_name === item.course_name) || null;
-      if (coursePhase(course) !== "REFRESHER") return true;
+      if (coursePhase(course) !== "RECURRENT") return true;
       const family = courseFamilyKey(course);
       if (!family) return true;
       const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry) === family);
@@ -1128,11 +1095,11 @@ const QMSTrainingUserPage: React.FC = () => {
 
   const summaryCards = [
     { key: "overdue", label: "Overdue", value: summary.overdue, pill: "qms-pill qms-pill--danger", helper: "Immediate action needed." },
-    { key: "dueSoon", label: "Due soon", value: summary.dueSoon, pill: "qms-pill qms-pill--warning", helper: "Track days, then hours on the final day." },
+    { key: "dueSoon", label: "Due Soon", value: summary.dueSoon, pill: "qms-pill qms-pill--warning", helper: "Track days, then hours on the final day." },
     { key: "current", label: "Current", value: summary.ok, pill: "qms-pill qms-pill--success", helper: "Accepted as current and in date." },
     { key: "deferred", label: "Deferred", value: summary.deferred, pill: "qms-pill qms-pill--info", helper: "Extension already on record." },
     { key: "scheduled", label: "Scheduled", value: summary.scheduled, pill: "qms-pill", helper: "Upcoming session already linked." },
-    { key: "notDone", label: "Not done", value: summary.notDone, pill: "qms-pill", helper: "No completion captured yet." },
+    { key: "notDone", label: "Not completed", value: summary.notDone, pill: "qms-pill", helper: "No completion captured yet." },
   ];
 
   const panelStats = {
@@ -1242,7 +1209,7 @@ const QMSTrainingUserPage: React.FC = () => {
                       if (statusFilter === "NOT_DONE") setStatusFilter("ALL");
                     }}
                   >
-                    Completed log
+                    Training requirements
                   </button>
                   <button
                     type="button"
@@ -1294,7 +1261,7 @@ const QMSTrainingUserPage: React.FC = () => {
                       <div className="qms-list">
                         <div className="qms-list__item">
                           <div>
-                            <strong>Next due</strong>
+                            <strong>Next Due</strong>
                             <span className="qms-list__meta">{nextDue ? `${nextDue.course_name} · ${dueLabel(nextDue)}` : "No due dates available"}</span>
                           </div>
                           <span className={`qms-pill ${nextDue ? statusPillClass(effectiveTrainingStatus(nextDue)) : ""}`.trim()}>{nextDue ? dueCountdownLabel(nextDue) : "-"}</span>
@@ -1334,10 +1301,10 @@ const QMSTrainingUserPage: React.FC = () => {
                 <div className="qms-card training-profile-logcard training-profile-section-card">
                   <div className="qms-card__header">
                     <div>
-                      <h3 className="qms-card__title">{viewMode === "completed" ? "Training record log" : "Missing required courses"}</h3>
+                      <h3 className="qms-card__title">{viewMode === "completed" ? "Training requirements" : "Missing required courses"}</h3>
                       <p className="qms-card__subtitle">
                         {viewMode === "completed"
-                          ? "Completed records and current due status are shown together here. This is the main working view for the individual profile."
+                          ? "Applicable requirements are shown once with Last Completed, Next Due, Scheduled, compliance and evidence. Historical completions remain in each requirement disclosure."
                           : "This view shows only courses required by the active course matrix for this person."}
                       </p>
                     </div>
@@ -1352,76 +1319,27 @@ const QMSTrainingUserPage: React.FC = () => {
                   </div>
                   <div className="table-responsive training-table-wrap">
                     {viewMode === "completed" ? (
-                      <table className="table table-striped table-compact training-history-table training-history-table--banded training-history-table--responsive">
-                        <thead>
-                          <tr>
-                            <th><button type="button" className="training-sort-button" onClick={() => toggleSort("course")}>Course</button></th>
-                            <th>Status</th>
-                            <th><button type="button" className="training-sort-button" onClick={() => toggleSort("completion_date")}>Completed</button></th>
-                            <th><button type="button" className="training-sort-button" onClick={() => toggleSort("valid_until")}>Next due</button></th>
-                            <th>Time left</th>
-                            <th><button type="button" className="training-sort-button" onClick={() => toggleSort("score")}>Score</button></th>
-                            <th>Certificate</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredCompletedRows.map((record) => {
-                            const course = resolveCourse(courseLookup, record.course_id);
-                            const item = itemByCoursePk.get(record.course_id);
-                            const linkedFile = latestFileByRecordId.get(record.id);
-                            const isPdf = !!linkedFile && ((linkedFile.content_type || "").toLowerCase().includes("pdf") || linkedFile.original_filename.toLowerCase().endsWith(".pdf"));
-                            return (
-                              <tr key={record.id}>
-                                <td>
-                                  <strong>{course?.course_name || record.course_name || record.course_id}</strong>
-                                  <div className="text-muted">{course?.course_id || record.course_code || record.course_id}</div>
-                                </td>
-                                <td>
-                                  <span className={statusPillClass(effectiveTrainingStatusForRecord(record, item))}>
-                                    {statusLabel(effectiveTrainingStatusForRecord(record, item))}
-                                  </span>
-                                </td>
-                                <td>{formatDate(record.completion_date)}</td>
-                                <td>{item ? dueLabel(item) : formatDate(record.valid_until)}</td>
-                                <td>{item ? timeLeftFromDueDate(dueDateForItem(item)) : timeLeftFromDueDate(record.valid_until)}</td>
-                                <td>{record.exam_score ?? "-"}</td>
-                                <td>
-                                  {linkedFile ? (
-                                    <button type="button" className="training-file-icon-btn" title={linkedFile.original_filename} onClick={() => void openFileViewer(linkedFile)}>
-                                      {isPdf ? <FileText size={16} /> : <FileImage size={16} />}
-                                    </button>
-                                  ) : (
-                                    <button type="button" className="training-file-icon-btn" title="Upload certificate" onClick={() => triggerInlineAttachmentUpload(record.id)} disabled={uploadingInlineAttachment && inlineAttachmentTargetRecordId === record.id}>
-                                      <FilePlus2 size={16} />
-                                    </button>
-                                  )}
-                                </td>
-                                <td>
-                                  <div className="training-row-actions">
-                                    <button type="button" className="training-icon-btn" title="Edit record" onClick={() => openRecordEditor(record)}><Pencil size={15} /></button>
-                                    <button type="button" className="training-icon-btn training-icon-btn--danger" title="Delete record" onClick={() => void deleteRecord(record)}><Trash2 size={15} /></button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {filteredCompletedRows.length === 0 && (
-                            <tr>
-                              <td colSpan={8} className="text-muted">No completed training rows match the selected status filter.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                      <TrainingRequirementList
+                        items={items}
+                        courses={courses}
+                        records={records}
+                        files={files}
+                        canEdit={canEdit}
+                        onEditRecord={openRecordEditor}
+                        onDeleteRecord={(record) => void deleteRecord(record)}
+                        onOpenEvidence={(file) => void openFileViewer(file)}
+                        onUploadEvidence={triggerInlineAttachmentUpload}
+                        onRecordCompletion={(coursePk) => beginNewRecord(coursePk)}
+                      />
                     ) : (
                       <table className="table table-striped table-compact training-history-table training-history-table--banded training-history-table--responsive">
                         <thead>
                           <tr>
                             <th>Course</th>
                             <th>Status</th>
-                            <th>Last done</th>
-                            <th>Due</th>
-                            <th>Next event</th>
+                            <th>Last Completed</th>
+                            <th>Next Due</th>
+                            <th>Scheduled</th>
                             <th>Action</th>
                           </tr>
                         </thead>

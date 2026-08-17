@@ -413,7 +413,19 @@
   }
 
   .training-history-table--responsive {
-    min-width: 620px;
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  .training-history-table--responsive thead th,
+  .training-history-table--responsive tbody td {
+    width: auto !important;
+    min-width: 0 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .training-table-wrap {
+    overflow-x: visible;
   }
 }
 
