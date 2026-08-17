@@ -22,9 +22,12 @@ def _duty(origin: datetime, start: int, end: int, name: str):
 def test_exact_evaluator_catches_violation_between_duty_boundary_candidates():
     """Regression for a sliding-window miss in boundary-candidate sampling.
 
-    The first non-compliant seven-day window starts 398 minutes after the
-    evaluation origin. Its longest free interval is exactly 1,439 minutes, so
-    sampling only starts derived from duty boundaries incorrectly reported PASS.
+    At exactly 397 minutes after the origin, the leading free interval is still
+    exactly 1,440 minutes and therefore compliant. The open interval immediately
+    after that instant is non-compliant; with Python datetime's microsecond
+    resolution the first representable failing start is 397 minutes + 1 µs.
+    The first whole-minute sample that fails would be minute 398, which is why a
+    minute/day candidate sampler can hide this boundary error.
     """
 
     origin = datetime(2026, 8, 1, tzinfo=UTC)
@@ -45,7 +48,9 @@ def test_exact_evaluator_catches_violation_between_duty_boundary_candidates():
     )
 
     assert violation is not None
-    assert violation["window_start"] == _at(origin, 398).isoformat()
+    assert violation["window_start"] == (
+        _at(origin, 397) + timedelta(microseconds=1)
+    ).isoformat()
     assert violation["longest_rest_minutes"] == 1439
     assert violation["required_rest_minutes"] == 1440
 
