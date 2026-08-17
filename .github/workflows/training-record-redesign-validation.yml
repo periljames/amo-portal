@@ -19,8 +19,8 @@ jobs:
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: training-record-redesign-validation-secret
     steps:
       - uses: actions/checkout@v6
