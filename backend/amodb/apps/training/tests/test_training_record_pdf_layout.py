@@ -23,6 +23,10 @@ def _pdf_user():
     )
 
 
+def _verification_url() -> str:
+    return "https://portal.example.test/public/training/users/ID-FL28MRNH/verify?format=html&amo=safarilink&report_token=trp1.test"
+
+
 def test_normal_fifteen_requirement_record_is_one_controlled_a4_page():
     user = _pdf_user()
     amo = SimpleNamespace(name="Safarilink Aviation Limited")
@@ -63,7 +67,7 @@ def test_normal_fifteen_requirement_record_is_one_controlled_a4_page():
         course_by_id=course_by_id,
         upcoming_events=[],
         deferrals=[],
-        verification_url="https://portal.example.test/public/training/users/ID-FL28MRNH/verify?format=html&amo=safarilink&report_token=trp1.test",
+        verification_url=_verification_url(),
         report_settings={},
     )
 
@@ -129,7 +133,7 @@ def test_pdf_honours_tenant_report_metadata_and_section_visibility():
         course_by_id={course.id: course},
         upcoming_events=[event],
         deferrals=[deferral],
-        verification_url=None,
+        verification_url=_verification_url(),
         report_settings={
             "title": "Personnel Training Master Record",
             "subtitle": "Tenant-controlled form",
