@@ -15,6 +15,7 @@ from . import (
     compliance_policy,
     consent_notification_policy,
     consent_policy,
+    consent_revalidation_policy,
     exemption_policy,
     extended_duty_day_policy,
     extended_duty_policy,
@@ -23,6 +24,7 @@ from . import (
     lineage,
     protected_rest_exact_policy,
     roster_control,
+    shift_scheduling_policy,
     statutory_rule_policy,
     structured_error_policy,
     template_usage_policy,
@@ -39,6 +41,7 @@ from .exemption_router import router as exemption_router
 from .extended_duty_router import router as extended_duty_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
+from .shift_semantics_router import router as shift_semantics_router
 from .workflow_state_router import router as workflow_state_router
 from ..workforce import pattern_rest_policy
 from ..workforce import pay_policy_store
@@ -102,6 +105,11 @@ timesheet_pay_policy.install_service_policy(workforce_services)
 
 roster_control.install_service_policy(rostering_route_module.services)
 version_copy_policy.install_service_policy(rostering_route_module.services)
+# Tenant-controlled scheduling eligibility is enforced server-side before the
+# consent mutation wrapper is installed. Generated work patterns resolve the
+# same guarded bulk function at runtime, so hidden/retired shifts cannot be
+# introduced through a direct API or pattern-generation bypass.
+shift_scheduling_policy.install_service_policy(rostering_route_module.services)
 # Route consent events through the existing portal notification service before
 # installing mutation/lifecycle hooks; the hooks call the wrapped service at
 # runtime, so create/edit/accept/decline/supervisor actions share one channel.
@@ -113,6 +121,9 @@ extended_duty_day_policy.install()
 # consent functions. A material assignment edit cancels the extension consent;
 # supervisor approval still re-runs the ordinary statutory validation engine.
 extended_duty_policy.install()
+# Every personnel/supervisor decision gets a fresh authoritative compliance pass
+# before the roster may be considered ready for organizational approval.
+consent_revalidation_policy.install()
 # Consent generation and lifecycle gating are installed on the same canonical
 # public service facade so single, bulk and generated assignments cannot bypass
 # acknowledgement policy, and submit/approve/publish always re-check it.
@@ -129,6 +140,7 @@ router.include_router(calendar_subscription_status_router)
 router.include_router(roster_control_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
+router.include_router(shift_semantics_router)
 router.include_router(consent_router)
 router.include_router(exemption_router)
 router.include_router(extended_duty_router)
