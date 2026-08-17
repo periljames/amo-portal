@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -38,6 +39,81 @@ SESSION_STAGE_TABS = {
 
 def _workflow_stage(workflow: Any, stage_id: str) -> Any | None:
     return next((stage for stage in workflow.stages if stage.id == stage_id), None)
+
+
+def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
+    return {
+        "id": str(audit.id),
+        "domain": getattr(getattr(audit, "domain", None), "value", audit.domain),
+        "kind": audit.kind,
+        "audit_scope_id": str(audit.audit_scope_id) if getattr(audit, "audit_scope_id", None) else None,
+        "audit_scope_code": getattr(audit, "audit_scope_code", None),
+        "status": getattr(getattr(audit, "status", None), "value", audit.status),
+        "audit_ref": audit.audit_ref,
+        "title": audit.title,
+        "scope": audit.scope,
+        "criteria": audit.criteria,
+        "auditee": audit.auditee,
+        "auditee_email": audit.auditee_email,
+        "auditee_user_id": audit.auditee_user_id,
+        "lead_auditor_user_id": audit.lead_auditor_user_id,
+        "observer_auditor_user_id": audit.observer_auditor_user_id,
+        "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "notify_auditors": audit.notify_auditors,
+        "notify_auditees": audit.notify_auditees,
+        "reminder_interval_days": audit.reminder_interval_days,
+        "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
+        "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
+        "actual_start": audit.actual_start.isoformat() if audit.actual_start else None,
+        "actual_end": audit.actual_end.isoformat() if audit.actual_end else None,
+        "report_file_ref": audit.report_file_ref,
+        "checklist_file_ref": audit.checklist_file_ref,
+        "retention_until": audit.retention_until.isoformat() if audit.retention_until else None,
+        "upcoming_notice_sent_at": audit.upcoming_notice_sent_at.isoformat() if audit.upcoming_notice_sent_at else None,
+        "day_of_notice_sent_at": audit.day_of_notice_sent_at.isoformat() if audit.day_of_notice_sent_at else None,
+        "created_at": audit.created_at.isoformat() if audit.created_at else None,
+        "updated_at": audit.updated_at.isoformat() if audit.updated_at else None,
+        "deleted_at": audit.deleted_at.isoformat() if audit.deleted_at else None,
+        "deleted_by_user_id": audit.deleted_by_user_id,
+        "delete_reason": audit.delete_reason,
+    }
+
+
+def _resolve_audit(db: Session, *, amo_id: str, audit_key: str) -> models.QMSAudit:
+    key = audit_key.strip()
+    if not key:
+        raise HTTPException(status_code=404, detail="Audit occurrence not found.")
+    id_value: uuid.UUID | None = None
+    try:
+        id_value = uuid.UUID(key)
+    except (TypeError, ValueError):
+        pass
+    identity_filters = [models.QMSAudit.audit_ref == key]
+    if id_value is not None:
+        identity_filters.append(models.QMSAudit.id == id_value)
+    audit = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == amo_id,
+        models.QMSAudit.deleted_at.is_(None),
+        or_(*identity_filters),
+    ).first()
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Audit occurrence not found.")
+    return audit
+
+
+@router.get("/audits/resolve/{audit_key}")
+def resolve_audit_occurrence(
+    audit_key: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    """Resolve exactly one tenant audit by immutable ID or human audit reference.
+
+    Canonical occurrence pages use this bounded lookup instead of enumerating
+    the audit register and filtering client-side.
+    """
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _audit_payload(_resolve_audit(db, amo_id=ctx.amo_id, audit_key=audit_key))
 
 
 def project_audit_session(
