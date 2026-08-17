@@ -14,6 +14,7 @@ import {
   listAuditUniverse,
   transitionAuditProgramme,
   type AuditProgramme,
+  type AuditProgrammeList,
   type AuditProgrammeStatus,
   type AuditRiskLevel,
   type AuditUniverseEntityType,
@@ -107,7 +108,15 @@ const QmsAuditProgrammePage: React.FC = () => {
 
   const transitionMutation = useMutation({
     mutationFn: (target: AuditProgrammeStatus) => transitionAuditProgramme(amoCode, selectedProgrammeId as string, target, actionReason.trim()),
-    onSuccess: async () => { setActionReason(""); await invalidateProgramme(); },
+    onSuccess: async (programme) => {
+      setActionReason("");
+      queryClient.setQueryData(["qms-audit-programme", amoCode, programme.id], programme);
+      queryClient.setQueryData<AuditProgrammeList>(["qms-audit-programmes", amoCode, year], (current) => current ? {
+        ...current,
+        items: current.items.map((item) => item.id === programme.id ? programme : item),
+      } : current);
+      await invalidateProgramme(programme.id);
+    },
   });
 
   const amendmentMutation = useMutation({
