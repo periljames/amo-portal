@@ -55,9 +55,11 @@ def test_seven_day_duty_sequence_requires_explicit_protected_rest():
     assert findings[0].code == compliance_policy.PROTECTED_REST_FINDING
     assert findings[0].severity == models.RosterValidationSeverity.BLOCKER
     assert findings[0].overridable is False
+    assert findings[0].details["window_start"] == "2026-08-01"
+    assert findings[0].details["window_end"] == "2026-08-07"
 
 
-def test_compensating_rd_satisfies_protected_rest_window():
+def test_normal_sequence_with_explicit_rd_does_not_add_replacement_finding():
     duty = template("D")
     rd = template("RD", kind=models.ShiftTemplateKind.OFF, counts_as_duty=False)
     rows = [assignment(day, duty, status=models.RosterAssignmentStatus.DUTY) for day in (1, 2, 3, 5, 6, 7)]
@@ -69,12 +71,24 @@ def test_compensating_rd_satisfies_protected_rest_window():
 def test_worked_rd_is_consumed_and_requires_replacement_rest():
     duty = template("X", kind=models.ShiftTemplateKind.STANDBY, counts_as_duty=True)
     rd = template("RD", kind=models.ShiftTemplateKind.OFF, counts_as_duty=False)
-    rows = [assignment(day, duty, status=models.RosterAssignmentStatus.STANDBY) for day in (1, 2, 3, 4, 5, 6, 7)]
-    rows.append(assignment(7, rd, status=models.RosterAssignmentStatus.OFF))
+    rows = [assignment(day, duty, status=models.RosterAssignmentStatus.STANDBY) for day in (1, 2, 4, 5)]
+    rows.append(assignment(4, rd, status=models.RosterAssignmentStatus.OFF))
     findings = compliance_policy._protected_rest_specs(version(rows), rows, [])
     assert findings
-    assert findings[0].details["worked_rest_dates"] == ["2026-08-07"]
+    assert findings[0].details["worked_rest_date"] == "2026-08-04"
     assert findings[0].details["required_replacement_rest"] is True
+
+
+def test_worked_rd_with_compensating_rd_clears_replacement_finding():
+    duty = template("X", kind=models.ShiftTemplateKind.STANDBY, counts_as_duty=True)
+    rd = template("RD", kind=models.ShiftTemplateKind.OFF, counts_as_duty=False)
+    rows = [assignment(day, duty, status=models.RosterAssignmentStatus.STANDBY) for day in (1, 2, 4, 5)]
+    rows.extend([
+        assignment(4, rd, status=models.RosterAssignmentStatus.OFF),
+        assignment(6, rd, status=models.RosterAssignmentStatus.OFF),
+    ])
+    findings = compliance_policy._protected_rest_specs(version(rows), rows, [])
+    assert findings == []
 
 
 def test_statutory_14_day_ceiling_and_weekly_rest_are_non_overridable():
