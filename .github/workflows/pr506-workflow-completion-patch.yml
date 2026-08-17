@@ -1,0 +1,36 @@
+name: PR506 Workflow Completion Patch
+
+on:
+  push:
+    branches: [codex/training-record-redesign-20260817]
+    paths:
+      - scripts/pr506_workflow_completion_patch.py
+      - .github/workflows/pr506-workflow-completion-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/training-record-redesign-20260817
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply compatibility patch
+        run: python scripts/pr506_workflow_completion_patch.py
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No compatibility changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/amodb/apps/training/models.py backend/amodb/apps/training/schemas.py backend/amodb/apps/training/router.py frontend/src/types/training.ts frontend/src/services/training.ts
+          git commit -m "training: wire governed workflow states"
+          git push origin HEAD:codex/training-record-redesign-20260817
