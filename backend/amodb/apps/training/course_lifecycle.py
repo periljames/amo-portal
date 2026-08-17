@@ -9,6 +9,7 @@ from . import models as training_models
 
 
 _RECURRENT_VALUES = {"REFRESHER", "RECURRENT", "CONTINUATION", "RENEWAL"}
+_RECOGNIZED_KINDS = {"INITIAL", "RECURRENT", "ONE_OFF"}
 
 
 def normalized_training_kind(value: Any) -> str:
@@ -31,9 +32,10 @@ def normalized_training_kind(value: Any) -> str:
 
 def training_kind_for_course(course: training_models.TrainingCourse | Any) -> str:
     kind = normalized_training_kind(getattr(course, "kind", None))
-    if kind != "OTHER":
+    if kind in _RECOGNIZED_KINDS:
         return kind
-    return normalized_training_kind(getattr(course, "status", None))
+    status = normalized_training_kind(getattr(course, "status", None))
+    return status if status in _RECOGNIZED_KINDS else "OTHER"
 
 
 def is_initial_course(course: training_models.TrainingCourse | Any) -> bool:
