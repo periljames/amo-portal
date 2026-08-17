@@ -44,7 +44,8 @@ async function signIn(page: Page): Promise<void> {
 
 async function documentTypeFromApi(page: Page, manualId: string): Promise<{ document_type: string; source: string }> {
   return page.evaluate(async ({ amoCode, manualIdValue }) => {
-    const token = localStorage.getItem("amo_portal_token");
+    const token = sessionStorage.getItem("amo_portal_token");
+    if (!token) throw new Error("Document type reload failed: authenticated session token is unavailable");
     const response = await fetch(`/doc-control/workspace/t/${encodeURIComponent(amoCode)}/documents/${encodeURIComponent(manualIdValue)}/document-type`, {
       headers: { Authorization: `Bearer ${token}` },
     });
