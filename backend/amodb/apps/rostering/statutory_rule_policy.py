@@ -6,6 +6,7 @@ _INSTALLED = False
 
 HARD_AVIATION_RULE_TYPES = {
     models.RosterRuleType.MAX_ASSIGNMENT_DURATION,
+    models.RosterRuleType.MAX_DUTY_HOURS_DAY,
     models.RosterRuleType.MIN_REST_HOURS,
 }
 
