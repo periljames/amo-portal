@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision = "rostering_20260815_pattern_scope"
@@ -16,7 +17,20 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(table_name: str, column_name: str) -> bool:
+    """Handle clean installs where an older metadata-driven migration already
+    created a column from the current application model.
+    """
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table(table_name):
+        return False
+    return column_name in {str(column["name"]) for column in inspector.get_columns(table_name)}
+
+
 def upgrade() -> None:
+    if _has_column("work_patterns", "applicability_json"):
+        return
     op.add_column(
         "work_patterns",
         sa.Column(
@@ -29,4 +43,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("work_patterns", "applicability_json")
+    if _has_column("work_patterns", "applicability_json"):
+        op.drop_column("work_patterns", "applicability_json")
