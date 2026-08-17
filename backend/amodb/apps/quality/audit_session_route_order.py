@@ -52,6 +52,11 @@ from . import audit_evidence_route_order as _audit_evidence_route_order  # noqa:
 # separate from append-only audit evidence/events while remaining tenant scoped.
 from . import audit_presence_route_order as _audit_presence_route_order  # noqa: F401,E402
 
+# Complete the occurrence data contract used by Setup, Prepare, Closing and the
+# purpose-bound auditee workspace: governed document-request metadata, meetings,
+# closing narrative, and safe released-CAR collaboration.
+from . import audit_occurrence_completion_route_order as _audit_occurrence_completion_route_order  # noqa: F401,E402
+
 # Deterministic report composition and closing assurance are part of the same
 # governed audit occurrence. Register their exact routes ahead of the legacy
 # generic QMS catch-all so the closing workspace never falls through to a broad
