@@ -1,0 +1,16 @@
+.tos-plan-month-view { display: none; }
+
+@media (max-width: 640px) {
+  .tos-plan-matrix-scroll { display: none; }
+  .tos-plan-month-view { display: grid; gap: 10px; }
+  .tos-plan-month-view > label { display: grid; gap: 5px; color: #536078; font-size: 12px; font-weight: 700; }
+  .tos-plan-month-view select { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid #cfd8e6; border-radius: 9px; background: #fff; color: #182338; }
+  .tos-plan-month-list { display: grid; gap: 7px; }
+  .tos-plan-month-row { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; min-height: 58px !important; padding: 9px 11px !important; text-align: left; }
+  .tos-plan-month-row > span:first-child { display: grid; min-width: 0; gap: 2px; }
+  .tos-plan-month-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tos-plan-month-row small { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tos-plan-month-row:disabled { opacity: .72 !important; }
+  .tos-plan-month-count { display: grid; min-width: 36px; min-height: 36px; place-items: center; border-radius: 9px; background: #edf4fb; color: #14213a; font-size: 17px; font-weight: 800; }
+  .tos-plan-month-state { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 70px; padding: 10px; color: #68758d; text-align: center; }
+}
