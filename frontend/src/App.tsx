@@ -13,6 +13,7 @@ import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
 import PublicAuditAccessPage from "./pages/PublicAuditAccessPage";
 import PublicAuditVerificationPage from "./pages/PublicAuditVerificationPage";
+import CanonicalPublicCarAccessPage from "./pages/CanonicalPublicCarAccessPage";
 import { onSessionEvent } from "./services/auth";
 import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
@@ -33,8 +34,9 @@ const App: React.FC = () => {
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
   const isPublicAuditAccess = /^\/qms\/audit-access(?:\/[^/]+)?\/?$/i.test(location.pathname);
+  const isPublicCarAccess = /^\/qms\/car-access\/[^/]+\/?$/i.test(location.pathname);
   const isPublicAuditVerification = /^\/verify\/[^/]+\/?$/i.test(location.pathname);
-  const isPublicQualitySurface = isPublicAuditAccess || isPublicAuditVerification;
+  const isPublicQualitySurface = isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
 
   useEffect(() => { document.body.dataset.theme = theme; }, [theme]);
   void scheme;
@@ -60,8 +62,8 @@ const App: React.FC = () => {
       clearApiResponseCache();
       resetLoading();
 
-      // Purpose-bound external audit and public verification routes must not be
-      // redirected into the employee login lifecycle.
+      // Purpose-bound external audit, CAR response and public verification
+      // routes must not be redirected into the employee login lifecycle.
       if (isPublicQualitySurface) return;
 
       const parts = location.pathname.split("/").filter(Boolean);
@@ -102,6 +104,7 @@ const App: React.FC = () => {
 
   if (isPublicAuditVerification) return <PortalErrorBoundary><PublicAuditVerificationPage /></PortalErrorBoundary>;
   if (isPublicAuditAccess) return <PortalErrorBoundary><PublicAuditAccessPage /></PortalErrorBoundary>;
+  if (isPublicCarAccess) return <PortalErrorBoundary><CanonicalPublicCarAccessPage /></PortalErrorBoundary>;
 
   return (
     <ToastProvider>
