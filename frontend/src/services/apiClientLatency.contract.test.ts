@@ -43,6 +43,7 @@ describe("API client latency retry policy", () => {
     expect(offlineHttpSource).toContain('if (connectivityState === "RECOVERING") {');
     expect(offlineHttpSource).toContain("if (isGet) void probePortalReadiness();");
     expect(offlineHttpSource).toContain("else await waitForPortalReadiness();");
+    expect(offlineHttpSource).toContain("return isPortalRequestNetworkEligible(");
     expect(offlineHttpSource).not.toContain('if (getPortalConnectivity().state === "RECOVERING") {\n    await waitForPortalReadiness();');
   });
 
