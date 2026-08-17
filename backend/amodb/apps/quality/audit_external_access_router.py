@@ -519,9 +519,20 @@ def exchange_audit_access(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     grant = _active_grant(db, payload.token)
+    participant = grant.participant
+    identity = participant.external_identity if participant else None
+    if (
+        participant is not None
+        and participant.participant_type == "EXTERNAL_AUDITOR"
+        and identity is not None
+        and identity.assurance_level == "PASSKEY"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This external auditor must complete passkey assurance before session activation.",
+        )
     now = _utcnow()
     grant.last_used_at = now
-    participant = grant.participant
     if participant.accepted_at is None:
         participant.accepted_at = now
         participant.status = "ACTIVE"
