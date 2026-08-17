@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Copy, Loader2, Search, UsersRound } from "lu
 import Drawer from "../shared/Drawer";
 import { getTrainingPlanMatrix, getTrainingPlanMatrixCell } from "../../services/trainingOperating";
 import type { TrainingPlanMatrixCell, TrainingPlanMatrixCourse, TrainingPlanMatrixPersonPage } from "../../types/trainingOperating";
+import "./TrainingPlanMatrix.css";
 
 type Props = { planId: string; planYear: number };
 type SelectedCell = { course: TrainingPlanMatrixCourse; cell: TrainingPlanMatrixCell };
@@ -20,6 +21,7 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("ALL");
+  const [mobileMonth, setMobileMonth] = useState(() => Math.min(12, Math.max(1, new Date().getMonth() + 1)));
   const [page, setPage] = useState<Awaited<ReturnType<typeof getTrainingPlanMatrix>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,7 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
   }, [drawerCell, planId]);
 
   const kindPills = useMemo(() => ["ALL", ...Object.keys(page?.kind_counts || {}).sort()], [page?.kind_counts]);
+  const mobileRows = useMemo(() => (page?.items || []).map((course) => ({ course, cell: course.cells.find((cell) => cell.month === mobileMonth) })).filter((row): row is { course: TrainingPlanMatrixCourse; cell: TrainingPlanMatrixCell } => Boolean(row.cell)), [mobileMonth, page?.items]);
 
   const copyPeople = async () => {
     if (!drawerCell || !peoplePage) return;
@@ -100,6 +103,26 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
       </div>
       {error ? <div className="tos-banner tos-banner--error">{error}<button onClick={() => setError(null)}>×</button></div> : null}
       <p className="tos-plan-matrix-legend"><strong>Values</strong> = unique personnel due / planned</p>
+
+      <div className="tos-plan-month-view" aria-label="Month-first training plan">
+        <label>
+          <span>Plan month</span>
+          <select value={mobileMonth} onChange={(event) => setMobileMonth(Number(event.target.value))} aria-label="Plan month">
+            {Array.from({ length: 12 }, (_, index) => <option value={index + 1} key={index + 1}>{monthLabel(index + 1, true)} {planYear}</option>)}
+          </select>
+        </label>
+        <div className="tos-plan-month-list">
+          {mobileRows.map(({ course, cell }) => (
+            <button key={course.course_key} type="button" className="tos-plan-month-row" onClick={() => cell.personnel_count && setDrawerCell({ course, cell })} disabled={!cell.personnel_count} aria-label={`${cell.personnel_count} personnel due or planned for ${course.course_name} in ${monthLabel(cell.month, true)} ${planYear}`}>
+              <span><strong>{course.course_code || "COURSE"}</strong><small>{course.course_name}</small></span>
+              <span className="tos-plan-month-count">{cell.personnel_count || "—"}</span>
+            </button>
+          ))}
+          {loading ? <div className="tos-plan-month-state"><Loader2 className="tos-spin" size={18} /> Loading monthly plan…</div> : null}
+          {!loading && !mobileRows.length ? <div className="tos-plan-month-state">No courses match the current plan filters.</div> : null}
+        </div>
+      </div>
+
       <div className="tos-plan-matrix-scroll">
         <table className="tos-plan-matrix">
           <thead><tr><th>Course</th>{Array.from({ length: 12 }, (_, index) => <th key={index}>{monthLabel(index + 1)}</th>)}</tr></thead>
