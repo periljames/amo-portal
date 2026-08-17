@@ -2,25 +2,41 @@ import { apiRequest, qmsPath } from "./apiClient";
 
 export type AuditAssignmentRole = "LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR";
 
-export type AuditAssignmentEligibility = {
-  governed: boolean;
-  eligible: boolean;
-  blockers: Array<{ code: string; message: string }>;
-  user_id: string;
-  assignment_role: AuditAssignmentRole;
-  as_of?: string;
-  assignment_scope_key?: string | null;
-  privilege?: Record<string, unknown> | null;
+export type AuditAssignmentIndependence = {
+  required?: boolean;
+  passed?: boolean;
+  pending?: boolean;
+  declaration?: string | null;
+  declaration_id?: string | null;
+  rationale?: string | null;
+  declared_at?: string | null;
+  message?: string | null;
+};
+
+export type AuditAssignmentAssessment = {
+  rule_id?: string;
+  privilege_code?: string;
+  privilege_type?: string;
+  hard_gates?: Record<string, boolean>;
+  active_privilege?: Record<string, unknown> | null;
   training?: Record<string, unknown> | null;
-  independence?: {
-    required?: boolean;
-    state?: string;
-    declaration?: string | null;
-    relationship_to_subject?: string | null;
-    rationale?: string | null;
-    declaration_id?: string | null;
-  } | null;
-  workload?: Record<string, unknown> | null;
+  capacity?: Record<string, unknown> | null;
+  independence?: AuditAssignmentIndependence | null;
+  eligible?: boolean;
+};
+
+export type AuditAssignmentEligibility = {
+  eligible: boolean;
+  governance_configured: boolean;
+  mode: "GOVERNED" | "LEGACY_COMPATIBILITY" | string;
+  assignment_role: AuditAssignmentRole;
+  user_id: string;
+  reason?: string | null;
+  rule_id?: string | null;
+  privilege_code?: string | null;
+  independence_pending?: boolean;
+  assessment?: AuditAssignmentAssessment | null;
+  assessments: AuditAssignmentAssessment[];
 };
 
 export function getAuditAssignmentEligibility(
@@ -76,6 +92,11 @@ export function updateAuditAssignments(
     lead_auditor_user_id: string | null;
     observer_auditor_user_id: string | null;
     assistant_auditor_user_id: string | null;
+    previous_assignments: {
+      lead_auditor_user_id: string | null;
+      observer_auditor_user_id: string | null;
+      assistant_auditor_user_id: string | null;
+    };
     assignment_gate: AuditAssignmentEligibility[];
     reason: string;
   }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/assignments`), {
