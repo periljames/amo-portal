@@ -130,7 +130,13 @@ const QualityEnhancementsHost: React.FC = () => {
   const amoCode = useQualityAmoCode();
   const route = useAuditRoute();
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
+  const canonicalOccurrence = Boolean(route && auditSessionStage);
   const legacyOccurrence = Boolean(route && !auditSessionStage);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("quality-audit-canonical-occurrence", canonicalOccurrence);
+    return () => document.documentElement.classList.remove("quality-audit-canonical-occurrence");
+  }, [canonicalOccurrence]);
 
   if (/^\/car-invite\/?$/i.test(location.pathname)) return <CarInviteResponsiveStyleLoader />;
 
