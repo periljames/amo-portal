@@ -213,19 +213,7 @@ function daysUntilDueFromItem(item: TrainingStatusItem | null | undefined): numb
 }
 
 function effectiveTrainingStatus(item: TrainingStatusItem | null | undefined): string {
-  if (!item) return "NOT_DONE";
-  if (item.status === "DEFERRED") return "DEFERRED";
-  if (item.status === "SCHEDULED_ONLY") return "SCHEDULED_ONLY";
-  if (item.status === "NOT_DONE") return "NOT_DONE";
-  const daysUntilDue = daysUntilDueFromItem(item);
-  if (daysUntilDue != null) {
-    if (daysUntilDue < 0) return "OVERDUE";
-    if (daysUntilDue <= 45) return "DUE_SOON";
-    return "OK";
-  }
-  if (item.status === "OVERDUE") return "OVERDUE";
-  if (item.status === "DUE_SOON") return "DUE_SOON";
-  return item.status || "OK";
+  return item?.status || "NOT_DONE";
 }
 
 function effectiveTrainingStatusForRecord(record: TrainingRecordRead | null | undefined, item: TrainingStatusItem | null | undefined): string {
@@ -344,7 +332,7 @@ function dueCountdownLabel(item: TrainingStatusItem | null | undefined): string 
   const effectiveStatus = effectiveTrainingStatus(item);
   if (effectiveStatus === "OVERDUE") return "Overdue";
   if (effectiveStatus === "OK") return "Current";
-  if (effectiveStatus === "NOT_DONE") return "Not done";
+  if (effectiveStatus === "NOT_DONE") return "Not completed";
   if (effectiveStatus === "DEFERRED") {
     const due = dueDateForItem(item);
     return due ? `Deferred to ${formatDate(due)}` : "Deferred";

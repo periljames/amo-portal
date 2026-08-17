@@ -89,6 +89,19 @@ function RowActionMenu({ label, children }: { label: string; children: React.Rea
   );
 }
 
+function startRowLongPress(event: React.PointerEvent<HTMLElement>): void {
+  if (event.pointerType === "mouse") return;
+  const row = event.currentTarget;
+  const timer = window.setTimeout(() => row.querySelector("details.trl-menu")?.setAttribute("open", ""), 650);
+  row.dataset.trainingLongPressTimer = String(timer);
+}
+
+function cancelRowLongPress(event: React.PointerEvent<HTMLElement>): void {
+  const raw = event.currentTarget.dataset.trainingLongPressTimer;
+  if (raw) window.clearTimeout(Number(raw));
+  delete event.currentTarget.dataset.trainingLongPressTimer;
+}
+
 function buildRows(items: TrainingStatusItem[], courses: TrainingCourseRead[], records: TrainingRecordRead[], files: TrainingFileRead[]): RequirementRow[] {
   const byCourse = new Map<string, TrainingCourseRead>();
   courses.forEach((course) => {
@@ -182,7 +195,13 @@ const TrainingRequirementList: React.FC<Props> = ({ items, courses, records, fil
           </tr>)}</tbody>
         </table>
       </div>
-      <div className="trl-card-view">{rows.map((row) => <article className="trl-card" key={row.key} onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}>
+      <div className="trl-card-view">{rows.map((row) => <article className="trl-card" key={row.key}
+  onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}
+  onPointerDown={startRowLongPress}
+  onPointerUp={cancelRowLongPress}
+  onPointerCancel={cancelRowLongPress}
+  onPointerMove={cancelRowLongPress}
+>
         <header><div><h3>{row.item.course_name}</h3><small>{row.course?.course_id || row.item.course_id} · {trainingTypeLabel(row.course)}</small></div><span className={`trl-status trl-status--${row.status.toLocaleLowerCase().replaceAll(" ", "-")}`}>{row.status}</span></header>
         <dl><dt>Completed</dt><dd>{formatDate(row.item.last_completion_date)}</dd><dt>Next Due</dt><dd>{formatDate(dueDate(row.item))}</dd><dt>Scheduled</dt><dd>{row.item.upcoming_event_date ? formatDate(row.item.upcoming_event_date) : "—"}</dd></dl>
         <footer><span>{row.evidence ? "Certificate/evidence available" : "No linked evidence"}</span>{actions(row)}</footer>
