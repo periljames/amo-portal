@@ -78,6 +78,9 @@ test("external audit access exchanges the raw token and renders released-only da
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/passkey/status") && request.method() === "POST") {
+      return respond(route, { detail: "Passkey assurance is only available to an assigned external auditor identity." }, 403);
+    }
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") {
       exchangeCount += 1;
       return respond(route, session);
@@ -113,6 +116,9 @@ test("auditee can submit a requested document through the scoped guest session",
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/passkey/status") && request.method() === "POST") {
+      return respond(route, { detail: "Passkey assurance is only available to an assigned external auditor identity." }, 403);
+    }
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, session);
     if (path.endsWith(`/quality/audit-access/document-requests/${REQUEST_ID}/submit`) && request.method() === "POST") {
       uploadCount += 1;
@@ -176,6 +182,9 @@ test("auditee downloads and acknowledges the exact issued closing report revisio
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/passkey/status") && request.method() === "POST") {
+      return respond(route, { detail: "Passkey assurance is only available to an assigned external auditor identity." }, 403);
+    }
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, session);
     if (path.endsWith("/quality/audit-access/issued-report") && request.method() === "GET") {
       reportStatusCount += 1;
@@ -297,6 +306,9 @@ test("external auditor executes assigned checklist and submits governed finding 
   await page.route("**/quality/audit-access/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path.endsWith("/quality/audit-access/passkey/status") && request.method() === "POST") {
+      return respond(route, { detail: "This external audit identity does not require passkey assurance." }, 409);
+    }
     if (path.endsWith("/quality/audit-access/exchange") && request.method() === "POST") return respond(route, externalSession);
     if (path.endsWith("/quality/audit-access/fieldwork") && request.method() === "GET") return respond(route, fieldwork);
     if (path.endsWith("/quality/audit-access/finding-drafts") && request.method() === "GET") return respond(route, { items: drafts });
