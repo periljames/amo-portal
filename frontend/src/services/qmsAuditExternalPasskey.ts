@@ -22,6 +22,15 @@ export type ExternalPasskeyStatus = {
 
 type CeremonyOptions = { challenge_id: string; options: Record<string, unknown> };
 
+export class ExternalPasskeyRequestError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ExternalPasskeyRequestError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "POST",
@@ -32,8 +41,12 @@ async function request<T>(path: string, body: Record<string, unknown>): Promise<
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
     const detail = payload?.detail;
-    if (typeof detail === "string") throw new Error(detail);
-    throw new Error(`External auditor passkey request failed with status ${response.status}.`);
+    const message = typeof detail === "string"
+      ? detail
+      : detail && typeof detail === "object" && typeof (detail as { message?: unknown }).message === "string"
+        ? String((detail as { message: unknown }).message)
+        : `External auditor passkey request failed with status ${response.status}.`;
+    throw new ExternalPasskeyRequestError(message, response.status);
   }
   return response.json() as Promise<T>;
 }
