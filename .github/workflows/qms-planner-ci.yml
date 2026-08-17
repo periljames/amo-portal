@@ -117,6 +117,8 @@ jobs:
           cat /tmp/qms-planner-readiness.log
           exit 1
       - name: Run deterministic planner browser regressions
+        env:
+          E2E_CHROMIUM_CHANNEL: "1"
         shell: bash
         run: |
           set +e
