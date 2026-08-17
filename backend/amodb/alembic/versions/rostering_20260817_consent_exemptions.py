@@ -1,4 +1,4 @@
-"""Add roster consent and regulatory exemption governance.
+"""Add roster consent governance.
 
 Revision ID: rostering_260817_consent
 Revises: rostering_260817_pay_merge
@@ -16,7 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    pass
+    op.add_column("roster_shift_template_policies", sa.Column("requires_personnel_acknowledgement", sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column("roster_shift_template_policies", sa.Column("requires_supervisor_approval", sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column("roster_shift_template_policies", sa.Column("fatigue_weight", sa.Float(), nullable=False, server_default="1.0"))
+    op.add_column("roster_shift_template_policies", sa.Column("pay_classification", sa.String(length=64), nullable=True))
 
 
 def downgrade() -> None:
