@@ -30,6 +30,7 @@ import {
   type FieldworkFindingLevel,
   type FieldworkFindingSeverity,
 } from "../../../services/qmsChecklistExecutionGovernance";
+import { listChecklistBindings, type ChecklistTemplateItem } from "../../../services/qmsChecklistTemplates";
 import { heartbeatAuditPresence, listAuditPresence } from "../../../services/qmsAuditPresence";
 import { getAuditSession } from "../../../services/qmsAuditSession";
 import LiveAuditEvidenceStrip from "./LiveAuditEvidenceStrip";
@@ -50,6 +51,11 @@ const RESPONSE_OPTIONS: Array<{
 
 type Props = { amoCode: string; auditKey: string };
 type NonconformityLevel = "LEVEL_1" | "LEVEL_2" | "LEVEL_3";
+type LiveChecklistSourceContext = ChecklistTemplateItem & {
+  templateCode: string;
+  revisionNo: number;
+  contentSha256: string;
+};
 
 type FindingDraft = {
   mode: "NONCOMPLIANT" | "OBSERVATION";
@@ -114,6 +120,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 1_500,
   });
+  const bindingsQuery = useQuery({
+    queryKey: ["qms", "live-audit-bindings", amoCode, auditId],
+    queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 30_000,
+  });
   const findingsQuery = useQuery({
     queryKey: ["qms", "live-audit-findings", auditId],
     queryFn: () => qmsListFindings(auditId),
@@ -162,6 +174,22 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [amoCode, auditId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
+  const sourceContextByItemId = useMemo(() => {
+    const map = new Map<string, LiveChecklistSourceContext>();
+    for (const binding of bindingsQuery.data?.items || []) {
+      binding.instantiated_item_ids.forEach((itemId, index) => {
+        const snapshot = binding.item_snapshot[index];
+        if (!snapshot) return;
+        map.set(itemId, {
+          ...snapshot,
+          templateCode: binding.template_code,
+          revisionNo: binding.revision_no,
+          contentSha256: binding.content_sha256,
+        });
+      });
+    }
+    return map;
+  }, [bindingsQuery.data?.items]);
   const effectiveSelectedId = useMemo(() => {
     if (!items.length) return null;
     if (selectedId && items.some((item) => item.checklist_item_id === selectedId)) return selectedId;
@@ -169,6 +197,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [items, selectedId]);
   const selectedIndex = effectiveSelectedId ? items.findIndex((item) => item.checklist_item_id === effectiveSelectedId) : -1;
   const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
+  const selectedSource = selected ? sourceContextByItemId.get(selected.checklist_item_id) || null : null;
   const notes = selected ? noteDrafts[selected.checklist_item_id] ?? selected.auditor_notes ?? "" : "";
   const outboxEntries = outboxQuery.data ?? [];
   const outbox = useMemo(() => ({
@@ -281,9 +310,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     updateMutation.mutate({ item, response, auditorNotes: notes });
   };
 
-  if (auditQuery.isLoading || checklistQuery.isLoading) return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
-  if (auditQuery.isError || checklistQuery.isError || !auditQuery.data) {
-    const error = auditQuery.error || checklistQuery.error;
+  if (auditQuery.isLoading || checklistQuery.isLoading || bindingsQuery.isLoading) return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
+  if (auditQuery.isError || checklistQuery.isError || bindingsQuery.isError || !auditQuery.data) {
+    const error = auditQuery.error || checklistQuery.error || bindingsQuery.error;
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading" role="alert"><AlertTriangle size={20} /> {error instanceof Error ? error.message : "Live audit workspace could not be loaded."}</div>;
   }
 
@@ -323,7 +352,19 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {selected ? (
             <>
               <div className="qms-live-audit-focus__question-head"><div><span>{selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div><span>{selectedIndex + 1} / {items.length}</span></div>
-              <dl className="qms-live-audit-focus__references"><div><dt>Checklist ref</dt><dd>{selected.checklist_ref || "—"}</dd></div><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div></dl>
+              <dl className="qms-live-audit-focus__references">
+                <div><dt>Checklist ref</dt><dd>{selected.checklist_ref || selectedSource?.checklist_ref || "—"}</dd></div>
+                <div><dt>Requirement</dt><dd>{selected.requirement_ref || selectedSource?.requirement_ref || "—"}</dd></div>
+                <div><dt>Regulatory source</dt><dd>{selectedSource?.regulatory_source_ref || "—"}</dd></div>
+                <div><dt>Manual source</dt><dd>{selectedSource?.manual_source_ref || "—"}</dd></div>
+                <div><dt>Frozen checklist</dt><dd>{selectedSource ? `${selectedSource.templateCode} Rev ${selectedSource.revisionNo} · SHA ${selectedSource.contentSha256.slice(0, 12)}…` : "No governed binding lineage"}</dd></div>
+                <div><dt>Current</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div>
+              </dl>
+              <section className="qms-live-audit-focus__expected-evidence" aria-label="Expected evidence">
+                <strong>Expected evidence</strong>
+                <p>{selectedSource?.expected_evidence || "No expected-evidence statement was defined in the applied checklist revision."}</p>
+                <small>{selectedSource?.mandatory === false ? "Optional verification item" : "Mandatory verification item"}{selectedSource?.finding_trigger && selectedSource.finding_trigger !== "NONE" ? ` · governed finding trigger: ${selectedSource.finding_trigger.replaceAll("_", " ")}` : ""}</small>
+              </section>
 
               <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
                 {RESPONSE_OPTIONS.map((option) => {
