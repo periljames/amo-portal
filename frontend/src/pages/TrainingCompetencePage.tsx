@@ -41,6 +41,7 @@ import type {
   TrainingAutoGroupScheduleCreate,
   TrainingCertificateArtifactOptions,
   TrainingCourseRead,
+  DeferralReasonCategory,
   TrainingDeferralRequestRead,
   TrainingEventBatchScheduleCreate,
   TrainingEventParticipantRead,
@@ -98,6 +99,8 @@ function trainingRouteStatusFilter(pathname: string, searchParams: URLSearchPara
   if (view === "expiring") return "DUE_SOON";
   return "ALL";
 }
+
+type AdminUserSummaryWithDepartment = AdminUserSummaryRead & { department_code?: string | null };
 
 type PersonRow = {
   user: AdminUserSummaryRead;
@@ -238,6 +241,10 @@ function downloadTextFile(content: string, filename: string, contentType = "text
   link.download = filename;
   link.click();
   window.URL.revokeObjectURL(url);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function csvEscape(value: unknown): string {
@@ -662,7 +669,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .catch(() => setParticipants([]));
   }, [selectedEventId]);
 
-  const load = async () => {
+  const load = React.useCallback(async () => {
     const requestId = ++loadSeq.current;
     if (!hydratedSnapshotRef.current) setLoading(true);
     setError(null);
@@ -738,11 +745,11 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     }
     setError(failures.length ? `Some datasets could not be loaded: ${failures.join(", ")}.` : null);
     setLoading(false);
-  };
+  }, [amoCode, peoplePage]);
 
   useEffect(() => {
     void load();
-  }, [peoplePage]);
+  }, [load]);
 
   const courseById = useMemo(() => new Map(courses.map((course) => [course.id, course])), [courses]);
   const courseLookup = useMemo(() => buildCourseLookup(courses), [courses]);
@@ -893,7 +900,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .sort((a, b) => (a.course?.course_name || a.course?.course_id || a.course_pk).localeCompare(b.course?.course_name || b.course?.course_id || b.course_pk));
   }, [courseById, requirements]);
 
-  const knownDepartments = useMemo(() => Array.from(new Set(users.map((user) => String((user as any).department_code || "").trim()).filter(Boolean))).sort(), [users]);
+  const knownDepartments = useMemo(() => Array.from(new Set(users.map((user) => String((user as AdminUserSummaryWithDepartment).department_code || "").trim()).filter(Boolean))).sort(), [users]);
   const knownRoles = useMemo(() => Array.from(new Set(users.map((user) => String(user.position_title || user.role || "").trim()).filter(Boolean))).sort(), [users]);
 
   const courseRows = useMemo(() => {
@@ -1021,8 +1028,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         message: `${result.total_enrolled || 0} enrolments were placed into ${result.total_sessions || result.sessions.length} course session(s).${result.skipped.length ? ` ${result.skipped.length} item(s) were skipped.` : ""}`,
         variant: result.skipped.length ? "warning" : "info",
       });
-    } catch (error: any) {
-      pushToast({ title: "Grouped scheduling failed", message: error?.message || "Could not auto-group the selected personnel.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Grouped scheduling failed", message: errorMessage(error, "Could not auto-group the selected personnel."), variant: "error" });
     } finally {
       setAutoGrouping(false);
     }
@@ -1057,8 +1064,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await load();
       openTab("schedule");
       pushToast({ title: "Session scheduled", message: `${result.created_count} personnel were enrolled into ${result.event.title}.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Scheduling failed", message: error?.message || "Could not create the training session.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Scheduling failed", message: errorMessage(error, "Could not create the training session."), variant: "error" });
     } finally {
       setScheduling(false);
     }
@@ -1099,7 +1106,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         course_pk: deferralTarget.coursePk,
         original_due_date: deferralTarget.originalDueDate,
         requested_new_due_date: deferralForm.requested_new_due_date,
-        reason_category: deferralForm.reason_category as any,
+        reason_category: deferralForm.reason_category as DeferralReasonCategory,
         reason_text: deferralForm.reason_text || null,
       });
       await updateTrainingEventParticipant(deferralTarget.participantId, { status: "DEFERRED" });
@@ -1110,8 +1117,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         setParticipants(refreshed);
       }
       pushToast({ title: "Deferral submitted", message: `${deferralTarget.userName} has been marked deferred pending decision.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Deferral failed", message: error?.message || "Could not submit the deferral request.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Deferral failed", message: errorMessage(error, "Could not submit the deferral request."), variant: "error" });
     }
   };
 
@@ -1134,8 +1141,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       });
       setReportSetupOpen(false);
       pushToast({ title: "Report setup saved", message: "Training record PDFs will use the updated tenant settings.", variant: "success" });
-    } catch (error: any) {
-      pushToast({ title: "Report setup failed", message: error?.message || "Could not save the report settings.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Report setup failed", message: errorMessage(error, "Could not save the report settings."), variant: "error" });
     } finally {
       setReportSaving(false);
     }
@@ -1146,8 +1153,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       const downloaded = await downloadTrainingCertificateArtifact(record.id, certificateSetup);
       saveDownloadedFile(downloaded);
       await load();
-    } catch (error: any) {
-      pushToast({ title: "Certificate download failed", message: error?.message || "Could not generate the certificate PDF.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Certificate download failed", message: errorMessage(error, "Could not generate the certificate PDF."), variant: "error" });
     }
   };
 
@@ -1204,8 +1211,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       setCourseFormOpen(false);
       await load();
       pushToast({ title: editingCourseId ? "Course updated" : "Course created", message: `${payload.course_id} saved successfully.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Save failed", message: error?.message || "Unable to save course.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Save failed", message: errorMessage(error, "Unable to save course."), variant: "error" });
     } finally {
       setSavingCourse(false);
     }
@@ -1316,8 +1323,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await load();
       openTab("matrix");
       pushToast({ title: editingRequirementId ? "Requirement updated" : "Requirement created", message: "The course requirement matrix has been updated.", variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Save failed", message: error?.message || "Unable to save the requirement rule.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Save failed", message: errorMessage(error, "Unable to save the requirement rule."), variant: "error" });
     } finally {
       setSavingRequirement(false);
     }
@@ -1331,8 +1338,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await deleteTrainingRequirement(requirement.id);
       await load();
       pushToast({ title: "Requirement deleted", message: "The requirement rule has been removed.", variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Delete failed", message: error?.message || "Could not delete the requirement rule.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Delete failed", message: errorMessage(error, "Could not delete the requirement rule."), variant: "error" });
     }
   };
 
