@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import { expect, test, type BrowserContext, type Page, type Response } from "@playwright/test";
+import { expect, test, type BrowserContext, type CDPSession, type Page, type Response } from "@playwright/test";
 
 test.use({ trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
-test.setTimeout(120_000);
+test.setTimeout(180_000);
 
 type LiveAuditFixture = {
   amo_id: string;
@@ -21,6 +21,13 @@ type LiveAuditFixture = {
   realtime_user_b_id: string;
   realtime_user_b_email: string;
   realtime_password: string;
+  ceremony_audit_id: string;
+  ceremony_audit_ref: string;
+  ceremony_checklist_item_id: string;
+  ceremony_finding_id: string;
+  ceremony_car_id: string;
+  ceremony_car_number: string;
+  ceremony_auditee_token: string;
 };
 
 function fixture(): LiveAuditFixture {
@@ -38,16 +45,38 @@ function watchServerFailures(page: Page, failures: string[]): void {
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
 }
 
-async function loginInternalUser(context: BrowserContext, *, amoSlug: string, email: string, password: string): Promise<Page> {
+async function loginInternalUser(context: BrowserContext, options: { amoSlug: string; email: string; password: string }): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`/maintenance/${amoSlug}/login`, { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Email or staff code").fill(email);
-  await page.getByLabel("Password").fill(password);
+  await page.goto(`/maintenance/${options.amoSlug}/login`, { waitUntil: "domcontentloaded" });
+  await page.getByLabel("Email or staff code").fill(options.email);
+  await page.getByLabel("Password").fill(options.password);
   await Promise.all([
     page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
     page.getByRole("button", { name: "Sign In" }).click(),
   ]);
   return page;
+}
+
+async function installVirtualPasskey(context: BrowserContext, page: Page): Promise<{ client: CDPSession; authenticatorId: string }> {
+  const client = await context.newCDPSession(page);
+  await client.send("WebAuthn.enable");
+  const { authenticatorId } = await client.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  return { client, authenticatorId };
+}
+
+async function removeVirtualPasskey(client: CDPSession, authenticatorId: string): Promise<void> {
+  await client.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
+  await client.send("WebAuthn.disable");
+  await client.detach();
 }
 
 const mutationRoute = "**/quality/audit-access/fieldwork/checklist-items/**/mutations";
@@ -202,5 +231,143 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     expect(failuresB).toEqual([]);
   } finally {
     await Promise.allSettled([contextA.close(), contextB.close()]);
+  }
+});
+
+test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn approval, issue, verification, execution close and governed archive", async ({ browser }) => {
+  const data = fixture();
+  const internalFailures: string[] = [];
+  const auditeeFailures: string[] = [];
+  const verificationFailures: string[] = [];
+  const internalContext = await browser.newContext();
+  const auditeeContext = await browser.newContext();
+  const verificationContext = await browser.newContext();
+  let virtualPasskey: { client: CDPSession; authenticatorId: string } | null = null;
+
+  try {
+    const internalPage = await loginInternalUser(internalContext, {
+      amoSlug: data.amo_slug,
+      email: data.realtime_user_a_email,
+      password: data.realtime_password,
+    });
+    watchServerFailures(internalPage, internalFailures);
+    virtualPasskey = await installVirtualPasskey(internalContext, internalPage);
+
+    const closingPath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.ceremony_audit_ref)}/closing?tab=report`;
+    await internalPage.goto(closingPath, { waitUntil: "domcontentloaded" });
+    await expect(internalPage.getByRole("heading", { name: new RegExp(`${data.ceremony_audit_ref} · Same-day closing and archive browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
+    await expect(internalPage.getByText("0", { exact: true }).last()).toBeVisible();
+
+    const generate = internalPage.getByRole("button", { name: "Generate closing report draft" });
+    await expect(generate).toBeEnabled();
+    await generate.click();
+    await expect(internalPage.getByRole("status")).toContainText("Closing report snapshot generated", { timeout: 30_000 });
+    await expect(internalPage.getByText("Artifact SHA-256")).toBeVisible();
+
+    const downloadPromise = internalPage.waitForEvent("download");
+    await internalPage.getByRole("button", { name: "Preview / download" }).click();
+    const generatedDownload = await downloadPromise;
+    expect(await generatedDownload.path()).toBeTruthy();
+
+    await internalPage.getByRole("button", { name: "Adopt governed draft" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Generated report adopted as a governed draft revision", { timeout: 30_000 });
+    await expect(internalPage.getByText(/R1 · DRAFT/i)).toBeVisible();
+    const draftSha = await internalPage.locator("dt", { hasText: "SHA-256" }).locator("..").locator("code").first().innerText();
+    expect(draftSha).toMatch(/^[0-9a-f]{64}$/i);
+
+    const auditeePage = await auditeeContext.newPage();
+    watchServerFailures(auditeePage, auditeeFailures);
+    await auditeePage.goto(`/qms/audit-access/${encodeURIComponent(data.ceremony_auditee_token)}`, { waitUntil: "domcontentloaded" });
+    await expect(auditeePage.getByRole("heading", { name: new RegExp(`${data.ceremony_audit_ref} · Same-day closing and archive browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
+    await expect(auditeePage.getByLabel("Closing meeting acknowledgement")).toBeVisible({ timeout: 30_000 });
+    await expect(auditeePage.getByText(data.ceremony_car_number)).toBeVisible();
+    await auditeePage.getByLabel("Comments").fill("Closing draft reviewed during the same-day closing meeting; receipt acknowledged without waiving CAR response rights.");
+    await auditeePage.getByRole("button", { name: "Record closing response" }).click();
+    await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
+
+    await internalPage.getByRole("button", { name: "Refresh" }).click();
+    await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
+    await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
+    await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
+    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
+
+    await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
+    await internalPage.getByRole("button", { name: "Register passkey" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Passkey registered for governed Quality approvals", { timeout: 30_000 });
+    await internalPage.getByRole("button", { name: "Approve exact report with passkey" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Passkey approval recorded against the exact approved report SHA-256", { timeout: 30_000 });
+    await expect(internalPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
+
+    const issue = internalPage.getByRole("button", { name: "Issue passkey-approved report" });
+    await expect(issue).toBeEnabled();
+    await issue.click();
+    await expect(internalPage.getByRole("status")).toContainText("ISSUE recorded", { timeout: 30_000 });
+    await expect(internalPage.getByText(/Issued R1/i)).toBeVisible();
+
+    await internalPage.getByRole("button", { name: "Create public verification link" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("purpose-bound verification link was created", { timeout: 30_000 });
+    const verificationHref = await internalPage.getByText("Verification URL").locator("..").getByRole("link").getAttribute("href");
+    expect(verificationHref).toBeTruthy();
+
+    const verificationPage = await verificationContext.newPage();
+    watchServerFailures(verificationPage, verificationFailures);
+    await verificationPage.goto(verificationHref!, { waitUntil: "domcontentloaded" });
+    await expect(verificationPage.getByRole("heading", { name: new RegExp(`${data.ceremony_audit_ref} · Same-day closing and archive browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
+    await expect(verificationPage.getByText("Valid governed record")).toBeVisible();
+    await expect(verificationPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
+    const governedSha = (await verificationPage.locator("dt", { hasText: "Governed SHA-256" }).locator("..").locator("code").innerText()).trim();
+    expect(governedSha).toBe(draftSha);
+    await verificationPage.getByLabel("SHA-256").fill(governedSha);
+    await verificationPage.getByRole("button", { name: "Compare hash" }).click();
+    await expect(verificationPage.getByRole("status")).toContainText("Hash matches the governed artifact", { timeout: 30_000 });
+
+    await auditeePage.getByRole("button", { name: "Refresh" }).click();
+    await expect(auditeePage.getByLabel("Issued audit report")).toBeVisible({ timeout: 30_000 });
+    const issuedDownloadPromise = auditeePage.waitForEvent("download");
+    await auditeePage.getByRole("button", { name: "Download issued report" }).click();
+    const issuedDownload = await issuedDownloadPromise;
+    expect(await issuedDownload.path()).toBeTruthy();
+    await auditeePage.getByRole("button", { name: "Acknowledge issued report" }).click();
+    await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision and checksum", { timeout: 30_000 });
+
+    const closeExecution = internalPage.getByRole("button", { name: "Close audit execution" });
+    await expect(closeExecution).toBeEnabled();
+    await closeExecution.click();
+    await expect(internalPage.getByRole("status")).toContainText("Execution closed. CAR/CAPA follow-up remains open", { timeout: 30_000 });
+    await expect(internalPage.getByText(/CAR status is OPEN/i)).toBeVisible();
+
+    const archivePath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.ceremony_audit_ref)}/archive?tab=evidence`;
+    await internalPage.goto(archivePath, { waitUntil: "domcontentloaded" });
+    await expect(internalPage.getByRole("region", { name: "Audit archive and retention workspace" })).toBeVisible({ timeout: 30_000 });
+    await expect(internalPage.getByText("QMS-AUDIT-7Y", { exact: true })).toBeVisible();
+    await internalPage.getByRole("button", { name: "Generate governed archive" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Immutable archive manifest and package generated", { timeout: 30_000 });
+    await expect(internalPage.getByText("CAR · 1", { exact: true })).toBeVisible();
+    await expect(internalPage.getByText("SIGNATURE EVIDENCE · 1", { exact: true })).toBeVisible();
+    await expect(internalPage.getByText("REPORT REVISION · 1", { exact: true })).toBeVisible();
+
+    const archiveDownloadPromise = internalPage.waitForEvent("download");
+    await internalPage.getByRole("button", { name: "Download verified package" }).click();
+    const archiveDownload = await archiveDownloadPromise;
+    expect(await archiveDownload.path()).toBeTruthy();
+
+    await internalPage.getByLabel("Legal hold reference").fill("CASE-QMS-LIVE-992");
+    await internalPage.getByLabel("Legal hold reason").fill("Preserve the completed acceptance audit while legal-hold controls are exercised.");
+    await internalPage.getByLabel("Legal hold governing basis").fill("Governed Quality archive acceptance and retention control validation.");
+    await internalPage.getByRole("button", { name: "Place legal hold" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Legal hold placed", { timeout: 30_000 });
+    await expect(internalPage.getByText("CASE-QMS-LIVE-992", { exact: true })).toBeVisible();
+    await internalPage.getByRole("button", { name: "Release" }).click();
+    await expect(internalPage.getByRole("status")).toContainText("Legal hold released with an append-only release event", { timeout: 30_000 });
+    await expect(internalPage.getByText("No active legal holds.")).toBeVisible();
+
+    expect(internalFailures).toEqual([]);
+    expect(auditeeFailures).toEqual([]);
+    expect(verificationFailures).toEqual([]);
+  } finally {
+    if (virtualPasskey) await removeVirtualPasskey(virtualPasskey.client, virtualPasskey.authenticatorId).catch(() => undefined);
+    await Promise.allSettled([internalContext.close(), auditeeContext.close(), verificationContext.close()]);
   }
 });
