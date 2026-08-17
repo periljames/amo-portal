@@ -674,7 +674,7 @@ const QMSTrainingUserPage: React.FC = () => {
     if (coursePhase(selectedCourse) !== "INITIAL") return null;
     const family = courseFamilyKey(selectedCourse);
     if (!family) return null;
-    return courses.find((course) => coursePhase(course) === "REFRESHER" && courseFamilyKey(course) === family) || null;
+    return courses.find((course) => coursePhase(course) === "RECURRENT" && courseFamilyKey(course) === family) || null;
   }, [courses, selectedCourse]);
   const selectedCoursePhase = coursePhase(selectedCourse);
   const derivedValidUntil = useMemo(() => {
