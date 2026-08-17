@@ -19,14 +19,14 @@ export type TrainingCourseCategory =
 export type TrainingKind = "INITIAL" | "CONTINUATION" | "RECURRENT" | "REFRESHER" | "OTHER";
 export type TrainingDeliveryMethod = "CLASSROOM" | "ONLINE" | "OJT" | "MIXED" | "OTHER";
 export type TrainingEventStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
-export type TrainingParticipantStatus = "SCHEDULED" | "INVITED" | "CONFIRMED" | "ATTENDED" | "NO_SHOW" | "CANCELLED" | "DEFERRED";
+export type TrainingParticipantStatus = "SCHEDULED" | "INVITED" | "CONFIRMED" | "WAITLISTED" | "ATTENDED" | "NO_SHOW" | "CANCELLED" | "DEFERRED";
 export type TrainingRequirementScope = "ALL" | "DEPARTMENT" | "JOB_ROLE" | "USER";
-export type DeferralStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+export type DeferralStatus = "PENDING" | "RETURNED_FOR_INFORMATION" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
 export type DeferralReasonCategory = "ILLNESS" | "OPERATIONAL_REQUIREMENTS" | "PERSONAL_EMERGENCY" | "PROVIDER_CANCELLATION" | "SYSTEM_FAILURE" | "OTHER";
 export type TrainingNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";
 export type TrainingRecordVerificationStatus = "PENDING" | "VERIFIED" | "REJECTED";
 export type TrainingFileKind = "CERTIFICATE" | "AMEL" | "LICENSE" | "EVIDENCE" | "OTHER";
-export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "RETURNED" | "REJECTED";
 
 export interface TrainingCourseRead {
   id: string;

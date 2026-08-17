@@ -421,7 +421,7 @@ class TrainingEventParticipantBase(BaseModel):
     user_id: str = Field(..., description="User id (person assigned to this event).")
     status: TrainingParticipantStatus = Field(
         TrainingParticipantStatus.INVITED,
-        description="SCHEDULED / INVITED / CONFIRMED / ATTENDED / NO_SHOW / CANCELLED / DEFERRED.",
+        description="SCHEDULED / INVITED / CONFIRMED / WAITLISTED / ATTENDED / NO_SHOW / CANCELLED / DEFERRED.",
     )
     attendance_note: Optional[str] = None
     notes: Optional[str] = Field(None, description="General notes about the participant for this event.")
@@ -639,7 +639,7 @@ class TrainingFileCreate(TrainingFileBase):
 
 
 class TrainingFileReviewUpdate(BaseModel):
-    review_status: TrainingFileReviewStatus = Field(..., description="PENDING / APPROVED / REJECTED.")
+    review_status: TrainingFileReviewStatus = Field(..., description="PENDING / APPROVED / RETURNED / REJECTED.")
     review_comment: Optional[str] = None
 
 

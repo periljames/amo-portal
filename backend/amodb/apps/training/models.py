@@ -88,6 +88,7 @@ class TrainingParticipantStatus(str, enum.Enum):
     SCHEDULED = "SCHEDULED"
     INVITED = "INVITED"
     CONFIRMED = "CONFIRMED"
+    WAITLISTED = "WAITLISTED"
     ATTENDED = "ATTENDED"
     NO_SHOW = "NO_SHOW"
     CANCELLED = "CANCELLED"
@@ -96,8 +97,10 @@ class TrainingParticipantStatus(str, enum.Enum):
 
 class DeferralStatus(str, enum.Enum):
     PENDING = "PENDING"
+    RETURNED_FOR_INFORMATION = "RETURNED_FOR_INFORMATION"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
 
 
@@ -142,6 +145,7 @@ class TrainingFileKind(str, enum.Enum):
 class TrainingFileReviewStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
+    RETURNED = "RETURNED"
     REJECTED = "REJECTED"
 
 

@@ -4740,8 +4740,19 @@ def update_deferral_request(
     if not deferral:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deferral request not found.")
 
+    if str(current_user.id) in {str(deferral.user_id), str(deferral.requested_by_user_id or "")}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The learner/requester cannot decide their own deferral.",
+        )
+
     data = payload.model_dump(exclude_unset=True)
     status_value = data.get("status")
+    if status_value == training_models.DeferralStatus.RETURNED_FOR_INFORMATION and not (data.get("decision_comment") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Returned deferrals require a reviewer comment explaining what information is needed.",
+        )
 
     if "requested_new_due_date" in data and data["requested_new_due_date"] is not None:
         if data["requested_new_due_date"] < deferral.original_due_date:
@@ -4995,7 +5006,9 @@ def upload_training_file(
             sha.update(chunk)
             out.write(chunk)
 
-    auto_approved = bool(is_editor and owner.id != current_user.id or is_editor)
+    # Governance: upload permission is not review permission. Every evidence
+    # upload enters independent review, including files uploaded by Training editors.
+    auto_approved = False
     f = training_models.TrainingFile(
         id=file_id,
         amo_id=current_user.amo_id,
@@ -5109,6 +5122,17 @@ def review_training_file(
     if not f:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training file not found.")
 
+    if str(f.owner_user_id) == str(current_user.id) or str(f.uploaded_by_user_id or "") == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Training evidence must be reviewed by someone other than the learner/uploader.",
+        )
+    if payload.review_status == training_models.TrainingFileReviewStatus.RETURNED and not (payload.review_comment or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Returned evidence requires a reviewer comment explaining what must be corrected.",
+        )
+
     f.review_status = payload.review_status
     f.review_comment = payload.review_comment
     f.reviewed_at = datetime.utcnow()
@@ -5120,7 +5144,12 @@ def review_training_file(
         accounts_models.User.amo_id == current_user.amo_id,
     ).first()
     if owner:
-        title = "Evidence approved" if payload.review_status == training_models.TrainingFileReviewStatus.APPROVED else "Evidence rejected"
+        if payload.review_status == training_models.TrainingFileReviewStatus.APPROVED:
+            title = "Evidence approved"
+        elif payload.review_status == training_models.TrainingFileReviewStatus.RETURNED:
+            title = "Evidence returned for correction"
+        else:
+            title = "Evidence rejected"
         body = f"Your document '{f.original_filename}' has been {payload.review_status}."
         if payload.review_comment:
             body += f"\n\nComment: {payload.review_comment}"
