@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
 
 from . import models
@@ -112,20 +113,12 @@ def declare_audit_independence(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    user = db.query(models.account_models.User).filter(
-        models.account_models.User.amo_id == ctx.amo_id,
-        models.account_models.User.id == payload.user_id,
-        models.account_models.User.is_active.is_(True),
-        models.account_models.User.is_system_account.is_(False),
-    ).first() if hasattr(models, "account_models") else None
-    if user is None:
-        from amodb.apps.accounts import models as account_models
-        user = db.query(account_models.User).filter(
-            account_models.User.amo_id == ctx.amo_id,
-            account_models.User.id == payload.user_id,
-            account_models.User.is_active.is_(True),
-            account_models.User.is_system_account.is_(False),
-        ).first()
+    user = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.id == payload.user_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).first()
     if user is None:
         raise HTTPException(status_code=422, detail="Selected person is inactive, belongs to another tenant, or does not exist.")
 
@@ -189,10 +182,14 @@ def update_audit_assignments(
     results = [_evaluate(db, audit=audit, amo_id=ctx.amo_id, user_id=user_id, role=role) for role, user_id in selected]
     _blocked(results)
 
+    previous = {
+        "lead_auditor_user_id": audit.lead_auditor_user_id,
+        "observer_auditor_user_id": audit.observer_auditor_user_id,
+        "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+    }
     audit.lead_auditor_user_id = payload.lead_auditor_user_id or None
     audit.observer_auditor_user_id = payload.observer_auditor_user_id or None
     audit.assistant_auditor_user_id = payload.assistant_auditor_user_id or None
-    audit.updated_by_user_id = ctx.user_id
     db.commit()
     db.refresh(audit)
     return {
@@ -200,6 +197,7 @@ def update_audit_assignments(
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "previous_assignments": previous,
         "assignment_gate": results,
         "reason": payload.reason.strip(),
     }
