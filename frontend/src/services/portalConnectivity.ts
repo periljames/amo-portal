@@ -206,46 +206,52 @@ export function onPortalConnectivityChange(
 }
 
 export function markPortalSessionExpired(reason = "session-expired"): void {
-  update("SESSION_EXPIRED", { reason, retryAt: null });
+  const changed = snapshot.state !== "SESSION_EXPIRED" || snapshot.reason !== reason;
+  update("SESSION_EXPIRED", { reason, retryAt: null }, changed);
   if (typeof window !== "undefined" && timer !== null) window.clearTimeout(timer);
 }
 
 export function notePortalResponse(response: Response): void {
   if (response.status === 503) {
     const delay = retryAfterMs(response) ?? nextDelay();
+    const reason = response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE";
+    const changed = snapshot.state !== "DEGRADED" || snapshot.reason !== reason;
     update("DEGRADED", {
       checkedAt: Date.now(),
       attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
-      reason: response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE",
+      reason,
       retryAt: Date.now() + delay,
-    });
+    }, changed);
     schedule(delay);
     return;
   }
   if (response.ok && snapshot.state !== "SESSION_EXPIRED") {
     const now = Date.now();
+    const changed = snapshot.state !== "ONLINE" || snapshot.reason !== null;
     update("ONLINE", {
       checkedAt: now,
       lastReadyAt: now,
       attempt: 0,
       reason: null,
-    });
+    }, changed);
   }
 }
 
 export function notePortalNetworkFailure(reason = "network-unreachable"): void {
+  const changed = snapshot.state !== "OFFLINE" || snapshot.reason !== reason;
   update("OFFLINE", {
     checkedAt: Date.now(),
     attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
     reason,
-  });
+  }, changed);
   schedule();
 }
 
 export function probePortalReadiness(force = false): Promise<PortalConnectivitySnapshot> {
   if (probeInFlight) return probeInFlight;
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    const next = update("OFFLINE", { checkedAt: Date.now(), reason: "device-offline" });
+    const changed = snapshot.state !== "OFFLINE" || snapshot.reason !== "device-offline";
+    const next = update("OFFLINE", { checkedAt: Date.now(), reason: "device-offline" }, changed);
     schedule();
     return Promise.resolve(next);
   }
@@ -254,30 +260,40 @@ export function probePortalReadiness(force = false): Promise<PortalConnectivityS
     return Promise.resolve(snapshot);
   }
 
-  update("RECOVERING", { reason: snapshot.reason }, false);
+  // A routine health probe while already online is an observation, not a
+  // connectivity transition. Keeping ONLINE here prevents each probe from
+  // manufacturing RECOVERING -> ONLINE events that can trigger subscribers to
+  // refetch and create request/revalidation feedback loops.
+  if (snapshot.state !== "ONLINE") {
+    update("RECOVERING", { reason: snapshot.reason }, false);
+  }
   probeInFlight = (async () => {
     try {
       const { response, legacy } = await requestReadiness();
       const parsed = await parseReadyResponse(response);
       const now = Date.now();
       if (parsed.ready) {
+        const reason = legacy ? "legacy-health-compatible" : null;
+        const changed = snapshot.state !== "ONLINE" || snapshot.reason !== reason;
         const next = update("ONLINE", {
           checkedAt: now,
           lastReadyAt: now,
           attempt: 0,
           retryAt: now + HEALTHY_PROBE_MS,
-          reason: legacy ? "legacy-health-compatible" : null,
-        });
+          reason,
+        }, changed);
         schedule(HEALTHY_PROBE_MS);
         return next;
       }
       const delay = retryAfterMs(response) ?? nextDelay();
-      const next = update(parsed.degraded ? "DEGRADED" : "OFFLINE", {
+      const state = parsed.degraded ? "DEGRADED" : "OFFLINE";
+      const changed = snapshot.state !== state || snapshot.reason !== parsed.reason;
+      const next = update(state, {
         checkedAt: now,
         attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
         retryAt: now + delay,
         reason: parsed.reason,
-      });
+      }, changed);
       schedule(delay);
       return next;
     } catch (error) {
@@ -299,8 +315,9 @@ export function startPortalConnectivity(): () => void {
       if (event.data?.type !== "snapshot" || !event.data.snapshot) return;
       const incoming = event.data.snapshot;
       if (incoming.checkedAt && (!snapshot.checkedAt || incoming.checkedAt >= snapshot.checkedAt)) {
+        const changed = incoming.state !== snapshot.state || incoming.reason !== snapshot.reason;
         snapshot = incoming;
-        window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: snapshot }));
+        if (changed) window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: snapshot }));
       }
     };
   }
