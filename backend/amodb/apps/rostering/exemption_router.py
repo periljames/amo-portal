@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
+from ..doc_control import models as doc_models
 from ..workforce import permissions as workforce_permissions
 from . import common, exemption_service
 from .consent_models import RosterRegulatoryExemption
@@ -38,6 +39,18 @@ class ExemptionRead(BaseModel):
     created_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ExemptionEvidenceRead(BaseModel):
+    id: str
+    document_number: str
+    title: str
+    document_type: str
+    status: str
+    version: str
+    revision_no: int
+    effective_date: date | None = None
+    restricted: bool
 
 
 class ExemptionCreate(BaseModel):
@@ -80,6 +93,40 @@ def _row_or_404(db: Session, *, amo_id: str, exemption_id: str, lock: bool = Fal
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "ROSTER_REGULATORY_EXEMPTION_NOT_FOUND"})
     return row
+
+
+@router.get("/supporting-documents", response_model=list[ExemptionEvidenceRead])
+def supporting_documents(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """List current tenant-owned controlled documents eligible as Authority evidence."""
+
+    _require_manage(db, current_user)
+    amo_id = _amo(current_user)
+    rows = db.query(doc_models.ControlledDocument).filter(
+        doc_models.ControlledDocument.tenant_id == amo_id,
+        doc_models.ControlledDocument.current_asset_id.isnot(None),
+    ).order_by(
+        doc_models.ControlledDocument.doc_id.asc(),
+        doc_models.ControlledDocument.revision_no.desc(),
+    ).all()
+    disallowed = {"draft", "obsolete", "superseded", "archived", "withdrawn", "cancelled"}
+    return [
+        ExemptionEvidenceRead(
+            id=row.id,
+            document_number=row.doc_id,
+            title=row.title,
+            document_type=row.doc_type,
+            status=row.status,
+            version=row.version,
+            revision_no=int(row.revision_no or 0),
+            effective_date=row.effective_date,
+            restricted=bool(row.restricted_flag),
+        )
+        for row in rows
+        if str(row.status or "").strip().lower() not in disallowed
+    ]
 
 
 @router.get("", response_model=list[ExemptionRead])
@@ -155,12 +202,16 @@ def revoke_exemption(
 ):
     _require_manage(db, current_user)
     row = _row_or_404(db, amo_id=_amo(current_user), exemption_id=exemption_id, lock=True)
-    row = exemption_service.revoke_exemption(
-        db,
-        row=row,
-        actor_user_id=current_user.id,
-        reason=payload.reason,
-    )
-    db.commit()
-    db.refresh(row)
-    return row
+    try:
+        row = exemption_service.revoke_exemption(
+            db,
+            row=row,
+            actor_user_id=current_user.id,
+            reason=payload.reason,
+        )
+        db.commit()
+        db.refresh(row)
+        return row
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "ROSTER_REGULATORY_EXEMPTION_INVALID", "message": str(exc)}) from exc
