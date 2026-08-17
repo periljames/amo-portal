@@ -120,6 +120,11 @@ jobs:
         working-directory: backend
         run: |
           python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import uuid
+
           from amodb.main import app as _app  # noqa: F401
           from amodb.apps.quality import models
           from amodb.apps.quality.audit_checklist_execution_models import (
@@ -128,18 +133,21 @@ jobs:
               QualityAuditFieldworkParticipantContribution,
           )
           from amodb.database import WriteSessionLocal
-          from amodb.scripts.seed_qms_live_audit_e2e import CHECKLIST_ITEM_ID, FINDING_ID
+
+          fixture = json.loads(Path(os.environ["E2E_QMS_LIVE_FIXTURE"]).read_text(encoding="utf-8"))
+          checklist_item_id = uuid.UUID(fixture["checklist_item_id"])
+          finding_id = uuid.UUID(fixture["finding_id"])
 
           db = WriteSessionLocal()
           try:
-              governance = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=CHECKLIST_ITEM_ID).one()
+              governance = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=checklist_item_id).one()
               assert governance.canonical_response_status == "COMPLIANT", governance.canonical_response_status
               assert governance.entity_version == 2, governance.entity_version
               assert governance.updated_by_participant_id is not None
-              assert db.query(QualityAuditFieldworkMutationReceipt).filter_by(checklist_item_id=CHECKLIST_ITEM_ID).count() == 1
-              contribution = db.query(QualityAuditFieldworkParticipantContribution).filter_by(checklist_item_id=CHECKLIST_ITEM_ID).one()
+              assert db.query(QualityAuditFieldworkMutationReceipt).filter_by(checklist_item_id=checklist_item_id).count() == 1
+              contribution = db.query(QualityAuditFieldworkParticipantContribution).filter_by(checklist_item_id=checklist_item_id).one()
               assert contribution.auditor_notes == "Verified in the real browser against the controlled DMS revision."
-              finding = db.get(models.QMSAuditFinding, FINDING_ID)
+              finding = db.get(models.QMSAuditFinding, finding_id)
               assert finding is not None and finding.acknowledged_at is not None
               assert finding.acknowledged_by_email == "auditee@example.com"
               print("Real browser fieldwork, participant attribution, idempotency receipt and auditee acknowledgement persisted in PostgreSQL")
