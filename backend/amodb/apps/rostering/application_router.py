@@ -13,6 +13,7 @@ from . import (
     code_registry,
     compliance_policy,
     consent_policy,
+    exemption_policy,
     lineage,
     roster_control,
     template_usage_policy,
@@ -25,6 +26,7 @@ from .calendar_subscription_status_router import router as calendar_subscription
 from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
 from .consent_router import router as consent_router
+from .exemption_router import router as exemption_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from ..workforce import pattern_rest_policy
@@ -56,6 +58,9 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 
 template_usage_policy.install_code_registry_policy(code_registry)
 compliance_policy.install_validation_policy()
+# Exemption policy deliberately wraps the statutory policy after it is installed:
+# only a verified Authority record can transform an underlying hard finding.
+exemption_policy.install_validation_policy()
 
 # All planners share the same rest semantics: an OFF pattern day without an
 # explicit template is persisted as canonical RD rather than anonymous empty
@@ -81,6 +86,7 @@ router.include_router(roster_control_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
 router.include_router(consent_router)
+router.include_router(exemption_router)
 router.include_router(rest_code_canonicalization_router)
 router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
