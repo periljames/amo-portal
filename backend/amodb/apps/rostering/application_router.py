@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from . import (
     calendar_subscriptions,
     code_registry,
+    compliance_audit_policy,
     compliance_policy,
     consent_notification_policy,
     consent_policy,
@@ -18,10 +19,12 @@ from . import (
     extended_duty_day_policy,
     extended_duty_policy,
     extended_duty_validation_policy,
+    lifecycle_error_policy,
     lineage,
     protected_rest_exact_policy,
     roster_control,
     statutory_rule_policy,
+    structured_error_policy,
     template_usage_policy,
     version_copy_policy,
 )
@@ -36,6 +39,7 @@ from .exemption_router import router as exemption_router
 from .extended_duty_router import router as extended_duty_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
+from .workflow_state_router import router as workflow_state_router
 from ..workforce import pattern_rest_policy
 from ..workforce import pay_policy_store
 from ..workforce import services as workforce_services
@@ -80,6 +84,10 @@ extended_duty_validation_policy.install()
 # Authority exemptions wrap the final statutory finding set; they remain the
 # only path that can report a hard rule as compliant under a verified exemption.
 exemption_policy.install_validation_policy()
+# Every canonical validation pass is audited. New hard blockers and resolved
+# hard blockers are traced, and the existing notification channel informs the
+# planner without creating a parallel notification subsystem.
+compliance_audit_policy.install()
 
 # All planners share the same rest semantics: an OFF pattern day without an
 # explicit template is persisted as canonical RD rather than anonymous empty
@@ -109,6 +117,12 @@ extended_duty_policy.install()
 # public service facade so single, bulk and generated assignments cannot bypass
 # acknowledgement policy, and submit/approve/publish always re-check it.
 consent_policy.install_service_policy(rostering_route_module.services)
+# Convert statutory lifecycle failures into actionable domain errors after all
+# workflow policies are installed, preserving consent errors unchanged.
+lifecycle_error_policy.install_service_policy(rostering_route_module.services)
+# Keep domain error codes/metadata intact at the legacy FastAPI translation
+# boundary instead of collapsing them to generic submit/publish failures.
+structured_error_policy.install(rostering_route_module)
 
 router = APIRouter()
 router.include_router(calendar_subscription_status_router)
@@ -118,6 +132,7 @@ router.include_router(code_registry_router)
 router.include_router(consent_router)
 router.include_router(exemption_router)
 router.include_router(extended_duty_router)
+router.include_router(workflow_state_router)
 router.include_router(rest_code_canonicalization_router)
 router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
