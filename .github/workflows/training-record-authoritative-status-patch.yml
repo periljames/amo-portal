@@ -59,6 +59,7 @@ jobs:
               if marker not in text:
                   raise SystemExit('buildRows marker missing')
               text = text.replace(marker, helper + marker, 1)
+
           old_tr = '''<tr key={row.key} onContextMenu={(event) => {
             event.preventDefault();
             event.currentTarget.querySelector("details")?.setAttribute("open", "");
@@ -75,6 +76,7 @@ jobs:
           >'''
           if old_tr in text:
               text = text.replace(old_tr, new_tr, 1)
+
           old_article = '''<article className="trl-card" key={row.key} onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}>'''
           new_article = '''<article className="trl-card" key={row.key}
             onContextMenu={(event) => { event.preventDefault(); event.currentTarget.querySelector("details.trl-menu")?.setAttribute("open", ""); }}
@@ -85,36 +87,8 @@ jobs:
           >'''
           if old_article in text:
               text = text.replace(old_article, new_article, 1)
-          component.write_text(text, encoding='utf-8')
 
-          backend = Path('backend/amodb/apps/training/record_presentation.py')
-          text = backend.read_text(encoding='utf-8')
-          old = '''    if db is not None:
-              try:
-                  settings = db.query(accounts_models.PlatformSettings).first()
-              except Exception:
-                  settings = None
-              if settings is not None and getattr(settings, "api_base_url", None):
-                  candidates.append(str(settings.api_base_url))
-          for env_name in ("APP_PUBLIC_BASE_URL", "PUBLIC_APP_URL", "PLATFORM_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"):
-              value = os.getenv(env_name)
-              if value:
-                  candidates.append(value)'''
-          new = '''    for env_name in ("APP_PUBLIC_BASE_URL", "PUBLIC_APP_URL", "PLATFORM_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"):
-              value = os.getenv(env_name)
-              if value:
-                  candidates.append(value)
-          if db is not None:
-              try:
-                  settings = db.query(accounts_models.PlatformSettings).first()
-              except Exception:
-                  settings = None
-              if settings is not None and getattr(settings, "api_base_url", None):
-                  candidates.append(str(settings.api_base_url))'''
-          if old not in text:
-              raise SystemExit('canonical origin candidate block did not match')
-          text = text.replace(old, new, 1)
-          backend.write_text(text, encoding='utf-8')
+          component.write_text(text, encoding='utf-8')
           PY
       - name: Commit cleaned sources
         run: |
@@ -124,6 +98,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/pages/QMSTrainingUserPage.tsx frontend/src/components/training/TrainingRequirementList.tsx backend/amodb/apps/training/record_presentation.py
+          git add frontend/src/pages/QMSTrainingUserPage.tsx frontend/src/components/training/TrainingRequirementList.tsx
           git commit -m "fix(training): keep compliance status authoritative [training-authoritative-status-applied]"
           git push origin HEAD:codex/training-record-redesign-20260817
