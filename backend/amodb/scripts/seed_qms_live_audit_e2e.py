@@ -22,8 +22,14 @@ if str(BACKEND_ROOT) not in sys.path:
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
+    QualityAuditRetentionPolicyRevision,
+)
 from amodb.apps.quality.audit_checklist_execution_models import (  # noqa: E402
     QualityAuditChecklistExecutionGovernance,
+)
+from amodb.apps.quality.audit_closing_assurance_models import (  # noqa: E402
+    QualityAuditOutputPolicyRevision,
 )
 from amodb.apps.quality.audit_external_access_models import (  # noqa: E402
     QualityAuditAccessGrant,
@@ -32,7 +38,14 @@ from amodb.apps.quality.audit_external_access_models import (  # noqa: E402
     QualityExternalIdentity,
 )
 from amodb.apps.quality.audit_external_access_router import _hash_token, _make_access_token  # noqa: E402
+from amodb.apps.quality.audit_occurrence_completion_models import (  # noqa: E402
+    QualityAuditClosingNarrative,
+    QualityAuditMeeting,
+)
 from amodb.apps.quality.enums import (  # noqa: E402
+    CARPriority,
+    CARProgram,
+    CARStatus,
     FindingLevel,
     QMSAuditKind,
     QMSAuditStatus,
@@ -64,10 +77,25 @@ REALTIME_CHECKLIST_ITEM_ID = uuid.UUID("00000000-0000-4000-8000-000000000717")
 REALTIME_GOVERNANCE_ID = "00000000-0000-4000-8000-000000000718"
 QUALITY_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8000-000000000719"
 
+CEREMONY_AUDIT_ID = uuid.UUID("00000000-0000-4000-8000-000000000720")
+CEREMONY_CHECKLIST_ITEM_ID = uuid.UUID("00000000-0000-4000-8000-000000000721")
+CEREMONY_GOVERNANCE_ID = "00000000-0000-4000-8000-000000000722"
+CEREMONY_FINDING_ID = uuid.UUID("00000000-0000-4000-8000-000000000723")
+CEREMONY_RELEASE_EVENT_ID = "00000000-0000-4000-8000-000000000724"
+CEREMONY_CAR_ID = uuid.UUID("00000000-0000-4000-8000-000000000725")
+CEREMONY_AUDITEE_IDENTITY_ID = "00000000-0000-4000-8000-000000000726"
+CEREMONY_AUDITEE_PARTICIPANT_ID = "00000000-0000-4000-8000-000000000727"
+CEREMONY_AUDITEE_GRANT_ID = "00000000-0000-4000-8000-000000000728"
+OUTPUT_POLICY_ID = "00000000-0000-4000-8000-000000000729"
+RETENTION_POLICY_ID = "00000000-0000-4000-8000-000000000730"
+CEREMONY_CLOSING_NARRATIVE_ID = uuid.UUID("00000000-0000-4000-8000-000000000731")
+CEREMONY_CLOSING_MEETING_ID = uuid.UUID("00000000-0000-4000-8000-000000000732")
+
 AMO_CODE = "QMSLIVE"
 AMO_SLUG = "qmslive"
 AUDIT_REF = "QAR-MO-26-990"
 REALTIME_AUDIT_REF = "QAR-MO-26-991"
+CEREMONY_AUDIT_REF = "QAR-MO-26-992"
 REALTIME_USER_A_EMAIL = "qms-live-a@example.com"
 REALTIME_USER_B_EMAIL = "qms-live-b@example.com"
 REALTIME_PASSWORD = "QmsLive!2026-Local"
@@ -176,6 +204,32 @@ def seed() -> None:
             metadata_json=json.dumps({"source": "qms_live_audit_real_browser_ci"}),
         ))
 
+        db.add(QualityAuditOutputPolicyRevision(
+            id=OUTPUT_POLICY_ID,
+            amo_id=amo.id,
+            revision_no=1,
+            artifact_policy="REPORT_ONLY",
+            artifact_title="Governed QMS audit report",
+            artifact_statement=None,
+            rationale="The disposable acceptance tenant requires the signed and issued audit report as its governed closing output.",
+            created_by_user_id=user_a.id,
+        ))
+        db.add(QualityAuditRetentionPolicyRevision(
+            id=RETENTION_POLICY_ID,
+            amo_id=amo.id,
+            revision_no=1,
+            retention_class="QMS-AUDIT-7Y",
+            retention_start_event="EXECUTION_CLOSED",
+            duration_days=2555,
+            indefinite=False,
+            governing_basis="Governed CI retention policy proving archive, manifest, legal-hold and controlled disposition boundaries.",
+            review_before_disposition=True,
+            legal_hold_supported=True,
+            disposition_mode="PRESERVE_METADATA_DELETE_PACKAGE",
+            approving_capability="qms.audit.manage",
+            created_by_user_id=user_a.id,
+        ))
+
         audit = quality_models.QMSAudit(
             id=AUDIT_ID,
             amo_id=amo.id,
@@ -278,6 +332,83 @@ def seed() -> None:
             entity_version=1,
         ))
 
+        ceremony_audit = quality_models.QMSAudit(
+            id=CEREMONY_AUDIT_ID,
+            amo_id=amo.id,
+            domain=QMSDomain.AMO,
+            kind=QMSAuditKind.INTERNAL,
+            status=QMSAuditStatus.CLOSED,
+            audit_ref=CEREMONY_AUDIT_REF,
+            reference_family="QAR",
+            unit_code="MO",
+            ref_year=26,
+            ref_sequence=992,
+            title="Same-day closing and archive browser acceptance",
+            scope="Completed fieldwork carried through governed closing, report issue, follow-up separation and archive controls.",
+            criteria="Approved QMS manual, controlled audit procedure and applicable regulatory requirements.",
+            auditee="Closing Ceremony Auditee",
+            auditee_email="closing.auditee@example.com",
+            planned_start=date.today(),
+            planned_end=date.today(),
+            actual_start=date.today(),
+            actual_end=date.today(),
+            lead_auditor_user_id=user_a.id,
+            observer_auditor_user_id=user_b.id,
+            notify_auditors=False,
+            notify_auditees=False,
+        )
+        db.add(ceremony_audit)
+        db.flush()
+        ceremony_item = quality_models.QualityAuditChecklistItem(
+            id=CEREMONY_CHECKLIST_ITEM_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            section="Closing evidence",
+            checklist_ref="CHK-CLOSE-001",
+            requirement_ref="QMS-CLOSE-001",
+            prompt="Verify all sampled closing evidence is complete and traceable to the controlled audit record.",
+            response_status="COMPLIANT",
+            objective_evidence="Sampled controlled records were traced to the frozen checklist decision.",
+            sort_order=10,
+        )
+        db.add(ceremony_item)
+        db.flush()
+        db.add(QualityAuditChecklistExecutionGovernance(
+            id=CEREMONY_GOVERNANCE_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            checklist_item_id=ceremony_item.id,
+            canonical_response_status="COMPLIANT",
+            auditor_notes="Closing fieldwork complete; controlled evidence traced to the sampled requirement.",
+            evidence_references=[{"type": "CONTROLLED_RECORD", "reference": "QMS-CLOSE-EVIDENCE-001"}],
+            entity_version=2,
+            updated_by_user_id=user_a.id,
+        ))
+        db.add(QualityAuditClosingNarrative(
+            id=CEREMONY_CLOSING_NARRATIVE_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            management_summary="Fieldwork was completed during the planned operating cycle with one released corrective-action finding requiring follow-up.",
+            conclusion="The audited process remains acceptable subject to the governed corrective-action follow-up recorded in the linked CAR.",
+            positive_practices="Controlled records were readily traceable and auditee representatives were available throughout fieldwork.",
+            updated_by_user_id=user_a.id,
+        ))
+        db.add(QualityAuditMeeting(
+            id=CEREMONY_CLOSING_MEETING_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            meeting_type="CLOSING",
+            scheduled_start=now - timedelta(hours=1),
+            scheduled_end=now - timedelta(minutes=30),
+            location="QMS acceptance room",
+            conference_url=None,
+            agenda="Review findings, closing narrative, report acknowledgement and corrective-action handoff.",
+            status="COMPLETED",
+            notes="Closing meeting completed in the same operational cycle as fieldwork.",
+            created_by_user_id=user_a.id,
+            updated_by_user_id=user_a.id,
+        ))
+
         finding = quality_models.QMSAuditFinding(
             id=FINDING_ID,
             amo_id=amo.id,
@@ -304,6 +435,58 @@ def seed() -> None:
             reason="Release deterministic browser-acceptance finding to the auditee.",
             actor_user_id=None,
         ))
+
+        ceremony_finding = quality_models.QMSAuditFinding(
+            id=CEREMONY_FINDING_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            finding_ref=f"{CEREMONY_AUDIT_REF}-F-001",
+            finding_type=QMSFindingType.NON_CONFORMITY,
+            severity=QMSFindingSeverity.MINOR,
+            level=FindingLevel.LEVEL_3,
+            requirement_ref="QMS-CLOSE-001",
+            description="A sampled local index was not updated immediately after the controlled source revision was issued.",
+            objective_evidence="The controlled source was current; one local index retained the previous revision marker.",
+            target_close_date=date.today() + timedelta(days=30),
+            acknowledged_at=now,
+            acknowledged_by_name="Closing Ceremony Auditee",
+            acknowledged_by_email="closing.auditee@example.com",
+        )
+        db.add(ceremony_finding)
+        db.flush()
+        db.add(QualityAuditFindingReleaseEvent(
+            id=CEREMONY_RELEASE_EVENT_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            finding_id=ceremony_finding.id,
+            action="RELEASED",
+            include_objective_evidence=True,
+            released_evidence_refs=[],
+            reason="Release the closing-ceremony finding for the real auditee browser and linked CAR follow-up.",
+            actor_user_id=user_a.id,
+        ))
+        ceremony_car = quality_models.CorrectiveActionRequest(
+            id=CEREMONY_CAR_ID,
+            amo_id=amo.id,
+            program=CARProgram.QUALITY,
+            car_number="Q-2026-0992",
+            title="Update local controlled-document index",
+            summary="Reconcile the sampled local index to the current controlled source revision and prevent recurrence.",
+            requested_by_user_id=user_a.id,
+            assigned_to_user_id=user_b.id,
+            priority=CARPriority.MEDIUM,
+            status=CARStatus.OPEN,
+            invite_token="qms-live-real-browser-car-0992",
+            reminder_interval_days=7,
+            next_reminder_at=now + timedelta(days=7),
+            due_date=date.today() + timedelta(days=30),
+            target_closure_date=date.today() + timedelta(days=30),
+            finding_id=ceremony_finding.id,
+            root_cause_status="PENDING",
+            capa_status="PENDING",
+            evidence_required=True,
+        )
+        db.add(ceremony_car)
 
         external_identity = QualityExternalIdentity(
             id=EXTERNAL_IDENTITY_ID,
@@ -392,6 +575,49 @@ def seed() -> None:
         db.flush()
         auditee_token = _grant_token(amo_id=amo.id, grant=auditee_grant)
 
+        ceremony_auditee_identity = QualityExternalIdentity(
+            id=CEREMONY_AUDITEE_IDENTITY_ID,
+            amo_id=amo.id,
+            email="closing.auditee@example.com",
+            display_name="Closing Ceremony Auditee",
+            organisation="QMS Live Audit Browser Acceptance AMO",
+            identity_status="ACTIVE",
+            assurance_level="EMAIL_LINK",
+        )
+        db.add(ceremony_auditee_identity)
+        db.flush()
+        ceremony_auditee_participant = QualityAuditParticipant(
+            id=CEREMONY_AUDITEE_PARTICIPANT_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            participant_type="AUDITEE_GUEST",
+            external_identity_id=ceremony_auditee_identity.id,
+            role="AUDITEE",
+            permissions_json=[
+                "audit:read_summary",
+                "audit:read_progress",
+                "audit:read_released_findings",
+                "audit:acknowledge",
+            ],
+            status="INVITED",
+            invited_at=now,
+            expires_at=expires_at,
+        )
+        db.add(ceremony_auditee_participant)
+        db.flush()
+        ceremony_auditee_grant = QualityAuditAccessGrant(
+            id=CEREMONY_AUDITEE_GRANT_ID,
+            amo_id=amo.id,
+            audit_id=ceremony_audit.id,
+            participant_id=ceremony_auditee_participant.id,
+            token_hash="pending-ceremony-auditee",
+            scope_json=list(ceremony_auditee_participant.permissions_json),
+            expires_at=expires_at,
+        )
+        db.add(ceremony_auditee_grant)
+        db.flush()
+        ceremony_auditee_token = _grant_token(amo_id=amo.id, grant=ceremony_auditee_grant)
+
         db.commit()
 
         FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -412,6 +638,13 @@ def seed() -> None:
             "realtime_user_b_id": REALTIME_USER_B_ID,
             "realtime_user_b_email": REALTIME_USER_B_EMAIL,
             "realtime_password": REALTIME_PASSWORD,
+            "ceremony_audit_id": str(CEREMONY_AUDIT_ID),
+            "ceremony_audit_ref": CEREMONY_AUDIT_REF,
+            "ceremony_checklist_item_id": str(CEREMONY_CHECKLIST_ITEM_ID),
+            "ceremony_finding_id": str(CEREMONY_FINDING_ID),
+            "ceremony_car_id": str(CEREMONY_CAR_ID),
+            "ceremony_car_number": ceremony_car.car_number,
+            "ceremony_auditee_token": ceremony_auditee_token,
         }, indent=2), encoding="utf-8")
         print(f"Seeded real QMS Live Audit browser fixture at {FIXTURE_PATH}")
     except Exception:
