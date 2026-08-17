@@ -11,6 +11,28 @@ from . import common
 from .consent_models import RosterRegulatoryExemption
 
 UTC = timezone.utc
+_DISALLOWED_EVIDENCE_STATES = {"draft", "obsolete", "superseded", "archived", "withdrawn", "cancelled"}
+
+
+def _supporting_document(
+    db: Session,
+    *,
+    amo_id: str,
+    document_id: str,
+    require_current: bool = True,
+) -> doc_models.ControlledDocument:
+    document = db.query(doc_models.ControlledDocument).filter(
+        doc_models.ControlledDocument.tenant_id == amo_id,
+        doc_models.ControlledDocument.id == document_id,
+    ).first()
+    if document is None:
+        raise ValueError("Supporting exemption document was not found in this tenant")
+    state = str(document.status or "").strip().lower()
+    if require_current and state in _DISALLOWED_EVIDENCE_STATES:
+        raise ValueError("Supporting exemption evidence must be a current controlled document")
+    if require_current and not document.current_asset_id:
+        raise ValueError("Supporting exemption evidence has no current controlled asset")
+    return document
 
 
 def create_exemption(
@@ -31,12 +53,7 @@ def create_exemption(
 ) -> RosterRegulatoryExemption:
     if expiry_date < effective_date:
         raise ValueError("Exemption expiry date must be on or after its effective date")
-    document = db.query(doc_models.ControlledDocument).filter(
-        doc_models.ControlledDocument.tenant_id == amo_id,
-        doc_models.ControlledDocument.id == supporting_document_id,
-    ).first()
-    if document is None:
-        raise ValueError("Supporting exemption document was not found in this tenant")
+    _supporting_document(db, amo_id=amo_id, document_id=supporting_document_id)
     if personnel_id:
         common.require_user(db, amo_id=amo_id, user_id=personnel_id, active_only=False)
     row = RosterRegulatoryExemption(
@@ -78,6 +95,9 @@ def create_exemption(
 def verify_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_id: str) -> RosterRegulatoryExemption:
     if row.is_revoked:
         raise ValueError("A revoked regulatory exemption cannot be verified")
+    if row.verified_at is not None:
+        return row
+    _supporting_document(db, amo_id=row.amo_id, document_id=row.supporting_document_id)
     row.verified_by_user_id = actor_user_id
     row.verified_at = datetime.now(UTC)
     db.add(row)
@@ -93,6 +113,7 @@ def verify_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_
             "reference": row.exemption_reference,
             "regulation_provision": row.regulation_provision,
             "verified_at": row.verified_at.isoformat(),
+            "supporting_document_id": row.supporting_document_id,
         },
         critical=True,
     )
@@ -100,6 +121,8 @@ def verify_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_
 
 
 def revoke_exemption(db: Session, *, row: RosterRegulatoryExemption, actor_user_id: str, reason: str) -> RosterRegulatoryExemption:
+    if row.is_revoked:
+        raise ValueError("Regulatory exemption is already revoked")
     row.is_revoked = True
     row.revoked_at = datetime.now(UTC)
     row.revocation_reason = reason.strip()
@@ -141,6 +164,10 @@ def applicable_exemption(
     role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")) or "").upper()
     requested_assignments = set(assignment_ids or [])
     for row in rows:
+        try:
+            _supporting_document(db, amo_id=amo_id, document_id=row.supporting_document_id)
+        except ValueError:
+            continue
         if row.personnel_id and row.personnel_id != user_id:
             continue
         if row.role_applicability and row.role_applicability != role:
