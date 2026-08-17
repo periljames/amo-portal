@@ -1,5 +1,6 @@
 import { apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
+import { getApiBaseUrl } from "./config";
 
 export type EnrichedDeferral = {
   id: string;
@@ -52,6 +53,28 @@ export type AssessmentAttempt = {
   questions?: Array<Record<string, unknown>>;
   answers?: Record<string, unknown>;
   comments?: string | null;
+};
+
+export type LearnerTrainingInvitation = {
+  id: string;
+  event_id: string;
+  course_id: string;
+  course_code?: string | null;
+  course_name: string;
+  event_title: string;
+  starts_on: string;
+  ends_on?: string | null;
+  location?: string | null;
+  provider?: string | null;
+  event_status: string;
+  channel: string;
+  delivery_status: string;
+  rsvp_status: string;
+  responded_at?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  calendar_path: string;
 };
 
 export async function listMyEnrichedDeferrals(): Promise<EnrichedDeferral[]> {
@@ -154,4 +177,37 @@ export async function getManagerTrainingWorkspace(): Promise<Record<string, unkn
 
 export async function getCoordinatorTrainingWorkspace(): Promise<Record<string, unknown>> {
   return apiGet("/training/workspace/coordinator", { headers: authHeaders() });
+}
+
+export async function listMyTrainingInvitations(includePast = false): Promise<LearnerTrainingInvitation[]> {
+  const response = await apiGet<{ items: LearnerTrainingInvitation[]; total: number }>(
+    `/training/invitations/me?include_past=${includePast ? "true" : "false"}`,
+    { headers: authHeaders() },
+  );
+  return response.items;
+}
+
+export async function respondToTrainingInvitation(
+  invitationId: string,
+  response: "ACCEPTED" | "DECLINED" | "TENTATIVE",
+): Promise<Record<string, unknown>> {
+  return apiPost(
+    `/training/operating/invitations/${encodeURIComponent(invitationId)}/rsvp`,
+    { response },
+    { headers: authHeaders() },
+  );
+}
+
+export async function downloadTrainingInvitationCalendar(invitation: LearnerTrainingInvitation): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}${invitation.calendar_path}`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) throw new Error(`Calendar export failed (${response.status}).`);
+  const href = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = `training-${invitation.event_id}.ics`;
+  anchor.click();
+  URL.revokeObjectURL(href);
 }
