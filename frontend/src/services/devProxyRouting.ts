@@ -7,6 +7,7 @@ const PLATFORM_OPS_DEV_PATH = new RegExp(PLATFORM_OPS_DEV_PROXY_PATTERN, "i");
 const DEV_API_PATH = new RegExp(DEV_API_PROXY_PATTERN, "i");
 const PLATFORM_PATH = /^\/platform(?:\/|$|\?)/i;
 const PUBLIC_QMS_SPA_PATH = /^\/qms\/(?:audit-access|car-access)(?:\/|$|\?)/i;
+const PUBLIC_QMS_VERIFICATION_SPA_PATH = /^\/verify\/[^/?]+(?:\/|$|\?)/i;
 
 export type DevProxyTargets = {
   apiTarget: string;
@@ -32,10 +33,9 @@ export function shouldProxyDevApi(url: string | undefined): boolean {
  * Return true for browser HTML navigations that share a first path segment
  * with an API proxy but are owned by the React SPA.
  *
- * `/platform/*` predates the public QMS workspaces. The signed audit/CAR URLs
- * intentionally live under `/qms/*`, while JSON/form calls use `/quality/*`.
- * Without this HTML-only bypass Vite proxies a deep-link navigation such as
- * `/qms/audit-access/:token` to the API target before React can mount.
+ * `/platform/*` predates the public QMS workspaces. Signed audit/CAR URLs live
+ * under `/qms/*`, while the public artifact verification surface lives under
+ * `/verify/:token`. JSON/form APIs stay under `/quality/*`.
  */
 export function shouldServePlatformSpa(
   method: string | undefined,
@@ -49,5 +49,7 @@ export function shouldServePlatformSpa(
   if (!acceptedTypes.toLowerCase().includes("text/html")) return false;
 
   const target = String(url || "");
-  return PLATFORM_PATH.test(target) || PUBLIC_QMS_SPA_PATH.test(target);
+  return PLATFORM_PATH.test(target)
+    || PUBLIC_QMS_SPA_PATH.test(target)
+    || PUBLIC_QMS_VERIFICATION_SPA_PATH.test(target);
 }
