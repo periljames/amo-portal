@@ -16,6 +16,7 @@ from . import (
     consent_policy,
     exemption_policy,
     extended_duty_policy,
+    extended_duty_validation_policy,
     lineage,
     roster_control,
     template_usage_policy,
@@ -61,8 +62,13 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 
 template_usage_policy.install_code_registry_policy(code_registry)
 compliance_policy.install_validation_policy()
-# Exemption policy deliberately wraps the statutory policy after it is installed:
-# only a verified Authority record can transform an underlying hard finding.
+# The controlled extension policy sits inside the statutory validator: it may
+# recognize an ordinary shift-duration excess only when a governed extension
+# exists, but it adds a non-overridable recovery-rest check and leaves all other
+# hard rules intact.
+extended_duty_validation_policy.install()
+# Authority exemptions wrap the final statutory finding set; they remain the
+# only path that can report a hard rule as compliant under a verified exemption.
 exemption_policy.install_validation_policy()
 
 # All planners share the same rest semantics: an OFF pattern day without an
