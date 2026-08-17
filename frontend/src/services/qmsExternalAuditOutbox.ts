@@ -49,9 +49,13 @@ function b64(bytes: Uint8Array): string {
   return btoa(raw);
 }
 
-function fromB64(value: string): Uint8Array {
+function fromB64(value: string): Uint8Array<ArrayBuffer> {
   const raw = atob(value);
-  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function idbAvailable(): boolean {
@@ -194,19 +198,6 @@ export async function markExternalAuditMutationFailure(id: string, message: stri
       row.lastError = message.slice(0, 1000);
       store.put(row);
     }
-    await transactionDone(tx);
-  } finally {
-    db.close();
-  }
-}
-
-export async function clearExternalAuditMutations(scope: ExternalAuditOutboxScope): Promise<void> {
-  const db = await openDb();
-  try {
-    const tx = db.transaction(ENTRY_STORE, "readwrite");
-    const index = tx.objectStore(ENTRY_STORE).index("scope");
-    const keys = await requestResult(index.getAllKeys(IDBKeyRange.only([scope.auditId, scope.participantId])));
-    keys.forEach((key) => tx.objectStore(ENTRY_STORE).delete(key));
     await transactionDone(tx);
   } finally {
     db.close();
