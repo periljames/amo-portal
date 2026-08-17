@@ -156,6 +156,40 @@ const platformSpaNavigationPlugin = (): Plugin => ({
   },
 })
 
+const portalPrecacheManifestPlugin = (): Plugin => {
+  let resolvedConfig: ResolvedConfig | null = null
+  return {
+    name: 'portal-precache-manifest',
+    configResolved(config) {
+      resolvedConfig = config
+    },
+    writeBundle() {
+      if (!resolvedConfig) return
+      const outputRoot = path.resolve(resolvedConfig.root, resolvedConfig.build.outDir)
+      const urls = new Set<string>(['/', '/index.html', '/portal.webmanifest'])
+      const visit = (directory: string) => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const absolute = path.join(directory, entry.name)
+          if (entry.isDirectory()) {
+            if (entry.name !== 'pdfjs') visit(absolute)
+            continue
+          }
+          const relative = path.relative(outputRoot, absolute).split(path.sep).join('/')
+          if (/^(?:assets\/).+\.(?:js|css|woff2?|ttf|png|jpe?g|svg|webp|ico)$/i.test(relative)) {
+            urls.add(`/${relative}`)
+          }
+        }
+      }
+      visit(outputRoot)
+      fs.writeFileSync(
+        path.join(outputRoot, 'portal-precache.json'),
+        `${JSON.stringify({ version: Date.now(), urls: [...urls].sort() }, null, 2)}\n`,
+        'utf8',
+      )
+    },
+  }
+}
+
 const resolveDevProxy = (env: Record<string, string>) => {
   const { apiTarget, platformOpsTarget } = resolveDevProxyTargets(env)
 
@@ -211,7 +245,7 @@ export default defineConfig(({ mode }) => {
     define: {
       __PDFJS_ASSET_VERSION__: JSON.stringify(pdfJsAssetVersion),
     },
-    plugins: [platformSpaNavigationPlugin(), pdfJsRuntimeAssetsPlugin(), react()],
+    plugins: [platformSpaNavigationPlugin(), pdfJsRuntimeAssetsPlugin(), react(), portalPrecacheManifestPlugin()],
     server: {
       https,
       allowedHosts,

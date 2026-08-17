@@ -1,5 +1,6 @@
 import { authHeaders, getCachedUser, getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { offlineCommandRouteKey } from "./offlineCapabilities";
 import {
   isPortalReady,
   notePortalResponse,
@@ -265,7 +266,8 @@ async function protectApiRecord(record: ApiCacheRecord): Promise<StoredApiCacheR
 async function restoreApiRecord<T>(record: StoredApiCacheRecord): Promise<ApiCacheRecord<T>> {
   if (!record.encryptedValue) return record as ApiCacheRecord<T>;
   const value = await decryptDeviceValue<T>(record.encryptedValue);
-  const { encryptedValue: _encryptedValue, ...rest } = record;
+  const rest = { ...record };
+  delete rest.encryptedValue;
   return { ...rest, value } as ApiCacheRecord<T>;
 }
 
@@ -279,7 +281,8 @@ async function protectOutboxEntry(entry: OfflineOutboxEntry): Promise<StoredOffl
 async function restoreOutboxEntry(entry: StoredOfflineOutboxEntry): Promise<OfflineOutboxEntry> {
   if (!entry.encryptedBody) return entry;
   const body = await decryptDeviceValue<string>(entry.encryptedBody);
-  const { encryptedBody: _encryptedBody, ...rest } = entry;
+  const rest = { ...entry };
+  delete rest.encryptedBody;
   return { ...rest, body };
 }
 
@@ -300,8 +303,9 @@ function activeAmoId(): string | null {
 }
 
 export function currentOfflineScope(): string {
-  const user = getCachedUser();
-  const tenant = activeAmoId() || user?.amo_id || getContext().amoCode || "platform";
+  const user = typeof window === "undefined" ? null : getCachedUser();
+  const contextAmo = typeof window === "undefined" ? null : getContext().amoCode;
+  const tenant = activeAmoId() || user?.amo_id || contextAmo || "platform";
   return `${user?.id || "anonymous"}:${tenant || "platform"}`;
 }
 
@@ -878,6 +882,39 @@ async function parseReplayError(response: Response): Promise<unknown> {
   return response.text().catch(() => response.statusText);
 }
 
+type CommandResolution = "not-found" | "processing" | "succeeded" | "terminal-failure";
+
+async function resolveServerCommand(entry: OfflineOutboxEntry): Promise<CommandResolution> {
+  const routeKey = offlineCommandRouteKey(entry.path, entry.method);
+  if (!routeKey) return "not-found";
+  const query = new URLSearchParams({ method: entry.method, route_key: routeKey });
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(new DOMException("Command receipt check timed out", "AbortError")),
+    10_000,
+  );
+  try {
+    const response = await fetch(
+      `${getApiBaseUrl().replace(/\/$/, "")}/resilience/commands/${encodeURIComponent(entry.idempotencyKey)}?${query}`,
+      {
+        method: "GET",
+        headers: authHeaders({ "X-AMO-Silent-Error": "1" }),
+        credentials: "include",
+        signal: controller.signal,
+      },
+    );
+    notePortalResponse(response);
+    if (response.status === 404) return "not-found";
+    if (!response.ok) throw new Error(`Could not verify the earlier command (${response.status}).`);
+    const payload = await response.json() as { status?: string };
+    if (payload.status === "SUCCEEDED") return "succeeded";
+    if (payload.status === "PROCESSING" || payload.status === "RECEIVED") return "processing";
+    return "terminal-failure";
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
 function normaliseReplayError(detail: unknown, status: number): {
   message: string;
   errorCode?: string;
@@ -970,6 +1007,53 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
       if (!claimed) continue;
 
       try {
+        // A timeout is ambiguous: the server may have committed after the
+        // browser stopped waiting. Resolve the durable receipt before resend.
+        if (claimed.attempts > 0 || entry.status === "syncing") {
+          const resolution = await resolveServerCommand(claimed);
+          if (resolution === "succeeded") {
+            if (await removeOutboxEntry(claimed)) {
+              synced += 1;
+              syncedPaths.add(claimed.path);
+              if (claimed.entityType) syncedEntityTypes.add(claimed.entityType);
+            }
+            continue;
+          }
+          if (resolution === "processing") {
+            const attempts = claimed.attempts + 1;
+            await replaceOutboxEntry(claimed, {
+              ...claimed,
+              status: "queued",
+              attempts,
+              updatedAt: Date.now(),
+              error: "The server accepted this command and is still confirming it.",
+              retryable: true,
+              nextAttemptAt: Date.now() + replayDelayMs(attempts),
+            });
+            notifyOfflineReplayProgress({
+              scope,
+              phase: "paused",
+              current: index + 1,
+              total: entries.length,
+              synced,
+              currentPath: claimed.path,
+              message: "Server command accepted; waiting for confirmation",
+            });
+            break;
+          }
+          if (resolution === "terminal-failure") {
+            await replaceOutboxEntry(claimed, {
+              ...claimed,
+              status: "conflict",
+              attempts: claimed.attempts + 1,
+              updatedAt: Date.now(),
+              error: "The earlier server command needs review before it can be retried.",
+              retryable: false,
+              nextAttemptAt: undefined,
+            });
+            continue;
+          }
+        }
         const response = await fetchForReplay(claimed);
         if (!(await renewReplayLease(leaseOwner, scope))) break;
         if (response.ok) {
@@ -983,6 +1067,30 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
 
         const detail = await parseReplayError(response);
         const failure = normaliseReplayError(detail, response.status);
+        if (response.status === 409 && failure.errorCode === "COMMAND_IN_PROGRESS") {
+          const attempts = claimed.attempts + 1;
+          await replaceOutboxEntry(claimed, {
+            ...claimed,
+            status: "queued",
+            attempts,
+            updatedAt: Date.now(),
+            error: "The server is still confirming this command.",
+            responseStatus: response.status,
+            errorCode: failure.errorCode,
+            retryable: true,
+            nextAttemptAt: Date.now() + replayDelayMs(attempts, response),
+          });
+          notifyOfflineReplayProgress({
+            scope,
+            phase: "paused",
+            current: index + 1,
+            total: entries.length,
+            synced,
+            currentPath: claimed.path,
+            message: "Server command accepted; waiting for confirmation",
+          });
+          break;
+        }
         const revisionConflict = failure.retryable === true
           || Boolean(failure.errorCode?.includes("REVISION_CONFLICT"));
         if ((response.status === 409 || response.status === 412) && revisionConflict) {

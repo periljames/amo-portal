@@ -1,10 +1,8 @@
-"""Embedded durable-job runtime for the tenant API process.
+"""Durable-job runtime shared by embedded development and dedicated workers.
 
-Small and single-process deployments commonly start only ``uvicorn amodb.main``.
-Historically that left several valid database queues without a consumer.  This
-supervisor runs the existing lease/row-lock protected workers in independent
-daemon threads.  Dedicated worker deployments can disable it with
-``PORTAL_EMBEDDED_JOB_WORKER=0``; running both modes during a rollout is safe.
+Production keeps workers outside Uvicorn so CPU-heavy jobs cannot starve API
+requests or multiply its connection pool.  Development may explicitly opt in
+to embedded threads with ``PORTAL_EMBEDDED_JOB_WORKER=1``.
 """
 from __future__ import annotations
 
@@ -34,7 +32,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def embedded_worker_enabled() -> bool:
     app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
-    return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", app_env not in {"test", "testing", "ci"})
+    # Preserve the existing one-command local workflow when APP_ENV is unset.
+    # Real deployments must identify themselves and keep workers isolated.
+    default_enabled = app_env not in {"prod", "production", "staging"}
+    return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", default_enabled)
 
 
 def _bounded_float(name: str, default: float, minimum: float, maximum: float) -> float:
@@ -159,29 +160,17 @@ def _families() -> tuple[WorkerFamily, ...]:
 
 
 class PortalJobSupervisor:
-    def __init__(self) -> None:
+    def __init__(self, *, mode: str = "embedded", selected_families: set[str] | None = None, concurrency: int = 1) -> None:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
-        self._database_outage_reported = False
         self._heartbeat_seconds = _bounded_float("PORTAL_JOB_HEARTBEAT_SECONDS", 15.0, 5.0, 300.0)
-
-    def _report_database_outage(self) -> None:
-        with self._lock:
-            if self._database_outage_reported:
-                return
-            self._database_outage_reported = True
-        logger.warning("Database unavailable; embedded workers paused until readiness recovers")
-
-    def _report_database_recovery(self) -> None:
-        with self._lock:
-            if not self._database_outage_reported:
-                return
-            self._database_outage_reported = False
-        logger.info("Database connectivity recovered; embedded job processing resumed")
+        self._mode = mode
+        self._selected_families = selected_families
+        self._concurrency = max(1, min(int(concurrency), 32))
 
     def start(self) -> bool:
-        if not embedded_worker_enabled():
+        if self._mode == "embedded" and not embedded_worker_enabled():
             logger.info("Embedded durable-job workers are disabled")
             return False
         with self._lock:
@@ -190,30 +179,34 @@ class PortalJobSupervisor:
             self._stop.clear()
             self._threads = {}
             for family in _families():
-                thread = threading.Thread(
-                    target=self._run_family,
-                    args=(family,),
-                    name=f"portal-job-{family.name}",
-                    daemon=True,
-                )
-                self._threads[family.name] = thread
-                thread.start()
-        logger.info("Started embedded durable-job workers: %s", ", ".join(sorted(self._threads)))
+                if self._selected_families and family.name not in self._selected_families:
+                    continue
+                for slot in range(self._concurrency):
+                    thread_name = f"{family.name}:{slot + 1}" if self._concurrency > 1 else family.name
+                    thread = threading.Thread(
+                        target=self._run_family,
+                        args=(family, slot + 1),
+                        name=f"portal-job-{thread_name}",
+                        daemon=True,
+                    )
+                    self._threads[thread_name] = thread
+                    thread.start()
+        logger.info("Started %s durable-job workers: %s", self._mode, ", ".join(sorted(self._threads)))
         return True
 
-    def _heartbeat(self, family: WorkerFamily, *, status: str, metadata: dict[str, Any]) -> None:
+    def _heartbeat(self, family: WorkerFamily, *, status: str, metadata: dict[str, Any], slot: int = 1) -> None:
         if not database_circuit.allow_request():
             return
         db = WriteSessionLocal()
         try:
-            worker_name = f"{_identity()}:{family.name}"[:128]
+            worker_name = f"{_identity()}:{self._mode}:{family.name}:{slot}"[:128]
             row = db.query(platform_models.PlatformWorkerHeartbeat).filter(
                 platform_models.PlatformWorkerHeartbeat.worker_name == worker_name,
             ).first()
             if row is None:
                 row = platform_models.PlatformWorkerHeartbeat(
                     worker_name=worker_name,
-                    worker_type="portal-embedded-job",
+                    worker_type=f"portal-{self._mode}-job",
                 )
                 db.add(row)
             row.last_seen_at = platform_models.utcnow()
@@ -221,7 +214,8 @@ class PortalJobSupervisor:
             row.metadata_json = {
                 "family": family.name,
                 "poll_seconds": family.poll_seconds,
-                "mode": "embedded",
+                "mode": self._mode,
+                "slot": slot,
                 **metadata,
             }
             db.commit()
@@ -232,60 +226,69 @@ class PortalJobSupervisor:
                 pass
             if is_database_disconnect(exc):
                 database_circuit.mark_failure(exc)
-                self._report_database_outage()
             else:
                 logger.debug("Could not record %s worker heartbeat", family.name, exc_info=True)
         finally:
             close_session_safely(db)
 
-    def _run_family(self, family: WorkerFamily) -> None:
+    def _run_family(self, family: WorkerFamily, slot: int = 1) -> None:
         last_heartbeat = 0.0
+        failure_streak = 0
+        outage_logged = False
         while not self._stop.is_set():
             started = time.monotonic()
             status = "ONLINE"
+            recovered_this_cycle = False
             metadata: dict[str, Any]
             activity = 0
-            was_offline = not database_circuit.allow_request()
-            if not probe_database():
-                # All worker families share the same single-flight probe and
-                # circuit.  During an outage they wait instead of multiplying
-                # connection attempts and traceback noise.
-                retry_after = database_circuit.retry_after_seconds()
-                self._report_database_outage()
-                self._stop.wait(retry_after + random.uniform(0.0, min(1.0, retry_after * 0.15)))
-                continue
-            if was_offline:
-                self._report_database_recovery()
             try:
+                if not database_circuit.allow_request() and not probe_database():
+                    raise ConnectionError("DATABASE_UNAVAILABLE")
                 result = family.run_once()
                 activity = _activity(result)
                 metadata = {"last_result": result if isinstance(result, (dict, int, bool)) else str(result)}
+                if outage_logged:
+                    logger.info("Database recovered; %s worker resumed", family.name)
+                    recovered_this_cycle = True
+                outage_logged = False
+                failure_streak = 0
             except Exception as exc:
+                # probe_database already records the synthetic ConnectionError;
+                # only record direct worker database failures here.
                 if is_database_disconnect(exc):
                     database_circuit.mark_failure(exc)
-                    self._report_database_outage()
-                    retry_after = database_circuit.retry_after_seconds()
-                    self._stop.wait(retry_after + random.uniform(0.0, min(1.0, retry_after * 0.15)))
-                    continue
                 status = "DEGRADED"
                 metadata = {"last_error": f"{type(exc).__name__}: {str(exc)[:500]}"}
-                logger.exception("Embedded %s worker cycle failed", family.name)
+                failure_streak += 1
+                if not outage_logged:
+                    logger.warning("%s worker paused while a dependency is unavailable: %s", family.name, exc)
+                    outage_logged = True
+                elif failure_streak % 10 == 0:
+                    logger.info("%s worker remains paused after %s checks", family.name, failure_streak)
 
             now = time.monotonic()
-            if status != "ONLINE" or now - last_heartbeat >= self._heartbeat_seconds:
+            # A database heartbeat during an outage is another failed database
+            # connection. Keep degraded state in memory and write it once the
+            # shared recovery probe has succeeded.
+            if status == "ONLINE" and (recovered_this_cycle or now - last_heartbeat >= self._heartbeat_seconds):
                 self._heartbeat(
                     family,
                     status=status,
                     metadata={**metadata, "last_cycle_seconds": round(now - started, 4)},
+                    slot=slot,
                 )
                 last_heartbeat = now
 
             # Drain backlogs without an artificial pause, but yield briefly so a
             # hot queue cannot monopolise CPU or the database pool.
-            delay = 0.05 if activity and family.drain_backlog else family.poll_seconds
+            if status == "DEGRADED":
+                base_delay = min(60.0, max(2.0, 2.0 ** min(failure_streak, 6)))
+                delay = base_delay + random.uniform(0.0, min(2.0, base_delay * 0.15))
+            else:
+                delay = 0.05 if activity and family.drain_backlog else family.poll_seconds
             self._stop.wait(delay)
 
-        self._heartbeat(family, status="OFFLINE", metadata={"reason": "API shutdown"})
+        self._heartbeat(family, status="OFFLINE", metadata={"reason": f"{self._mode} shutdown"}, slot=slot)
 
     def stop(self) -> None:
         self._stop.set()
@@ -304,10 +307,10 @@ class PortalJobSupervisor:
         with self._lock:
             threads = dict(self._threads)
         return {
-            "enabled": embedded_worker_enabled(),
+            "enabled": embedded_worker_enabled() if self._mode == "embedded" else True,
+            "mode": self._mode,
             "running": any(thread.is_alive() for thread in threads.values()),
             "families": {name: thread.is_alive() for name, thread in threads.items()},
-            "database": database_circuit.snapshot(),
         }
 
 

@@ -17,6 +17,7 @@ import type {
   AccountRole,
 } from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
+import { portalErrorMessage } from "../services/portalError";
 import { useAdminAccountRoles } from "../hooks/useAdminAccountRoles";
 import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -82,12 +83,25 @@ const AdminUserNewPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const creatingPlatformSuperuser = form.role === "SUPERUSER";
+  const platformRootAmo = useMemo(
+    () => amos.find((amo) =>
+      amo.amo_code.toUpperCase() === "ROOT"
+      || ["root", "system"].includes(amo.login_slug.toLowerCase())
+    ) ?? null,
+    [amos]
+  );
   const selectedAmo = useMemo(() => amos.find((amo) => amo.id === selectedAmoId) ?? null, [amos, selectedAmoId]);
+  const accountTargetAmoId = isSuperuser
+    ? (creatingPlatformSuperuser ? platformRootAmo?.id || "" : selectedAmoId)
+    : currentUser?.amo_id || "";
 
   const pageTitle = useMemo(() => {
-    const label = selectedAmo?.name || resolvedAmoCode.toUpperCase();
+    const label = creatingPlatformSuperuser
+      ? platformRootAmo?.name || "Platform ROOT"
+      : selectedAmo?.name || resolvedAmoCode.toUpperCase();
     return `Create user · ${label}`;
-  }, [resolvedAmoCode, selectedAmo]);
+  }, [creatingPlatformSuperuser, platformRootAmo?.name, resolvedAmoCode, selectedAmo]);
 
   const activeDepartments = useMemo(
     () => departments.filter((dept) => dept.is_active),
@@ -137,10 +151,13 @@ const AdminUserNewPage: React.FC = () => {
       return "Only a platform superuser can create another superuser.";
     }
 
-    if (isSuperuser && !selectedAmoId) {
+    if (isSuperuser && creatingPlatformSuperuser && !platformRootAmo) {
+      return "The platform ROOT tenant is unavailable. Create or restore it before adding another superuser.";
+    }
+    if (isSuperuser && !creatingPlatformSuperuser && !selectedAmoId) {
       return "Select an AMO for this user.";
     }
-    if (activeDepartments.length > 0 && !selectedDepartmentId) {
+    if (!creatingPlatformSuperuser && activeDepartments.length > 0 && !selectedDepartmentId) {
       return "Select a department for this user.";
     }
     if (!selectedStaffCode) {
@@ -157,8 +174,16 @@ const AdminUserNewPage: React.FC = () => {
     const symbols = "!@#$%^&*()-_=+[]{}<>?";
     const all = upper + lower + digits + symbols;
 
-    const pick = (chars: string) =>
-      chars[Math.floor(Math.random() * chars.length)];
+    const randomIndex = (length: number) => {
+      if (!globalThis.crypto?.getRandomValues) {
+        throw new Error("Secure browser randomness is unavailable.");
+      }
+      const ceiling = 0x1_0000_0000 - (0x1_0000_0000 % length);
+      const value = new Uint32Array(1);
+      do globalThis.crypto.getRandomValues(value); while (value[0] >= ceiling);
+      return value[0] % length;
+    };
+    const pick = (chars: string) => chars[randomIndex(chars.length)];
 
     const base = [
       pick(upper),
@@ -171,12 +196,12 @@ const AdminUserNewPage: React.FC = () => {
       base.push(pick(all));
     }
 
-    const shuffled = base.sort(() => Math.random() - 0.5).join("");
-    setForm((prev) => ({
-      ...prev,
-      password: shuffled,
-      confirmPassword: shuffled,
-    }));
+    for (let index = base.length - 1; index > 0; index -= 1) {
+      const swapIndex = randomIndex(index + 1);
+      [base[index], base[swapIndex]] = [base[swapIndex], base[index]];
+    }
+    const password = base.join("");
+    setForm((prev) => ({ ...prev, password, confirmPassword: password }));
   };
 
   const copyPassword = async () => {
@@ -205,9 +230,9 @@ const AdminUserNewPage: React.FC = () => {
         if (!selectedAmoId && data.length > 0) {
           setSelectedAmoId(data[0].id);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to load AMOs", err);
-        setAmoError(err?.message || "Failed to load AMOs.");
+        setAmoError(portalErrorMessage(err, "Failed to load AMOs."));
       } finally {
         setAmoLoading(false);
       }
@@ -220,6 +245,11 @@ const AdminUserNewPage: React.FC = () => {
     const loadDepartments = async () => {
       setDepartmentsError(null);
       if (!currentUser) return;
+      if (creatingPlatformSuperuser) {
+        setDepartments([]);
+        setSelectedDepartmentId("");
+        return;
+      }
       const targetAmoId = isSuperuser ? selectedAmoId : currentUser.amo_id;
       if (!targetAmoId) {
         setDepartments([]);
@@ -231,24 +261,26 @@ const AdminUserNewPage: React.FC = () => {
         const data = await listAdminDepartments(targetAmoId);
         setDepartments(data);
         const active = data.filter((dept) => dept.is_active);
-        if (!selectedDepartmentId && active.length > 0) {
-          setSelectedDepartmentId(active[0].id);
-        }
-      } catch (err: any) {
+        setSelectedDepartmentId((current) =>
+          active.some((department) => department.id === current)
+            ? current
+            : active[0]?.id || ""
+        );
+      } catch (err: unknown) {
         console.error("Failed to load departments", err);
-        setDepartmentsError(err?.message || "Failed to load departments.");
+        setDepartmentsError(portalErrorMessage(err, "Failed to load departments."));
       } finally {
         setDepartmentsLoading(false);
       }
     };
 
     loadDepartments();
-  }, [currentUser, isSuperuser, selectedAmoId]);
+  }, [creatingPlatformSuperuser, currentUser, isSuperuser, selectedAmoId]);
 
   React.useEffect(() => {
     const first = form.firstName.trim();
     const last = form.lastName.trim();
-    const targetAmoId = isSuperuser ? selectedAmoId : currentUser?.amo_id;
+    const targetAmoId = accountTargetAmoId;
 
     if (!first || !last || !targetAmoId) {
       setStaffCodeOptions([]);
@@ -272,9 +304,9 @@ const AdminUserNewPage: React.FC = () => {
             suggestions.includes(prev) ? prev : suggestions[0] || ""
           );
         })
-        .catch((err: any) => {
+        .catch((err: unknown) => {
           console.error("Failed to load staff code suggestions", err);
-          setStaffCodeError(err?.message || "Failed to load staff code suggestions.");
+          setStaffCodeError(portalErrorMessage(err, "Failed to load staff code suggestions."));
           setStaffCodeOptions([]);
           setSelectedStaffCode("");
         })
@@ -286,8 +318,7 @@ const AdminUserNewPage: React.FC = () => {
     form.firstName,
     form.lastName,
     isSuperuser,
-    selectedAmoId,
-    currentUser?.amo_id,
+    accountTargetAmoId,
     staffCodeSeed,
   ]);
 
@@ -326,8 +357,8 @@ const AdminUserNewPage: React.FC = () => {
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
-        amo_id: isSuperuser ? selectedAmoId || undefined : undefined,
-        department_id: selectedDepartmentId || undefined,
+        amo_id: isSuperuser && !creatingPlatformSuperuser ? selectedAmoId || undefined : undefined,
+        department_id: creatingPlatformSuperuser ? undefined : selectedDepartmentId || undefined,
         // NOTE:
         // Do NOT force amo_id here. adminUsers.ts resolves it safely:
         // - SUPERUSER: can target selected/active AMO
@@ -338,17 +369,9 @@ const AdminUserNewPage: React.FC = () => {
 
       setSuccess("User created successfully.");
       setTimeout(() => navigate(backTarget), 600);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to create user", err);
-
-      const msg =
-        err?.response?.data?.detail ||
-        err?.detail ||
-        err?.message ||
-        "Failed to create user. Please try again.";
-      setError(
-        typeof msg === "string" ? msg : "Failed to create user. Please try again."
-      );
+      setError(portalErrorMessage(err, "Failed to create user. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -417,7 +440,7 @@ const AdminUserNewPage: React.FC = () => {
             </InlineAlert>
           )}
 
-          {isSuperuser && (
+          {isSuperuser && !creatingPlatformSuperuser && (
             <div className="form-row form-row--span-2">
               <label htmlFor="amoId">Target AMO</label>
               <select
@@ -443,12 +466,20 @@ const AdminUserNewPage: React.FC = () => {
                 ))}
               </select>
               <p className="form-hint">
-                Superusers must select which AMO will own this user.
+                Select which AMO will own this tenant user.
               </p>
             </div>
           )}
 
-          <div className="form-row form-row--span-2">
+          {isSuperuser && creatingPlatformSuperuser && (
+            <InlineAlert tone="info" title="Platform ROOT identity" className="form-row--span-2">
+              <span>
+                Platform superusers are always owned by the ROOT tenant and are not assigned to an AMO department.
+              </span>
+            </InlineAlert>
+          )}
+
+          {!creatingPlatformSuperuser && <div className="form-row form-row--span-2">
             <div className="form-row__header">
               <label htmlFor="departmentId">Department</label>
               <button
@@ -480,8 +511,8 @@ const AdminUserNewPage: React.FC = () => {
               Assign the default department so the user lands in the right dashboard. Only active
               departments are listed.
             </p>
-          </div>
-          {!departmentsLoading && activeDepartments.length === 0 && (
+          </div>}
+          {!creatingPlatformSuperuser && !departmentsLoading && activeDepartments.length === 0 && (
             <InlineAlert
               tone="warning"
               title="No departments yet"

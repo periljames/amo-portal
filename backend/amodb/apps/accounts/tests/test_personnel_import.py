@@ -4,6 +4,7 @@ from datetime import date
 
 from amodb.apps.accounts import models, services
 from amodb.apps.accounts.personnel_import import import_personnel_rows
+from amodb.apps.workforce import services as workforce_services
 
 
 def _seed_amo(db):
@@ -22,6 +23,13 @@ def _seed_amo(db):
 def test_personnel_import_dry_run_and_idempotent(db_session, monkeypatch):
     amo = _seed_amo(db_session)
     monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+    # Contract-date alignment belongs to Workforce and has its own integration
+    # coverage. This accounts fixture intentionally creates only account tables.
+    monkeypatch.setattr(
+        workforce_services,
+        "sync_contract_start_from_hire_date",
+        lambda *_args, **_kwargs: None,
+    )
 
     rows = [
         {

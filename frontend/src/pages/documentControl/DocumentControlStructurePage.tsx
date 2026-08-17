@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   BookOpen,
   Boxes,
   CheckCircle2,
@@ -11,6 +12,8 @@ import {
   FileCog,
   FileText,
   FolderTree,
+  History,
+  Link2,
   ListTree,
   Network,
   Pencil,
@@ -24,6 +27,7 @@ import { useNavigate } from "react-router-dom";
 
 import {
   getDocumentationTree,
+  getDocumentationNodeConnections,
   getReferenceMonitor,
   reconcileDocumentationTree,
   reindexDocumentationRevision,
@@ -31,6 +35,7 @@ import {
   updateDocumentationExecutionProfile,
   updateDocumentationNode,
   type DocumentationExecutionProfile,
+  type DocumentationNodeConnections,
   type DocumentationTree,
   type DocumentationTreeNode,
   type DocumentationNodeType,
@@ -97,6 +102,11 @@ export default function DocumentControlStructurePage() {
   const navigate = useNavigate();
   const { tenant, readerBasePath } = useDocumentControlRoute();
   const [tree, setTree] = useState<DocumentationTree | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [connections, setConnections] = useState<DocumentationNodeConnections | null>(null);
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
+  const [connectionsError, setConnectionsError] = useState("");
+  const [connectionsRevision, setConnectionsRevision] = useState(0);
   const [monitor, setMonitor] = useState<ReferenceMonitorResponse | null>(null);
   const [tab, setTab] = useState<WorkspaceTab>("STRUCTURE");
   const [mode, setMode] = useState<StructureMode>("TREE");
@@ -116,6 +126,12 @@ export default function DocumentControlStructurePage() {
     try {
       const structure = await getDocumentationTree(tenant);
       setTree(structure);
+      setSelectedNodeId((current) => (
+        current && structure.items.some((item) => item.id === current)
+          ? current
+          : structure.root_id || structure.items[0]?.id || null
+      ));
+      setConnectionsRevision((current) => current + 1);
       if (structure.capabilities.control) {
         setMonitor(await getReferenceMonitor(tenant).catch(() => null));
       }
@@ -127,6 +143,23 @@ export default function DocumentControlStructurePage() {
   }, [tenant]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!tenant || !selectedNodeId) {
+      setConnections(null);
+      return;
+    }
+    let active = true;
+    setConnectionsLoading(true);
+    setConnectionsError("");
+    void getDocumentationNodeConnections(tenant, selectedNodeId)
+      .then((result) => { if (active) setConnections(result); })
+      .catch((caught) => {
+        if (active) setConnectionsError(caught instanceof Error ? caught.message : "Document connections could not be loaded.");
+      })
+      .finally(() => { if (active) setConnectionsLoading(false); });
+    return () => { active = false; };
+  }, [connectionsRevision, selectedNodeId, tenant]);
 
   const visibleItems = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -184,7 +217,7 @@ export default function DocumentControlStructurePage() {
       const Icon = NODE_ICONS[node.node_type];
       const status = nodeStatus(node);
       return <div key={node.id} className="dc-structure-node" style={{ "--tree-depth": level } as React.CSSProperties}>
-        <div className={`dc-structure-node__row ${node.manual_id ? "is-document" : "is-group"}`}>
+        <div className={`dc-structure-node__row ${node.manual_id ? "is-document" : "is-group"} ${selectedNodeId === node.id ? "is-selected" : ""}`}>
           <button
             type="button"
             className="dc-structure-node__toggle"
@@ -198,7 +231,7 @@ export default function DocumentControlStructurePage() {
           >
             {children.length ? isCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} /> : <span />}
           </button>
-          <button type="button" className="dc-structure-node__primary" onClick={() => openNode(node)} disabled={!node.manual_id || (!node.document?.current_published_revision_id && !tree?.capabilities.control)}>
+          <button type="button" className="dc-structure-node__primary" onClick={() => setSelectedNodeId(node.id)} aria-pressed={selectedNodeId === node.id}>
             <Icon size={17} />
             <span><strong>{node.code}</strong><small>{node.title}</small></span>
           </button>
@@ -206,11 +239,14 @@ export default function DocumentControlStructurePage() {
             <DocumentControlStatus status={status.label} kind={status.kind} />
             {node.execution ? <span className="dc-structure-node__execution">{node.execution.execution_type.replaceAll("_", " ")}</span> : null}
           </div>
-          {tree?.capabilities.control ? <div className="dc-structure-node__actions">
+          <div className="dc-structure-node__actions">
+            {node.manual_id && (node.document?.current_published_revision_id || (tree?.capabilities.control && node.document?.latest_revision_id)) ? <button type="button" onClick={() => openNode(node)} title="Open controlled reader"><BookOpen size={14} /></button> : null}
+            {tree?.capabilities.control ? <>
             {node.manual_id ? <button type="button" onClick={() => void reindex(node)} disabled={busy || !node.document?.latest_revision_id} title="Reindex references"><RefreshCw size={14} /></button> : null}
             {executable(node) ? <button type="button" onClick={() => setExecutionNode(node)} title="Configure form execution"><Settings2 size={14} /></button> : null}
             {!String(node.metadata.system || "") ? <button type="button" onClick={() => setEditingNode(node)} title="Edit hierarchy placement"><Pencil size={14} /></button> : null}
-          </div> : null}
+            </> : null}
+          </div>
         </div>
         {!isCollapsed && children.length ? <div className="dc-structure-node__children">{renderTree(node.id, level + 1)}</div> : null}
       </div>;
@@ -245,13 +281,25 @@ export default function DocumentControlStructurePage() {
         <label><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a manual, policy, procedure, instruction, form, checklist, or record series" /></label>
         <div><button type="button" className={mode === "TREE" ? "active" : ""} onClick={() => setMode("TREE")}><FolderTree size={14} /> Tree</button><button type="button" className={mode === "LIST" ? "active" : ""} onClick={() => setMode("LIST")}><ListTree size={14} /> Register view</button></div>
       </div>
-      {visibleItems.length ? mode === "TREE"
+      <div className="dc-structure-workspace">
+        <div className="dc-structure-workspace__browser">
+          {visibleItems.length ? mode === "TREE"
         ? <div className="dc-structure-tree">{renderTree(null)}</div>
         : <div className="dc-table-wrap"><table className="dc-table"><thead><tr><th>Code</th><th>Type and title</th><th>Hierarchy path</th><th>Revision</th><th>Execution</th><th>Action</th></tr></thead><tbody>{visibleItems.filter((node) => node.manual_id || node.node_type === "RECORD_SERIES").map((node) => {
           const status = nodeStatus(node);
-          return <tr key={node.id}><td><strong>{node.code}</strong></td><td><strong>{NODE_LABELS[node.node_type]}</strong><small>{node.title}</small></td><td><small>{node.path.split("/").filter(Boolean).map((segment) => segment.split("~")[0]).join(" › ")}</small></td><td><DocumentControlStatus status={status.label} kind={status.kind} /><small>{node.document?.latest_revision ? `Rev ${node.document.latest_revision}` : "—"}</small></td><td><strong>{node.execution?.execution_type.replaceAll("_", " ") || "Reference only"}</strong><small>{node.execution?.record_series_node_id ? `${node.execution.retention_years || "—"} year retention` : "No generated records"}</small></td><td><button type="button" className="dc-button" disabled={!node.manual_id} onClick={() => openNode(node)}><BookOpen size={14} /> Open</button></td></tr>;
+          return <tr key={node.id} className={selectedNodeId === node.id ? "is-selected" : ""}><td><strong>{node.code}</strong></td><td><strong>{NODE_LABELS[node.node_type]}</strong><small>{node.title}</small></td><td><small>{node.path.split("/").filter(Boolean).map((segment) => segment.split("~")[0]).join(" › ")}</small></td><td><DocumentControlStatus status={status.label} kind={status.kind} /><small>{node.document?.latest_revision ? `Rev ${node.document.latest_revision}` : "—"}</small></td><td><strong>{node.execution?.execution_type.replaceAll("_", " ") || "Reference only"}</strong><small>{node.execution?.record_series_node_id ? `${node.execution.retention_years || "—"} year retention` : "No generated records"}</small></td><td><button type="button" className="dc-button" onClick={() => setSelectedNodeId(node.id)}><Network size={14} /> Inspect</button>{node.manual_id ? <button type="button" className="dc-button" disabled={!node.document?.current_published_revision_id && !tree?.capabilities.control} onClick={() => openNode(node)}><BookOpen size={14} /> Open</button> : null}</td></tr>;
         })}</tbody></table></div>
         : <DocumentControlEmpty icon={Search} title="No hierarchy item matches the search" message="Clear the search or use a document code, title, type, or record-series name." />}
+        </div>
+        <NodeConnectionsInspector
+          connections={connections}
+          loading={connectionsLoading}
+          error={connectionsError}
+          onRetry={() => setConnectionsRevision((current) => current + 1)}
+          onSelect={setSelectedNodeId}
+          onOpen={openNode}
+        />
+      </div>
     </> : null}
 
     {!loading && tree && tab === "REFERENCES" ? <ReferenceMonitor
@@ -261,10 +309,98 @@ export default function DocumentControlStructurePage() {
       onOpenSource={(item) => navigate(`${readerBasePath}/${item.source_manual.id}/rev/${item.source_revision_id}/read${item.source_page_number ? `?page=${item.source_page_number}` : ""}`)}
     /> : null}
 
-    {editingNode && tree ? <NodeEditor node={editingNode} tree={tree} tenant={tenant} onClose={() => setEditingNode(null)} onSaved={(next) => { setTree(next); setEditingNode(null); }} /> : null}
+    {editingNode && tree ? <NodeEditor node={editingNode} tree={tree} tenant={tenant} onClose={() => setEditingNode(null)} onSaved={(next) => { setTree(next); setConnectionsRevision((current) => current + 1); setEditingNode(null); }} /> : null}
     {executionNode && tree ? <ExecutionEditor node={executionNode} tree={tree} tenant={tenant} onClose={() => setExecutionNode(null)} onSaved={() => { setExecutionNode(null); void load(); }} /> : null}
     {resolvingReference && tree ? <ReferenceResolver reference={resolvingReference} tree={tree} tenant={tenant} onClose={() => setResolvingReference(null)} onSaved={() => { setResolvingReference(null); void load(); }} /> : null}
   </DocumentControlShell>;
+}
+
+function connectionStatusKind(status: string): "success" | "warning" | "danger" | "neutral" | "info" {
+  if (["CONFIRMED", "VERIFIED", "AUTO_RESOLVED", "ACCEPTED"].includes(status)) return "success";
+  if (["BROKEN", "REJECTED", "MISSING", "MISMATCH", "RETURNED"].includes(status)) return "danger";
+  if (["UNRESOLVED", "AMBIGUOUS", "DETECTED", "PENDING_REVIEW", "SUBMITTED"].includes(status)) return "warning";
+  return "neutral";
+}
+
+function connectionDate(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(parsed);
+}
+
+function NodeConnectionsInspector({ connections, loading, error, onRetry, onSelect, onOpen }: {
+  connections: DocumentationNodeConnections | null;
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+  onSelect: (nodeId: string) => void;
+  onOpen: (node: DocumentationTreeNode) => void;
+}) {
+  if (loading && !connections) return <aside className="dc-node-inspector"><DocumentControlLoading label="Tracing document lineage…" /></aside>;
+  if (error && !connections) return <aside className="dc-node-inspector"><DocumentControlError message={error} retry={onRetry} /></aside>;
+  if (!connections) return <aside className="dc-node-inspector"><DocumentControlEmpty icon={Network} title="Select a hierarchy item" message="Choose any manual, related document, form, checklist, or record series to see its full controlled lineage." /></aside>;
+
+  const { node } = connections;
+  const relationships = [...connections.governed_relationships, ...connections.detected_references];
+  const uniqueWorkflowNodes = connections.workflow_nodes;
+  const canOpen = (item: DocumentationTreeNode) => Boolean(item.manual_id && (item.document?.current_published_revision_id || (connections.capabilities.control && item.document?.latest_revision_id)));
+
+  return <aside className="dc-node-inspector" aria-live="polite">
+    <header className="dc-node-inspector__header">
+      <div><span>{NODE_LABELS[node.node_type]}</span><h2>{node.code}</h2><p>{node.title}</p></div>
+      {canOpen(node) ? <button type="button" className="dc-button dc-button--primary" onClick={() => onOpen(node)}><BookOpen size={14} /> Open reader</button> : null}
+    </header>
+
+    <nav className="dc-node-inspector__breadcrumbs" aria-label="Document hierarchy path">
+      {connections.breadcrumbs.map((item, index) => <span key={item.id}><button type="button" onClick={() => onSelect(item.id)}>{item.code}</button>{index < connections.breadcrumbs.length - 1 ? <ChevronRight size={12} /> : null}</span>)}
+    </nav>
+
+    <div className="dc-node-inspector__flow" aria-label="Controlled information lineage">
+      <span><BookOpen size={15} /> Manual or procedure</span><ArrowRight size={14} />
+      <span><Link2 size={15} /> Related documents</span><ArrowRight size={14} />
+      <span><ClipboardCheck size={15} /> Forms &amp; checklists</span><ArrowRight size={14} />
+      <span><History size={15} /> Associated records</span>
+    </div>
+
+    <section className="dc-node-inspector__section">
+      <div className="dc-node-inspector__section-title"><div><h3>Contained documents and templates</h3><p>Directly subordinate items in the controlled hierarchy.</p></div><strong>{connections.children.length}</strong></div>
+      {connections.children.length ? <div className="dc-node-inspector__links">{connections.children.map((item) => <article key={item.id}>
+        <button type="button" className="dc-node-inspector__link-main" onClick={() => onSelect(item.id)}><span>{item.code}</span><strong>{item.title}</strong><small>{NODE_LABELS[item.node_type]}</small></button>
+        {canOpen(item) ? <button type="button" className="dc-node-inspector__open" onClick={() => onOpen(item)} aria-label={`Open ${item.code} in reader`}><BookOpen size={14} /></button> : null}
+      </article>)}</div> : <p className="dc-node-inspector__empty">No direct child documents are registered under this item.</p>}
+    </section>
+
+    <section className="dc-node-inspector__section">
+      <div className="dc-node-inspector__section-title"><div><h3>Related documentation</h3><p>Confirmed relationships and detected cross-references in both directions.</p></div><strong>{relationships.length}</strong></div>
+      {relationships.length ? <div className="dc-node-inspector__relationships">{relationships.slice(0, 30).map((edge) => <article key={`${edge.kind}-${edge.id}-${edge.direction}`}>
+        <div className="dc-node-inspector__relationship-copy"><span>{edge.direction === "OUTGOING" ? "Uses / points to" : "Referenced by"}</span><button type="button" onClick={() => onSelect(edge.related_node.id)}>{edge.related_node.code} · {edge.related_node.title}</button><small>{edge.relationship_type.replaceAll("_", " ")}{edge.source_page_number || edge.page_number ? ` · page ${edge.source_page_number || edge.page_number}` : ""}</small></div>
+        <DocumentControlStatus status={edge.status} kind={connectionStatusKind(edge.status)} />
+        {canOpen(edge.related_node) ? <button type="button" className="dc-node-inspector__open" onClick={() => onOpen(edge.related_node)} aria-label={`Open related document ${edge.related_node.code}`}><BookOpen size={14} /></button> : null}
+      </article>)}</div> : <p className="dc-node-inspector__empty">No visible governed or detected document relationships are connected to this item.</p>}
+      {relationships.length > 30 ? <p className="dc-node-inspector__more">Showing 30 of {relationships.length} visible relationship occurrences.</p> : null}
+    </section>
+
+    <section className="dc-node-inspector__section">
+      <div className="dc-node-inspector__section-title"><div><h3>Work records, forms &amp; checklists</h3><p>Executable templates and the record series they feed.</p></div><strong>{uniqueWorkflowNodes.length}</strong></div>
+      {uniqueWorkflowNodes.length ? <div className="dc-node-inspector__links">{uniqueWorkflowNodes.map((item) => <article key={item.id}>
+        <button type="button" className="dc-node-inspector__link-main" onClick={() => onSelect(item.id)}><span>{item.code}</span><strong>{item.title}</strong><small>{NODE_LABELS[item.node_type]}{item.execution?.retention_years ? ` · ${item.execution.retention_years} year retention` : ""}</small></button>
+        {canOpen(item) ? <button type="button" className="dc-node-inspector__open" onClick={() => onOpen(item)} aria-label={`Open ${item.code} in reader`}><BookOpen size={14} /></button> : null}
+      </article>)}</div> : <p className="dc-node-inspector__empty">No executable form, checklist, register, or output record series is linked here yet.</p>}
+    </section>
+
+    <section className="dc-node-inspector__section">
+      <div className="dc-node-inspector__section-title"><div><h3>Associated retained records</h3><p>{connections.records.scope === "ALL" ? "All tenant records visible to Document Control." : "Only records submitted by you are shown."}</p></div><strong>{connections.records.total}</strong></div>
+      {connections.records.items.length ? <div className="dc-node-inspector__records">{connections.records.items.map((record) => <article key={record.id}>
+        <div><strong>{record.record_number}</strong><span>{record.template?.code || node.code} · {connectionDate(record.submitted_at)}</span><small>{record.artifact_filename}{record.retention_years ? ` · retain ${record.retention_years} years` : ""}</small></div>
+        <DocumentControlStatus status={record.status} kind={connectionStatusKind(record.status)} />
+        <a className="dc-node-inspector__open" href={record.download_url} target="_blank" rel="noreferrer" aria-label={`Open retained record ${record.record_number}`}><BookOpen size={14} /></a>
+      </article>)}</div> : <p className="dc-node-inspector__empty">No associated retained records are visible for this item yet.</p>}
+      {connections.records.total > connections.records.limit ? <p className="dc-node-inspector__more">Showing the latest {connections.records.limit} of {connections.records.total} records.</p> : null}
+    </section>
+    {loading ? <div className="dc-node-inspector__refreshing"><RefreshCw size={13} /> Refreshing lineage…</div> : null}
+    {error ? <div className="dc-node-inspector__refreshing is-error"><AlertTriangle size={13} /> {error} <button type="button" onClick={onRetry}>Retry</button></div> : null}
+  </aside>;
 }
 
 function ReferenceMonitor({ response, onRefresh, onResolve, onOpenSource }: {

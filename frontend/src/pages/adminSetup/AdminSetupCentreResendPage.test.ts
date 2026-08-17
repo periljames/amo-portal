@@ -7,7 +7,9 @@ const css = readFileSync(new URL("../../styles/admin-setup-resend.css", import.m
 
 describe("AMO Setup Centre supplied workflow adoption", () => {
   it("routes the setup page to the dedicated Resend-derived structure", () => {
-    expect(entry).toContain('export { default } from "./AdminSetupCentreResendPage"');
+    expect(entry).toContain('import AdminSetupCentreResendPage from "./AdminSetupCentreResendPage"');
+    expect(entry).toContain("<AdminSetupCentreResendPage />");
+    expect(entry).toContain("<AdminSetupWorkflowNavigator />");
     expect(page).toContain('className="setup-resend__rail"');
     expect(page).toContain('className="setup-resend__marker"');
     expect(page).toContain('className="setup-resend__context"');

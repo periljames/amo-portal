@@ -98,6 +98,7 @@ def test_knowledge_routes_are_registered_before_generic_compatibility_routes() -
     paths = [route.path for route in routes]
     required = {
         "/doc-control/workspace/t/{tenant_slug}/knowledge/tree",
+        "/doc-control/workspace/t/{tenant_slug}/knowledge/nodes/{node_id}/connections",
         "/doc-control/workspace/t/{tenant_slug}/knowledge/reference-monitor",
         "/manuals/t/{tenant_slug}/{manual_id}/rev/{revision_id}/references",
         "/manuals/t/{tenant_slug}/linked-resources/{reference_id}",
@@ -123,3 +124,18 @@ def test_frontend_reader_and_structure_surface_the_graph() -> None:
     assert "submitLinkedPdfResource" in linked_panel
     assert "Reference monitor" in structure
     assert "RECORD_SERIES" in structure
+    assert "Related documentation" in structure
+    assert "Work records, forms &amp; checklists" in structure
+    assert "Associated retained records" in structure
+    assert "getDocumentationNodeConnections" in structure
+
+
+def test_node_connection_reader_is_access_filtered_and_record_scoped() -> None:
+    root = Path(__file__).resolve().parents[5]
+    reader = (root / "backend/amodb/apps/doc_control/knowledge_tree_reader.py").read_text(encoding="utf-8")
+    service = (root / "frontend/src/services/documentation.ts").read_text(encoding="utf-8")
+    assert "read_only_node_connections" in reader
+    assert "visible_manual_ids" in reader
+    assert "DocumentationRecord.submitted_by_user_id == user.id" in reader
+    assert 'records_scope = "ALL" if is_control_user(user) else "OWN"' in reader
+    assert "/knowledge/nodes/${encodeURIComponent(nodeId)}/connections" in service

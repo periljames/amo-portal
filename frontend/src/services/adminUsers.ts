@@ -376,8 +376,8 @@ function resolveTargetAmoId(
     throw new Error("You are not logged in. Please sign in again.");
   }
 
-  const currentAmoId = (current as any).amo_id as string | undefined;
-  const isSuperuser = !!(current as any).is_superuser;
+  const currentAmoId = current.amo_id || undefined;
+  const isSuperuser = !!current.is_superuser;
 
   const candidate =
     (payload.amo_id || "").trim() ||
@@ -462,8 +462,8 @@ function resolveListAmoId(params?: ListParams): string | undefined {
   const current = getCachedUser();
   if (!current) return undefined;
 
-  const currentAmoId = (current as any).amo_id as string | undefined;
-  const isSuperuser = !!(current as any).is_superuser;
+  const currentAmoId = current.amo_id || undefined;
+  const isSuperuser = !!current.is_superuser;
 
   if (!isSuperuser) {
     // Never send amo_id for non-superusers (prevents accidental cross-AMO calls)
@@ -650,11 +650,13 @@ export async function updateAdminUser(
   userId: string,
   payload: AdminUserUpdatePayload
 ): Promise<AdminUserRead> {
-  return apiPut<AdminUserRead>(
+  const result = await apiPut<AdminUserRead>(
     `/accounts/admin/users/${encodeURIComponent(userId)}`,
     JSON.stringify(payload),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 
@@ -743,61 +745,74 @@ export async function deactivateAdminUser(userId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
     headers: authHeaders(),
   });
+  invalidateAdminUserCache(userId);
 }
 
 
 export async function disableAdminUser(userId: string): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/disable`,
     JSON.stringify({}),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function enableAdminUser(userId: string): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/enable`,
     JSON.stringify({}),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function revokeAdminUserAccess(userId: string): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/revoke-access`,
     JSON.stringify({}),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function forceAdminUserPasswordReset(userId: string): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/force-password-reset`,
     JSON.stringify({}),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function notifyAdminUser(
   userId: string,
   payload: UserNotifyPayload
 ): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/notify`,
     JSON.stringify(payload),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function scheduleAdminUserReview(
   userId: string,
   payload: UserScheduleReviewPayload
 ): Promise<UserCommandResult> {
-  return apiPost<UserCommandResult>(
+  const result = await apiPost<UserCommandResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/commands/schedule-review`,
     JSON.stringify(payload),
     { headers: authHeaders() }
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export interface AdminUserPresence {
@@ -1222,26 +1237,31 @@ export async function listAdminUserAuthorisations(userId?: string | null): Promi
 export async function grantAdminUserAuthorisation(
   payload: AdminUserAuthorisationCreatePayload,
 ): Promise<AdminUserAuthorisationRead> {
-  return apiPost<AdminUserAuthorisationRead>(`/accounts/admin/user-authorisations`, JSON.stringify(payload), {
+  const result = await apiPost<AdminUserAuthorisationRead>(`/accounts/admin/user-authorisations`, JSON.stringify(payload), {
     headers: authHeaders(),
   });
+  invalidateAdminUserCache(payload.user_id);
+  return result;
 }
 
 export async function updateAdminUserAuthorisation(
   userAuthorisationId: string,
   payload: AdminUserAuthorisationUpdatePayload,
 ): Promise<AdminUserAuthorisationRead> {
-  return apiPut<AdminUserAuthorisationRead>(
+  const result = await apiPut<AdminUserAuthorisationRead>(
     `/accounts/admin/user-authorisations/${encodeURIComponent(userAuthorisationId)}`,
     JSON.stringify(payload),
     { headers: authHeaders() },
   );
+  invalidateAdminUserCache();
+  return result;
 }
 
 export async function deleteAdminUserAuthorisation(userAuthorisationId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/user-authorisations/${encodeURIComponent(userAuthorisationId)}`, undefined, {
     headers: authHeaders(),
   });
+  invalidateAdminUserCache();
 }
 
 export async function listAdminGroups(amoId?: string | null): Promise<AdminUserGroupRead[]> {
@@ -1297,26 +1317,31 @@ export async function removeAdminGroupMember(groupId: string, membershipId: stri
 }
 
 export async function bulkAdminUserAction(payload: BulkUserActionPayload): Promise<BulkUserActionResult> {
-  return apiPost<BulkUserActionResult>(`/accounts/admin/users/bulk`, JSON.stringify(payload), {
+  const result = await apiPost<BulkUserActionResult>(`/accounts/admin/users/bulk`, JSON.stringify(payload), {
     headers: authHeaders(),
   });
+  payload.user_ids.forEach((userId) => invalidateAdminUserCache(userId));
+  return result;
 }
 
 export async function applyAdminUserEmploymentAction(
   userId: string,
   payload: UserEmploymentActionPayload,
 ): Promise<UserEmploymentActionResult> {
-  return apiPost<UserEmploymentActionResult>(
+  const result = await apiPost<UserEmploymentActionResult>(
     `/accounts/admin/users/${encodeURIComponent(userId)}/employment-actions`,
     JSON.stringify(payload),
     { headers: authHeaders() },
   );
+  invalidateAdminUserCache(userId);
+  return result;
 }
 
 export async function permanentDeleteAdminUser(userId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
     headers: authHeaders(),
   });
+  invalidateAdminUserCache(userId);
 }
 
 export async function downloadAdminUserExport(userId: string): Promise<{ filename: string; blob: Blob }> {

@@ -12,6 +12,7 @@ import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
 import {
   flushPendingSessionRevocation,
+  hasRecoverableSession,
   getToken,
   getTokenSecondsRemaining,
   onSessionEvent,
@@ -20,7 +21,6 @@ import {
 import { BRANDING_EVENT } from "./services/branding";
 import {
   clearAllPortalApiCaches,
-  clearAllPortalOfflineData,
   currentOfflineScope,
   onOfflineSyncComplete,
   replayOfflineMutations,
@@ -28,9 +28,9 @@ import {
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
 import {
   isPortalReady,
-  probePortalConnectivity,
-  startPortalConnectivityMonitor,
-  subscribePortalConnectivity,
+  onPortalConnectivityChange,
+  probePortalReadiness,
+  startPortalConnectivity,
 } from "./services/portalConnectivity";
 import "./styles/index.css";
 
@@ -168,7 +168,7 @@ const queryPersister = createPortalQueryPersister((_previousScope, nextScope) =>
 installActiveAmoStorageGuard();
 ensureManifest();
 onlineManager.setOnline(false);
-startPortalConnectivityMonitor();
+startPortalConnectivity();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -187,7 +187,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         // The readiness subscriber owns recovery ordering: revoke a pending
         // logout, recover authentication, then resume work. Hydration alone is
         // never permission to send persisted mutations.
-        if (isPortalReady()) void probePortalConnectivity("query-cache-restored");
+        if (isPortalReady()) void probePortalReadiness(true);
       }}
     >
       <RealtimeProvider>
@@ -247,8 +247,8 @@ async function configurePortalServiceWorker(): Promise<void> {
 if (typeof window !== "undefined") {
   let wasPortalReady = false;
   let recoverySequence: Promise<void> | null = null;
-  subscribePortalConnectivity((connectivity) => {
-    const ready = connectivity.state === "online" && connectivity.databaseReady;
+  onPortalConnectivityChange((connectivity) => {
+    const ready = connectivity.state === "ONLINE";
     if (!ready) {
       wasPortalReady = false;
       onlineManager.setOnline(false);
@@ -259,13 +259,13 @@ if (typeof window !== "undefined") {
     recoverySequence = (async () => {
       await flushPendingSessionRevocation();
       const remaining = getTokenSecondsRemaining();
-      if (getToken() && remaining !== null && remaining <= 0) {
+      if (hasRecoverableSession() && (!getToken() || (remaining !== null && remaining <= 0))) {
         await recoverSession("server-recovered");
         const recoveredRemaining = getTokenSecondsRemaining();
-        if (getToken() && recoveredRemaining !== null && recoveredRemaining <= 0) {
+        if (!getToken() || (recoveredRemaining !== null && recoveredRemaining <= 0)) {
           wasPortalReady = false;
           onlineManager.setOnline(false);
-          window.setTimeout(() => void probePortalConnectivity("session-recovery-retry"), 2_000);
+          window.setTimeout(() => void probePortalReadiness(true), 2_000);
           return;
         }
       }
@@ -297,7 +297,8 @@ if (typeof window !== "undefined") {
     if (detail.type === "manual-logout") {
       observedTenantScope = currentOfflineScope();
       clearTenantScopedRuntimeState();
-      void Promise.all([clearAllPortalOfflineData(), clearAllPortalQueryCaches()]);
+      // Logout may clear in-memory/query state, but must never silently destroy an encrypted unsynced outbox.
+      void Promise.all([clearAllPortalApiCaches(), clearAllPortalQueryCaches()]);
     }
   });
 
@@ -321,8 +322,8 @@ if (typeof window !== "undefined") {
   });
 
   navigator.serviceWorker?.addEventListener("message", (event) => {
-    if (event.data?.type === "PORTAL_CONNECTIVITY_RECHECK") {
-      void probePortalConnectivity("service-worker");
+    if (event.data?.type === "PORTAL_CONNECTIVITY_RECHECK" || event.data?.type === "PORTAL_SYNC_REQUESTED") {
+      void probePortalReadiness(true);
     }
   });
 }

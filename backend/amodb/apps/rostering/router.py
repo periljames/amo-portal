@@ -5,7 +5,7 @@ from datetime import date, datetime
 from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
+from ..resilience import command_service
 from . import calendar_feed, exports, governance, models, schemas, services
 
 router = APIRouter(prefix="/rostering", tags=["rostering"])
@@ -528,15 +529,30 @@ def list_roster_assignments(
 def create_roster_assignment(
     version_id: str,
     payload: schemas.RosterAssignmentCreate,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_EDIT, department_id=payload.department_id, base_station_id=payload.base_station_id)
     version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
     try:
+        route_key = f"rostering.version.assignment.create:{version_id}"
+        claim = command_service.begin_command(
+            db, amo_id=_amo(current_user), actor_user_id=current_user.id,
+            method="POST", route_key=route_key, idempotency_key=idempotency_key, payload=payload,
+        )
+        if claim.replayed:
+            if claim.row.status == "SUCCEEDED":
+                return claim.row.response_json
+            raise _error("This command is already being processed.", error_code="COMMAND_IN_PROGRESS", status_code=409, retryable=True)
         row = services.create_assignment(db, version=version, actor_user_id=current_user.id, payload=payload)
-        _commit(db, row)
-        return services.serialize_assignment(_assignment_or_404(db, amo_id=_amo(current_user), assignment_id=row.id))
+        result = services.serialize_assignment(row)
+        command_service.complete_command(claim.row, response=result, status_code=201)
+        db.commit()
+        return result
+    except command_service.CommandConflict as exc:
+        db.rollback()
+        raise _error(str(exc), error_code="IDEMPOTENCY_CONFLICT", status_code=409) from exc
     except (ValueError, RuntimeError) as exc:
         db.rollback()
         raise _translate(exc, default_code="ROSTER_ASSIGNMENT_INVALID") from exc
@@ -547,15 +563,31 @@ def create_roster_assignment(
 def patch_roster_assignment(
     assignment_id: str,
     payload: schemas.RosterAssignmentUpdate,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     row = _assignment_or_404(db, amo_id=_amo(current_user), assignment_id=assignment_id, lock=True)
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_EDIT, department_id=row.department_id, base_station_id=row.base_station_id)
     try:
+        route_key = f"rostering.assignment.update:{assignment_id}"
+        claim = command_service.begin_command(
+            db, amo_id=_amo(current_user), actor_user_id=current_user.id,
+            method="PATCH", route_key=route_key, idempotency_key=idempotency_key, payload=payload,
+            expected_revision=payload.expected_state_revision,
+        )
+        if claim.replayed:
+            if claim.row.status == "SUCCEEDED":
+                return claim.row.response_json
+            raise _error("This command is already being processed.", error_code="COMMAND_IN_PROGRESS", status_code=409, retryable=True)
         services.update_assignment(db, row=row, actor_user_id=current_user.id, payload=payload)
-        _commit(db, row)
-        return services.serialize_assignment(_assignment_or_404(db, amo_id=_amo(current_user), assignment_id=row.id))
+        result = services.serialize_assignment(row)
+        command_service.complete_command(claim.row, response=result, status_code=200)
+        db.commit()
+        return result
+    except command_service.CommandConflict as exc:
+        db.rollback()
+        raise _error(str(exc), error_code="IDEMPOTENCY_CONFLICT", status_code=409) from exc
     except (ValueError, RuntimeError) as exc:
         db.rollback()
         raise _translate(exc, default_code="ROSTER_ASSIGNMENT_INVALID") from exc

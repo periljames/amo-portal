@@ -299,7 +299,7 @@ export function MyRosterWorkspace() {
   const roster = rosterQuery.data || null;
   const leaveTypes = leaveTypesQuery.data || [];
   const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);
-  const requests = requestsQuery.data?.items || [];
+  const requests = useMemo(() => requestsQuery.data?.items || [], [requestsQuery.data?.items]);
   const attendance = attendanceQuery.data || null;
   const currentAttendance = currentAttendanceQuery.data || null;
   const timesheets = timesheetsQuery.data?.items || [];
@@ -311,11 +311,13 @@ export function MyRosterWorkspace() {
     [currentAttendance?.current_state, currentAttendance?.events, localAttendanceMode],
   );
 
+  const refetchAttendance = attendanceQuery.refetch;
+  const refetchCurrentAttendance = currentAttendanceQuery.refetch;
   useEffect(() => onOfflineSyncComplete((detail) => {
     if (!detail.entityTypes.includes("attendance-event")) return;
     setLocalAttendanceMode(null);
-    void Promise.allSettled([currentAttendanceQuery.refetch(), attendanceQuery.refetch()]);
-  }), [attendanceKey, currentAttendanceKey]);
+    void Promise.allSettled([refetchCurrentAttendance(), refetchAttendance()]);
+  }), [attendanceKey, currentAttendanceKey, refetchAttendance, refetchCurrentAttendance]);
   const lastAttendance = useMemo(
     () => latestAttendanceEvent(currentAttendance?.events || []),
     [currentAttendance?.events],
@@ -887,8 +889,9 @@ export function MyRosterWorkspace() {
           </div>
           <div
             className="wr-attendance-actions wr-attendance-actions--stateful"
-            hidden={(currentAttendanceQuery.isPending && !localAttendanceMode)
-              || (Boolean(currentAttendanceQuery.error) && !localAttendanceMode && !currentAttendance)}
+            hidden={currentAttendanceQuery.isPending
+              ? !localAttendanceMode
+              : Boolean(currentAttendanceQuery.error) && !localAttendanceMode && !currentAttendance}
           >
             {mode === "CLOCKED_OUT" ? (
               <AttendanceButton eventType="CLOCK_IN" busy={Boolean(busy)} onAction={(eventType) => void attendanceAction(eventType)} />

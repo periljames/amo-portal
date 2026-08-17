@@ -106,11 +106,12 @@ describe("rostering architecture regressions", () => {
     expect(mainSource).toContain("BRANDING_EVENT");
   });
 
-  it("retains the outbox on involuntary expiry and clears it only on manual logout", () => {
+  it("never destroys encrypted unsynced work as a side effect of logout", () => {
     expect(mainSource).toContain('detail.type === "expired" || detail.type === "idle-logout"');
     expect(mainSource).toContain("clearAllPortalApiCaches()");
     expect(mainSource).toContain('detail.type === "manual-logout"');
-    expect(mainSource).toContain("clearAllPortalOfflineData()");
+    expect(mainSource).not.toContain("clearAllPortalOfflineData()");
+    expect(mainSource).toContain("never silently destroy an encrypted unsynced");
   });
 
   it("provides retry and discard controls for conflicted offline changes", () => {

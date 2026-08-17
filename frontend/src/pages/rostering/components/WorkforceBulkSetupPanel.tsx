@@ -39,8 +39,8 @@ const initialFilters = (): HrPeopleFilters => {
   return {
     search: p.get("bulk_search") || null,
     department_id: p.get("bulk_department") || null,
-    contract_state: selectedFilter<NonNullable<HrPeopleFilters["contract_state"]>>(p.get("bulk_contract")),
-    pattern_state: legacyPatternDefault ? null : selectedFilter<NonNullable<HrPeopleFilters["pattern_state"]>>(p.get("bulk_pattern")),
+    contract_state: selectedFilter(p.get("bulk_contract")) as HrPeopleFilters["contract_state"],
+    pattern_state: legacyPatternDefault ? null : selectedFilter(p.get("bulk_pattern")) as HrPeopleFilters["pattern_state"],
     sort_by: "name", sort_dir: "asc",
   };
 };

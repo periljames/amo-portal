@@ -559,6 +559,9 @@
 .wr-planner-alert-stack .wr-inline-note > button { display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
 
 .wr-roster-grid--month { --wr-person-col: 258px; --wr-day-col: 42px; }
+.wr-native-guidance { margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--wr-border); border-radius: 9px; color: var(--wr-muted); background: var(--wr-surface-soft); font-size: .68rem; }
+.wr-native-guidance summary { color: var(--wr-text); font-weight: 820; cursor: pointer; }
+.wr-native-guidance p { margin: 7px 0 1px; line-height: 1.45; }
 .wr-roster-grid--month .wr-grid-corner { min-height: 36px; }
 .wr-roster-grid--month .wr-grid-corner { grid-template-columns: minmax(0, 1fr) 58px; align-items: center; column-gap: 5px; }
 .wr-roster-grid--month .wr-grid-corner > span { display: grid; min-width: 0; }

@@ -64,7 +64,7 @@ describe("portal offline mutation policy", () => {
 
     await expect(portalFetch("/rostering/versions/ID-1/assignments", {
       method: "POST",
-      body: JSON.stringify({ user_id: "ID-U1" }),
+      body: JSON.stringify({ user_id: "ID-U1", source_reference_id: "offline-test-503" }),
       offline: { queueMutation: true },
     })).rejects.not.toBeInstanceOf(OfflineQueuedError);
   });
@@ -82,7 +82,7 @@ describe("portal offline mutation policy", () => {
 
     await expect(portalFetch("/rostering/versions/ID-1/assignments", {
       method: "POST",
-      body: JSON.stringify({ user_id: "ID-U1" }),
+      body: JSON.stringify({ user_id: "ID-U1", source_reference_id: "offline-test-transport" }),
       offline: { queueMutation: true },
     })).rejects.toBeInstanceOf(OfflineQueuedError);
   });
@@ -94,7 +94,7 @@ describe("portal offline mutation policy", () => {
 
     await expect(portalFetch("/rostering/versions/ID-1/assignments", {
       method: "POST",
-      body: JSON.stringify({ user_id: "ID-U1" }),
+      body: JSON.stringify({ user_id: "ID-U1", source_reference_id: "offline-test-transport" }),
       offline: { queueMutation: true, entityType: "roster-assignment" },
     })).rejects.toBeInstanceOf(OfflineQueuedError);
   });

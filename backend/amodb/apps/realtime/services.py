@@ -20,6 +20,7 @@ from . import models, schemas
 
 DEFAULT_TOKEN_TTL_SECONDS = int(os.getenv("REALTIME_CONNECT_TOKEN_TTL_SECONDS", "300"))
 MAX_PAYLOAD_BYTES = int(os.getenv("REALTIME_PAYLOAD_MAX_BYTES", "8192"))
+PRESENCE_FRESH_SECONDS = max(30, int(os.getenv("PRESENCE_HEARTBEAT_GRACE_SECONDS", "90")))
 
 
 def utcnow() -> datetime:
@@ -164,10 +165,23 @@ def build_bootstrap(db: Session, *, user: account_models.User) -> schemas.Realti
         .filter(models.PromptDelivery.amo_id == amo_id, models.PromptDelivery.user_id == str(user.id), models.PromptDelivery.actioned_at.is_(None))
         .all()
     )
+    presence_cutoff = utcnow() - timedelta(seconds=PRESENCE_FRESH_SECONDS)
     return schemas.RealtimeBootstrapResponse(
         threads=threads,
         unread_counts=unread_counts,
-        presence={row.user_id: row.state.value for row in presence_rows},
+        presence={
+            row.user_id: (
+                row.state.value
+                if row.last_seen_at
+                and (
+                    row.last_seen_at.replace(tzinfo=timezone.utc)
+                    if row.last_seen_at.tzinfo is None
+                    else row.last_seen_at.astimezone(timezone.utc)
+                ) >= presence_cutoff
+                else models.PresenceKind.OFFLINE.value
+            )
+            for row in presence_rows
+        },
         pending_prompts=[
             {
                 "promptId": prompt.id,
@@ -188,47 +202,11 @@ def update_presence_state(
     user: account_models.User,
     payload: schemas.PresenceStateUpdateRequest,
 ) -> schemas.PresenceStateRead:
-    amo_id = effective_amo_id(user)
-    now = utcnow()
-    if not amo_id:
-        # Platform superusers deliberately have no AMO. Do not write tenant FK rows.
-        return schemas.PresenceStateRead(
-            user_id=str(user.id),
-            amo_id="platform",
-            state="online" if payload.state == "online" else "away",
-            last_seen_at=now,
-            updated_at=now,
-            reason=payload.reason,
-        )
+    # Compatibility shim for older imports. Keep all lease aggregation in one
+    # implementation so a stale browser can never overwrite a live device.
+    from .presence_service import update_presence_state as update_session_presence
 
-    row = (
-        db.query(models.PresenceState)
-        .filter(models.PresenceState.amo_id == amo_id, models.PresenceState.user_id == str(user.id))
-        .first()
-    )
-    if not row:
-        row = models.PresenceState(
-            amo_id=amo_id,
-            user_id=str(user.id),
-            state=models.PresenceKind.ONLINE,
-            last_seen_at=now,
-        )
-        db.add(row)
-
-    row.state = models.PresenceKind.ONLINE if payload.state == "online" else models.PresenceKind.AWAY
-    row.last_seen_at = now
-    row.updated_at = now
-    db.commit()
-    db.refresh(row)
-
-    return schemas.PresenceStateRead(
-        user_id=row.user_id,
-        amo_id=row.amo_id,
-        state=row.state.value,
-        last_seen_at=row.last_seen_at,
-        updated_at=row.updated_at,
-        reason=payload.reason,
-    )
+    return update_session_presence(db, user=user, payload=payload)
 
 
 def create_thread(db: Session, *, user: account_models.User, payload: schemas.ThreadCreateRequest) -> schemas.ThreadRead:

@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -28,6 +28,7 @@ from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
+from amodb.apps.resilience import command_service
 from amodb.apps.reliability import schemas as reliability_schemas
 from amodb.apps.reliability import services as reliability_services
 from amodb.utils.identifiers import generate_uuid7
@@ -467,6 +468,7 @@ def create_task(
 def update_task(
     task_id: int,
     payload: schemas.TaskCardUpdate,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -487,6 +489,21 @@ def update_task(
     )
     if not task:
         raise HTTPException(status_code=404, detail="Task card not found")
+
+    try:
+        claim = command_service.begin_command(
+            db, amo_id=current_user.effective_amo_id, actor_user_id=current_user.id,
+            method="PUT", route_key=f"work.task.update:{task_id}",
+            idempotency_key=idempotency_key, payload=payload,
+            expected_revision=payload.last_known_updated_at.isoformat(),
+        )
+    except command_service.CommandConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"error_code": "IDEMPOTENCY_CONFLICT", "detail": str(exc)}) from exc
+    if claim.replayed:
+        if claim.row.status == "SUCCEEDED":
+            return claim.row.response_json
+        raise HTTPException(status_code=409, detail={"error_code": "COMMAND_IN_PROGRESS", "retryable": True})
 
     is_planning = (
         current_user.is_superuser
@@ -595,9 +612,11 @@ def update_task(
                 commit=False,
             )
 
+    db.flush()
+    result = schemas.TaskCardRead.model_validate(task).model_dump(mode="json")
+    command_service.complete_command(claim.row, response=result, status_code=200)
     db.commit()
-    db.refresh(task)
-    return task
+    return result
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

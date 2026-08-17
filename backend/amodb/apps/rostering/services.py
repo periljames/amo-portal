@@ -153,7 +153,10 @@ def _ensure_source_owned_state(
         )
         if exclude_assignment_id:
             collision_query = collision_query.filter(models.RosterAssignment.id != exclude_assignment_id)
-        collision = collision_query.order_by(models.RosterAssignment.starts_at.asc(), models.RosterAssignment.id.asc()).first()
+        # This is an existence check; ordering adds database work without
+        # changing the collision decision and makes lightweight service
+        # adapters unnecessarily implement an ordering API.
+        collision = collision_query.first()
         if collision:
             raise ValueError(
                 "This person already has an overlapping roster assignment "

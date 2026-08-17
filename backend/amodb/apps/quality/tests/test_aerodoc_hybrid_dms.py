@@ -40,8 +40,9 @@ def _user(db_session, amo_id: str, role: account_models.AccountRole = account_mo
     return user
 
 
-def _doc(db_session):
+def _doc(db_session, amo_id: str):
     doc = quality_models.QMSDocument(
+        amo_id=amo_id,
         domain=quality_models.QMSDomain.AMO,
         doc_type=quality_models.QMSDocType.MANUAL,
         doc_code=f"DOC-{uuid4().hex[:6]}",
@@ -58,7 +59,7 @@ def test_upload_revision_computes_sha_and_logs_event(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo.id)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo.id)
 
     upload = UploadFile(filename="manual.txt", file=BytesIO(b"controlled copy content"), headers={"content-type": "text/plain"})
 
@@ -87,9 +88,10 @@ def test_verify_physical_copy_green_only_for_approved(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo.id)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo.id)
 
     rev = quality_models.QMSDocumentRevision(
+        amo_id=amo.id,
         document_id=doc.id,
         issue_no=1,
         rev_no=0,
@@ -123,9 +125,9 @@ def test_damage_workflow_voids_old_and_replaces(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo.id)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo.id)
 
-    rev = quality_models.QMSDocumentRevision(document_id=doc.id, issue_no=1, rev_no=0)
+    rev = quality_models.QMSDocumentRevision(amo_id=amo.id, document_id=doc.id, issue_no=1, rev_no=0)
     db_session.add(rev)
     db_session.flush()
 
@@ -157,8 +159,9 @@ def test_verify_physical_copy_is_tenant_scoped(db_session):
     db_session.commit()
 
     user_b = _user(db_session, amo_b.id)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo_a.id)
     rev = quality_models.QMSDocumentRevision(
+        amo_id=amo_a.id,
         document_id=doc.id,
         issue_no=1,
         rev_no=0,
@@ -189,8 +192,8 @@ def test_report_damage_rejects_cross_tenant_access(db_session):
     db_session.commit()
 
     user_b = _user(db_session, amo_b.id)
-    doc = _doc(db_session)
-    rev = quality_models.QMSDocumentRevision(document_id=doc.id, issue_no=1, rev_no=0)
+    doc = _doc(db_session, amo_a.id)
+    rev = quality_models.QMSDocumentRevision(amo_id=amo_a.id, document_id=doc.id, issue_no=1, rev_no=0)
     db_session.add(rev)
     db_session.flush()
 
@@ -224,7 +227,7 @@ def test_upload_revision_requires_control_role(db_session):
     db_session.add(amo)
     db_session.commit()
     viewer = _user(db_session, amo.id, role=account_models.AccountRole.VIEW_ONLY)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo.id)
     upload = UploadFile(filename="manual.txt", file=BytesIO(b"viewer cannot upload"), headers={"content-type": "text/plain"})
 
     from fastapi import HTTPException
@@ -252,8 +255,8 @@ def test_request_physical_copy_requires_control_role(db_session):
     db_session.add(amo)
     db_session.commit()
     viewer = _user(db_session, amo.id, role=account_models.AccountRole.VIEW_ONLY)
-    doc = _doc(db_session)
-    rev = quality_models.QMSDocumentRevision(document_id=doc.id, issue_no=1, rev_no=0)
+    doc = _doc(db_session, amo.id)
+    rev = quality_models.QMSDocumentRevision(amo_id=amo.id, document_id=doc.id, issue_no=1, rev_no=0)
     db_session.add(rev)
     db_session.commit()
 
@@ -278,7 +281,7 @@ def test_add_revision_persists_new_metadata_fields(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo.id)
-    doc = _doc(db_session)
+    doc = _doc(db_session, amo.id)
 
     out = quality_router.add_revision(
         doc_id=doc.id,
@@ -316,8 +319,8 @@ def test_request_physical_copy_continues_serial_sequence(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _user(db_session, amo.id)
-    doc = _doc(db_session)
-    rev = quality_models.QMSDocumentRevision(document_id=doc.id, issue_no=1, rev_no=0)
+    doc = _doc(db_session, amo.id)
+    rev = quality_models.QMSDocumentRevision(amo_id=amo.id, document_id=doc.id, issue_no=1, rev_no=0)
     db_session.add(rev)
     db_session.commit()
 

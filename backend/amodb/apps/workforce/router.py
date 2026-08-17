@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
+from ..resilience import command_service
 from . import models, permissions, schemas, services
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
@@ -811,15 +812,31 @@ def export_attendance_events(
 @router.post("/attendance-events", response_model=schemas.AttendanceEventRead, status_code=status.HTTP_201_CREATED)
 def create_attendance_event(
     payload: schemas.AttendanceEventCreate,
+    idempotency_header: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _permission(db, current_user, permissions.PermissionCode.ATTENDANCE_VIEW_OWN)
     try:
+        key = idempotency_header or payload.idempotency_key
+        claim = command_service.begin_command(
+            db, amo_id=_amo(current_user), actor_user_id=current_user.id,
+            method="POST", route_key="workforce.attendance.create", idempotency_key=key, payload=payload,
+        )
+        if claim.replayed:
+            if claim.row.status == "SUCCEEDED":
+                return claim.row.response_json
+            raise _error("This attendance event is already being processed.", error_code="COMMAND_IN_PROGRESS", status_code=409, retryable=True)
         row = services.create_attendance_event(db, amo_id=_amo(current_user), actor=current_user, payload=payload)
-        _commit(db, row)
+        db.flush()
         row = db.query(models.AttendanceEvent).options(selectinload(models.AttendanceEvent.user)).filter(models.AttendanceEvent.id == row.id).first()
-        return services.serialize_attendance(row)
+        result = services.serialize_attendance(row)
+        command_service.complete_command(claim.row, response=result, status_code=201)
+        db.commit()
+        return result
+    except command_service.CommandConflict as exc:
+        db.rollback()
+        raise _error(str(exc), error_code="IDEMPOTENCY_CONFLICT", status_code=409) from exc
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="ATTENDANCE_EVENT_INVALID") from exc

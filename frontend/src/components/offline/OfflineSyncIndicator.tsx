@@ -25,9 +25,9 @@ import {
   type OfflineReplayProgress,
 } from "../../services/offlinePersistence";
 import {
-  getPortalConnectivitySnapshot,
-  probePortalConnectivity,
-  subscribePortalConnectivity,
+  getPortalConnectivity,
+  onPortalConnectivityChange,
+  probePortalReadiness,
   type PortalConnectivitySnapshot,
 } from "../../services/portalConnectivity";
 import { MessagingHub } from "../messaging/MessagingHub";
@@ -59,7 +59,7 @@ function formatLastReady(value: number | null): string {
 }
 
 export function OfflineSyncIndicator() {
-  const [connectivity, setConnectivity] = useState<PortalConnectivitySnapshot>(getPortalConnectivitySnapshot);
+  const [connectivity, setConnectivity] = useState<PortalConnectivitySnapshot>(getPortalConnectivity);
   const [summary, setSummary] = useState<OfflineOutboxSummary>(EMPTY);
   const [entries, setEntries] = useState<OfflineOutboxEntry[]>([]);
   const [progress, setProgress] = useState<OfflineReplayProgress>(EMPTY_PROGRESS);
@@ -67,7 +67,7 @@ export function OfflineSyncIndicator() {
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const online = connectivity.state === "online" && connectivity.databaseReady;
+  const online = connectivity.state === "ONLINE";
 
   const refresh = useCallback(async () => {
     const [nextSummary, nextEntries] = await Promise.all([
@@ -81,7 +81,7 @@ export function OfflineSyncIndicator() {
   const sync = useCallback(async () => {
     if (manualSync) return;
     if (!online) {
-      void probePortalConnectivity("manual-sync");
+      void probePortalReadiness(true);
       return;
     }
     setManualSync(true);
@@ -130,7 +130,7 @@ export function OfflineSyncIndicator() {
   }, [busyId, refresh]);
 
   useEffect(() => {
-    const removeConnectivity = subscribePortalConnectivity((next) => {
+    const removeConnectivity = onPortalConnectivityChange((next) => {
       setConnectivity(next);
       void refresh();
     });
@@ -165,7 +165,7 @@ export function OfflineSyncIndicator() {
   const state: IndicatorState = useMemo(() => {
     if (summary.conflict > 0 || summary.failed > 0) return "conflict";
     if (manualSync || progress.phase === "sending" || summary.syncing > 0) return "syncing";
-    if (connectivity.state === "degraded" || connectivity.state === "recovering") return "degraded";
+    if (connectivity.state === "DEGRADED" || connectivity.state === "RECOVERING") return "degraded";
     if (!online) return "offline";
     if (summary.queued > 0) return "queued";
     return "online";
@@ -251,13 +251,14 @@ export function OfflineSyncIndicator() {
           <div className="portal-offline-recovery__summary">
             <span><strong>{summary.queued + summary.syncing}</strong> waiting</span>
             <span><strong>{issueCount}</strong> review</span>
-            <span><strong>{connectivity.latencyMs ?? "—"}</strong> ms</span>
+            <span><strong>{connectivity.attempt}</strong> retry attempt{connectivity.attempt === 1 ? "" : "s"}</span>
           </div>
 
           {actionError ? <p className="portal-offline-recovery__error" role="alert">{actionError}</p> : null}
 
           {reviewEntries.length ? (
             <div className="portal-offline-recovery__list">
+              <strong className="portal-offline-recovery__review-title">Offline changes need review</strong>
               {reviewEntries.map((entry) => {
                 const busy = busyId === entry.id;
                 return (
@@ -284,7 +285,7 @@ export function OfflineSyncIndicator() {
           ) : null}
 
           <footer className="portal-offline-recovery__footer">
-            <button type="button" onClick={() => void probePortalConnectivity("panel")} disabled={manualSync}>
+            <button type="button" onClick={() => void probePortalReadiness(true)} disabled={manualSync}>
               <RefreshCw size={15} aria-hidden="true" />Check server
             </button>
             {summary.queued > 0 ? (

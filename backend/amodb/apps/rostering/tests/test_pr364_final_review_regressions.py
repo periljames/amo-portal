@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from amodb.apps.rostering import automation_service
+from amodb.apps.workforce import services as workforce_services
 from amodb.apps.rostering.automation_models import (
     RosterAutomationFrequency,
     RosterGenerationPolicy,
@@ -47,7 +48,12 @@ def test_fortnightly_overdue_schedule_preserves_each_due_cycle():
 
 
 def test_pattern_readiness_query_filters_inactive_patterns():
-    source = Path(automation_service.__file__).read_text(encoding="utf-8")
-    section = source[source.index("def _pattern_assignments"):source.index("def _estimated_assignments")]
+    # Automation delegates pattern eligibility to the canonical Workforce
+    # preview service. Keep this regression bound to the current owner rather
+    # than to the removed duplicate rostering query.
+    source = Path(workforce_services.__file__).read_text(encoding="utf-8")
+    start = source.index("def preview_patterns")
+    next_function = source.find("\ndef ", start + 1)
+    section = source[start : next_function if next_function != -1 else None]
     assert "join(" in section
     assert "WorkPattern.is_active.is_(True)" in section

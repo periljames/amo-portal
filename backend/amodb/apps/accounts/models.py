@@ -861,6 +861,64 @@ class PasswordResetToken(Base):
         return self.expires_at >= now
 
 
+class PortalAuthSession(Base):
+    """Revocable browser/device session backing short-lived access tokens."""
+
+    __tablename__ = "portal_auth_sessions"
+    __table_args__ = (
+        Index("ix_portal_auth_sessions_user_active", "user_id", "revoked_at", "expires_at"),
+        Index("ix_portal_auth_sessions_amo_active", "amo_id", "revoked_at", "expires_at"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
+    refresh_family_id = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_reason = Column(String(64), nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent_hash = Column(String(64), nullable=True)
+
+
+class RefreshSessionToken(Base):
+    """Hashed, one-time refresh credential with bounded replay recovery."""
+
+    __tablename__ = "refresh_session_tokens"
+    __table_args__ = (
+        Index("ix_refresh_session_tokens_session_status", "session_id", "status", "expires_at"),
+        Index("ix_refresh_session_tokens_family", "family_id", "issued_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    session_id = Column(
+        String(64),
+        ForeignKey("portal_auth_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    family_id = Column(String(64), nullable=False, index=True)
+    parent_id = Column(
+        String(36),
+        ForeignKey("refresh_session_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    replaced_by_id = Column(
+        String(36),
+        ForeignKey("refresh_session_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(String(16), nullable=False, default="ACTIVE", index=True)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    rotated_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # SECURITY EVENTS (AUDIT TRAIL)
 # ---------------------------------------------------------------------------
