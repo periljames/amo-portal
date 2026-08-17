@@ -65,6 +65,14 @@ export async function downloadInternalAuditEvidence(amoCode: string, auditId: st
   return response.blob();
 }
 
-export function publicReleasedEvidenceDownloadUrl(findingId: string, artifactId: string): string {
-  return `${getApiBaseUrl()}/quality/audit-access/findings/${encodeURIComponent(findingId)}/evidence/${encodeURIComponent(artifactId)}/download`;
+export async function downloadPublicReleasedAuditEvidence(findingId: string, artifactId: string): Promise<Blob> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/quality/audit-access/findings/${encodeURIComponent(findingId)}/evidence/${encodeURIComponent(artifactId)}/download`,
+    { headers: { Accept: "application/octet-stream" }, credentials: "include" },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    throw new Error(typeof payload?.detail === "string" ? payload.detail : `Released evidence download failed with status ${response.status}.`);
+  }
+  return response.blob();
 }
