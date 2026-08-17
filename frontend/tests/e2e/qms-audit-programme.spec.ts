@@ -267,7 +267,7 @@ test("creates a draft programme and requires a reason before review transition",
   const detailHeader = page.locator(".qms-audit-programme__detail-header");
   await expect(page.getByText("AP-2026-CREATED-R01", { exact: true })).toBeVisible();
   await expect(detailHeader.getByText("Draft", { exact: true })).toBeVisible();
-  const submitReview = page.getByRole("button", { name: "Under Review" });
+  const submitReview = page.getByRole("button", { name: "Submit for review" });
   await expect(submitReview).toBeDisabled();
   await page.getByLabel("Programme transition reason").fill("Ready for independent Quality review.");
   await expect(submitReview).toBeEnabled();
