@@ -22,17 +22,22 @@ def create_external_participant_guarded(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    """Fail closed until a real MFA/passkey ceremony is wired to external audit access.
+    """Permit only assurance modes backed by an implemented ceremony.
 
-    The underlying external participant model retains the future assurance vocabulary,
-    but current invitations are email-link sessions only. This compatibility route is
-    registered before the older create route so the API cannot silently label an
-    email-link session as MFA or passkey assured.
+    Email-link access remains valid for auditees and explicitly configured external
+    participants. PASSKEY is available only to external auditors because the
+    public bootstrap/assertion flow is purpose-bound to their assigned fieldwork
+    identity. MFA remains fail-closed until a real MFA provider is integrated.
     """
 
-    if payload.assurance_level != "EMAIL_LINK":
+    if payload.assurance_level == "MFA":
         raise HTTPException(
             status_code=422,
-            detail="MFA/passkey external audit access is not enabled yet. Use EMAIL_LINK until the current-main identity assurance provider is integrated.",
+            detail="MFA external audit access is not enabled because no MFA provider is currently wired to the QMS assurance flow.",
+        )
+    if payload.assurance_level == "PASSKEY" and payload.participant_type != "EXTERNAL_AUDITOR":
+        raise HTTPException(
+            status_code=422,
+            detail="PASSKEY assurance is currently supported only for assigned external auditors. Auditee guest access remains purpose-bound EMAIL_LINK access.",
         )
     return create_external_participant(audit_id=audit_id, payload=payload, ctx=ctx, db=db)
