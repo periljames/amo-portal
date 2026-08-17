@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.audit import models as audit_models
+from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.database import get_read_db, get_write_db
 
 from . import models
@@ -35,6 +37,29 @@ class AuditIndependenceCreate(BaseModel):
     relationship_to_subject: str | None = Field(default=None, max_length=2000)
     rationale: str = Field(min_length=8, max_length=4000)
     source_references: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _publish_persisted_event(row: audit_models.AuditEvent) -> None:
+    """Publish only after the transaction containing the authoritative event commits."""
+    try:
+        publish_event(EventEnvelope(
+            id=str(row.id),
+            type=f"{row.entity_type}.{row.action}".lower(),
+            entityType=row.entity_type,
+            entityId=row.entity_id,
+            action=row.action,
+            timestamp=(row.occurred_at or row.created_at or _utcnow()).isoformat(),
+            actor={"userId": row.actor_user_id} if row.actor_user_id else None,
+            metadata={"amoId": row.amo_id, **(row.metadata_json or {})},
+        ))
+    except Exception:
+        # The durable AuditEvent is authoritative. A disconnected subscriber can
+        # recover it through the replay/history path on reconnect.
+        return
 
 
 def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
@@ -144,8 +169,33 @@ def declare_audit_independence(
         declared_by_user_id=ctx.user_id,
     )
     db.add(row)
+    db.flush()
+    event = audit_models.AuditEvent(
+        amo_id=ctx.amo_id,
+        entity_type="qms.audit.independence",
+        entity_id=str(row.id),
+        action="DECLARED",
+        actor_user_id=ctx.user_id,
+        before=None,
+        after={
+            "audit_id": str(audit_id),
+            "user_id": str(payload.user_id),
+            "declaration": payload.declaration,
+            "relationship_to_subject": row.relationship_to_subject,
+        },
+        metadata_json={
+            "module": "quality",
+            "auditId": str(audit_id),
+            "userId": str(payload.user_id),
+            "declaration": payload.declaration,
+            "reason": payload.rationale.strip(),
+        },
+    )
+    db.add(event)
+    db.flush()
     db.commit()
     db.refresh(row)
+    _publish_persisted_event(event)
     return {
         "id": str(row.id),
         "user_id": str(row.user_id),
@@ -190,8 +240,31 @@ def update_audit_assignments(
     audit.lead_auditor_user_id = payload.lead_auditor_user_id or None
     audit.observer_auditor_user_id = payload.observer_auditor_user_id or None
     audit.assistant_auditor_user_id = payload.assistant_auditor_user_id or None
+    current = {
+        "lead_auditor_user_id": audit.lead_auditor_user_id,
+        "observer_auditor_user_id": audit.observer_auditor_user_id,
+        "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+    }
+    event = audit_models.AuditEvent(
+        amo_id=ctx.amo_id,
+        entity_type="qms.audit.assignment",
+        entity_id=str(audit.id),
+        action="UPDATED",
+        actor_user_id=ctx.user_id,
+        before=previous,
+        after=current,
+        metadata_json={
+            "module": "quality",
+            "auditId": str(audit.id),
+            "reason": payload.reason.strip(),
+            "assignmentGate": results,
+        },
+    )
+    db.add(event)
+    db.flush()
     db.commit()
     db.refresh(audit)
+    _publish_persisted_event(event)
     return {
         "audit_id": str(audit.id),
         "lead_auditor_user_id": audit.lead_auditor_user_id,
