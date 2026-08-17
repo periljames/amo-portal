@@ -5,13 +5,13 @@ import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { apiRequest } from "../../../services/apiClient";
-import { qmsResolveAudit } from "../../../services/qms";
 import {
   getAuditClosureState,
   recordAuditFollowUpComplete,
   reopenAuditFollowUp,
 } from "../../../services/qmsAuditCloseout";
 import { getCarControlLoop } from "../../../services/qmsCarControlLoop";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { auditSessionPath } from "./auditSessionRoutes";
 
 type Props = { amoCode: string; auditKey: string };
@@ -66,13 +66,13 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [notice, setNotice] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-follow-up-audit-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-follow-up-audit-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
   const carsQuery = useQuery({
-    queryKey: ["qms-audit-cars", auditId],
+    queryKey: ["qms-audit-cars", amoCode, auditId],
     queryFn: ({ signal }) => listAuditCars(auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
@@ -98,7 +98,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const refresh = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["qms-audit-cars", auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-cars", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-closure-state", amoCode, auditId] }),
       effectiveSelectedCarId ? queryClient.invalidateQueries({ queryKey: ["qms-car-control-loop", amoCode, effectiveSelectedCarId] }) : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
@@ -154,7 +154,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <div className="qms-occurrence-stage__grid">
         <main>
           <article className="qms-occurrence-stage__card">
-            <header><Clock3 size={18} /><div><strong>Corrective-action queue</strong><small>One bounded register query for this audit; detailed control-loop state is fetched only for the selected CAR.</small></div></header>
+            <header><Clock3 size={18} /><div><strong>Corrective-action queue</strong><small>One audit-filtered register query; detailed control-loop state is fetched only for the selected CAR.</small></div></header>
             {!cars.length ? <p>No CARs are linked to this audit.</p> : <div className="qms-occurrence-stage__queue">{cars.map((car) => <button type="button" key={car.id} className={car.id === effectiveSelectedCarId ? "is-selected" : ""} onClick={() => setSelectedCarId(car.id)}><div><strong>{car.car_number}</strong><span>{car.title}</span><small>{car.finding_ref || "No finding reference"} · {car.priority}</small></div><em data-state={carIsClosed(car) ? "closed" : carIsOverdue(car) ? "overdue" : "open"}>{carIsClosed(car) ? "Closed" : carIsOverdue(car) ? "Overdue" : car.status.replaceAll("_", " ")}</em></button>)}</div>}
           </article>
 
@@ -171,7 +171,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
         <aside>
           <article className="qms-occurrence-stage__card">
-            <header><CheckCircle2 size={18} /><div><strong>Follow-up closure gate</strong><small>Computed by the backend from the audit's unresolved assurance obligations.</small></div></header>
+            <header><CheckCircle2 size={18} /><div><strong>Follow-up closure gate</strong><small>Computed by the backend from this audit's unresolved assurance obligations.</small></div></header>
             <dl><div><dt>Execution</dt><dd>{closure.execution_status}</dd></div><div><dt>Follow-up</dt><dd>{closure.follow_up_status}</dd></div></dl>
             {closure.follow_up_readiness.blockers.length ? <ul>{closure.follow_up_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${blocker.id || index}`}><strong>{blocker.type}{blocker.ref ? ` · ${blocker.ref}` : ""}</strong><span>{blocker.reason}</span></li>)}</ul> : <p className="is-ready"><CheckCircle2 size={14} /> No unresolved follow-up blocker remains.</p>}
             {canManage ? <><label><span>Lifecycle decision reason</span><textarea rows={4} value={completionReason} onChange={(event) => setCompletionReason(event.target.value)} /></label><div className="qms-occurrence-stage__actions">{closure.execution_status === "CLOSED" && closure.follow_up_status !== "COMPLETE" ? <button type="button" className="is-primary" disabled={!closure.follow_up_readiness.ready || completionReason.trim().length < 8 || completeMutation.isPending} onClick={() => completeMutation.mutate()}><CheckCircle2 size={15} /> Complete follow-up</button> : null}{closure.follow_up_status === "COMPLETE" ? <button type="button" disabled={completionReason.trim().length < 8 || reopenMutation.isPending} onClick={() => reopenMutation.mutate()}><RotateCcw size={15} /> Reopen follow-up</button> : null}</div></> : null}
