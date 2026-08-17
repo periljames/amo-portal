@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
+from amodb import storage
 from amodb.apps.manuals import models as manual_models
 from amodb.apps.platform import saas_lease, saas_models, saas_queue
 from amodb.database import WriteSessionLocal, close_session_safely
@@ -192,6 +193,27 @@ def _safe_output_path(*, amo_id: str, manual_id: str, job_id: str) -> Path:
     return path
 
 
+def _persist_completed_output(*, output: Path, amo_id: str, manual_id: str, job_id: str) -> str:
+    """Persist a completed archive where every API replica can retrieve it.
+
+    Local development keeps the existing retained path because all supervised
+    processes share one host filesystem. Horizontal/production deployments use
+    the configured object-storage backend and store only the durable object URI
+    in the job result, so a worker pod/container never leaks a container-local
+    path to an API replica.
+    """
+    if not storage.shared_storage_enabled():
+        return str(output)
+
+    stored = storage.put_file(
+        output,
+        key=f"document-control/evidence-packs/{amo_id}/{manual_id}/{job_id}.zip",
+        content_type="application/zip",
+    )
+    output.unlink(missing_ok=True)
+    return stored.uri
+
+
 def build_large_evidence_pack(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
     payload = dict(job.payload_json or {})
     manual_id = str(payload.get("manual_id") or "")
@@ -351,11 +373,17 @@ def build_large_evidence_pack(db: Session, job: saas_models.SaaSJob) -> dict[str
     sha256 = _sha256_file(output)
     size_bytes = output.stat().st_size
     filename = f"{str(manual.code).replace('/', '-')}_evidence_pack_async{f'_{selected_revision.rev_number}' if selected_revision else ''}.zip"
+    output_uri = _persist_completed_output(
+        output=output,
+        amo_id=tenant.amo_id,
+        manual_id=manual.id,
+        job_id=job.id,
+    )
     return {
         "manual_id": manual.id,
         "revision_id": revision_id,
         "filename": filename,
-        "output_path": str(output),
+        "output_uri": output_uri,
         "sha256": sha256,
         "size_bytes": size_bytes,
         "attachments": attachment_count,
@@ -434,12 +462,27 @@ def stop_evidence_pack_job_worker() -> None:
 def verified_job_output(job: saas_models.SaaSJob) -> tuple[Path, dict[str, Any]]:
     if job.status != "SUCCEEDED" or not isinstance(job.result_json, dict):
         raise HTTPException(status_code=409, detail="Evidence pack job has not completed")
+
     result = dict(job.result_json)
-    path = Path(str(result.get("output_path") or "")).resolve()
-    if not path.exists() or not path.is_file() or (path != OUTPUT_ROOT and OUTPUT_ROOT not in path.parents):
+    locator = str(result.get("output_uri") or result.get("output_path") or "").strip()
+    expected = str(result.get("sha256") or "").strip()
+    if not locator or not expected:
         raise HTTPException(status_code=409, detail="Retained evidence pack output is unavailable")
-    expected = str(result.get("sha256") or "")
+
+    if locator.startswith("s3://"):
+        try:
+            path = storage.materialize(locator, expected_sha256=expected)
+        except Exception as exc:
+            logger.warning("Unable to materialize retained evidence pack %s: %s", job.id, exc)
+            raise HTTPException(status_code=409, detail="Retained evidence pack output is unavailable") from exc
+    else:
+        # Backwards-compatible local development/legacy completed jobs. Local
+        # paths remain constrained to the evidence-pack staging root.
+        path = Path(locator).resolve()
+        if not path.exists() or not path.is_file() or (path != OUTPUT_ROOT and OUTPUT_ROOT not in path.parents):
+            raise HTTPException(status_code=409, detail="Retained evidence pack output is unavailable")
+
     actual = _sha256_file(path)
-    if not expected or actual.lower() != expected.lower():
+    if actual.lower() != expected.lower():
         raise HTTPException(status_code=409, detail="Retained evidence pack checksum does not match its completed job record")
     return path, result
