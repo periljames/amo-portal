@@ -21,6 +21,11 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:4173",
     trace: "on-first-retry",
+    // Playwright defaults headless Chromium to chromium-headless-shell. GitHub
+    // Actions has exhibited a native headless-shell SIGSEGV before a test could
+    // create its context, so CI uses Chromium's real-browser headless channel.
+    // Local development retains Playwright's default unless CI is explicitly set.
+    channel: process.env.CI ? "chromium" : undefined,
   },
   reporter: [["list"]],
 });
