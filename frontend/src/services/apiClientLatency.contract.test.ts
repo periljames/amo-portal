@@ -39,6 +39,24 @@ describe("API client latency retry policy", () => {
     expect(apiClientSource).toContain("isProxyTransportFailureResponse(response)");
   });
 
+  it("does not gate ordinary GET/navigation requests behind connectivity recovery", () => {
+    expect(offlineHttpSource).toContain('if (connectivityState === "RECOVERING") {');
+    expect(offlineHttpSource).toContain("if (isGet) void probePortalReadiness();");
+    expect(offlineHttpSource).toContain("else await waitForPortalReadiness();");
+    expect(offlineHttpSource).not.toContain('if (getPortalConnectivity().state === "RECOVERING") {\n    await waitForPortalReadiness();');
+  });
+
+  it("uses lightweight liveness for interactive connectivity instead of dependency readiness", () => {
+    expect(connectivitySource).toContain('fetch(apiUrl("/livez"), init)');
+    expect(connectivitySource).toContain('fetch(apiUrl("/health"), init)');
+    expect(connectivitySource).not.toContain('apiUrl("/readyz")');
+    expect(connectivitySource).toContain("CONNECTIVITY_PROBE_TIMEOUT_MS");
+  });
+
+  it("can bypass a stale cross-tab leader lease when a protected request must recover", () => {
+    expect(connectivitySource).toContain("const forced = await probePortalReadiness(true);");
+  });
+
   it("does not broadcast a connectivity event for every successful API response", () => {
     expect(connectivitySource).toContain('const changed = snapshot.state !== "ONLINE" || snapshot.reason !== null;');
     expect(connectivitySource).toContain('if (snapshot.state !== "ONLINE") {');
