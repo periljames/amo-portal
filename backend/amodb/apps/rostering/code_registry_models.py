@@ -57,6 +57,12 @@ class RosterShiftTemplatePolicy(Base):
     semantics and workflow policy without assigning statutory meaning to the
     tenant's display code. Consent is therefore configured explicitly rather
     than inferred from names such as X, OT, RD or SA.
+
+    ``counts_as_rest`` is descriptive scheduling metadata only. A rest/off code
+    can never satisfy protected-rest law by itself; the compliance engine proves
+    release from all duty using the effective timestamp timeline. Conversely,
+    on-site availability must not be configured as non-duty because personnel
+    remain available for work rather than relieved from all duties.
     """
 
     __tablename__ = "roster_shift_template_policies"
@@ -96,6 +102,9 @@ class RosterShiftTemplatePolicy(Base):
         nullable=False,
         default=RosterCodeVerificationStatus.UNRESOLVED,
     )
+    counts_as_rest = Column(Boolean, nullable=False, default=False)
+    on_site_availability = Column(Boolean, nullable=False, default=False)
+    scheduling_eligible = Column(Boolean, nullable=False, default=True)
     requires_personnel_acknowledgement = Column(Boolean, nullable=False, default=False)
     requires_supervisor_approval = Column(Boolean, nullable=False, default=False)
     fatigue_weight = Column(Float, nullable=False, default=1.0)
