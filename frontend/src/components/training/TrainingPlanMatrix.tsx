@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Copy, Loader2, Search, UsersRound } from "lu
 
 import Drawer from "../shared/Drawer";
 import { getTrainingPlanMatrix, getTrainingPlanMatrixCell } from "../../services/trainingOperating";
-import type { TrainingPlanMatrixCell, TrainingPlanMatrixCourse, TrainingPlanMatrixPerson, TrainingPlanMatrixPersonPage } from "../../types/trainingOperating";
+import type { TrainingPlanMatrixCell, TrainingPlanMatrixCourse, TrainingPlanMatrixPersonPage } from "../../types/trainingOperating";
 
 type Props = { planId: string; planYear: number };
 type SelectedCell = { course: TrainingPlanMatrixCourse; cell: TrainingPlanMatrixCell };
@@ -99,16 +99,18 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
         </div>
       </div>
       {error ? <div className="tos-banner tos-banner--error">{error}<button onClick={() => setError(null)}>×</button></div> : null}
+      <p className="tos-plan-matrix-legend"><strong>Values</strong> = unique personnel due / planned</p>
       <div className="tos-plan-matrix-scroll">
         <table className="tos-plan-matrix">
           <thead><tr><th>Course</th>{Array.from({ length: 12 }, (_, index) => <th key={index}>{monthLabel(index + 1)}</th>)}</tr></thead>
           <tbody>
             {(page?.items || []).map((course) => <tr key={course.course_key}>
-              <th scope="row"><strong>{course.course_code || "COURSE"}</strong><span>{course.course_name}</span><small>{course.training_kind.replaceAll("_", " ")} · {course.personnel_count} people</small></th>
+              <th scope="row"><strong>{course.course_code || "COURSE"}</strong><span>{course.course_name}</span><small>{course.training_kind.replaceAll("_", " ")} · Total {course.personnel_count}</small></th>
               {course.cells.map((cell) => {
                 const isSelected = selected?.course.course_key === course.course_key && selected.cell.month === cell.month;
+                const label = `${cell.personnel_count} personnel due or planned for ${course.course_name} in ${monthLabel(cell.month, true)} ${planYear}`;
                 return <td key={cell.month} className={isSelected ? "is-selected" : ""}>
-                  {cell.personnel_count ? <button className="tos-plan-cell" type="button" aria-expanded={isSelected} onClick={() => setSelected(isSelected ? null : { course, cell })}><strong>{cell.personnel_count}</strong><span>people</span></button> : <span className="tos-plan-cell--empty">—</span>}
+                  {cell.personnel_count ? <button className="tos-plan-cell" type="button" aria-label={label} aria-expanded={isSelected} onClick={() => setSelected(isSelected ? null : { course, cell })}><strong>{cell.personnel_count}</strong></button> : <span className="tos-plan-cell--empty" aria-label={`No personnel due or planned for ${course.course_name} in ${monthLabel(cell.month, true)} ${planYear}`}>—</span>}
                   {isSelected ? <div className="tos-plan-cell-preview">{cell.preview.map((person) => <span key={person.user_id} title={person.staff_code || person.user_id}>{person.person_name}</span>)}{cell.personnel_count > 5 ? <button type="button" onClick={() => setDrawerCell({ course, cell })}>+ More ({cell.personnel_count - 5})</button> : null}</div> : null}
                 </td>;
               })}
