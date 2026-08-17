@@ -81,6 +81,23 @@ def notify_email(
     context: dict[str, Any],
     correlation_id: str,
 ) -> None:
+    """Send through the portal notification service and retain an auditable trace.
+
+    Notification delivery remains non-blocking for roster transactions, but the
+    attempt is no longer silent: both successful hand-off and failed hand-off
+    are recorded in the canonical audit stream without exposing message bodies.
+    """
+    if not recipient:
+        audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=None,
+            entity_type="RosterNotification",
+            entity_id=correlation_id,
+            action="roster_notification_skipped",
+            metadata={"template_key": template_key, "reason": "recipient_missing"},
+        )
+        return
     try:
         notification_service.send_email(
             template_key=template_key,
@@ -92,8 +109,27 @@ def notify_email(
             amo_id=amo_id,
             db=db,
         )
-    except Exception:
+    except Exception as exc:
+        audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=None,
+            entity_type="RosterNotification",
+            entity_id=correlation_id,
+            action="roster_notification_delivery_failed",
+            metadata={"template_key": template_key, "error_type": type(exc).__name__},
+            critical=False,
+        )
         return
+    audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=None,
+        entity_type="RosterNotification",
+        entity_id=correlation_id,
+        action="roster_notification_delivered",
+        metadata={"template_key": template_key},
+    )
 
 
 def require_user(db: Session, *, amo_id: str, user_id: str, active_only: bool = True) -> account_models.User:
@@ -428,7 +464,3 @@ def can_view_roster(db: Session, *, user: account_models.User) -> bool:
 
 def can_manage_roster(db: Session, *, user: account_models.User) -> bool:
     return workforce_permissions.has_permission(db, user=user, permission=workforce_permissions.PermissionCode.ROSTER_EDIT)
-
-
-def can_approve_roster(db: Session, *, user: account_models.User) -> bool:
-    return workforce_permissions.has_permission(db, user=user, permission=workforce_permissions.PermissionCode.ROSTER_APPROVE)
