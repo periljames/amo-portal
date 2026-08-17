@@ -66,7 +66,8 @@ def _govern_rule(row: models.RosterRule) -> None:
         configured = int(parameters.get("maximum_minutes") or _NORMAL_WEEK_MINUTES)
         parameters["maximum_minutes"] = min(configured, _NORMAL_WEEK_MINUTES)
         row.parameters_json = parameters
-        # This threshold classifies excess time as overtime; it is not the statutory total-hours ceiling.
+        # Crossing normal hours classifies excess time as overtime. It is not
+        # the separate rolling total-hours illegality threshold.
         row.severity = models.RosterValidationSeverity.WARNING
 
 
@@ -78,15 +79,37 @@ def _local_date(row: Any, timezone_name: str) -> date:
     return row.starts_at.astimezone(zone).date()
 
 
+def _finding(
+    *,
+    user_id: str,
+    rule_id: str | None,
+    message: str,
+    details: dict[str, Any],
+) -> validation.FindingSpec:
+    return validation.FindingSpec(
+        source=models.RosterValidationSource.RULE,
+        severity=models.RosterValidationSeverity.BLOCKER,
+        code=PROTECTED_REST_FINDING,
+        message=message,
+        user_id=user_id,
+        rule_id=rule_id,
+        details=details,
+        overridable=False,
+        sort_order=54,
+    )
+
+
 def _protected_rest_specs(
     version: models.RosterVersion,
     assignments: Sequence[models.RosterAssignment],
     rules: Sequence[models.RosterRule],
 ) -> list[validation.FindingSpec]:
-    """Require an explicit protected rest assignment in every duty-bearing seven-day window.
+    """Add explicit protected-rest blockers without inventing code semantics.
 
-    Empty calendar space is not treated as protected rest. If an OFF assignment is worked,
-    that date is consumed and another explicit protected rest date must exist in the window.
+    The existing REQUIRED_DAYS_OFF rule remains the general 24-hour-in-seven
+    statutory check. This companion rule closes two operational gaps:
+    seven consecutive local duty dates cannot be published, and a rostered
+    OFF/RD date that is worked must have another explicit protected rest date.
     """
 
     timezone_name = version.period.timezone_name or "UTC"
@@ -106,40 +129,64 @@ def _protected_rest_specs(
         duty_dates = {_local_date(row, timezone_name) for row in duty_rows}
         candidate_rest_dates = {_local_date(row, timezone_name) for row in rest_by_user.get(user_id, [])}
         valid_rest_dates = candidate_rest_dates - duty_dates
+        worked_rest_dates = sorted(candidate_rest_dates & duty_dates)
         first_assignment = min(duty_rows, key=lambda row: row.starts_at)
         rest_rule = validation.find_rule(rules, models.RosterRuleType.REQUIRED_DAYS_OFF, first_assignment)
+        rule_id = getattr(rest_rule, "id", None)
 
         cursor = period_start
-        while cursor <= period_end:
-            window_end = min(cursor + timedelta(days=6), period_end)
-            window_dates = {cursor + timedelta(days=offset) for offset in range((window_end - cursor).days + 1)}
-            if len(window_dates) < 7:
-                break
-            if duty_dates & window_dates and not (valid_rest_dates & window_dates):
+        consecutive_blocked = False
+        while cursor + timedelta(days=6) <= period_end:
+            window_end = cursor + timedelta(days=6)
+            window_dates = {cursor + timedelta(days=offset) for offset in range(7)}
+            if window_dates.issubset(duty_dates):
                 findings.append(
-                    validation.FindingSpec(
-                        source=models.RosterValidationSource.RULE,
-                        severity=models.RosterValidationSeverity.BLOCKER,
-                        code=PROTECTED_REST_FINDING,
-                        message=(
-                            "A duty-bearing seven-day window has no explicit protected rest day. "
-                            "Assign a valid replacement rest day before publication."
-                        ),
+                    _finding(
                         user_id=user_id,
-                        rule_id=getattr(rest_rule, "id", None),
+                        rule_id=rule_id,
+                        message=(
+                            "Seven consecutive local duty dates consume the employee's protected weekly rest. "
+                            "Replan the sequence with a valid protected rest day before publication."
+                        ),
                         details={
                             "window_start": cursor.isoformat(),
                             "window_end": window_end.isoformat(),
-                            "duty_dates": sorted(item.isoformat() for item in duty_dates & window_dates),
-                            "worked_rest_dates": sorted(item.isoformat() for item in candidate_rest_dates & duty_dates & window_dates),
+                            "duty_dates": sorted(item.isoformat() for item in window_dates),
                             "required_replacement_rest": True,
                         },
-                        overridable=False,
-                        sort_order=54,
                     )
                 )
+                consecutive_blocked = True
                 break
             cursor += timedelta(days=1)
+
+        if consecutive_blocked:
+            continue
+
+        for worked_rest in worked_rest_dates:
+            replacement_end = min(worked_rest + timedelta(days=7), period_end)
+            replacements = sorted(
+                day for day in valid_rest_dates
+                if worked_rest < day <= replacement_end
+            )
+            if replacements:
+                continue
+            findings.append(
+                _finding(
+                    user_id=user_id,
+                    rule_id=rule_id,
+                    message=(
+                        "A scheduled protected rest day is also assigned as duty. "
+                        "Assign a replacement protected rest day before publication."
+                    ),
+                    details={
+                        "worked_rest_date": worked_rest.isoformat(),
+                        "replacement_due_by": replacement_end.isoformat(),
+                        "required_replacement_rest": True,
+                    },
+                )
+            )
+            break
     return findings
 
 
