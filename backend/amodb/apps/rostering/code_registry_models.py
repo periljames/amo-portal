@@ -4,11 +4,13 @@ from datetime import date, datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     Date,
     DateTime,
     Enum as SAEnum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -51,10 +53,10 @@ class RosterCodeVerificationStatus(str, Enum):
 class RosterShiftTemplatePolicy(Base):
     """Tenant-owned governance layered on a reusable ShiftTemplate.
 
-    ShiftTemplate answers *when* a person works. This policy records the
-    roster semantic, source confidence and presentation rules without turning
-    bases, work centres or aircraft identifiers into shift codes. Published
-    rosters are protected separately by immutable publication snapshots.
+    ShiftTemplate answers *when* a person works. This policy records roster
+    semantics and workflow policy without assigning statutory meaning to the
+    tenant's display code. Consent is therefore configured explicitly rather
+    than inferred from names such as X, OT, RD or SA.
     """
 
     __tablename__ = "roster_shift_template_policies"
@@ -63,6 +65,7 @@ class RosterShiftTemplatePolicy(Base):
         Index("ix_roster_shift_policy_amo", "amo_id", "shift_template_id"),
         Index("ix_roster_shift_policy_verification", "amo_id", "verification_status"),
         CheckConstraint("unpaid_break_minutes >= 0", name="ck_roster_shift_policy_break_nonneg"),
+        CheckConstraint("fatigue_weight >= 0", name="ck_roster_shift_policy_fatigue_nonneg"),
         CheckConstraint(
             "effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from",
             name="ck_roster_shift_policy_effective_dates",
@@ -93,6 +96,10 @@ class RosterShiftTemplatePolicy(Base):
         nullable=False,
         default=RosterCodeVerificationStatus.UNRESOLVED,
     )
+    requires_personnel_acknowledgement = Column(Boolean, nullable=False, default=False)
+    requires_supervisor_approval = Column(Boolean, nullable=False, default=False)
+    fatigue_weight = Column(Float, nullable=False, default=1.0)
+    pay_classification = Column(String(64), nullable=True)
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
     source_reference = Column(Text, nullable=True)
