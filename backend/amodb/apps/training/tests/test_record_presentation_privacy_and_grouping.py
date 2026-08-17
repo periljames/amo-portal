@@ -78,6 +78,55 @@ def test_public_payload_masks_personnel_pii_before_serialization(monkeypatch):
     assert payload["user"]["staff_code"] == "ETEN01"
 
 
+def test_record_scoped_public_grant_preserves_non_requirement_completion(monkeypatch):
+    amo = SimpleNamespace(name="Example Aviation", contact_email="quality@example.test", contact_phone="+254700000000")
+    user = SimpleNamespace(id="user-1", amo=amo, amo_id="amo-1")
+    db = _FakeDB(user)
+
+    monkeypatch.setattr(record_presentation, "_build_requirement_rows", lambda *args, **kwargs: [])
+
+    def original_payload(*args, **kwargs):
+        return {
+            "user": {"full_name": "James Example", "staff_code": "ETEN01"},
+            "records": [
+                {
+                    "record_id": "record-optional-1",
+                    "course_id": "EXT-CRM",
+                    "course_name": "External CRM Workshop",
+                    "completion_date": "2026-08-01",
+                    "valid_until": None,
+                    "certificate_reference": "CRM-2026-22",
+                    "verification_status": "VERIFIED",
+                },
+                {
+                    "record_id": "peer-record",
+                    "course_id": "HF-REC",
+                    "course_name": "Human Factors Recurrent",
+                    "completion_date": "2026-07-01",
+                    "valid_until": "2028-07-01",
+                    "verification_status": "VERIFIED",
+                },
+            ],
+        }
+
+    payload = record_presentation._augment_public_payload(
+        original_payload,
+        db,
+        amo_id="amo-1",
+        user_id="user-1",
+        record_id="record-optional-1",
+    )
+
+    assert "records" not in payload
+    assert len(payload["requirements"]) == 1
+    requirement = payload["requirements"][0]
+    assert requirement["requirement_key"] == "record:record-optional-1"
+    assert requirement["course_id"] == "EXT-CRM"
+    assert requirement["compliance_status"] == "Completed"
+    assert [item["record_id"] for item in requirement["history"]] == ["record-optional-1"]
+    assert "peer-record" not in json.dumps(payload)
+
+
 def test_requirement_summary_groups_only_explicit_course_relationships():
     initial = _course(pk="a", code="HF-INIT", kind=training_models.TrainingKind.INITIAL, group_code="HF")
     recurrent = _course(pk="b", code="HF-REF", kind=training_models.TrainingKind.REFRESHER, group_code="HF")
