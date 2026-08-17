@@ -464,3 +464,7 @@ def can_view_roster(db: Session, *, user: account_models.User) -> bool:
 
 def can_manage_roster(db: Session, *, user: account_models.User) -> bool:
     return workforce_permissions.has_permission(db, user=user, permission=workforce_permissions.PermissionCode.ROSTER_EDIT)
+
+
+def can_approve_roster(db: Session, *, user: account_models.User) -> bool:
+    return workforce_permissions.has_permission(db, user=user, permission=workforce_permissions.PermissionCode.ROSTER_APPROVE)
