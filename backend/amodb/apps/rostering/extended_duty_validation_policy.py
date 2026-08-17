@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_
 
@@ -28,6 +28,11 @@ def _finding_minutes(spec: validation.FindingSpec, rule_type: models.RosterRuleT
     if rule_type == models.RosterRuleType.MAX_DUTY_HOURS_DAY:
         return int(details.get("planned_minutes") or 0)
     return 0
+
+
+def recovery_rest_minutes(*, extended_duty_end: datetime, next_duty_start: datetime) -> int:
+    """Return complete recovery-rest minutes between two effective duty timestamps."""
+    return max(int((next_duty_start - extended_duty_end).total_seconds() // 60), 0)
 
 
 def install() -> None:
@@ -133,7 +138,10 @@ def install() -> None:
             next_duty = next((row for row in next_rows if compliance_policy.assignment_counts_as_duty(row)), None)
             if next_duty is None:
                 continue
-            actual_rest = int((next_duty.starts_at - assignment.ends_at).total_seconds() // 60)
+            actual_rest = recovery_rest_minutes(
+                extended_duty_end=assignment.ends_at,
+                next_duty_start=next_duty.starts_at,
+            )
             governed.append(validation.FindingSpec(
                 source=models.RosterValidationSource.RULE,
                 severity=models.RosterValidationSeverity.BLOCKER,
@@ -174,4 +182,9 @@ def install() -> None:
     _INSTALLED = True
 
 
-__all__ = ["CONTROLLED_EXTENSION_CODE", "RECOVERY_REST_CODE", "install"]
+__all__ = [
+    "CONTROLLED_EXTENSION_CODE",
+    "RECOVERY_REST_CODE",
+    "install",
+    "recovery_rest_minutes",
+]
