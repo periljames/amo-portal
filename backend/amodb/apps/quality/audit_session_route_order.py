@@ -54,3 +54,9 @@ from . import audit_closing_assurance_route_order as _audit_closing_assurance_ro
 # follow-up. Retention, hold and disposition routes therefore share the same
 # canonical occurrence chain and remain ahead of the generic catch-all.
 from . import audit_archive_governance_route_order as _audit_archive_governance_route_order  # noqa: F401,E402
+
+# Final completion semantics intentionally load after historical report/closing
+# routers. This layer adds auditee closing acknowledgement, WebAuthn signing and
+# public verification, and shadows the older ISSUE transition with stricter
+# exact-hash ceremony gates.
+from . import audit_live_completion_route_order as _audit_live_completion_route_order  # noqa: F401,E402
