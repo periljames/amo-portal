@@ -50,6 +50,7 @@ async function prepare(page: Page, state: { patchBody: Record<string, unknown> |
   const respond = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
   const fulfil = async (route: Route) => {
     const request = route.request();
+    if (request.resourceType() === "document") return route.continue();
     const path = new URL(request.url()).pathname;
     const method = request.method();
 
