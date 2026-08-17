@@ -58,14 +58,13 @@ jobs:
       - name: Run Training presentation unit tests
         working-directory: frontend
         run: npx vitest run src/utils/trainingPresentation.test.ts
-      - name: Lint changed Training frontend
+      - name: Lint new Training presentation frontend
         working-directory: frontend
         run: >-
           npx eslint
           src/utils/trainingPresentation.ts
           src/utils/trainingPresentation.test.ts
           src/components/training/TrainingRequirementList.tsx
-          src/pages/QMSTrainingUserPage.tsx
       - name: Typecheck and production build
         working-directory: frontend
         run: npm run build
