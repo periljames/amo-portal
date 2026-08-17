@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -15,6 +15,7 @@ def _utcnow() -> datetime:
 class QualityAuditEvidenceArtifact(Base):
     __tablename__ = "quality_audit_evidence_artifacts"
     __table_args__ = (
+        UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_audit_evidence_client_mutation"),
         CheckConstraint("source_type IN ('INTERNAL_USER','EXTERNAL_AUDITOR','AUDITEE_GUEST')", name="ck_quality_audit_evidence_source"),
         CheckConstraint("NOT (uploaded_by_user_id IS NOT NULL AND uploaded_by_participant_id IS NOT NULL)", name="ck_quality_audit_evidence_single_actor"),
         CheckConstraint("size_bytes >= 0", name="ck_quality_audit_evidence_size"),
@@ -30,6 +31,7 @@ class QualityAuditEvidenceArtifact(Base):
     checklist_item_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_checklist_items.id", ondelete="SET NULL"), nullable=True)
     finding_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audit_findings.id", ondelete="SET NULL"), nullable=True)
     source_type = Column(String(24), nullable=False)
+    client_mutation_id = Column(String(128), nullable=True)
     file_ref = Column(String(1024), nullable=False)
     filename = Column(String(255), nullable=False)
     content_type = Column(String(128), nullable=True)
