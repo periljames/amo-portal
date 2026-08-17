@@ -378,17 +378,13 @@ async function installGovernedRoutes(page: Page) {
       departments: [{ id: "department-maintenance", code: "MNT", name: "Maintenance" }],
     });
     if (path.endsWith("/rostering/versions/version-1/workflow-gates")) return json(route, workflowGates);
-    if (path.endsWith("/rostering/consents/supervisor/pending")) {
-      return json(route, supervisorApproved ? [] : [supervisorConsent]);
-    }
+    if (path.endsWith("/rostering/consents/supervisor/pending")) return json(route, supervisorApproved ? [] : [supervisorConsent]);
     if (path.endsWith("/rostering/consents/consent-supervisor/supervisor-decision") && request.method() === "POST") {
       supervisorPayload = request.postDataJSON();
       supervisorApproved = true;
       return json(route, { ...supervisorConsent, supervisor_decision: "APPROVED", supervisor_decision_at: NOW, supervisor_decided_by_user_id: "user-1" });
     }
-    if (path.endsWith("/rostering/consents/me")) {
-      return json(route, myConsentAccepted ? [{ ...myConsent, personnel_response: "ACCEPTED", personnel_response_at: NOW }] : [myConsent]);
-    }
+    if (path.endsWith("/rostering/consents/me")) return json(route, myConsentAccepted ? [{ ...myConsent, personnel_response: "ACCEPTED", personnel_response_at: NOW }] : [myConsent]);
     if (path.endsWith("/rostering/consents/consent-me/respond") && request.method() === "POST") {
       consentPayload = request.postDataJSON();
       myConsentAccepted = true;
@@ -398,8 +394,16 @@ async function installGovernedRoutes(page: Page) {
     if (path.endsWith("/rostering/regulatory-exemptions") && request.method() === "GET") return json(route, exemption);
     if (path.endsWith("/rostering/duty-extensions")) return json(route, extension);
     if (path.endsWith("/rostering/dashboard")) return json(route, { generated_at: NOW, top_findings: [], upcoming_periods: [] });
-    if (path.includes("/rostering/calendar/subscription")) return json(route, { status: "NOT_ISSUED" });
-    if (path.endsWith("/rostering/my-roster")) return json(route, { assignments: [], publications: [] });
+    if (path.includes("/rostering/calendar/subscription")) return json(route, { active: false, status: "NOT_ISSUED" });
+    if (path.endsWith("/rostering/my-roster")) return json(route, {
+      user_id: "user-1",
+      from_date: "2026-08-17",
+      to_date: "2026-09-16",
+      assignments: [],
+      training_due_next_month: [],
+      leave_requests: [],
+      acknowledgement_required_version_ids: [],
+    });
     return json(route, { detail: "Not required by governed rostering acceptance" }, 404);
   });
 
@@ -422,17 +426,12 @@ test("planner keeps statutory rest separate from consent, supervisor, AOG and Au
   await expect(page.getByText("21h 59m")).toBeVisible();
   await expect(page.getByText("24h", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Seven-day protected-rest timeline")).toBeVisible();
-
   await page.getByRole("button", { name: "Assign protected rest" }).click();
   await expect(page.getByText(/Remove, move or reassign enough duty to create at least 24 uninterrupted hours/)).toBeVisible();
 
   await expect(page.getByRole("heading", { name: "Duty approvals awaiting you" })).toBeVisible();
   await page.getByRole("button", { name: "Approve workflow" }).click();
-  await expect.poll(captured.supervisorPayload).toEqual({
-    decision: "APPROVE",
-    assignment_fingerprint: "assignment-fp-1",
-    comment: null,
-  });
+  await expect.poll(captured.supervisorPayload).toEqual({ decision: "APPROVE", assignment_fingerprint: "assignment-fp-1", comment: null });
 
   await page.getByText("Controlled AOG / unscheduled unserviceability duty extension").click();
   await expect(page.getByRole("heading", { name: "Unscheduled aircraft unserviceability" })).toBeVisible();
@@ -459,10 +458,6 @@ test("employee acknowledgement is exact-duty scoped and carries the assignment f
   await expect(page.getByText("Changed duty requires acknowledgement")).toBeVisible();
   await page.getByRole("button", { name: "Accept exact duty" }).click();
 
-  await expect.poll(captured.consentPayload).toEqual({
-    decision: "ACCEPT",
-    assignment_fingerprint: "assignment-fp-1",
-    comment: null,
-  });
+  await expect.poll(captured.consentPayload).toEqual({ decision: "ACCEPT", assignment_fingerprint: "assignment-fp-1", comment: null });
   await expect(page.getByText("ACCEPTED", { exact: true })).toBeVisible();
 });
