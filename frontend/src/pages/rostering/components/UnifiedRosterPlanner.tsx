@@ -1,4 +1,5 @@
 import { GroupRotationPlanner } from "./GroupRotationPlanner";
+import { RosterComplianceControlCenter } from "./RosterComplianceControlCenter";
 import { RosterPlannerV2 } from "./RosterPlannerV2";
 import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 
@@ -13,6 +14,7 @@ export function UnifiedRosterPlanner() {
       <p>Leave, training, Quality activity, and other protected commitments stay owned by their source modules rather than creating duplicate roster records.</p>
     </details>
     {canManagePatterns ? <GroupRotationPlanner canManagePatterns={canManagePatterns} /> : null}
+    <RosterComplianceControlCenter />
     <RosterPlannerV2 />
   </>;
 }
