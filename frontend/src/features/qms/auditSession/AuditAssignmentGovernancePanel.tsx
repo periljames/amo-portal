@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ShieldAlert, UserCheck } from "lucide-react";
 
@@ -39,6 +39,12 @@ const GATE_LABELS: Record<string, string> = {
   independence: "audit-specific independence",
 };
 
+const EMPTY_ASSIGNMENT: AssignmentDraft = {
+  lead_auditor_user_id: "",
+  observer_auditor_user_id: "",
+  assistant_auditor_user_id: "",
+};
+
 function assessmentFor(row: AuditAssignmentEligibility | undefined): AuditAssignmentAssessment | undefined {
   return row?.assessment || row?.assessments?.find((item) => item.eligible) || row?.assessments?.[0];
 }
@@ -61,7 +67,7 @@ function eligibilitySummary(row: AuditAssignmentEligibility | undefined): string
 const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
-  const [draft, setDraft] = useState<AssignmentDraft>({ lead_auditor_user_id: "", observer_auditor_user_id: "", assistant_auditor_user_id: "" });
+  const [draftOverride, setDraftOverride] = useState<AssignmentDraft | null>(null);
   const [reason, setReason] = useState("Assign the audit team after privilege, training, independence and capacity verification.");
   const [declaration, setDeclaration] = useState<DeclarationDraft>({ userId: "", declaration: "INDEPENDENT", relationship: "", rationale: "No conflict of interest identified for this audit occurrence." });
   const [error, setError] = useState<string | null>(null);
@@ -73,22 +79,26 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
+  const persistedDraft = useMemo<AssignmentDraft>(() => {
+    const audit = auditQuery.data;
+    if (!audit) return EMPTY_ASSIGNMENT;
+    return {
+      lead_auditor_user_id: audit.lead_auditor_user_id || "",
+      observer_auditor_user_id: audit.observer_auditor_user_id || "",
+      assistant_auditor_user_id: audit.assistant_auditor_user_id || "",
+    };
+  }, [auditQuery.data]);
+  const draft = draftOverride ?? persistedDraft;
+  const updateDraft = (field: RoleField, value: string) => {
+    setDraftOverride((current) => ({ ...(current ?? persistedDraft), [field]: value }));
+  };
+
   const personnelQuery = useQuery({
     queryKey: ["qms-audit-personnel-options", amoCode],
     queryFn: () => qmsListAuditPersonnelOptions({ limit: 200 }),
     enabled: canManage,
     staleTime: 30_000,
   });
-
-  useEffect(() => {
-    const audit = auditQuery.data;
-    if (!audit) return;
-    setDraft({
-      lead_auditor_user_id: audit.lead_auditor_user_id || "",
-      observer_auditor_user_id: audit.observer_auditor_user_id || "",
-      assistant_auditor_user_id: audit.assistant_auditor_user_id || "",
-    });
-  }, [auditQuery.data]);
 
   const eligibilityQueries = useQueries({
     queries: ROLE_CONFIG.map(({ field, role }) => ({
@@ -116,6 +126,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
       reason: reason.trim(),
     }),
     onSuccess: async () => {
+      setDraftOverride(null);
       setError(null);
       setNotice("Audit team committed after the server re-ran the governed assignment gates.");
       await Promise.all([
@@ -159,7 +170,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
           return (
             <label key={field}>
               <span>{label}</span>
-              <select disabled={!canManage} value={draft[field]} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))}>
+              <select disabled={!canManage} value={draft[field]} onChange={(event) => updateDraft(field, event.target.value)}>
                 <option value="">Unassigned</option>
                 {(personnelQuery.data || []).map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}
               </select>
