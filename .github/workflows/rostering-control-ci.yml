@@ -112,6 +112,7 @@ jobs:
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
             backend/amodb/apps/rostering/tests/test_consent_exemption_contract.py \
             backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
+            backend/amodb/apps/rostering/tests/test_governed_workflow_security.py \
             backend/amodb/apps/rostering/tests/test_protected_rest_exact_policy.py \
             backend/amodb/apps/rostering/tests/test_roster_control_contract.py \
             backend/amodb/apps/rostering/tests/test_shift_operational_policy_contract.py
