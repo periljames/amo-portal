@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type { ServerOptions } from 'node:https'
-import { defineConfig, loadEnv, type Plugin, type ResolvedConfig } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions, type ResolvedConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 import {
@@ -21,6 +21,7 @@ const pdfJsPackage = JSON.parse(fs.readFileSync(pdfJsPackagePath, 'utf8')) as { 
 const pdfJsAssetVersion = String(pdfJsPackage.version || 'unknown')
 const pdfJsAssetDirectories = ['wasm', 'cmaps', 'standard_fonts'] as const
 const pdfJsAssetDirectorySet = new Set<string>(pdfJsAssetDirectories)
+const PROXY_TRANSPORT_ERROR_HEADER = 'X-AMO-Proxy-Transport-Error'
 
 const pdfJsAssetContentType = (filename: string): string => {
   const extension = path.extname(filename).toLowerCase()
@@ -199,6 +200,13 @@ const portalPrecacheManifestPlugin = (): Plugin => {
   }
 }
 
+const markProxyTransportFailure: NonNullable<ProxyOptions['configure']> = (proxy) => {
+  proxy.on('error', (_error, _req, response) => {
+    const writable = response as { headersSent?: boolean; setHeader?: (name: string, value: string) => void }
+    if (!writable.headersSent) writable.setHeader?.(PROXY_TRANSPORT_ERROR_HEADER, '1')
+  })
+}
+
 const resolveDevProxy = (env: Record<string, string>) => {
   const { apiTarget, platformOpsTarget } = resolveDevProxyTargets(env)
 
@@ -207,11 +215,13 @@ const resolveDevProxy = (env: Record<string, string>) => {
       target: platformOpsTarget,
       changeOrigin: true,
       secure: false,
+      configure: markProxyTransportFailure,
     },
     [DEV_API_PROXY_PATTERN]: {
       target: apiTarget,
       changeOrigin: true,
       secure: false,
+      configure: markProxyTransportFailure,
     },
   }
 }
