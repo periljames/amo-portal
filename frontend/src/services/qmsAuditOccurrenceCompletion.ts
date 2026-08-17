@@ -1,6 +1,15 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
 
+export type ControlledDocumentSubmission = {
+  id: string;
+  request_id: string;
+  document_id: string;
+  revision_id: string | null;
+  response_comment: string | null;
+  created_at: string;
+};
+
 export type GovernedAuditDocumentRequest = {
   id: string;
   audit_id: string;
@@ -19,6 +28,10 @@ export type GovernedAuditDocumentRequest = {
   source_mode: "UPLOAD" | "CONTROLLED_DMS" | "UPLOAD_OR_CONTROLLED";
   controlled_document_id: string | null;
   controlled_revision_id: string | null;
+};
+
+export type PublicGovernedAuditDocumentRequest = Omit<GovernedAuditDocumentRequest, "audit_id" | "file_ref" | "uploaded_at" | "created_at" | "updated_at"> & {
+  controlled_submission: ControlledDocumentSubmission | null;
 };
 
 export type AuditMeeting = {
@@ -67,9 +80,35 @@ function json(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
+async function publicJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    credentials: "include",
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    const detail = payload?.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : detail && typeof detail === "object" && typeof (detail as { message?: unknown }).message === "string"
+        ? String((detail as { message: unknown }).message)
+        : `Audit collaboration request failed (${response.status}).`;
+    throw new Error(message);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function listGovernedAuditDocumentRequests(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: GovernedAuditDocumentRequest[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/governed-document-requests`),
+    { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
+  );
+}
+
+export function listControlledDocumentSubmissions(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: ControlledDocumentSubmission[] }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/controlled-document-submissions`),
     { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
   );
 }
@@ -89,10 +128,7 @@ export function createGovernedAuditDocumentRequest(
     controlled_revision_id?: string | null;
   },
 ) {
-  return apiRequest<GovernedAuditDocumentRequest>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/governed-document-requests`),
-    json("POST", payload),
-  );
+  return apiRequest<GovernedAuditDocumentRequest>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/governed-document-requests`), json("POST", payload));
 }
 
 export function updateGovernedAuditDocumentRequest(
@@ -109,11 +145,7 @@ export function updateGovernedAuditDocumentRequest(
 }
 
 export function listAuditMeetings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), {
-    timeoutMs: 15_000,
-    cacheTtlMs: 2_000,
-    signal,
-  });
+  return apiRequest<{ items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
 }
 
 export function createAuditMeeting(
@@ -139,18 +171,11 @@ export function updateAuditMeeting(
   meetingId: string,
   payload: Partial<Omit<AuditMeeting, "id" | "audit_id" | "created_at" | "updated_at">>,
 ) {
-  return apiRequest<AuditMeeting>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings/${encodeURIComponent(meetingId)}`),
-    json("PATCH", payload),
-  );
+  return apiRequest<AuditMeeting>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings/${encodeURIComponent(meetingId)}`), json("PATCH", payload));
 }
 
 export function getAuditClosingNarrative(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<AuditClosingNarrative>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-narrative`), {
-    timeoutMs: 15_000,
-    cacheTtlMs: 1_500,
-    signal,
-  });
+  return apiRequest<AuditClosingNarrative>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-narrative`), { timeoutMs: 15_000, cacheTtlMs: 1_500, signal });
 }
 
 export function updateAuditClosingNarrative(
@@ -161,16 +186,20 @@ export function updateAuditClosingNarrative(
   return apiRequest<AuditClosingNarrative>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-narrative`), json("PUT", payload));
 }
 
-export async function getPublicAuditCollaboration(): Promise<PublicAuditCollaboration> {
-  const response = await fetch(`${getApiBaseUrl()}/quality/audit-access/collaboration`, {
-    method: "GET",
-    credentials: "include",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
-    const detail = payload?.detail;
-    throw new Error(typeof detail === "string" ? detail : `Audit collaboration could not be loaded (${response.status}).`);
-  }
-  return response.json() as Promise<PublicAuditCollaboration>;
+export function getPublicAuditCollaboration(): Promise<PublicAuditCollaboration> {
+  return publicJson<PublicAuditCollaboration>("/quality/audit-access/collaboration");
+}
+
+export function listPublicGovernedAuditDocumentRequests() {
+  return publicJson<{ items: PublicGovernedAuditDocumentRequest[] }>("/quality/audit-access/governed-document-requests");
+}
+
+export function linkPublicControlledDocumentRequest(
+  requestId: string,
+  payload: { document_id: string; revision_id?: string | null; response_comment?: string | null },
+) {
+  return publicJson<ControlledDocumentSubmission>(
+    `/quality/audit-access/document-requests/${encodeURIComponent(requestId)}/link-controlled`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+  );
 }
