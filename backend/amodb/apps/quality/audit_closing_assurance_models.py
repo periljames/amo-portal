@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -38,7 +38,7 @@ class QualityAuditOutputPolicyRevision(Base):
 class QualityAuditSignatureAttempt(Base):
     __tablename__ = "quality_audit_signature_attempts"
     __table_args__ = (
-        CheckConstraint("method IN ('PASSWORD_REAUTH')", name="ck_quality_audit_signature_attempt_method"),
+        CheckConstraint("method IN ('PASSWORD_REAUTH','WEBAUTHN')", name="ck_quality_audit_signature_attempt_method"),
         Index("ix_quality_audit_signature_attempt_window", "amo_id", "audit_id", "signer_user_id", "created_at"),
     )
 
@@ -55,8 +55,8 @@ class QualityAuditSignatureAttempt(Base):
 class QualityAuditSignatureEvidence(Base):
     __tablename__ = "quality_audit_signature_evidence"
     __table_args__ = (
-        CheckConstraint("method IN ('PASSWORD_REAUTH')", name="ck_quality_audit_signature_evidence_method"),
-        CheckConstraint("purpose IN ('ISSUED_REPORT')", name="ck_quality_audit_signature_evidence_purpose"),
+        CheckConstraint("method IN ('PASSWORD_REAUTH','WEBAUTHN')", name="ck_quality_audit_signature_evidence_method"),
+        CheckConstraint("purpose IN ('APPROVED_REPORT','ISSUED_REPORT')", name="ck_quality_audit_signature_evidence_purpose"),
         Index("ix_quality_audit_signature_evidence_report", "amo_id", "audit_id", "report_revision_id", "signed_at"),
     )
 
@@ -71,6 +71,11 @@ class QualityAuditSignatureEvidence(Base):
     reason = Column(Text, nullable=False)
     signature_digest = Column(String(64), nullable=False)
     nonce = Column(String(64), nullable=False)
+    credential_id_hash = Column(String(64), nullable=True)
+    webauthn_sign_count = Column(BigInteger, nullable=True)
+    webauthn_origin = Column(String(512), nullable=True)
+    webauthn_rp_id = Column(String(255), nullable=True)
+    ceremony_sha256 = Column(String(64), nullable=True)
     signed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
