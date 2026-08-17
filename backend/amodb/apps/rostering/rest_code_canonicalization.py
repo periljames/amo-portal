@@ -21,7 +21,10 @@ from .roster_control_models import RosterShiftAlias
 
 router = APIRouter(prefix="/rostering", tags=["rostering-code-registry"])
 
-_REST_ALIASES = ("O", "OF", "RR")
+# Only exact historical aliases are collapsed. OF remains a preserved, distinct
+# off-duty code with OFF semantics; the compliance layer treats OFF and REST as
+# equivalent protected-rest semantics without deleting either vocabulary item.
+_REST_ALIASES = ("O", "RR")
 
 
 class RestCanonicalizationResult(BaseModel):
@@ -66,7 +69,7 @@ def _normalize_target(
     policy.calendar_mode = RosterCalendarMode.ALL_DAY
     policy.duty_semantic = RosterDutySemantic.REST
     policy.verification_status = RosterCodeVerificationStatus.CONFIRMED
-    policy.source_reference = "Canonical protected-rest code after O/OF/RR destructive consolidation."
+    policy.source_reference = "Canonical protected-rest code after exact O/RR alias consolidation."
     policy.updated_by_user_id = actor_user_id
     db.add(policy)
 
@@ -87,7 +90,7 @@ def canonicalize_rest_codes(
     if target is None:
         source = next((by_code.get(code) for code in _REST_ALIASES if by_code.get(code) is not None), None)
         if source is None:
-            raise LookupError("No RD, O, OF or RR rest template exists to canonicalize")
+            raise LookupError("No RD, O or RR rest template exists to canonicalize")
         target = source
         by_code.pop(str(source.code).upper(), None)
 
