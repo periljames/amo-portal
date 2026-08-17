@@ -22,6 +22,7 @@ services:
       DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT: "${DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT:-1}"
       PLATFORM_OPS_GATEWAY_PROCESS_COUNT: "1"
       PLATFORM_OPS_WORKER_PROCESS_COUNT: "1"
+      ROSTER_AUTOMATION_PROCESS_COUNT: "1"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -45,6 +46,10 @@ services:
       PORTAL_WORKER_DB_POOL_SIZE: "${PORTAL_WORKER_DB_POOL_SIZE:-2}"
       PORTAL_WORKER_DB_MAX_OVERFLOW: "${PORTAL_WORKER_DB_MAX_OVERFLOW:-1}"
       PORTAL_WORKER_DB_POOL_TIMEOUT: "${PORTAL_WORKER_DB_POOL_TIMEOUT:-3}"
+      # Report/index consumers remain hot so newly requested artifacts begin
+      # processing within roughly one second without sharing the API pool.
+      TRAINING_REPORT_JOB_INTERVAL_SECONDS: "${TRAINING_REPORT_JOB_INTERVAL_SECONDS:-1}"
+      DOCUMENT_INDEX_WORKER_POLL_SECONDS: "${DOCUMENT_INDEX_WORKER_POLL_SECONDS:-1}"
     command: ["python", "-m", "amodb.jobs.portal_worker_main"]
     restart: unless-stopped
     cpus: "${PORTAL_WORKER_CPU_LIMIT:-2.0}"
@@ -83,7 +88,7 @@ services:
       DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE: "${DOCUMENT_EVIDENCE_PACK_DB_POOL_SIZE:-1}"
       DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW: "${DOCUMENT_EVIDENCE_PACK_DB_MAX_OVERFLOW:-1}"
       DOCUMENT_EVIDENCE_PACK_DB_POOL_TIMEOUT: "${DOCUMENT_EVIDENCE_PACK_DB_POOL_TIMEOUT:-3}"
-      DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS: "${DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS:-2}"
+      DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS: "${DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS:-0.5}"
     command: ["python", "-m", "amodb.apps.doc_control.evidence_pack_worker_main"]
     restart: unless-stopped
     cpus: "${DOCUMENT_EVIDENCE_WORKER_CPU_LIMIT:-1.0}"
@@ -151,6 +156,9 @@ services:
     environment:
       AMO_REQUIRE_SHARED_STORAGE: "true"
       AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING: "false"
+      DB_POOL_SIZE: "${ROSTER_AUTOMATION_DB_POOL_SIZE:-1}"
+      DB_MAX_OVERFLOW: "${ROSTER_AUTOMATION_DB_MAX_OVERFLOW:-1}"
+      DB_POOL_TIMEOUT: "${ROSTER_AUTOMATION_DB_POOL_TIMEOUT:-3}"
     command: ["python", "-m", "amodb.jobs.rostering_automation", "--loop"]
     restart: unless-stopped
     volumes:
