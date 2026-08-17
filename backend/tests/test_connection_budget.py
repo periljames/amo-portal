@@ -22,14 +22,26 @@ class ConnectionBudgetTests(unittest.TestCase):
         self.assertEqual(budget.projected, 210)
         self.assertEqual(budget.usable, 275)
 
-    def test_direct_pool_budget_uses_role_specific_pool_sizes(self) -> None:
+    def test_invalid_fleet_budget_fails_before_serving_traffic(self) -> None:
+        with patch.dict(os.environ, {
+            "DB_EXTERNAL_POOLER": "true", "DB_MAX_CONNECTIONS": "100",
+            "DB_ADMIN_CONNECTION_RESERVE": "20", "DB_MIGRATION_CONNECTION_RESERVE": "5",
+            "PGBOUNCER_API_POOL_SIZE": "90", "PGBOUNCER_WORKFORCE_POOL_SIZE": "45",
+            "PGBOUNCER_GENERAL_POOL_SIZE": "35", "PGBOUNCER_SCHEDULED_POOL_SIZE": "10",
+            "PGBOUNCER_READ_POOL_SIZE": "30",
+        }, clear=False):
+            self.assertFalse(connection_budget().valid)
+            with self.assertRaises(RuntimeError):
+                validate_connection_budget()
+
+    def test_direct_pool_budget_counts_isolated_runtime_roles(self) -> None:
         values = {
             "DB_EXTERNAL_POOLER": "false",
             "DB_MAX_CONNECTIONS": "100",
-            "DB_ADMIN_CONNECTION_RESERVE": "20",
+            "DB_ADMIN_CONNECTION_RESERVE": "10",
             "DB_MIGRATION_CONNECTION_RESERVE": "5",
-            "DB_POOL_SIZE": "20",
-            "DB_MAX_OVERFLOW": "10",
+            "DB_POOL_SIZE": "10",
+            "DB_MAX_OVERFLOW": "5",
             "PORTAL_API_PROCESS_COUNT": "1",
             "PORTAL_WORKER_PROCESS_COUNT": "5",
             "PORTAL_WORKER_DB_POOL_SIZE": "2",
@@ -46,36 +58,22 @@ class ConnectionBudgetTests(unittest.TestCase):
             "PLATFORM_OPS_WORKER_PROCESS_COUNT": "1",
             "PLATFORM_OPS_WORKER_DB_POOL_SIZE": "2",
             "PLATFORM_OPS_WORKER_DB_MAX_OVERFLOW": "1",
+            "ROSTER_AUTOMATION_PROCESS_COUNT": "1",
+            "ROSTER_AUTOMATION_DB_POOL_SIZE": "1",
+            "ROSTER_AUTOMATION_DB_MAX_OVERFLOW": "1",
         }
-        with patch.dict(os.environ, values, clear=True):
+        with patch.dict(os.environ, values, clear=False):
             budget = validate_connection_budget()
-
-        self.assertEqual(
-            budget.roles,
-            {
-                "api": 30,
-                "worker": 15,
-                "scheduled_worker": 3,
-                "evidence_worker": 2,
-                "platform_ops_gateway": 5,
-                "platform_ops_worker": 3,
-            },
-        )
-        self.assertEqual(budget.projected, 58)
-        self.assertEqual(budget.usable, 75)
         self.assertTrue(budget.valid)
-
-    def test_invalid_fleet_budget_fails_before_serving_traffic(self) -> None:
-        with patch.dict(os.environ, {
-            "DB_EXTERNAL_POOLER": "true", "DB_MAX_CONNECTIONS": "100",
-            "DB_ADMIN_CONNECTION_RESERVE": "20", "DB_MIGRATION_CONNECTION_RESERVE": "5",
-            "PGBOUNCER_API_POOL_SIZE": "90", "PGBOUNCER_WORKFORCE_POOL_SIZE": "45",
-            "PGBOUNCER_GENERAL_POOL_SIZE": "35", "PGBOUNCER_SCHEDULED_POOL_SIZE": "10",
-            "PGBOUNCER_READ_POOL_SIZE": "30",
-        }, clear=False):
-            self.assertFalse(connection_budget().valid)
-            with self.assertRaises(RuntimeError):
-                validate_connection_budget()
+        self.assertEqual(budget.roles["api"], 15)
+        self.assertEqual(budget.roles["worker"], 15)
+        self.assertEqual(budget.roles["scheduled_worker"], 3)
+        self.assertEqual(budget.roles["evidence_worker"], 2)
+        self.assertEqual(budget.roles["platform_ops_gateway"], 5)
+        self.assertEqual(budget.roles["platform_ops_worker"], 3)
+        self.assertEqual(budget.roles["rostering_automation"], 2)
+        self.assertEqual(budget.projected, 45)
+        self.assertEqual(budget.usable, 85)
 
 
 if __name__ == "__main__":
