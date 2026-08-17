@@ -95,7 +95,7 @@ jobs:
           amodb/apps/doc_control/tests/test_applicability_target_contract.py
       - name: Upgrade clean lifecycle database
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade head
+        run: alembic -c amodb/alembic.ini upgrade heads
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py
