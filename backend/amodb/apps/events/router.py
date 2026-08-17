@@ -122,6 +122,19 @@ def _audit_row_to_envelope(event: audit_models.AuditEvent) -> EventEnvelope:
     )
 
 
+def _event_matches_tenant(event: EventEnvelope, effective_amo_id: str) -> bool:
+    """Fail closed for live tenant event delivery.
+
+    Persisted replay/history is already filtered by AuditEvent.amo_id. The live broker
+    must apply the same boundary rather than treating missing tenant metadata as a
+    global broadcast. Any future genuinely global stream needs an explicit contract
+    and endpoint instead of bypassing tenant isolation here.
+    """
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    amo_id = metadata.get("amoId")
+    return bool(amo_id) and str(amo_id) == str(effective_amo_id)
+
+
 def _replay_events_since(
     db: Session,
     *,
@@ -188,8 +201,7 @@ async def _event_generator(
                 break
             try:
                 event = await asyncio.to_thread(q.get, True, 15)
-                amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
-                if amo_id and str(amo_id) != str(effective_amo_id):
+                if not _event_matches_tenant(event, str(effective_amo_id)):
                     continue
                 yield format_sse(event.to_json(), event=event.type, event_id=event.id)
             except queue.Empty:
@@ -239,7 +251,6 @@ def _history_etag(
     ])
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
     return f'W/"{digest}"'
-
 
 
 @router.get("/events/history", response_model=ActivityHistoryResponse)
