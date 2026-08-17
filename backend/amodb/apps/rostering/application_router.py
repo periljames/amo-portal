@@ -19,6 +19,7 @@ from . import (
     extended_duty_policy,
     extended_duty_validation_policy,
     lineage,
+    protected_rest_exact_policy,
     roster_control,
     statutory_rule_policy,
     template_usage_policy,
@@ -64,6 +65,10 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 
 template_usage_policy.install_code_registry_policy(code_registry)
 compliance_policy.install_validation_policy()
+# Replace candidate sampling with exact continuous interval coverage before any
+# validation request can run. The compatibility seam inside compliance_policy
+# resolves this function at runtime, so the exact evaluator governs every caller.
+protected_rest_exact_policy.install()
 # Maintenance assignment-duration and prior-rest rules are server-side hard
 # aviation limits. They cannot be converted to warnings by consent or approval.
 statutory_rule_policy.install()
