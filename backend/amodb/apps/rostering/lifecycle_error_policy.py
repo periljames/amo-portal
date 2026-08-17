@@ -26,15 +26,21 @@ def _finding_payload(row: models.RosterValidationFinding) -> dict[str, Any]:
     }
 
 
-def _raise_compliance_error(version: models.RosterVersion, exc: Exception) -> None:
+def _raise_compliance_error(db, version: models.RosterVersion, exc: Exception) -> None:
     message = str(exc)
     if "unresolved blocker" not in message.lower():
         raise exc
-    blockers = [
-        row
-        for row in (version.validation_findings or [])
-        if row.severity == models.RosterValidationSeverity.BLOCKER and not row.resolved
-    ]
+    # Final validation rewrites finding rows. Query the transaction's current
+    # rows rather than relying on a relationship collection loaded beforehand.
+    blockers = db.query(models.RosterValidationFinding).filter(
+        models.RosterValidationFinding.amo_id == version.amo_id,
+        models.RosterValidationFinding.version_id == version.id,
+        models.RosterValidationFinding.severity == models.RosterValidationSeverity.BLOCKER,
+        models.RosterValidationFinding.resolved.is_(False),
+    ).order_by(
+        models.RosterValidationFinding.sort_order.asc(),
+        models.RosterValidationFinding.code.asc(),
+    ).all()
     payload = [_finding_payload(row) for row in blockers]
     protected = next((row for row in blockers if row.code == "ROSTER_PROTECTED_REST_VIOLATION"), None)
     code = protected.code if protected is not None else "ROSTER_COMPLIANCE_BLOCKED"
@@ -78,7 +84,7 @@ def install_service_policy(service_module) -> None:
             except consent_service.RosterWorkflowError:
                 raise
             except (ValueError, RuntimeError) as exc:
-                _raise_compliance_error(version, exc)
+                _raise_compliance_error(db, version, exc)
 
         setattr(service_module, name, governed)
 
