@@ -181,7 +181,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const auditTeamPresence = presence.filter((entry) => entry.actor_type !== "AUDITEE_GUEST");
 
   const refreshFieldwork = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session-resolve", auditKey] }),
+    ]);
   };
 
   const updateMutation = useMutation({
