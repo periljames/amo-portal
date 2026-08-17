@@ -138,7 +138,9 @@ function seedSession(storedToken: string) {
 }
 
 function isBackendApi(url: URL): boolean {
-  return url.origin === "http://127.0.0.1:8080" || url.pathname.startsWith("/api/maintenance/");
+  return url.origin === "http://127.0.0.1:8080"
+    || url.pathname.startsWith("/api/maintenance/")
+    || url.pathname.startsWith("/quality/");
 }
 
 async function fulfilShellRequest(route: Route, url: URL): Promise<boolean> {
