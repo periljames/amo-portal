@@ -264,14 +264,14 @@ test("creates a draft programme and requires a reason before review transition",
   await expect(page.getByText("Create governed programme revision", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
+  const detailHeader = page.locator(".qms-audit-programme__detail-header");
   await expect(page.getByText("AP-2026-CREATED-R01", { exact: true })).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true }).first()).toBeVisible();
+  await expect(detailHeader.getByText("Draft", { exact: true })).toBeVisible();
   const submitReview = page.getByRole("button", { name: "Under Review" });
   await expect(submitReview).toBeDisabled();
   await page.getByLabel("Programme transition reason").fill("Ready for independent Quality review.");
   await expect(submitReview).toBeEnabled();
   await submitReview.click();
-  const detailHeader = page.locator(".qms-audit-programme__detail-header");
   await expect(detailHeader.getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator(".qms-audit-programme__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
 });
