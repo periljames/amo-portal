@@ -1,6 +1,6 @@
 # QMS Report and Signature Lifecycle
 
-## Governing rule
+## Governing report lifecycle
 
 The existing report governance remains authoritative:
 
@@ -8,128 +8,101 @@ The existing report governance remains authoritative:
 DRAFT → INTERNAL_REVIEW → APPROVED → ISSUED → SUPERSEDED
 ```
 
-The Live Audit work changes how the draft artifact is produced. It does not weaken formal review/approval/issue controls.
+Live Audit changes how the controlled draft is composed and signed. It does not create a second report state machine.
 
-## Current generated-report implementation
+## Deterministic report composition
 
-`audit_report_composition.py` builds a canonical snapshot from:
+`audit_report_composition.py` builds `QMS_AUDIT_REPORT_SNAPSHOT_V2` from authoritative occurrence data:
 
-- audit identity/scope/criteria;
-- actual/planned dates;
-- assigned audit team identifiers;
+- audit identity, scope and criteria;
+- planned and actual dates;
+- assigned audit-team identifiers;
+- persisted management summary, conclusion and positive-practices statement;
+- non-cancelled occurrence meetings;
 - governed checklist execution;
 - findings;
 - linked CARs;
-- preparation document-request state.
+- preparation request state.
 
-Generation is blocked unless:
+Generation fails closed unless:
 
-- fieldwork has `actual_end`; and
-- no checklist execution row remains `NOT_VERIFIED`.
+- fieldwork has `actual_end`;
+- no checklist execution row remains `NOT_VERIFIED`;
+- management summary is populated;
+- audit conclusion is populated;
+- a positive-practices statement is populated, including an explicit statement when none were observed.
 
-The source snapshot is canonical-JSON hashed with SHA-256. The server renders a PDF using the existing ReportLab dependency and stores:
+The canonical JSON snapshot is SHA-256 hashed. The generated PDF records source-snapshot hash, template/renderer version, filename, media type, size, artifact SHA-256, private storage reference, generating user and timestamp.
+
+`report.generated` is not `report.issued`.
+
+## Adoption into the governed report domain
+
+The Closing workspace now performs the controlled transaction:
 
 ```text
-source_snapshot_hash
-template_version
-renderer_version
-filename
-content_type
-size_bytes
-artifact_sha256
-private storage_ref
-generated_by_user_id
-created_at
+deterministic generated artifact
+→ governed DRAFT report revision
+→ auditee closing response
+→ INTERNAL_REVIEW
+→ APPROVED
+→ WebAuthn signature evidence
+→ ISSUED
 ```
 
-Generated artifacts are append-only and tenant-RLS protected.
+The generated artifact is verified and adopted as a governed revision. Formal review, approval and issue remain in the existing report lifecycle.
 
-## Important semantic boundary
+## Auditee closing response
 
-`report.generated` does not mean `report.issued`.
+When an auditee participant exists, the exact governed draft revision and SHA-256 are exposed through the purpose-bound closing context. The auditee may record:
 
-The Closing workspace displays three distinct positions:
+- `ACKNOWLEDGED`;
+- `COMMENTED`;
+- `DECLINED_TO_ACKNOWLEDGE`.
 
-```text
-Generated artifact
-→ Governed report revision
-→ Issued report
-```
+Comments are required for comment/decline responses. The record is append-only and bound to the exact draft revision/hash.
 
-The branch currently stops after generation. Automatic adoption of the generated artifact into the existing report-revision lifecycle is still pending.
+This is a closing-meeting response, not a waiver and not automatic acceptance of findings.
 
-## Required adoption transaction
+Issued-report receipt is a separate record against the exact issued revision/hash.
 
-The next report-domain step must:
+## WebAuthn / passkey approval
 
-1. Load the selected generated artifact under tenant scope.
-2. Verify its stored SHA-256 against the private file.
-3. Create a new governed report revision in `DRAFT` using the generated artifact as the controlled source.
-4. Preserve `source_snapshot_hash`, artifact hash and renderer/template metadata in revision/evidence lineage.
-5. Append the existing report-governance event.
-6. Avoid setting any compatibility field that causes the authoritative workflow to infer `report_complete` before formal issue/approved state.
-7. Return the existing report-revision representation.
+The canonical Closing flow uses WebAuthn/passkey evidence for approval of the exact `APPROVED` report revision.
 
-Do not recreate the report state machine in the composer.
-
-## Closing-meeting target
-
-Normal successful path:
+The ceremony binds:
 
 ```text
-fieldwork complete
-→ generate deterministic draft
-→ review closing narrative
-→ auditee acknowledgement/comments
-→ submit for internal review
-→ Quality approval
-→ electronic signature
-→ issue immutable revision
-→ share report/CARs
-→ close audit execution
-```
-
-## Electronic signature
-
-Historical PR #280 contains reusable concepts for:
-
-- WebAuthn/passkeys;
-- explicit signing intent;
-- artifact-hash binding;
-- signer evidence bundles;
-- public verification token;
-- provider abstraction;
-- distinction between appearance-only and stronger cryptographic/PAdES signing.
-
-It must not be merged wholesale because it predates current Quality architecture.
-
-Current branch state:
-
-**Electronic signature is not integrated.** The Closing UI deliberately displays this as incomplete.
-
-## Signature requirements when ported
-
-Every signature must bind:
-
-```text
-signer identity
-signing authority/capability
-artifact ID
-artifact SHA-256
+tenant
+audit
 report revision ID
+artifact SHA-256
+signer identity
 signing reason
-signature provider/assurance level
+credential ID hash
+WebAuthn sign count
+origin
+RP ID
+ceremony SHA-256
 server timestamp
-verification/evidence bundle
 ```
 
-An appearance stamp must never be presented as a cryptographic PAdES signature.
+User verification is required. The server refuses `ISSUE` when current passkey evidence is absent, stale, belongs to another revision/hash, or predates the current approval state.
 
-## Certificate / approval output policy
+Password re-authentication is not represented as equivalent passkey evidence in the canonical closing workflow.
 
-Do not issue a certificate for every audit.
+## Immutable issue
 
-Required policy vocabulary:
+After issue:
+
+- the governed report revision is `ISSUED`;
+- its exact revision/hash is the public and auditee reference point;
+- execution closure remains separate from CAR/CAPA follow-up;
+- a new return/reapproval path requires fresh valid signature evidence where the lifecycle permits revision change.
+
+## Policy-controlled assurance output
+
+Assurance output is not automatic for every audit. The governed policy vocabulary remains:
 
 ```text
 NONE
@@ -139,14 +112,36 @@ CERTIFICATE
 ATTESTATION
 ```
 
-The policy is audit-type/programme controlled. If numbering, validity or approving authority is not configured, artifact generation must fail closed rather than inventing business rules.
+Where a supplementary artifact is permitted, it is generated from the governed report/signature evidence and carries its own integrity metadata. Missing policy/authority rules fail closed rather than being invented by the UI.
 
-## Incomplete items
+## Public verification
 
-- Generated artifact → existing report revision adoption.
-- Closing narrative/editor model separate from immutable source facts.
-- Auditee closing acknowledgement flow beyond finding acknowledgement.
-- WebAuthn/passkey/e-signature port.
-- Signature verification page integration.
-- Policy-driven approval/certificate artifact.
-- Same-day full browser acceptance from fieldwork completion to signed issue.
+A high-entropy public verification token may be created for an issued report. The raw token is returned only to the creator and is stored server-side only as a SHA-256 hash.
+
+The verification surface can expose the report revision/hash and passkey/assurance metadata without publishing the controlled report itself. A user may calculate a local file SHA-256 in the browser and compare it with the governed value without uploading that file.
+
+## Closing sequence
+
+The intended same-occurrence sequence is:
+
+```text
+complete fieldwork
+→ save closing narrative
+→ conduct closing meeting
+→ release findings/CARs as authorised
+→ generate deterministic report
+→ adopt governed draft
+→ auditee closing response
+→ submit for review
+→ Quality approval
+→ passkey signing
+→ immutable issue
+→ optional policy-controlled assurance output
+→ create verification link if required
+→ close audit execution
+→ continue CAR/CAPA follow-up independently
+```
+
+## Validation status
+
+This document describes the current source implementation on PR #502. It does not assert that the current head has passed typecheck, migrations, browser acceptance or full CI. Those checks belong to the post-freeze validation phase.
