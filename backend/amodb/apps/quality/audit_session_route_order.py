@@ -43,6 +43,11 @@ for api_router in (router, legacy_router):
 # routes exist without changing the historical central Quality bootstrap order.
 from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
 
+# Evidence is a first-class immutable artifact. Load its guarded release route
+# after the historical external-access router so raw path/free-form evidence
+# references cannot bypass purpose-bound artifact authorization.
+from . import audit_evidence_route_order as _audit_evidence_route_order  # noqa: F401,E402
+
 # Deterministic report composition and closing assurance are part of the same
 # governed audit occurrence. Register their exact routes ahead of the legacy
 # generic QMS catch-all so the closing workspace never falls through to a broad
