@@ -30,9 +30,23 @@ class QualityAuditDocumentRequestMetadata(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    __table_args__ = (
-        Index("ix_quality_audit_doc_meta_audit", "amo_id", "audit_id"),
-    )
+    __table_args__ = (Index("ix_quality_audit_doc_meta_audit", "amo_id", "audit_id"),)
+
+
+class QualityAuditControlledDocumentSubmission(Base):
+    __tablename__ = "quality_audit_controlled_document_submissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id = Column(UUID(as_uuid=True), ForeignKey("quality_audit_document_requests.id", ondelete="CASCADE"), nullable=False, index=True)
+    participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("qms_documents.id", ondelete="RESTRICT"), nullable=False)
+    revision_id = Column(UUID(as_uuid=True), ForeignKey("qms_document_revisions.id", ondelete="RESTRICT"), nullable=True)
+    response_comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("ix_quality_audit_controlled_link_request", "amo_id", "audit_id", "request_id", "created_at"),)
 
 
 class QualityAuditMeeting(Base):
@@ -54,9 +68,7 @@ class QualityAuditMeeting(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    __table_args__ = (
-        Index("ix_quality_audit_meeting_audit", "amo_id", "audit_id", "scheduled_start"),
-    )
+    __table_args__ = (Index("ix_quality_audit_meeting_audit", "amo_id", "audit_id", "scheduled_start"),)
 
 
 class QualityAuditClosingNarrative(Base):
