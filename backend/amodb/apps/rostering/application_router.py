@@ -23,6 +23,7 @@ from .automation_router import router as automation_router
 from .calendar_subscription_status_router import router as calendar_subscription_status_router
 from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
+from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from ..workforce.bulk_router import router as workforce_bulk_router
 from ..workforce.governance_router import router as workforce_governance_router
@@ -76,6 +77,7 @@ router.include_router(calendar_subscription_status_router)
 router.include_router(roster_control_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
+router.include_router(rest_code_canonicalization_router)
 router.include_router(aircraft_allocation_router)
 router.include_router(automation_router)
 router.include_router(commitments_router)
