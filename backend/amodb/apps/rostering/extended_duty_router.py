@@ -10,7 +10,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
-from . import common, consent_service, extended_duty_service
+from . import common, consent_service, extended_duty_service, services
 from .extended_duty_models import RosterDutyExtension, RosterDutyExtensionStatus, RosterDutyExtensionType
 
 router = APIRouter(prefix="/rostering/duty-extensions", tags=["rostering-duty-extensions"])
@@ -69,14 +69,12 @@ def list_duty_extensions(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    workforce_permissions.require_permission(
-        db,
-        user=current_user,
-        permission=workforce_permissions.PermissionCode.ROSTER_VIEW,
-    )
-    query = db.query(RosterDutyExtension).filter(RosterDutyExtension.amo_id == _amo(current_user))
+    if not services.can_view_roster(db, user=current_user):
+        raise HTTPException(status_code=403, detail={"code": "ROSTER_ACCESS_DENIED"})
+    amo_id = _amo(current_user)
+    query = db.query(RosterDutyExtension).filter(RosterDutyExtension.amo_id == amo_id)
     if version_id:
-        version = common.get_version(db, amo_id=_amo(current_user), version_id=version_id)
+        version = common.get_version(db, amo_id=amo_id, version_id=version_id)
         if version is None:
             raise HTTPException(status_code=404, detail={"code": "ROSTER_VERSION_NOT_FOUND"})
         query = query.filter(RosterDutyExtension.version_id == version_id)
