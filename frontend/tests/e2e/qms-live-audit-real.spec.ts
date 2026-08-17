@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { expect, test, type BrowserContext, type Page, type Response } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 
 test.use({ trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 test.setTimeout(90_000);
@@ -28,14 +28,6 @@ function watchServerFailures(page: Page, failures: string[]): void {
     }
   });
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
-}
-
-async function openInvitation(context: BrowserContext, token: string, auditRef: string): Promise<Page> {
-  const page = await context.newPage();
-  await page.goto(`/qms/audit-access/${encodeURIComponent(token)}`, { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: new RegExp(`${auditRef} · Real browser live audit acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
-  await expect(page).toHaveURL(/\/qms\/audit-access$/);
-  return page;
 }
 
 test("real concurrent external-auditor and auditee browsers persist fieldwork and released-finding receipt through FastAPI/PostgreSQL", async ({ browser }) => {
