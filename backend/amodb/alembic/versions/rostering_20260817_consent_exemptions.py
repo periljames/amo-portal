@@ -1,4 +1,4 @@
-"""Add roster consent governance.
+"""Add roster consent and Authority exemption governance.
 
 Revision ID: rostering_260817_consent
 Revises: rostering_260817_pay_merge
@@ -58,6 +58,33 @@ def upgrade() -> None:
     )
     op.create_index("ix_roster_consent_amo_personnel_status", "roster_assignment_consents", ["amo_id", "personnel_id", "personnel_response"])
     op.create_index("ix_roster_consent_version_status", "roster_assignment_consents", ["version_id", "personnel_response", "supervisor_decision"])
+    op.create_table(
+        "roster_regulatory_exemptions",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("authority", sa.String(255), nullable=False),
+        sa.Column("exemption_reference", sa.String(128), nullable=False),
+        sa.Column("regulation_provision", sa.String(255), nullable=False),
+        sa.Column("scope", sa.Text(), nullable=False),
+        sa.Column("personnel_id", sa.String(36), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("role_applicability", sa.String(128), nullable=True),
+        sa.Column("conditions_json", sa.JSON(), nullable=False),
+        sa.Column("effective_date", sa.Date(), nullable=False),
+        sa.Column("expiry_date", sa.Date(), nullable=False),
+        sa.Column("supporting_document_id", sa.String(36), sa.ForeignKey("doc_control_documents.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("verified_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("is_revoked", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("revocation_reason", sa.Text(), nullable=True),
+        sa.Column("created_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("expiry_date >= effective_date", name="ck_roster_exemption_validity"),
+        sa.UniqueConstraint("amo_id", "authority", "exemption_reference", name="uq_roster_exemption_reference"),
+    )
+    op.create_index("ix_roster_exemption_amo_validity", "roster_regulatory_exemptions", ["amo_id", "effective_date", "expiry_date"])
+    op.create_index("ix_roster_exemption_amo_user", "roster_regulatory_exemptions", ["amo_id", "personnel_id"])
 
 
 def downgrade() -> None:
