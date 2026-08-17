@@ -77,6 +77,20 @@ def _active_requests(db: Session, *, amo_id: str, assignment_id: str) -> list[Ro
     ).all()
 
 
+def _schedule_snapshot(row: RosterAssignmentConsent) -> dict[str, Any]:
+    """Capture the exact prior duty terms for an auditable consent revision."""
+
+    return {
+        "assignment_revision": row.assignment_revision,
+        "assignment_fingerprint": row.assignment_fingerprint,
+        "duty_type": row.duty_type,
+        "planned_start": row.planned_start.isoformat(),
+        "planned_end": row.planned_end.isoformat(),
+        "overtime_rest_day_classification": row.overtime_rest_day_classification,
+        "replacement_rest": dict(row.replacement_rest_json or {}),
+    }
+
+
 def _invalidate(
     db: Session,
     row: RosterAssignmentConsent,
@@ -135,6 +149,7 @@ def sync_assignment_consent(
     if same is not None:
         return same
 
+    prior_schedule = _schedule_snapshot(existing[0]) if existing else None
     for request in existing:
         _invalidate(
             db,
@@ -162,7 +177,7 @@ def sync_assignment_consent(
         duty_type=common.enum_value(assignment.status),
         planned_start=assignment.starts_at,
         planned_end=assignment.ends_at,
-        original_schedule_json=None,
+        original_schedule_json=prior_schedule,
         personnel_response=RosterConsentStatus.PENDING,
         supervisor_required=supervisor_required,
         supervisor_decision=(
@@ -188,6 +203,7 @@ def sync_assignment_consent(
             "assignment_revision": request.assignment_revision,
             "assignment_fingerprint": fingerprint,
             "supervisor_required": supervisor_required,
+            "original_schedule": prior_schedule,
         },
         metadata={"version_id": assignment.version_id},
         critical=True,
