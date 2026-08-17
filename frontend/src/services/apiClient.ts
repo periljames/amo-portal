@@ -257,7 +257,10 @@ async function fetchOnce<T>(
 }
 
 function isRetryableNetworkError(error: unknown): boolean {
-  if (error instanceof ApiClientError) return error.status >= 500;
+  // An HTTP response proves that the backend was reached. Retrying a valid 5xx
+  // against another localhost alias only repeats the same expensive request and
+  // can turn one five-second backend timeout into a ten-second page stall.
+  if (error instanceof ApiClientError) return false;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     return message.includes("failed to fetch")
