@@ -6,7 +6,6 @@ import { auditSessionStageFromPath } from "../../features/qms/auditSession/audit
 import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
 
-
 const ACTIVE_REFRESH_INTERVAL_MS = 45_000;
 const FOCUS_REFRESH_THRESHOLD_MS = 15_000;
 const MUTATION_REFRESH_DELAYS_MS = [1_200, 4_500] as const;
@@ -18,6 +17,11 @@ function isQualityPath(pathname: string): boolean {
 
 function qualityAmoCode(pathname: string): string | null {
   const match = pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)(?:\/|$)/i);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function auditOccurrenceKey(pathname: string): string | null {
+  const match = pathname.match(/^\/maintenance\/[^/]+\/(?:quality|qms)\/audits\/([^/]+)\/(?:setup|prepare|live|closing|follow-up|archive)\/?$/i);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -33,6 +37,22 @@ function isQualityQueryKey(queryKey: readonly unknown[]): boolean {
     "management-review",
     "training-competence",
   ].some((value) => marker.includes(value));
+}
+
+function queryKeyContainsAny(queryKey: readonly unknown[], markers: Set<string>): boolean {
+  if (!markers.size) return false;
+  const serialised = queryKey.map((part) => String(part).toLowerCase()).join(":");
+  return Array.from(markers).some((marker) => marker && serialised.includes(marker.toLowerCase()));
+}
+
+function realtimeAuditId(event: QmsAuditRealtimeEvent): string | null {
+  if (!event.data || typeof event.data !== "object") return null;
+  const payload = event.data as Record<string, unknown>;
+  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata as Record<string, unknown> : {};
+  for (const value of [metadata.auditId, metadata.audit_id, payload.auditId, payload.audit_id]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function isQualityRealtimeEvent(event: QmsAuditRealtimeEvent): boolean {
@@ -71,6 +91,33 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
   const auditOccurrenceActive = auditSessionStage !== null;
   const liveAuditActive = auditSessionStage === "live";
+  const occurrenceKey = auditOccurrenceKey(location.pathname);
+
+  const occurrenceMarkers = (eventAuditId?: string | null): Set<string> => {
+    const markers = new Set<string>();
+    if (occurrenceKey) markers.add(occurrenceKey);
+    if (eventAuditId) markers.add(eventAuditId);
+    if (!occurrenceKey) return markers;
+
+    for (const query of queryClient.getQueryCache().getAll()) {
+      const data = query.state.data;
+      if (!data || typeof data !== "object") continue;
+      const root = data as Record<string, unknown>;
+      const candidate = root.audit && typeof root.audit === "object" ? root.audit as Record<string, unknown> : root;
+      const id = typeof candidate.id === "string" ? candidate.id : typeof candidate.audit_id === "string" ? candidate.audit_id : null;
+      const ref = typeof candidate.audit_ref === "string" ? candidate.audit_ref : null;
+      if (id && (id === occurrenceKey || ref?.toLowerCase() === occurrenceKey.toLowerCase())) markers.add(id);
+    }
+    return markers;
+  };
+
+  const invalidateOccurrence = (markers: Set<string>) => {
+    if (!markers.size) return Promise.resolve();
+    return queryClient.invalidateQueries({
+      predicate: (query) => isQualityQueryKey(query.queryKey) && queryKeyContainsAny(query.queryKey, markers),
+      refetchType: "active",
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -105,9 +152,6 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   }, [location.pathname, location.search, qualityActive]);
 
   useEffect(() => {
-    // Realtime audit traffic is occurrence-scoped. Opening the People,
-    // Assurance, Intelligence, programme or register workspaces must not create
-    // an unrelated live-audit subscription or invalidate their active queries.
     if (!qualityActive || !auditOccurrenceActive) return;
     const stop = startQmsAuditRealtimeStream({
       onState: (state) => {
@@ -116,12 +160,12 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       onEvent: (event) => {
         if (!isQualityRealtimeEvent(event)) return;
         if (event.event === "reset") {
+          // A reset means the server's replay window cannot prove which events
+          // were missed. This is the one case where active queries are refetched.
           void queryClient.refetchQueries({ type: "active" });
         } else {
-          void queryClient.invalidateQueries({
-            predicate: (query) => isQualityQueryKey(query.queryKey),
-            refetchType: "active",
-          });
+          const eventAuditId = realtimeAuditId(event);
+          void invalidateOccurrence(occurrenceMarkers(eventAuditId));
         }
         window.dispatchEvent(new CustomEvent("amo:qms:realtime", { detail: event.data }));
       },
@@ -130,7 +174,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       stop();
       delete document.documentElement.dataset.qmsRealtimeState;
     };
-  }, [auditOccurrenceActive, qualityActive, queryClient]);
+  }, [auditOccurrenceActive, occurrenceKey, qualityActive, queryClient]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!qualityActive) return;
@@ -140,7 +184,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       if (!force && now - lastRefreshAt.current < FOCUS_REFRESH_THRESHOLD_MS) return;
       lastRefreshAt.current = now;
 
-      if (includeAllActive) {
+      if (auditOccurrenceActive) {
+        void invalidateOccurrence(occurrenceMarkers());
+      } else if (includeAllActive) {
         void queryClient.refetchQueries({ type: "active" });
       } else {
         void queryClient.invalidateQueries({
@@ -157,17 +203,13 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
     };
 
     const replayAndRefresh = async () => {
-      // The encrypted mutation outbox belongs to day-of-audit fieldwork. Do not
-      // replay it merely because another Quality workspace is mounted: that can
-      // refetch otherwise stable portfolio/person data and creates cross-workspace
-      // coupling that the live-audit specification explicitly avoids.
       if (!liveAuditActive) {
         refresh(true);
         return;
       }
       try {
-        const summary = await replayOfflineMutations();
-        refresh(true, summary.conflict > 0 || summary.failed > 0);
+        await replayOfflineMutations();
+        refresh(true);
       } catch (error) {
         console.warn("[qms-offline] replay did not complete", error);
         refresh(true);
@@ -188,9 +230,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       if (document.visibilityState === "visible") refresh(false);
     };
     const onExplicitRefresh = () => {
-      refresh(true, true);
+      refresh(true, !auditOccurrenceActive);
       const amoCode = qualityAmoCode(location.pathname);
-      if (!amoCode) return;
+      if (!amoCode || auditOccurrenceActive) return;
       void apiRequest<Record<string, unknown>>(qmsPath(amoCode, "/dashboard-lite"), {
         timeoutMs: 8_000,
         cacheTtlMs: 0,
@@ -228,7 +270,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("click", onClick, true);
     };
-  }, [liveAuditActive, location.pathname, location.search, qualityActive, queryClient]);
+  }, [auditOccurrenceActive, liveAuditActive, location.pathname, location.search, occurrenceKey, qualityActive, queryClient]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return null;
 };
