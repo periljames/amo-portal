@@ -1426,6 +1426,20 @@ def install_training_workflow_completion(router_module) -> None:
         db: Session = Depends(get_read_db),
         current_user: account_models.User = Depends(get_current_active_user),
     ):
+        manager_roles = {
+            "SUPERUSER",
+            "AMO_ADMIN",
+            "ACCOUNTABLE_EXECUTIVE",
+            "BASE_MAINTENANCE_MANAGER",
+            "LINE_MAINTENANCE_MANAGER",
+            "WORKSHOP_MANAGER",
+            "QUALITY_MANAGER",
+            "SAFETY_MANAGER",
+            "FINANCE_MANAGER",
+            "STORES_MANAGER",
+        }
+        if not router_module._is_training_editor(current_user) and _enum(getattr(current_user, "role", None)) not in manager_roles:
+            raise HTTPException(status_code=403, detail="Management permission is required for Team Training.")
         return workspace_payload(db, current_user, coordinator=False)
 
     @router.get("/workspace/coordinator")

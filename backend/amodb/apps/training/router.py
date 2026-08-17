@@ -1841,6 +1841,14 @@ def _create_notification(
 
 def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str], subject: str, body: str) -> None:
     """
+    Legacy immediate email hook. Durable Training notification dispatch is the default.
+
+    Set TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY=1 only as an explicit
+    compatibility escape hatch while migrating tenant notification policy.
+    """
+    if str(os.getenv("TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY", "0")).strip().lower() not in {"1", "true", "yes"}:
+        return
+    """
     Optional email hook (safe-by-default).
     If SMTP env vars are not set, this does nothing.
 
@@ -1910,6 +1918,14 @@ def _preferred_phone(user: object) -> Optional[str]:
 
 
 def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[str], message: str) -> None:
+    """
+    Legacy immediate WhatsApp hook. Durable Training notification dispatch is the default.
+
+    Set TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY=1 only as an explicit
+    compatibility escape hatch while migrating tenant notification policy.
+    """
+    if str(os.getenv("TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY", "0")).strip().lower() not in {"1", "true", "yes"}:
+        return
     """
     Optional WhatsApp hook (safe-by-default).
     If WHATSAPP_WEBHOOK_URL is not set, this does nothing.
