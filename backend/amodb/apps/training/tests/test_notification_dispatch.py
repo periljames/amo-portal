@@ -98,6 +98,23 @@ def test_outbox_contract_reuses_training_workflow_runtime() -> None:
         assert contract in source
 
 
+def test_provider_callback_is_tenant_scoped_secret_protected_and_audited() -> None:
+    source = _source("backend/amodb/apps/training/notification_dispatch_routes.py")
+    package = _source("backend/amodb/apps/training/__init__.py")
+    assert 'Header(None, alias="X-Training-Provider-Secret")' in source
+    assert "TRAINING_NOTIFICATION_PROVIDER_CALLBACK_SECRET" in source
+    assert "TrainingWorkflowInstance.amo_id == amo_id" in source
+    assert "TrainingWorkflowInstance.workflow_type == OUTBOX_WORKFLOW_TYPE" in source
+    assert 'Literal["DELIVERED", "READ", "FAILED"]' in source
+    assert 'action="NOTIFICATION_OUTBOX_PROVIDER_STATUS"' in source
+    assert "install_training_notification_dispatch_routes(_router_module)" in package
+
+
+def test_legacy_immediate_delivery_is_disabled_by_default() -> None:
+    source = _source("backend/amodb/apps/training/router.py")
+    assert 'TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY", "0"' in source
+
+
 def test_scheduler_syncs_and_processes_durable_outbox() -> None:
     source = _source("backend/amodb/jobs/training_notification_automation.py")
     assert "sync_notifications_to_outbox" in source
