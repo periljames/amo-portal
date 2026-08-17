@@ -3,6 +3,7 @@ import { CheckCircle2, ClipboardCheck, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { completeTrainingWorkflowStep, listMyTrainingTasks, transitionTrainingWorkflow } from "../../services/trainingOperating";
+import TrainingInvitationInbox from "./TrainingInvitationInbox";
 import TrainingRoleWorkspacePanel from "./TrainingRoleWorkspacePanel";
 
 const MyTrainingTaskInbox: React.FC = () => {
@@ -13,6 +14,7 @@ const MyTrainingTaskInbox: React.FC = () => {
   return (
     <>
       <TrainingRoleWorkspacePanel />
+      <TrainingInvitationInbox />
       <section className="page-section" id="training-task-inbox">
         <div className="card">
           <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
