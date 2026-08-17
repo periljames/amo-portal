@@ -12,6 +12,24 @@ RECOVERY_REST_CODE = "ROSTER_RECOVERY_REST_REQUIRED"
 CONTROLLED_EXTENSION_CODE = "ROSTER_EXTENDED_DUTY_CONTROLLED"
 
 
+def _controlled_limit(extension: RosterDutyExtension, rule_type: models.RosterRuleType) -> int:
+    fatigue = dict(extension.fatigue_risk_json or {})
+    if rule_type == models.RosterRuleType.MAX_ASSIGNMENT_DURATION:
+        return int(fatigue.get("extended_maximum_minutes") or 0)
+    if rule_type == models.RosterRuleType.MAX_DUTY_HOURS_DAY:
+        return int(fatigue.get("extended_daily_maximum_minutes") or 0)
+    return 0
+
+
+def _finding_minutes(spec: validation.FindingSpec, rule_type: models.RosterRuleType) -> int:
+    details = dict(spec.details or {})
+    if rule_type == models.RosterRuleType.MAX_ASSIGNMENT_DURATION:
+        return int(details.get("shift_minutes") or 0)
+    if rule_type == models.RosterRuleType.MAX_DUTY_HOURS_DAY:
+        return int(details.get("planned_minutes") or 0)
+    return 0
+
+
 def install() -> None:
     """Recognize only the governed extension path while preserving all hard rules."""
 
@@ -46,22 +64,28 @@ def install() -> None:
         for spec in specs:
             extension = extension_by_assignment.get(str(spec.assignment_id or ""))
             rule = rule_by_id.get(spec.rule_id) if spec.rule_id else None
+            controlled_types = {
+                models.RosterRuleType.MAX_ASSIGNMENT_DURATION,
+                models.RosterRuleType.MAX_DUTY_HOURS_DAY,
+            }
+            controlled_limit = _controlled_limit(extension, rule.rule_type) if extension is not None and rule is not None else 0
+            finding_minutes = _finding_minutes(spec, rule.rule_type) if rule is not None else 0
             if (
                 extension is not None
                 and rule is not None
-                and rule.rule_type == models.RosterRuleType.MAX_ASSIGNMENT_DURATION
+                and rule.rule_type in controlled_types
                 and extension.proposed_extended_end == extension.assignment.ends_at
-                and extension.continuous_duty_minutes
-                <= int((extension.fatigue_risk_json or {}).get("extended_maximum_minutes") or 0)
+                and controlled_limit > 0
+                and finding_minutes <= controlled_limit
             ):
                 governed.append(validation.FindingSpec(
                     source=models.RosterValidationSource.RULE,
                     severity=models.RosterValidationSeverity.INFO,
                     code=CONTROLLED_EXTENSION_CODE,
                     message=(
-                        "Ordinary shift duration exceeded under the controlled unscheduled-aircraft "
-                        "extension path. Personnel acknowledgement, supervisor approval, recovery "
-                        "rest and all other hard statutory checks remain mandatory."
+                        "Ordinary maintenance duty duration exceeded under the controlled unscheduled-aircraft "
+                        "extension path. Personnel acknowledgement, supervisor approval, recovery rest and all "
+                        "other hard statutory checks remain mandatory."
                     ),
                     assignment_id=spec.assignment_id,
                     user_id=spec.user_id,
@@ -76,7 +100,8 @@ def install() -> None:
                         "operational_reference": extension.operational_reference,
                         "aircraft_registration": extension.aircraft_registration,
                         "continuous_duty_minutes": extension.continuous_duty_minutes,
-                        "extended_maximum_minutes": (extension.fatigue_risk_json or {}).get("extended_maximum_minutes"),
+                        "controlled_maximum_minutes": controlled_limit,
+                        "finding_minutes": finding_minutes,
                         "required_recovery_rest_minutes": extension.required_recovery_rest_minutes,
                     },
                     overridable=False,
