@@ -43,6 +43,26 @@ def _create_amo_and_user(db_session, code: str = "EVM01"):
     return amo, user
 
 
+def test_live_event_tenant_match_fails_closed_without_matching_amo_metadata():
+    base = {
+        "id": "evt-1",
+        "type": "quality.qms.audit.updated",
+        "entityType": "qms.audit",
+        "entityId": "audit-1",
+        "action": "UPDATED",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    matching = events_router.EventEnvelope(**base, metadata={"amoId": "tenant-a", "module": "quality"})
+    different = events_router.EventEnvelope(**base, metadata={"amoId": "tenant-b", "module": "quality"})
+    tenantless = events_router.EventEnvelope(**base, metadata={"module": "quality"})
+    malformed = events_router.EventEnvelope(**base, metadata={})
+
+    assert events_router._event_matches_tenant(matching, "tenant-a") is True
+    assert events_router._event_matches_tenant(different, "tenant-a") is False
+    assert events_router._event_matches_tenant(tenantless, "tenant-a") is False
+    assert events_router._event_matches_tenant(malformed, "tenant-a") is False
+
+
 def test_replay_events_since_persists_via_audit_store(db_session):
     amo, user = _create_amo_and_user(db_session)
 
