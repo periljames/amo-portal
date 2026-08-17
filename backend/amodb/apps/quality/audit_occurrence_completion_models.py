@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from amodb.database import Base
@@ -87,4 +87,29 @@ class QualityAuditClosingNarrative(Base):
     __table_args__ = (
         UniqueConstraint("amo_id", "audit_id", name="uq_quality_audit_closing_narrative"),
         Index("ix_quality_audit_closing_narrative_audit", "amo_id", "audit_id"),
+    )
+
+
+class QualityAuditAssignmentDecision(Base):
+    """Immutable governance record for a change to an audit's internal team.
+
+    The occurrence itself remains authoritative for the current assignees. This
+    record preserves the reason, before/after state and exact eligibility result
+    that justified each assignment mutation.
+    """
+
+    __tablename__ = "quality_audit_assignment_decisions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    before_snapshot = Column(JSON, nullable=False)
+    after_snapshot = Column(JSON, nullable=False)
+    eligibility_snapshot = Column(JSON, nullable=False)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_quality_audit_assignment_decision", "amo_id", "audit_id", "created_at"),
     )
