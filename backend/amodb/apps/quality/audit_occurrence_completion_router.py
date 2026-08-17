@@ -8,6 +8,10 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
+from amodb.apps.doc_control import domain_models as doc_control_models
+from amodb.apps.doc_control.workspace_service import can_read_manual
+from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db, get_read_db, get_write_db
 
 from . import models
@@ -22,6 +26,13 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 
 router = APIRouter(tags=["Quality audit occurrence completion"])
 public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
+
+ControlledSourceSystem = Literal["QMS_LOCAL", "DOCUMENT_CONTROL"]
+_CANONICAL_CONTROLLED_REVISION_STATUSES = {
+    manual_models.ManualRevisionStatus.PUBLISHED,
+    manual_models.ManualRevisionStatus.SUPERSEDED,
+    manual_models.ManualRevisionStatus.ARCHIVED,
+}
 
 
 def _utcnow() -> datetime:
@@ -57,8 +68,14 @@ class GovernedDocumentRequestCreate(BaseModel):
     linked_criterion: str | None = Field(default=None, max_length=4000)
     is_required: bool = True
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] = "UPLOAD_OR_CONTROLLED"
+
+    # QMS_LOCAL is the compatibility default for older API clients. New frontend
+    # flows explicitly choose DOCUMENT_CONTROL when they use the canonical library.
+    controlled_source_system: ControlledSourceSystem = "QMS_LOCAL"
     controlled_document_id: uuid.UUID | None = None
     controlled_revision_id: uuid.UUID | None = None
+    canonical_document_id: str | None = Field(default=None, max_length=36)
+    canonical_revision_id: str | None = Field(default=None, max_length=36)
 
 
 class GovernedDocumentRequestUpdate(BaseModel):
@@ -68,8 +85,11 @@ class GovernedDocumentRequestUpdate(BaseModel):
     linked_criterion: str | None = Field(default=None, max_length=4000)
     is_required: bool | None = None
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] | None = None
+    controlled_source_system: ControlledSourceSystem | None = None
     controlled_document_id: uuid.UUID | None = None
     controlled_revision_id: uuid.UUID | None = None
+    canonical_document_id: str | None = Field(default=None, max_length=36)
+    canonical_revision_id: str | None = Field(default=None, max_length=36)
 
 
 class AuditMeetingCreate(BaseModel):
@@ -107,8 +127,9 @@ def _validate_controlled_source(
     document_id: uuid.UUID | None,
     revision_id: uuid.UUID | None,
 ) -> tuple[models.QMSDocument | None, models.QMSDocumentRevision | None]:
+    """Validate the legacy Quality-local controlled-document source."""
     if revision_id is not None and document_id is None:
-        raise HTTPException(status_code=422, detail="A controlled revision must be linked to its controlled document.")
+        raise HTTPException(status_code=422, detail="A Quality-local revision must be linked to its Quality-local document.")
     document = None
     revision = None
     if document_id is not None:
@@ -117,7 +138,7 @@ def _validate_controlled_source(
             models.QMSDocument.id == document_id,
         ).first()
         if document is None:
-            raise HTTPException(status_code=422, detail="Controlled DMS document is not available in this tenant.")
+            raise HTTPException(status_code=422, detail="Quality-local controlled document is not available in this tenant.")
     if revision_id is not None:
         revision = db.query(models.QMSDocumentRevision).filter(
             models.QMSDocumentRevision.amo_id == amo_id,
@@ -125,8 +146,145 @@ def _validate_controlled_source(
             models.QMSDocumentRevision.document_id == document_id,
         ).first()
         if revision is None:
-            raise HTTPException(status_code=422, detail="Controlled DMS revision does not belong to the selected document.")
+            raise HTTPException(status_code=422, detail="Quality-local controlled revision does not belong to the selected document.")
     return document, revision
+
+
+def _manual_tenant(db: Session, amo_id: str) -> manual_models.Tenant | None:
+    return db.query(manual_models.Tenant).filter(manual_models.Tenant.amo_id == amo_id).first()
+
+
+def _document_control_user(db: Session, *, amo_id: str, user_id: str | None) -> account_models.User | None:
+    if not user_id:
+        return None
+    return db.query(account_models.User).filter(
+        account_models.User.id == user_id,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+
+
+def _validate_canonical_controlled_source(
+    db: Session,
+    *,
+    amo_id: str,
+    document_id: str | None,
+    revision_id: str | None,
+    user_id: str | None = None,
+    require_revision: bool = False,
+) -> tuple[manual_models.Manual | None, manual_models.ManualRevision | None]:
+    """Validate a canonical Document Control document and exact controlled revision."""
+    document_id = (document_id or "").strip() or None
+    revision_id = (revision_id or "").strip() or None
+    if revision_id and not document_id:
+        raise HTTPException(status_code=422, detail="A canonical revision must be linked to its Document Control document.")
+    if require_revision and document_id and not revision_id:
+        raise HTTPException(status_code=422, detail="Canonical Document Control evidence must identify an exact controlled revision.")
+    if not document_id:
+        return None, None
+
+    tenant = _manual_tenant(db, amo_id)
+    if tenant is None:
+        raise HTTPException(status_code=422, detail="Document Control is not configured for this tenant.")
+
+    document = db.query(manual_models.Manual).filter(
+        manual_models.Manual.id == document_id,
+        manual_models.Manual.tenant_id == tenant.id,
+    ).first()
+    if document is None:
+        raise HTTPException(status_code=422, detail="Canonical Document Control document is not available in this tenant.")
+
+    if user_id is not None:
+        user = _document_control_user(db, amo_id=amo_id, user_id=user_id)
+        if user is None:
+            raise HTTPException(status_code=403, detail="Document Control access could not be established for this user.")
+        profile = db.query(doc_control_models.DocumentControlProfile).filter(
+            doc_control_models.DocumentControlProfile.tenant_id == amo_id,
+            doc_control_models.DocumentControlProfile.manual_id == document.id,
+        ).first()
+        if not can_read_manual(user, profile):
+            raise HTTPException(status_code=403, detail="The selected Document Control record is restricted.")
+
+    revision = None
+    if revision_id:
+        revision = db.query(manual_models.ManualRevision).filter(
+            manual_models.ManualRevision.id == revision_id,
+            manual_models.ManualRevision.manual_id == document.id,
+        ).first()
+        if revision is None:
+            raise HTTPException(status_code=422, detail="Canonical revision does not belong to the selected Document Control document.")
+        if revision.status_enum not in _CANONICAL_CONTROLLED_REVISION_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail="Audit evidence may reference only a published, superseded, or archived Document Control revision.",
+            )
+    return document, revision
+
+
+def _validate_request_controlled_selection(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str | None,
+    source_mode: str,
+    source_system: str,
+    controlled_document_id: uuid.UUID | None,
+    controlled_revision_id: uuid.UUID | None,
+    canonical_document_id: str | None,
+    canonical_revision_id: str | None,
+) -> tuple[
+    uuid.UUID | None,
+    uuid.UUID | None,
+    str | None,
+    str | None,
+]:
+    if source_system not in {"QMS_LOCAL", "DOCUMENT_CONTROL"}:
+        raise HTTPException(status_code=422, detail="Unknown controlled-document source system.")
+
+    if source_mode == "UPLOAD":
+        if any((controlled_document_id, controlled_revision_id, canonical_document_id, canonical_revision_id)):
+            raise HTTPException(status_code=422, detail="Upload-only requests cannot carry controlled-document references.")
+        return None, None, None, None
+
+    if source_system == "QMS_LOCAL":
+        if canonical_document_id or canonical_revision_id:
+            raise HTTPException(status_code=422, detail="Canonical Document Control IDs cannot be stored as Quality-local references.")
+        document, revision = _validate_controlled_source(
+            db,
+            amo_id=amo_id,
+            document_id=controlled_document_id,
+            revision_id=controlled_revision_id,
+        )
+        if source_mode == "CONTROLLED_DMS" and document is None:
+            raise HTTPException(status_code=422, detail="A Quality-local controlled document is required for this request.")
+        return (
+            document.id if document else None,
+            revision.id if revision else None,
+            None,
+            None,
+        )
+
+    if controlled_document_id or controlled_revision_id:
+        raise HTTPException(status_code=422, detail="Quality-local UUIDs cannot be stored as canonical Document Control references.")
+    document, revision = _validate_canonical_controlled_source(
+        db,
+        amo_id=amo_id,
+        document_id=canonical_document_id,
+        revision_id=canonical_revision_id,
+        user_id=user_id,
+        require_revision=bool(canonical_document_id),
+    )
+    if source_mode == "CONTROLLED_DMS" and (document is None or revision is None):
+        raise HTTPException(
+            status_code=422,
+            detail="A canonical Document Control document and exact controlled revision are required for this request.",
+        )
+    return (
+        None,
+        None,
+        document.id if document else None,
+        revision.id if revision else None,
+    )
 
 
 def _doc_request_dict(row: models.QualityAuditDocumentRequest, metadata: QualityAuditDocumentRequestMetadata | None) -> dict[str, Any]:
@@ -146,8 +304,11 @@ def _doc_request_dict(row: models.QualityAuditDocumentRequest, metadata: Quality
         "linked_criterion": metadata.linked_criterion if metadata else None,
         "is_required": metadata.is_required if metadata else True,
         "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
+        "controlled_source_system": metadata.controlled_source_system if metadata else "QMS_LOCAL",
         "controlled_document_id": str(metadata.controlled_document_id) if metadata and metadata.controlled_document_id else None,
         "controlled_revision_id": str(metadata.controlled_revision_id) if metadata and metadata.controlled_revision_id else None,
+        "canonical_document_id": metadata.canonical_document_id if metadata else None,
+        "canonical_revision_id": metadata.canonical_revision_id if metadata else None,
     }
 
 
@@ -199,6 +360,88 @@ def list_governed_document_requests(
     return {"items": [_doc_request_dict(row, metadata.get(row.id)) for row in rows]}
 
 
+@router.get("/audits/{audit_id}/document-control/documents")
+def list_canonical_document_control_documents(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    """Expose the canonical Document Control library through a QMS-purpose bridge."""
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, ctx.amo_id, audit_id)
+    tenant = _manual_tenant(db, ctx.amo_id)
+    if tenant is None:
+        return {"items": []}
+    user = _document_control_user(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    if user is None:
+        raise HTTPException(status_code=403, detail="Document Control access could not be established for this user.")
+
+    documents = db.query(manual_models.Manual).filter(
+        manual_models.Manual.tenant_id == tenant.id,
+    ).order_by(manual_models.Manual.code.asc(), manual_models.Manual.title.asc()).all()
+    document_ids = [row.id for row in documents]
+    profiles = {
+        row.manual_id: row
+        for row in db.query(doc_control_models.DocumentControlProfile).filter(
+            doc_control_models.DocumentControlProfile.tenant_id == ctx.amo_id,
+            doc_control_models.DocumentControlProfile.manual_id.in_(document_ids or ["-"]),
+        ).all()
+    }
+    items = []
+    for document in documents:
+        if not can_read_manual(user, profiles.get(document.id)):
+            continue
+        items.append({
+            "id": document.id,
+            "code": document.code,
+            "title": document.title,
+            "manual_type": document.manual_type,
+            "status": document.status,
+            "current_published_revision_id": document.current_published_rev_id,
+        })
+    return {"items": items}
+
+
+@router.get("/audits/{audit_id}/document-control/documents/{document_id}/revisions")
+def list_canonical_document_control_revisions(
+    audit_id: uuid.UUID,
+    document_id: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, ctx.amo_id, audit_id)
+    document, _ = _validate_canonical_controlled_source(
+        db,
+        amo_id=ctx.amo_id,
+        document_id=document_id,
+        revision_id=None,
+        user_id=ctx.user_id,
+    )
+    assert document is not None
+    revisions = db.query(manual_models.ManualRevision).filter(
+        manual_models.ManualRevision.manual_id == document.id,
+        manual_models.ManualRevision.status_enum.in_(tuple(_CANONICAL_CONTROLLED_REVISION_STATUSES)),
+    ).order_by(
+        manual_models.ManualRevision.created_at.desc(),
+        manual_models.ManualRevision.id.desc(),
+    ).all()
+    return {
+        "items": [
+            {
+                "id": revision.id,
+                "document_id": document.id,
+                "issue_number": revision.issue_number,
+                "revision_number": revision.rev_number,
+                "status": _enum_value(revision.status_enum),
+                "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
+                "source_sha256": revision.source_sha256,
+            }
+            for revision in revisions
+        ]
+    }
+
+
 @router.post("/audits/{audit_id}/governed-document-requests", status_code=status.HTTP_201_CREATED)
 def create_governed_document_request(
     audit_id: uuid.UUID,
@@ -210,7 +453,17 @@ def create_governed_document_request(
 
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, ctx.amo_id, audit_id)
-    _validate_controlled_source(db, amo_id=ctx.amo_id, document_id=payload.controlled_document_id, revision_id=payload.controlled_revision_id)
+    qms_document_id, qms_revision_id, canonical_document_id, canonical_revision_id = _validate_request_controlled_selection(
+        db,
+        amo_id=ctx.amo_id,
+        user_id=ctx.user_id,
+        source_mode=payload.source_mode,
+        source_system=payload.controlled_source_system,
+        controlled_document_id=payload.controlled_document_id,
+        controlled_revision_id=payload.controlled_revision_id,
+        canonical_document_id=payload.canonical_document_id,
+        canonical_revision_id=payload.canonical_revision_id,
+    )
     due_date = date.fromisoformat(payload.due_date) if payload.due_date else None
     row = models.QualityAuditDocumentRequest(
         amo_id=ctx.amo_id,
@@ -231,8 +484,11 @@ def create_governed_document_request(
         linked_criterion=(payload.linked_criterion or "").strip() or None,
         is_required=payload.is_required,
         source_mode=payload.source_mode,
-        controlled_document_id=payload.controlled_document_id,
-        controlled_revision_id=payload.controlled_revision_id,
+        controlled_source_system=payload.controlled_source_system,
+        controlled_document_id=qms_document_id,
+        controlled_revision_id=qms_revision_id,
+        canonical_document_id=canonical_document_id,
+        canonical_revision_id=canonical_revision_id,
         created_by_user_id=ctx.user_id,
         updated_by_user_id=ctx.user_id,
     )
@@ -266,13 +522,47 @@ def update_governed_document_request(
         QualityAuditDocumentRequestMetadata.request_id == request_id,
     ).with_for_update().first()
     if metadata is None:
-        metadata = QualityAuditDocumentRequestMetadata(request_id=request_id, amo_id=ctx.amo_id, audit_id=audit_id, created_by_user_id=ctx.user_id)
+        metadata = QualityAuditDocumentRequestMetadata(
+            request_id=request_id,
+            amo_id=ctx.amo_id,
+            audit_id=audit_id,
+            created_by_user_id=ctx.user_id,
+        )
         db.add(metadata)
 
     update = payload.model_dump(exclude_unset=True)
-    next_document_id = update.get("controlled_document_id", metadata.controlled_document_id)
-    next_revision_id = update.get("controlled_revision_id", metadata.controlled_revision_id)
-    _validate_controlled_source(db, amo_id=ctx.amo_id, document_id=next_document_id, revision_id=next_revision_id)
+    next_source_mode = update.get("source_mode", metadata.source_mode or "UPLOAD_OR_CONTROLLED")
+    next_source_system = update.get("controlled_source_system", metadata.controlled_source_system or "QMS_LOCAL")
+    next_qms_document_id = update.get("controlled_document_id", metadata.controlled_document_id)
+    next_qms_revision_id = update.get("controlled_revision_id", metadata.controlled_revision_id)
+    next_canonical_document_id = update.get("canonical_document_id", metadata.canonical_document_id)
+    next_canonical_revision_id = update.get("canonical_revision_id", metadata.canonical_revision_id)
+
+    # Switching repository is explicit and clears identities from the other source;
+    # IDs are never coerced or relabelled between the two repositories.
+    if next_source_mode == "UPLOAD":
+        next_qms_document_id = None
+        next_qms_revision_id = None
+        next_canonical_document_id = None
+        next_canonical_revision_id = None
+    elif next_source_system == "QMS_LOCAL":
+        next_canonical_document_id = None
+        next_canonical_revision_id = None
+    else:
+        next_qms_document_id = None
+        next_qms_revision_id = None
+
+    qms_document_id, qms_revision_id, canonical_document_id, canonical_revision_id = _validate_request_controlled_selection(
+        db,
+        amo_id=ctx.amo_id,
+        user_id=ctx.user_id,
+        source_mode=next_source_mode,
+        source_system=next_source_system,
+        controlled_document_id=next_qms_document_id,
+        controlled_revision_id=next_qms_revision_id,
+        canonical_document_id=next_canonical_document_id,
+        canonical_revision_id=next_canonical_revision_id,
+    )
 
     if "status" in update and update["status"] is not None:
         row.status = update["status"]
@@ -280,12 +570,19 @@ def update_governed_document_request(
         row.reviewed_at = _utcnow()
     if "review_note" in update:
         row.review_note = (update["review_note"] or "").strip() or None
-    for field in ("request_type", "linked_criterion", "is_required", "source_mode", "controlled_document_id", "controlled_revision_id"):
+    for field in ("request_type", "linked_criterion", "is_required"):
         if field in update:
             value = update[field]
             if isinstance(value, str):
                 value = value.strip() or None
             setattr(metadata, field, value)
+
+    metadata.source_mode = next_source_mode
+    metadata.controlled_source_system = next_source_system
+    metadata.controlled_document_id = qms_document_id
+    metadata.controlled_revision_id = qms_revision_id
+    metadata.canonical_document_id = canonical_document_id
+    metadata.canonical_revision_id = canonical_revision_id
     metadata.updated_by_user_id = ctx.user_id
     metadata.updated_at = _utcnow()
     db.commit()
