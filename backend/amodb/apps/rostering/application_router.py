@@ -25,6 +25,8 @@ from .code_registry_router import router as code_registry_router
 from .commitments_router import router as commitments_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
+from ..workforce import services as workforce_services
+from ..workforce import timesheet_pay_policy
 from ..workforce.bulk_router import router as workforce_bulk_router
 from ..workforce.governance_router import router as workforce_governance_router
 from ..workforce.hr_router import router as workforce_hr_router
@@ -66,6 +68,11 @@ template_usage_policy.install_code_registry_policy(code_registry)
 # display codes. Statutory protected-rest and rolling total-hours blockers are
 # non-overridable at the shared validation boundary.
 compliance_policy.install_validation_policy()
+
+# Classify attendance-backed timesheet lines by pay reason at generation time.
+# Sunday itself is not a pay category; protected-rest/public-holiday state and
+# the configured normal-hours threshold determine the payroll bucket/floor.
+timesheet_pay_policy.install_service_policy(workforce_services)
 
 # Install lifecycle/export policy at application import time. The public
 # service facade remains the compatibility boundary used by the existing
