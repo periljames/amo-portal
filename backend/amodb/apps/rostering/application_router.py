@@ -19,6 +19,7 @@ from . import (
     extended_duty_validation_policy,
     lineage,
     roster_control,
+    statutory_rule_policy,
     template_usage_policy,
     version_copy_policy,
 )
@@ -62,6 +63,9 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 
 template_usage_policy.install_code_registry_policy(code_registry)
 compliance_policy.install_validation_policy()
+# Maintenance assignment-duration and prior-rest rules are server-side hard
+# aviation limits. They cannot be converted to warnings by consent or approval.
+statutory_rule_policy.install()
 # The controlled extension policy sits inside the statutory validator: it may
 # recognize an ordinary shift-duration excess only when a governed extension
 # exists, but it adds a non-overridable recovery-rest check and leaves all other
