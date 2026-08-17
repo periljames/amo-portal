@@ -7,6 +7,12 @@ on:
       - "frontend/vite.config.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/apiClientLatency.contract.test.ts"
+      - "frontend/src/services/offlineHttp.ts"
+      - "frontend/src/services/portalConnectivity.ts"
+      - "frontend/src/services/portalRequestEligibility.ts"
+      - "frontend/src/services/portalRequestEligibility.test.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/devProxyRouting.test.ts"
   push:
@@ -16,6 +22,12 @@ on:
       - "frontend/vite.config.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "frontend/src/services/apiClient.ts"
+      - "frontend/src/services/apiClientLatency.contract.test.ts"
+      - "frontend/src/services/offlineHttp.ts"
+      - "frontend/src/services/portalConnectivity.ts"
+      - "frontend/src/services/portalRequestEligibility.ts"
+      - "frontend/src/services/portalRequestEligibility.test.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/devProxyRouting.test.ts"
 
@@ -36,9 +48,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
-      - name: Prove dedicated Platform Operations dev proxy routing
+      - name: Prove portal request, retry and proxy contracts
         working-directory: frontend
-        run: npx vitest run src/services/devProxyRouting.test.ts
+        run: npm run test:platform
       - name: Build production frontend
         working-directory: frontend
         run: npm run build

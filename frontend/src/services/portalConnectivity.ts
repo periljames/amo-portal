@@ -21,9 +21,10 @@ const EVENT_NAME = "amo:portal-connectivity";
 const CHANNEL_NAME = "amo:portal-connectivity-v1";
 const LEADER_KEY = "amo_portal_connectivity_leader_v1";
 // Longer than the healthy probe interval so another tab cannot take over
-// between successful probes and create duplicate readiness traffic.
+// between successful probes and create duplicate liveness traffic.
 const LEADER_TTL_MS = 45_000;
 const HEALTHY_PROBE_MS = 30_000;
+const CONNECTIVITY_PROBE_TIMEOUT_MS = 1_500;
 const BACKOFF_MS = [2_000, 5_000, 10_000, 20_000, 40_000, 60_000];
 const tabId = typeof crypto !== "undefined" && "randomUUID" in crypto
   ? crypto.randomUUID()
@@ -146,19 +147,28 @@ async function parseReadyResponse(response: Response): Promise<{ ready: boolean;
   return { ready, degraded, reason };
 }
 
-async function requestReadiness(): Promise<{ response: Response; legacy: boolean }> {
+async function requestConnectivityProbe(): Promise<{ response: Response; legacy: boolean }> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(new DOMException("Connectivity probe timed out", "AbortError")),
+    CONNECTIVITY_PROBE_TIMEOUT_MS,
+  );
   const init: RequestInit = {
     method: "GET",
     cache: "no-store",
     credentials: "include",
     headers: { Accept: "application/json", "X-AMO-Silent-Error": "1" },
+    signal: controller.signal,
   };
-  const response = await fetch(apiUrl("/readyz"), init);
-  if (response.status !== 404) return { response, legacy: false };
-  // Rolling deployments may briefly run the older backend. A successful
-  // legacy /healthz is treated as usable, while the new endpoint remains the
-  // authoritative dependency check after all instances are upgraded.
-  return { response: await fetch(apiUrl("/healthz"), init), legacy: true };
+  try {
+    const response = await fetch(apiUrl("/livez"), init);
+    if (response.status !== 404) return { response, legacy: false };
+    // Older instances may not expose /livez yet. /health is process-only and
+    // avoids the PostgreSQL/migration work performed by /readyz and /healthz.
+    return { response: await fetch(apiUrl("/health"), init), legacy: true };
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 }
 
 export function getPortalConnectivity(): PortalConnectivitySnapshot {
@@ -170,14 +180,17 @@ export function isPortalReady(): boolean {
 }
 
 /**
- * Let the shared readiness probe finish before an initial route decides that
- * uncached data is unavailable. This prevents the first render racing the
- * health check while still bounding startup on very poor links.
+ * Protected writes may wait briefly for recovery before deciding whether they
+ * can run. Ordinary reads never call this path. If another tab owns a stale
+ * leader lease, force a local lightweight liveness probe rather than waiting
+ * for that lease to expire.
  */
-export async function waitForPortalReadiness(timeoutMs = 5_000): Promise<PortalConnectivitySnapshot> {
+export async function waitForPortalReadiness(timeoutMs = 2_000): Promise<PortalConnectivitySnapshot> {
   if (snapshot.state !== "RECOVERING") return snapshot;
   const probed = await probePortalReadiness();
   if (probed.state !== "RECOVERING" || typeof window === "undefined") return probed;
+  const forced = await probePortalReadiness(true);
+  if (forced.state !== "RECOVERING") return forced;
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value: PortalConnectivitySnapshot) => {
@@ -206,46 +219,52 @@ export function onPortalConnectivityChange(
 }
 
 export function markPortalSessionExpired(reason = "session-expired"): void {
-  update("SESSION_EXPIRED", { reason, retryAt: null });
+  const changed = snapshot.state !== "SESSION_EXPIRED" || snapshot.reason !== reason;
+  update("SESSION_EXPIRED", { reason, retryAt: null }, changed);
   if (typeof window !== "undefined" && timer !== null) window.clearTimeout(timer);
 }
 
 export function notePortalResponse(response: Response): void {
   if (response.status === 503) {
     const delay = retryAfterMs(response) ?? nextDelay();
+    const reason = response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE";
+    const changed = snapshot.state !== "DEGRADED" || snapshot.reason !== reason;
     update("DEGRADED", {
       checkedAt: Date.now(),
       attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
-      reason: response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE",
+      reason,
       retryAt: Date.now() + delay,
-    });
+    }, changed);
     schedule(delay);
     return;
   }
   if (response.ok && snapshot.state !== "SESSION_EXPIRED") {
     const now = Date.now();
+    const changed = snapshot.state !== "ONLINE" || snapshot.reason !== null;
     update("ONLINE", {
       checkedAt: now,
       lastReadyAt: now,
       attempt: 0,
       reason: null,
-    });
+    }, changed);
   }
 }
 
 export function notePortalNetworkFailure(reason = "network-unreachable"): void {
+  const changed = snapshot.state !== "OFFLINE" || snapshot.reason !== reason;
   update("OFFLINE", {
     checkedAt: Date.now(),
     attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
     reason,
-  });
+  }, changed);
   schedule();
 }
 
 export function probePortalReadiness(force = false): Promise<PortalConnectivitySnapshot> {
   if (probeInFlight) return probeInFlight;
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    const next = update("OFFLINE", { checkedAt: Date.now(), reason: "device-offline" });
+    const changed = snapshot.state !== "OFFLINE" || snapshot.reason !== "device-offline";
+    const next = update("OFFLINE", { checkedAt: Date.now(), reason: "device-offline" }, changed);
     schedule();
     return Promise.resolve(next);
   }
@@ -254,30 +273,40 @@ export function probePortalReadiness(force = false): Promise<PortalConnectivityS
     return Promise.resolve(snapshot);
   }
 
-  update("RECOVERING", { reason: snapshot.reason }, false);
+  // A routine liveness probe while already online is an observation, not a
+  // connectivity transition. Keeping ONLINE here prevents each probe from
+  // manufacturing RECOVERING -> ONLINE events that can trigger subscribers to
+  // refetch and create request/revalidation feedback loops.
+  if (snapshot.state !== "ONLINE") {
+    update("RECOVERING", { reason: snapshot.reason }, false);
+  }
   probeInFlight = (async () => {
     try {
-      const { response, legacy } = await requestReadiness();
+      const { response, legacy } = await requestConnectivityProbe();
       const parsed = await parseReadyResponse(response);
       const now = Date.now();
       if (parsed.ready) {
+        const reason = legacy ? "legacy-health-compatible" : null;
+        const changed = snapshot.state !== "ONLINE" || snapshot.reason !== reason;
         const next = update("ONLINE", {
           checkedAt: now,
           lastReadyAt: now,
           attempt: 0,
           retryAt: now + HEALTHY_PROBE_MS,
-          reason: legacy ? "legacy-health-compatible" : null,
-        });
+          reason,
+        }, changed);
         schedule(HEALTHY_PROBE_MS);
         return next;
       }
       const delay = retryAfterMs(response) ?? nextDelay();
-      const next = update(parsed.degraded ? "DEGRADED" : "OFFLINE", {
+      const state = parsed.degraded ? "DEGRADED" : "OFFLINE";
+      const changed = snapshot.state !== state || snapshot.reason !== parsed.reason;
+      const next = update(state, {
         checkedAt: now,
         attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
         retryAt: now + delay,
         reason: parsed.reason,
-      });
+      }, changed);
       schedule(delay);
       return next;
     } catch (error) {
@@ -299,8 +328,9 @@ export function startPortalConnectivity(): () => void {
       if (event.data?.type !== "snapshot" || !event.data.snapshot) return;
       const incoming = event.data.snapshot;
       if (incoming.checkedAt && (!snapshot.checkedAt || incoming.checkedAt >= snapshot.checkedAt)) {
+        const changed = incoming.state !== snapshot.state || incoming.reason !== snapshot.reason;
         snapshot = incoming;
-        window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: snapshot }));
+        if (changed) window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: snapshot }));
       }
     };
   }
