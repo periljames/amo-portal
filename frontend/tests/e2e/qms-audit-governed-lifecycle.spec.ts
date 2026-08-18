@@ -106,7 +106,7 @@ async function prepareLifecycle(page: Page): Promise<void> {
     if (path.includes("/accounts/admin/admin-profile/")) return respond(route, { eligible: false, active: false });
     if (path.endsWith(`/quality/audits/resolve/${AUDIT_REF}`) || path.endsWith("/quality/audits/resolve/qar-mo-26-015")) return respond(route, audit);
     if (path.endsWith("/quality/audits") && method === "GET") return respond(route, [audit]);
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/session`) && method === "GET") return respond(route, auditSession(path.includes("closing") ? "closing" : "prepare"));
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/session`) && method === "GET") return respond(route, auditSession("prepare"));
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/workflow-check`) && method === "GET") return respond(route, { audit, workflow: { audit_id: AUDIT_ID, current_stage_id: "report", current_stage_label: "Report", percent_complete: 70, findings_total: 1, findings_open: 0, cars_total: 1, cars_open: 1, checklist_uploaded: true, report_uploaded: false, stages: [] } });
     if (path.endsWith("/quality/audits/personnel/options") && method === "GET") return respond(route, [{ id: "quality-user-a", full_name: "Quality Manager", staff_code: "QMS-001", email: "quality.manager@tenant-a.test", position_title: "Quality Manager" }]);
     if (path.includes("/quality/audit-register") && method === "GET") return respond(route, { rows: [], total: 0, limit: 200, offset: 0, has_more: false });
@@ -209,8 +209,8 @@ test.describe("governed audit lifecycle", () => {
     const setup = page.getByRole("region", { name: "Audit setup workspace" });
     await expect(setup).toBeVisible({ timeout: 30_000 });
     await expect(setup).toContainText("Audit notice");
-    await expect(setup).toContainText("14 days");
     await setup.getByRole("button", { name: "Create notice" }).click();
+    await expect(setup).toContainText("14 days");
     for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
       const button = setup.getByRole("button", { name: action, exact: true });
       await expect(button).toBeVisible();
