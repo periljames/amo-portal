@@ -2,6 +2,7 @@ import "./roster-planner-ux.css";
 import "./roster-planner-actions.css";
 import "./roster-generation.css";
 
+import { useEffect, useRef } from "react";
 import { Download, ShieldCheck } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
@@ -11,10 +12,30 @@ import { RosterPlannerV2 } from "./RosterPlannerV2";
 export function UnifiedRosterPlanner() {
   const { amoCode = "" } = useParams();
   const reportsRoute = `/maintenance/${encodeURIComponent(amoCode)}/rostering/reports`;
+  const governanceRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const container = governanceRef.current;
+    if (!container) return;
+
+    const surfaceHardBlock = () => {
+      const blockerBadges = Array.from(container.querySelectorAll<HTMLElement>(".wr-pill--blocker"));
+      const hasHardBlock = blockerBadges.some((badge) => {
+        const text = (badge.textContent || "").trim().toUpperCase();
+        return text.includes("HARD BLOCK") && !text.startsWith("0 ");
+      });
+      if (hasHardBlock) container.open = true;
+    };
+
+    surfaceHardBlock();
+    const observer = new MutationObserver(surfaceHardBlock);
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <div className="wr-planner-workspace">
-      <details className="wr-planner-governance-shortcut">
+      <details ref={governanceRef} className="wr-planner-governance-shortcut">
         <summary aria-label="Open compliance checks" title="Compliance checks">
           <ShieldCheck size={17} aria-hidden="true" />
           <span>Checks</span>
