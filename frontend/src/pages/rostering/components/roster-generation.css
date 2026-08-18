@@ -1,0 +1,107 @@
+.wr-generation-starts {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--wr-accent) 28%, var(--wr-border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--wr-accent) 4%, var(--wr-surface));
+}
+
+.wr-generation-starts__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wr-generation-starts__head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.wr-generation-starts__head strong {
+  font-size: .76rem;
+}
+
+.wr-generation-starts__head p {
+  margin: 0;
+  max-width: 560px;
+  color: var(--wr-muted);
+  font-size: .66rem;
+  line-height: 1.4;
+}
+
+.wr-generation-starts__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.wr-generation-starts__list label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--wr-border);
+  border-radius: 9px;
+  background: var(--wr-surface-strong);
+}
+
+.wr-generation-starts__list label > span {
+  display: grid;
+  min-width: 0;
+}
+
+.wr-generation-starts__list label strong,
+.wr-generation-starts__list label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-generation-starts__list label strong {
+  font-size: .69rem;
+}
+
+.wr-generation-starts__list label small {
+  color: var(--wr-muted);
+  font-size: .59rem;
+}
+
+.wr-generation-starts__list select {
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: .68rem;
+}
+
+.wr-generation-continuity {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: color-mix(in srgb, var(--wr-good) 80%, var(--wr-text));
+  background: var(--wr-good-soft);
+  font-size: .68rem;
+  line-height: 1.4;
+}
+
+.wr-generation-continuity span {
+  display: grid;
+  gap: 2px;
+}
+
+@media (max-width: 700px) {
+  .wr-generation-starts__list {
+    grid-template-columns: 1fr;
+    max-height: 40dvh;
+  }
+
+  .wr-generation-starts__list label {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+}
