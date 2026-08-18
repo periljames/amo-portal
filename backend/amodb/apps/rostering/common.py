@@ -451,11 +451,17 @@ def serialize_period(row: models.RosterPeriod, *, current_user: Optional[account
 
 
 def can_view_roster(db: Session, *, user: account_models.User) -> bool:
+    """Return access to shared roster workspaces, never personal self-service.
+
+    ``roster.view_own`` is intentionally excluded. Employees use the dedicated
+    ``/my-roster`` and personal consent/calendar endpoints; it must not unlock
+    tenant roster periods, versions, assignments or operational policy views.
+    """
+
     return workforce_permissions.any_permission(
         db,
         user=user,
         permissions=[
-            workforce_permissions.PermissionCode.ROSTER_VIEW_OWN,
             workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT,
             workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
         ],
