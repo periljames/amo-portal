@@ -12,6 +12,7 @@ from .assessment_readiness_bridge import bridge_readiness as _bridge_assessment_
 from .calendar_lifecycle import install_training_calendar_lifecycle
 from .canonical_assessment_routes import install_training_canonical_assessment_routes
 from .canonical_exam_governance_routes import install_training_canonical_exam_governance_routes
+from .completion_gate_bridge import bridge_completion_gate as _bridge_completion_gate
 from .governance_course_scope import technical_authorisation_readiness as _revision_aware_technical_readiness
 from .governance_routes import install_training_governance_routes
 from .learner_invitation_routes import install_training_learner_invitation_routes
@@ -28,12 +29,12 @@ from .workflow_completion_installer import install_training_workflow_completion_
 # boundary in one place rather than changing legacy authorisation identities.
 _governance_service.technical_authorisation_readiness = _revision_aware_technical_readiness
 
-# The original readiness calculator recognizes the legacy APPROVED/PASS state
-# vocabulary. Canonical assessment attempts use COMPLETED/PASSED. Bridge those
-# vocabularies at the single readiness boundary without creating a second case model.
+# Canonical assessment state vocabulary is normalized at the existing readiness
+# and certificate/completion gates rather than by creating parallel case models.
 _operating_service.compute_authorization_readiness = _bridge_assessment_readiness(
     _operating_service.compute_authorization_readiness
 )
+_operating_service.completion_gate = _bridge_completion_gate(_operating_service.completion_gate)
 
 # Tenant operating policy is normalized and validated before the canonical
 # settings service writes it. Invalid recipients, reminder milestones, retry
