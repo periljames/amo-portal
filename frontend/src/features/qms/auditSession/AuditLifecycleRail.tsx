@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Circle, ShieldAlert } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession, type AuditSessionStageId } from "../../../services/qmsAuditSession";
@@ -9,7 +9,6 @@ import {
   AUDIT_SESSION_STAGES,
   auditSessionPath,
   auditSessionStageFromPath,
-  legacyTabForAuditSessionStage,
 } from "./auditSessionRoutes";
 import "../../../styles/qms-audit-session.css";
 
@@ -26,7 +25,6 @@ type Props = { amoCode: string; auditKey: string };
 
 const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
-  const navigate = useNavigate();
   const routeStage = auditSessionStageFromPath(location.pathname);
 
   const auditQuery = useQuery({
@@ -42,15 +40,6 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 2_000,
     refetchInterval: routeStage === "live" ? 5_000 : 15_000,
   });
-
-  useEffect(() => {
-    if (!routeStage) return;
-    const expectedTab = legacyTabForAuditSessionStage(routeStage);
-    const params = new URLSearchParams(location.search);
-    if (params.get("tab") === expectedTab) return;
-    params.set("tab", expectedTab);
-    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
-  }, [location.pathname, location.search, navigate, routeStage]);
 
   const stageState = useMemo(() => {
     const serverStages = new Map(sessionQuery.data?.stages.map((stage) => [stage.id, stage]) || []);
