@@ -21,6 +21,7 @@ import { parseFormFieldLines, parseSignatoryLines } from "./trainingSetupModel";
 import { downloadTrainingWorkbookTemplate, listTrainingWorkbookImports } from "../../services/trainingWorkbookImport";
 import type { TrainingWorkbookImportJob } from "../../types/trainingWorkbookImport";
 import CurrencySelect from "./CurrencySelect";
+import TrainingReminderPolicyEditor from "./TrainingReminderPolicyEditor";
 
 const parseLines = parseFormFieldLines;
 
@@ -195,6 +196,12 @@ const TrainingSetupWorkspace: React.FC<Props> = ({ canManage, onOpenImport, onCh
           <label>Setup state<select value={settings.setup_status} onChange={(event) => setSettings({ ...settings, setup_status: event.target.value as "DRAFT" | "ACTIVE" })}><option value="DRAFT">Draft</option><option value="ACTIVE">Active</option></select></label>
         </div><div className="tos-inline-proof"><Bot size={17} /><span>{automation?.enabled ? `Next scheduled evaluation: ${automation.next_run_at ? new Date(automation.next_run_at).toLocaleString() : "pending"}` : "Automation disabled"}</span><strong>{automation?.last_run ? `Last: ${automation.last_run.status}` : "No run yet"}</strong></div></div>
       </details>
+
+      <TrainingReminderPolicyEditor
+        value={settings.notification_policy || {}}
+        disabled={!canManage || busy}
+        onChange={(notification_policy) => setSettings({ ...settings, notification_policy })}
+      />
 
       <details className="tos-disclosure" id="certificate-policy">
         <summary><span><BadgeCheck size={18} /><strong>Certificate &amp; decision policy</strong></span><small>Server-side numbering, signatories and committee defaults</small></summary>
