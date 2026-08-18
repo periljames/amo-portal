@@ -14,15 +14,15 @@ describe("audit session routes", () => {
     expect(auditSessionStageFromPath("/maintenance/amo/quality/audits/QAR-26-001?tab=checklist")).toBeNull();
   });
 
-  it("keeps new time-oriented routes compatible with the established run hub", () => {
+  it("keeps legacy tab mapping available only for compatibility decisions", () => {
     expect(legacyTabForAuditSessionStage("setup")).toBe("war-room");
     expect(legacyTabForAuditSessionStage("closing")).toBe("report");
     expect(legacyTabForAuditSessionStage("archive")).toBe("evidence");
   });
 
-  it("builds encoded canonical occurrence links", () => {
+  it("builds encoded canonical occurrence links without legacy tab state", () => {
     expect(auditSessionPath("tenant a", "QAR/MO/26/015", "live")).toBe(
-      "/maintenance/tenant%20a/quality/audits/QAR%2FMO%2F26%2F015/live?tab=checklist",
+      "/maintenance/tenant%20a/quality/audits/QAR%2FMO%2F26%2F015/live",
     );
   });
 
