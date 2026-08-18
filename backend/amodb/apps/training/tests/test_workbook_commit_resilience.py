@@ -96,7 +96,7 @@ class WorkbookCommitResilienceTests(unittest.TestCase):
 
     def test_database_restart_is_reported_as_retryable_service_unavailable(self) -> None:
         main = (TRAINING_DIR.parents[1] / "main.py").read_text(encoding="utf-8")
-        self.assertIn("except OperationalError:", main)
+        self.assertRegex(main, r"except OperationalError(?: as [A-Za-z_][A-Za-z0-9_]*)?:")
         self.assertIn('"error_code": "DB_TEMPORARILY_UNAVAILABLE"', main)
         self.assertIn('headers={"Retry-After": "3"}', main)
 
