@@ -7,7 +7,8 @@ on:
       - "backend/amodb/alembic/versions/rostering_*"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
-      - "frontend/src/types/rostering.ts"
+      - "frontend/src/types/rostering*.ts"
+      - "frontend/tests/e2e/rostering-governed-workflows.spec.ts"
       - ".github/workflows/rostering-control-ci.yml"
   push:
     branches: [main]
@@ -16,7 +17,8 @@ on:
       - "backend/amodb/alembic/versions/rostering_*"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering*.ts"
-      - "frontend/src/types/rostering.ts"
+      - "frontend/src/types/rostering*.ts"
+      - "frontend/tests/e2e/rostering-governed-workflows.spec.ts"
       - ".github/workflows/rostering-control-ci.yml"
 
 permissions:
@@ -66,6 +68,31 @@ jobs:
             backend/amodb/apps/rostering/code_registry.py \
             backend/amodb/apps/rostering/code_registry_models.py \
             backend/amodb/apps/rostering/code_registry_router.py \
+            backend/amodb/apps/rostering/compliance_audit_policy.py \
+            backend/amodb/apps/rostering/compliance_policy.py \
+            backend/amodb/apps/rostering/protected_rest_exact_policy.py \
+            backend/amodb/apps/rostering/statutory_rule_policy.py \
+            backend/amodb/apps/rostering/consent_models.py \
+            backend/amodb/apps/rostering/consent_service.py \
+            backend/amodb/apps/rostering/consent_notification_policy.py \
+            backend/amodb/apps/rostering/consent_revalidation_policy.py \
+            backend/amodb/apps/rostering/consent_policy.py \
+            backend/amodb/apps/rostering/consent_router.py \
+            backend/amodb/apps/rostering/exemption_service.py \
+            backend/amodb/apps/rostering/exemption_policy.py \
+            backend/amodb/apps/rostering/exemption_router.py \
+            backend/amodb/apps/rostering/extended_duty_models.py \
+            backend/amodb/apps/rostering/extended_duty_service.py \
+            backend/amodb/apps/rostering/extended_duty_day_policy.py \
+            backend/amodb/apps/rostering/extended_duty_validation_policy.py \
+            backend/amodb/apps/rostering/extended_duty_policy.py \
+            backend/amodb/apps/rostering/extended_duty_router.py \
+            backend/amodb/apps/rostering/shift_semantics_router.py \
+            backend/amodb/apps/rostering/shift_scheduling_policy.py \
+            backend/amodb/apps/rostering/starter_shift_semantics_policy.py \
+            backend/amodb/apps/rostering/workflow_state_router.py \
+            backend/amodb/apps/rostering/lifecycle_error_policy.py \
+            backend/amodb/apps/rostering/structured_error_policy.py \
             backend/amodb/apps/rostering/controlled_exports.py \
             backend/amodb/apps/rostering/lineage.py \
             backend/amodb/apps/rostering/roster_control.py \
@@ -81,8 +108,14 @@ jobs:
           PYTHONPATH: backend
         run: |
           pytest -q \
+            backend/amodb/apps/rostering/tests/test_application_bootstrap.py \
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
-            backend/amodb/apps/rostering/tests/test_roster_control_contract.py
+            backend/amodb/apps/rostering/tests/test_consent_exemption_contract.py \
+            backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
+            backend/amodb/apps/rostering/tests/test_governed_workflow_security.py \
+            backend/amodb/apps/rostering/tests/test_protected_rest_exact_policy.py \
+            backend/amodb/apps/rostering/tests/test_roster_control_contract.py \
+            backend/amodb/apps/rostering/tests/test_shift_operational_policy_contract.py
 
   frontend-controlled-roster:
     runs-on: ubuntu-24.04
@@ -106,3 +139,50 @@ jobs:
       - name: Check rostering performance contract
         working-directory: frontend
         run: npm run perf:rostering
+
+  browser-governed-roster:
+    name: Governed rostering Chromium acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Start production preview
+        working-directory: frontend
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/rostering-preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/rostering-preview.log
+          exit 1
+      - name: Run governed rostering acceptance
+        working-directory: frontend
+        run: npx playwright test tests/e2e/rostering-governed-workflows.spec.ts --timeout=60000
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rostering-governed-browser-diagnostics
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            /tmp/rostering-preview.log
+          if-no-files-found: ignore
+          retention-days: 7

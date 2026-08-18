@@ -188,7 +188,7 @@ def patch_controlled_document_settings(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES)
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT)
     row = roster_control.get_or_create_settings(db, amo_id=_amo(current_user), actor_user_id=current_user.id)
     try:
         roster_control.update_settings(

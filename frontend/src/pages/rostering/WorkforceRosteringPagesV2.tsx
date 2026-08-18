@@ -14,6 +14,8 @@ const LazyComplianceImpact = lazy(() => import("./components/ComplianceImpact")
   .then((module) => ({ default: module.ComplianceImpact })));
 const LazyDutyLocationAssistant = lazy(() => import("./components/DutyLocationAssistant")
   .then((module) => ({ default: module.DutyLocationAssistant })));
+const LazyMyRosterConsentPanel = lazy(() => import("./components/RosterConsentWorkflows")
+  .then((module) => ({ default: module.MyRosterConsentPanel })));
 const LazyMyRosterWorkspace = lazy(() => import("./components/MyRosterWorkspace")
   .then((module) => ({ default: module.MyRosterWorkspace })));
 const LazyRosterDashboard = lazy(() => import("./components/RosterDashboard")
@@ -76,9 +78,10 @@ export function ManpowerPlanningBoardPage() {
 
 export function MyRosterPage() {
   return (
-    <RosterShell eyebrow="Employee self-service" title="My duty and time" description="Review published duty, acknowledge changes, request leave, capture attendance and inspect timesheet reconciliation.">
+    <RosterShell eyebrow="Employee self-service" title="My duty and time" description="Review published duty, acknowledge exact proposed changes, request leave, capture attendance and inspect timesheet reconciliation.">
       <DeferredWorkspace label="Checking private duty-location guidance…"><LazyDutyLocationAssistant /></DeferredWorkspace>
       <DeferredWorkspace label="Checking calendar subscription security…"><LazyCalendarSubscriptionSecurityPanel /></DeferredWorkspace>
+      <DeferredWorkspace label="Opening controlled duty acknowledgements…"><LazyMyRosterConsentPanel /></DeferredWorkspace>
       <DeferredWorkspace label="Opening your duty workspace…"><LazyMyRosterWorkspace /></DeferredWorkspace>
     </RosterShell>
   );

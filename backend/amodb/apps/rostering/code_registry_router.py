@@ -29,6 +29,10 @@ class ShiftPolicyRead(BaseModel):
     calendar_mode: RosterCalendarMode = RosterCalendarMode.TIMED
     duty_semantic: RosterDutySemantic = RosterDutySemantic.DUTY
     verification_status: RosterCodeVerificationStatus = RosterCodeVerificationStatus.UNRESOLVED
+    requires_personnel_acknowledgement: bool = False
+    requires_supervisor_approval: bool = False
+    fatigue_weight: float = 1.0
+    pay_classification: Optional[str] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     source_reference: Optional[str] = None
@@ -39,6 +43,10 @@ class ShiftPolicyUpdate(BaseModel):
     calendar_mode: Optional[RosterCalendarMode] = None
     duty_semantic: Optional[RosterDutySemantic] = None
     verification_status: Optional[RosterCodeVerificationStatus] = None
+    requires_personnel_acknowledgement: Optional[bool] = None
+    requires_supervisor_approval: Optional[bool] = None
+    fatigue_weight: Optional[float] = Field(default=None, ge=0, le=100)
+    pay_classification: Optional[str] = Field(default=None, max_length=64)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     source_reference: Optional[str] = Field(default=None, max_length=4000)
@@ -97,6 +105,14 @@ def _require_manage(db: Session, user: account_models.User) -> None:
     )
 
 
+def _require_semantics(db: Session, user: account_models.User) -> None:
+    workforce_permissions.require_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS,
+    )
+
+
 def _template_or_404(db: Session, *, amo_id: str, template_id: str) -> models.ShiftTemplate:
     row = (
         db.query(models.ShiftTemplate)
@@ -127,6 +143,9 @@ def _default_policy(row: models.ShiftTemplate) -> ShiftPolicyRead:
         calendar_mode=mode,
         duty_semantic=_default_semantic(row),
         verification_status=RosterCodeVerificationStatus.UNRESOLVED,
+        requires_personnel_acknowledgement=False,
+        requires_supervisor_approval=False,
+        fatigue_weight=1.0,
     )
 
 
@@ -209,7 +228,11 @@ def update_shift_policy(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_manage(db, current_user)
+    # This legacy policy endpoint changes duty/rest semantics, verification,
+    # acknowledgement and fatigue controls. It must use the same governed
+    # permission as the newer operational-policy endpoint; ordinary planners
+    # may still manage names/times/templates but cannot redefine compliance.
+    _require_semantics(db, current_user)
     amo_id = _amo(current_user)
     template = _template_or_404(db, amo_id=amo_id, template_id=template_id)
     row = code_registry.policy_for_template(db, amo_id=amo_id, template_id=template_id)
@@ -231,6 +254,10 @@ def update_shift_policy(
             "calendar_mode": str(getattr(row.calendar_mode, "value", row.calendar_mode)),
             "duty_semantic": str(getattr(row.duty_semantic, "value", row.duty_semantic)),
             "verification_status": str(getattr(row.verification_status, "value", row.verification_status)),
+            "requires_personnel_acknowledgement": row.requires_personnel_acknowledgement,
+            "requires_supervisor_approval": row.requires_supervisor_approval,
+            "fatigue_weight": row.fatigue_weight,
+            "pay_classification": row.pay_classification,
             "effective_from": row.effective_from.isoformat() if row.effective_from else None,
             "effective_to": row.effective_to.isoformat() if row.effective_to else None,
             "source_reference": row.source_reference,
@@ -257,6 +284,10 @@ def update_shift_policy(
             "calendar_mode": str(getattr(row.calendar_mode, "value", row.calendar_mode)),
             "duty_semantic": str(getattr(row.duty_semantic, "value", row.duty_semantic)),
             "verification_status": str(getattr(row.verification_status, "value", row.verification_status)),
+            "requires_personnel_acknowledgement": row.requires_personnel_acknowledgement,
+            "requires_supervisor_approval": row.requires_supervisor_approval,
+            "fatigue_weight": row.fatigue_weight,
+            "pay_classification": row.pay_classification,
             "effective_from": row.effective_from.isoformat() if row.effective_from else None,
             "effective_to": row.effective_to.isoformat() if row.effective_to else None,
             "source_reference": row.source_reference,
