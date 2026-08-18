@@ -22,6 +22,8 @@ const LazyRosterDashboard = lazy(() => import("./components/RosterDashboard")
   .then((module) => ({ default: module.RosterDashboard })));
 const LazyRosterOperationsWorkspace = lazy(() => import("./components/RosterOperationsWorkspace")
   .then((module) => ({ default: module.RosterOperationsWorkspace })));
+const LazyRosterReports = lazy(() => import("./components/RosterReports")
+  .then((module) => ({ default: module.RosterReports })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
 const LazyRosteringSetupWorkspace = lazy(() => import("./components/RosteringSetupWorkspace")
@@ -68,8 +70,8 @@ export function ManpowerPlanningBoardPage() {
   return (
     <RosterShell
       eyebrow="Live operations"
-      title="Capacity, coverage and reporting"
-      description="Compare duty coverage with maintenance demand, then reconcile planned and actual time from the same operational workspace."
+      title="Capacity and live coverage"
+      description="Compare duty coverage with maintenance demand and reconcile planned versus actual staffing from the operational workspace."
     >
       <DeferredWorkspace label="Opening operations workspace…"><LazyRosterOperationsWorkspace /></DeferredWorkspace>
     </RosterShell>
@@ -131,12 +133,12 @@ export function WorkforceHrPage() {
 export function RosterReportsPage() {
   return (
     <RosterShell
-      eyebrow="Operational reporting"
-      title="Roster and workforce operations"
-      description="Reports now sit beside capacity and coverage so supervisors can move from a result directly to operational action."
+      eyebrow="Reports · Controlled outputs"
+      title="Roster reports and exports"
+      description="Generate operational summaries or download an exact controlled roster version without mixing reporting into the live operations workspace."
       actions={<span className="wr-header-badge"><Download size={15} /> CSV · XLSX · PDF · ICS</span>}
     >
-      <DeferredWorkspace label="Opening operations workspace…"><LazyRosterOperationsWorkspace /></DeferredWorkspace>
+      <DeferredWorkspace label="Opening roster reports…"><LazyRosterReports /></DeferredWorkspace>
     </RosterShell>
   );
 }
@@ -149,7 +151,7 @@ export function RosterSettingsPage() {
     <RosterShell
       eyebrow="Guided setup"
       title="Roster setup"
-      description="Follow one clear path: define reusable rotations, create the month, then review and publish. Advanced controls stay collapsed until needed."
+      description="Configure tenant-owned shifts, reusable work patterns, rules and controlled roster outputs. Planning then consumes those settings without redefining them."
     >
       <DeferredWorkspace label="Opening roster setup…"><LazyRosteringSetupWorkspace /></DeferredWorkspace>
     </RosterShell>

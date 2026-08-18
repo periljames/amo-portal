@@ -1,20 +1,58 @@
-import { GroupRotationPlanner } from "./GroupRotationPlanner";
+import "./roster-planner-ux.css";
+import "./roster-planner-actions.css";
+import "./roster-generation.css";
+
+import { useEffect, useRef } from "react";
+import { Download, ShieldCheck } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
+
 import { RosterComplianceControlCenter } from "./RosterComplianceControlCenter";
 import { RosterPlannerV2 } from "./RosterPlannerV2";
-import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 
 export function UnifiedRosterPlanner() {
-  const permissionsQuery = useWorkforcePermissions();
-  const permissions = permissionsQuery.data?.permissions || [];
-  const canManagePatterns = permissions.includes("roster.manage_patterns") || permissions.includes("workforce.assign_patterns");
+  const { amoCode = "" } = useParams();
+  const reportsRoute = `/maintenance/${encodeURIComponent(amoCode)}/rostering/reports`;
+  const governanceRef = useRef<HTMLDetailsElement>(null);
 
-  return <>
-    <details className="wr-native-guidance">
-      <summary>Commitment sources</summary>
-      <p>Leave, training, Quality activity, and other protected commitments stay owned by their source modules rather than creating duplicate roster records.</p>
-    </details>
-    {canManagePatterns ? <GroupRotationPlanner canManagePatterns={canManagePatterns} /> : null}
-    <RosterComplianceControlCenter />
-    <RosterPlannerV2 />
-  </>;
+  useEffect(() => {
+    const container = governanceRef.current;
+    if (!container) return;
+
+    const surfaceHardBlock = () => {
+      const blockerBadges = Array.from(container.querySelectorAll<HTMLElement>(".wr-pill--blocker"));
+      const hasHardBlock = blockerBadges.some((badge) => {
+        const text = (badge.textContent || "").trim().toUpperCase();
+        return text.includes("HARD BLOCK") && !text.startsWith("0 ");
+      });
+      if (hasHardBlock) container.open = true;
+    };
+
+    surfaceHardBlock();
+    const observer = new MutationObserver(surfaceHardBlock);
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="wr-planner-workspace">
+      <details ref={governanceRef} className="wr-planner-governance-shortcut">
+        <summary aria-label="Open compliance checks" title="Compliance checks">
+          <ShieldCheck size={17} aria-hidden="true" />
+          <span>Checks</span>
+        </summary>
+        <aside className="wr-planner-governance-drawer" aria-label="Roster compliance and governed exceptions">
+          <RosterComplianceControlCenter />
+        </aside>
+      </details>
+      <Link
+        className="wr-planner-download-shortcut"
+        to={reportsRoute}
+        aria-label="Download or export roster"
+        title="Download / export"
+      >
+        <Download size={17} aria-hidden="true" />
+      </Link>
+      <RosterPlannerV2 />
+    </div>
+  );
 }

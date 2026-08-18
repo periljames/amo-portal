@@ -1,0 +1,446 @@
+/* Deliberate planner-only UX layer.
+   The monthly spreadsheet is the primary surface; setup/compliance configuration
+   must not consume the planner viewport. */
+
+.wr-planner-workspace {
+  min-width: 0;
+}
+
+.wr-planner-workspace .wr-planner-layout--sheet {
+  --wr-planner-height: calc(100dvh - 156px);
+  min-height: 520px;
+  border: 1px solid var(--wr-border);
+  border-radius: 14px;
+  background: var(--wr-surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, #020617 7%, transparent);
+}
+
+.wr-planner-workspace .wr-planner-panel {
+  border: 0;
+  border-radius: inherit;
+  box-shadow: none;
+}
+
+/* Keep the working controls compact. */
+.wr-planner-workspace .wr-planner-toolbar--compact {
+  min-height: 42px;
+  padding: 4px 6px;
+}
+
+.wr-planner-workspace .wr-planner-filterbar {
+  min-height: 36px;
+  padding: 3px 6px;
+}
+
+.wr-planner-workspace .wr-month-label {
+  min-width: 102px;
+  padding-inline: 6px;
+}
+
+.wr-planner-workspace .wr-planner-primary-actions {
+  gap: 4px;
+}
+
+/* The action is always Generate. It applies the effective tenant work patterns
+   to the roster; it is not presented as a one-off gap filler. */
+.wr-planner-workspace .wr-planner-primary-actions .wr-button:has(.lucide-wand-sparkles),
+.wr-planner-workspace .wr-prefill-dialog .wr-button--primary:has(.lucide-wand-sparkles) {
+  font-size: 0;
+}
+
+.wr-planner-workspace .wr-planner-primary-actions .wr-button:has(.lucide-wand-sparkles)::after,
+.wr-planner-workspace .wr-prefill-dialog .wr-button--primary:has(.lucide-wand-sparkles)::after {
+  content: "Generate";
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.wr-planner-workspace .wr-planner-primary-actions .wr-button:has(.lucide-wand-sparkles) svg,
+.wr-planner-workspace .wr-prefill-dialog .wr-button--primary:has(.lucide-wand-sparkles) svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Compact personnel rail: name only. Staff/payroll codes, role snippets,
+   start-cycle selectors and summary counters do not belong in every row. */
+.wr-planner-workspace .wr-roster-grid--month {
+  --wr-person-col: 154px;
+  --wr-day-col: 42px;
+  grid-template-columns: var(--wr-person-col) repeat(var(--wr-days), var(--wr-day-col));
+  min-width: calc(var(--wr-person-col) + var(--wr-days) * var(--wr-day-col));
+}
+
+.wr-planner-workspace .wr-grid-corner,
+.wr-planner-workspace .wr-day-header {
+  min-height: 38px;
+  height: 38px;
+  padding: 3px 4px;
+}
+
+.wr-planner-workspace .wr-grid-corner {
+  display: flex;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.wr-planner-workspace .wr-grid-corner small,
+.wr-planner-workspace .wr-grid-corner__start {
+  display: none !important;
+}
+
+.wr-planner-workspace .wr-grid-corner strong {
+  color: var(--wr-text);
+  font-size: .68rem;
+  letter-spacing: 0;
+}
+
+.wr-planner-workspace .wr-day-header {
+  gap: 0;
+  border-color: color-mix(in srgb, var(--wr-border) 90%, var(--wr-text));
+}
+
+.wr-planner-workspace .wr-day-header small {
+  font-size: .53rem;
+  font-weight: 760;
+}
+
+.wr-planner-workspace .wr-day-header strong {
+  font-size: .69rem;
+}
+
+.wr-planner-workspace .wr-grid-person {
+  min-height: 38px;
+  height: 38px;
+  padding: 0 7px;
+  border-right: 1px solid color-mix(in srgb, var(--wr-border) 80%, var(--wr-text));
+  border-bottom: 1px solid color-mix(in srgb, var(--wr-border) 92%, var(--wr-text));
+}
+
+.wr-planner-workspace .wr-person {
+  display: flex;
+  align-items: center;
+  min-height: 37px;
+  height: 37px;
+  padding: 0;
+  border: 0;
+  cursor: default;
+}
+
+.wr-planner-workspace .wr-person > svg,
+.wr-planner-workspace .wr-person__identity small,
+.wr-planner-workspace .wr-person__rotation,
+.wr-planner-workspace .wr-person__summary,
+.wr-planner-workspace .wr-person__signals {
+  display: none !important;
+}
+
+.wr-planner-workspace .wr-person__identity {
+  min-width: 0;
+  width: 100%;
+}
+
+.wr-planner-workspace .wr-person__identity strong {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  color: var(--wr-text);
+  font-size: .68rem;
+  font-weight: 720;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Clear spreadsheet banding and cell boundaries. */
+.wr-planner-workspace .wr-drop-cell {
+  position: relative;
+  min-height: 38px;
+  height: 38px;
+  padding: 0;
+  overflow: visible;
+  border-right: 1px solid color-mix(in srgb, var(--wr-border) 92%, var(--wr-text));
+  border-bottom: 1px solid color-mix(in srgb, var(--wr-border) 92%, var(--wr-text));
+  background: var(--wr-surface);
+}
+
+.wr-planner-workspace .wr-grid-row:nth-child(odd) > .wr-grid-person,
+.wr-planner-workspace .wr-grid-row:nth-child(odd) > .wr-drop-cell {
+  background-color: color-mix(in srgb, var(--wr-surface-soft) 50%, var(--wr-surface));
+}
+
+.wr-planner-workspace .wr-day-header.is-weekend,
+.wr-planner-workspace .wr-drop-cell.is-weekend {
+  background-color: color-mix(in srgb, var(--wr-info) 4%, var(--wr-surface));
+}
+
+.wr-planner-workspace .wr-drop-cell.is-holiday,
+.wr-planner-workspace .wr-day-header.is-holiday {
+  background-color: color-mix(in srgb, var(--wr-warning) 7%, var(--wr-surface));
+}
+
+.wr-planner-workspace .wr-drop-cell:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-accent) 42%, transparent);
+}
+
+.wr-planner-workspace .wr-drop-cell.is-active-cell,
+.wr-planner-workspace .wr-drop-cell.is-range-selected {
+  z-index: 3;
+  box-shadow: inset 0 0 0 2px var(--wr-accent);
+}
+
+/* Shift code and state colour fill the complete spreadsheet cell. */
+.wr-planner-workspace .wr-roster-grid--month .wr-drop-cell > div:has(> .wr-assignment) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--wr-text);
+  background: color-mix(in srgb, var(--wr-accent) 16%, var(--wr-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-accent) 24%, var(--wr-border));
+  text-align: center;
+  transform: none;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment:hover {
+  transform: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--wr-accent) 64%, var(--wr-border));
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment.is-selected {
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px var(--wr-accent);
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment__top {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment__top strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: .73rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: .015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment__top svg,
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment > span:not(.wr-assignment__top),
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment > small,
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment > em,
+.wr-planner-workspace .wr-roster-grid--month .wr-fill-handle {
+  display: none !important;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment--duty {
+  color: color-mix(in srgb, var(--wr-good) 72%, var(--wr-text));
+  background: color-mix(in srgb, var(--wr-good) 20%, var(--wr-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-good) 34%, var(--wr-border));
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment--standby {
+  color: color-mix(in srgb, var(--wr-warning) 78%, var(--wr-text));
+  background: color-mix(in srgb, var(--wr-warning) 22%, var(--wr-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-warning) 38%, var(--wr-border));
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment--off {
+  color: var(--wr-muted);
+  background: color-mix(in srgb, var(--wr-faint) 16%, var(--wr-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-faint) 34%, var(--wr-border));
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment--travel,
+.wr-planner-workspace .wr-roster-grid--month .wr-assignment--other {
+  color: color-mix(in srgb, var(--wr-info) 78%, var(--wr-text));
+  background: color-mix(in srgb, var(--wr-info) 17%, var(--wr-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-info) 34%, var(--wr-border));
+}
+
+/* Source-owned commitments remain visually unmistakable and can never be
+   mistaken for an empty cell available for generation. */
+.wr-planner-workspace .wr-roster-grid--month .wr-planner-commitment {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  text-align: center;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-planner-commitment > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.wr-planner-workspace .wr-roster-grid--month .wr-planner-commitment > span,
+.wr-planner-workspace .wr-roster-grid--month .wr-planner-commitment > em {
+  display: none !important;
+}
+
+.wr-planner-workspace .wr-cell-source-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 0;
+}
+
+.wr-planner-workspace .wr-cell-source-state svg {
+  width: 13px;
+  height: 13px;
+}
+
+.wr-planner-workspace .wr-cell-holiday,
+.wr-planner-workspace .wr-cell-conflict {
+  z-index: 5;
+}
+
+.wr-planner-workspace .wr-cell-add {
+  position: absolute;
+  inset: 3px;
+  min-height: 0;
+  margin: 0;
+  border-radius: 5px;
+}
+
+/* Generation is a controlled action, not a configurable bypass. */
+.wr-planner-workspace .wr-prefill-dialog {
+  width: min(720px, calc(100vw - 28px));
+  max-height: min(760px, calc(100dvh - 28px));
+  overflow-y: auto;
+}
+
+.wr-planner-workspace .wr-prefill-rules {
+  margin: 0;
+}
+
+.wr-planner-workspace .wr-prefill-rules li {
+  min-height: 42px;
+  border: 1px solid var(--wr-border);
+  background: var(--wr-surface-soft);
+}
+
+.wr-planner-workspace .wr-prefill-rules li:nth-child(1)::after {
+  content: " · cycle position rolls forward automatically into following months";
+  color: var(--wr-muted);
+  font-size: .64rem;
+  font-weight: 600;
+}
+
+.wr-planner-workspace .wr-prefill-rules li:nth-child(2)::after {
+  content: " · mandatory protection";
+  color: var(--wr-muted);
+  font-size: .64rem;
+  font-weight: 700;
+}
+
+.wr-planner-workspace .wr-prefill-rules li:nth-child(3)::after {
+  content: " · compliance validation runs automatically after generation";
+  color: var(--wr-muted);
+  font-size: .64rem;
+  font-weight: 700;
+}
+
+/* Responsive planner keeps the spreadsheet deliberate. Horizontal movement is
+   confined to the roster viewport, never the whole route. */
+@media (max-width: 1100px) {
+  .wr-planner-workspace .wr-roster-grid--month {
+    --wr-person-col: 142px;
+    --wr-day-col: 41px;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions {
+    width: auto;
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .wr-planner-workspace .wr-planner-layout--sheet {
+    --wr-planner-height: calc(100dvh - 126px);
+    min-height: 460px;
+    border-radius: 10px;
+  }
+
+  .wr-planner-workspace .wr-planner-toolbar--compact,
+  .wr-planner-workspace .wr-planner-filterbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .wr-planner-workspace .wr-planner-toolbar--compact::-webkit-scrollbar,
+  .wr-planner-workspace .wr-planner-filterbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wr-planner-workspace .wr-planner-context {
+    display: flex;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions {
+    width: auto;
+    margin-left: auto;
+    overflow: visible;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions .wr-button {
+    min-width: 36px;
+  }
+
+  .wr-planner-workspace .wr-roster-grid--month {
+    --wr-person-col: 122px;
+    --wr-day-col: 40px;
+  }
+
+  .wr-planner-workspace .wr-grid-person,
+  .wr-planner-workspace .wr-drop-cell {
+    min-height: 40px;
+    height: 40px;
+  }
+
+  .wr-planner-workspace .wr-person {
+    min-height: 39px;
+    height: 39px;
+  }
+
+  .wr-planner-workspace .wr-person__identity strong {
+    font-size: .65rem;
+  }
+
+  .wr-planner-workspace .wr-prefill-dialog,
+  .wr-planner-workspace .wr-review-dialog,
+  .wr-planner-workspace .wr-drawer--assignment {
+    width: 100vw;
+    max-width: none;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+  }
+}
