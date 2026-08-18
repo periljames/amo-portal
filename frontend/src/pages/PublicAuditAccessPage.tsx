@@ -187,7 +187,11 @@ const PublicAuditAccessPage: React.FC = () => {
 
   const acknowledge = async (findingId: string) => {
     setActionId(findingId); setError(null); setNotice(null);
-    try { await acknowledgeGuestFinding(findingId); setNotice("Finding receipt recorded. This does not waive response, review or challenge rights."); await load(null); }
+    try {
+      await acknowledgeGuestFinding(findingId);
+      await load(null);
+      setNotice("Finding receipt recorded. This does not waive response, review or challenge rights.");
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Finding acknowledgement failed."); }
     finally { setActionId(null); }
   };
@@ -202,8 +206,8 @@ const PublicAuditAccessPage: React.FC = () => {
         revision_id: request.controlled_revision_id,
         response_comment: controlledComments[request.id]?.trim() || null,
       });
-      setNotice("Controlled DMS record linked to the request. The audit team can review the exact governed document/revision without receiving an uploaded duplicate.");
       await load(null);
+      setNotice("Controlled DMS record linked to the request. The audit team can review the exact governed document/revision without receiving an uploaded duplicate.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Controlled record could not be linked."); }
     finally { setControlledBusy(null); }
   };
