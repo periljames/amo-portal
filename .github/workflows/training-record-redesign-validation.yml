@@ -11,6 +11,7 @@ on:
       - "backend/amodb/jobs/training_*"
       - "backend/amodb/jobs/portal_job_supervisor.py"
       - "backend/amodb/jobs/portal_scheduler_main.py"
+      - "backend/amodb/scripts/seed_training_governance_e2e.py"
       - "backend/scripts/reconcile_training_synthetic_recurrent.py"
       - "backend/tests/test_training_notification_automation.py"
       - "frontend/src/**/training/**"
@@ -185,3 +186,131 @@ jobs:
       - name: Run Training PostgreSQL tenant RLS probe
         working-directory: backend
         run: python -m amodb.apps.training.tests.postgres_tenant_rls_probe
+
+  governed-live-postgres-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_training_governance_browser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_training_governance_browser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: training-governance-live-browser-secret
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_training_governance_browser
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_training_governance_browser
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_training_governance_browser
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_DIRECT_API_URL: http://127.0.0.1:8080
+      E2E_LIVE_TRAINING_GOVERNANCE: "1"
+      E2E_TRAINING_AMO_CODE: trngate
+      E2E_TRAINING_ADMIN_EMAIL: training-gate@example.com
+      E2E_TRAINING_ADMIN_PASSWORD: TrainingGate!2026-Local
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt opencv-python-headless
+      - name: Upgrade clean governed Training database
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade head
+      - name: Seed governed Training browser fixture
+        working-directory: backend
+        run: python amodb/scripts/seed_training_governance_e2e.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Lint live governed Training browser acceptance
+        working-directory: frontend
+        run: npx eslint tests/e2e/training-governed-live-postgres.spec.ts
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start Training backend and production preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/training-live-backend.log 2>&1 & echo $! > /tmp/training-live-backend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/training-live-backend.log; exit 1; fi
+            sleep 1
+          done
+          if grep -Eq "UndefinedColumn|UndefinedTable|Traceback \(most recent call last\)" /tmp/training-live-backend.log; then
+            echo "::error::Training backend startup reported schema/runtime failure"
+            cat /tmp/training-live-backend.log
+            exit 1
+          fi
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/training-live-frontend.log 2>&1 & echo $! > /tmp/training-live-frontend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:4173/maintenance/trngate/login >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/training-live-frontend.log; exit 1; fi
+            sleep 1
+          done
+      - name: Run live governed Training browser journey
+        working-directory: frontend
+        run: npx playwright test tests/e2e/training-governed-live-postgres.spec.ts --workers=1 --reporter=line
+      - name: Verify governed Training runtime logs are clean
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "UndefinedTable|UndefinedColumn|Traceback \(most recent call last\)|WebSocket connection.*failed|\[vite\].*failed to connect" /tmp/training-live-frontend.log /tmp/training-live-backend.log 2>/dev/null; then
+            echo "::error::Material Training runtime or schema error detected"
+            cat /tmp/training-live-frontend.log 2>/dev/null || true
+            cat /tmp/training-live-backend.log 2>/dev/null || true
+            exit 1
+          fi
+      - name: Dump governed Training runtime logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo '--- backend ---'
+          cat /tmp/training-live-backend.log 2>/dev/null || true
+          echo '--- frontend ---'
+          cat /tmp/training-live-frontend.log 2>/dev/null || true
+      - name: Upload governed Training browser evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: training-governed-live-evidence-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+            /tmp/training-live-backend.log
+            /tmp/training-live-frontend.log
+      - name: Stop governed Training acceptance servers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/training-live-frontend.pid ]; then kill "$(cat /tmp/training-live-frontend.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/training-live-backend.pid ]; then kill "$(cat /tmp/training-live-backend.pid)" 2>/dev/null || true; fi
