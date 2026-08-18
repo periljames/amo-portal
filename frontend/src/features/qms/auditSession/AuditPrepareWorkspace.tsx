@@ -212,6 +212,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       linked_criterion: newRequest.linkedCriterion.trim() || null,
       is_required: newRequest.isRequired,
       source_mode: newRequest.sourceMode,
+      controlled_source_system: "QMS_LOCAL",
       controlled_document_id: newRequest.sourceMode !== "UPLOAD" && newRequest.controlledDocumentId ? newRequest.controlledDocumentId : null,
       controlled_revision_id: newRequest.sourceMode !== "UPLOAD" && newRequest.controlledRevisionId ? newRequest.controlledRevisionId : null,
     }),
