@@ -159,9 +159,9 @@ const QualityEnhancementsHost: React.FC = () => {
       <WorkflowIntegrityGuard route={route} />
       <MobileAuditDeepLinkState />
 
+      {legacyOccurrence || auditSessionStage === "prepare" ? <Suspense fallback={null}><QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
       {legacyOccurrence ? <>
         <Suspense fallback={null}>
-          <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
           <QualityAuditPreparationContextHost amoCode={route.amoCode} auditKey={route.auditKey} />
           {route.activeTab === "report" || route.activeTab === "closeout" ? <QualityAuditReportCloseoutHost amoCode={route.amoCode} auditKey={route.auditKey} /> : null}
         </Suspense>
