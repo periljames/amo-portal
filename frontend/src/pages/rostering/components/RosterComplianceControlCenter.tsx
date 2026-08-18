@@ -164,7 +164,7 @@ function GateCard({ gate, onOpenPlanner }: { gate: RosterWorkflowGateRead; onOpe
       <div className="wr-section-heading">
         <div>
           <span className="wr-eyebrow">{gate.severity.replace(/_/g, " ")}</span>
-          <strong>{protectedRest ? "Protected Rest Required — Publication Blocked" : gate.code.replace(/_/g, " ")}</strong>
+          <h3>{protectedRest ? "Protected Rest Required — Publication Blocked" : gate.code.replace(/_/g, " ")}</h3>
           <p>{gate.message}</p>
         </div>
         <StatusPill value={gate.severity.replace(/_/g, " ")} tone={gateTone(gate.severity)} />
