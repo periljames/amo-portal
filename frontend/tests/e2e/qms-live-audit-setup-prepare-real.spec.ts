@@ -48,7 +48,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const page = await internalContext.newPage();
     watchServerFailures(page, internalFailures);
     await page.goto(`/maintenance/${data.amo_slug}/login`, { waitUntil: "domcontentloaded" });
-    await page.getByLabel("Email or staff code").fill(data.realtime_user_a_email);
+    await page.getByLabel("Email", { exact: true }).fill(data.realtime_user_a_email);
     await page.getByLabel("Password").fill(data.realtime_password);
     await Promise.all([
       page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
