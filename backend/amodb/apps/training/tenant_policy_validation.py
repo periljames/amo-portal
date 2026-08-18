@@ -118,12 +118,15 @@ def validate_notification_policy(db: Session, *, amo_id: str, raw: Any) -> dict[
 
 
 def wrap_update_settings(base_update: Callable):
-    def update_settings(db: Session, *, amo_id: str, payload, actor_user_id: str | None):
+    def update_settings(db: Session, *, actor: account_models.User, payload):
         values = payload.model_dump(exclude_unset=True)
         if "notification_policy" in values:
+            amo_id = str(getattr(actor, "effective_amo_id", None) or getattr(actor, "amo_id", None) or "")
+            if not amo_id:
+                raise HTTPException(status_code=403, detail="Select an AMO tenant before updating Training settings.")
             normalized = validate_notification_policy(db, amo_id=amo_id, raw=values.get("notification_policy"))
             payload = payload.model_copy(update={"notification_policy": normalized})
-        return base_update(db, amo_id=amo_id, payload=payload, actor_user_id=actor_user_id)
+        return base_update(db, actor=actor, payload=payload)
 
     return update_settings
 
