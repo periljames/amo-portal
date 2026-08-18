@@ -122,7 +122,23 @@ jobs:
             cat /tmp/training-vite-preview.log
             exit 1
           fi
-          npx playwright test tests/e2e/training-governed-workflows.spec.ts --workers=1
+          set +e
+          npx playwright test tests/e2e/training-governed-workflows.spec.ts --workers=1 --reporter=line 2>&1 | tee /tmp/training-playwright.log
+          playwright_status=${PIPESTATUS[0]}
+          set -e
+          exit "$playwright_status"
+      - name: Upload Training browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-browser-failure-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            /tmp/training-playwright.log
+            /tmp/training-vite-preview.log
+            frontend/playwright-report/
+            frontend/test-results/
 
   postgres-tenant-isolation:
     runs-on: ubuntu-latest
