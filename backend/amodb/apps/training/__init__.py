@@ -25,6 +25,7 @@ from .operating_policy_guards import (
     guard_submit_assessment as _guard_submit_assessment,
     guard_transition_controlled_form as _guard_transition_controlled_form,
 )
+from .person_360_routes import install_training_person_360_routes
 from .planning_policy_bridge import bridge_demand_items as _bridge_demand_items
 from .record_presentation import install_training_record_presentation
 from .session_closeout_routes import install_training_session_closeout_routes
@@ -88,6 +89,7 @@ install_training_notification_dispatch_routes(_router_module)
 install_training_governance_routes(_router_module)
 install_training_canonical_exam_governance_routes(_router_module)
 install_training_session_closeout_routes(_router_module)
+install_training_person_360_routes(_router_module)
 
 # Compatibility boundary for legacy compliance internals. Runtime relationship
 # identity now comes only from explicit catalogue fields; no title/code parsing.
@@ -103,6 +105,7 @@ __all__ = [
     "install_training_learner_invitation_routes",
     "install_training_learner_workflow_routes",
     "install_training_notification_dispatch_routes",
+    "install_training_person_360_routes",
     "install_training_record_presentation",
     "install_training_session_closeout_routes",
     "install_training_shared_storage",
