@@ -84,10 +84,18 @@ def _require_view(db: Session, user: account_models.User) -> None:
 
 
 def _require_manage(db: Session, user: account_models.User) -> None:
+    """Restrict compliance semantics to a separately governed permission.
+
+    Shift-template management remains available to planners for tenant-owned
+    codes and times. The semantic policy controls what the compliance engine
+    treats as duty/rest, consent and fatigue, so it must not be implicitly
+    writable merely because a user can build a roster template.
+    """
+
     workforce_permissions.require_permission(
         db,
         user=user,
-        permission=workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
+        permission=workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS,
     )
 
 
@@ -217,6 +225,18 @@ def _validate_semantics(
             detail={
                 "code": "ROSTER_REST_SEMANTIC_COUNTS_AS_DUTY",
                 "message": "REST/OFF semantics cannot be configured to count as duty. Use a duty or standby semantic instead.",
+            },
+        )
+    if duty_semantic in {
+        RosterDutySemantic.DUTY,
+        RosterDutySemantic.STANDBY,
+        RosterDutySemantic.TRAINING,
+    } and not counts_as_duty:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ROSTER_DUTY_SEMANTIC_MUST_COUNT_AS_DUTY",
+                "message": "Duty, standby and training semantics must count as duty for compliance calculations.",
             },
         )
 
