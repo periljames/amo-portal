@@ -75,13 +75,13 @@ PLANNER = EMPLOYEE | {
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
 }
 
+# Supervisors operate only inside their concrete department/base scope. Version
+# creation, tenant-wide validation and submission are planning functions; a
+# supervisor can still edit/delete/allocate assignments in an authorized scope.
 SUPERVISOR = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
-    PermissionCode.ROSTER_CREATE.value,
     PermissionCode.ROSTER_EDIT.value,
     PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
-    PermissionCode.ROSTER_VALIDATE.value,
-    PermissionCode.ROSTER_SUBMIT.value,
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
     PermissionCode.LEAVE_REVIEW.value,
     PermissionCode.ATTENDANCE_MANAGE.value,
@@ -182,10 +182,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 }
 
 
-# These permissions act on a department/base resource when the route supplies
-# resource scope. A role permission must never silently widen itself to an
-# arbitrary department or base. Explicit WorkforcePermissionGrant rows can
-# still grant wider or different scope when that is intentional and auditable.
 _SCOPED_ROSTER_DEFAULTS = {
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
     PermissionCode.ROSTER_EDIT.value,
@@ -273,11 +269,12 @@ def _default_scope_allows(
     if permission_code not in _SCOPED_ROSTER_DEFAULTS:
         return True
 
-    # Tenant-wide roster viewers/managers have deliberately global role scope.
+    # Explicitly tenant-wide roles may exercise scoped actions globally. A
+    # department/base role must provide a concrete resource scope; calling a
+    # scoped permission with neither identifier can never mean "all tenant".
     if PermissionCode.ROSTER_VIEW_ALL.value in defaults:
         return True
-
-    if permission_code == PermissionCode.ROSTER_VIEW_DEPARTMENT.value and not department_id:
+    if department_id is None and base_station_id is None:
         return False
 
     if department_id is not None:
@@ -355,8 +352,19 @@ def require_permission(
 
 
 def permissions_for_user(db: Session, *, user: account_models.User) -> list[str]:
-    """Return globally effective permissions using the same rules as guards."""
-    permissions = default_permissions_for(user)
+    """Return globally effective permissions using the same rules as guards.
+
+    Scope-bound role defaults are omitted from this global permission list. UI
+    controls that depend on department/base permissions should obtain or apply
+    a concrete scope instead of treating this list as a tenant-wide grant.
+    """
+
+    defaults = default_permissions_for(user)
+    permissions = {
+        code for code in defaults
+        if code not in _SCOPED_ROSTER_DEFAULTS
+        or PermissionCode.ROSTER_VIEW_ALL.value in defaults
+    }
     amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
     today = date.today()
     rows = db.query(models.WorkforcePermissionGrant).filter(
