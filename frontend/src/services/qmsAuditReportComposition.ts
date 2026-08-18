@@ -37,6 +37,7 @@ export type AuditReportComposition = {
 export function getAuditReportComposition(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<AuditReportComposition>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-composition`), {
     timeoutMs: 20_000,
+    cacheTtlMs: 0,
     signal,
   });
 }
