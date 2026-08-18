@@ -53,22 +53,34 @@ function safePatternCode(base: string, existing: Set<string>): string {
 function makeAlternatingPattern(
   name: string,
   code: string,
-  weekday: ShiftTemplateRead,
+  normalDuty: ShiftTemplateRead,
   weekendDuty: ShiftTemplateRead,
   rest: ShiftTemplateRead,
   phase: "A" | "B",
   timezoneName: string,
 ): WorkPatternCreate {
-  const days: WorkPatternDayInput[] = [];
-  for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10, 11]) days.push(patternDay(index, weekday));
-  const firstWeekend = phase === "A" ? rest : weekendDuty;
-  const secondWeekend = phase === "A" ? weekendDuty : rest;
-  days.push(patternDay(5, firstWeekend), patternDay(6, firstWeekend));
-  days.push(patternDay(12, secondWeekend), patternDay(13, secondWeekend));
+  const schedule = new Map<number, ShiftTemplateRead>();
+
+  if (phase === "A") {
+    // Team A worked the immediately preceding cycle's second weekend. Give it
+    // replacement rest first, then the first weekend off. It works the second
+    // weekend and receives replacement rest at the start of the next cycle.
+    [0, 1, 5, 6].forEach((index) => schedule.set(index, rest));
+    [2, 3, 4, 7, 8, 9, 10, 11].forEach((index) => schedule.set(index, normalDuty));
+    [12, 13].forEach((index) => schedule.set(index, weekendDuty));
+  } else {
+    // Team B works the first weekend, then receives replacement rest on the
+    // next two cycle days and has the second weekend off.
+    [0, 1, 2, 3, 4, 9, 10, 11].forEach((index) => schedule.set(index, normalDuty));
+    [5, 6].forEach((index) => schedule.set(index, weekendDuty));
+    [7, 8, 12, 13].forEach((index) => schedule.set(index, rest));
+  }
+
+  const days = Array.from({ length: 14 }, (_, index) => patternDay(index, schedule.get(index) || rest));
   return {
     code,
     name,
-    description: `14-day paired group rotation. ${phase === "A" ? "First" : "Second"} weekend is protected rest; alternate weekend uses ${weekendDuty.code}.`,
+    description: `14-day paired group rotation using tenant-selected ${normalDuty.code}, ${weekendDuty.code} and ${rest.code} templates. Replacement rest follows the working weekend across the repeating cycle.`,
     cycle_length_days: 14,
     is_active: true,
     timezone_name: timezoneName,
@@ -80,7 +92,7 @@ function makeAlternatingPattern(
       anchor_date: null,
       priority: 100,
     },
-    days: days.sort((left, right) => left.cycle_day_index - right.cycle_day_index),
+    days,
   };
 }
 
@@ -96,31 +108,41 @@ export function GroupRotationPlanner({ canManagePatterns }: { canManagePatterns:
     queryFn: () => listWorkPatterns(true),
     staleTime: 0,
   });
+  const [normalDutyId, setNormalDutyId] = useState("");
   const [weekendDutyId, setWeekendDutyId] = useState("");
+  const [restId, setRestId] = useState("");
+  const [timezoneName, setTimezoneName] = useState("");
   const [label, setLabel] = useState("Weekend Rotation");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const shifts = shiftsQuery.data || [];
-  const weekday = shifts.find((shift) => shift.is_active && shift.code.toUpperCase() === "D") || null;
-  const rest = shifts.find((shift) => shift.is_active && shift.code.toUpperCase() === "RD") || null;
+  const dutyCandidates = useMemo(
+    () => shifts.filter((shift) => shift.is_active && shift.counts_as_duty),
+    [shifts],
+  );
+  const restCandidates = useMemo(
+    () => shifts.filter((shift) => shift.is_active && !shift.counts_as_duty),
+    [shifts],
+  );
+  const normalDuty = dutyCandidates.find((shift) => shift.id === normalDutyId) || dutyCandidates[0] || null;
   const weekendCandidates = useMemo(
-    () => shifts.filter((shift) => shift.is_active && shift.counts_as_duty && shift.id !== weekday?.id),
-    [shifts, weekday?.id],
+    () => dutyCandidates.filter((shift) => shift.id !== normalDuty?.id),
+    [dutyCandidates, normalDuty?.id],
   );
   const selectedWeekend = weekendCandidates.find((shift) => shift.id === weekendDutyId)
-    || weekendCandidates.find((shift) => shift.code.toUpperCase() === "X")
     || weekendCandidates[0]
-    || null;
+    || normalDuty;
+  const rest = restCandidates.find((shift) => shift.id === restId) || restCandidates[0] || null;
   const configured = (shift: ShiftTemplateRead | null) => Boolean(
     shift && (!shift.counts_as_duty || shift.duration_minutes || (shift.default_start_time && shift.default_end_time)),
   );
   const existingCodes = new Set((patternsQuery.data || []).map((pattern) => pattern.code.toUpperCase()));
-  const timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const effectiveTimezone = timezoneName.trim() || (patternsQuery.data || []).find((pattern) => pattern.timezone_name)?.timezone_name || "";
 
   const createPair = async () => {
-    if (!weekday || !rest || !selectedWeekend) return;
+    if (!normalDuty || !rest || !selectedWeekend || !effectiveTimezone) return;
     setBusy(true);
     setMessage(null);
     setError(null);
@@ -129,8 +151,8 @@ export function GroupRotationPlanner({ canManagePatterns }: { canManagePatterns:
       const codeA = safePatternCode(`${base}-A`, existingCodes);
       existingCodes.add(codeA);
       const codeB = safePatternCode(`${base}-B`, existingCodes);
-      await createWorkPattern(makeAlternatingPattern(`${label} · Team A`, codeA, weekday, selectedWeekend, rest, "A", timezoneName));
-      await createWorkPattern(makeAlternatingPattern(`${label} · Team B`, codeB, weekday, selectedWeekend, rest, "B", timezoneName));
+      await createWorkPattern(makeAlternatingPattern(`${label} · Team A`, codeA, normalDuty, selectedWeekend, rest, "A", effectiveTimezone));
+      await createWorkPattern(makeAlternatingPattern(`${label} · Team B`, codeB, normalDuty, selectedWeekend, rest, "B", effectiveTimezone));
       await queryClient.invalidateQueries({ queryKey: ["rostering", "group-rotation", "patterns"] });
       await queryClient.invalidateQueries({ queryKey: ["workforce", "hr", "work-patterns"] });
       setMessage(`Created ${codeA} and ${codeB}. Assign each pattern below by department filter, all-matching group, or selected individuals.`);
@@ -143,8 +165,8 @@ export function GroupRotationPlanner({ canManagePatterns }: { canManagePatterns:
 
   if (shiftsQuery.isPending || patternsQuery.isPending) return <RosterLoading label="Loading group rotation controls…" />;
 
-  const missingCanonical = !weekday || !rest;
-  const unconfiguredDuty = !configured(weekday) || !configured(selectedWeekend);
+  const missingTemplates = !normalDuty || !rest;
+  const unconfiguredDuty = !configured(normalDuty) || !configured(selectedWeekend);
 
   return (
     <section className="wr-panel">
@@ -152,13 +174,14 @@ export function GroupRotationPlanner({ canManagePatterns }: { canManagePatterns:
         <div>
           <span className="wr-eyebrow">Group planning</span>
           <h2><Layers3 size={18} /> Alternating weekend teams</h2>
-          <p>Create a paired 14-day Team A/Team B rotation, then allocate it to a department, filtered group or selected employees in one bulk action.</p>
+          <p>Create a paired 14-day Team A/Team B rotation from this tenant's own shift templates, then allocate it to a department, filtered group or selected employees.</p>
         </div>
       </div>
 
       {shiftsQuery.error || patternsQuery.error ? <div className="wr-inline-error">{errorMessage(shiftsQuery.error || patternsQuery.error)}</div> : null}
-      {missingCanonical ? <div className="wr-inline-warning">Create the canonical D and RD templates first. D remains normal day duty; RD is the single protected-rest code.</div> : null}
-      {!missingCanonical && unconfiguredDuty ? <div className="wr-inline-warning">Configure start/end times (or duration) on D and the selected working/standby template before building the rotation. The planner does not hard-code shift times.</div> : null}
+      {missingTemplates ? <div className="wr-inline-warning">Create at least one working template and one non-duty/rest template before building a group rotation. The portal does not require specific shift codes.</div> : null}
+      {!missingTemplates && unconfiguredDuty ? <div className="wr-inline-warning">Configure start/end times or duration on the selected working templates before building the rotation. The planner does not invent shift times.</div> : null}
+      {!effectiveTimezone ? <div className="wr-inline-warning">Enter the tenant/base operational IANA time zone before creating the rotation.</div> : null}
       {message ? <div className="wr-inline-success">{message}</div> : null}
       {error ? <div className="wr-inline-error">{error}</div> : null}
 
@@ -168,22 +191,38 @@ export function GroupRotationPlanner({ canManagePatterns }: { canManagePatterns:
           <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={80} />
         </label>
         <label>
-          Working weekend code
-          <select value={selectedWeekend?.id || ""} onChange={(event) => setWeekendDutyId(event.target.value)}>
-            {weekendCandidates.map((shift) => <option key={shift.id} value={shift.id}>{shift.code} · {shift.label}</option>)}
+          Normal working template
+          <select value={normalDuty?.id || ""} onChange={(event) => setNormalDutyId(event.target.value)}>
+            {dutyCandidates.map((shift) => <option key={shift.id} value={shift.id}>{shift.code} · {shift.label}</option>)}
           </select>
+        </label>
+        <label>
+          Working weekend template
+          <select value={selectedWeekend?.id || ""} onChange={(event) => setWeekendDutyId(event.target.value)}>
+            {weekendCandidates.length ? weekendCandidates.map((shift) => <option key={shift.id} value={shift.id}>{shift.code} · {shift.label}</option>) : normalDuty ? <option value={normalDuty.id}>{normalDuty.code} · {normalDuty.label}</option> : null}
+          </select>
+        </label>
+        <label>
+          Rest/off template
+          <select value={rest?.id || ""} onChange={(event) => setRestId(event.target.value)}>
+            {restCandidates.map((shift) => <option key={shift.id} value={shift.id}>{shift.code} · {shift.label}</option>)}
+          </select>
+        </label>
+        <label>
+          Operational time zone
+          <input value={timezoneName} onChange={(event) => setTimezoneName(event.target.value)} placeholder={effectiveTimezone || "e.g. Africa/Nairobi"} maxLength={64} />
         </label>
       </div>
 
       <div className="wr-callout">
         <CalendarRange size={16} />
-        <span><strong>Team A:</strong> RD/RD → duty/duty. <strong>Team B:</strong> duty/duty → RD/RD. Weekdays use the configured D template. Choose X for Line, XH for Hangar, or any tenant-created working/standby template.</span>
+        <span>The two teams alternate working weekends. The generated cycle places replacement rest immediately after each team's working weekend, including across the 14-day cycle boundary. Final publication still runs the authoritative timestamp-based rest and duty validator.</span>
       </div>
 
       <button
         type="button"
         className="wr-button wr-button--primary"
-        disabled={!canManagePatterns || busy || missingCanonical || unconfiguredDuty || !selectedWeekend || !label.trim()}
+        disabled={!canManagePatterns || busy || missingTemplates || unconfiguredDuty || !selectedWeekend || !label.trim() || !effectiveTimezone}
         onClick={() => void createPair()}
       >
         <UsersRound size={15} /> {busy ? "Creating paired patterns…" : "Create Team A / Team B patterns"}
