@@ -360,7 +360,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
   expect(submittedBody.mutation_type).toBe("ASSIGN_ORGANIZATION");
   expect(submittedBody.placement_type).toBe("SECONDARY");
 
-  await expect(page.getByText("10,000/10,000 processed")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".workforce-governance__operation")).toContainText("10000/10000 processed", { timeout: 10_000 });
   await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
   expect(operationPolls).toBeGreaterThanOrEqual(2);
 });
