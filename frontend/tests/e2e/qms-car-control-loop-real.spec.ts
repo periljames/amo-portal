@@ -64,7 +64,7 @@ async function authenticatedPost(page: Page, path: string, payload: unknown): Pr
 
 async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffix: string): Promise<void> {
   await page.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`, { waitUntil: "domcontentloaded" });
-  await expect(page.getByText(data.car_loop_number, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".car-invite-kicker").getByText(data.car_loop_number, { exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel("Your name").fill("Responsible Maintenance Manager");
   await page.getByLabel("Your email").fill("responsible.manager@example.com");
   await page.getByRole("button", { name: "Save responder details" }).click();
