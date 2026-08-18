@@ -1,0 +1,184 @@
+/* Secondary Rostering refinements that intentionally use higher specificity
+   than legacy workspace styles. */
+
+@media (min-width: 901px) {
+  .wr-page .rs-setup {
+    grid-template-columns: 158px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+  }
+
+  .wr-page .rs-setup__nav {
+    position: sticky;
+    top: 8px;
+    grid-column: 1;
+    grid-row: 1 / span 20;
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    overflow: visible;
+    padding: 6px;
+    border: 1px solid var(--wr-ios-hairline);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--wr-surface-strong) 94%, transparent);
+    box-shadow: 0 4px 16px color-mix(in srgb, #020617 4%, transparent);
+  }
+
+  .wr-page .rs-setup__nav button {
+    width: 100%;
+    min-height: 38px;
+    padding: 6px 9px;
+    border-radius: 9px;
+    text-align: left;
+  }
+
+  .wr-page .rs-setup__nav button.is-active {
+    background: var(--wr-accent-soft);
+    color: var(--wr-accent);
+    box-shadow: inset 3px 0 0 var(--wr-accent);
+  }
+
+  .wr-page .rs-setup > :not(.rs-setup__nav) {
+    grid-column: 2;
+    min-width: 0;
+  }
+}
+
+/* Segmented controls are useful for one small level of local navigation. */
+.wr-page .rs-subnav {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--wr-surface) 82%, transparent);
+}
+
+.wr-page .rs-subnav button {
+  min-height: 31px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wr-muted);
+  font-size: .7rem;
+  font-weight: 720;
+}
+
+.wr-page .rs-subnav button.is-active {
+  color: var(--wr-text);
+  background: var(--wr-surface-strong);
+  box-shadow: 0 1px 4px color-mix(in srgb, #020617 9%, transparent);
+}
+
+/* Article-based data lists are treated like proper compact tables. */
+.wr-page .rs-period-list,
+.wr-page .rs-shift-table,
+.wr-page .rs-run-list,
+.wr-page .rs-policy-group {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: 12px;
+  background: var(--wr-surface-strong);
+}
+
+.wr-page .rs-period-list article,
+.wr-page .rs-shift-table article,
+.wr-page .rs-run-list article,
+.wr-page .rs-policy-group article {
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--wr-border) 58%, transparent);
+  background: transparent;
+}
+
+.wr-page .rs-period-list article:nth-child(even),
+.wr-page .rs-shift-table article:nth-child(even),
+.wr-page .rs-run-list article:nth-child(even),
+.wr-page .rs-policy-group article:nth-child(even) {
+  background: color-mix(in srgb, var(--wr-surface) 44%, transparent);
+}
+
+.wr-page .rs-period-list article:hover,
+.wr-page .rs-shift-table article:hover,
+.wr-page .rs-run-list article:hover,
+.wr-page .rs-policy-group article:hover {
+  background: color-mix(in srgb, var(--wr-accent) 5%, var(--wr-surface-strong));
+}
+
+.wr-page .rs-period-list article:last-child,
+.wr-page .rs-shift-table article:last-child,
+.wr-page .rs-run-list article:last-child,
+.wr-page .rs-policy-group article:last-child {
+  border-bottom: 0;
+}
+
+/* Keep dashboard/list rows visually bounded rather than wide text stripes. */
+.wr-page .wr-period-list,
+.wr-page .wr-recommendation-list,
+.wr-page .wr-approval-list,
+.wr-page .wr-task-list {
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* Compact nested Workforce rail to match the module rail. */
+.wr-page .hr-workspace-v2 {
+  grid-template-columns: 186px minmax(0, 1fr);
+  align-items: start;
+}
+
+.wr-page .hr-workspace__nav {
+  position: sticky;
+  top: 8px;
+  padding: 6px;
+}
+
+.wr-page .hr-workspace__nav-heading {
+  padding: 6px 8px 8px;
+}
+
+.wr-page .hr-workspace__nav button {
+  min-height: 40px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 900px) {
+  .wr-page .rs-setup {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .wr-page .rs-setup__nav {
+    display: flex;
+    gap: 3px;
+    overflow-x: auto;
+    padding: 4px;
+    scrollbar-width: none;
+  }
+
+  .wr-page .rs-setup__nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wr-page .rs-setup__nav button {
+    min-height: 34px;
+    white-space: nowrap;
+  }
+
+  .wr-page .rs-setup__nav button.is-active {
+    box-shadow: inset 0 -2px 0 var(--wr-accent);
+  }
+
+  .wr-page .hr-workspace-v2 {
+    grid-template-columns: 1fr;
+  }
+
+  .wr-page .hr-workspace__nav {
+    position: static;
+  }
+}
