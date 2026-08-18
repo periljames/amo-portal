@@ -118,7 +118,7 @@ function fieldworkEnvelope(clientMutationId: string, baseVersion: number) {
 export function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<ChecklistExecutionGovernanceResponse>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-execution-governance`),
-    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+    { timeoutMs: 15_000, signal },
   );
 }
 
@@ -190,6 +190,7 @@ export function createAtomicChecklistFinding(
     target_close_date: payload.target_close_date ?? null,
     auditor_notes: payload.auditor_notes ?? null,
     evidence_references: payload.evidence_references ?? [],
+    reason: payload.reason,
   };
   return apiRequest<AtomicFieldworkFindingResult>(
     qmsPath(
