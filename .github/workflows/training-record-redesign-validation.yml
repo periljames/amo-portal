@@ -16,6 +16,7 @@ on:
       - "frontend/src/pages/MyTrainingPage.tsx"
       - "frontend/src/pages/TrainingCompetencePage.tsx"
       - "frontend/src/services/trainingWorkflowCompletion.ts"
+      - "frontend/src/services/trainingExternalReview.ts"
       - "frontend/src/utils/trainingPresentation*"
       - ".github/workflows/training-record-redesign-validation.yml"
 
@@ -81,10 +82,14 @@ jobs:
           src/components/training/MyTrainingTaskInbox.tsx
           src/components/training/TrainingInvitationInbox.tsx
           src/components/training/TrainingLearnerActionCentre.tsx
+          src/components/training/TrainingExternalLearningReview.tsx
+          src/components/training/TrainingSessionSelfService.tsx
           src/components/training/TrainingRequirementList.tsx
           src/components/training/TrainingPlanMatrix.tsx
           src/components/training/TrainingRoleWorkspacePanel.tsx
+          src/components/training/TrainingWorkflowWorkspace.tsx
           src/services/trainingWorkflowCompletion.ts
+          src/services/trainingExternalReview.ts
           src/pages/TrainingCompetencePage.tsx
       - name: Typecheck and production build
         working-directory: frontend
