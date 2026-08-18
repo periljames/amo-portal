@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, NavLink, useLocation, useParams } from "react-router-dom";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 import {
   Building2,
   CalendarDays,
@@ -7,7 +7,6 @@ import {
   ClipboardCheck,
   Download,
   Gauge,
-  MoreHorizontal,
   Settings2,
   ShieldCheck,
   UsersRound,
@@ -45,7 +44,7 @@ const PRIMARY_NAV: NavItem[] = [
   { suffix: "my-roster", label: "My duty", icon: ClipboardCheck, feature: "rostering.my-roster" },
 ];
 
-const MORE_NAV: NavItem[] = [
+const SECONDARY_NAV: NavItem[] = [
   { suffix: "planning-board", label: "Operations", icon: UsersRound, feature: "rostering.planning-board" },
   { suffix: "reports", label: "Reports", icon: Download, feature: "rostering.reports" },
   { suffix: "training-impact", label: "Readiness", icon: ShieldCheck, feature: "rostering.training-impact" },
@@ -73,8 +72,6 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
     return item.feature ? canViewFeature(user, item.feature) : false;
   };
 
-  const visiblePrimary = PRIMARY_NAV.filter(canSee);
-  const visibleMore = MORE_NAV.filter(canSee);
   const isSpecialActive = (item: NavItem) => {
     if (item.label === "Workforce") {
       return location.pathname.endsWith("/rostering/settings") && selectedSection === "workforce";
@@ -84,64 +81,66 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
     }
     return location.pathname.endsWith(`/rostering/${item.suffix.split("?", 1)[0]}`);
   };
-  const moreActive = visibleMore.some(isSpecialActive);
+
+  const renderNavItem = (item: NavItem) => {
+    const Icon = item.icon;
+    return (
+      <NavLink
+        key={`${item.suffix}:${item.label}`}
+        to={`${root}/${item.suffix}`}
+        className={({ isActive }) => {
+          const active = item.label === "Workforce" || item.label === "Setup" ? isSpecialActive(item) : isActive;
+          return `wr-tab${active ? " wr-tab--active" : ""}`;
+        }}
+        title={item.label}
+      >
+        <span className="wr-tab__icon"><Icon aria-hidden="true" size={17} strokeWidth={1.9} /></span>
+        <span>{item.label}</span>
+      </NavLink>
+    );
+  };
+
+  const visiblePrimary = PRIMARY_NAV.filter(canSee);
+  const visibleSecondary = SECONDARY_NAV.filter(canSee);
 
   return (
     <DepartmentLayout amoCode={amoCode || "UNKNOWN"} activeDepartment="rostering">
       <div className="wr-page">
-        <header className="wr-header">
-          <div className="wr-header__copy">
-            <h1>{title}</h1>
-            <span className="wr-header__context">{eyebrow}</span>
-          </div>
-          <div className="wr-header__actions">
-            <details className="wr-header-help">
-              <summary aria-label={`About ${title}`} title={`About ${title}`}><CircleHelp size={17} /></summary>
-              <p>{description}</p>
-            </details>
-            {actions}
-          </div>
-        </header>
+        <div className="wr-module-shell">
+          <aside className="wr-module-rail" aria-label="Duty rostering navigation">
+            <div className="wr-module-rail__brand">
+              <span>AMO</span>
+              <strong>Rostering</strong>
+            </div>
+            <nav className="wr-tabs" aria-label="Primary duty rostering sections">
+              {visiblePrimary.map(renderNavItem)}
+            </nav>
+            {visibleSecondary.length ? (
+              <nav className="wr-tabs wr-tabs--secondary" aria-label="Additional duty rostering sections">
+                {visibleSecondary.map(renderNavItem)}
+              </nav>
+            ) : null}
+          </aside>
 
-        <nav className="wr-tabs" aria-label="Duty rostering sections">
-          {visiblePrimary.map(({ suffix, label, icon: Icon }) => (
-            <NavLink
-              key={`${suffix}:${label}`}
-              to={`${root}/${suffix}`}
-              className={({ isActive }) => {
-                const active = label === "Workforce" ? isSpecialActive({ suffix, label, icon: Icon }) : isActive;
-                return `wr-tab${active ? " wr-tab--active" : ""}`;
-              }}
-            >
-              <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
-          {visibleMore.length ? (
-            <details className="wr-roster-more">
-              <summary className={`wr-tab${moreActive ? " wr-tab--active" : ""}`} aria-label="More rostering sections">
-                <MoreHorizontal aria-hidden="true" size={17} strokeWidth={1.9} />
-                <span>More</span>
-              </summary>
-              <div className="wr-roster-more__menu">
-                {visibleMore.map(({ suffix, label, icon: Icon }) => (
-                  <Link
-                    key={`${suffix}:${label}`}
-                    to={`${root}/${suffix}`}
-                    className={isSpecialActive({ suffix, label, icon: Icon }) ? "is-active" : ""}
-                  >
-                    <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
-                    <span>{label}</span>
-                  </Link>
-                ))}
+          <section className="wr-module-stage">
+            <header className="wr-header">
+              <div className="wr-header__copy">
+                <span className="wr-header__context">{eyebrow}</span>
+                <h1>{title}</h1>
               </div>
-            </details>
-          ) : null}
-        </nav>
+              <div className="wr-header__actions">
+                {actions}
+                <details className="wr-header-help">
+                  <summary aria-label={`About ${title}`} title={`About ${title}`}><CircleHelp size={17} /></summary>
+                  <p>{description}</p>
+                </details>
+              </div>
+            </header>
 
-        {context ? <div className="wr-context">{context}</div> : null}
-
-        <main className="wr-main wr-main--enter">{children}</main>
+            {context ? <div className="wr-context">{context}</div> : null}
+            <main className="wr-main wr-main--enter">{children}</main>
+          </section>
+        </div>
       </div>
     </DepartmentLayout>
   );
