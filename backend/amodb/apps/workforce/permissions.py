@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..accounts import models as account_models, role_registry
+from ..accounts import models as account_models
 from . import models
 
 
@@ -110,7 +110,6 @@ ACCOUNTABLE_EXECUTIVE = EMPLOYEE | {
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
-
 QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
@@ -120,7 +119,6 @@ QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
     PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
 }
-
 
 HR = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
@@ -138,13 +136,11 @@ HR = EMPLOYEE | {
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
-
 PAYROLL = EMPLOYEE | {
     PermissionCode.TIMESHEET_APPROVE.value,
     PermissionCode.PAYROLL_EXPORT.value,
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
-
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPERUSER": ALL_PERMISSIONS,
@@ -187,8 +183,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 
 
 # These permissions act on a department/base resource when the route supplies
-# resource scope. A role-derived permission must never silently widen itself to
-# an arbitrary department or base. Explicit WorkforcePermissionGrant rows can
+# resource scope. A role permission must never silently widen itself to an
+# arbitrary department or base. Explicit WorkforcePermissionGrant rows can
 # still grant wider or different scope when that is intentional and auditable.
 _SCOPED_ROSTER_DEFAULTS = {
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
@@ -204,42 +200,19 @@ def _role_value(user: account_models.User) -> str:
     return str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")))
 
 
-def _derived_role(user: account_models.User) -> Optional[str]:
-    """Support exact regulated aliases and tenant support titles.
+def default_permissions_for(user: account_models.User) -> set[str]:
+    """Resolve permissions only from explicit account role and grants.
 
-    Explicit permission grants remain authoritative.  This compatibility layer
-    lets legacy KCAR 2018 titles participate during migration without treating
-    every free-text ``Head of`` title as a privileged management role.
+    Free-text position titles are descriptive HR data, not authorization data.
+    They must never silently turn a user into a roster planner, supervisor,
+    department head, publisher, Quality authority, HR manager or payroll user.
     """
 
-    title = str(getattr(user, "position_title", "") or "").lower()
-    department = str(getattr(getattr(user, "department", None), "code", "") or "").lower()
-    regulated = role_registry.infer_regulated_role(title)
-    if regulated is not None:
-        return regulated.value
-    if "human resource" in title or title.startswith("hr ") or department in {"hr", "human-resources", "human_resources"}:
-        return "HR_MANAGER" if "manager" in title or "head" in title else "HR_OFFICER"
-    if "payroll" in title:
-        return "PAYROLL_OFFICER"
-    if "roster" in title or "duty planner" in title:
-        return "ROSTER_PLANNER"
-    if "department head" in title or "department manager" in title:
-        return "DEPARTMENT_HEAD"
-    if "supervisor" in title or "shift lead" in title:
-        return "DEPARTMENT_SUPERVISOR"
-    return None
-
-
-def default_permissions_for(user: account_models.User) -> set[str]:
     if not user or getattr(user, "is_system_account", False):
         return set()
     if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
         return set(ALL_PERMISSIONS)
-    permissions = set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
-    derived = _derived_role(user)
-    if derived:
-        permissions |= ROLE_PERMISSIONS.get(derived, set())
-    return permissions
+    return set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
 
 
 def _active_grants(
@@ -304,9 +277,6 @@ def _default_scope_allows(
     if PermissionCode.ROSTER_VIEW_ALL.value in defaults:
         return True
 
-    # Department-view is never a tenant-wide permission by implication. When a
-    # route asks for it without a department, force the caller to use an
-    # explicitly global grant or roster.view_all instead of leaking the tenant.
     if permission_code == PermissionCode.ROSTER_VIEW_DEPARTMENT.value and not department_id:
         return False
 
