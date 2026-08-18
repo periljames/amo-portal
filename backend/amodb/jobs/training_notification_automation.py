@@ -1,9 +1,9 @@
 """Tenant-safe scheduled Training compliance notifications.
 
 This worker materialises authoritative in-app Training actions, runs governed
-workflow escalations, and processes the durable external delivery outbox. It
-never treats creation of an in-app row as proof that an external provider sent
-or delivered a message.
+workflow escalations, dispatches pending calendar changes, and processes the
+durable external delivery outbox. It never treats creation of an in-app row as
+proof that an external provider sent or delivered a message.
 
 Reminder timing is tenant policy. The platform does not invent reminder days for
 an AMO that has not configured them.
@@ -240,6 +240,18 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
             db.rollback()
             summary["errors"] += 1
             logger.exception("Training workflow escalation pass failed")
+
+        try:
+            from amodb.apps.training.calendar_update_dispatch import dispatch_pending_calendar_updates
+
+            calendar_summary = dispatch_pending_calendar_updates(db)
+            db.commit()
+            for key, value in calendar_summary.items():
+                summary[f"calendar_{key}"] = int(value)
+        except Exception:
+            db.rollback()
+            summary["errors"] += 1
+            logger.exception("Training calendar update/cancellation dispatch pass failed")
 
         try:
             from amodb.apps.training.notification_dispatch import process_outbox, sync_notifications_to_outbox
