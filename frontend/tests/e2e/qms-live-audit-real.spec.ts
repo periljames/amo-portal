@@ -48,7 +48,7 @@ function watchServerFailures(page: Page, failures: string[]): void {
 async function loginInternalUser(context: BrowserContext, options: { amoSlug: string; email: string; password: string }): Promise<Page> {
   const page = await context.newPage();
   await page.goto(`/maintenance/${options.amoSlug}/login`, { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Email or staff code").fill(options.email);
+  await page.getByLabel("Email", { exact: true }).fill(options.email);
   await page.getByLabel("Password").fill(options.password);
   await Promise.all([
     page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
