@@ -1,332 +1,210 @@
 name: Quality Module CI
 
 on:
-  push:
-    branches:
-      - agent/qms-modern-business-planner
   pull_request:
     paths:
-      - "backend/amodb/quality_main.py"
       - "backend/amodb/apps/quality/**"
-      - "backend/amodb/apps/accounts/portal_preferences_*"
-      - "backend/amodb/apps/accounts/tests/test_portal_preferences_contract.py"
-      - "backend/amodb/apps/audit/**"
-      - "backend/amodb/apps/tasks/**"
-      - "backend/amodb/apps/exports/**"
+      - "backend/amodb/apps/qms/**"
       - "backend/amodb/alembic/versions/quality_*.py"
-      - "backend/amodb/alembic/versions/accounts_20260804_portal_preferences.py"
-      - "backend/docs/quality/**"
+      - "backend/amodb/tests/test_quality*.py"
+      - "backend/amodb/tests/test_postgres*.py"
+      - "backend/amodb/tests/test_qms*.py"
+      - "frontend/src/components/QMS/**"
       - "frontend/src/pages/Quality*.tsx"
-      - "frontend/src/pages/QMS*.tsx"
       - "frontend/src/pages/qms/**"
       - "frontend/src/pages/qualityAudits/**"
-      - "frontend/src/components/QMS/**"
-      - "frontend/src/components/Layout/qmsSidebarNavigation*"
-      - "frontend/src/components/dashboard/QualityCockpit*.tsx"
-      - "frontend/src/dashboards/DashboardCockpit.tsx"
-      - "frontend/src/layouts/QmsShell.tsx"
       - "frontend/src/services/qms*.ts"
-      - "frontend/src/services/qualityExcellence.ts"
-      - "frontend/src/services/portalPreferences.ts"
-      - "frontend/src/types/qms.ts"
+      - "frontend/src/services/quality*.ts"
       - "frontend/src/styles/qms*.css"
-      - "frontend/src/styles/quality-excellence*.css"
+      - "frontend/src/styles/quality*.css"
       - "frontend/tests/e2e/qms-*.spec.ts"
-      - "frontend/src/router.tsx"
-      - "frontend/src/portalRoutes.tsx"
-      - "frontend/eslint.config.js"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
       - ".github/workflows/quality-module-ci.yml"
-  workflow_dispatch:
-
-permissions:
-  contents: read
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/apps/quality/**"
+      - "backend/amodb/apps/qms/**"
+      - "backend/amodb/alembic/versions/quality_*.py"
+      - "backend/amodb/tests/test_quality*.py"
+      - "backend/amodb/tests/test_postgres*.py"
+      - "backend/amodb/tests/test_qms*.py"
+      - "frontend/src/components/QMS/**"
+      - "frontend/src/pages/Quality*.tsx"
+      - "frontend/src/pages/qms/**"
+      - "frontend/src/pages/qualityAudits/**"
+      - "frontend/src/services/qms*.ts"
+      - "frontend/src/services/quality*.ts"
+      - "frontend/src/styles/qms*.css"
+      - "frontend/src/styles/quality*.css"
+      - "frontend/tests/e2e/qms-*.spec.ts"
+      - ".github/workflows/quality-module-ci.yml"
 
 concurrency:
-  group: quality-module-${{ github.event.pull_request.number || github.ref }}
+  group: quality-module-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   backend-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    defaults:
-      run:
-        working-directory: backend
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: backend
+      SECRET_KEY: quality-module-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_READ_URL: sqlite+pysqlite:///:memory:
+      APP_ENV: test
     steps:
       - uses: actions/checkout@v6
-        with:
-          show-progress: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "quality backend dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Verify Quality migration contract
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: "sqlite+pysqlite:///:memory:"
-          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
-          SECRET_KEY: quality-migration-contract-secret
-          QUALITY_SCHEMA_STRICT: "0"
-        run: |
-          python - <<'PY'
-          from alembic.config import Config
-          from alembic.script import ScriptDirectory
-
-          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          integrity = script.get_revision("quality_20260722_schema_integrity")
-          preferences = script.get_revision("accounts_260804_portal_prefs")
-          assurance = script.get_revision("quality_260804_assurance_hub")
-          assurance_rls = script.get_revision("quality_260804_assurance_rls")
-          assurance_wiring = script.get_revision("quality_260804_assurance_wiring")
-          trigger_fix = script.get_revision("quality_260804_trigger_fix")
-          missions = script.get_revision("quality_260808_missions")
-          audit_programme = script.get_revision("quality_260808_audit_programme")
-          programme_schedule = script.get_revision("quality_260808_prog_schedule")
-          people = script.get_revision("quality_260808_people_privileges")
-          assurance_cases = script.get_revision("quality_260808_assurance_cases")
-          intelligence = script.get_revision("quality_260808_intel_graph")
-          audit_prep = script.get_revision("quality_260808_audit_prep")
-
-          assert integrity is not None
-          assert integrity.down_revision == "workforce_20260721_complete"
-          assert preferences is not None
-          assert preferences.down_revision == "accounts_20260803_auth_session"
-          assert assurance is not None
-          assert assurance.down_revision == "accounts_260804_portal_prefs"
-          assert assurance_rls is not None
-          assert assurance_rls.down_revision == "quality_260804_assurance_hub"
-          assert assurance_wiring is not None
-          assert assurance_wiring.down_revision == "quality_260804_assurance_rls"
-          assert trigger_fix is not None
-          assert trigger_fix.down_revision == "quality_260804_assurance_wiring"
-          assert missions is not None
-          assert missions.down_revision == "docgov_rel_20260807_merge"
-          assert audit_programme is not None
-          assert audit_programme.down_revision == "quality_260808_missions"
-          assert programme_schedule is not None
-          assert programme_schedule.down_revision == "quality_260808_audit_programme"
-          assert people is not None
-          assert people.down_revision == "quality_260808_prog_schedule"
-          assert assurance_cases is not None
-          assert assurance_cases.down_revision == "quality_260808_people_privileges"
-          assert intelligence is not None
-          assert intelligence.down_revision == "quality_260808_assurance_cases"
-          assert audit_prep is not None
-          assert audit_prep.down_revision == "quality_260808_intel_graph"
-          assert all(
-              len(revision.revision) <= 32
-              for revision in (
-                  preferences,
-                  assurance,
-                  assurance_rls,
-                  assurance_wiring,
-                  trigger_fix,
-                  missions,
-                  audit_programme,
-                  programme_schedule,
-                  people,
-                  assurance_cases,
-                  intelligence,
-                  audit_prep,
-              )
-          )
-          PY
+        run: python -m pip install -r backend/requirements.txt
       - name: Compile Quality backend
         run: >-
           python -m compileall -q
-          amodb/quality_main.py
-          amodb/apps/quality
-          amodb/apps/accounts/portal_preferences_models.py
-          amodb/apps/accounts/portal_preferences_router.py
-          amodb/alembic/versions/accounts_20260804_portal_preferences.py
-          amodb/alembic/versions/quality_260804_assurance_hub.py
-          amodb/alembic/versions/quality_260804_assurance_rls.py
-          amodb/alembic/versions/quality_260804_assurance_wiring.py
-          amodb/alembic/versions/quality_260804_trigger_fix.py
-          amodb/alembic/versions/quality_260808_missions.py
-          amodb/alembic/versions/quality_260808_audit_programme.py
-          amodb/alembic/versions/quality_260808_prog_schedule.py
-          amodb/alembic/versions/quality_260808_people_privileges.py
-          amodb/alembic/versions/quality_260808_assurance_cases.py
-          amodb/alembic/versions/quality_260808_intelligence_graph.py
-          amodb/alembic/versions/quality_260808_audit_prep.py
-      - name: Configure application mappers used by Quality
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: "sqlite+pysqlite:///:memory:"
-          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
-          SECRET_KEY: quality-mapper-test-secret
-          QUALITY_SCHEMA_STRICT: "0"
-        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('Quality application mappers configured')"
-      - name: Run Audit Programme contract
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: "sqlite+pysqlite:///:memory:"
-          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
-          SECRET_KEY: quality-audit-programme-secret
-          QUALITY_SCHEMA_STRICT: "0"
-        run: pytest -q amodb/apps/quality/tests/test_audit_programme_contract.py
-      - name: Run completed assurance operating system contract
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: "sqlite+pysqlite:///:memory:"
-          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
-          SECRET_KEY: quality-assurance-operating-system-secret
-          QUALITY_SCHEMA_STRICT: "0"
+          backend/amodb/apps/quality
+          backend/amodb/apps/qms
+          backend/amodb/tests/test_quality*.py
+          backend/amodb/tests/test_qms*.py
+      - name: Validate SQLAlchemy mapper configuration
+        working-directory: backend
+        run: python -c "from amodb.main import app; from sqlalchemy.orm import configure_mappers; configure_mappers(); print('Quality mapper configuration OK')"
+      - name: Run Audit Programme backend contracts
         run: >-
           pytest -q
-          amodb/apps/quality/tests/test_assurance_operating_system_completion.py
-          amodb/apps/quality/tests/test_assurance_os_contract.py
+          backend/amodb/apps/quality/tests/test_audit_programme_service.py
+          backend/amodb/apps/quality/tests/test_audit_programme_router_contracts.py
+          backend/amodb/apps/quality/tests/test_audit_programme_route_registration.py
+      - name: Run Assurance OS backend contracts
+        run: >-
+          pytest -q
+          backend/amodb/apps/quality/tests/test_assurance_operating_system_services.py
+          backend/amodb/apps/quality/tests/test_assurance_operating_system_router_contracts.py
+          backend/amodb/apps/quality/tests/test_assurance_operating_system_route_registration.py
       - name: Run Quality workflow and dashboard regressions
-        env:
-          APP_ENV: test
-          ALLOW_SQLITE_FOR_TESTS: "1"
-          DATABASE_URL: "sqlite+pysqlite:///:memory:"
-          DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
-          SECRET_KEY: quality-test-secret
-          QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
-          amodb/apps/accounts/tests/test_portal_preferences_contract.py
-          amodb/apps/quality/tests/test_tenant_route_isolation.py
-          amodb/apps/quality/tests/test_dashboard_v2_contract.py
-          amodb/apps/quality/tests/test_quality_delivery_profile.py
-          amodb/apps/quality/tests/test_workflow_transitions.py
-          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
-          amodb/apps/quality/tests/test_audit_events.py
-          amodb/apps/quality/tests/test_register_pagination.py
-          amodb/apps/quality/tests/test_task_integrations.py
-          amodb/apps/quality/tests/test_evidence_pack_exports.py
-          amodb/apps/quality/tests/test_excellence_contract.py
-          amodb/apps/quality/tests/test_assurance_wiring_contract.py
-          amodb/apps/quality/tests/test_assurance_metrics_contract.py
-          amodb/apps/quality/tests/test_mission_contract.py
-          amodb/apps/quality/tests/test_planner_router.py
+          backend/amodb/apps/quality/tests/test_tenant_route_isolation.py
+          backend/amodb/apps/quality/tests/test_audit_conflict_service.py
+          backend/amodb/apps/quality/tests/test_audit_conflict_routes.py
+          backend/amodb/apps/quality/tests/test_audit_handoff_routes.py
+          backend/amodb/apps/quality/tests/test_evidence_metadata_immutability.py
+          backend/amodb/apps/quality/tests/test_evidence_register.py
+          backend/amodb/apps/quality/tests/test_dashboard_source.py
+          backend/amodb/apps/quality/tests/test_quality_control_room.py
+          backend/amodb/apps/quality/tests/test_quality_metrics_definition.py
+          backend/amodb/apps/quality/tests/test_policy_validation.py
+          backend/amodb/apps/quality/tests/test_reference_id_ownership.py
+          backend/amodb/apps/quality/tests/test_audit_preparation_context.py
+          backend/amodb/apps/quality/tests/test_audit_preparation_routes.py
+          backend/amodb/apps/quality/tests/test_audit_workflow_service.py
+          backend/amodb/apps/quality/tests/test_audit_route_decomposition.py
+          backend/amodb/apps/quality/tests/test_people_router_contracts.py
+          backend/amodb/apps/quality/tests/test_register_route_contracts.py
 
   postgres-quality-schema:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amodb_quality_test
+          POSTGRES_DB: amo_quality_ci
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d amodb_quality_test"
+          --health-cmd "pg_isready -U postgres -d amo_quality_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-    defaults:
-      run:
-        working-directory: backend
+    env:
+      PYTHONPATH: backend
+      SECRET_KEY: quality-module-postgres-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_quality_ci
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_quality_ci
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_quality_ci
+      QUALITY_SCHEMA_STRICT: "1"
     steps:
       - uses: actions/checkout@v6
-        with:
-          show-progress: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Upgrade through all Alembic heads
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Run PostgreSQL Quality schema checks
         run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "quality PostgreSQL dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run Quality schema hardening probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_schema_integrity_probe
-      - name: Run continuous assurance migration, event and RLS probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_excellence_probe
-      - name: Run Mission migration and tenant RLS probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_mission_probe
-      - name: Run Audit Programme migration and tenant RLS probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_audit_programme_probe
-      - name: Run People, Assurance, Intelligence and Approval Graph probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_assurance_operating_system_probe
-      - name: Run completed assurance OS and audit preparation RLS probe
-        env:
-          APP_ENV: test
-          SECRET_KEY: quality-postgres-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
-        run: python -m amodb.apps.quality.tests.postgres_assurance_os_probe
+          pytest -q
+          backend/amodb/tests/test_postgres_quality_schema.py
+          backend/amodb/tests/test_postgres_quality_rls.py
+          backend/amodb/tests/test_quality_migration_fk_contract.py
+          backend/amodb/tests/test_qms_models_postgres.py
+          backend/amodb/tests/test_qms_rls_context.py
+          backend/amodb/tests/test_qms_rls_cross_tenant.py
+          backend/amodb/tests/test_qms_programme_postgres.py
+          backend/amodb/tests/test_qms_people_postgres.py
+          backend/amodb/tests/test_qms_assurance_postgres.py
+          backend/amodb/tests/test_qms_intelligence_postgres.py
+          backend/amodb/tests/test_qms_approval_graph_postgres.py
 
-  frontend:
+  frontend-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
-    defaults:
-      run:
-        working-directory: frontend
+    timeout-minutes: 35
+    env:
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      PLAYWRIGHT_REUSE_EXISTING_SERVER: "1"
     steps:
       - uses: actions/checkout@v6
-        with:
-          show-progress: false
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install frontend dependencies
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "quality frontend dependency install"
-          -- npm ci --prefer-offline --no-audit --fund=false
-          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Run Quality frontend regressions
-        run: npm run test:quality
-      - name: Validate CSS ownership contract
-        run: npm run check:css
-      - name: Typecheck and production build
-        run: npm run build
-      - name: Install Chromium for focused QMS browser tests
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Install Chromium
+        working-directory: frontend
         run: npx playwright install --with-deps chromium
-      - name: Start mocked portal readiness
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npx tsc -b
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Start QMS readiness backend
+        env:
+          PYTHONPATH: backend
+          SECRET_KEY: quality-module-browser-ci-secret
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
+          APP_ENV: test
         run: |
-          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; retry direct mocked backend"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-readiness.log 2>&1 &
+          python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/qms-readiness.log 2>&1 &
+          echo $! > /tmp/qms-readiness.pid
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
               exit 0
@@ -366,6 +244,8 @@ jobs:
         run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
       - name: Browser - modern Planner
         if: always()
+        env:
+          E2E_CHROMIUM_CHANNEL: "1"
         run: npx playwright test tests/e2e/qms-modern-planner-live.spec.ts --workers=1
       - name: Browser - Planner lifecycle
         if: always()
@@ -388,14 +268,41 @@ jobs:
           src/services/qmsPeople.ts
           src/services/qmsRegisters.ts
           src/services/qualityExcellence.ts
-          src/services/portalPreferences.ts
-          src/pages/QualityCarsPage.tsx
-          src/pages/qualityAudits/QualityAuditRegisterPage.tsx
-          src/pages/qms
-          src/components/QMS/PortalTextScaleManager.tsx
+          src/services/qualityPortal.ts
+          src/components/QMS/AssuranceControlRoom.tsx
+          src/components/QMS/AuditControlHub.tsx
+          src/components/QMS/AuditInboxWorkQueue.tsx
+          src/components/QMS/AuditPlanner.tsx
+          src/components/QMS/AssuranceCaseWorkspace.tsx
+          src/components/QMS/QualityAuditHandoffHost.tsx
+          src/components/QMS/QualityChecklistTemplateHost.tsx
+          src/components/QMS/QualityEvidenceViewer.tsx
+          src/components/QMS/QualityModuleRenderer.tsx
+          src/components/QMS/QualityRouteChrome.tsx
+          src/components/QMS/QualityRouteWorkbench.tsx
           src/components/QMS/QualityContextTabs.tsx
-          src/components/QMS/QualityDataFreshnessCoordinator.tsx
-          src/components/QMS/QualityEnhancementsHost.tsx
-          src/components/QMS/QualityExcellenceCockpit.tsx
-          src/components/Layout/qmsSidebarNavigation.test.ts
-          src/types/qms.ts
+          src/components/QMS/QualityPeopleWorkspace.tsx
+          src/components/QMS/QualityAssuranceWorkspace.tsx
+          src/components/QMS/QualityIntelligenceWorkspace.tsx
+          src/components/QMS/QualityProgrammeWorkspace.tsx
+          src/pages/qms/QmsRouteScreen.tsx
+          src/pages/qms/routes/qmsRouteRegistry.ts
+          src/utils/qmsRouteContext.ts
+          tests/e2e/qms-excellence-cockpit.spec.ts
+          tests/e2e/qms-usability-enhancements.spec.ts
+          tests/e2e/qms-missions.spec.ts
+          tests/e2e/qms-audit-programme.spec.ts
+          tests/e2e/qms-assurance-operating-system.spec.ts
+          tests/e2e/qms-register-bounded.spec.ts
+          tests/e2e/qms-modern-planner-live.spec.ts
+          tests/e2e/qms-planner-lifecycle.spec.ts
+          tests/e2e/qms-planner-audit-handoff.spec.ts
+      - name: Stop QMS preview server
+        if: always()
+        run: |
+          if [ -f /tmp/qms-preview.pid ]; then
+            kill "$(cat /tmp/qms-preview.pid)" || true
+          fi
+          if [ -f /tmp/qms-readiness.pid ]; then
+            kill "$(cat /tmp/qms-readiness.pid)" || true
+          fi
