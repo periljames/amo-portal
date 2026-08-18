@@ -5,6 +5,7 @@ import {
   getCoordinatorTrainingWorkspace,
   getManagerTrainingWorkspace,
 } from "../../services/trainingWorkflowCompletion";
+import TrainingPerson360Drawer from "./TrainingPerson360Drawer";
 
 type TeamHealth = {
   people: number;
@@ -77,6 +78,7 @@ const TrainingRoleWorkspacePanel = () => {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [person360UserId, setPerson360UserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!mode) return;
@@ -103,57 +105,61 @@ const TrainingRoleWorkspacePanel = () => {
 
   const health = workspace?.team_health;
   return (
-    <section className="page-section" id="training-role-workspace" aria-labelledby="training-role-workspace-title">
-      <div className="card">
-        <div className="card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-          <div>
-            <h2 id="training-role-workspace-title">{mode === "COORDINATOR" ? "Training coordination" : "Team Training"}</h2>
-            <p className="text-muted">
-              {mode === "COORDINATOR"
-                ? "Tenant-wide compliance health and governed Training action queue."
-                : "Your department's compliance health and items requiring management attention."}
-            </p>
+    <>
+      <section className="page-section" id="training-role-workspace" aria-labelledby="training-role-workspace-title">
+        <div className="card">
+          <div className="card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+            <div>
+              <h2 id="training-role-workspace-title">{mode === "COORDINATOR" ? "Training coordination" : "Team Training"}</h2>
+              <p className="text-muted">
+                {mode === "COORDINATOR"
+                  ? "Tenant-wide compliance health and governed Training action queue."
+                  : "Your department's compliance health and items requiring management attention."}
+              </p>
+            </div>
+            <button type="button" className="secondary-chip-btn" onClick={() => void load()} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
-          <button type="button" className="secondary-chip-btn" onClick={() => void load()} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
+
+          {error ? <div className="card card--error"><p>{error}</p></div> : null}
+          {health ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }}>
+              <div><strong>{health.people}</strong><div className="text-muted">People</div></div>
+              <div><strong>{health.current}</strong><div className="text-muted">Current</div></div>
+              <div><strong>{health.due_soon}</strong><div className="text-muted">Due soon</div></div>
+              <div><strong>{health.overdue}</strong><div className="text-muted">Overdue</div></div>
+              <div><strong>{health.incomplete}</strong><div className="text-muted">Incomplete</div></div>
+            </div>
+          ) : null}
+
+          {workspace ? (
+            <div>
+              <h3>Action queue</h3>
+              {workspace.action_queue.length ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {workspace.action_queue.slice(0, 20).map((item, index) => (
+                    <article key={`${item.type || "ACTION"}:${item.user_id || index}:${item.course || index}`} style={{ border: "1px solid #dde4ee", borderRadius: 10, padding: 10 }}>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                        <strong>{item.type || "Training action"}</strong>
+                        <span className="badge badge--neutral">{item.status || "ACTION REQUIRED"}</span>
+                      </div>
+                      <div>{item.person || "Team member"}{item.course ? ` · ${item.course}` : ""}</div>
+                      <small className="text-muted">
+                        {item.due ? `Due ${new Date(item.due).toLocaleDateString()}` : item.age_days != null ? `${item.age_days} day(s) in queue` : "Review required"}
+                      </small>
+                      {item.user_id ? <div style={{ marginTop: 8 }}><button type="button" className="secondary-chip-btn" onClick={() => setPerson360UserId(item.user_id || null)}>Open Person 360</button></div> : null}
+                    </article>
+                  ))}
+                  {workspace.action_queue.length > 20 ? <p className="text-muted">Showing the highest-priority 20 of {workspace.action_queue.length} actions.</p> : null}
+                </div>
+              ) : <p className="text-muted">No governed Training actions are currently waiting in this workspace.</p>}
+            </div>
+          ) : loading ? <p>Loading team Training workspace…</p> : null}
         </div>
-
-        {error ? <div className="card card--error"><p>{error}</p></div> : null}
-        {health ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }}>
-            <div><strong>{health.people}</strong><div className="text-muted">People</div></div>
-            <div><strong>{health.current}</strong><div className="text-muted">Current</div></div>
-            <div><strong>{health.due_soon}</strong><div className="text-muted">Due soon</div></div>
-            <div><strong>{health.overdue}</strong><div className="text-muted">Overdue</div></div>
-            <div><strong>{health.incomplete}</strong><div className="text-muted">Incomplete</div></div>
-          </div>
-        ) : null}
-
-        {workspace ? (
-          <div>
-            <h3>Action queue</h3>
-            {workspace.action_queue.length ? (
-              <div style={{ display: "grid", gap: 8 }}>
-                {workspace.action_queue.slice(0, 20).map((item, index) => (
-                  <article key={`${item.type || "ACTION"}:${item.user_id || index}:${item.course || index}`} style={{ border: "1px solid #dde4ee", borderRadius: 10, padding: 10 }}>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
-                      <strong>{item.type || "Training action"}</strong>
-                      <span className="badge badge--neutral">{item.status || "ACTION REQUIRED"}</span>
-                    </div>
-                    <div>{item.person || "Team member"}{item.course ? ` · ${item.course}` : ""}</div>
-                    <small className="text-muted">
-                      {item.due ? `Due ${new Date(item.due).toLocaleDateString()}` : item.age_days != null ? `${item.age_days} day(s) in queue` : "Review required"}
-                    </small>
-                  </article>
-                ))}
-                {workspace.action_queue.length > 20 ? <p className="text-muted">Showing the highest-priority 20 of {workspace.action_queue.length} actions.</p> : null}
-              </div>
-            ) : <p className="text-muted">No governed Training actions are currently waiting in this workspace.</p>}
-          </div>
-        ) : loading ? <p>Loading team Training workspace…</p> : null}
-      </div>
-    </section>
+      </section>
+      <TrainingPerson360Drawer userId={person360UserId} isOpen={Boolean(person360UserId)} onClose={() => setPerson360UserId(null)} />
+    </>
   );
 };
 
