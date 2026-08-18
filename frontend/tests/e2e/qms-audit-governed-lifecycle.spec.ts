@@ -195,14 +195,14 @@ test.describe("governed audit lifecycle", () => {
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/prepare`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("region", { name: "Pre-audit preparation workspace" })).toBeVisible({ timeout: 30_000 });
-    const launcher = page.getByRole("button", { name: "Audit governance" });
+    const launcher = page.getByRole("button", { name: "Audit governance", exact: true });
     await expect(launcher).toBeVisible();
     await launcher.click();
     const panel = page.getByRole("complementary", { name: "Audit governance" });
     await panel.getByLabel("Preparation scope / notes").fill("Prior findings, controlled records and opening-meeting evidence.");
-    await panel.getByRole("button", { name: "Create controlled revision" }).click();
-    await expect(panel.getByRole("button", { name: "Issue revision" })).toBeVisible();
-    await panel.getByRole("button", { name: "Issue revision" }).click();
+    await panel.getByRole("button", { name: "Create controlled revision", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Issue revision", exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Issue revision", exact: true }).click();
     await expect(panel).toContainText("Rev 1 · ISSUED");
 
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/setup`, { waitUntil: "domcontentloaded" });
@@ -212,17 +212,17 @@ test.describe("governed audit lifecycle", () => {
     await expect(setup).toContainText("14 days");
     await setup.getByRole("button", { name: "Create notice" }).click();
     for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
-      const button = setup.getByRole("button", { name: action });
+      const button = setup.getByRole("button", { name: action, exact: true });
       await expect(button).toBeVisible();
       await button.click();
     }
     await setup.getByLabel("Delivery reference").fill("MSG-QAR-MO-26-015");
-    await setup.getByRole("button", { name: "DELIVER" }).click();
-    await setup.getByRole("button", { name: "ACKNOWLEDGE" }).click();
+    await setup.getByRole("button", { name: "DELIVER", exact: true }).click();
+    await setup.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
     await expect(setup).toContainText("ACKNOWLEDGED");
   });
 
-  test("builds the closing report from authoritative audit data and keeps follow-up blockers separate", async ({ page }) => {
+  test("builds the closing report from authoritative audit data and keeps execution closure separate from follow-up", async ({ page }) => {
     await prepareLifecycle(page);
     await page.setViewportSize({ width: 1500, height: 940 });
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/closing`, { waitUntil: "domcontentloaded" });
@@ -235,7 +235,8 @@ test.describe("governed audit lifecycle", () => {
     await expect(closing).toContainText(`${AUDIT_REF}-closing.pdf`);
     await closing.getByRole("button", { name: "Adopt governed draft" }).click();
     await expect(closing).toContainText("R1 · DRAFT");
-    await expect(closing).toContainText("Corrective action effectiveness verification remains open.");
+    await expect(closing).toContainText("Execution closure and CAR/CAPA completion are separate controls.");
+    await expect(closing).toContainText("Issued report and passkey evidence are required before execution close.");
   });
 
   test("redirects legacy mobile closeout deep links to the canonical closing stage and survives refresh", async ({ page }) => {
