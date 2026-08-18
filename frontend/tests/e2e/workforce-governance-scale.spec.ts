@@ -343,7 +343,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();
 
   await page.getByRole("button", { name: "Select all 10,000 matching" }).click();
-  await expect(page.getByText("10,000 selected")).toBeVisible();
+  await expect(page.getByText("10,000 selected", { exact: true })).toBeVisible();
   await mutationCard.getByLabel("Change type", { exact: true }).selectOption("ASSIGN_ORGANIZATION");
   await organisationMutation.selectOption("org-line");
   await mutationCard.getByLabel("Placement", { exact: true }).selectOption("SECONDARY");
