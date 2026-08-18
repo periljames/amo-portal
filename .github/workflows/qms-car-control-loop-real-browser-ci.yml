@@ -95,7 +95,7 @@ jobs:
           done
           (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-car-real-frontend.log 2>&1 & echo $! > /tmp/qms-car-real-frontend.pid)
           for attempt in $(seq 1 60); do
-            curl --silent --fail http://127.0.0.1:4173/qms/car-access/invalid >/dev/null && break
+            curl --silent --fail -H 'Accept: text/html' http://127.0.0.1:4173/qms/car-access/invalid >/dev/null && break
             [ "$attempt" -lt 60 ] || { cat /tmp/qms-car-real-frontend.log; exit 1; }
             sleep 1
           done
