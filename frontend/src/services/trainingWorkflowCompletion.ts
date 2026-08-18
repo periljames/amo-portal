@@ -43,16 +43,20 @@ export type AssessmentAttempt = {
   status: string;
   outcome?: string | null;
   score?: number | null;
-  assessment_type?: string;
+  assessment_type?: string | null;
   template_name?: string;
   candidate_user_id: string;
   course_id?: string | null;
+  event_id?: string | null;
+  authorization_case_id?: string | null;
   planned_at?: string | null;
   performed_at?: string | null;
   attempt?: Record<string, unknown>;
   questions?: Array<Record<string, unknown>>;
   answers?: Record<string, unknown>;
   comments?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type LearnerTrainingInvitation = {
@@ -75,6 +79,28 @@ export type LearnerTrainingInvitation = {
   delivered_at?: string | null;
   read_at?: string | null;
   calendar_path: string;
+};
+
+export type LearnerAuthorizationCase = {
+  id: string;
+  status: string;
+  authorisation_type_id: string;
+  requested_scope?: string | null;
+  application_date: string;
+  required_assessment_types: string[];
+  readiness_snapshot: Record<string, unknown>;
+  readiness_computed_at?: string | null;
+  recommendation?: string | null;
+  decision?: string | null;
+  restrictions?: string | null;
+  updated_at: string;
+};
+
+export type TrainingRoleWorkspace = {
+  workspace: "MANAGER" | "COORDINATOR";
+  generated_at: string;
+  team_health: { people: number; current: number; due_soon: number; overdue: number; incomplete: number };
+  action_queue: Array<Record<string, unknown>>;
 };
 
 export async function listMyEnrichedDeferrals(): Promise<EnrichedDeferral[]> {
@@ -127,6 +153,13 @@ export async function transitionExternalLearningRequest(
   return apiPost<ExternalLearningRequest>(`/training/external-learning/requests/${encodeURIComponent(workflowId)}/transition`, payload, { headers: authHeaders() });
 }
 
+export async function listMyAssessments(includeCompleted = true): Promise<AssessmentAttempt[]> {
+  return apiGet<AssessmentAttempt[]>(
+    `/training/assessments/me?include_completed=${includeCompleted ? "true" : "false"}`,
+    { headers: authHeaders() },
+  );
+}
+
 export async function startAssessmentAttempt(assessmentId: string): Promise<AssessmentAttempt> {
   return apiPost<AssessmentAttempt>(`/training/assessments/${encodeURIComponent(assessmentId)}/attempt/start`, {}, { headers: authHeaders() });
 }
@@ -167,16 +200,20 @@ export async function enrolTrainingEvent(eventId: string): Promise<{ participant
   return apiPost(`/training/events/${encodeURIComponent(eventId)}/enrol`, {}, { headers: authHeaders() });
 }
 
+export async function listMyAuthorizationCases(): Promise<LearnerAuthorizationCase[]> {
+  return apiGet<LearnerAuthorizationCase[]>("/training/authorization-cases/me", { headers: authHeaders() });
+}
+
 export async function getAuthorizationReadiness(caseId: string): Promise<Record<string, unknown>> {
   return apiGet(`/training/authorization-cases/${encodeURIComponent(caseId)}/readiness/explain`, { headers: authHeaders() });
 }
 
-export async function getManagerTrainingWorkspace(): Promise<Record<string, unknown>> {
-  return apiGet("/training/workspace/manager", { headers: authHeaders() });
+export async function getManagerTrainingWorkspace(): Promise<TrainingRoleWorkspace> {
+  return apiGet<TrainingRoleWorkspace>("/training/workspace/manager", { headers: authHeaders() });
 }
 
-export async function getCoordinatorTrainingWorkspace(): Promise<Record<string, unknown>> {
-  return apiGet("/training/workspace/coordinator", { headers: authHeaders() });
+export async function getCoordinatorTrainingWorkspace(): Promise<TrainingRoleWorkspace> {
+  return apiGet<TrainingRoleWorkspace>("/training/workspace/coordinator", { headers: authHeaders() });
 }
 
 export async function listMyTrainingInvitations(includePast = false): Promise<LearnerTrainingInvitation[]> {
@@ -190,9 +227,9 @@ export async function listMyTrainingInvitations(includePast = false): Promise<Le
 export async function respondToTrainingInvitation(
   invitationId: string,
   response: "ACCEPTED" | "DECLINED" | "TENTATIVE",
-): Promise<Record<string, unknown>> {
+): Promise<{ id: string; event_id: string; rsvp_status: string; responded_at?: string | null; participant_status?: string | null }> {
   return apiPost(
-    `/training/operating/invitations/${encodeURIComponent(invitationId)}/rsvp`,
+    `/training/invitations/${encodeURIComponent(invitationId)}/rsvp`,
     { response },
     { headers: authHeaders() },
   );
