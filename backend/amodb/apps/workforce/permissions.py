@@ -30,6 +30,8 @@ class PermissionCode(str, Enum):
     ROSTER_MANAGE_RULES = "roster.manage_rules"
     ROSTER_MANAGE_APPROVAL_AUTHORITIES = "roster.manage_approval_authorities"
     ROSTER_MANAGE_SHIFT_TEMPLATES = "roster.manage_shift_templates"
+    ROSTER_MANAGE_SHIFT_SEMANTICS = "roster.manage_shift_semantics"
+    ROSTER_MANAGE_CONTROLLED_OUTPUT = "roster.manage_controlled_output"
     ROSTER_MANAGE_PATTERNS = "roster.manage_patterns"
     ROSTER_ALLOCATE_WORK = "roster.allocate_work"
     LEAVE_REQUEST = "leave.request"
@@ -115,6 +117,8 @@ QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_OVERRIDE_WARNING.value,
     PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
     PermissionCode.ROSTER_MANAGE_RULES.value,
+    PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
+    PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
 }
 
 
@@ -158,7 +162,12 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "BASE_MANAGER": BASE_MANAGER,
     "LINE_MANAGER": DEPARTMENT_HEAD,
     "QUALITY_MANAGER": QUALITY,
-    "QUALITY_INSPECTOR": QUALITY - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.ROSTER_OVERRIDE_BLOCKER.value},
+    "QUALITY_INSPECTOR": QUALITY - {
+        PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
+        PermissionCode.ROSTER_MANAGE_RULES.value,
+        PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
+        PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
+    },
     "AUDITOR": {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
     "HR_OFFICER": HR - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.PAYROLL_EXPORT.value},
     "HR_MANAGER": HR | {PermissionCode.PAYROLL_EXPORT.value},
@@ -174,6 +183,20 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "FINANCE_MANAGER": PAYROLL,
     "ACCOUNTS_OFFICER": PAYROLL,
     "VIEW_ONLY": {PermissionCode.ROSTER_VIEW_OWN.value},
+}
+
+
+# These permissions act on a department/base resource when the route supplies
+# resource scope. A role-derived permission must never silently widen itself to
+# an arbitrary department or base. Explicit WorkforcePermissionGrant rows can
+# still grant wider or different scope when that is intentional and auditable.
+_SCOPED_ROSTER_DEFAULTS = {
+    PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+    PermissionCode.ROSTER_EDIT.value,
+    PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
+    PermissionCode.ROSTER_APPROVE.value,
+    PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+    PermissionCode.ROSTER_ALLOCATE_WORK.value,
 }
 
 
@@ -245,6 +268,61 @@ def _active_grants(
     ]
 
 
+def _active_contract_base_ids(db: Session, *, amo_id: str, user_id: str) -> set[str]:
+    today = date.today()
+    rows = db.query(models.EmploymentContract).filter(
+        models.EmploymentContract.amo_id == amo_id,
+        models.EmploymentContract.user_id == user_id,
+        models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
+        models.EmploymentContract.effective_from <= today,
+        or_(models.EmploymentContract.effective_to.is_(None), models.EmploymentContract.effective_to >= today),
+    ).all()
+    base_ids: set[str] = set()
+    for row in rows:
+        if row.primary_base_station_id:
+            base_ids.add(str(row.primary_base_station_id))
+        if row.secondary_base_station_id:
+            base_ids.add(str(row.secondary_base_station_id))
+    return base_ids
+
+
+def _default_scope_allows(
+    db: Session,
+    *,
+    user: account_models.User,
+    permission_code: str,
+    department_id: Optional[str],
+    base_station_id: Optional[str],
+) -> bool:
+    defaults = default_permissions_for(user)
+    if permission_code not in defaults:
+        return False
+    if permission_code not in _SCOPED_ROSTER_DEFAULTS:
+        return True
+
+    # Tenant-wide roster viewers/managers have deliberately global role scope.
+    if PermissionCode.ROSTER_VIEW_ALL.value in defaults:
+        return True
+
+    # Department-view is never a tenant-wide permission by implication. When a
+    # route asks for it without a department, force the caller to use an
+    # explicitly global grant or roster.view_all instead of leaking the tenant.
+    if permission_code == PermissionCode.ROSTER_VIEW_DEPARTMENT.value and not department_id:
+        return False
+
+    if department_id is not None:
+        user_department_id = str(getattr(user, "department_id", "") or "")
+        if not user_department_id or user_department_id != str(department_id):
+            return False
+
+    if base_station_id is not None:
+        amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
+        if str(base_station_id) not in _active_contract_base_ids(db, amo_id=amo_id, user_id=user.id):
+            return False
+
+    return True
+
+
 def has_permission(
     db: Session,
     *,
@@ -269,7 +347,13 @@ def has_permission(
         return False
     if any(row.effect == models.PermissionEffect.GRANT for row in explicit):
         return True
-    return code in default_permissions_for(user)
+    return _default_scope_allows(
+        db,
+        user=user,
+        permission_code=code,
+        department_id=department_id,
+        base_station_id=base_station_id,
+    )
 
 
 def require_permission(
