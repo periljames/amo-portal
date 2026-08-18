@@ -102,7 +102,25 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Browser - learner and manager governed Training workflows
         working-directory: frontend
-        run: npx playwright test tests/e2e/training-governed-workflows.spec.ts --workers=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/training-vite-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:4173/ >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/training-vite-preview.log
+            exit 1
+          fi
+          npx playwright test tests/e2e/training-governed-workflows.spec.ts --workers=1
 
   postgres-tenant-isolation:
     runs-on: ubuntu-latest
