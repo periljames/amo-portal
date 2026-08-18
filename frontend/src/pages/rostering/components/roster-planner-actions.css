@@ -1,0 +1,49 @@
+.wr-planner-workspace {
+  position: relative;
+}
+
+.wr-planner-download-shortcut {
+  position: absolute;
+  z-index: 34;
+  top: 5px;
+  right: 43px;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--wr-border);
+  border-radius: 9px;
+  color: var(--wr-text);
+  background: var(--wr-surface-strong);
+  text-decoration: none;
+  transition: background 130ms ease, border-color 130ms ease, transform 130ms ease;
+}
+
+.wr-planner-download-shortcut:hover {
+  border-color: color-mix(in srgb, var(--wr-accent) 40%, var(--wr-border));
+  background: var(--wr-accent-soft);
+  transform: translateY(-1px);
+}
+
+.wr-planner-download-shortcut:focus-visible {
+  outline: 2px solid var(--wr-accent);
+  outline-offset: 2px;
+}
+
+/* Reserve room for the icon-first download action before the refresh control. */
+.wr-planner-workspace .wr-planner-primary-actions {
+  padding-right: 39px;
+}
+
+@media (max-width: 700px) {
+  .wr-planner-download-shortcut {
+    position: static;
+    width: 36px;
+    height: 36px;
+    margin: 4px 5px 0 auto;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions {
+    padding-right: 0;
+  }
+}
