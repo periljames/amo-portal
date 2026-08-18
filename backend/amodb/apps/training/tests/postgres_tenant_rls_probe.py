@@ -9,9 +9,10 @@ from sqlalchemy import create_engine, text
 
 
 BASE_REVISION = "resilience_260816_commands"
-TARGET_REVISION = "training_260818_rls_gap"
+TARGET_REVISION = "training_260818_examgov"
 APP_ROLE = "amo_training_rls_probe"
 TENANT_TABLES = (
+    # Existing post-operating-system Training tenant tables.
     "training_configuration_revisions",
     "training_reference_resources",
     "training_controlled_form_templates",
@@ -24,6 +25,43 @@ TENANT_TABLES = (
     "training_report_definitions",
     "training_report_jobs",
     "training_saved_views",
+    # Governed aviation Training OS envelope.
+    "training_authorities",
+    "training_governance_rules",
+    "training_governance_conflicts",
+    "training_approvals",
+    "training_facilities",
+    "training_providers_governed",
+    "training_approval_scopes",
+    "training_technical_authorisations",
+    "training_course_revisions",
+    "training_course_modules",
+    "training_learning_objectives",
+    "training_practical_tasks",
+    "training_course_prerequisites",
+    "training_course_references",
+    "training_material_revisions",
+    "training_session_governance",
+    "training_module_attendance",
+    "training_practical_assessments",
+    "training_question_bank_items",
+    "training_question_revisions",
+    "training_exam_blueprints",
+    "training_exam_generations",
+    "training_exam_attempts_governed",
+    "training_exam_attempt_items",
+    "training_exam_security_events",
+    "training_impact_assessments",
+    "training_impact_items",
+    "training_session_closeouts",
+    "training_learner_closeouts",
+    "training_authority_submissions",
+    "training_quality_links",
+    # Examination quality governance.
+    "training_exam_forms",
+    "training_exam_item_analysis",
+    "training_exam_moderations",
+    "training_exam_appeals",
 )
 
 
@@ -36,6 +74,13 @@ def _run_alembic(*arguments: str) -> None:
 
 
 def _bootstrap(engine: sa.Engine) -> tuple[str, str]:
+    """Create minimal tenant-bearing tables so this probe isolates RLS behavior.
+
+    The real schema/migration suite validates full FKs and columns.  This probe
+    intentionally pre-creates each tenant table with only id/amo_id; additive
+    migrations therefore skip structural creation and exercise their PostgreSQL RLS
+    policy installation against every governed table.
+    """
     amo_a = str(uuid4())
     amo_b = str(uuid4())
     with engine.begin() as connection:
@@ -43,12 +88,7 @@ def _bootstrap(engine: sa.Engine) -> tuple[str, str]:
         connection.execute(text("CREATE SCHEMA public"))
         connection.execute(text("GRANT ALL ON SCHEMA public TO public"))
         for table_name in TENANT_TABLES:
-            connection.execute(
-                text(
-                    f'CREATE TABLE "{table_name}" ('
-                    "id VARCHAR(36) PRIMARY KEY, amo_id VARCHAR(36) NOT NULL)"
-                )
-            )
+            connection.execute(text(f'CREATE TABLE "{table_name}" (id VARCHAR(36) PRIMARY KEY, amo_id VARCHAR(36) NOT NULL)'))
         connection.execute(
             text(
                 f"""
@@ -66,10 +106,7 @@ def _bootstrap(engine: sa.Engine) -> tuple[str, str]:
 
 
 def _set_tenant(connection: sa.Connection, amo_id: str) -> None:
-    connection.execute(
-        text("SELECT set_config('app.tenant_id', :amo_id, true)"),
-        {"amo_id": amo_id},
-    )
+    connection.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})
 
 
 def _assert_rls_contract(connection: sa.Connection, table_name: str) -> None:
@@ -114,14 +151,8 @@ def main() -> None:
             _assert_rls_contract(connection, table_name)
             connection.execute(
                 text(f'INSERT INTO "{table_name}" (id, amo_id) VALUES (:id_a, :amo_a), (:id_b, :amo_b)'),
-                {
-                    "id_a": f"a-{uuid4().hex[:28]}",
-                    "amo_a": amo_a,
-                    "id_b": f"b-{uuid4().hex[:28]}",
-                    "amo_b": amo_b,
-                },
+                {"id_a": f"a-{uuid4().hex[:28]}", "amo_a": amo_a, "id_b": f"b-{uuid4().hex[:28]}", "amo_b": amo_b},
             )
-
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}"))
         connection.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}"))
 
@@ -131,10 +162,7 @@ def main() -> None:
         for table_name in TENANT_TABLES:
             rows = connection.execute(text(f'SELECT amo_id FROM "{table_name}"')).scalars().all()
             assert rows == [amo_a]
-            cross_tenant = connection.execute(
-                text(f'UPDATE "{table_name}" SET id = id WHERE amo_id = :amo_b'),
-                {"amo_b": amo_b},
-            )
+            cross_tenant = connection.execute(text(f'UPDATE "{table_name}" SET id = id WHERE amo_id = :amo_b'), {"amo_b": amo_b})
             assert cross_tenant.rowcount == 0
 
     with engine.begin() as connection:
@@ -144,7 +172,7 @@ def main() -> None:
             rows = connection.execute(text(f'SELECT amo_id FROM "{table_name}"')).scalars().all()
             assert rows == [amo_b]
 
-    print("Training PostgreSQL tenant RLS probe passed")
+    print(f"Training PostgreSQL tenant RLS probe passed for {len(TENANT_TABLES)} tables")
 
 
 if __name__ == "__main__":

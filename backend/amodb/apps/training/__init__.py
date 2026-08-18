@@ -1,11 +1,13 @@
 """Training domain package."""
 
-# Import the router once, then replace only its evidence transfer and training
-# record presentation call targets. This preserves the established FastAPI
-# route/dependency contracts while centralising public/PDF record semantics.
+# Import the router once, then install bounded extensions onto the canonical
+# Training API.  This preserves established FastAPI route/dependency contracts
+# while avoiding a parallel LMS or duplicate domain roots.
 from . import compliance as _training_compliance
 from . import course_lifecycle as _course_lifecycle
 from . import router as _router_module
+from .exam_governance_routes import install_training_exam_governance_routes
+from .governance_routes import install_training_governance_routes
 from .learner_invitation_routes import install_training_learner_invitation_routes
 from .learner_workflow_routes import install_training_learner_workflow_routes
 from .notification_dispatch_routes import install_training_notification_dispatch_routes
@@ -19,6 +21,8 @@ install_training_workflow_completion(_router_module)
 install_training_learner_invitation_routes(_router_module)
 install_training_learner_workflow_routes(_router_module)
 install_training_notification_dispatch_routes(_router_module)
+install_training_governance_routes(_router_module)
+install_training_exam_governance_routes(_router_module)
 
 # Compatibility boundary for legacy compliance internals. Runtime relationship
 # identity now comes only from explicit catalogue fields; no title/code parsing.
@@ -27,6 +31,8 @@ _training_compliance.is_initial_course = _course_lifecycle.is_initial_course
 _training_compliance.is_refresher_course = _course_lifecycle.is_recurrent_course
 
 __all__ = [
+    "install_training_exam_governance_routes",
+    "install_training_governance_routes",
     "install_training_learner_invitation_routes",
     "install_training_learner_workflow_routes",
     "install_training_notification_dispatch_routes",

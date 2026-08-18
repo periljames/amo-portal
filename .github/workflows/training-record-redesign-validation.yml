@@ -51,12 +51,14 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check -r requirements.txt opencv-python-headless
-      - name: Compile Training backend, migration and schedulers
+      - name: Compile Training backend, migrations and schedulers
         working-directory: backend
         run: >-
           python -m compileall -q
           amodb/apps/training
           amodb/alembic/versions/training_20260818_tenant_rls.py
+          amodb/alembic/versions/training_20260818_governance.py
+          amodb/alembic/versions/training_20260818_exam_governance.py
           amodb/jobs/training_notification_automation.py
           amodb/jobs/training_plan_automation.py
           amodb/jobs/portal_job_supervisor.py
@@ -156,9 +158,14 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check -r requirements.txt
-      - name: Compile Training PostgreSQL tenant probe
+      - name: Compile Training PostgreSQL tenant probe and governance migrations
         working-directory: backend
-        run: python -m py_compile amodb/alembic/versions/training_20260818_tenant_rls.py amodb/apps/training/tests/postgres_tenant_rls_probe.py
+        run: >-
+          python -m py_compile
+          amodb/alembic/versions/training_20260818_tenant_rls.py
+          amodb/alembic/versions/training_20260818_governance.py
+          amodb/alembic/versions/training_20260818_exam_governance.py
+          amodb/apps/training/tests/postgres_tenant_rls_probe.py
       - name: Run Training PostgreSQL tenant RLS probe
         working-directory: backend
         run: python -m amodb.apps.training.tests.postgres_tenant_rls_probe
