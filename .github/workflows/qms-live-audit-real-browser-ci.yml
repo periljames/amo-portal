@@ -112,7 +112,9 @@ jobs:
           done
           (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-live-real-frontend.log 2>&1 & echo $! > /tmp/qms-live-real-frontend.pid)
           for attempt in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:4173/qms/audit-access >/dev/null; then break; fi
+            # Exercise the public React navigation with the same HTML Accept header
+            # used by a browser. JSON APIs for this workspace live under /quality/*.
+            if curl --silent --fail -H 'Accept: text/html' http://127.0.0.1:4173/qms/audit-access >/dev/null; then break; fi
             if [ "$attempt" -eq 60 ]; then cat /tmp/qms-live-real-frontend.log; exit 1; fi
             sleep 1
           done
