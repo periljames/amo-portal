@@ -30,6 +30,5 @@ export function legacyTabForAuditSessionStage(stage: AuditSessionStageId): strin
 }
 
 export function auditSessionPath(amoCode: string, auditKey: string, stage: AuditSessionStageId): string {
-  const path = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/${encodeURIComponent(auditKey)}/${stage}`;
-  return `${path}?tab=${encodeURIComponent(legacyTabForAuditSessionStage(stage))}`;
+  return `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/${encodeURIComponent(auditKey)}/${stage}`;
 }
