@@ -27,6 +27,7 @@ from .operating_policy_guards import (
 )
 from .planning_policy_bridge import bridge_demand_items as _bridge_demand_items
 from .record_presentation import install_training_record_presentation
+from .session_closeout_routes import install_training_session_closeout_routes
 from .shared_storage_policy import install_training_shared_storage
 from .tenant_policy_validation import wrap_update_settings as _wrap_tenant_settings_update
 from .tenant_report_control import install_tenant_report_control
@@ -86,6 +87,7 @@ install_training_learner_workflow_routes(_router_module)
 install_training_notification_dispatch_routes(_router_module)
 install_training_governance_routes(_router_module)
 install_training_canonical_exam_governance_routes(_router_module)
+install_training_session_closeout_routes(_router_module)
 
 # Compatibility boundary for legacy compliance internals. Runtime relationship
 # identity now comes only from explicit catalogue fields; no title/code parsing.
@@ -102,6 +104,7 @@ __all__ = [
     "install_training_learner_workflow_routes",
     "install_training_notification_dispatch_routes",
     "install_training_record_presentation",
+    "install_training_session_closeout_routes",
     "install_training_shared_storage",
     "install_tenant_report_control",
     "install_training_workflow_completion_without_legacy_assessment_routes",
