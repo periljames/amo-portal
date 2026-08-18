@@ -82,12 +82,52 @@ def test_notification_worker_runs_deferral_and_evidence_escalations() -> None:
     assert 'summary[f"workflow_{key}"]' in source
 
 
+def test_learner_self_service_routes_are_tenant_and_subject_scoped() -> None:
+    source = _source("backend/amodb/apps/training/learner_workflow_routes.py")
+    assert '@router.get("/assessments/me")' in source
+    assert "TrainingAssessmentInstance.amo_id == amo_id" in source
+    assert "TrainingAssessmentInstance.candidate_user_id == str(current_user.id)" in source
+    assert '@router.get("/authorization-cases/me")' in source
+    assert "TrainingAuthorizationCase.candidate_user_id == str(current_user.id)" in source
+    assert '@router.post("/invitations/{invitation_id}/rsvp")' in source
+    assert "TrainingSessionInvitation.user_id == str(current_user.id)" in source
+    assert "TrainingParticipantStatus.CONFIRMED" in source
+    assert "TrainingParticipantStatus.CANCELLED" in source
+    assert "TrainingParticipantStatus.INVITED" in source
+
+
+def test_learner_assessment_projection_never_exposes_answer_keys() -> None:
+    source = _source("backend/amodb/apps/training/learner_workflow_routes.py")
+    assert "_safe_assessment_payload" in source
+    assert '"question_text"' in source
+    assert '"answer_options"' in source
+    assert '"answer_key"' not in source
+
+
+def test_manager_workspace_is_role_guarded_and_coordinator_is_editor_guarded() -> None:
+    source = _source("backend/amodb/apps/training/workflow_completion.py")
+    assert "Management permission is required for Team Training." in source
+    assert "if coordinator:\n            _training_editor(router_module, current_user)" in source
+
+
 def test_learner_action_centre_is_mounted_in_my_training() -> None:
     page = _source("frontend/src/pages/MyTrainingPage.tsx")
     component = _source("frontend/src/components/training/TrainingLearnerActionCentre.tsx")
+    service = _source("frontend/src/services/trainingWorkflowCompletion.ts")
     assert "TrainingLearnerActionCentre" in page
     assert "<TrainingLearnerActionCentre />" in page
-    assert "Resubmit deferral" in component
-    assert "Submit replacement evidence" in component
-    assert "Request external learning" in component
-    assert "Record OJT / supervised experience" in component
+    for label in (
+        "Resubmit deferral",
+        "Submit replacement evidence",
+        "Request external learning",
+        "Record OJT / supervised experience",
+        "Training invitations & calendar",
+        "Assessments & examinations",
+        "Authorization readiness & renewal posture",
+        "Training coordinator workspace",
+        "Team Training workspace",
+    ):
+        assert label in component
+    assert "/training/assessments/me" in service
+    assert "/training/authorization-cases/me" in service
+    assert "/training/invitations/${encodeURIComponent(invitationId)}/rsvp" in service
