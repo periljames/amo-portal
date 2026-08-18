@@ -19,6 +19,7 @@ import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import "../../../styles/rostering-workforce.css";
 import "../../../styles/rostering-workforce-layout.css";
 import "./roster-shell-ux.css";
+import "./roster-module-refinement.css";
 
 type Props = {
   title: string;
