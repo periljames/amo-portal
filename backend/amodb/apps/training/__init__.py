@@ -10,6 +10,7 @@ from . import operating_service as _operating_service
 from . import router as _router_module
 from .assessment_readiness_bridge import bridge_readiness as _bridge_assessment_readiness
 from .calendar_lifecycle import install_training_calendar_lifecycle
+from .canonical_assessment_routes import install_training_canonical_assessment_routes
 from .canonical_exam_governance_routes import install_training_canonical_exam_governance_routes
 from .governance_course_scope import technical_authorisation_readiness as _revision_aware_technical_readiness
 from .governance_routes import install_training_governance_routes
@@ -19,7 +20,7 @@ from .notification_dispatch_routes import install_training_notification_dispatch
 from .record_presentation import install_training_record_presentation
 from .shared_storage_policy import install_training_shared_storage
 from .tenant_report_control import install_tenant_report_control
-from .workflow_completion import install_training_workflow_completion
+from .workflow_completion_installer import install_training_workflow_completion_without_legacy_assessment_routes
 
 # Governed routes may receive a TrainingCourseRevision.id while existing technical
 # authorisations remain scoped to canonical TrainingCourse.id. Keep that compatibility
@@ -40,7 +41,8 @@ install_training_calendar_lifecycle()
 
 install_training_shared_storage(_router_module)
 install_training_record_presentation(_router_module)
-install_training_workflow_completion(_router_module)
+install_training_workflow_completion_without_legacy_assessment_routes(_router_module)
+install_training_canonical_assessment_routes(_router_module)
 install_training_learner_invitation_routes(_router_module)
 install_training_learner_workflow_routes(_router_module)
 install_training_notification_dispatch_routes(_router_module)
@@ -55,6 +57,7 @@ _training_compliance.is_refresher_course = _course_lifecycle.is_recurrent_course
 
 __all__ = [
     "install_training_calendar_lifecycle",
+    "install_training_canonical_assessment_routes",
     "install_training_canonical_exam_governance_routes",
     "install_training_governance_routes",
     "install_training_learner_invitation_routes",
@@ -63,5 +66,5 @@ __all__ = [
     "install_training_record_presentation",
     "install_training_shared_storage",
     "install_tenant_report_control",
-    "install_training_workflow_completion",
+    "install_training_workflow_completion_without_legacy_assessment_routes",
 ]
