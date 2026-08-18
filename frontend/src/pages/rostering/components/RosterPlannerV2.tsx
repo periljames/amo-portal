@@ -160,37 +160,15 @@ function CommitmentSourceIcon({ sourceModule }: { sourceModule: string }) {
   return <Umbrella size={12} aria-hidden="true" />;
 }
 
-function PersonCard({ person, assignedDays, plannedHours, issues, rotationValue, rotationOptions, rotationDisabled, rotationTitle, onRotationChange }: {
-  person: RosterPersonRead;
-  assignedDays: number;
-  plannedHours: number;
-  issues: number;
-  rotationValue: string;
-  rotationOptions: RotationOption[];
-  rotationDisabled: boolean;
-  rotationTitle: string;
-  onRotationChange: (cycleDayIndex: number) => void;
-}) {
+function PersonCard({ person }: { person: RosterPersonRead }) {
   return (
-    <div className="wr-person" draggable onDragStart={(event) => setDrag(event, { type: "person", userId: person.user_id })}>
-      <GripVertical size={14} aria-hidden="true" />
-      <span className="wr-person__identity"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.position_title || person.role.replace(/_/g, " ")}</small></span>
-      <label className="wr-person__rotation" title={rotationTitle} onPointerDown={(event) => event.stopPropagation()}>
-        <span className="sr-only">Starting rotation day for {person.full_name}</span>
-        <select
-          aria-label={`Starting shift for ${person.full_name}`}
-          value={rotationValue}
-          disabled={rotationDisabled}
-          draggable={false}
-          onDragStart={(event) => event.preventDefault()}
-          onChange={(event) => onRotationChange(Number(event.target.value))}
-        >
-          {!rotationOptions.length ? <option value="">—</option> : null}
-          {rotationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
-      <span className="wr-person__summary"><strong>{assignedDays}d</strong><small>{plannedHours}h</small>{issues ? <em>{issues}</em> : null}</span>
-      <span className="wr-person__signals" title={`${person.has_active_contract ? "Active contract" : "Contract missing"} · ${person.active_authorisation_count ? `${person.active_authorisation_count} active authorisations` : "Authorisation missing"}`}><i className={person.has_active_contract ? "is-good" : "is-danger"} /><i className={person.active_authorisation_count ? "is-good" : "is-warning"} /></span>
+    <div
+      className="wr-person wr-person--compact"
+      draggable
+      title={person.full_name}
+      onDragStart={(event) => setDrag(event, { type: "person", userId: person.user_id })}
+    >
+      <span className="wr-person__identity"><strong>{person.full_name}</strong></span>
     </div>
   );
 }
@@ -537,6 +515,19 @@ export function RosterPlannerV2() {
     staleTime: 60_000,
     retry: 1,
   });
+  const generationPeopleQuery = useQuery({
+    queryKey: ["rostering", "planner", "generation-people", period?.starts_on, period?.ends_on],
+    queryFn: () => listAllRosterPeople({
+      page_size: 250,
+      active_only: true,
+      roster_eligible_only: true,
+      from: period!.starts_on,
+      to: period!.ends_on,
+    }),
+    enabled: prefillOpen && Boolean(period),
+    staleTime: 30_000,
+    retry: 1,
+  });
   const recommendationsQuery = useQuery({
     queryKey: ["rostering", "planner", "coverage-recommendations", data.selectedVersionId, data.selectedVersion?.state_revision],
     queryFn: () => getRosterCoverageRecommendations(data.selectedVersionId),
@@ -588,6 +579,22 @@ export function RosterPlannerV2() {
     return result;
   }, [data.templates, period, rotationsQuery.data]);
 
+  const generationPeople = generationPeopleQuery.data?.items || people;
+  const initialRotationRows = useMemo(() => {
+    if (!period) return [];
+    return generationPeople.flatMap((person) => {
+      const rotation = rotationByUser.get(person.user_id);
+      if (!rotation) return [];
+      const firstSetupPeriod = rotation.assignment.cycle_anchor_date >= period.starts_on
+        || rotation.assignment.effective_from >= period.starts_on;
+      return firstSetupPeriod ? [{ person, rotation }] : [];
+    });
+  }, [generationPeople, period, rotationByUser]);
+  const missingPatternPeople = useMemo(
+    () => generationPeople.filter((person) => !rotationByUser.has(person.user_id)),
+    [generationPeople, rotationByUser],
+  );
+
   const commitmentsByCell = useMemo(() => {
     const map = new Map<string, RosterCommitmentRead[]>();
     for (const commitment of commitmentsQuery.data?.items || []) {
@@ -629,18 +636,6 @@ export function RosterPlannerV2() {
     });
     return count;
   }, [commitmentsByCell]);
-  const personSummary = useMemo(() => {
-    const map = new Map<string, { dates: Set<string>; minutes: number; issues: number }>();
-    for (const person of people) map.set(person.user_id, { dates: new Set(), minutes: 0, issues: 0 });
-    for (const assignment of data.assignments) {
-      const summary = map.get(assignment.user_id);
-      if (!summary) continue;
-      summary.dates.add(localDate(assignment.starts_at, timezoneName));
-      summary.minutes += assignment.planned_minutes || Math.max(0, (new Date(assignment.ends_at).getTime() - new Date(assignment.starts_at).getTime()) / 60_000);
-      if ((commitmentsQuery.data?.items || []).some((commitment) => commitment.user_id === assignment.user_id && (commitment.blocking || commitment.provisional) && intervalsOverlap(assignment.starts_at, assignment.ends_at, commitment.starts_at, commitment.ends_at))) summary.issues += 1;
-    }
-    return map;
-  }, [commitmentsQuery.data?.items, data.assignments, people, timezoneName]);
   const totalPlannedHours = useMemo(() => Math.round(data.assignments.reduce((total, assignment) => total + (assignment.planned_minutes || 0), 0) / 60), [data.assignments]);
   const pendingSyncCount = useMemo(() => data.assignments.filter((assignment) => assignment.id.startsWith("offline-")).length, [data.assignments]);
 
@@ -956,7 +951,7 @@ export function RosterPlannerV2() {
       });
       await data.refresh();
       data.setSelectedVersionId(created.id);
-      setNotice("Draft created. Generate the month to apply effective work patterns.");
+      setNotice("Draft created. Generate the roster from effective work patterns.");
       setPrefillOpen(true);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -973,11 +968,11 @@ export function RosterPlannerV2() {
     try {
       await updateWorkPatternAssignment(rotation.assignment.id, {
         cycle_anchor_date: anchorDate,
-        reason: `Planner rotation starts on cycle day ${cycleDayIndex + 1}`,
+        reason: `Planner initial cycle starts on day ${cycleDayIndex + 1}`,
       });
       await rotationsQuery.refetch();
-      const selected = rotation.options.find((option) => option.value === String(cycleDayIndex))?.label || `day ${cycleDayIndex + 1}`;
-      setNotice(`${selected} is now the starting rotation for this month; following months continue from it automatically.`);
+      const selectedStart = rotation.options.find((option) => option.value === String(cycleDayIndex))?.label || `day ${cycleDayIndex + 1}`;
+      setNotice(`${rotation.pattern.name}: ${selectedStart} saved as the initial cycle position for ${rotation.targetDate}. Following months continue automatically.`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -990,7 +985,7 @@ export function RosterPlannerV2() {
     setBusy("prefill-patterns"); setError(null); setNotice(null);
     let partial: GenerationProgress | null = null;
     try {
-      const rosterPeople = await listAllRosterPeople({
+      const rosterPeople = generationPeopleQuery.data || await listAllRosterPeople({
         page_size: 250,
         active_only: true,
         roster_eligible_only: true,
@@ -1027,11 +1022,11 @@ export function RosterPlannerV2() {
       const validation = await Promise.allSettled([validateRosterVersion(data.selectedVersion.id)]);
       setNotice(`${partial.created} duties generated for ${partial.processedPeople} people; ${partial.skipped} protected or occupied dates skipped${partial.conflicts ? `; ${partial.conflicts} exceptions need review` : ""}.`);
       await Promise.all([data.refresh(), commitmentsQuery.refetch(), recommendationsQuery.refetch()]);
-      if (validation[0].status === "rejected") setError(`The month was generated, but automatic checks could not finish: ${errorMessage(validation[0].reason)}`);
+      if (validation[0].status === "rejected") setError(`The roster was generated, but mandatory automatic checks could not finish: ${errorMessage(validation[0].reason)}`);
       if (partial.conflicts) setInsightsOpen(true);
     } catch (cause) {
       const completed = partial?.processedPeople || 0;
-      setError(`${completed ? `${completed} people were completed safely. ` : ""}${errorMessage(cause)}${completed ? " Run Fill gaps again to continue; existing duties will not be duplicated." : ""}`);
+      setError(`${completed ? `${completed} people were completed safely. ` : ""}${errorMessage(cause)}${completed ? " Run Generate again to continue; existing duties will not be duplicated." : ""}`);
     } finally {
       setBusy(null);
       setGenerationProgress(null);
@@ -1170,7 +1165,7 @@ export function RosterPlannerV2() {
           </div>
           <div className="wr-planner-primary-actions">
             {!data.selectedVersion && period ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create {format(data.month.days[0], "MMM")} roster</button> : null}
-            {data.selectedVersion && canGeneratePatterns ? <button type="button" className={`wr-button ${data.assignments.length ? "wr-button--secondary" : "wr-button--primary"}`} onClick={() => setPrefillOpen(true)} disabled={!period || Boolean(busy) || Boolean(rotationUpdatingUserId)}><WandSparkles size={16} /> {data.assignments.length ? "Fill gaps" : "Generate month"}</button> : null}
+            {data.selectedVersion && canGeneratePatterns ? <button type="button" className="wr-button wr-button--primary" onClick={() => setPrefillOpen(true)} disabled={!period || Boolean(busy) || Boolean(rotationUpdatingUserId)}><WandSparkles size={16} /> Generate</button> : null}
             <button type="button" className="wr-button wr-button--secondary wr-coverage-toggle" onClick={() => setInsightsOpen(true)} disabled={!data.selectedVersion}><PanelRightOpen size={16} /> Exceptions <span>{recommendationCount + openFindingCount}</span></button>
             <button type="button" className="wr-button wr-button--primary" onClick={() => setReviewOpen(true)} disabled={!data.selectedVersion || !data.assignments.length}><ClipboardCheck size={16} /> Review &amp; submit</button>
             <button type="button" className="wr-icon-button" aria-label="Refresh planner" onClick={() => void refreshAll()}><RefreshCw size={17} className={data.refreshing || commitmentsQuery.isFetching ? "is-spinning" : ""} /></button>
@@ -1198,14 +1193,11 @@ export function RosterPlannerV2() {
         {!data.selectedVersion ? <EmptyState title={period ? `Create ${format(data.month.days[0], "MMMM")} roster` : "No monthly period"} description={period ? "Start a draft, then generate duties from effective work patterns." : "Create the monthly period in Setup first."} action={period ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create monthly roster</button> : null} /> : <div className="wr-planner-body wr-planner-body--month">
           <div className="wr-grid-scroll" aria-label={`${format(data.month.days[0], "MMMM yyyy")} monthly roster`}>
             <div className="wr-roster-grid wr-roster-grid--month" role="grid" aria-rowcount={people.length + 1} aria-colcount={data.month.days.length + 1} aria-multiselectable="true" style={{ "--wr-days": data.month.days.length } as CSSProperties}>
-              <div className="wr-grid-row" role="row"><div className="wr-grid-corner" role="columnheader"><span><strong>Personnel</strong><small>Select a cell, then type a shift code</small></span><strong className="wr-grid-corner__start" title="Starting cycle day; continuity is inferred from the saved anchor">Start</strong></div>
+              <div className="wr-grid-row" role="row"><div className="wr-grid-corner" role="columnheader"><strong>Personnel</strong></div>
                 {data.month.days.map((day) => { const holiday = holidaysByDate.get(isoDate(day)); return <div key={isoDate(day)} role="columnheader" className={`wr-day-header${isoDate(day) === isoDate(new Date()) ? " is-today" : ""}${[0, 6].includes(day.getDay()) ? " is-weekend" : ""}${holiday ? " is-holiday" : ""}`} title={holiday ? `${holiday.name} · ${format(day, "EEEE, d MMMM yyyy")}` : format(day, "EEEE, d MMMM yyyy")}><small>{format(day, "EEE")}</small><strong>{format(day, "d")}</strong>{holiday ? <em>H</em> : null}</div>; })}
               </div>
-              {people.map((person) => {
-                const summary = personSummary.get(person.user_id);
-                const rotation = rotationByUser.get(person.user_id);
-                return <div className="wr-grid-row" role="row" key={person.user_id}>
-                <div className="wr-grid-person" role="rowheader"><PersonCard person={person} assignedDays={summary?.dates.size || 0} plannedHours={Math.round((summary?.minutes || 0) / 60)} issues={summary?.issues || 0} rotationValue={rotation?.value || ""} rotationOptions={rotation?.options || []} rotationDisabled={!editable || !rotation || rotationUpdatingUserId === person.user_id || Boolean(busy)} rotationTitle={rotation ? `${rotation.pattern.code} · starts ${rotation.targetDate}` : rotationsQuery.isLoading ? "Loading saved rotation" : "Assign a work pattern in Workforce before selecting a rotation start"} onRotationChange={(cycleDayIndex) => void changeRotationStart(person.user_id, cycleDayIndex)} /></div>
+              {people.map((person) => <div className="wr-grid-row" role="row" key={person.user_id}>
+                <div className="wr-grid-person" role="rowheader"><PersonCard person={person} /></div>
                 {data.month.days.map((day) => {
                   const key = `${person.user_id}:${isoDate(day)}`;
                   const point = { userId: person.user_id, date: isoDate(day) };
@@ -1246,7 +1238,7 @@ export function RosterPlannerV2() {
                     {rows.length === 0 && commitments.length === 0 && editable && !cellEntry ? <button type="button" className="wr-cell-add" title={`Assign ${person.full_name} on ${format(day, "d MMMM")}`} aria-label={`Assign ${person.full_name} on ${format(day, "d MMMM")}`} onClick={() => void create(person, day)} disabled={busy === `create:${person.user_id}:${isoDate(day)}`}><Plus size={12} /></button> : null}
                   </div>;
                 })}
-              </div>;})}
+              </div>)}
             </div>
             <datalist id="wr-shift-code-options">{pickerTemplates.map((template) => <option key={template.id} value={template.code}>{template.label}</option>)}</datalist>
           </div>
@@ -1276,14 +1268,40 @@ export function RosterPlannerV2() {
         onAction={(action) => void lifecycle(action)}
         onClose={() => setReviewOpen(false)}
       /> : null}
-      {commandOpen ? <div className="wr-command-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCommandOpen(false); }}><div className="wr-command-palette" role="dialog" aria-modal="true" aria-labelledby="wr-command-title"><div className="wr-command-heading"><div><span className="wr-eyebrow">Keyboard planner</span><h2 id="wr-command-title">Quick actions</h2></div><button type="button" className="wr-icon-button" aria-label="Close commands" onClick={() => setCommandOpen(false)}><X size={16} /></button></div><button type="button" onClick={() => { data.setAnchor(new Date()); setCommandOpen(false); }}><span>Go to current month</span><kbd>T</kbd></button><button type="button" onClick={() => { data.moveMonth(-1); setCommandOpen(false); }}><span>Previous month</span><kbd>[</kbd></button><button type="button" onClick={() => { data.moveMonth(1); setCommandOpen(false); }}><span>Next month</span><kbd>]</kbd></button><button type="button" onClick={() => { setCommandOpen(false); window.setTimeout(() => searchRef.current?.focus(), 0); }}><span>Search personnel</span><kbd>/</kbd></button><button type="button" onClick={() => { setInsightsOpen(true); setCommandOpen(false); }}><span>Open coverage intelligence</span><kbd>C</kbd></button><button type="button" disabled={!data.selectedVersion || Boolean(busy)} onClick={() => { setCommandOpen(false); void lifecycle("validate"); }}><span>Validate roster</span><kbd>V</kbd></button>{canGeneratePatterns ? <button type="button" disabled={!period || Boolean(busy)} onClick={() => { setCommandOpen(false); setPrefillOpen(true); }}><span>Prefill month from patterns</span><kbd>P</kbd></button> : null}</div></div> : null}
+      {commandOpen ? <div className="wr-command-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCommandOpen(false); }}><div className="wr-command-palette" role="dialog" aria-modal="true" aria-labelledby="wr-command-title"><div className="wr-command-heading"><div><span className="wr-eyebrow">Keyboard planner</span><h2 id="wr-command-title">Quick actions</h2></div><button type="button" className="wr-icon-button" aria-label="Close commands" onClick={() => setCommandOpen(false)}><X size={16} /></button></div><button type="button" onClick={() => { data.setAnchor(new Date()); setCommandOpen(false); }}><span>Go to current month</span><kbd>T</kbd></button><button type="button" onClick={() => { data.moveMonth(-1); setCommandOpen(false); }}><span>Previous month</span><kbd>[</kbd></button><button type="button" onClick={() => { data.moveMonth(1); setCommandOpen(false); }}><span>Next month</span><kbd>]</kbd></button><button type="button" onClick={() => { setCommandOpen(false); window.setTimeout(() => searchRef.current?.focus(), 0); }}><span>Search personnel</span><kbd>/</kbd></button><button type="button" onClick={() => { setInsightsOpen(true); setCommandOpen(false); }}><span>Open coverage intelligence</span><kbd>C</kbd></button><button type="button" disabled={!data.selectedVersion || Boolean(busy)} onClick={() => { setCommandOpen(false); void lifecycle("validate"); }}><span>Validate roster</span><kbd>V</kbd></button>{canGeneratePatterns ? <button type="button" disabled={!period || Boolean(busy)} onClick={() => { setCommandOpen(false); setPrefillOpen(true); }}><span>Generate roster</span><kbd>P</kbd></button> : null}</div></div> : null}
       {prefillOpen && period && data.selectedVersion ? (
         <div className="wr-prefill-dialog" role="dialog" aria-modal="true" aria-labelledby="wr-prefill-title">
-          <div className="wr-prefill-dialog__head"><div><span className="wr-eyebrow">Automation preview</span><h2 id="wr-prefill-title">Generate {format(data.month.days[0], "MMMM")} roster</h2><p>{period.starts_on}–{period.ends_on}</p></div><button type="button" className="wr-icon-button" aria-label="Close generation preview" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}><X size={17} /></button></div>
-          <div className="wr-prefill-summary"><article><strong>{data.peopleTotal}</strong><span>Personnel</span></article><article><strong>{data.assignments.length}</strong><span>Existing duties kept</span></article><article><strong>{protectedCellCount}</strong><span>Protected dates</span></article><article><strong>{recommendationCount + openFindingCount}</strong><span>Current exceptions</span></article></div>
-          <ul className="wr-prefill-rules"><li><WandSparkles size={15} /> Saved start shifts continue each rotation</li><li><GraduationCap size={15} /> Scheduled classes protected — leave stays protected too</li><li><ShieldCheck size={15} /> Collision-safe — occupied dates are skipped, never duplicated</li></ul>
-          {generationProgress ? <div className="wr-prefill-batch-progress" role="status"><div><strong>{generationProgress.processedPeople}/{generationProgress.totalPeople} people</strong><span>{generationProgress.created} duties · {generationProgress.skipped} skipped</span></div><progress max={generationProgress.totalPeople} value={generationProgress.processedPeople} /></div> : null}
-          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || Boolean(rotationUpdatingUserId)} onClick={() => void prefillFromPatterns()}>{busy === "prefill-patterns" ? <RefreshCw size={15} className="is-spinning" /> : <WandSparkles size={15} />} {generationProgress ? "Generating…" : "Generate month"}</button></div>
+          <div className="wr-prefill-dialog__head"><div><span className="wr-eyebrow">Controlled generation</span><h2 id="wr-prefill-title">Generate {format(data.month.days[0], "MMMM")} roster</h2><p>Build the complete roster from each person's effective tenant work pattern. Existing manual edits and protected source commitments remain unchanged.</p></div><button type="button" className="wr-icon-button" aria-label="Close generation" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}><X size={17} /></button></div>
+          <div className="wr-prefill-summary"><article><strong>{generationPeopleQuery.isPending ? "…" : generationPeople.length}</strong><span>Roster personnel</span></article><article><strong>{data.assignments.length}</strong><span>Existing duties kept</span></article><article><strong>{protectedCellCount}</strong><span>Protected dates</span></article><article><strong>{recommendationCount + openFindingCount}</strong><span>Current exceptions</span></article></div>
+          <ul className="wr-prefill-rules">
+            <li><Repeat2 size={15} /> Saved cycle positions continue automatically into following months — September continues from August; users do not restart each person.</li>
+            <li><Umbrella size={15} /> Approved or pending leave, unavailability, Training and other protected commitments are mandatory constraints and cannot be switched off here.</li>
+            <li><ShieldCheck size={15} /> Compliance validation always runs after generation. Any governed change remains subject to the configured approval and personnel-consent workflow.</li>
+          </ul>
+          {generationPeopleQuery.error ? <div className="wr-inline-error">Could not load personnel for generation setup: {errorMessage(generationPeopleQuery.error)}</div> : null}
+          {!generationPeopleQuery.isPending && missingPatternPeople.length ? <div className="wr-inline-warning"><AlertTriangle size={15} /> <span><strong>{missingPatternPeople.length} roster-eligible {missingPatternPeople.length === 1 ? "person has" : "people have"} no effective work pattern.</strong> Assign the correct tenant work pattern in Workforce before generating; the planner will not invent a shift.</span></div> : null}
+          {!generationPeopleQuery.isPending && initialRotationRows.length ? (
+            <section className="wr-generation-starts" aria-labelledby="wr-generation-starts-title">
+              <div className="wr-generation-starts__head"><div><strong id="wr-generation-starts-title">Initial cycle starts</strong><p>Only first-time pattern assignments need a starting position. Once saved, later roster periods roll forward automatically from this anchor.</p></div><span className="wr-pill wr-pill--info">{initialRotationRows.length} first setup</span></div>
+              <div className="wr-generation-starts__list">
+                {initialRotationRows.map(({ person, rotation }) => (
+                  <label key={person.user_id}>
+                    <span><strong>{person.full_name}</strong><small>{rotation.pattern.name}</small></span>
+                    <select
+                      aria-label={`Initial shift for ${person.full_name}`}
+                      value={rotation.value}
+                      disabled={Boolean(busy) || rotationUpdatingUserId === person.user_id}
+                      onChange={(event) => void changeRotationStart(person.user_id, Number(event.target.value))}
+                    >
+                      {rotation.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ) : !generationPeopleQuery.isPending && !missingPatternPeople.length ? <div className="wr-generation-continuity"><Repeat2 size={16} /><span><strong>Cycle continuity is already established.</strong> This month starts from the saved pattern anchors automatically.</span></div> : null}
+          {generationProgress ? <div className="wr-prefill-batch-progress" role="status"><div><strong>{generationProgress.processedPeople}/{generationProgress.totalPeople} people</strong><span>{generationProgress.created} duties · {generationProgress.skipped} protected/occupied · {generationProgress.conflicts} exceptions</span></div><progress max={generationProgress.totalPeople} value={generationProgress.processedPeople} /></div> : null}
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || Boolean(rotationUpdatingUserId) || generationPeopleQuery.isPending || Boolean(generationPeopleQuery.error) || missingPatternPeople.length > 0} onClick={() => void prefillFromPatterns()}>{busy === "prefill-patterns" ? <RefreshCw size={15} className="is-spinning" /> : <WandSparkles size={15} />} {generationProgress ? "Generating…" : "Generate roster"}</button></div>
         </div>
       ) : null}
       <AnimatePresence>{selected ? <AssignmentDrawer key={selected.id} assignment={selected} templates={data.templates} bases={basesQuery.data || []} timezoneName={timezoneName} editable={editable && !selected.locked_after_publish && !selected.id.startsWith("offline-")} onClose={() => setSelectedId(null)} onSaved={replace} onDeleted={(id) => data.setAssignments((current) => current.filter((row) => row.id !== id))} /> : null}</AnimatePresence>
