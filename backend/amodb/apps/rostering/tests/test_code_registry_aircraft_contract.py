@@ -15,10 +15,8 @@ def _routes():
 
 
 def test_recommended_amo_starter_codes_are_compact_and_resource_neutral():
-    assert code_registry.STARTER_CODES == (
-        "DY", "AM", "PM", "XD", "WD", "NT", "F1", "F2", "FD", "SB", "TR", "OF", "RD"
-    )
-    assert all(len(code) == 2 for code in code_registry.STARTER_CODES)
+    assert code_registry.STARTER_CODES == ("D", "X", "RD")
+    assert all(1 <= len(code) <= 2 for code in code_registry.STARTER_CODES)
     assert not {"JKIA", "HA", "H.A", "OS", "SS", "LC"}.intersection(code_registry.STARTER_CODES)
 
 

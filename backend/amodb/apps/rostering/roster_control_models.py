@@ -36,13 +36,43 @@ class RosterControlledDocumentSettings(Base):
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
-    form_number = Column(String(64), nullable=False, default="ROSTER")
+    # The portal does not manufacture a form/control number. Each tenant sets
+    # its own value through the governed frontend and may later change it.
+    form_number = Column(String(64), nullable=False, default="")
     revision_label = Column(String(64), nullable=True)
     revision_date = Column(Date, nullable=True)
     footer_note = Column(Text, nullable=True)
     prepared_by_label = Column(String(64), nullable=False, default="Prepared by")
     approved_by_label = Column(String(64), nullable=False, default="Approved by")
     page_size = Column(String(8), nullable=False, default="A3")
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class RosterControlledFormNumberReservation(Base):
+    """Tenant-local control-number registry for governed printed outputs.
+
+    ``normalized_number`` is unique only inside an AMO/tenant. The same number
+    may therefore be used legitimately by a different tenant. ``owner_type``
+    keeps this registry extensible to other controlled portal outputs without
+    baking a Safarilink or module-specific form number into the platform.
+    """
+
+    __tablename__ = "roster_controlled_form_number_reservations"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "normalized_number", name="uq_roster_control_number_amo_number"),
+        UniqueConstraint("amo_id", "owner_type", "owner_id", name="uq_roster_control_number_amo_owner"),
+        Index("ix_roster_control_number_amo_owner", "amo_id", "owner_type", "owner_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    normalized_number = Column(String(64), nullable=False)
+    display_number = Column(String(64), nullable=False)
+    owner_type = Column(String(64), nullable=False)
+    owner_id = Column(String(36), nullable=False)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
