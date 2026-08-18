@@ -1,16 +1,19 @@
 """Tenant-safe scheduled Training compliance notifications.
 
 This worker materialises authoritative in-app Training actions, runs governed
-workflow escalations, and processes the durable external delivery outbox.  It
+workflow escalations, and processes the durable external delivery outbox. It
 never treats creation of an in-app row as proof that an external provider sent
 or delivered a message.
+
+Reminder timing is tenant policy. The platform does not invent reminder days for
+an AMO that has not configured them.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.exc import IntegrityError
@@ -24,20 +27,20 @@ from amodb.database import WriteSessionLocal, close_session_safely
 
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
-_DEFAULT_DUE_DAYS = (90, 60, 30, 15, 7, 1)
-_DEFAULT_OVERDUE_DAYS = (1, 7, 14, 30)
 
 
 @dataclass(frozen=True)
 class ReminderPolicy:
+    configured: bool
     enabled: bool
     due_days: tuple[int, ...]
     overdue_days: tuple[int, ...]
+    error: str | None = None
 
 
-def _positive_unique_days(value: Any, default: Iterable[int]) -> tuple[int, ...]:
+def _positive_unique_days(value: Any) -> tuple[int, ...]:
     if not isinstance(value, (list, tuple, set)):
-        value = default
+        return ()
     result: set[int] = set()
     for raw in value:
         try:
@@ -46,29 +49,38 @@ def _positive_unique_days(value: Any, default: Iterable[int]) -> tuple[int, ...]
             continue
         if 1 <= day <= 730:
             result.add(day)
-    return tuple(sorted(result, reverse=True)) or tuple(sorted(set(default), reverse=True))
+    return tuple(sorted(result, reverse=True))
 
 
 def reminder_policy(raw: Any) -> ReminderPolicy:
     payload = raw if isinstance(raw, dict) else {}
-    reminders = payload.get("compliance_reminders") if isinstance(payload.get("compliance_reminders"), dict) else payload
-    enabled = reminders.get("enabled", True) is not False
+    explicit = payload.get("compliance_reminders")
+    if not isinstance(explicit, dict):
+        return ReminderPolicy(configured=False, enabled=False, due_days=(), overdue_days=())
+
+    enabled = explicit.get("enabled") is True
+    due_days = _positive_unique_days(explicit.get("due_days"))
+    overdue_days = _positive_unique_days(explicit.get("overdue_days"))
+    if enabled and not due_days and not overdue_days:
+        return ReminderPolicy(
+            configured=True,
+            enabled=False,
+            due_days=(),
+            overdue_days=(),
+            error="Enabled compliance reminders require at least one tenant-defined due or overdue milestone.",
+        )
     return ReminderPolicy(
+        configured=True,
         enabled=enabled,
-        due_days=_positive_unique_days(reminders.get("due_days"), _DEFAULT_DUE_DAYS),
-        overdue_days=_positive_unique_days(reminders.get("overdue_days"), _DEFAULT_OVERDUE_DAYS),
+        due_days=due_days,
+        overdue_days=overdue_days,
     )
 
 
 def selected_milestone(days_until_due: int | None, policy: ReminderPolicy) -> tuple[str, int] | None:
-    """Return the single most relevant crossed reminder milestone.
+    """Return the single most relevant crossed tenant-defined milestone."""
 
-    Choosing one milestone avoids a burst of historical reminders when a tenant
-    first enables the scheduler. The due-date-specific dedupe key makes repeated
-    hourly runs idempotent.
-    """
-
-    if days_until_due is None:
+    if not policy.enabled or days_until_due is None:
         return None
     days = int(days_until_due)
     if days >= 0:
@@ -140,6 +152,8 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
         "created": 0,
         "deduped": 0,
         "disabled": 0,
+        "policy_missing": 0,
+        "policy_invalid": 0,
         "failed_tenants": 0,
         "errors": 0,
     }
@@ -153,6 +167,13 @@ def run_once(*, now: datetime | None = None, tenant_limit: int = 100, user_limit
         summary["configured"] = len(settings_rows)
         for settings in settings_rows:
             policy = reminder_policy(settings.notification_policy)
+            if not policy.configured:
+                summary["policy_missing"] += 1
+                continue
+            if policy.error:
+                summary["policy_invalid"] += 1
+                logger.warning("Training reminder policy invalid for tenant %s: %s", settings.amo_id, policy.error)
+                continue
             if not policy.enabled:
                 summary["disabled"] += 1
                 continue
