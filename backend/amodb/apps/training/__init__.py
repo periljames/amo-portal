@@ -6,7 +6,9 @@
 from . import compliance as _training_compliance
 from . import course_lifecycle as _course_lifecycle
 from . import governance_service as _governance_service
+from . import operating_service as _operating_service
 from . import router as _router_module
+from .assessment_readiness_bridge import bridge_readiness as _bridge_assessment_readiness
 from .canonical_exam_governance_routes import install_training_canonical_exam_governance_routes
 from .governance_course_scope import technical_authorisation_readiness as _revision_aware_technical_readiness
 from .governance_routes import install_training_governance_routes
@@ -21,6 +23,13 @@ from .workflow_completion import install_training_workflow_completion
 # authorisations remain scoped to canonical TrainingCourse.id. Keep that compatibility
 # boundary in one place rather than changing legacy authorisation identities.
 _governance_service.technical_authorisation_readiness = _revision_aware_technical_readiness
+
+# The original readiness calculator recognizes the legacy APPROVED/PASS state
+# vocabulary. Canonical assessment attempts use COMPLETED/PASSED. Bridge those
+# vocabularies at the single readiness boundary without creating a second case model.
+_operating_service.compute_authorization_readiness = _bridge_assessment_readiness(
+    _operating_service.compute_authorization_readiness
+)
 
 install_training_shared_storage(_router_module)
 install_training_record_presentation(_router_module)
