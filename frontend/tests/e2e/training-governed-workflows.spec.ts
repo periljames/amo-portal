@@ -94,9 +94,43 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
       path.endsWith("/training/records") ||
       path.endsWith("/training/certificates") ||
       path.endsWith("/training/deferrals/me") ||
-      path.endsWith("/training/files")
+      path.endsWith("/training/deferrals/me/enriched") ||
+      path.endsWith("/training/files") ||
+      path.endsWith("/training/external-learning/requests/me") ||
+      path.endsWith("/training/assessments/me") ||
+      path.endsWith("/training/authorization-cases/me")
     ) {
       await json(route, []);
+      return;
+    }
+    if (path.endsWith("/training/ojt/me")) {
+      await json(route, { verified_hours: 0, items: [] });
+      return;
+    }
+    if (path.endsWith("/training/workspace/coordinator")) {
+      if (role !== "QUALITY_MANAGER") {
+        await json(route, { detail: "Training editor permission is required." }, 403);
+        return;
+      }
+      await json(route, {
+        workspace: "COORDINATOR",
+        generated_at: "2026-08-18T03:00:00Z",
+        team_health: { people: 1, current: 0, due_soon: 1, overdue: 0, incomplete: 0 },
+        action_queue: [],
+      });
+      return;
+    }
+    if (path.endsWith("/training/workspace/manager")) {
+      if (role === "TECHNICIAN") {
+        await json(route, { detail: "Management permission is required for Team Training." }, 403);
+        return;
+      }
+      await json(route, {
+        workspace: "MANAGER",
+        generated_at: "2026-08-18T03:00:00Z",
+        team_health: { people: 1, current: 0, due_soon: 1, overdue: 0, incomplete: 0 },
+        action_queue: [],
+      });
       return;
     }
     if (path.endsWith("/training/operating/access")) {
@@ -149,6 +183,7 @@ test("learner My Training renders governed recurrent status without page overflo
   await expect(page.getByRole("heading", { name: "My Training" })).toBeVisible();
   await expect(page.getByText("Human Factors Recurrent")).toBeVisible();
   await expect(page.getByRole("heading", { name: "My training tasks" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Upcoming sessions & waitlist" })).toBeVisible();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
