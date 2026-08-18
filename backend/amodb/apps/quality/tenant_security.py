@@ -189,7 +189,7 @@ def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
         )
         .first()
     )
-    if subscription is None:
+    if subscription is None or not isinstance(subscription, account_models.ModuleSubscription):
         return
     state = _normalise(subscription.status).upper()
     if state not in {
@@ -252,7 +252,6 @@ def _active_support_session(db: Session, *, amo_id: str, platform_user_id: str) 
 
 def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.User, db: Session) -> TenantContext:
     amo = _resolve_amo(db, amo_code)
-    _assert_quality_module_available(db, amo_id=str(amo.id))
     if _is_platform_superuser(current_user):
         session = _active_support_session(db, amo_id=str(amo.id), platform_user_id=str(current_user.id))
         if not session:
@@ -260,6 +259,7 @@ def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Start an active platform support session for this tenant before opening Quality tenant routes.",
             )
+        _assert_quality_module_available(db, amo_id=str(amo.id))
         set_postgres_tenant_context(db, amo_id=str(amo.id), user_id=str(current_user.id))
         return TenantContext(
             amo_code=amo_code,
@@ -274,6 +274,7 @@ def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.
     if not effective_amo_id or str(effective_amo_id) != str(amo.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a member of this AMO tenant.")
 
+    _assert_quality_module_available(db, amo_id=str(amo.id))
     set_postgres_tenant_context(db, amo_id=str(amo.id), user_id=str(current_user.id))
     return TenantContext(amo_code=amo_code, amo_id=str(amo.id), user_id=str(current_user.id), is_superuser=False)
 
