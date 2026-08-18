@@ -336,6 +336,8 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
   const mutationCard = page.locator(".workforce-governance__mutation-card");
   const organisationFilter = filters.locator("label").filter({ hasText: /^Organisation/ }).locator("select").first();
   const organisationMutation = mutationCard.locator("label").filter({ hasText: /^Organisation/ }).locator("select").first();
+  const changeTypeMutation = mutationCard.locator("label").filter({ hasText: /^Change type/ }).locator("select").first();
+  const placementMutation = mutationCard.locator("label").filter({ hasText: /^Placement/ }).locator("select").first();
   await organisationFilter.selectOption("org-quality");
   await expect(page).toHaveURL(/gov_org=org-quality/);
   await expect(page.getByText("1-50 of 5,000")).toBeVisible();
@@ -344,9 +346,9 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await page.getByRole("button", { name: "Select all 10,000 matching" }).click();
   await expect(page.getByText("10,000 selected", { exact: true })).toBeVisible();
-  await mutationCard.getByLabel("Change type", { exact: true }).selectOption("ASSIGN_ORGANIZATION");
+  await changeTypeMutation.selectOption("ASSIGN_ORGANIZATION");
   await organisationMutation.selectOption("org-line");
-  await mutationCard.getByLabel("Placement", { exact: true }).selectOption("SECONDARY");
+  await placementMutation.selectOption("SECONDARY");
   await page.getByRole("button", { name: "Preview 10,000 selected" }).click();
   await page.getByRole("button", { name: "Confirm 10,000 changes" }).click();
 
