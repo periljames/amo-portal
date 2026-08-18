@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.training.courses_import import import_courses_rows, parse_courses_sheet
-from amodb.apps.training.models import TrainingCourse
+from amodb.apps.training.models import TrainingCourse, TrainingRequirement
 
 
 def _seed_amo(db):
@@ -21,6 +21,11 @@ def _seed_amo(db):
     db.add(amo)
     db.commit()
     return amo
+
+
+def _ensure_import_tables(db) -> None:
+    TrainingCourse.__table__.create(bind=db.bind, checkfirst=True)
+    TrainingRequirement.__table__.create(bind=db.bind, checkfirst=True)
 
 
 def _xlsx_bytes(sheet_name: str, headers: list[str], rows: list[list[object]]) -> bytes:
@@ -61,7 +66,7 @@ def test_parse_courses_sheet_rejects_wrong_sheet_and_unknown_headers():
 
 
 def test_courses_import_contract_and_normalization(db_session):
-    TrainingCourse.__table__.create(bind=db_session.bind, checkfirst=True)
+    _ensure_import_tables(db_session)
     amo = _seed_amo(db_session)
     rows = [
         {
@@ -131,7 +136,7 @@ def test_courses_import_contract_and_normalization(db_session):
 
 
 def test_courses_import_rejects_duplicate_course_id_and_invalid_tokens(db_session):
-    TrainingCourse.__table__.create(bind=db_session.bind, checkfirst=True)
+    _ensure_import_tables(db_session)
     amo = _seed_amo(db_session)
     rows = [
         {
@@ -209,7 +214,7 @@ def test_courses_import_rejects_duplicate_course_id_and_invalid_tokens(db_sessio
 
 
 def test_courses_workbook_fixture_dry_run_and_live_import(db_session):
-    TrainingCourse.__table__.create(bind=db_session.bind, checkfirst=True)
+    _ensure_import_tables(db_session)
     amo = _seed_amo(db_session)
     headers = [
         "CourseID",
