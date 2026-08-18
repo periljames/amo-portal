@@ -18,6 +18,7 @@ const SHIFT_POLICY_KEY = ["rostering", "settings", "shift-operational-policies"]
 const SEMANTICS: RosterShiftDutySemantic[] = ["DUTY", "STANDBY", "TRAINING", "REST", "OFF", "LEAVE", "SICK", "OTHER"];
 const CALENDAR_MODES: RosterShiftCalendarMode[] = ["TIMED", "ALL_DAY", "HIDDEN"];
 const VERIFICATION_STATES: RosterShiftVerification[] = ["CONFIRMED", "REVIEW_REQUIRED", "UNRESOLVED"];
+const DUTY_SEMANTICS: RosterShiftDutySemantic[] = ["DUTY", "STANDBY", "TRAINING"];
 
 type Draft = {
   counts_as_duty: boolean;
@@ -102,6 +103,10 @@ function PolicyEditor({
       setLocalError("REST/OFF semantics cannot count as duty. Use DUTY or STANDBY instead.");
       return;
     }
+    if (DUTY_SEMANTICS.includes(draft.duty_semantic) && !draft.counts_as_duty) {
+      setLocalError("DUTY, STANDBY and TRAINING semantics must count as duty.");
+      return;
+    }
     if (draft.effective_from && draft.effective_to && draft.effective_to < draft.effective_from) {
       setLocalError("Policy end date cannot precede its start date.");
       return;
@@ -122,10 +127,10 @@ function PolicyEditor({
         <label><span>Verification</span><select value={draft.verification_status} disabled={!canManage} onChange={(event) => set("verification_status", event.target.value as RosterShiftVerification)}>{VERIFICATION_STATES.map((value) => <option key={value}>{value.replace(/_/g, " ")}</option>)}</select></label>
         <label><span>Unpaid break minutes</span><input type="number" min="0" max="1440" value={draft.unpaid_break_minutes} disabled={!canManage} onChange={(event) => set("unpaid_break_minutes", Number(event.target.value))} /></label>
         <label><span>Fatigue weight</span><input type="number" min="0" max="100" step="0.1" value={draft.fatigue_weight} disabled={!canManage} onChange={(event) => set("fatigue_weight", Number(event.target.value))} /></label>
-        <label><span>Pay classification</span><input value={draft.pay_classification} disabled={!canManage} placeholder="Normal duty / OT / rest-day work…" onChange={(event) => set("pay_classification", event.target.value)} /></label>
+        <label><span>Pay classification</span><input value={draft.pay_classification} disabled={!canManage} placeholder="Tenant-defined pay classification" onChange={(event) => set("pay_classification", event.target.value)} /></label>
         <label><span>Policy effective from</span><input type="date" value={draft.effective_from} disabled={!canManage} onChange={(event) => set("effective_from", event.target.value)} /></label>
         <label><span>Policy effective to</span><input type="date" value={draft.effective_to} disabled={!canManage} onChange={(event) => set("effective_to", event.target.value)} /></label>
-        <label className="wr-span-2"><span>Controlled source / evidence</span><input value={draft.source_reference} disabled={!canManage} placeholder="Manual clause, approved policy or controlled source" onChange={(event) => set("source_reference", event.target.value)} /></label>
+        <label className="wr-span-2"><span>Controlled source / evidence</span><input value={draft.source_reference} disabled={!canManage} placeholder="Tenant-approved controlled source or policy" onChange={(event) => set("source_reference", event.target.value)} /></label>
       </div>
       <div className="wr-form-grid wr-form-grid--inspector">
         <label><input type="checkbox" checked={draft.counts_as_duty} disabled={!canManage} onChange={(event) => set("counts_as_duty", event.target.checked)} /> Counts as duty</label>
@@ -136,7 +141,7 @@ function PolicyEditor({
         <label><input type="checkbox" checked={draft.requires_supervisor_approval} disabled={!canManage} onChange={(event) => set("requires_supervisor_approval", event.target.checked)} /> Requires supervisor approval</label>
       </div>
       {row.spans_midnight ? <div className="wr-inline-note"><Clock3 size={15} /> This template crosses midnight. Compliance uses the resulting timestamp interval, not the calendar cell.</div> : null}
-      {draft.counts_as_rest ? <div className="wr-inline-warning"><AlertTriangle size={15} /> A rest/off code is only roster evidence. It does not itself prove 24 uninterrupted hours relieved from all duties; the legal engine still checks the surrounding timestamps.</div> : null}
+      {draft.counts_as_rest ? <div className="wr-inline-warning"><AlertTriangle size={15} /> A rest/off code is only roster evidence. It does not itself prove uninterrupted protected rest; the compliance engine still checks the surrounding timestamps.</div> : null}
       {localError ? <div className="wr-inline-error" role="alert">{localError}</div> : null}
       {canManage ? <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--primary" disabled={!changed || saving} onClick={() => void save()}><Save size={14} /> Save operational policy</button></div> : null}
     </details>
@@ -147,7 +152,7 @@ export function RosterShiftOperationalPolicyPanel() {
   const queryClient = useQueryClient();
   const policiesQuery = useQuery({ queryKey: SHIFT_POLICY_KEY, queryFn: listRosterShiftOperationalPolicies, staleTime: 5 * 60_000 });
   const permissionsQuery = useWorkforcePermissions();
-  const canManage = (permissionsQuery.data?.permissions || []).includes("roster.manage_shift_templates");
+  const canManage = (permissionsQuery.data?.permissions || []).includes("roster.manage_shift_semantics");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -187,13 +192,13 @@ export function RosterShiftOperationalPolicyPanel() {
   return (
     <section className="wr-panel">
       <div className="wr-section-heading">
-        <div><span className="wr-eyebrow">Tenant-owned duty semantics</span><h2><ShieldCheck size={19} /> Shift operational policy</h2><p>Configure what each tenant shift means. No code name or default hour is treated as a statutory constant.</p></div>
+        <div><span className="wr-eyebrow">Tenant-owned duty semantics</span><h2><ShieldCheck size={19} /> Shift operational policy</h2><p>Configure what each tenant shift means. No tenant code, shift time, form number or operating pattern is imposed by the portal.</p></div>
         <span className="wr-header-badge">{(policiesQuery.data || []).length} templates</span>
       </div>
       <div className="wr-inline-warning"><ShieldCheck size={16} /> On-site standby/availability must count as duty. REST/OFF labels never replace the timestamp-based protected-rest calculation.</div>
       {actionError || policiesQuery.error ? <div className="wr-inline-error" role="alert">{actionError || errorMessage(policiesQuery.error)}</div> : null}
       <div className="wr-recommendation-list">{(policiesQuery.data || []).map((row) => <PolicyEditor key={row.shift_template_id} row={row} canManage={canManage} saving={busy === row.shift_template_id} onSave={save} />)}</div>
-      {!canManage ? <div className="wr-inline-note">You can review tenant shift semantics. Editing requires roster shift-template management permission.</div> : null}
+      {!canManage ? <div className="wr-inline-note">You can review tenant shift semantics. Editing requires the governed roster-semantics permission.</div> : null}
     </section>
   );
 }
