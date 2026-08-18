@@ -15,23 +15,41 @@ def _source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_retry_delay_is_exponential_and_bounded() -> None:
-    assert notification_dispatch.retry_delay_seconds(1) == 60
-    assert notification_dispatch.retry_delay_seconds(2) == 120
-    assert notification_dispatch.retry_delay_seconds(3) == 240
-    assert notification_dispatch.retry_delay_seconds(99) == 6 * 60 * 60
+def test_retry_delay_is_exponential_and_bounded_by_tenant_policy() -> None:
+    policy = {"base_seconds": 60, "ceiling_seconds": 6 * 60 * 60}
+    assert notification_dispatch.retry_delay_seconds(1, **policy) == 60
+    assert notification_dispatch.retry_delay_seconds(2, **policy) == 120
+    assert notification_dispatch.retry_delay_seconds(3, **policy) == 240
+    assert notification_dispatch.retry_delay_seconds(99, **policy) == 6 * 60 * 60
 
 
 def test_tenant_channel_policy_is_opt_in_and_deduplicated() -> None:
-    assert notification_dispatch._normalise_channels({}) == ()
-    assert notification_dispatch._normalise_channels({"external_channels": ["email", "EMAIL", "whatsapp"]}) == (
-        "EMAIL",
-        "WHATSAPP",
-    )
-    assert notification_dispatch._normalise_channels({"email_enabled": True, "whatsapp_enabled": True}) == (
-        "EMAIL",
-        "WHATSAPP",
-    )
+    unconfigured = notification_dispatch.delivery_policy({})
+    assert unconfigured.configured is False
+    assert unconfigured.enabled is False
+    assert unconfigured.channels == ()
+
+    explicit = notification_dispatch.delivery_policy({
+        "external_channels": ["email", "EMAIL", "whatsapp"],
+        "delivery": {
+            "enabled": True,
+            "mode": "FALLBACK",
+            "max_attempts": 3,
+            "retry_base_seconds": 60,
+            "retry_ceiling_seconds": 3600,
+        },
+    })
+    assert explicit.error is None
+    assert explicit.enabled is True
+    assert explicit.channels == ("EMAIL", "WHATSAPP")
+
+    legacy_channel_flags_still_only_select_channels = notification_dispatch.delivery_policy({
+        "email_enabled": True,
+        "whatsapp_enabled": True,
+    })
+    assert legacy_channel_flags_still_only_select_channels.channels == ("EMAIL", "WHATSAPP")
+    assert legacy_channel_flags_still_only_select_channels.enabled is False
+    assert legacy_channel_flags_still_only_select_channels.error is not None
 
 
 def test_email_adapter_uses_provider_message_id_and_fake_provider(monkeypatch: pytest.MonkeyPatch) -> None:
