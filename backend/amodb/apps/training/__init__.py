@@ -18,6 +18,14 @@ from .governance_routes import install_training_governance_routes
 from .learner_invitation_routes import install_training_learner_invitation_routes
 from .learner_workflow_routes import install_training_learner_workflow_routes
 from .notification_dispatch_routes import install_training_notification_dispatch_routes
+from .operating_policy_guards import (
+    bridge_settings_creation as _bridge_settings_creation,
+    guard_create_authorization_case as _guard_create_authorization_case,
+    guard_create_controlled_form as _guard_create_controlled_form,
+    guard_submit_assessment as _guard_submit_assessment,
+    guard_transition_controlled_form as _guard_transition_controlled_form,
+)
+from .planning_policy_bridge import bridge_demand_items as _bridge_demand_items
 from .record_presentation import install_training_record_presentation
 from .shared_storage_policy import install_training_shared_storage
 from .tenant_policy_validation import wrap_update_settings as _wrap_tenant_settings_update
@@ -29,12 +37,35 @@ from .workflow_completion_installer import install_training_workflow_completion_
 # boundary in one place rather than changing legacy authorisation identities.
 _governance_service.technical_authorisation_readiness = _revision_aware_technical_readiness
 
+# Tenant-created settings start without a portal-selected authorization committee.
+_operating_service.get_or_create_settings = _bridge_settings_creation(_operating_service.get_or_create_settings)
+
+# Planning classifications use the tenant planning lead window rather than the
+# legacy embedded 45-day marker.
+_operating_service._demand_items = _bridge_demand_items(
+    _operating_service._demand_items,
+    settings_getter=_operating_service.get_or_create_settings,
+)
+
 # Canonical assessment state vocabulary is normalized at the existing readiness
 # and certificate/completion gates rather than by creating parallel case models.
 _operating_service.compute_authorization_readiness = _bridge_assessment_readiness(
     _operating_service.compute_authorization_readiness
 )
 _operating_service.completion_gate = _bridge_completion_gate(_operating_service.completion_gate)
+
+# Remove remaining implicit operating-policy behavior from legacy service entry
+# points while retaining their canonical persistence models.
+_operating_service.submit_assessment = _guard_submit_assessment(_operating_service.submit_assessment)
+_operating_service.create_authorization_case = _guard_create_authorization_case(
+    _operating_service.create_authorization_case
+)
+_operating_service.create_controlled_form = _guard_create_controlled_form(
+    _operating_service.create_controlled_form
+)
+_operating_service.transition_controlled_form = _guard_transition_controlled_form(
+    _operating_service.transition_controlled_form
+)
 
 # Tenant operating policy is normalized and validated before the canonical
 # settings service writes it. Invalid recipients, reminder milestones, retry
