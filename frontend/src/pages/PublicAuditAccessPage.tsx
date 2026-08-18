@@ -192,6 +192,7 @@ const PublicAuditAccessPage: React.FC = () => {
     setControlledBusy(request.id); setError(null); setNotice(null);
     try {
       await linkPublicControlledDocumentRequest(request.id, {
+        source_system: request.controlled_source_system,
         document_id: request.controlled_document_id,
         revision_id: request.controlled_revision_id,
         response_comment: controlledComments[request.id]?.trim() || null,
@@ -251,7 +252,7 @@ const PublicAuditAccessPage: React.FC = () => {
   const canAcknowledge = data.permissions.includes("audit:acknowledge");
   const canSubmitDocuments = data.permissions.includes("audit:document_submit");
   const canReadReleasedEvidence = data.permissions.includes("audit:read_released_evidence");
-  const requestRows = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, request_type: "DOCUMENT" as const, linked_criterion: null, is_required: true, source_mode: "UPLOAD" as const, controlled_document_id: null, controlled_revision_id: null, controlled_submission: null }));
+  const requestRows = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, request_type: "DOCUMENT" as const, linked_criterion: null, is_required: true, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, controlled_submission: null }));
 
   return (
     <main className="qms-public-audit">
