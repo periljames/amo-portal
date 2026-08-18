@@ -5,8 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from amodb.apps.rostering import consent_service, exemption_service, extended_duty_validation_policy
+from amodb.apps.rostering import (
+    consent_router,
+    consent_service,
+    exemption_service,
+    extended_duty_validation_policy,
+    shift_semantics_router,
+)
 from amodb.apps.rostering.consent_models import RosterConsentStatus, RosterSupervisorDecision
+from amodb.apps.workforce import permissions as workforce_permissions
 
 UTC = timezone.utc
 
@@ -95,6 +102,103 @@ def test_supervisor_cannot_approve_outside_authority_scope(monkeypatch):
             approve=True,
         )
     assert exc.value.code == "ROSTER_SUPERVISOR_SCOPE_FORBIDDEN"
+
+
+def test_department_role_defaults_fail_closed_without_resource_scope():
+    user = SimpleNamespace(
+        id="supervisor-1",
+        amo_id="amo-1",
+        effective_amo_id="amo-1",
+        role="DEPARTMENT_SUPERVISOR",
+        department_id="department-a",
+        is_system_account=False,
+        is_superuser=False,
+        is_amo_admin=False,
+    )
+    assert not workforce_permissions._default_scope_allows(
+        object(),
+        user=user,
+        permission_code=workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+        department_id=None,
+        base_station_id=None,
+    )
+    assert workforce_permissions._default_scope_allows(
+        object(),
+        user=user,
+        permission_code=workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+        department_id="department-a",
+        base_station_id=None,
+    )
+    assert not workforce_permissions._default_scope_allows(
+        object(),
+        user=user,
+        permission_code=workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+        department_id="department-b",
+        base_station_id=None,
+    )
+
+
+def test_free_text_job_title_does_not_create_roster_privilege():
+    user = SimpleNamespace(
+        role="USER",
+        position_title="Department Head / Roster Planner",
+        is_system_account=False,
+        is_superuser=False,
+        is_amo_admin=False,
+    )
+    permissions = workforce_permissions.default_permissions_for(user)
+    assert workforce_permissions.PermissionCode.ROSTER_VIEW_OWN.value in permissions
+    assert workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT.value not in permissions
+    assert workforce_permissions.PermissionCode.ROSTER_EDIT.value not in permissions
+    assert workforce_permissions.PermissionCode.ROSTER_APPROVE.value not in permissions
+
+
+def test_version_consent_visibility_does_not_inherit_personal_roster_access(monkeypatch):
+    request = SimpleNamespace(
+        id="consent-1",
+        personnel_id="person-a",
+        assignment_id="assignment-1",
+    )
+    viewer = SimpleNamespace(id="person-b")
+    monkeypatch.setattr(
+        consent_router.workforce_permissions,
+        "has_permission",
+        lambda *args, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        consent_router.common,
+        "get_assignment",
+        lambda *args, **kwargs: SimpleNamespace(
+            department_id="department-a",
+            base_station_id="base-a",
+        ),
+    )
+    monkeypatch.setattr(
+        consent_router.governance,
+        "can_approve_scope",
+        lambda *args, **kwargs: False,
+    )
+    assert not consent_router._can_view_consent_request(
+        object(),
+        amo_id="amo-1",
+        row=request,
+        user=viewer,
+    )
+
+
+def test_shift_semantics_guard_uses_governed_permission(monkeypatch):
+    observed: list[str] = []
+
+    def capture(*args, permission, **kwargs):
+        observed.append(permission.value if hasattr(permission, "value") else str(permission))
+
+    monkeypatch.setattr(
+        shift_semantics_router.workforce_permissions,
+        "require_permission",
+        capture,
+    )
+    shift_semantics_router._require_manage(object(), SimpleNamespace())
+    assert observed == [workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value]
 
 
 def _exemption(**overrides):
