@@ -105,6 +105,14 @@ def _require_manage(db: Session, user: account_models.User) -> None:
     )
 
 
+def _require_semantics(db: Session, user: account_models.User) -> None:
+    workforce_permissions.require_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS,
+    )
+
+
 def _template_or_404(db: Session, *, amo_id: str, template_id: str) -> models.ShiftTemplate:
     row = (
         db.query(models.ShiftTemplate)
@@ -220,7 +228,11 @@ def update_shift_policy(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_manage(db, current_user)
+    # This legacy policy endpoint changes duty/rest semantics, verification,
+    # acknowledgement and fatigue controls. It must use the same governed
+    # permission as the newer operational-policy endpoint; ordinary planners
+    # may still manage names/times/templates but cannot redefine compliance.
+    _require_semantics(db, current_user)
     amo_id = _amo(current_user)
     template = _template_or_404(db, amo_id=amo_id, template_id=template_id)
     row = code_registry.policy_for_template(db, amo_id=amo_id, template_id=template_id)
