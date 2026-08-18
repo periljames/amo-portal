@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
-from . import common, consent_service, governance, services
+from ..workforce import permissions as workforce_permissions
+from . import common, consent_service, governance
 from .consent_models import (
     RosterAssignmentConsent,
     RosterConsentStatus,
@@ -96,6 +97,42 @@ def _request_or_404(
     return row
 
 
+def _can_view_consent_request(
+    db: Session,
+    *,
+    amo_id: str,
+    row: RosterAssignmentConsent,
+    user: account_models.User,
+) -> bool:
+    """Return whether ``user`` may see the sensitive consent workflow record.
+
+    Personnel can always see their own request. Tenant-wide roster viewers can
+    see all requests. Department/base supervisors only see requests inside an
+    approval scope they actually hold. This helper intentionally does not use
+    the broad roster-view helper because a personal roster permission must not
+    reveal another employee's comments, fatigue data or consent history.
+    """
+
+    if row.personnel_id == user.id:
+        return True
+    if workforce_permissions.has_permission(
+        db,
+        user=user,
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
+    ):
+        return True
+    assignment = common.get_assignment(db, amo_id=amo_id, assignment_id=row.assignment_id)
+    return bool(
+        assignment
+        and governance.can_approve_scope(
+            db,
+            user=user,
+            department_id=assignment.department_id,
+            base_station_id=assignment.base_station_id,
+        )
+    )
+
+
 @router.get("/me", response_model=list[ConsentRead])
 def my_consent_requests(
     db: Session = Depends(get_db),
@@ -139,16 +176,34 @@ def version_consent_requests(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    if not services.can_view_roster(db, user=current_user):
-        raise HTTPException(status_code=403, detail="Roster access denied")
     amo_id = _amo(current_user)
     version = common.get_version(db, amo_id=amo_id, version_id=version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Roster version not found")
-    return db.query(RosterAssignmentConsent).filter(
+    rows = db.query(RosterAssignmentConsent).filter(
         RosterAssignmentConsent.amo_id == amo_id,
         RosterAssignmentConsent.version_id == version_id,
     ).order_by(RosterAssignmentConsent.created_at.asc()).all()
+    permitted = [
+        row
+        for row in rows
+        if _can_view_consent_request(
+            db,
+            amo_id=amo_id,
+            row=row,
+            user=current_user,
+        )
+    ]
+    if not permitted and rows and not workforce_permissions.has_permission(
+        db,
+        user=current_user,
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
+    ):
+        # An empty result is appropriate for a version that contains no request
+        # belonging to this user. Do not disclose whether hidden consent records
+        # exist through a different error shape.
+        return []
+    return permitted
 
 
 @router.get("/{consent_id}", response_model=ConsentRead)
@@ -159,16 +214,7 @@ def get_consent_request(
 ):
     amo_id = _amo(current_user)
     row = _request_or_404(db, amo_id=amo_id, consent_id=consent_id)
-    assignment = common.get_assignment(db, amo_id=amo_id, assignment_id=row.assignment_id)
-    permitted = row.personnel_id == current_user.id
-    if assignment and not permitted:
-        permitted = governance.can_approve_scope(
-            db,
-            user=current_user,
-            department_id=assignment.department_id,
-            base_station_id=assignment.base_station_id,
-        )
-    if not permitted:
+    if not _can_view_consent_request(db, amo_id=amo_id, row=row, user=current_user):
         raise HTTPException(status_code=403, detail={"code": "ROSTER_CONSENT_FORBIDDEN"})
     common.audit(
         db,
