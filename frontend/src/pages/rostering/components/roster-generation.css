@@ -1,3 +1,7 @@
+.wr-planner-workspace .wr-prefill-rules li::after {
+  content: none !important;
+}
+
 .wr-generation-starts {
   display: grid;
   gap: 8px;
