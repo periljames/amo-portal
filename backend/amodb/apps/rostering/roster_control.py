@@ -9,6 +9,7 @@ from datetime import date
 from typing import Any, Optional
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
@@ -24,11 +25,14 @@ from .roster_control_models import (
     RosterAssignmentLineage,
     RosterCalendarSubscription,
     RosterControlledDocumentSettings,
+    RosterControlledFormNumberReservation,
     RosterPublicationSnapshot,
     RosterShiftAlias,
 )
 
 _ALIAS_SPACE_RE = re.compile(r"\s+")
+_CONTROL_NUMBER_SPACE_RE = re.compile(r"\s+")
+_CONTROLLED_OUTPUT_OWNER = "ROSTER_CONTROLLED_OUTPUT"
 
 
 def normalize_alias(value: str) -> str:
@@ -36,6 +40,66 @@ def normalize_alias(value: str) -> str:
     if not alias or len(alias) > 64:
         raise ValueError("Legacy alias must contain 1-64 visible characters")
     return alias
+
+
+def clean_controlled_form_number(value: str) -> str:
+    display = _CONTROL_NUMBER_SPACE_RE.sub(" ", str(value or "").strip())
+    if not display or len(display) > 64:
+        raise ValueError("Controlled roster form number must contain 1-64 visible characters")
+    return display
+
+
+def normalize_controlled_form_number(value: str) -> str:
+    return clean_controlled_form_number(value).upper()
+
+
+def _reserve_controlled_form_number(
+    db: Session,
+    *,
+    settings: RosterControlledDocumentSettings,
+    actor_user_id: Optional[str],
+) -> RosterControlledFormNumberReservation:
+    display = clean_controlled_form_number(settings.form_number)
+    normalized = normalize_controlled_form_number(display)
+    owner = db.query(RosterControlledFormNumberReservation).filter(
+        RosterControlledFormNumberReservation.amo_id == settings.amo_id,
+        RosterControlledFormNumberReservation.owner_type == _CONTROLLED_OUTPUT_OWNER,
+        RosterControlledFormNumberReservation.owner_id == settings.id,
+    ).with_for_update().first()
+    collision = db.query(RosterControlledFormNumberReservation).filter(
+        RosterControlledFormNumberReservation.amo_id == settings.amo_id,
+        RosterControlledFormNumberReservation.normalized_number == normalized,
+        RosterControlledFormNumberReservation.owner_id != settings.id,
+    ).first()
+    if collision:
+        raise ValueError(
+            f"Controlled form number '{display}' is already assigned to another controlled output in this tenant"
+        )
+    if owner:
+        owner.normalized_number = normalized
+        owner.display_number = display
+        owner.updated_by_user_id = actor_user_id
+        reservation = owner
+    else:
+        reservation = RosterControlledFormNumberReservation(
+            amo_id=settings.amo_id,
+            normalized_number=normalized,
+            display_number=display,
+            owner_type=_CONTROLLED_OUTPUT_OWNER,
+            owner_id=settings.id,
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+        )
+        db.add(reservation)
+    settings.form_number = display
+    db.add(settings)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        raise ValueError(
+            f"Controlled form number '{display}' is already assigned to another controlled output in this tenant"
+        ) from exc
+    return reservation
 
 
 def list_aliases(db: Session, *, amo_id: str, template_id: Optional[str] = None) -> list[RosterShiftAlias]:
@@ -129,11 +193,13 @@ def get_or_create_settings(db: Session, *, amo_id: str, actor_user_id: Optional[
         RosterControlledDocumentSettings.amo_id == amo_id
     ).first()
     if row:
+        if str(row.form_number or "").strip():
+            _reserve_controlled_form_number(db, settings=row, actor_user_id=actor_user_id)
         return row
     row = RosterControlledDocumentSettings(
         amo_id=amo_id,
-        form_number="ROSTER",
-        footer_note="Times are shown in the roster period time zone. Unpaid breaks are stated in the applicable shift-code legend.",
+        form_number="",
+        footer_note=None,
         updated_by_user_id=actor_user_id,
     )
     db.add(row)
@@ -160,6 +226,8 @@ def update_settings(
     for key, value in values.items():
         if key in {"form_number", "revision_label", "prepared_by_label", "approved_by_label", "page_size"} and isinstance(value, str):
             value = value.strip()
+        if key == "form_number" and value is not None:
+            value = clean_controlled_form_number(value)
         setattr(row, key, value)
     if row.page_size not in {"A3", "A4"}:
         raise ValueError("Controlled roster page size must be A3 or A4")
@@ -167,7 +235,7 @@ def update_settings(
         raise ValueError("Controlled roster form number is required")
     row.updated_by_user_id = actor_user_id
     db.add(row)
-    db.flush()
+    _reserve_controlled_form_number(db, settings=row, actor_user_id=actor_user_id)
     common.audit(
         db,
         amo_id=row.amo_id,
@@ -186,6 +254,21 @@ def update_settings(
         critical=True,
     )
     return row
+
+
+def assert_controlled_output_ready(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: Optional[str] = None,
+) -> RosterControlledDocumentSettings:
+    settings = get_or_create_settings(db, amo_id=amo_id, actor_user_id=actor_user_id)
+    if not str(settings.form_number or "").strip():
+        raise ValueError(
+            "Controlled roster form number is not configured for this tenant. Set it in Rostering > Controlled output before publication or controlled export."
+        )
+    _reserve_controlled_form_number(db, settings=settings, actor_user_id=actor_user_id)
+    return settings
 
 
 def _assignment_signature(row: models.RosterAssignment) -> tuple[Any, ...]:
@@ -365,7 +448,11 @@ def _aircraft_by_assignment(db: Session, *, amo_id: str, assignment_ids: list[st
 
 
 def build_snapshot(db: Session, *, version: models.RosterVersion, legacy_reconstructed: bool = False) -> dict[str, Any]:
-    settings = get_or_create_settings(db, amo_id=version.amo_id, actor_user_id=version.created_by_user_id)
+    settings = assert_controlled_output_ready(
+        db,
+        amo_id=version.amo_id,
+        actor_user_id=version.created_by_user_id,
+    )
     assignments = sorted(
         [row for row in version.assignments or [] if row.deleted_at is None],
         key=lambda row: (getattr(row.user, "full_name", "") or "", row.starts_at, row.id),
@@ -712,6 +799,7 @@ def install_service_policy(service_module) -> None:
         version = kwargs.get("version") or (args[1] if len(args) > 1 else None)
         actor_user_id = kwargs.get("actor_user_id") or (args[2] if len(args) > 2 else None)
         assert_registry_ready(db, version=version)
+        assert_controlled_output_ready(db, amo_id=version.amo_id, actor_user_id=actor_user_id)
         ensure_assignment_lineages(db, version=version)
         row = original_publish_version(*args, **kwargs)
         capture_publication_snapshot(db, version=row, actor_user_id=actor_user_id)

@@ -18,13 +18,34 @@ const orgUnits = [
 const jobFamilies = [{ id: "family-maintenance", code: "MAINT", name: "Aircraft Maintenance", description: null, is_active: true }];
 const grades = [{ id: "grade-3", code: "G3", name: "Grade 3", rank_order: 30, description: null, is_active: true }];
 const positions = [
-  { id: "position-technician", code: "TECH", canonical_title: "Aircraft Technician", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, is_supervisory: false, is_active: true },
-  { id: "position-supervisor", code: "SUP", canonical_title: "Maintenance Supervisor", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, is_supervisory: true, is_active: true },
+  { id: "position-technician", code: "TECH", canonical_title: "Aircraft Technician", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, role_source: "TENANT", role_key: null, management_level: "STAFF", can_have_supervisor: true, is_locked: false, is_supervisory: false, is_active: true },
+  { id: "position-supervisor", code: "SUP", canonical_title: "Maintenance Supervisor", job_family_id: "family-maintenance", job_family_name: "Aircraft Maintenance", grade_id: "grade-3", grade_name: "Grade 3", description: null, role_source: "TENANT", role_key: null, management_level: "SUPERVISOR", can_have_supervisor: true, is_locked: false, is_supervisory: true, is_active: true },
 ];
 const baseStations = [
   { id: "base-nbo", amo_id: "amo-test", code: "NBO", name: "Nairobi", country_code: "KE", time_zone: "Africa/Nairobi", is_active: true },
   { id: "base-mba", amo_id: "amo-test", code: "MBA", name: "Mombasa", country_code: "KE", time_zone: "Africa/Nairobi", is_active: true },
 ];
+const hierarchyBlueprint = {
+  source_title: "Civil Aviation (Approved Maintenance Organisations) Regulations, 2025",
+  source_reference: "KCAR 2025 regulations 19–21",
+  source_url: "https://kcaa.or.ke/",
+  regulatory_roles: [
+    { key: "ACCOUNTABLE_MANAGER", code: "AM", title: "Accountable Manager", management_level: "EXECUTIVE", description: "Accountable executive", status: "READY", position_id: "position-supervisor", can_have_supervisor: false },
+  ],
+  tenant_functions: [
+    { key: "HUMAN_RESOURCES", label: "Human Resources", suggested_code: "HR", suggested_title: "Human Resources Manager", status: "PENDING_TENANT_SETUP", position_id: null },
+    { key: "INFORMATION_TECHNOLOGY", label: "Information Technology", suggested_code: "IT", suggested_title: "Information Technology Manager", status: "PENDING_TENANT_SETUP", position_id: null },
+    { key: "FINANCE", label: "Finance", suggested_code: "FIN", suggested_title: "Finance Manager", status: "PENDING_TENANT_SETUP", position_id: null },
+  ],
+  required_role_count: 1,
+  ready_role_count: 1,
+  missing_role_count: 0,
+  created_count: 0,
+  adopted_count: 0,
+  updated_count: 0,
+  supervisor_links_cleared: 0,
+  accounts_synced: 0,
+};
 
 function person(index: number) {
   const padded = String(index).padStart(5, "0");
@@ -217,10 +238,20 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     const url = new URL(request.url());
     const path = url.pathname;
 
+    if (
+      path.endsWith("/livez")
+      || path.endsWith("/health")
+      || path.endsWith("/readyz")
+      || path.endsWith("/healthz")
+    ) {
+      return json(route, { ready: true, status: "ok" });
+    }
     if (path.endsWith("/workforce/permissions/current")) return json(route, { user_id: "scale-technician", permissions });
     if (path.endsWith("/workforce/hr/dashboard")) return json(route, {
       generated_at: "2026-08-14T08:00:00Z",
       can_manage_contracts: true,
+      can_manage_patterns: true,
+      can_assign_patterns: true,
       can_initialize_default_day_pattern: true,
       can_manage_leave_balances: true,
       can_review_leave: true,
@@ -229,6 +260,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
       can_approve_timesheet_hr: true,
       can_approve_overtime_supervisor: true,
       can_approve_overtime_hr: true,
+      can_manage_attendance: true,
       can_export_payroll: true,
       active_employee_count: TOTAL_PERSONNEL,
       employees_without_contract_count: 0,
@@ -250,6 +282,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     if (path.endsWith("/workforce/hr/organization-units")) return json(route, orgUnits);
     if (path.endsWith("/workforce/hr/job-families")) return json(route, jobFamilies);
     if (path.endsWith("/workforce/hr/grades")) return json(route, grades);
+    if (path.endsWith("/workforce/hr/positions/hierarchy-blueprint")) return json(route, hierarchyBlueprint);
     if (path.endsWith("/workforce/hr/positions")) return json(route, positions);
     if (path.endsWith("/workforce/hr/people/governed/facets")) return json(route, facets());
     if (path.endsWith("/foundations/base-stations")) return json(route, baseStations);
@@ -294,21 +327,28 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();
   await expect(page.locator(".workforce-governance__people-table tbody tr")).toHaveCount(50);
+  await page.waitForTimeout(300);
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByText("51-100 of 10,000")).toBeVisible();
   expect(pageSizes.every((size) => size <= 250)).toBeTruthy();
 
-  await page.getByLabel("Organisation", { exact: true }).selectOption("org-quality");
+  const filters = page.locator(".workforce-governance__filters");
+  const mutationCard = page.locator(".workforce-governance__mutation-card");
+  const organisationFilter = filters.locator("label").filter({ hasText: /^Organisation/ }).locator("select").first();
+  const organisationMutation = mutationCard.locator("label").filter({ hasText: /^Organisation/ }).locator("select").first();
+  const changeTypeMutation = mutationCard.locator("label").filter({ hasText: /^Change type/ }).locator("select").first();
+  const placementMutation = mutationCard.locator("label").filter({ hasText: /^Placement/ }).locator("select").first();
+  await organisationFilter.selectOption("org-quality");
   await expect(page).toHaveURL(/gov_org=org-quality/);
   await expect(page.getByText("1-50 of 5,000")).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(page.getByText("1-50 of 10,000")).toBeVisible();
 
   await page.getByRole("button", { name: "Select all 10,000 matching" }).click();
-  await expect(page.getByText("10,000 selected")).toBeVisible();
-  await page.getByLabel("Change type").selectOption("ASSIGN_ORGANIZATION");
-  await page.getByLabel("Organisation", { exact: true }).last().selectOption("org-line");
-  await page.getByLabel("Placement").last().selectOption("SECONDARY");
+  await expect(page.getByText("10,000 selected", { exact: true })).toBeVisible();
+  await changeTypeMutation.selectOption("ASSIGN_ORGANIZATION");
+  await organisationMutation.selectOption("org-line");
+  await placementMutation.selectOption("SECONDARY");
   await page.getByRole("button", { name: "Preview 10,000 selected" }).click();
   await page.getByRole("button", { name: "Confirm 10,000 changes" }).click();
 
@@ -320,7 +360,7 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
   expect(submittedBody.mutation_type).toBe("ASSIGN_ORGANIZATION");
   expect(submittedBody.placement_type).toBe("SECONDARY");
 
-  await expect(page.getByText("10,000/10,000 processed")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".workforce-governance__operation")).toContainText("10000/10000 processed", { timeout: 10_000 });
   await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
   expect(operationPolls).toBeGreaterThanOrEqual(2);
 });

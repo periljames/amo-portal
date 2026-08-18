@@ -81,6 +81,23 @@ def notify_email(
     context: dict[str, Any],
     correlation_id: str,
 ) -> None:
+    """Send through the portal notification service and retain an auditable trace.
+
+    Notification delivery remains non-blocking for roster transactions, but the
+    attempt is no longer silent: both successful hand-off and failed hand-off
+    are recorded in the canonical audit stream without exposing message bodies.
+    """
+    if not recipient:
+        audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=None,
+            entity_type="RosterNotification",
+            entity_id=correlation_id,
+            action="roster_notification_skipped",
+            metadata={"template_key": template_key, "reason": "recipient_missing"},
+        )
+        return
     try:
         notification_service.send_email(
             template_key=template_key,
@@ -92,8 +109,27 @@ def notify_email(
             amo_id=amo_id,
             db=db,
         )
-    except Exception:
+    except Exception as exc:
+        audit(
+            db,
+            amo_id=amo_id,
+            actor_user_id=None,
+            entity_type="RosterNotification",
+            entity_id=correlation_id,
+            action="roster_notification_delivery_failed",
+            metadata={"template_key": template_key, "error_type": type(exc).__name__},
+            critical=False,
+        )
         return
+    audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=None,
+        entity_type="RosterNotification",
+        entity_id=correlation_id,
+        action="roster_notification_delivered",
+        metadata={"template_key": template_key},
+    )
 
 
 def require_user(db: Session, *, amo_id: str, user_id: str, active_only: bool = True) -> account_models.User:
@@ -415,11 +451,17 @@ def serialize_period(row: models.RosterPeriod, *, current_user: Optional[account
 
 
 def can_view_roster(db: Session, *, user: account_models.User) -> bool:
+    """Return access to shared roster workspaces, never personal self-service.
+
+    ``roster.view_own`` is intentionally excluded. Employees use the dedicated
+    ``/my-roster`` and personal consent/calendar endpoints; it must not unlock
+    tenant roster periods, versions, assignments or operational policy views.
+    """
+
     return workforce_permissions.any_permission(
         db,
         user=user,
         permissions=[
-            workforce_permissions.PermissionCode.ROSTER_VIEW_OWN,
             workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT,
             workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
         ],

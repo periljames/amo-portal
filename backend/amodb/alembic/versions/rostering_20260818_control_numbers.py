@@ -27,6 +27,8 @@ def upgrade() -> None:
         nullable=False,
         server_default="",
     )
+    # Remove the former portal-generated placeholder. Tenants must explicitly
+    # enter their own governed identifier in the frontend.
     op.execute(
         sa.text(
             """

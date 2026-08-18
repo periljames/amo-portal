@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..accounts import models as account_models, role_registry
+from ..accounts import models as account_models
 from . import models
 
 
@@ -30,6 +30,8 @@ class PermissionCode(str, Enum):
     ROSTER_MANAGE_RULES = "roster.manage_rules"
     ROSTER_MANAGE_APPROVAL_AUTHORITIES = "roster.manage_approval_authorities"
     ROSTER_MANAGE_SHIFT_TEMPLATES = "roster.manage_shift_templates"
+    ROSTER_MANAGE_SHIFT_SEMANTICS = "roster.manage_shift_semantics"
+    ROSTER_MANAGE_CONTROLLED_OUTPUT = "roster.manage_controlled_output"
     ROSTER_MANAGE_PATTERNS = "roster.manage_patterns"
     ROSTER_ALLOCATE_WORK = "roster.allocate_work"
     LEAVE_REQUEST = "leave.request"
@@ -73,13 +75,13 @@ PLANNER = EMPLOYEE | {
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
 }
 
+# Supervisors operate only inside their concrete department/base scope. Version
+# creation, tenant-wide validation and submission are planning functions; a
+# supervisor can still edit/delete/allocate assignments in an authorized scope.
 SUPERVISOR = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
-    PermissionCode.ROSTER_CREATE.value,
     PermissionCode.ROSTER_EDIT.value,
     PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
-    PermissionCode.ROSTER_VALIDATE.value,
-    PermissionCode.ROSTER_SUBMIT.value,
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
     PermissionCode.LEAVE_REVIEW.value,
     PermissionCode.ATTENDANCE_MANAGE.value,
@@ -108,15 +110,15 @@ ACCOUNTABLE_EXECUTIVE = EMPLOYEE | {
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
-
 QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
     PermissionCode.ROSTER_OVERRIDE_WARNING.value,
     PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
     PermissionCode.ROSTER_MANAGE_RULES.value,
+    PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
+    PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
 }
-
 
 HR = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
@@ -134,13 +136,11 @@ HR = EMPLOYEE | {
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
-
 PAYROLL = EMPLOYEE | {
     PermissionCode.TIMESHEET_APPROVE.value,
     PermissionCode.PAYROLL_EXPORT.value,
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
-
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPERUSER": ALL_PERMISSIONS,
@@ -158,7 +158,12 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "BASE_MANAGER": BASE_MANAGER,
     "LINE_MANAGER": DEPARTMENT_HEAD,
     "QUALITY_MANAGER": QUALITY,
-    "QUALITY_INSPECTOR": QUALITY - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.ROSTER_OVERRIDE_BLOCKER.value},
+    "QUALITY_INSPECTOR": QUALITY - {
+        PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
+        PermissionCode.ROSTER_MANAGE_RULES.value,
+        PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
+        PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
+    },
     "AUDITOR": {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
     "HR_OFFICER": HR - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.PAYROLL_EXPORT.value},
     "HR_MANAGER": HR | {PermissionCode.PAYROLL_EXPORT.value},
@@ -177,46 +182,33 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 }
 
 
+_SCOPED_ROSTER_DEFAULTS = {
+    PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+    PermissionCode.ROSTER_EDIT.value,
+    PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
+    PermissionCode.ROSTER_APPROVE.value,
+    PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+    PermissionCode.ROSTER_ALLOCATE_WORK.value,
+}
+
+
 def _role_value(user: account_models.User) -> str:
     return str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")))
 
 
-def _derived_role(user: account_models.User) -> Optional[str]:
-    """Support exact regulated aliases and tenant support titles.
+def default_permissions_for(user: account_models.User) -> set[str]:
+    """Resolve permissions only from explicit account role and grants.
 
-    Explicit permission grants remain authoritative.  This compatibility layer
-    lets legacy KCAR 2018 titles participate during migration without treating
-    every free-text ``Head of`` title as a privileged management role.
+    Free-text position titles are descriptive HR data, not authorization data.
+    They must never silently turn a user into a roster planner, supervisor,
+    department head, publisher, Quality authority, HR manager or payroll user.
     """
 
-    title = str(getattr(user, "position_title", "") or "").lower()
-    department = str(getattr(getattr(user, "department", None), "code", "") or "").lower()
-    regulated = role_registry.infer_regulated_role(title)
-    if regulated is not None:
-        return regulated.value
-    if "human resource" in title or title.startswith("hr ") or department in {"hr", "human-resources", "human_resources"}:
-        return "HR_MANAGER" if "manager" in title or "head" in title else "HR_OFFICER"
-    if "payroll" in title:
-        return "PAYROLL_OFFICER"
-    if "roster" in title or "duty planner" in title:
-        return "ROSTER_PLANNER"
-    if "department head" in title or "department manager" in title:
-        return "DEPARTMENT_HEAD"
-    if "supervisor" in title or "shift lead" in title:
-        return "DEPARTMENT_SUPERVISOR"
-    return None
-
-
-def default_permissions_for(user: account_models.User) -> set[str]:
     if not user or getattr(user, "is_system_account", False):
         return set()
     if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
         return set(ALL_PERMISSIONS)
-    permissions = set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
-    derived = _derived_role(user)
-    if derived:
-        permissions |= ROLE_PERMISSIONS.get(derived, set())
-    return permissions
+    return set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
 
 
 def _active_grants(
@@ -245,6 +237,59 @@ def _active_grants(
     ]
 
 
+def _active_contract_base_ids(db: Session, *, amo_id: str, user_id: str) -> set[str]:
+    today = date.today()
+    rows = db.query(models.EmploymentContract).filter(
+        models.EmploymentContract.amo_id == amo_id,
+        models.EmploymentContract.user_id == user_id,
+        models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
+        models.EmploymentContract.effective_from <= today,
+        or_(models.EmploymentContract.effective_to.is_(None), models.EmploymentContract.effective_to >= today),
+    ).all()
+    base_ids: set[str] = set()
+    for row in rows:
+        if row.primary_base_station_id:
+            base_ids.add(str(row.primary_base_station_id))
+        if row.secondary_base_station_id:
+            base_ids.add(str(row.secondary_base_station_id))
+    return base_ids
+
+
+def _default_scope_allows(
+    db: Session,
+    *,
+    user: account_models.User,
+    permission_code: str,
+    department_id: Optional[str],
+    base_station_id: Optional[str],
+) -> bool:
+    defaults = default_permissions_for(user)
+    if permission_code not in defaults:
+        return False
+    if permission_code not in _SCOPED_ROSTER_DEFAULTS:
+        return True
+
+    # Explicitly tenant-wide roles may exercise scoped actions globally. A
+    # department/base role must provide a concrete resource scope; calling a
+    # scoped permission with neither identifier can never mean "all tenant".
+    if PermissionCode.ROSTER_VIEW_ALL.value in defaults:
+        return True
+    if department_id is None and base_station_id is None:
+        return False
+
+    if department_id is not None:
+        user_department_id = str(getattr(user, "department_id", "") or "")
+        if not user_department_id or user_department_id != str(department_id):
+            return False
+
+    if base_station_id is not None:
+        amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
+        if str(base_station_id) not in _active_contract_base_ids(db, amo_id=amo_id, user_id=user.id):
+            return False
+
+    return True
+
+
 def has_permission(
     db: Session,
     *,
@@ -269,7 +314,13 @@ def has_permission(
         return False
     if any(row.effect == models.PermissionEffect.GRANT for row in explicit):
         return True
-    return code in default_permissions_for(user)
+    return _default_scope_allows(
+        db,
+        user=user,
+        permission_code=code,
+        department_id=department_id,
+        base_station_id=base_station_id,
+    )
 
 
 def require_permission(
@@ -301,8 +352,19 @@ def require_permission(
 
 
 def permissions_for_user(db: Session, *, user: account_models.User) -> list[str]:
-    """Return globally effective permissions using the same rules as guards."""
-    permissions = default_permissions_for(user)
+    """Return globally effective permissions using the same rules as guards.
+
+    Scope-bound role defaults are omitted from this global permission list. UI
+    controls that depend on department/base permissions should obtain or apply
+    a concrete scope instead of treating this list as a tenant-wide grant.
+    """
+
+    defaults = default_permissions_for(user)
+    permissions = {
+        code for code in defaults
+        if code not in _SCOPED_ROSTER_DEFAULTS
+        or PermissionCode.ROSTER_VIEW_ALL.value in defaults
+    }
     amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
     today = date.today()
     rows = db.query(models.WorkforcePermissionGrant).filter(

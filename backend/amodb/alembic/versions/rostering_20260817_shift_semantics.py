@@ -33,6 +33,8 @@ def upgrade() -> None:
         sa.Column("scheduling_eligible", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
 
+    # Migrate from existing controlled semantics rather than guessing from
+    # tenant display codes. The legal rest engine does not consume this flag.
     op.execute(
         sa.text(
             """

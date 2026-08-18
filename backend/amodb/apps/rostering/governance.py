@@ -4,16 +4,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Iterable, Optional
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
 from ..workforce import models as workforce_models
 from ..workforce import permissions as workforce_permissions
 from . import common, models, schemas
-
-
-DEFAULT_RULE_SET_CODE = "KCAR2025_MOPM_1_6_2"
 
 
 def _value(value) -> str:
@@ -36,49 +33,15 @@ def _active_window(query, model):
     )
 
 
-def seed_default_rule_set(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> models.RosterRuleSet:
-    row = db.query(models.RosterRuleSet).filter(
-        models.RosterRuleSet.amo_id == amo_id,
-        models.RosterRuleSet.code == DEFAULT_RULE_SET_CODE,
-    ).first()
-    if row:
-        return row
-    row = models.RosterRuleSet(
-        amo_id=amo_id,
-        code=DEFAULT_RULE_SET_CODE,
-        name="KCAR 2025 transition and MoPM shift-roster baseline",
-        version_label="2025 operational baseline",
-        regulatory_basis=(
-            "KCAA 2025 regulatory transition obligations; numerical working-time controls remain "
-            "configurable and are sourced from the approved MoPM and applicable Kenyan employment law."
-        ),
-        manual_reference="MoPM Part 1, section 1.6.2 — Shift Roster; controlled roster form SL/MCM/27",
-        description=(
-            "Tenant baseline for maintenance duty planning. It records the approved manual basis, "
-            "hours, rest, shift length and departmental exceptions without hard-coding a single "
-            "aircraft, base or department operating model."
-        ),
-        priority=100,
-        is_active=True,
-        created_by_user_id=actor_user_id,
-        updated_by_user_id=actor_user_id,
-    )
-    db.add(row)
-    db.flush()
-    common.audit(
-        db,
-        amo_id=amo_id,
-        actor_user_id=actor_user_id,
-        entity_type="RosterRuleSet",
-        entity_id=row.id,
-        action="seed",
-        after={"code": row.code, "version_label": row.version_label},
-    )
-    return row
-
-
 def list_rule_sets(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.RosterRuleSet]:
-    seed_default_rule_set(db, amo_id=amo_id)
+    """Return only rule sets actually configured by this tenant.
+
+    The multi-tenant platform does not auto-install an operator, authority,
+    manual, form number or regulatory profile. A newly provisioned tenant may
+    therefore have no roster rule sets until its authorized users configure
+    them through the governed setup workflow.
+    """
+
     query = db.query(models.RosterRuleSet).filter(models.RosterRuleSet.amo_id == amo_id)
     if not include_inactive:
         query = query.filter(models.RosterRuleSet.is_active.is_(True))
@@ -344,49 +307,8 @@ def update_authority(
     return row
 
 
-def _title(user: account_models.User) -> str:
-    return str(getattr(user, "position_title", "") or "").strip().lower()
-
-
 def _is_admin(user: account_models.User) -> bool:
     return bool(getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False))
-
-
-def _active_contracts_for_user(db: Session, *, amo_id: str, user_id: str) -> list[workforce_models.EmploymentContract]:
-    today = _today()
-    return db.query(workforce_models.EmploymentContract).filter(
-        workforce_models.EmploymentContract.amo_id == amo_id,
-        workforce_models.EmploymentContract.user_id == user_id,
-        workforce_models.EmploymentContract.employment_status == workforce_models.EmploymentStatus.ACTIVE,
-        workforce_models.EmploymentContract.effective_from <= today,
-        or_(
-            workforce_models.EmploymentContract.effective_to.is_(None),
-            workforce_models.EmploymentContract.effective_to >= today,
-        ),
-    ).all()
-
-
-def _is_inferred_base_manager(
-    db: Session,
-    *,
-    user: account_models.User,
-    base_station_id: Optional[str],
-) -> bool:
-    if "base manager" not in _title(user):
-        return False
-    if not base_station_id:
-        return True
-    return any(
-        base_station_id in {row.primary_base_station_id, row.secondary_base_station_id}
-        for row in _active_contracts_for_user(db, amo_id=common.effective_amo_id(user), user_id=user.id)
-    )
-
-
-def _is_inferred_department_head(user: account_models.User, department_id: Optional[str]) -> bool:
-    if not department_id or str(getattr(user, "department_id", "") or "") != str(department_id):
-        return False
-    title = _title(user)
-    return "department head" in title or title.startswith("head of ") or title.endswith(" manager") or "department manager" in title
 
 
 def _matching_authorities(
@@ -426,12 +348,6 @@ def can_approve_scope(
         base_station_id=base_station_id,
     )):
         return True
-    if _is_inferred_department_head(user, department_id) or _is_inferred_base_manager(
-        db,
-        user=user,
-        base_station_id=base_station_id,
-    ):
-        return True
     return workforce_permissions.has_permission(
         db,
         user=user,
@@ -448,20 +364,18 @@ def can_publish_scope(
     department_id: Optional[str],
     base_station_id: Optional[str],
 ) -> bool:
+    """Publication is an explicit appointment, not a job-title inference."""
+
     if _is_admin(user):
         return True
     amo_id = common.effective_amo_id(user)
-    if any(row.can_publish for row in _matching_authorities(
+    return any(row.can_publish for row in _matching_authorities(
         db,
         amo_id=amo_id,
         user_id=user.id,
         department_id=department_id,
         base_station_id=base_station_id,
-    )):
-        return True
-    if _is_inferred_base_manager(db, user=user, base_station_id=base_station_id):
-        return True
-    return False
+    ))
 
 
 def _preferred_approver(
@@ -471,6 +385,13 @@ def _preferred_approver(
     department_id: Optional[str],
     base_station_id: Optional[str],
 ) -> Optional[str]:
+    """Select only a governed active appointment.
+
+    Free-text job titles are deliberately not interpreted as safety-critical
+    roster authority. If a scope has no configured authority, it stays visibly
+    unassigned and cannot be approved through an accidental title match.
+    """
+
     rows = _authority_query(db, amo_id=amo_id).filter(
         models.RosterApprovalAuthority.can_approve.is_(True),
     ).all()
@@ -488,38 +409,6 @@ def _preferred_approver(
     if candidates:
         candidates.sort(key=lambda row: (rank.get(row.authority_level, 0), row.created_at), reverse=True)
         return candidates[0].user_id
-
-    if department_id:
-        department_heads = db.query(account_models.User).filter(
-            account_models.User.amo_id == amo_id,
-            account_models.User.department_id == department_id,
-            account_models.User.is_active.is_(True),
-            account_models.User.is_system_account.is_(False),
-        ).order_by(account_models.User.full_name.asc()).all()
-        for user in department_heads:
-            if _is_inferred_department_head(user, department_id):
-                return user.id
-
-    if base_station_id:
-        base_users = db.query(account_models.User).join(
-            workforce_models.EmploymentContract,
-            and_(
-                workforce_models.EmploymentContract.amo_id == amo_id,
-                workforce_models.EmploymentContract.user_id == account_models.User.id,
-            ),
-        ).filter(
-            account_models.User.amo_id == amo_id,
-            account_models.User.is_active.is_(True),
-            account_models.User.is_system_account.is_(False),
-            workforce_models.EmploymentContract.employment_status == workforce_models.EmploymentStatus.ACTIVE,
-            or_(
-                workforce_models.EmploymentContract.primary_base_station_id == base_station_id,
-                workforce_models.EmploymentContract.secondary_base_station_id == base_station_id,
-            ),
-        ).order_by(account_models.User.full_name.asc()).all()
-        for user in base_users:
-            if "base manager" in _title(user):
-                return user.id
     return None
 
 
@@ -751,7 +640,7 @@ def require_publish_authority(
         )
         for row in scopes
     ):
-        raise ValueError("Publication requires the Base Manager or an explicitly delegated roster publisher for every affected base")
+        raise ValueError("Publication requires an explicitly appointed roster publisher for every affected base/department scope")
 
 
 def approval_matrix(
