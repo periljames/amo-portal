@@ -19,6 +19,7 @@ from .learner_workflow_routes import install_training_learner_workflow_routes
 from .notification_dispatch_routes import install_training_notification_dispatch_routes
 from .record_presentation import install_training_record_presentation
 from .shared_storage_policy import install_training_shared_storage
+from .tenant_policy_validation import wrap_update_settings as _wrap_tenant_settings_update
 from .tenant_report_control import install_tenant_report_control
 from .workflow_completion_installer import install_training_workflow_completion_without_legacy_assessment_routes
 
@@ -33,6 +34,11 @@ _governance_service.technical_authorisation_readiness = _revision_aware_technica
 _operating_service.compute_authorization_readiness = _bridge_assessment_readiness(
     _operating_service.compute_authorization_readiness
 )
+
+# Tenant operating policy is normalized and validated before the canonical
+# settings service writes it. Invalid recipients, reminder milestones, retry
+# timing or provider strategy are rejected rather than silently defaulted.
+_operating_service.update_settings = _wrap_tenant_settings_update(_operating_service.update_settings)
 
 # Cross-cutting controls are installed before route extensions so every Training
 # write uses the same tenant-owned report metadata and calendar lifecycle.
