@@ -1,0 +1,1 @@
+Temporary synchronization note for PR #502. The main-sync branch exists only to bring current main into the Live Audit feature branch through GitHub's merge engine. Delete this note after synchronization.
