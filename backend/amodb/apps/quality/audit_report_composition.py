@@ -89,6 +89,14 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         QualityAuditChecklistExecutionGovernance.amo_id == amo_id,
         QualityAuditChecklistExecutionGovernance.audit_id == audit_id,
     ).order_by(QualityAuditChecklistExecutionGovernance.created_at.asc()).all()
+    checklist_item_ids = [row.checklist_item_id for row in checklist]
+    checklist_items = db.query(models.QualityAuditChecklistItem).filter(
+        models.QualityAuditChecklistItem.amo_id == amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit_id,
+        models.QualityAuditChecklistItem.id.in_(checklist_item_ids),
+    ).all() if checklist_item_ids else []
+    checklist_item_by_id = {row.id: row for row in checklist_items}
+
     findings = db.query(models.QMSAuditFinding).filter(
         models.QMSAuditFinding.amo_id == amo_id,
         models.QMSAuditFinding.audit_id == audit_id,
@@ -111,6 +119,21 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         QualityAuditClosingNarrative.amo_id == amo_id,
         QualityAuditClosingNarrative.audit_id == audit_id,
     ).first()
+
+    def checklist_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[str, Any]:
+        item = checklist_item_by_id.get(row.checklist_item_id)
+        return {
+            "checklist_item_id": row.checklist_item_id,
+            "section": item.section if item else None,
+            "checklist_ref": item.checklist_ref if item else None,
+            "requirement_ref": item.requirement_ref if item else None,
+            "prompt": item.prompt if item else None,
+            "sort_order": item.sort_order if item else None,
+            "canonical_response_status": row.canonical_response_status,
+            "auditor_notes": row.auditor_notes,
+            "objective_evidence": row.objective_evidence,
+            "evidence_references": row.evidence_references_json or [],
+        }
 
     return _json_value({
         "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V2",
@@ -153,16 +176,7 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             }
             for row in meetings
         ],
-        "checklist": [
-            {
-                "checklist_item_id": row.checklist_item_id,
-                "canonical_response_status": row.canonical_response_status,
-                "auditor_notes": row.auditor_notes,
-                "objective_evidence": row.objective_evidence,
-                "evidence_references": row.evidence_references_json or [],
-            }
-            for row in checklist
-        ],
+        "checklist": [checklist_snapshot(row) for row in checklist],
         "findings": [
             {
                 "id": row.id,
@@ -330,11 +344,26 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
 
     story.extend([PageBreak(), _p("Checklist execution", styles["QmsSection"])])
     if checklist:
-        checklist_rows = [["#", "Response", "Objective evidence / auditor note"]]
+        checklist_rows = [["#", "Checklist / requirement", "Question", "Response", "Evidence / auditor note"]]
         for index, row in enumerate(checklist, 1):
-            evidence = row.get("objective_evidence") or row.get("auditor_notes") or "—"
-            checklist_rows.append([str(index), _p(row.get("canonical_response_status"), styles["QmsSmall"]), _p(evidence, styles["QmsSmall"])])
-        table = Table(checklist_rows, colWidths=[10 * mm, 34 * mm, 126 * mm], repeatRows=1)
+            references = [
+                str(value).strip()
+                for value in (row.get("section"), row.get("checklist_ref"), row.get("requirement_ref"))
+                if str(value or "").strip()
+            ]
+            evidence_parts = [
+                str(value).strip()
+                for value in (row.get("objective_evidence"), row.get("auditor_notes"))
+                if str(value or "").strip()
+            ]
+            checklist_rows.append([
+                str(index),
+                _p(" · ".join(references) or "—", styles["QmsSmall"]),
+                _p(row.get("prompt"), styles["QmsSmall"]),
+                _p(row.get("canonical_response_status"), styles["QmsSmall"]),
+                _p(" | ".join(evidence_parts) or "—", styles["QmsSmall"]),
+            ])
+        table = Table(checklist_rows, colWidths=[10 * mm, 36 * mm, 58 * mm, 28 * mm, 46 * mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
