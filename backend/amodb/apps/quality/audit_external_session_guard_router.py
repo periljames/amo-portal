@@ -66,10 +66,26 @@ def exchange_audit_access_guarded(
 
 @router.delete("/audit-access/session", status_code=status.HTTP_204_NO_CONTENT)
 def end_audit_access_session_guarded(response: Response) -> Response:
+    # Current EMAIL_LINK and PASSKEY sessions both use the root path. Delete the
+    # historical narrower cookie too so clients upgraded from an older build
+    # cannot retain a second same-name session cookie.
     response.delete_cookie(_GUEST_COOKIE, path="/", httponly=True, samesite="strict")
+    response.delete_cookie(_GUEST_COOKIE, path="/quality/audit-access", httponly=True, samesite="strict")
     return response
 
 
-# These routes intentionally shadow the older exchange/delete endpoints. PASSKEY
-# invitations must complete the dedicated WebAuthn flow before any cookie is set.
+def _is_shadowed_session_route(route_item) -> bool:
+    path = str(getattr(route_item, "path", ""))
+    methods = set(getattr(route_item, "methods", None) or ())
+    return (
+        path == "/quality/audit-access/exchange" and "POST" in methods
+    ) or (
+        path == "/quality/audit-access/session" and "DELETE" in methods
+    )
+
+
+# Remove older same-path compatibility handlers rather than relying only on
+# FastAPI insertion order. This makes the cookie path and PASSKEY gate canonical
+# for every caller and eliminates the stale logout route permanently at runtime.
+public_router.routes[:] = [item for item in public_router.routes if not _is_shadowed_session_route(item)]
 public_router.routes[0:0] = list(router.routes)
