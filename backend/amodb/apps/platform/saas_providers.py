@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import smtplib
 import ssl
 import time
@@ -145,6 +146,38 @@ def verify_stripe_signature(
     return any(hmac.compare_digest(expected, candidate) for candidate in signatures)
 
 
+def _production_runtime() -> bool:
+    return str(os.getenv("APP_ENV") or "production").strip().lower() in {
+        "production",
+        "prod",
+        "staging",
+        "stage",
+    }
+
+
+def _require_secure_callback(url: str, *, label: str) -> None:
+    if not url:
+        return
+    parsed = urllib.parse.urlsplit(url)
+    if not parsed.hostname:
+        raise ValueError(f"{label} must be an absolute URL")
+    if _production_runtime() and parsed.scheme.lower() != "https":
+        raise ValueError(f"{label} must use HTTPS outside local/test environments")
+
+
+def _trusted_stripe_checkout_url(value: Any) -> str | None:
+    url = str(value or "").strip()
+    if not url:
+        return None
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https" or not (host == "checkout.stripe.com" or host.endswith(".checkout.stripe.com")):
+        raise RuntimeError("Stripe returned an untrusted hosted checkout URL")
+    if parsed.username or parsed.password:
+        raise RuntimeError("Stripe checkout URL must not contain user credentials")
+    return urllib.parse.urlunsplit(parsed)
+
+
 def create_stripe_checkout_session(
     *,
     secret: dict[str, Any],
@@ -168,6 +201,8 @@ def create_stripe_checkout_session(
     cancel_url = str(config.get("cancel_url") or "").strip()
     if not success_url or not cancel_url:
         raise ValueError("Stripe success_url and cancel_url must be configured")
+    _require_secure_callback(success_url, label="Stripe success_url")
+    _require_secure_callback(cancel_url, label="Stripe cancel_url")
     _safe_url(success_url, allowed_schemes=("https", "http"))
     _safe_url(cancel_url, allowed_schemes=("https", "http"))
 
@@ -199,7 +234,7 @@ def create_stripe_checkout_session(
     return {
         "provider": "stripe",
         "session_id": response.get("id"),
-        "checkout_url": response.get("url"),
+        "checkout_url": _trusted_stripe_checkout_url(response.get("url")),
         "customer": response.get("customer"),
         "subscription": response.get("subscription"),
         "latency_ms": elapsed,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from amodb.entitlements import require_module
+
 # Bind hardened knowledge-graph implementations before route modules copy service
 # callables into their module namespaces.
 from . import knowledge_runtime as _knowledge_runtime  # noqa: F401
@@ -66,7 +68,7 @@ install_governance_runtime_guard()
 install_evidence_pack_runtime_guard()
 quarantine_legacy_copy_mutations(workspace_router)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("document_control"))])
 router.include_router(reminder_lifecycle_router)
 router.include_router(evidence_pack_job_lifecycle_router)
 router.include_router(legacy_router)

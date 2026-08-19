@@ -14,6 +14,7 @@ from sqlalchemy import text
 from amodb.apps.accounts import models as account_models
 from amodb.apps.tasks import services as task_services
 from amodb.apps.platform import (
+    commercial_services,
     platform_command_queue,
     saas_lease,
     saas_models as models,
@@ -49,6 +50,8 @@ def _mark_webhook_failure(db, job: models.SaaSJob, exc: Exception) -> None:
 
 
 def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
+    if job.job_type in commercial_services.COMMERCIAL_JOB_TYPES:
+        return commercial_services.process_job(db, job)
     if job.job_type == "PLATFORM_COMMAND_JOB":
         return platform_command_queue.process_leased_job(db, job)
     if job.job_type in {"MANUAL_REVISION_PROCESS", "MANUAL_REVISION_OCR"}:
