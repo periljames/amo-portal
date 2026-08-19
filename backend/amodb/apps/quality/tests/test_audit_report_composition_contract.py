@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
+
 from amodb.apps.quality.audit_report_composition import _canonical_hash, _render_pdf
 
 
 def _snapshot() -> dict:
     return {
-        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V1",
+        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V2",
         "audit": {
             "id": "44444444-4444-4444-8444-444444444444",
             "audit_ref": "QAR-MO-26-021",
@@ -27,9 +29,22 @@ def _snapshot() -> dict:
             "observer_auditor_user_id": None,
             "assistant_auditor_user_id": None,
         },
+        "closing_narrative": {
+            "management_summary": "The audit was completed against the approved scope and criteria.",
+            "conclusion": "The system is generally effective subject to the recorded finding.",
+            "positive_practices": "Controlled records were readily retrievable.",
+            "updated_at": "2026-08-19T15:40:00+03:00",
+            "updated_by_user_id": "auditor-a",
+        },
+        "meetings": [],
         "checklist": [
             {
                 "checklist_item_id": "item-1",
+                "section": "Document control",
+                "checklist_ref": "CHK-4.2.3-01",
+                "requirement_ref": "QMSM 4.2.3",
+                "prompt": "Are current controlled procedures available at each sampled point of use?",
+                "sort_order": 10,
                 "canonical_response_status": "COMPLIANT",
                 "auditor_notes": "Current controlled copy sampled at point of use.",
                 "objective_evidence": "QP-04 Rev 7 compared to DMS current revision.",
@@ -37,6 +52,11 @@ def _snapshot() -> dict:
             },
             {
                 "checklist_item_id": "item-2",
+                "section": "Document control",
+                "checklist_ref": "CHK-4.2.3-02",
+                "requirement_ref": "QMSM 4.2.3",
+                "prompt": "Are obsolete controlled copies prevented from unintended use?",
+                "sort_order": 20,
                 "canonical_response_status": "NONCOMPLIANT",
                 "auditor_notes": "One obsolete print was available at the sampled station.",
                 "objective_evidence": "Station copy QP-07 Rev 2 versus current Rev 4.",
@@ -102,6 +122,16 @@ def test_report_renderer_produces_a_pdf_from_the_frozen_snapshot(tmp_path: Path)
     content = destination.read_bytes()
     assert content.startswith(b"%PDF-")
     assert len(content) > 1000
+
+
+def test_report_renderer_includes_checklist_question_and_requirement_context(tmp_path: Path):
+    destination = tmp_path / "checklist-context-report.pdf"
+    _render_pdf(_snapshot(), destination)
+    with fitz.open(destination) as document:
+        rendered_text = "\n".join(page.get_text() for page in document)
+    assert "QMSM 4.2.3" in rendered_text
+    assert "Are current controlled procedures available" in rendered_text
+    assert "Are obsolete controlled copies prevented" in rendered_text
 
 
 def test_report_renderer_handles_no_findings_without_inventing_content(tmp_path: Path):
