@@ -37,11 +37,15 @@ function watchServerFailures(page: Page, failures: string[]): void {
 async function login(page: Page, data: Fixture): Promise<void> {
   await page.goto(`/maintenance/${data.amo_slug}/login`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Email", { exact: true }).fill(data.realtime_user_a_email);
-  await page.getByLabel("Password").fill(data.realtime_password);
+  await page.getByLabel("Password", { exact: true }).fill(data.realtime_password);
   await Promise.all([
     page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
     page.getByRole("button", { name: "Sign In" }).click(),
   ]);
+}
+
+function structuredEditor(page: Page, label: string) {
+  return page.getByLabel(`${label} structured editor`, { exact: true }).locator("textarea");
 }
 
 async function authenticatedPost(page: Page, path: string, payload: unknown): Promise<{ status: number; body: unknown }> {
@@ -69,16 +73,16 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByLabel("Your email").fill("responsible.manager@example.com");
   await page.getByRole("button", { name: "Save responder details" }).click();
 
-  await page.getByLabel("Immediate containment action", { exact: true }).fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
+  await structuredEditor(page, "Immediate containment action").fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
   await page.getByRole("button", { name: "Save containment and continue" }).click();
-  await page.getByLabel("Root cause analysis", { exact: true }).fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
-  await page.getByLabel("Corrective action plan", { exact: true }).fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
-  await page.getByLabel("Preventive action / systemic control", { exact: true }).fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
+  await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
+  await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
   await page.getByLabel("Target closure date").fill(futureDate(28));
   await page.getByLabel("Due date").fill(futureDate(21));
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
-  await page.getByLabel("Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
+  await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
     name: `car-effectiveness-${suffix}.txt`,
     mimeType: "text/plain",
