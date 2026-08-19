@@ -1,0 +1,586 @@
+/* Rostering module visual system.
+   Compact, grouped, iOS-inspired surfaces with vertical navigation on desktop
+   and dense, readable operational tables throughout the module. */
+
+.wr-page {
+  --wr-ios-radius-xl: 18px;
+  --wr-ios-radius-lg: 14px;
+  --wr-ios-radius-md: 11px;
+  --wr-ios-shadow: 0 10px 30px color-mix(in srgb, #020617 8%, transparent);
+  --wr-ios-hairline: color-mix(in srgb, var(--wr-border) 76%, transparent);
+  --wr-ios-group: color-mix(in srgb, var(--wr-surface) 86%, var(--wr-surface-strong));
+  padding: 8px 10px 12px;
+}
+
+.wr-module-shell {
+  display: grid;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px) - 20px);
+}
+
+.wr-module-rail {
+  position: sticky;
+  top: 8px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px) - 24px);
+  padding: 9px;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: var(--wr-ios-radius-xl);
+  background: color-mix(in srgb, var(--wr-surface-strong) 92%, transparent);
+  box-shadow: var(--wr-ios-shadow);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.wr-module-rail__brand {
+  display: grid;
+  gap: 1px;
+  padding: 7px 9px 8px;
+}
+
+.wr-module-rail__brand span {
+  color: var(--wr-muted);
+  font-size: .62rem;
+  font-weight: 760;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.wr-module-rail__brand strong {
+  color: var(--wr-text);
+  font-size: .91rem;
+  letter-spacing: -.015em;
+}
+
+.wr-tabs {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--wr-ios-radius-md);
+  background: color-mix(in srgb, var(--wr-surface) 78%, transparent);
+  box-shadow: none;
+  overflow: visible;
+}
+
+.wr-tabs--secondary {
+  margin-top: auto;
+  padding-top: 7px;
+  border-top: 1px solid var(--wr-ios-hairline);
+  border-radius: 0 0 var(--wr-ios-radius-md) var(--wr-ios-radius-md);
+  background: transparent;
+}
+
+.wr-tab {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 36px;
+  padding: 5px 8px 5px 6px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--wr-muted);
+  background: transparent;
+  font-size: .75rem;
+  font-weight: 710;
+  line-height: 1.1;
+  text-align: left;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.wr-tab__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: currentColor;
+}
+
+.wr-tab:hover {
+  color: var(--wr-text);
+  background: color-mix(in srgb, var(--wr-surface-strong) 76%, transparent);
+}
+
+.wr-tab--active {
+  color: var(--wr-accent);
+  background: var(--wr-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wr-accent) 10%, transparent);
+}
+
+.wr-tab--active .wr-tab__icon {
+  background: color-mix(in srgb, var(--wr-accent) 12%, transparent);
+}
+
+.wr-tab:focus-visible {
+  outline: 2px solid var(--wr-accent);
+  outline-offset: 1px;
+}
+
+.wr-module-stage {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: start;
+  gap: 7px;
+}
+
+.wr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: var(--wr-ios-radius-lg);
+  background: color-mix(in srgb, var(--wr-surface-strong) 94%, transparent);
+  box-shadow: 0 5px 18px color-mix(in srgb, #020617 5%, transparent);
+}
+
+.wr-header__copy {
+  display: grid;
+  grid-template-columns: auto;
+  align-items: start;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wr-header__context {
+  order: 0;
+  max-width: min(52vw, 680px);
+  overflow: hidden;
+  color: var(--wr-muted);
+  font-size: .61rem;
+  font-weight: 760;
+  letter-spacing: .055em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wr-header__copy > h1,
+.wr-header h1 {
+  order: 1;
+  margin: 0;
+  color: var(--wr-text);
+  font-size: clamp(.98rem, 1vw, 1.16rem);
+  font-weight: 760;
+  line-height: 1.14;
+  letter-spacing: -.025em;
+  white-space: normal;
+}
+
+.wr-header__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.wr-header__actions .wr-button,
+.wr-header-badge {
+  min-height: 32px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  font-size: .72rem;
+}
+
+.wr-header-help {
+  position: relative;
+}
+
+.wr-header-help > summary {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: 9px;
+  color: var(--wr-muted);
+  background: var(--wr-ios-group);
+  cursor: pointer;
+  list-style: none;
+}
+
+.wr-header-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wr-header-help[open] > summary {
+  color: var(--wr-accent);
+  border-color: color-mix(in srgb, var(--wr-accent) 28%, var(--wr-border));
+  background: var(--wr-accent-soft);
+}
+
+.wr-header-help > p {
+  position: absolute;
+  z-index: 90;
+  top: 38px;
+  right: 0;
+  width: min(340px, calc(100vw - 28px));
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: 12px;
+  color: var(--wr-muted);
+  background: color-mix(in srgb, var(--wr-surface-strong) 96%, transparent);
+  box-shadow: 0 18px 46px color-mix(in srgb, #020617 15%, transparent);
+  backdrop-filter: blur(18px) saturate(1.15);
+  font-size: .73rem;
+  line-height: 1.42;
+}
+
+.wr-context {
+  margin: 0;
+}
+
+.wr-main {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Grouped iOS-style content surfaces. */
+.wr-panel,
+.wr-metric,
+.wr-empty,
+.wr-state,
+.wr-native-guidance,
+.wr-context {
+  border-color: var(--wr-ios-hairline);
+  border-radius: var(--wr-ios-radius-lg);
+}
+
+.wr-panel {
+  box-shadow: 0 4px 16px color-mix(in srgb, #020617 4%, transparent);
+}
+
+.wr-section-heading {
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.wr-section-heading > div:first-child {
+  min-width: 0;
+  max-width: 76ch;
+}
+
+.wr-section-heading h2,
+.wr-section-heading h3 {
+  margin-block: 0 2px;
+  font-size: .9rem;
+  line-height: 1.2;
+  letter-spacing: -.012em;
+}
+
+.wr-section-heading p {
+  max-width: 68ch;
+  margin: 2px 0 0;
+  font-size: .72rem;
+  line-height: 1.4;
+}
+
+/* Do not let a text-only heading become a fake full-width banner. */
+.wr-section-heading > :only-child {
+  flex: 0 1 76ch;
+}
+
+/* Dense, controlled table treatment shared by all Rostering workspaces. */
+.wr-page table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--wr-ios-hairline);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--wr-surface-strong);
+  font-size: .72rem;
+}
+
+.wr-page table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 34px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wr-ios-hairline);
+  color: var(--wr-muted);
+  background: color-mix(in srgb, var(--wr-surface) 92%, var(--wr-surface-strong));
+  font-size: .64rem;
+  font-weight: 780;
+  letter-spacing: .035em;
+  line-height: 1.15;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wr-page table tbody td,
+.wr-page table tbody th {
+  min-height: 36px;
+  padding: 7px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--wr-border) 58%, transparent);
+  vertical-align: middle;
+}
+
+.wr-page table tbody tr:nth-child(even) > * {
+  background: color-mix(in srgb, var(--wr-surface) 45%, transparent);
+}
+
+.wr-page table tbody tr:hover > * {
+  background: color-mix(in srgb, var(--wr-accent) 5%, var(--wr-surface-strong));
+}
+
+.wr-page table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.wr-page table th + th,
+.wr-page table td + td {
+  border-left: 1px solid color-mix(in srgb, var(--wr-border) 42%, transparent);
+}
+
+.wr-page table button,
+.wr-page table .wr-button {
+  min-height: 28px;
+  padding: 4px 7px;
+  border-radius: 8px;
+}
+
+/* Tables remain bounded. Horizontal overflow belongs to their local surface,
+   never to the entire module page. */
+.wr-table-wrap,
+.wr-table-scroll,
+.wr-page .table-responsive,
+.wr-page [class*="table-scroll"],
+.wr-page [class*="table-wrap"] {
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-radius: 12px;
+}
+
+/* Compact controls: icon-first actions and grouped segmented choices. */
+.wr-button {
+  border-radius: 9px;
+}
+
+.wr-button--small {
+  min-height: 29px;
+  padding: 4px 8px;
+}
+
+.wr-filterbar,
+.wr-toolbar,
+.wr-planner-toolbar,
+.wr-inline-counts {
+  gap: 5px;
+}
+
+.wr-filterbar input,
+.wr-filterbar select,
+.wr-toolbar input,
+.wr-toolbar select,
+.wr-page input,
+.wr-page select,
+.wr-page textarea {
+  border-radius: 9px;
+}
+
+.wr-pill {
+  border-radius: 999px;
+}
+
+/* Existing Workforce vertical tabs become a compact nested settings rail. */
+.hr-workspace-v2 {
+  gap: 9px;
+}
+
+.hr-workspace__nav {
+  border-radius: var(--wr-ios-radius-lg);
+  box-shadow: 0 4px 16px color-mix(in srgb, #020617 4%, transparent);
+}
+
+.hr-workspace__nav button {
+  min-height: 42px;
+  border-radius: 10px;
+}
+
+/* Planner is intentionally flatter than settings/dashboard cards. */
+.wr-planner-workspace,
+.wr-planner-layout--sheet {
+  min-width: 0;
+}
+
+.wr-planner-layout--sheet {
+  border-radius: var(--wr-ios-radius-lg);
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+  .wr-module-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .wr-module-rail {
+    padding: 7px;
+  }
+
+  .wr-module-rail__brand {
+    padding: 6px 3px 8px;
+    text-align: center;
+  }
+
+  .wr-module-rail__brand span {
+    display: none;
+  }
+
+  .wr-module-rail__brand strong {
+    font-size: .7rem;
+  }
+
+  .wr-tab {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 5px 2px;
+    font-size: .59rem;
+    text-align: center;
+  }
+
+  .wr-tab__icon {
+    width: 27px;
+    height: 27px;
+  }
+}
+
+@media (max-width: 760px) {
+  .wr-page {
+    padding: 6px;
+  }
+
+  .wr-module-shell {
+    display: block;
+    min-height: 0;
+  }
+
+  .wr-module-stage {
+    gap: 6px;
+  }
+
+  .wr-module-rail {
+    position: sticky;
+    z-index: 70;
+    top: 0;
+    display: block;
+    min-height: 0;
+    margin-bottom: 6px;
+    padding: 4px;
+    border-radius: 13px;
+  }
+
+  .wr-module-rail__brand {
+    display: none;
+  }
+
+  .wr-module-rail .wr-tabs,
+  .wr-module-rail .wr-tabs--secondary {
+    display: flex;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .wr-module-rail .wr-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wr-module-rail .wr-tabs--secondary {
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px solid var(--wr-ios-hairline);
+  }
+
+  .wr-module-rail .wr-tab {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 5px;
+    min-width: auto;
+    min-height: 34px;
+    padding: 4px 8px 4px 5px;
+    font-size: .66rem;
+    white-space: nowrap;
+  }
+
+  .wr-module-rail .wr-tab__icon {
+    width: 25px;
+    height: 25px;
+  }
+
+  .wr-header {
+    min-height: 44px;
+    padding: 5px 6px 5px 9px;
+    border-radius: 12px;
+  }
+
+  .wr-header__context {
+    max-width: 62vw;
+    font-size: .56rem;
+  }
+
+  .wr-header h1 {
+    font-size: .98rem;
+  }
+
+  .wr-header__actions .wr-button span,
+  .wr-header-badge {
+    display: none;
+  }
+
+  .wr-header__actions .wr-button {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .wr-page table {
+    min-width: max-content;
+  }
+
+  .wr-page table thead th {
+    height: 32px;
+    padding-inline: 7px;
+  }
+
+  .wr-page table tbody td,
+  .wr-page table tbody th {
+    padding: 6px 7px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wr-tab,
+  .wr-button {
+    transition: none;
+  }
+}

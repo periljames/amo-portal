@@ -1,0 +1,162 @@
+.wr-planner-workspace {
+  position: relative;
+}
+
+.wr-planner-download-shortcut,
+.wr-planner-governance-shortcut > summary {
+  position: absolute;
+  z-index: 64;
+  top: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  border: 1px solid var(--wr-border);
+  border-radius: 9px;
+  color: var(--wr-text);
+  background: var(--wr-surface-strong);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 130ms ease, border-color 130ms ease, transform 130ms ease;
+}
+
+.wr-planner-download-shortcut {
+  right: 43px;
+  width: 34px;
+}
+
+.wr-planner-governance-shortcut > summary {
+  right: 82px;
+  min-width: 76px;
+  padding: 0 9px;
+  list-style: none;
+  font-size: .7rem;
+  font-weight: 800;
+}
+
+.wr-planner-governance-shortcut > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wr-planner-download-shortcut:hover,
+.wr-planner-governance-shortcut > summary:hover,
+.wr-planner-governance-shortcut[open] > summary {
+  border-color: color-mix(in srgb, var(--wr-accent) 40%, var(--wr-border));
+  color: var(--wr-accent);
+  background: var(--wr-accent-soft);
+  transform: translateY(-1px);
+}
+
+.wr-planner-download-shortcut:focus-visible,
+.wr-planner-governance-shortcut > summary:focus-visible {
+  outline: 2px solid var(--wr-accent);
+  outline-offset: 2px;
+}
+
+.wr-planner-governance-shortcut[open]::before {
+  content: "";
+  position: absolute;
+  z-index: 52;
+  inset: 0;
+  background: color-mix(in srgb, #020617 22%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.wr-planner-governance-drawer {
+  position: absolute;
+  z-index: 58;
+  top: 0;
+  right: 0;
+  width: min(720px, 92vw);
+  height: 100%;
+  min-height: 0;
+  padding: 48px 10px 12px;
+  overflow: auto;
+  border-left: 1px solid var(--wr-border);
+  border-radius: 0 14px 14px 0;
+  background: var(--wr-surface-strong);
+  box-shadow: -18px 0 42px color-mix(in srgb, #020617 18%, transparent);
+}
+
+.wr-planner-governance-drawer .wr-settings {
+  gap: 8px;
+}
+
+.wr-planner-governance-drawer .wr-panel {
+  box-shadow: none;
+}
+
+/* Reserve room for the icon-first governed checks and download actions. */
+.wr-planner-workspace .wr-planner-primary-actions {
+  padding-right: 123px;
+}
+
+@media (max-width: 900px) {
+  .wr-planner-governance-shortcut > summary span {
+    display: none;
+  }
+
+  .wr-planner-governance-shortcut > summary {
+    right: 82px;
+    min-width: 34px;
+    width: 34px;
+    padding: 0;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions {
+    padding-right: 82px;
+  }
+}
+
+@media (max-width: 700px) {
+  .wr-planner-download-shortcut,
+  .wr-planner-governance-shortcut > summary {
+    position: static;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    padding: 0;
+    margin-top: 4px;
+  }
+
+  .wr-planner-download-shortcut {
+    margin-left: 4px;
+  }
+
+  .wr-planner-governance-shortcut {
+    position: absolute;
+    z-index: 64;
+    top: 0;
+    right: 48px;
+  }
+
+  .wr-planner-download-shortcut {
+    position: absolute;
+    top: 0;
+    right: 5px;
+  }
+
+  .wr-planner-governance-drawer {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: min(86dvh, 760px);
+    padding: 50px 8px 10px;
+    border: 1px solid var(--wr-border);
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .wr-planner-governance-shortcut[open]::before {
+    position: fixed;
+    inset: 0;
+  }
+
+  .wr-planner-workspace .wr-planner-primary-actions {
+    padding-right: 86px;
+  }
+}
