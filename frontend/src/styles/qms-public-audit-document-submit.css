@@ -1,0 +1,49 @@
+.qms-public-audit__document-submit {
+  display: grid;
+  gap: 0.45rem;
+  min-width: min(300px, 100%);
+  padding: 0.6rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.qms-public-audit__document-submit label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.qms-public-audit__document-submit label > span {
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.qms-public-audit__document-submit input,
+.qms-public-audit__document-submit textarea {
+  width: 100%;
+  padding: 0.45rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.qms-public-audit__document-submit small {
+  font-size: 0.68rem;
+}
+
+.qms-public-audit__document-submit small.is-error {
+  color: #991b1b;
+}
+
+.qms-public-audit__document-submit small.is-success {
+  color: #15803d;
+}
+
+@media (max-width: 560px) {
+  .qms-public-audit__document-submit {
+    min-width: 0;
+  }
+}

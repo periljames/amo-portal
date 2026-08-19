@@ -1,0 +1,167 @@
+name: QMS Live Audit Security
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/quality/**"
+      - "backend/amodb/alembic/versions/quality_260816_*.py"
+      - "backend/amodb/alembic/versions/quality_260817_*.py"
+      - "backend/requirements.txt"
+      - "frontend/src/features/qms/**"
+      - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/pages/PublicAuditVerificationPage.tsx"
+      - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsExternalAuditOutbox.ts"
+      - "frontend/src/services/qmsExternalAuditorMutations.ts"
+      - "frontend/src/services/qmsExternalFindingDraft*.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/qms-live-audit-security.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_REF: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+
+jobs:
+  frontend-dependencies:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - name: Checkout exact base for comparison
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: baseline
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Audit head production dependency graph
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --omit=dev --json > ../qms-live-audit-npm-head.json || true
+      - name: Audit exact base production dependency graph
+        working-directory: baseline/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --omit=dev --json > ../../qms-live-audit-npm-base.json || true
+      - name: Fail on newly introduced high or critical npm advisories
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          function read(path) {
+            const value = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (!value || typeof value !== 'object' || !value.vulnerabilities) throw new Error(`Invalid npm audit JSON: ${path}`);
+            return value;
+          }
+          function findings(value) {
+            const result = new Set();
+            for (const [pkg, finding] of Object.entries(value.vulnerabilities || {})) {
+              const via = Array.isArray(finding.via) ? finding.via : [];
+              for (const advisory of via) {
+                if (!advisory || typeof advisory !== 'object') continue;
+                const severity = String(advisory.severity || finding.severity || '').toLowerCase();
+                if (!['high', 'critical'].includes(severity)) continue;
+                result.add(`${pkg}:${advisory.source || advisory.url || advisory.title || severity}`);
+              }
+            }
+            return result;
+          }
+          const head = findings(read('qms-live-audit-npm-head.json'));
+          const base = findings(read('qms-live-audit-npm-base.json'));
+          const added = [...head].filter(item => !base.has(item)).sort();
+          console.log(`Base high/critical advisory keys: ${base.size}`);
+          console.log(`Head high/critical advisory keys: ${head.size}`);
+          if (added.length) {
+            console.error('New high/critical npm vulnerabilities introduced by this PR:');
+            for (const item of added) console.error(` - ${item}`);
+            process.exit(1);
+          }
+          console.log('No new high/critical npm vulnerability was introduced relative to the exact PR base.');
+          NODE
+      - name: Upload npm audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-npm-audit
+          path: |
+            qms-live-audit-npm-head.json
+            qms-live-audit-npm-base.json
+          if-no-files-found: error
+
+  backend-dependencies:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - name: Checkout exact base for comparison
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: baseline
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install audit tooling
+        run: python -m pip install --disable-pip-version-check "pip-audit>=2.9,<3"
+      - name: Audit head and exact-base backend requirements
+        run: |
+          pip-audit -r backend/requirements.txt --format json --output qms-live-audit-pip-head.json || true
+          pip-audit -r baseline/backend/requirements.txt --format json --output qms-live-audit-pip-base.json || true
+      - name: Fail on newly introduced backend vulnerabilities
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          def findings(path: str) -> set[str]:
+              payload = json.loads(Path(path).read_text(encoding='utf-8'))
+              dependencies = payload.get('dependencies') if isinstance(payload, dict) else None
+              if not isinstance(dependencies, list):
+                  raise SystemExit(f'Invalid pip-audit JSON: {path}')
+              result: set[str] = set()
+              for dependency in dependencies:
+                  name = str(dependency.get('name') or 'unknown').lower()
+                  for vulnerability in dependency.get('vulns') or []:
+                      result.add(f"{name}:{vulnerability.get('id') or 'unknown'}")
+              return result
+
+          head = findings('qms-live-audit-pip-head.json')
+          base = findings('qms-live-audit-pip-base.json')
+          added = sorted(head - base)
+          print(f'Base vulnerability keys: {len(base)}')
+          print(f'Head vulnerability keys: {len(head)}')
+          if added:
+              print('New backend vulnerabilities introduced by this PR:')
+              for item in added:
+                  print(f' - {item}')
+              raise SystemExit(1)
+          print('No new backend vulnerability was introduced relative to the exact PR base.')
+          PY
+      - name: Upload pip-audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-pip-audit
+          path: |
+            qms-live-audit-pip-head.json
+            qms-live-audit-pip-base.json
+          if-no-files-found: error

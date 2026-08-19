@@ -11,6 +11,9 @@ import { ToastProvider } from "./components/feedback/ToastProvider";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
+import PublicAuditAccessPage from "./pages/PublicAuditAccessPage";
+import PublicAuditVerificationPage from "./pages/PublicAuditVerificationPage";
+import CanonicalPublicCarAccessPage from "./pages/CanonicalPublicCarAccessPage";
 import { onSessionEvent } from "./services/auth";
 import { clearAllCachedAdminProfileStates } from "./services/adminProfileMode";
 import { resetLoading } from "./services/loading";
@@ -21,6 +24,8 @@ import { installPortalUploadGuard } from "./services/portalUploadGuard";
 import { preloadRoute } from "./app/routePreload";
 
 import "./styles/auth.css";
+import "./styles/qms-live-audit-completion.css";
+import "./styles/qms-audit-canonical-occurrence.css";
 
 const App: React.FC = () => {
   const queryClient = useQueryClient();
@@ -28,57 +33,48 @@ const App: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
+  const isPublicAuditAccess = /^\/qms\/audit-access(?:\/[^/]+)?\/?$/i.test(location.pathname);
+  const isPublicCarAccess = /^\/qms\/car-access\/[^/]+\/?$/i.test(location.pathname);
+  const isPublicAuditVerification = /^\/verify\/[^/]+\/?$/i.test(location.pathname);
+  const isPublicQualitySurface = isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
 
-  useEffect(() => {
-    document.body.dataset.theme = theme;
-  }, [theme]);
-
+  useEffect(() => { document.body.dataset.theme = theme; }, [theme]);
   void scheme;
 
   useEffect(() => {
     const removeFetchBridge = installPortalFetchErrorBridge();
     const removeInlineMirror = installPortalInlineErrorMirror();
     const removeUploadGuard = installPortalUploadGuard();
-    return () => {
-      removeUploadGuard();
-      removeInlineMirror();
-      removeFetchBridge();
-    };
+    return () => { removeUploadGuard(); removeInlineMirror(); removeFetchBridge(); };
   }, []);
 
-  useEffect(() => {
-    return onSessionEvent((detail) => {
-      if (detail.type === "authenticated") {
-        void queryClient.cancelQueries();
-        clearAllCachedAdminProfileStates();
-        clearApiResponseCache();
-        resetLoading();
-      }
-      if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
-        void queryClient.cancelQueries();
-        queryClient.clear();
-        clearAllCachedAdminProfileStates();
-        clearApiResponseCache();
-        resetLoading();
+  useEffect(() => onSessionEvent((detail) => {
+    if (detail.type === "authenticated") {
+      void queryClient.cancelQueries();
+      clearAllCachedAdminProfileStates();
+      clearApiResponseCache();
+      resetLoading();
+    }
+    if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+      void queryClient.cancelQueries();
+      queryClient.clear();
+      clearAllCachedAdminProfileStates();
+      clearApiResponseCache();
+      resetLoading();
 
-        const parts = location.pathname.split("/").filter(Boolean);
-        const isLoginRoute = location.pathname === "/login"
-          || (parts[0] === "maintenance" && parts[2] === "login");
-        if (isLoginRoute) return;
+      // Purpose-bound external audit, CAR response and public verification
+      // routes must not be redirected into the employee login lifecycle.
+      if (isPublicQualitySurface) return;
 
-        const tenant = (parts[0] === "maintenance" || parts[0] === "t") ? parts[1] : "";
-        const loginTarget = tenant ? `/maintenance/${encodeURIComponent(tenant)}/login` : "/login";
-        const shouldResume = detail.type === "expired" || detail.type === "idle-logout";
-        navigate(loginTarget, {
-          replace: true,
-          state: {
-            from: shouldResume ? `${location.pathname}${location.search}${location.hash}` : undefined,
-            sessionReason: detail.type,
-          },
-        });
-      }
-    });
-  }, [location.hash, location.pathname, location.search, navigate, queryClient]);
+      const parts = location.pathname.split("/").filter(Boolean);
+      const isLoginRoute = location.pathname === "/login" || (parts[0] === "maintenance" && parts[2] === "login");
+      if (isLoginRoute) return;
+      const tenant = (parts[0] === "maintenance" || parts[0] === "t") ? parts[1] : "";
+      const loginTarget = tenant ? `/maintenance/${encodeURIComponent(tenant)}/login` : "/login";
+      const shouldResume = detail.type === "expired" || detail.type === "idle-logout";
+      navigate(loginTarget, { replace: true, state: { from: shouldResume ? `${location.pathname}${location.search}${location.hash}` : undefined, sessionReason: detail.type } });
+    }
+  }), [isPublicQualitySurface, location.hash, location.pathname, location.search, navigate, queryClient]);
 
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
@@ -93,11 +89,9 @@ const App: React.FC = () => {
         // Ignore malformed or non-route links.
       }
     };
-
     const onPointerOver = (event: PointerEvent) => preloadFromTarget(event.target);
     const onFocusIn = (event: FocusEvent) => preloadFromTarget(event.target);
     const onPointerDown = (event: PointerEvent) => preloadFromTarget(event.target);
-
     document.addEventListener("pointerover", onPointerOver, { passive: true, capture: true });
     document.addEventListener("focusin", onFocusIn, { capture: true });
     document.addEventListener("pointerdown", onPointerDown, { passive: true, capture: true });
@@ -108,15 +102,15 @@ const App: React.FC = () => {
     };
   }, []);
 
+  if (isPublicAuditVerification) return <PortalErrorBoundary><PublicAuditVerificationPage /></PortalErrorBoundary>;
+  if (isPublicAuditAccess) return <PortalErrorBoundary><PublicAuditAccessPage /></PortalErrorBoundary>;
+  if (isPublicCarAccess) return <PortalErrorBoundary><CanonicalPublicCarAccessPage /></PortalErrorBoundary>;
+
   return (
     <ToastProvider>
       <GlobalLoadingBar />
       <PortalSessionLifecycle />
-      <PortalErrorBoundary>
-        <TenantRouteBoundary>
-          <AppRouter />
-        </TenantRouteBoundary>
-      </PortalErrorBoundary>
+      <PortalErrorBoundary><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></PortalErrorBoundary>
     </ToastProvider>
   );
 };

@@ -324,6 +324,17 @@ jobs:
         run: npm run build
       - name: Install Chromium for focused QMS browser tests
         run: npx playwright install --with-deps chromium
+      - name: Start mocked portal readiness
+        run: |
+          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; retry direct mocked backend"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-readiness.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-readiness.log
+          exit 1
       - name: Start QMS preview server
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-preview.log 2>&1 &

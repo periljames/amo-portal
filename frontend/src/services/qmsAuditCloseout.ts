@@ -61,6 +61,13 @@ export function adoptCurrentAuditReport(amoCode: string, auditId: string, reason
   return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/adopt-current`), json("POST", { reason }));
 }
 
+export function adoptGeneratedAuditReport(amoCode: string, auditId: string, artifactId: string, reason: string) {
+  return apiRequest<AuditReportRevision>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/adopt-generated/${encodeURIComponent(artifactId)}`),
+    json("POST", { reason }),
+  );
+}
+
 export function transitionAuditReport(amoCode: string, auditId: string, revisionId: string, action: "SUBMIT" | "RETURN" | "APPROVE" | "ISSUE" | "CANCEL", reason: string) {
   return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/${encodeURIComponent(revisionId)}/transitions`), json("POST", { action, reason }));
 }

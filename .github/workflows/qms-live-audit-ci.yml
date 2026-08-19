@@ -1,0 +1,288 @@
+name: QMS Live Audit CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/alembic/versions/quality_260816_*.py"
+      - "backend/amodb/alembic/versions/quality_260817_*.py"
+      - "backend/amodb/apps/quality/audit_session_*.py"
+      - "backend/amodb/apps/quality/audit_external_*.py"
+      - "backend/amodb/apps/quality/audit_occurrence_*.py"
+      - "backend/amodb/apps/quality/audit_live_completion_*.py"
+      - "backend/amodb/apps/quality/audit_evidence_*.py"
+      - "backend/amodb/apps/quality/audit_presence_*.py"
+      - "backend/amodb/apps/quality/audit_controlled_document_collaboration_router.py"
+      - "backend/amodb/apps/quality/audit_generated_report_adoption_router.py"
+      - "backend/amodb/apps/quality/audit_finding_release_status_router.py"
+      - "backend/amodb/apps/quality/audit_guest_document_*.py"
+      - "backend/amodb/apps/quality/audit_guest_documents_router.py"
+      - "backend/amodb/apps/quality/audit_report_composition*.py"
+      - "backend/amodb/apps/quality/audit_closing_assurance*.py"
+      - "backend/amodb/apps/quality/audit_archive_*.py"
+      - "backend/amodb/apps/quality/audit_official_finding_service.py"
+      - "backend/amodb/apps/quality/audit_checklist_execution_*.py"
+      - "backend/amodb/apps/quality/car_control_loop_route_order.py"
+      - "backend/amodb/apps/quality/tests/test_audit_*.py"
+      - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
+      - "frontend/src/App.tsx"
+      - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/pages/PublicAuditVerificationPage.tsx"
+      - "frontend/src/features/qms/auditSession/**"
+      - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsExternalAuditOutbox.ts"
+      - "frontend/src/services/qmsExternalAuditorMutations.ts"
+      - "frontend/src/services/qmsExternalFindingDraft*.ts"
+      - "frontend/src/services/qmsChecklistExecutionGovernance.ts"
+      - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
+      - "frontend/src/components/QMS/QualityDataFreshnessCoordinator.tsx"
+      - "frontend/src/styles/qms-audit-*.css"
+      - "frontend/src/styles/qms-live-*.css"
+      - "frontend/src/styles/qms-external-*.css"
+      - "frontend/src/styles/qms-public-audit-*.css"
+      - "frontend/tests/e2e/qms-live-audit-*.spec.ts"
+      - "docs/quality/QMS_LIVE_AUDIT_*.md"
+      - "docs/quality/QMS_ARCHIVE_RETENTION_MODEL.md"
+      - "docs/quality/QMS_PENDING_PR_RECONCILIATION.md"
+      - ".github/workflows/qms-live-audit-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      SECRET_KEY: qms-live-audit-ci-secret
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile live audit contract
+        run: >-
+          python -m compileall -q
+          amodb/apps/quality/audit_session_router.py
+          amodb/apps/quality/audit_session_route_order.py
+          amodb/apps/quality/audit_external_access_models.py
+          amodb/apps/quality/audit_external_access_router.py
+          amodb/apps/quality/audit_external_access_route_order.py
+          amodb/apps/quality/audit_external_report_acknowledgement_router.py
+          amodb/apps/quality/audit_external_participant_guard_router.py
+          amodb/apps/quality/audit_external_session_guard_router.py
+          amodb/apps/quality/audit_external_passkey_router.py
+          amodb/apps/quality/audit_external_fieldwork_router.py
+          amodb/apps/quality/audit_external_finding_draft_router.py
+          amodb/apps/quality/audit_external_finding_promotion_router.py
+          amodb/apps/quality/audit_occurrence_assignment_router.py
+          amodb/apps/quality/audit_occurrence_completion_models.py
+          amodb/apps/quality/audit_occurrence_completion_router.py
+          amodb/apps/quality/audit_occurrence_completion_route_order.py
+          amodb/apps/quality/audit_live_completion_models.py
+          amodb/apps/quality/audit_live_completion_router.py
+          amodb/apps/quality/audit_live_completion_route_order.py
+          amodb/apps/quality/audit_evidence_models.py
+          amodb/apps/quality/audit_evidence_storage.py
+          amodb/apps/quality/audit_evidence_router.py
+          amodb/apps/quality/audit_evidence_route_order.py
+          amodb/apps/quality/audit_presence_models.py
+          amodb/apps/quality/audit_presence_router.py
+          amodb/apps/quality/audit_presence_route_order.py
+          amodb/apps/quality/audit_controlled_document_collaboration_router.py
+          amodb/apps/quality/audit_generated_report_adoption_router.py
+          amodb/apps/quality/audit_finding_release_status_router.py
+          amodb/apps/quality/audit_guest_document_models.py
+          amodb/apps/quality/audit_guest_document_storage.py
+          amodb/apps/quality/audit_guest_documents_router.py
+          amodb/apps/quality/audit_report_composition.py
+          amodb/apps/quality/audit_report_composition_models.py
+          amodb/apps/quality/audit_report_composition_router.py
+          amodb/apps/quality/audit_report_composition_route_order.py
+          amodb/apps/quality/audit_closing_assurance_models.py
+          amodb/apps/quality/audit_closing_assurance_router.py
+          amodb/apps/quality/audit_closing_assurance_route_order.py
+          amodb/apps/quality/audit_archive_governance_models.py
+          amodb/apps/quality/audit_archive_governance_router.py
+          amodb/apps/quality/audit_archive_package_router.py
+          amodb/apps/quality/audit_archive_governance_route_order.py
+          amodb/apps/quality/audit_checklist_execution_models.py
+          amodb/apps/quality/audit_checklist_execution_router.py
+      - name: Test session projection
+        run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
+      - name: Test external access token, scope, CSRF and issued-report receipt contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py amodb/apps/quality/tests/test_audit_external_report_acknowledgement_contract.py
+      - name: Test external finding draft and promotion contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_external_finding_draft_contract.py amodb/apps/quality/tests/test_audit_external_finding_promotion_contract.py
+      - name: Test guest document storage controls
+        run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
+      - name: Test deterministic report composition helpers
+        run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
+      - name: Test idempotent fieldwork sync contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
+      - name: Test realtime reconnect and tenant replay contract
+        run: pytest -q amodb/apps/quality/tests/test_audit_realtime_contract.py
+      - name: Test closing and archive governance helpers
+        run: pytest -q amodb/apps/quality/tests/test_audit_closing_assurance_contract.py amodb/apps/quality/tests/test_audit_archive_governance_contract.py
+      - name: Prove authoritative workflow contract remains green
+        run: pytest -q amodb/apps/quality/tests/test_audit_workflow_contract.py
+
+  postgres-contract:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_live_audit_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_live_audit_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_ci
+      SECRET_KEY: qms-live-audit-ci-secret
+      QUALITY_SCHEMA_STRICT: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Upgrade PostgreSQL through all Alembic heads
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Verify final live audit schema, RLS, integrity and immutable history
+        run: python -m amodb.apps.quality.tests.postgres_audit_external_access_probe
+
+  frontend-contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint live audit workspaces
+        run: >-
+          npx eslint
+          src/App.tsx
+          src/pages/PublicAuditAccessPage.tsx
+          src/pages/PublicAuditVerificationPage.tsx
+          src/features/qms/auditSession/AuditLifecycleRail.tsx
+          src/features/qms/auditSession/AuditSetupWorkspace.tsx
+          src/features/qms/auditSession/AuditAssignmentGovernancePanel.tsx
+          src/features/qms/auditSession/AuditPrepareWorkspace.tsx
+          src/features/qms/auditSession/AuditDocumentSubmissionReviewPanel.tsx
+          src/features/qms/auditSession/GuestDocumentSubmit.tsx
+          src/features/qms/auditSession/ExternalAuditorFieldworkWorkspace.tsx
+          src/features/qms/auditSession/ExternalAuditorFindingDraftPanel.tsx
+          src/features/qms/auditSession/ExternalFindingDraftReviewPanel.tsx
+          src/features/qms/auditSession/LiveAuditWorkspace.tsx
+          src/features/qms/auditSession/LiveAuditEvidenceStrip.tsx
+          src/features/qms/auditSession/LiveFindingReleasePanel.tsx
+          src/features/qms/auditSession/AuditClosingNarrativePanel.tsx
+          src/features/qms/auditSession/AuditClosingWorkspace.tsx
+          src/features/qms/auditSession/AuditFollowUpWorkspace.tsx
+          src/features/qms/auditSession/AuditArchiveWorkspace.tsx
+          src/features/qms/auditSession/MobileAuditDeepLinkState.tsx
+          src/features/qms/auditSession/auditSessionRoutes.ts
+          src/features/qms/auditSession/auditSessionRoutes.test.ts
+          src/services/qmsAuditSession.ts
+          src/services/qmsAuditPreparationRoom.ts
+          src/services/qmsAuditExternalAccess.ts
+          src/services/qmsAuditExternalPasskey.ts
+          src/services/qmsAuditOccurrenceResolver.ts
+          src/services/qmsAuditOccurrenceCompletion.ts
+          src/services/qmsAuditEvidence.ts
+          src/services/qmsAuditPresence.ts
+          src/services/qmsAuditGuestClosing.ts
+          src/services/qmsAuditVerification.ts
+          src/services/qmsAuditReportComposition.ts
+          src/services/qmsAuditClosingAssurance.ts
+          src/services/qmsAuditArchiveGovernance.ts
+          src/services/qmsAuditRealtime.ts
+          src/services/qmsExternalAuditOutbox.ts
+          src/services/qmsExternalAuditorMutations.ts
+          src/services/qmsExternalFindingDrafts.ts
+          src/services/qmsExternalFindingDraftReview.ts
+          src/services/qmsChecklistExecutionGovernance.ts
+          src/components/QMS/QualityEnhancementsHost.tsx
+          src/components/QMS/QualityDataFreshnessCoordinator.tsx
+      - name: Test route and realtime compatibility
+        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts src/services/qmsAuditRealtime.test.ts
+      - name: Production frontend build
+        run: npm run build
+      - name: Start production preview
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-live-audit-preview.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-live-audit-preview.log
+          exit 1
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Public and responsive audit access browser acceptance
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 100 /tmp/qms-live-audit-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS live audit browser failure::$summary"
+          fi
+          exit "$status"
+      - name: Retain live audit browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-live-audit-playwright.log
+            /tmp/qms-live-audit-preview.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -6,6 +6,8 @@ export const DEV_API_PROXY_PATTERN =
 const PLATFORM_OPS_DEV_PATH = new RegExp(PLATFORM_OPS_DEV_PROXY_PATTERN, "i");
 const DEV_API_PATH = new RegExp(DEV_API_PROXY_PATTERN, "i");
 const PLATFORM_PATH = /^\/platform(?:\/|$|\?)/i;
+const PUBLIC_QMS_SPA_PATH = /^\/qms\/(?:audit-access|car-access)(?:\/|$|\?)/i;
+const PUBLIC_QMS_VERIFICATION_SPA_PATH = /^\/verify\/[^/?]+(?:\/|$|\?)/i;
 
 export type DevProxyTargets = {
   apiTarget: string;
@@ -27,6 +29,14 @@ export function shouldProxyDevApi(url: string | undefined): boolean {
   return DEV_API_PATH.test(String(url || ""));
 }
 
+/**
+ * Return true for browser HTML navigations that share a first path segment
+ * with an API proxy but are owned by the React SPA.
+ *
+ * `/platform/*` predates the public QMS workspaces. Signed audit/CAR URLs live
+ * under `/qms/*`, while the public artifact verification surface lives under
+ * `/verify/:token`. JSON/form APIs stay under `/quality/*`.
+ */
 export function shouldServePlatformSpa(
   method: string | undefined,
   url: string | undefined,
@@ -36,5 +46,10 @@ export function shouldServePlatformSpa(
   if (normalizedMethod !== "GET" && normalizedMethod !== "HEAD") return false;
 
   const acceptedTypes = Array.isArray(accept) ? accept.join(",") : String(accept || "");
-  return PLATFORM_PATH.test(String(url || "")) && acceptedTypes.toLowerCase().includes("text/html");
+  if (!acceptedTypes.toLowerCase().includes("text/html")) return false;
+
+  const target = String(url || "");
+  return PLATFORM_PATH.test(target)
+    || PUBLIC_QMS_SPA_PATH.test(target)
+    || PUBLIC_QMS_VERIFICATION_SPA_PATH.test(target);
 }

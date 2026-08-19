@@ -1,0 +1,70 @@
+.qms-external-finding-drafts {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #cbd5e1;
+}
+
+.qms-external-finding-drafts > header,
+.qms-external-finding-drafts > header > div,
+.qms-external-finding-drafts article footer,
+.qms-external-finding-drafts__form footer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.qms-external-finding-drafts > header { justify-content: space-between; }
+.qms-external-finding-drafts > header strong,
+.qms-external-finding-drafts > header small { display: block; }
+.qms-external-finding-drafts > header small { color: #64748b; }
+
+.qms-external-finding-drafts__notice {
+  margin: 0.65rem 0;
+  padding: 0.55rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+}
+
+.qms-external-finding-drafts__form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.qms-external-finding-drafts__form label { display: grid; gap: 0.25rem; font-size: 0.76rem; font-weight: 700; }
+.qms-external-finding-drafts__form .is-wide { grid-column: 1 / -1; }
+.qms-external-finding-drafts__form select,
+.qms-external-finding-drafts__form input,
+.qms-external-finding-drafts__form textarea {
+  width: 100%;
+  padding: 0.55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+.qms-external-finding-drafts__form footer { justify-content: space-between; }
+.qms-external-finding-drafts__form footer span { color: #64748b; font-size: 0.72rem; }
+
+.qms-external-finding-drafts__list { display: grid; gap: 0.55rem; margin-top: 0.75rem; }
+.qms-external-finding-drafts__list article { padding: 0.7rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.qms-external-finding-drafts__list article > div > span { color: #64748b; font-size: 0.68rem; font-weight: 800; }
+.qms-external-finding-drafts__list article strong { display: block; margin-top: 0.15rem; }
+.qms-external-finding-drafts__list article p { margin: 0.3rem 0; }
+.qms-external-finding-drafts__list blockquote { margin: 0.45rem 0; padding-left: 0.55rem; border-left: 2px solid #f59e0b; color: #92400e; }
+.qms-external-finding-drafts article footer { justify-content: flex-end; padding-top: 0.45rem; border-top: 1px solid #e2e8f0; }
+
+@media (max-width: 640px) {
+  .qms-external-finding-drafts__form { grid-template-columns: 1fr; }
+  .qms-external-finding-drafts__form .is-wide { grid-column: 1; }
+  .qms-external-finding-drafts__form footer { align-items: flex-start; flex-direction: column; }
+}

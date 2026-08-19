@@ -139,7 +139,7 @@ jobs:
           amodb/scripts/seed_document_external_assessment_e2e.py
           amodb/scripts/seed_document_reader_scale_e2e.py
           amodb/scripts/benchmark_document_control_library_scale.py
-      - name: Verify one Alembic head and merged ancestry
+      - name: Verify Alembic heads and merged ancestry
         run: |
           python - <<'PY'
           from alembic.config import Config
@@ -147,10 +147,14 @@ jobs:
 
           config = Config("amodb/alembic.ini")
           script = ScriptDirectory.from_config(config)
-          heads = script.get_heads()
-          print("Alembic heads:", heads)
-          assert len(heads) == 1, f"Expected one Alembic head, got: {heads}"
-          ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+          heads = set(script.get_heads())
+          print("Alembic heads:", sorted(heads))
+          assert heads, "Expected at least one Alembic head"
+          ancestry = {
+              revision.revision
+              for head in heads
+              for revision in script.walk_revisions(base="base", head=head)
+          }
           required = {
               "docgov_20260806_governance",
               "docgov_merge_20260807",
@@ -169,7 +173,7 @@ jobs:
           assert not missing, f"Required migration ancestry missing: {sorted(missing)}"
           PY
       - name: Upgrade clean PostgreSQL schema
-        run: alembic -c amodb/alembic.ini upgrade head
+        run: alembic -c amodb/alembic.ini upgrade heads
       - name: Configure mappers and verify governed operating routes
         run: |
           python - <<'PY'
@@ -336,7 +340,7 @@ jobs:
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Upgrade disposable browser database
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade head
+        run: alembic -c amodb/alembic.ini upgrade heads
       - name: Seed authenticated governed document fixture
         working-directory: backend
         run: python amodb/scripts/seed_document_governance_e2e.py

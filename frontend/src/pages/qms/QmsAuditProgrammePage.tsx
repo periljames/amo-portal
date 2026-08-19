@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, ClipboardCheck, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarDays, ClipboardCheck, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../app/routeGuards";
@@ -14,6 +14,7 @@ import {
   listAuditUniverse,
   transitionAuditProgramme,
   type AuditProgramme,
+  type AuditProgrammeList,
   type AuditProgrammeStatus,
   type AuditRiskLevel,
   type AuditUniverseEntityType,
@@ -32,6 +33,12 @@ function dateLabel(value?: string | null): string {
   if (!value) return "—";
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function timestampLabel(value?: string | null): string {
+  if (!value) return "Time not recorded";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function transitionTargets(status: AuditProgrammeStatus): AuditProgrammeStatus[] {
@@ -107,7 +114,14 @@ const QmsAuditProgrammePage: React.FC = () => {
 
   const transitionMutation = useMutation({
     mutationFn: (target: AuditProgrammeStatus) => transitionAuditProgramme(amoCode, selectedProgrammeId as string, target, actionReason.trim()),
-    onSuccess: async () => { setActionReason(""); await invalidateProgramme(); },
+    onSuccess: (programme) => {
+      setActionReason("");
+      queryClient.setQueryData(["qms-audit-programme", amoCode, programme.id], programme);
+      queryClient.setQueryData<AuditProgrammeList>(["qms-audit-programmes", amoCode, year], (current) => current ? {
+        ...current,
+        items: current.items.map((item) => item.id === programme.id ? programme : item),
+      } : current);
+    },
   });
 
   const amendmentMutation = useMutation({
@@ -180,100 +194,58 @@ const QmsAuditProgrammePage: React.FC = () => {
         </form>
       ) : null}
 
-      <section className="qms-audit-programme__summary" aria-label="Programme performance">
-        <article><span>Programme revisions</span><strong>{programmesQuery.isLoading ? "—" : programmes.length}</strong><small>{year} governed revisions</small></article>
-        <article><span>Audit requirements</span><strong>{programmesQuery.isLoading ? "—" : summary.requirements}</strong><small>planned across programme revisions</small></article>
-        <article><span>Completed</span><strong>{programmesQuery.isLoading ? "—" : summary.completed}</strong><small>programme requirements completed</small></article>
-        <article className={summary.deferred ? "is-warning" : ""}><span>Deferred</span><strong>{programmesQuery.isLoading ? "—" : summary.deferred}</strong><small>requires visible justification</small></article>
-        <article className={summary.followup ? "is-warning" : ""}><span>Follow-up</span><strong>{programmesQuery.isLoading ? "—" : summary.followup}</strong><small>assurance obligations retained</small></article>
+      <section className="qms-audit-programme__scoreboard" aria-label="Programme coverage summary">
+        <article><span>Planned audits</span><strong>{summary.requirements}</strong><small>All governed programme requirements</small></article>
+        <article><span>Completed</span><strong>{summary.completed}</strong><small>Completed programme items</small></article>
+        <article><span>Deferred</span><strong>{summary.deferred}</strong><small>Items with governed deferral state</small></article>
+        <article><span>Follow-up</span><strong>{summary.followup}</strong><small>Items requiring follow-up audit</small></article>
       </section>
 
-      <div className="qms-audit-programme__workspace">
-        <aside className="qms-audit-programme__portfolio">
-          <header><strong>{year} revisions</strong><small>Approved history remains visible.</small></header>
-          {programmesQuery.isLoading ? <p>Loading programme revisions…</p> : null}
-          {!programmesQuery.isLoading && !programmes.length ? <p className="is-empty">No governed audit programme exists for {year}.</p> : null}
-          {programmes.map((programme) => (
-            <button key={programme.id} type="button" className={selectedProgrammeId === programme.id ? "is-active" : ""} onClick={() => setSelectedId(programme.id)}>
-              <span><strong>{programme.programme_ref}</strong><small>{programme.title}</small></span>
-              <span><b>{human(programme.status)}</b><small>Rev {programme.revision_no}</small></span>
-              <ArrowRight size={15} />
+      <div className="qms-audit-programme__layout">
+        <aside className="qms-audit-programme__rail">
+          <header><strong>Programme revisions</strong><small>{programmes.length} in {year}</small></header>
+          {!programmes.length ? <p>No programme revisions exist for {year}.</p> : programmes.map((programme) => (
+            <button key={programme.id} type="button" className={programme.id === selectedProgrammeId ? "is-active" : ""} onClick={() => setSelectedId(programme.id)}>
+              <span>{programme.programme_ref}</span><strong>{programme.title}</strong><small>Rev {programme.revision_no} · {human(programme.status)}</small>
             </button>
           ))}
         </aside>
 
         <section className="qms-audit-programme__detail">
-          {!selectedProgrammeId ? <div className="is-empty">Select or create a programme revision.</div> : null}
-          {detailQuery.isLoading && selectedProgrammeId ? <div className="is-empty">Loading programme…</div> : null}
-          {selected ? (
+          {!selectedProgrammeId ? <p>Select or create a programme revision.</p> : detailQuery.isLoading ? <p>Loading programme…</p> : !selected ? <p>Programme not available.</p> : (
             <>
-              <header className="qms-audit-programme__detail-header">
-                <div><span>{selected.programme_ref} · Rev {selected.revision_no}</span><h2>{selected.title}</h2><p>{dateLabel(selected.period_start)} → {dateLabel(selected.period_end)}</p></div>
-                <span className={`is-${selected.status.toLowerCase()}`}>{human(selected.status)}</span>
-              </header>
+              <header className="qms-audit-programme__detail-header"><div><span>{selected.programme_ref} · Rev {selected.revision_no}</span><h2>{selected.title}</h2><small>{dateLabel(selected.period_start)} → {dateLabel(selected.period_end)}</small></div><span className={`is-${selected.status.toLowerCase()}`}>{human(selected.status)}</span></header>
+              <div className="qms-audit-programme__facts"><div><span>Status</span><strong>{human(selected.status)}</strong></div><div><span>Planned</span><strong>{selected.metrics.planned_audit_count}</strong></div><div><span>Completed</span><strong>{selected.metrics.completed_audit_count}</strong></div><div><span>Scheduled</span><strong>{selected.metrics.scheduled_audit_count}</strong></div></div>
 
-              <div className="qms-audit-programme__governance">
-                <div><strong>Governance</strong><p>Approved and active revisions cannot be edited in place. Create an amendment to preserve prior approved history.</p></div>
-                {canManage && transitionTargets(selected.status).length ? (
-                  <div className="qms-audit-programme__actions">
-                    <input aria-label="Programme transition reason" value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Required transition / amendment reason" />
-                    {transitionTargets(selected.status).map((target) => <button key={target} type="button" disabled={actionReason.trim().length < 3 || transitionMutation.isPending} onClick={() => transitionMutation.mutate(target)}>{human(target)}</button>)}
-                    {["APPROVED", "ACTIVE"].includes(selected.status) ? <button type="button" disabled={actionReason.trim().length < 3 || amendmentMutation.isPending} onClick={() => amendmentMutation.mutate()}>Create amendment</button> : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <section className="qms-audit-programme__objectives">
-                <div><strong>Objectives</strong>{selected.objectives.length ? <ul>{selected.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul> : <p>No objectives recorded.</p>}</div>
-                <div><strong>Regulatory / manual basis</strong>{selected.regulatory_basis.length ? <ul>{selected.regulatory_basis.map((basis, index) => <li key={`${index}-${String(basis)}`}>{typeof basis === "string" ? basis : JSON.stringify(basis)}</li>)}</ul> : <p>No basis recorded.</p>}</div>
+              <section className="qms-audit-programme__governance"><header><ShieldCheck size={17} /><div><strong>Governance</strong><small>State changes require an attributable reason.</small></div></header><textarea aria-label="Programme transition reason" rows={3} value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Reason for transition or amendment" />
+                <div>{transitionTargets(selected.status).map((target) => <button key={target} type="button" disabled={!canManage || actionReason.trim().length < 3 || transitionMutation.isPending} onClick={() => transitionMutation.mutate(target)}>{target === "UNDER_REVIEW" ? "Submit for review" : human(target)} <ArrowRight size={14} /></button>)}{selected.status !== "DRAFT" && selected.status !== "SUPERSEDED" && canManage ? <button type="button" disabled={actionReason.trim().length < 3 || amendmentMutation.isPending} onClick={() => amendmentMutation.mutate()}>Create amendment</button> : null}</div>
               </section>
 
-              <section className="qms-audit-programme__requirements">
-                <header><div><strong>Surveillance requirements</strong><small>Discrete requirements reference governed Audit Universe entities. Scheduling stays in the authoritative Audit Planner.</small></div><div>{canManage && ["DRAFT", "UNDER_REVIEW"].includes(selected.status) ? <button type="button" onClick={() => setShowItemCreate((value) => !value)}><Plus size={14} /> Add requirement</button> : null}<Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/plan?view=calendar`}><CalendarDays size={14} /> Audit Planner</Link></div></header>
-                {showItemCreate ? (
-                  <form className="qms-audit-programme__form is-embedded" onSubmit={(event) => { event.preventDefault(); itemMutation.mutate(); }}>
-                    <label className="is-wide"><span>Auditable entity</span><select required value={itemForm.universe_item_id} onChange={(event) => setItemForm((current) => ({ ...current, universe_item_id: event.target.value }))}><option value="">Select from Audit Universe</option>{(universeQuery.data?.items || []).filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.display_label} · {human(item.entity_type)}</option>)}</select></label>
-                    <label><span>Audit type</span><select value={itemForm.audit_type} onChange={(event) => setItemForm((current) => ({ ...current, audit_type: event.target.value }))}>{AUDIT_TYPES.map((type) => <option key={type} value={type}>{human(type)}</option>)}</select></label>
-                    <label><span>Recurrence</span><select value={itemForm.recurrence} onChange={(event) => setItemForm((current) => ({ ...current, recurrence: event.target.value }))}>{["ONE_TIME", "MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL", "RISK_TRIGGERED"].map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label>
-                    <label className="is-wide"><span>Requirement title</span><input required minLength={3} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} /></label>
-                    <label className="is-wide"><span>Scope</span><textarea required minLength={3} rows={2} value={itemForm.scope} onChange={(event) => setItemForm((current) => ({ ...current, scope: event.target.value }))} /></label>
-                    <label className="is-wide"><span>Criteria · one per line</span><textarea rows={2} value={itemForm.criteria} onChange={(event) => setItemForm((current) => ({ ...current, criteria: event.target.value }))} /></label>
-                    <label><span>Target start</span><input type="date" value={itemForm.target_start} onChange={(event) => setItemForm((current) => ({ ...current, target_start: event.target.value }))} /></label>
-                    <label><span>Target end</span><input type="date" value={itemForm.target_end} onChange={(event) => setItemForm((current) => ({ ...current, target_end: event.target.value }))} /></label>
-                    <label className="is-checkbox"><input type="checkbox" checked={itemForm.mandatory_surveillance} onChange={(event) => setItemForm((current) => ({ ...current, mandatory_surveillance: event.target.checked }))} /><span>Mandatory surveillance</span></label>
-                    <footer><button type="button" onClick={() => setShowItemCreate(false)}>Cancel</button><button className="is-primary" disabled={itemMutation.isPending}>Add requirement</button></footer>
-                  </form>
-                ) : null}
-                {selected.items?.length ? (
-                  <div className="qms-audit-programme__table-wrap"><table><thead><tr><th>Requirement</th><th>Auditable entity</th><th>Coverage</th><th>Target</th><th>State</th></tr></thead><tbody>{selected.items.map((item) => <tr key={item.id}><td><strong>{item.title}</strong><small>{human(item.audit_type)} · {human(item.recurrence)}{item.mandatory_surveillance ? " · Mandatory" : ""}</small></td><td><strong>{item.auditable_entity?.display_label || "Source unavailable"}</strong><small>{item.auditable_entity ? `${human(item.auditable_entity.entity_type)} · ${item.auditable_entity.source_owner_module}` : ""}</small></td><td>{item.scope}</td><td>{dateLabel(item.target_start)}{item.target_end ? ` → ${dateLabel(item.target_end)}` : ""}</td><td><span>{human(item.state)}</span></td></tr>)}</tbody></table></div>
-                ) : <p className="is-empty">No surveillance requirement has been added to this revision.</p>}
+              <section className="qms-audit-programme__history" aria-label="Programme transition history">
+                <header><strong>Programme history</strong><small>Attributable state changes and governance decisions.</small></header>
+                {!selected.events?.length ? <p>No programme events have been recorded.</p> : (
+                  <ol>
+                    {[...selected.events].reverse().map((event) => (
+                      <li key={event.id}>
+                        <div><strong>{human(event.event_type)}</strong><span>{timestampLabel(event.created_at)}</span></div>
+                        <p>{event.reason}</p>
+                        <small>{event.actor_user_id ? `Actor ${event.actor_user_id}` : "System event"}</small>
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </section>
 
-              <section className="qms-audit-programme__history"><header><strong>Approval & amendment history</strong><small>Human-attributed programme events are append-only through this workflow.</small></header>{selected.events?.length ? selected.events.slice().reverse().map((event) => <article key={event.id}><span><ShieldCheck size={14} /><strong>{human(event.event_type)}</strong></span><p>{event.reason}</p><small>{new Date(event.created_at).toLocaleString()} · actor {event.actor_user_id || "system"}</small></article>) : <p className="is-empty">No programme events recorded.</p>}</section>
+              <section className="qms-audit-programme__items"><header><div><strong>Programme requirements</strong><small>{selected.items?.length || 0} governed audit requirements</small></div>{canManage && selected.status === "DRAFT" ? <button type="button" onClick={() => setShowItemCreate((value) => !value)}><Plus size={14} /> Add requirement</button> : null}</header>
+                {showItemCreate ? <form onSubmit={(event) => { event.preventDefault(); itemMutation.mutate(); }}><label><span>Auditable universe item</span><select required value={itemForm.universe_item_id} onChange={(event) => setItemForm((current) => ({ ...current, universe_item_id: event.target.value }))}><option value="">Select item</option>{(universeQuery.data?.items || []).filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.display_label} · {human(item.entity_type)}</option>)}</select></label><label><span>Audit type</span><select value={itemForm.audit_type} onChange={(event) => setItemForm((current) => ({ ...current, audit_type: event.target.value }))}>{AUDIT_TYPES.map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label><label className="is-wide"><span>Title</span><input required minLength={3} value={itemForm.title} onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))} /></label><label className="is-wide"><span>Scope</span><textarea required rows={3} value={itemForm.scope} onChange={(event) => setItemForm((current) => ({ ...current, scope: event.target.value }))} /></label><label className="is-wide"><span>Criteria · one per line</span><textarea rows={3} value={itemForm.criteria} onChange={(event) => setItemForm((current) => ({ ...current, criteria: event.target.value }))} /></label><label><span>Target start</span><input type="date" value={itemForm.target_start} onChange={(event) => setItemForm((current) => ({ ...current, target_start: event.target.value }))} /></label><label><span>Target end</span><input type="date" value={itemForm.target_end} onChange={(event) => setItemForm((current) => ({ ...current, target_end: event.target.value }))} /></label><label><span>Recurrence</span><input value={itemForm.recurrence} onChange={(event) => setItemForm((current) => ({ ...current, recurrence: event.target.value }))} /></label><label><span><input type="checkbox" checked={itemForm.mandatory_surveillance} onChange={(event) => setItemForm((current) => ({ ...current, mandatory_surveillance: event.target.checked }))} /> Mandatory surveillance</span></label><footer><button type="button" onClick={() => setShowItemCreate(false)}>Cancel</button><button className="is-primary" disabled={itemMutation.isPending}>Add requirement</button></footer></form> : null}
+                {!selected.items?.length ? <p>No audit requirements have been added to this programme revision.</p> : <div className="qms-audit-programme__item-list">{selected.items.map((item) => <article key={item.id}><div><span>{human(item.audit_type)} · {human(item.state)}</span><strong>{item.title}</strong><small>{item.auditable_entity?.display_label || "Unlinked auditable entity"}</small><p>{item.scope}</p></div><div><span>{dateLabel(item.target_start)}</span><span>{dateLabel(item.target_end)}</span><strong>{human(item.auditable_entity?.risk_classification || "MEDIUM")}</strong></div><Link to={`/maintenance/${encodeURIComponent(amoCode)}/qms/audits/planner?programmeItemId=${encodeURIComponent(item.id)}`}>Schedule <CalendarDays size={14} /></Link></article>)}</div>}
+              </section>
             </>
-          ) : null}
+          )}
         </section>
       </div>
 
-      <section className="qms-audit-programme__universe">
-        <header><div><span><ShieldCheck size={15} /> Governed catalogue</span><h2>Audit Universe</h2><p>Auditable entities point to authoritative records in Workforce, Procurement, Tooling, DMS and other source modules; QMS does not copy those masters.</p></div>{canManage ? <button type="button" onClick={() => setShowUniverseCreate((value) => !value)}><Plus size={14} /> Add source reference</button> : null}</header>
-        {showUniverseCreate ? (
-          <form className="qms-audit-programme__form" onSubmit={(event) => { event.preventDefault(); universeMutation.mutate(); }}>
-            <label><span>Entity type</span><select value={universeForm.entity_type} onChange={(event) => setUniverseForm((current) => ({ ...current, entity_type: event.target.value as AuditUniverseEntityType }))}>{UNIVERSE_TYPES.map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label>
-            <label className="is-wide"><span>Display label</span><input required minLength={2} value={universeForm.display_label} onChange={(event) => setUniverseForm((current) => ({ ...current, display_label: event.target.value }))} /></label>
-            <label><span>Source module</span><input required value={universeForm.source_owner_module} onChange={(event) => setUniverseForm((current) => ({ ...current, source_owner_module: event.target.value }))} placeholder="workforce / procurement / tooling" /></label>
-            <label><span>Source type</span><input required value={universeForm.source_type} onChange={(event) => setUniverseForm((current) => ({ ...current, source_type: event.target.value }))} /></label>
-            <label><span>Source ID</span><input required value={universeForm.source_id} onChange={(event) => setUniverseForm((current) => ({ ...current, source_id: event.target.value }))} /></label>
-            <label className="is-wide"><span>Source route</span><input value={universeForm.source_route} onChange={(event) => setUniverseForm((current) => ({ ...current, source_route: event.target.value }))} placeholder="/maintenance/... authoritative record" /></label>
-            <label><span>Risk classification</span><select value={universeForm.risk_classification} onChange={(event) => setUniverseForm((current) => ({ ...current, risk_classification: event.target.value as AuditRiskLevel }))}>{RISKS.map((value) => <option key={value}>{value}</option>)}</select></label>
-            <label><span>Regulatory criticality</span><select value={universeForm.regulatory_criticality} onChange={(event) => setUniverseForm((current) => ({ ...current, regulatory_criticality: event.target.value as AuditRiskLevel }))}>{RISKS.map((value) => <option key={value}>{value}</option>)}</select></label>
-            <label><span>Surveillance interval · days</span><input type="number" min={1} max={3650} value={universeForm.surveillance_interval_days} onChange={(event) => setUniverseForm((current) => ({ ...current, surveillance_interval_days: event.target.value }))} /></label>
-            <label className="is-checkbox"><input type="checkbox" checked={universeForm.mandatory_surveillance} onChange={(event) => setUniverseForm((current) => ({ ...current, mandatory_surveillance: event.target.checked }))} /><span>Mandatory surveillance</span></label>
-            <footer><button type="button" onClick={() => setShowUniverseCreate(false)}>Cancel</button><button className="is-primary" disabled={universeMutation.isPending}>Add to universe</button></footer>
-          </form>
-        ) : null}
-        <div className="qms-audit-programme__universe-grid">{(universeQuery.data?.items || []).map((item) => <article key={item.id}><header><span>{human(item.entity_type)}</span><strong>{item.display_label}</strong></header><dl><div><dt>Source</dt><dd>{item.source_owner_module} · {item.source_type}</dd></div><div><dt>Source ID</dt><dd>{item.source_id}</dd></div><div><dt>Risk</dt><dd>{human(item.risk_classification)}</dd></div><div><dt>Regulatory</dt><dd>{human(item.regulatory_criticality)}</dd></div><div><dt>Frequency</dt><dd>{item.surveillance_interval_days ? `${item.surveillance_interval_days} days` : "Risk-triggered / not fixed"}</dd></div></dl><footer>{item.mandatory_surveillance ? <span><CheckCircle2 size={13} /> Mandatory</span> : <span>Risk-based</span>}{item.source_route ? <Link to={item.source_route}>Open source <ArrowRight size={13} /></Link> : null}</footer></article>)}</div>
-      </section>
+      <section className="qms-audit-programme__universe" aria-labelledby="qms-audit-universe-heading"><header><div><h2 id="qms-audit-universe-heading">Audit Universe</h2><small>Stable auditable-entity keys consumed by the programme; this is not a second roster.</small></div>{canManage ? <button type="button" onClick={() => setShowUniverseCreate((value) => !value)}><Plus size={14} /> Add universe item</button> : null}</header>{showUniverseCreate ? <form onSubmit={(event) => { event.preventDefault(); universeMutation.mutate(); }}><label><span>Entity type</span><select value={universeForm.entity_type} onChange={(event) => setUniverseForm((current) => ({ ...current, entity_type: event.target.value as AuditUniverseEntityType }))}>{UNIVERSE_TYPES.map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label><label><span>Display label</span><input required minLength={2} value={universeForm.display_label} onChange={(event) => setUniverseForm((current) => ({ ...current, display_label: event.target.value }))} /></label><label><span>Source module</span><input required value={universeForm.source_owner_module} onChange={(event) => setUniverseForm((current) => ({ ...current, source_owner_module: event.target.value }))} /></label><label><span>Source type</span><input required value={universeForm.source_type} onChange={(event) => setUniverseForm((current) => ({ ...current, source_type: event.target.value }))} /></label><label><span>Source ID</span><input required value={universeForm.source_id} onChange={(event) => setUniverseForm((current) => ({ ...current, source_id: event.target.value }))} /></label><label><span>Source route</span><input value={universeForm.source_route} onChange={(event) => setUniverseForm((current) => ({ ...current, source_route: event.target.value }))} /></label><label><span>Risk</span><select value={universeForm.risk_classification} onChange={(event) => setUniverseForm((current) => ({ ...current, risk_classification: event.target.value as AuditRiskLevel }))}>{RISKS.map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label><label><span>Regulatory criticality</span><select value={universeForm.regulatory_criticality} onChange={(event) => setUniverseForm((current) => ({ ...current, regulatory_criticality: event.target.value as AuditRiskLevel }))}>{RISKS.map((value) => <option key={value} value={value}>{human(value)}</option>)}</select></label><label><span>Surveillance interval (days)</span><input type="number" min={1} value={universeForm.surveillance_interval_days} onChange={(event) => setUniverseForm((current) => ({ ...current, surveillance_interval_days: event.target.value }))} /></label><label><span><input type="checkbox" checked={universeForm.mandatory_surveillance} onChange={(event) => setUniverseForm((current) => ({ ...current, mandatory_surveillance: event.target.checked }))} /> Mandatory surveillance</span></label><label className="is-wide"><span>Notes</span><textarea rows={3} value={universeForm.notes} onChange={(event) => setUniverseForm((current) => ({ ...current, notes: event.target.value }))} /></label><footer><button type="button" onClick={() => setShowUniverseCreate(false)}>Cancel</button><button className="is-primary" disabled={universeMutation.isPending}>Add universe item</button></footer></form> : null}<div className="qms-audit-programme__universe-grid">{(universeQuery.data?.items || []).map((item) => <article key={item.id}><span>{human(item.entity_type)}</span><strong>{item.display_label}</strong><small><span>{item.source_owner_module} · {item.source_type}</span>:{item.source_id}</small><div><em>{human(item.risk_classification)} risk</em><em>{human(item.regulatory_criticality)} criticality</em>{item.mandatory_surveillance ? <em>Mandatory</em> : null}</div></article>)}</div></section>
     </main>
   );
 };

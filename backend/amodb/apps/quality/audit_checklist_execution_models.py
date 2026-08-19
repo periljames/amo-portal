@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import relationship
 
 from amodb.database import Base
@@ -14,13 +14,7 @@ def _utcnow() -> datetime:
 
 
 class QualityAuditChecklistExecutionGovernance(Base):
-    """Governance metadata for the authoritative legacy checklist execution row.
-
-    The existing ``quality_audit_checklist_items`` row remains the execution record.
-    This one-to-one record adds the canonical MD response vocabulary, auditor notes,
-    structured evidence references and attributable change history without creating a
-    second checklist engine or rewriting historical ``NON_CONFORMING`` values.
-    """
+    """Governance metadata for the authoritative legacy checklist execution row."""
 
     __tablename__ = "quality_audit_checklist_execution_governance"
     __table_args__ = (
@@ -39,7 +33,9 @@ class QualityAuditChecklistExecutionGovernance(Base):
     canonical_response_status = Column(String(24), nullable=False, default="NOT_VERIFIED", server_default="NOT_VERIFIED")
     auditor_notes = Column(Text, nullable=True)
     evidence_references = Column(JSON, nullable=False, default=list)
+    entity_version = Column(Integer, nullable=False, default=1, server_default="1")
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
@@ -70,6 +66,67 @@ class QualityAuditChecklistExecutionEvent(Base):
     before_snapshot = Column(JSON, nullable=True)
     after_snapshot = Column(JSON, nullable=False)
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     governance = relationship("QualityAuditChecklistExecutionGovernance", back_populates="events", lazy="joined")
+
+
+class QualityAuditFieldworkMutationReceipt(Base):
+    """Append-only receipt for offline-safe, idempotent fieldwork writes."""
+
+    __tablename__ = "quality_audit_fieldwork_mutation_receipts"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_fieldwork_client_mutation"),
+        CheckConstraint("base_version >= 0", name="ck_quality_fieldwork_base_version"),
+        CheckConstraint("committed_version >= 1", name="ck_quality_fieldwork_committed_version"),
+        CheckConstraint("device_sequence >= 0", name="ck_quality_fieldwork_device_sequence"),
+        CheckConstraint("NOT (actor_user_id IS NOT NULL AND actor_participant_id IS NOT NULL)", name="ck_quality_fieldwork_single_actor"),
+        Index("ix_quality_fieldwork_receipt_audit_item", "amo_id", "audit_id", "checklist_item_id", "created_at"),
+        Index("ix_quality_fieldwork_receipt_device", "amo_id", "device_id", "device_sequence"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
+    checklist_item_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_checklist_items.id", ondelete="CASCADE"), nullable=False)
+    client_mutation_id = Column(String(128), nullable=False)
+    device_id = Column(String(128), nullable=False)
+    device_sequence = Column(BigInteger, nullable=False)
+    client_timestamp = Column(DateTime(timezone=True), nullable=False)
+    base_version = Column(Integer, nullable=False)
+    committed_version = Column(Integer, nullable=False)
+    operation = Column(String(48), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    result_snapshot = Column(JSON, nullable=False)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class QualityAuditFieldworkParticipantContribution(Base):
+    """Append-only external-auditor notes/evidence attached to a governed item."""
+
+    __tablename__ = "quality_audit_fieldwork_participant_contributions"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "client_mutation_id", name="uq_quality_fieldwork_participant_contribution_mutation"),
+        CheckConstraint(
+            "canonical_response_status IN ('COMPLIANT','NONCOMPLIANT','OBSERVATION','NOT_APPLICABLE','NOT_VERIFIED')",
+            name="ck_quality_fieldwork_participant_response_status",
+        ),
+        Index(
+            "ix_quality_fieldwork_participant_contribution_item",
+            "amo_id", "audit_id", "checklist_item_id", "participant_id", "created_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
+    checklist_item_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_checklist_items.id", ondelete="CASCADE"), nullable=False)
+    participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="CASCADE"), nullable=False)
+    client_mutation_id = Column(String(128), nullable=False)
+    canonical_response_status = Column(String(24), nullable=False)
+    auditor_notes = Column(Text, nullable=True)
+    evidence_references = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

@@ -145,17 +145,26 @@ const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
   return ['.ts.net']
 }
 
-const platformSpaNavigationPlugin = (): Plugin => ({
-  name: 'platform-spa-navigation-before-api-proxy',
-  configureServer(server) {
+const platformSpaNavigationPlugin = (): Plugin => {
+  const installSpaNavigationMiddleware = (server: { middlewares: { use: (handler: (req: { method?: string; url?: string; headers: { accept?: string | string[] } }, res: unknown, next: () => void) => void) => void } }) => {
     server.middlewares.use((req, _res, next) => {
       if (shouldServePlatformSpa(req.method, req.url, req.headers.accept)) {
         req.url = '/index.html'
       }
       next()
     })
-  },
-})
+  }
+
+  return {
+    name: 'platform-spa-navigation-before-api-proxy',
+    configureServer(server) {
+      installSpaNavigationMiddleware(server)
+    },
+    configurePreviewServer(server) {
+      installSpaNavigationMiddleware(server)
+    },
+  }
+}
 
 const portalPrecacheManifestPlugin = (): Plugin => {
   let resolvedConfig: ResolvedConfig | null = null

@@ -4,6 +4,7 @@ test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "onl
 
 const AUDIT_ID = "11111111-1111-4111-8111-111111111111";
 const AUDIT_REF = "QAR-MO-26-015";
+const ARTIFACT_ID = "22222222-2222-4222-8222-222222222222";
 
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -25,49 +26,42 @@ const audit = {
   lead_auditor_user_id: "quality-user-a",
   assistant_auditor_user_id: null,
   observer_auditor_user_id: null,
-  planned_start: "2026-08-19T08:00:00+03:00",
-  planned_end: "2026-08-19T16:00:00+03:00",
-  actual_start: "2026-08-19T08:10:00+03:00",
-  actual_end: null,
-  checklist_file_ref: "controlled/qms-audit-checklist.pdf",
-  checklist_filename: "QMS Audit Checklist.pdf",
-  checklist_content_type: "application/pdf",
-  report_file_ref: "controlled/qms-audit-report-draft.pdf",
-  report_filename: "QMS Audit Report Draft.pdf",
-  report_content_type: "application/pdf",
-  report_size_bytes: 245760,
-  report_uploaded_at: "2026-08-19T17:00:00+03:00",
+  planned_start: "2026-08-19",
+  planned_end: "2026-08-19",
+  actual_start: "2026-08-19T05:10:00Z",
+  actual_end: "2026-08-19T13:00:00Z",
+  checklist_file_ref: null,
+  checklist_filename: null,
+  report_file_ref: null,
+  report_filename: null,
   created_at: "2026-08-01T08:00:00Z",
-  updated_at: "2026-08-19T17:00:00Z",
+  updated_at: "2026-08-19T13:00:00Z",
 };
 
-const workflow = {
-  audit_id: AUDIT_ID,
-  current_stage_id: "report",
-  current_stage_label: "Report",
-  percent_complete: 70,
-  findings_total: 1,
-  findings_open: 0,
-  cars_total: 1,
-  cars_open: 1,
-  checklist_uploaded: true,
-  report_uploaded: true,
-  acknowledged_by_name: "Quality Department",
-  acknowledged_by_email: "quality.auditee@tenant-a.test",
-  created_at: "2026-08-19T08:10:00Z",
-  stages: [
-    { id: "war-room", label: "War room", complete: true, active: false, helper: "Ready", metric: "Ready" },
-    { id: "checklist", label: "Checklist", complete: true, active: false, helper: "Executed", metric: "1 row" },
-    { id: "findings", label: "Findings", complete: true, active: false, helper: "Captured", metric: "1 finding" },
-    { id: "report", label: "Report", complete: false, active: true, helper: "Governed issue pending", metric: "Draft uploaded" },
-    { id: "cars", label: "CARs", complete: false, active: false, helper: "Follow-up open", metric: "1 open" },
-    { id: "evidence", label: "Evidence", complete: true, active: false, helper: "Retained", metric: "Available" },
-    { id: "closeout", label: "Closeout", complete: false, active: false, helper: "Follow-up remains", metric: "Open" },
-  ],
-};
+function auditSession(stage: "setup" | "prepare" | "closing" = "prepare") {
+  return {
+    audit_id: AUDIT_ID,
+    current_stage_id: stage,
+    current_stage_label: stage === "setup" ? "Setup" : stage === "closing" ? "Closing" : "Prepare",
+    percent_complete: stage === "closing" ? 70 : 20,
+    source_workflow_stage_id: stage,
+    source_workflow_percent_complete: stage === "closing" ? 70 : 20,
+    preparation_issued: stage !== "setup",
+    execution_status: "OPEN",
+    follow_up_status: "OPEN",
+    archive_count: 0,
+    stages: [
+      { id: "setup", label: "Setup", complete: stage !== "setup", active: stage === "setup", legacy_tab: "war-room", helper: "Occurrence definition" },
+      { id: "prepare", label: "Prepare", complete: stage === "closing", active: stage === "prepare", legacy_tab: "checklist", helper: "Controlled preparation" },
+      { id: "live", label: "Live", complete: stage === "closing", active: false, legacy_tab: "checklist", helper: "Fieldwork" },
+      { id: "closing", label: "Closing", complete: false, active: stage === "closing", legacy_tab: "report", helper: "Closing meeting" },
+      { id: "follow-up", label: "Follow-up", complete: false, active: false, legacy_tab: "cars", helper: "CAR/CAPA" },
+      { id: "archive", label: "Archive", complete: false, active: false, legacy_tab: "closeout", helper: "Immutable archive" },
+    ],
+  };
+}
 
 async function prepareLifecycle(page: Page): Promise<void> {
-  const token = futureToken();
   await page.addInitScript(({ storedToken }) => {
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
@@ -76,299 +70,183 @@ async function prepareLifecycle(page: Page): Promise<void> {
     localStorage.setItem("amo_color_scheme", "light");
     localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
-      id: "quality-user-a",
-      amo_id: "amo-a",
-      department_id: "department-quality",
-      staff_code: "QMS-001",
-      email: "quality.manager@tenant-a.test",
-      first_name: "Quality",
-      last_name: "Manager",
-      full_name: "Quality Manager",
-      role: "QUALITY_MANAGER",
-      position_title: "Quality Manager",
-      is_active: true,
-      is_superuser: false,
-      is_amo_admin: true,
+      id: "quality-user-a", amo_id: "amo-a", department_id: "department-quality", staff_code: "QMS-001",
+      email: "quality.manager@tenant-a.test", first_name: "Quality", last_name: "Manager", full_name: "Quality Manager",
+      role: "QUALITY_MANAGER", position_title: "Quality Manager", is_active: true, is_superuser: false, is_amo_admin: true,
       must_change_password: false,
     }));
-  }, { storedToken: token });
+  }, { storedToken: futureToken() });
 
-  let preparation: Record<string, unknown> | null = null;
+  let preparation: Record<string, any> | null = null;
   let notice: Record<string, any> | null = null;
+  let generatedArtifact: Record<string, any> | null = null;
   let reportRevision: Record<string, any> | null = null;
-  let closure = {
-    id: "closure-1",
-    audit_id: AUDIT_ID,
-    execution_status: "OPEN",
-    execution_closed_by_user_id: null,
-    execution_closed_at: null,
-    execution_close_reason: null,
-    execution_evidence_snapshot: null,
-    follow_up_status: "OPEN",
-    follow_up_completed_by_user_id: null,
-    follow_up_completed_at: null,
-    follow_up_completion_reason: null,
-    follow_up_evidence_snapshot: null,
-    execution_readiness: { ready: true, blockers: [], counts: { reports: 1, findings: 1 }, captured_at: "2026-08-19T17:05:00Z" },
-    follow_up_readiness: {
-      ready: false,
-      blockers: [{ type: "OPEN_CAR", id: "car-1", ref: "CAR-26-004", reason: "Corrective action effectiveness verification remains open." }],
-      counts: { open_cars: 1 },
-      captured_at: "2026-08-19T17:05:00Z",
-    },
-    events: [] as Array<Record<string, unknown>>,
-  };
 
   const policy = {
-    id: "policy-1",
-    policy_code: "INTERNAL_14_DAY",
-    title: "Internal audit notice policy",
-    audit_kind: "INTERNAL",
-    minimum_notice_days: 14,
-    review_required: true,
-    acknowledgement_required: true,
-    emergency_exception_allowed: true,
-    unannounced_exception_allowed: true,
-    is_active: true,
+    id: "policy-1", policy_code: "INTERNAL_14_DAY", title: "Internal audit notice policy", audit_kind: "INTERNAL",
+    minimum_notice_days: 14, review_required: true, acknowledgement_required: true,
+    emergency_exception_allowed: true, unannounced_exception_allowed: true, is_active: true,
   };
-
+  const closure = {
+    id: "closure-1", audit_id: AUDIT_ID, execution_status: "OPEN", follow_up_status: "OPEN",
+    execution_readiness: { ready: false, blockers: [{ type: "SIGNATURE_REQUIRED", reason: "Issued report and passkey evidence are required before execution close." }], counts: { reports: 0 }, captured_at: "2026-08-19T13:05:00Z" },
+    follow_up_readiness: { ready: false, blockers: [{ type: "OPEN_CAR", id: "car-1", ref: "CAR-26-004", reason: "Corrective action effectiveness verification remains open." }], counts: { open_cars: 1 }, captured_at: "2026-08-19T13:05:00Z" },
+    events: [],
+  };
   const respond = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-  const now = () => "2026-08-19T17:10:00Z";
+  const now = () => "2026-08-19T13:10:00Z";
 
   const fulfil = async (route: Route) => {
     const request = route.request();
-    const url = new URL(request.url());
-    const path = url.pathname;
+    if (request.resourceType() === "document") return route.continue();
+    const path = new URL(request.url()).pathname;
     const method = request.method();
 
-    if (path === "/auth/portal-preferences/") {
-      await respond(route, { user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: now() });
-      return;
-    }
-    if (path.includes("/accounts/admin/admin-profile/")) {
-      await respond(route, { eligible: false, active: false });
-      return;
-    }
+    if (path === "/auth/portal-preferences/") return respond(route, { user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: now() });
+    if (path.includes("/accounts/admin/admin-profile/")) return respond(route, { eligible: false, active: false });
+    if (path.endsWith(`/quality/audits/resolve/${AUDIT_REF}`) || path.endsWith("/quality/audits/resolve/qar-mo-26-015")) return respond(route, audit);
+    if (path.endsWith("/quality/audits") && method === "GET") return respond(route, [audit]);
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/session`) && method === "GET") return respond(route, auditSession("prepare"));
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/workflow-check`) && method === "GET") return respond(route, { audit, workflow: { audit_id: AUDIT_ID, current_stage_id: "report", current_stage_label: "Report", percent_complete: 70, findings_total: 1, findings_open: 0, cars_total: 1, cars_open: 1, checklist_uploaded: true, report_uploaded: false, stages: [] } });
+    if (path.endsWith("/quality/audits/personnel/options") && method === "GET") return respond(route, [{ id: "quality-user-a", full_name: "Quality Manager", staff_code: "QMS-001", email: "quality.manager@tenant-a.test", position_title: "Quality Manager" }]);
+    if (path.includes("/quality/audit-register") && method === "GET") return respond(route, { rows: [], total: 0, limit: 200, offset: 0, has_more: false });
 
-    if (path.endsWith("/quality/audits") && method === "GET") {
-      await respond(route, [audit]);
-      return;
-    }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/workflow-check`) && method === "GET") {
-      await respond(route, { audit, workflow });
-      return;
-    }
-    if (path.endsWith("/quality/audits/personnel/options") && method === "GET") {
-      await respond(route, [{ id: "quality-user-a", full_name: "Quality Manager", staff_code: "QMS-001", email: "quality.manager@tenant-a.test", position_title: "Quality Manager" }]);
-      return;
-    }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-items`) && method === "GET") {
-      await respond(route, [{
-        id: "check-1", audit_id: AUDIT_ID, section: "Governance", checklist_ref: "QMS-01", requirement_ref: "KCAR-QMS-01",
-        prompt: "Verify controlled audit lifecycle governance.", response_status: "COMPLIANT", objective_evidence: "Controlled records sampled and traced.",
-        finding_id: null, assigned_to_user_id: "quality-user-a", completed_by_user_id: "quality-user-a", completed_at: now(), sort_order: 10,
-      }]);
-      return;
-    }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/finding-attachments`) && method === "GET") {
-      await respond(route, []);
-      return;
-    }
-    if (path.includes("/quality/audit-register") && method === "GET") {
-      await respond(route, { rows: [], total: 0, limit: 200, offset: 0, has_more: false });
-      return;
-    }
-    if (path.endsWith("/quality/cars") && method === "GET") {
-      await respond(route, []);
-      return;
-    }
-
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-revisions`) && method === "GET") {
-      await respond(route, { items: preparation ? [preparation] : [] });
-      return;
-    }
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-revisions`) && method === "GET") return respond(route, { items: preparation ? [preparation] : [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-revisions`) && method === "POST") {
       preparation = {
-        id: "prep-1", audit_id: AUDIT_ID, revision_no: 1, status: "DRAFT", preparation_scope: "Prior findings, controlled records and opening-meeting evidence.",
-        audit_snapshot: audit, checklist_snapshot: [], document_request_snapshot: [], source_references: [], source_fingerprint: "a".repeat(64),
-        change_reason: "Capture controlled preparation sources for this audit.", supersedes_revision_id: null, issued_by_user_id: null, issued_at: null,
-        created_by_user_id: "quality-user-a", created_at: now(), events: [{ id: "prep-event-1", event_type: "CREATED", reason: "Controlled preparation draft created.", actor_user_id: "quality-user-a", created_at: now() }],
+        id: "prep-1", audit_id: AUDIT_ID, revision_no: 1, status: "DRAFT",
+        preparation_scope: "Prior findings, controlled records and opening-meeting evidence.", audit_snapshot: audit,
+        checklist_snapshot: [], document_request_snapshot: [], source_references: [], source_fingerprint: "a".repeat(64),
+        change_reason: "Capture controlled preparation sources for this audit.", supersedes_revision_id: null,
+        issued_by_user_id: null, issued_at: null, created_by_user_id: "quality-user-a", created_at: now(),
+        events: [{ id: "prep-event-1", event_type: "CREATED", reason: "Controlled preparation draft created.", actor_user_id: "quality-user-a", created_at: now() }],
       };
-      await respond(route, preparation, 201);
-      return;
+      return respond(route, preparation, 201);
     }
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-revisions/prep-1/issue`) && method === "POST") {
       preparation = { ...preparation!, status: "ISSUED", issued_by_user_id: "quality-user-a", issued_at: now(), events: [...((preparation as any)?.events || []), { id: "prep-event-2", event_type: "ISSUED", reason: "Preparation revision issued.", actor_user_id: "quality-user-a", created_at: now() }] };
-      await respond(route, preparation);
-      return;
+      return respond(route, preparation);
     }
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-context`) && method === "GET") return respond(route, {
+      audit_id: AUDIT_ID,
+      regulatory_and_manual_basis: { audit_scope: audit.scope, audit_criteria: audit.criteria },
+      controlled_preparation: { checklist_bindings: [], latest_revision: preparation },
+      prior_audits: [], prior_findings: [], car_exposure: [], document_requests: [], source_lineage: [],
+    });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/meetings`) && method === "GET") return respond(route, { items: [] });
 
-    if (path.endsWith("/quality/audit-notice-policies") && method === "GET") {
-      await respond(route, { items: [policy] });
-      return;
-    }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "GET") {
-      await respond(route, { items: notice ? [notice] : [] });
-      return;
-    }
+    if (path.endsWith("/quality/audit-notice-policies") && method === "GET") return respond(route, { items: [policy] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "GET") return respond(route, { items: notice ? [notice] : [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "POST") {
       notice = {
         id: "notice-1", audit_id: AUDIT_ID, policy_id: policy.id, revision_no: 1, status: "DRAFT", required_notice_days: 14,
-        notice_date: "2026-08-05", exception_type: null, exception_reason: null, subject: "Audit Notice · QAR-MO-26-015",
-        body: "Controlled notice for the scheduled QMS internal audit.", audit_snapshot: audit, recipient_snapshot: [{ email: audit.auditee_email }],
-        delivery_channel: null, delivery_reference: null, supersedes_notice_id: null, approved_at: null, generated_at: null, delivered_at: null, acknowledged_at: null,
-        created_at: now(), events: [{ id: "notice-event-1", event_type: "CREATED", reason: "Controlled notice draft created.", created_at: now() }],
+        notice_date: "2026-08-05", subject: `${AUDIT_REF} · ${audit.title}`, body: "Controlled audit notice", audit_snapshot: audit,
+        recipient_snapshot: [{ email: audit.auditee_email }], delivery_channel: null, delivery_reference: null,
+        approved_at: null, generated_at: null, delivered_at: null, acknowledged_at: null, created_at: now(), events: [],
       };
-      await respond(route, notice, 201);
-      return;
+      return respond(route, notice, 201);
     }
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices/notice-1/transitions`) && method === "POST") {
-      const payload = request.postDataJSON() as { action: string; delivery_channel?: string; delivery_reference?: string; reason: string };
-      const next: Record<string, string> = { SUBMIT: "UNDER_REVIEW", APPROVE: "APPROVED", GENERATE: "GENERATED", DELIVER: "DELIVERED", ACKNOWLEDGE: "ACKNOWLEDGED", RETURN: "DRAFT", CANCEL: "CANCELLED" };
-      notice = {
-        ...notice!,
-        status: next[payload.action],
-        delivery_channel: payload.delivery_channel || (notice as any)?.delivery_channel,
-        delivery_reference: payload.delivery_reference || (notice as any)?.delivery_reference,
-        approved_at: payload.action === "APPROVE" ? now() : (notice as any)?.approved_at,
-        generated_at: payload.action === "GENERATE" ? now() : (notice as any)?.generated_at,
-        delivered_at: payload.action === "DELIVER" ? now() : (notice as any)?.delivered_at,
-        acknowledged_at: payload.action === "ACKNOWLEDGE" ? now() : (notice as any)?.acknowledged_at,
-        events: [...((notice as any)?.events || []), { id: `notice-event-${((notice as any)?.events || []).length + 1}`, event_type: payload.action, reason: payload.reason, created_at: now() }],
-      };
-      await respond(route, notice);
-      return;
+      const payload = request.postDataJSON() as { action: string; delivery_channel?: string; delivery_reference?: string };
+      const next: Record<string, string> = { SUBMIT: "UNDER_REVIEW", APPROVE: "APPROVED", GENERATE: "GENERATED", DELIVER: "DELIVERED", ACKNOWLEDGE: "ACKNOWLEDGED" };
+      notice = { ...notice!, status: next[payload.action], delivery_channel: payload.delivery_channel || notice?.delivery_channel, delivery_reference: payload.delivery_reference || notice?.delivery_reference, approved_at: payload.action === "APPROVE" ? now() : notice?.approved_at, generated_at: payload.action === "GENERATE" ? now() : notice?.generated_at, delivered_at: payload.action === "DELIVER" ? now() : notice?.delivered_at, acknowledged_at: payload.action === "ACKNOWLEDGE" ? now() : notice?.acknowledged_at };
+      return respond(route, notice);
     }
 
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-revisions`) && method === "GET") {
-      await respond(route, { items: reportRevision ? [reportRevision] : [] });
-      return;
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-composition`) && method === "GET") return respond(route, {
+      audit: { id: AUDIT_ID, audit_ref: AUDIT_REF, title: audit.title, status: audit.status, scope: audit.scope, criteria: audit.criteria, actual_start: audit.actual_start, actual_end: audit.actual_end },
+      checklist_counts: { COMPLIANT: 1, NONCOMPLIANT: 1, OBSERVATION: 0, NOT_APPLICABLE: 0, NOT_VERIFIED: 0 },
+      findings_count: 1, cars_count: 1, preparation_documents_count: 0, artifacts: generatedArtifact ? [generatedArtifact] : [],
+    });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-composition/generate`) && method === "POST") {
+      generatedArtifact = { id: ARTIFACT_ID, audit_id: AUDIT_ID, source_snapshot_hash: "c".repeat(64), template_version: "qms-live-v1", renderer_version: "reportlab-v1", filename: `${AUDIT_REF}-closing.pdf`, content_type: "application/pdf", size_bytes: 4096, sha256: "d".repeat(64), generated_by_user_id: "quality-user-a", created_at: now() };
+      return respond(route, generatedArtifact, 201);
     }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-revisions/adopt-current`) && method === "POST") {
-      reportRevision = {
-        id: "report-rev-1", audit_id: AUDIT_ID, revision_no: 1, status: "DRAFT", filename: "QMS Audit Report Draft.pdf", content_type: "application/pdf",
-        size_bytes: 245760, sha256: "b".repeat(64), report_snapshot: { report_file_ref: audit.report_file_ref }, change_reason: "Adopt current controlled report upload.",
-        supersedes_revision_id: null, reviewed_by_user_id: null, reviewed_at: null, approved_by_user_id: null, approved_at: null,
-        issued_by_user_id: null, issued_at: null, created_by_user_id: "quality-user-a", created_at: now(), updated_at: now(),
-        events: [{ id: "report-event-1", event_type: "ADOPTED", reason: "Current report upload adopted into governed revision control.", actor_user_id: "quality-user-a", created_at: now() }],
-      };
-      await respond(route, reportRevision, 201);
-      return;
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-revisions`) && method === "GET") return respond(route, { items: reportRevision ? [reportRevision] : [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-revisions/adopt-generated/${ARTIFACT_ID}`) && method === "POST") {
+      reportRevision = { id: "report-rev-1", audit_id: AUDIT_ID, revision_no: 1, status: "DRAFT", filename: generatedArtifact?.filename, content_type: "application/pdf", size_bytes: 4096, sha256: generatedArtifact?.sha256, report_snapshot: { source_snapshot_hash: generatedArtifact?.source_snapshot_hash }, change_reason: "Adopt deterministic closing report.", supersedes_revision_id: null, reviewed_by_user_id: null, reviewed_at: null, approved_by_user_id: null, approved_at: null, issued_by_user_id: null, issued_at: null, created_by_user_id: "quality-user-a", created_at: now(), updated_at: now(), events: [] };
+      return respond(route, reportRevision, 201);
     }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-revisions/report-rev-1/transitions`) && method === "POST") {
-      const payload = request.postDataJSON() as { action: string; reason: string };
-      const next: Record<string, string> = { SUBMIT: "INTERNAL_REVIEW", APPROVE: "APPROVED", ISSUE: "ISSUED", RETURN: "DRAFT", CANCEL: "CANCELLED" };
-      reportRevision = {
-        ...reportRevision!, status: next[payload.action],
-        reviewed_by_user_id: payload.action === "SUBMIT" ? "quality-user-a" : (reportRevision as any)?.reviewed_by_user_id,
-        reviewed_at: payload.action === "SUBMIT" ? now() : (reportRevision as any)?.reviewed_at,
-        approved_by_user_id: payload.action === "APPROVE" ? "quality-user-a" : (reportRevision as any)?.approved_by_user_id,
-        approved_at: payload.action === "APPROVE" ? now() : (reportRevision as any)?.approved_at,
-        issued_by_user_id: payload.action === "ISSUE" ? "quality-user-a" : (reportRevision as any)?.issued_by_user_id,
-        issued_at: payload.action === "ISSUE" ? now() : (reportRevision as any)?.issued_at,
-        updated_at: now(), events: [...((reportRevision as any)?.events || []), { id: `report-event-${((reportRevision as any)?.events || []).length + 1}`, event_type: payload.action, reason: payload.reason, actor_user_id: "quality-user-a", created_at: now() }],
-      };
-      await respond(route, reportRevision);
-      return;
-    }
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/closure-state`) && method === "GET") return respond(route, closure);
+    if (path.endsWith("/quality/audit-output-policy") && method === "GET") return respond(route, { configured: true, current: { id: "output-policy-1", revision_no: 1, artifact_policy: "REPORT_ONLY", artifact_title: null, artifact_statement: null, rationale: "Internal audit issues a governed report only.", created_by_user_id: "quality-user-a", created_at: now() } });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/signature-evidence`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/closing-acknowledgements`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith("/quality/audit-webauthn/credentials") && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/assurance-artifacts`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/closing-narrative`) && method === "GET") return respond(route, { management_summary: null, conclusion: null, positive_practices: null });
 
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/closure-state`) && method === "GET") {
-      await respond(route, closure);
-      return;
-    }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/closure-state/execution-close`) && method === "POST") {
-      const payload = request.postDataJSON() as { reason: string };
-      closure = { ...closure, execution_status: "CLOSED", execution_closed_by_user_id: "quality-user-a", execution_closed_at: now(), execution_close_reason: payload.reason, execution_evidence_snapshot: { report_revision: 1 }, events: [...closure.events, { id: "closure-event-1", event_type: "EXECUTION_CLOSED", reason: payload.reason, actor_user_id: "quality-user-a", created_at: now() }] };
-      await respond(route, closure);
-      return;
-    }
-
-    if (path.includes("/api/maintenance/tenant-a/quality/") && method === "GET") {
-      await respond(route, []);
-      return;
-    }
-    await respond(route, { detail: "Not configured in governed audit lifecycle regression" }, 404);
+    if (path.includes("/api/maintenance/tenant-a/quality/") && method === "GET") return respond(route, []);
+    return respond(route, { detail: "Not configured in canonical governed audit lifecycle regression" }, 404);
   };
 
   await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
+  await page.route("**/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
 test.describe("governed audit lifecycle", () => {
-  test("issues controlled preparation and completes notice review, delivery and acknowledgement", async ({ page }) => {
+  test("uses canonical preparation and setup surfaces for preparation revision and notice governance", async ({ page }) => {
     await prepareLifecycle(page);
     await page.setViewportSize({ width: 1500, height: 940 });
-    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=war-room`, { waitUntil: "domcontentloaded" });
+    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/prepare`, { waitUntil: "domcontentloaded" });
 
-    const launcher = page.getByRole("button", { name: "Audit governance" });
-    await expect(launcher).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("region", { name: "Pre-audit preparation workspace" })).toBeVisible({ timeout: 30_000 });
+    const launcher = page.getByRole("button", { name: "Audit governance", exact: true });
+    await expect(launcher).toBeVisible();
     await launcher.click();
     const panel = page.getByRole("complementary", { name: "Audit governance" });
-    await expect(panel).toContainText("Controlled audit lifecycle");
-
     await panel.getByLabel("Preparation scope / notes").fill("Prior findings, controlled records and opening-meeting evidence.");
-    await panel.getByRole("button", { name: "Create controlled revision" }).click();
-    await expect(panel.getByRole("button", { name: "Issue revision" })).toBeVisible();
-    await panel.getByRole("button", { name: "Issue revision" }).click();
-    await expect(panel).toContainText("ISSUED");
-
-    await panel.getByRole("button", { name: "Notices" }).click();
-    await expect(panel).toContainText("14 days");
-    await panel.getByLabel("Notice date").fill("2026-08-05");
-    await panel.getByRole("button", { name: "Create notice draft" }).click();
-    await expect(panel.getByRole("button", { name: "SUBMIT" })).toBeVisible();
-    await panel.getByRole("button", { name: "SUBMIT" }).click();
-    await expect(panel.getByRole("button", { name: "APPROVE" })).toBeVisible();
-    await panel.getByRole("button", { name: "APPROVE" }).click();
-    await expect(panel.getByRole("button", { name: "GENERATE" })).toBeVisible();
-    await panel.getByRole("button", { name: "GENERATE" }).click();
-    await expect(panel.getByLabel("Delivery reference")).toBeVisible();
-    await panel.getByLabel("Delivery reference").fill("MSG-QAR-MO-26-015");
-    await panel.getByRole("button", { name: "DELIVER" }).click();
-    await expect(panel.getByRole("button", { name: "ACKNOWLEDGE" })).toBeVisible();
-    await panel.getByRole("button", { name: "ACKNOWLEDGE" }).click();
-    await expect(panel).toContainText("Delivery and acknowledgement are attributable and retained in revision history.");
-  });
-
-  test("governs report issue and closes execution without erasing follow-up obligations", async ({ page }) => {
-    await prepareLifecycle(page);
-    await page.setViewportSize({ width: 1500, height: 940 });
-    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=report`, { waitUntil: "domcontentloaded" });
-
-    const launcher = page.getByRole("button", { name: "Report & closeout" });
-    await expect(launcher).toBeVisible({ timeout: 30_000 });
-    await launcher.click();
-    const panel = page.getByRole("complementary", { name: "Audit report and assurance closeout" });
-
-    await panel.getByRole("button", { name: "Adopt current upload" }).click();
-    await expect(panel.getByRole("button", { name: "SUBMIT" })).toBeVisible();
-    await panel.getByRole("button", { name: "SUBMIT" }).click();
-    await expect(panel.getByRole("button", { name: "APPROVE" })).toBeVisible();
-    await panel.getByRole("button", { name: "APPROVE" }).click();
-    await expect(panel.getByRole("button", { name: "ISSUE" })).toBeVisible();
-    await panel.getByRole("button", { name: "ISSUE" }).click();
+    await panel.getByRole("button", { name: "Create controlled revision", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Issue revision", exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Issue revision", exact: true }).click();
     await expect(panel).toContainText("Rev 1 · ISSUED");
 
-    await panel.getByRole("button", { name: "Closeout", exact: true }).click();
-    await expect(panel).toContainText("Execution close evidence is ready.");
-    await panel.getByRole("button", { name: "Record execution closed" }).click();
-    await expect(panel).toContainText("CLOSED");
-    await expect(panel).toContainText("CAR-26-004");
-    await expect(panel).toContainText("Corrective action effectiveness verification remains open.");
-    await expect(panel.getByRole("button", { name: "Complete assurance follow-up" })).toBeDisabled();
+    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/setup`, { waitUntil: "domcontentloaded" });
+    const setup = page.getByRole("region", { name: "Audit setup workspace" });
+    await expect(setup).toBeVisible({ timeout: 30_000 });
+    await expect(setup).toContainText("Audit notice");
+    await setup.getByRole("button", { name: "Create notice" }).click();
+    await expect(setup).toContainText("14 days");
+    for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
+      const button = setup.getByRole("button", { name: action, exact: true });
+      await expect(button).toBeVisible();
+      await button.click();
+    }
+    await setup.getByLabel("Delivery reference").fill("MSG-QAR-MO-26-015");
+    await setup.getByRole("button", { name: "DELIVER", exact: true }).click();
+    await setup.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
+    await expect(setup).toContainText("ACKNOWLEDGED");
   });
 
-  test("retains the closeout deep link on a mobile viewport and refresh", async ({ page }) => {
+  test("builds the closing report from authoritative audit data and keeps execution closure separate from follow-up", async ({ page }) => {
+    await prepareLifecycle(page);
+    await page.setViewportSize({ width: 1500, height: 940 });
+    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/closing`, { waitUntil: "domcontentloaded" });
+
+    const closing = page.getByRole("region", { name: "Audit closing meeting workspace" });
+    await expect(closing).toBeVisible({ timeout: 30_000 });
+    await expect(closing.getByRole("button", { name: "Generate closing report draft" })).toBeVisible();
+    await expect(closing.getByRole("button", { name: /Adopt current upload/i })).toHaveCount(0);
+    await closing.getByRole("button", { name: "Generate closing report draft" }).click();
+    await expect(closing).toContainText(`${AUDIT_REF}-closing.pdf`);
+    await closing.getByRole("button", { name: "Adopt governed draft" }).click();
+    await expect(closing).toContainText("R1 · DRAFT");
+    await expect(closing).toContainText("Execution closure and CAR/CAPA completion are separate controls.");
+    await expect(closing).toContainText("Issued report and passkey evidence are required before execution close.");
+  });
+
+  test("redirects legacy mobile closeout deep links to the canonical closing stage and survives refresh", async ({ page }) => {
     await prepareLifecycle(page);
     await page.setViewportSize({ width: 390, height: 844 });
-    const url = `/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=closeout`;
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}\\?tab=closeout$`));
-    await expect(page.getByRole("button", { name: "Report & closeout" })).toBeVisible({ timeout: 30_000 });
+    await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=closeout`, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}/closing$`));
+    await expect(page.getByRole("region", { name: "Audit closing meeting workspace" })).toBeVisible({ timeout: 30_000 });
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}\\?tab=closeout$`));
-    await expect(page.getByRole("button", { name: "Report & closeout" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}/closing$`));
+    await expect(page.getByRole("region", { name: "Audit closing meeting workspace" })).toBeVisible();
   });
 });

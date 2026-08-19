@@ -141,7 +141,7 @@ jobs:
           print('application import and mapper configuration passed')
           PY
 
-      - name: Verify one Alembic head and merged ancestry
+      - name: Verify Alembic heads and merged Reliability ancestry
         shell: bash
         run: |
           set -euo pipefail
@@ -151,11 +151,20 @@ jobs:
 
           script = ScriptDirectory.from_config(Config('backend/amodb/alembic.ini'))
           heads = script.get_heads()
-          assert len(heads) == 1, f'Expected one Alembic head, found {heads}'
-          head = heads[0]
-          assert head == 'plat_qms_260809_merge', head
-          ancestry = {revision.revision for revision in script.walk_revisions(base='base', head=head)}
-          ancestry.add(head)
+          assert heads, 'Alembic graph has no heads'
+          pending = [script.get_revision(head) for head in heads]
+          ancestry = set()
+          while pending:
+              revision = pending.pop()
+              if revision is None or revision.revision in ancestry:
+                  continue
+              ancestry.add(revision.revision)
+              parents = revision.down_revision
+              if not parents:
+                  continue
+              if isinstance(parents, str):
+                  parents = (parents,)
+              pending.extend(script.get_revision(parent) for parent in parents)
           for required in (
               'platform_rel_20260809_merge',
               'platform_ops_20260809_incident_lifecycle',
@@ -167,14 +176,14 @@ jobs:
               'rel_20260806_reference_integrity',
               'merge_20260807_qms_planner_aircraft',
           ):
-              assert required in ancestry, f'{required} is not an ancestor of {head}'
-          print(f'alembic_head={head}')
+              assert required in ancestry, f'{required} is not reachable from current Alembic heads {heads}'
+          print(f'alembic_heads={heads}')
           PY
 
       - name: Upgrade clean PostgreSQL schema
-        run: python -m alembic -c backend/amodb/alembic.ini upgrade head
+        run: python -m alembic -c backend/amodb/alembic.ini upgrade heads
 
-      - name: Verify Alembic revision and capacity
+      - name: Verify Alembic revisions and capacity
         run: |
           python - <<'PY'
           import os
@@ -182,7 +191,7 @@ jobs:
           from alembic.script import ScriptDirectory
           from sqlalchemy import create_engine, text
 
-          expected = ScriptDirectory.from_config(Config('backend/amodb/alembic.ini')).get_current_head()
+          expected = set(ScriptDirectory.from_config(Config('backend/amodb/alembic.ini')).get_heads())
           engine = create_engine(os.environ['DATABASE_URL'])
           with engine.connect() as connection:
               width = connection.execute(text("""
@@ -191,10 +200,10 @@ jobs:
                   WHERE table_name = 'alembic_version'
                     AND column_name = 'version_num'
               """)).scalar_one()
-              version = connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
+              versions = set(connection.execute(text('SELECT version_num FROM alembic_version')).scalars())
           assert width is not None and width >= 128, width
-          assert version == expected, (version, expected)
-          print(f'alembic_version={version}; capacity={width}')
+          assert versions == expected, (sorted(versions), sorted(expected))
+          print(f'alembic_versions={sorted(versions)}; capacity={width}')
           PY
 
       - name: Verify formal Reliability Programme schema

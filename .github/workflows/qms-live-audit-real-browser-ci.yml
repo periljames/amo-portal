@@ -1,0 +1,293 @@
+name: QMS Live Audit Real Browser CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/alembic/versions/quality_260816_*.py"
+      - "backend/amodb/alembic/versions/quality_260817_*.py"
+      - "backend/amodb/apps/quality/audit_*.py"
+      - "backend/amodb/apps/quality/models.py"
+      - "backend/amodb/apps/quality/enums.py"
+      - "backend/amodb/scripts/seed_qms_live_audit_e2e.py"
+      - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
+      - "frontend/src/components/QMS/QualityDataFreshnessCoordinator.tsx"
+      - "frontend/src/pages/PublicAuditAccessPage.tsx"
+      - "frontend/src/pages/PublicAuditVerificationPage.tsx"
+      - "frontend/src/features/qms/auditSession/**"
+      - "frontend/src/services/qmsAudit*.ts"
+      - "frontend/src/services/qmsExternal*.ts"
+      - "frontend/tests/e2e/qms-live-audit-real.spec.ts"
+      - ".github/workflows/qms-live-audit-real-browser-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qms-live-audit-real-browser-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-browser-postgres:
+    name: Real browser -> FastAPI -> PostgreSQL governed lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amo_live_audit_real_browser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amo_live_audit_real_browser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: qms-live-audit-real-browser-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_real_browser
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_real_browser
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amo_live_audit_real_browser
+      QUALITY_SCHEMA_STRICT: "1"
+      PYTHONPATH: backend
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8080
+      VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_QMS_LIVE_FIXTURE: /tmp/qms-live-audit-real-e2e.json
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Upgrade clean PostgreSQL through all Alembic heads
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Seed signed external participants and authenticated Quality users
+        working-directory: backend
+        run: |
+          python amodb/scripts/seed_qms_live_audit_e2e.py
+          python amodb/scripts/complete_qms_live_audit_onboarding_e2e.py
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Lint real browser acceptance
+        working-directory: frontend
+        run: npm exec -- eslint tests/e2e/qms-live-audit-real.spec.ts
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start real FastAPI backend and production preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && nohup python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 > /tmp/qms-live-real-backend.log 2>&1 & echo $! > /tmp/qms-live-real-backend.pid)
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/openapi.json >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/qms-live-real-backend.log; exit 1; fi
+            sleep 1
+          done
+          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-live-real-frontend.log 2>&1 & echo $! > /tmp/qms-live-real-frontend.pid)
+          for attempt in $(seq 1 60); do
+            # Exercise the public React navigation with the same HTML Accept header
+            # used by a browser. JSON APIs for this workspace live under /quality/*.
+            if curl --silent --fail -H 'Accept: text/html' http://127.0.0.1:4173/qms/audit-access >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then cat /tmp/qms-live-real-frontend.log; exit 1; fi
+            sleep 1
+          done
+
+      - name: Run no-mock Live Audit browser journeys
+        working-directory: frontend
+        run: npm exec -- playwright test tests/e2e/qms-live-audit-real.spec.ts --project=chromium
+
+      - name: Prove browser lifecycle persisted exactly in PostgreSQL
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import uuid
+
+          from amodb.main import app as _app  # noqa: F401
+          from amodb.apps.quality import models
+          from amodb.apps.quality.audit_archive_governance_models import (
+              QualityAuditArchiveManifest,
+              QualityAuditLegalHoldEvent,
+          )
+          from amodb.apps.quality.audit_checklist_execution_models import (
+              QualityAuditChecklistExecutionGovernance,
+              QualityAuditFieldworkMutationReceipt,
+              QualityAuditFieldworkParticipantContribution,
+          )
+          from amodb.apps.quality.audit_closing_assurance_models import QualityAuditSignatureEvidence
+          from amodb.apps.quality.audit_closure_models import QualityAuditClosureState
+          from amodb.apps.quality.audit_live_completion_models import (
+              QualityAuditClosingAcknowledgement,
+              QualityAuditVerificationToken,
+              QualityAuditWebAuthnChallenge,
+              QualityAuditWebAuthnCredential,
+          )
+          from amodb.apps.quality.audit_report_governance_models import QualityAuditReportRevision
+          from amodb.database import WriteSessionLocal
+
+          def sha256(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          fixture = json.loads(Path(os.environ["E2E_QMS_LIVE_FIXTURE"]).read_text(encoding="utf-8"))
+          checklist_item_id = uuid.UUID(fixture["checklist_item_id"])
+          finding_id = uuid.UUID(fixture["finding_id"])
+          realtime_checklist_item_id = uuid.UUID(fixture["realtime_checklist_item_id"])
+          ceremony_audit_id = uuid.UUID(fixture["ceremony_audit_id"])
+          ceremony_car_id = uuid.UUID(fixture["ceremony_car_id"])
+
+          db = WriteSessionLocal()
+          try:
+              governance = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=checklist_item_id).one()
+              assert governance.canonical_response_status == "NOT_APPLICABLE", governance.canonical_response_status
+              assert governance.entity_version == 5, governance.entity_version
+              assert governance.updated_by_participant_id is not None
+
+              receipts = db.query(QualityAuditFieldworkMutationReceipt).filter_by(checklist_item_id=checklist_item_id).all()
+              assert len(receipts) == 4, len(receipts)
+              assert len({row.client_mutation_id for row in receipts}) == 4
+
+              contributions = db.query(QualityAuditFieldworkParticipantContribution).filter_by(checklist_item_id=checklist_item_id).order_by(QualityAuditFieldworkParticipantContribution.created_at.asc()).all()
+              assert len(contributions) == 4, len(contributions)
+              assert contributions[-1].auditor_notes == "Authoritative v5 update from the first external-auditor browser."
+
+              finding = db.get(models.QMSAuditFinding, finding_id)
+              assert finding is not None and finding.acknowledged_at is not None
+              assert finding.acknowledged_by_email == "auditee@example.com"
+
+              realtime = db.query(QualityAuditChecklistExecutionGovernance).filter_by(checklist_item_id=realtime_checklist_item_id).one()
+              assert realtime.canonical_response_status == "COMPLIANT", realtime.canonical_response_status
+              assert realtime.entity_version == 2, realtime.entity_version
+              assert realtime.updated_by_user_id == fixture["realtime_user_a_id"], realtime.updated_by_user_id
+              assert realtime.auditor_notes == "Committed by Quality Alpha and delivered to Quality Bravo by the authenticated SSE stream."
+
+              report = db.query(QualityAuditReportRevision).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert report.status == "ISSUED", report.status
+              assert report.revision_no == 1, report.revision_no
+              assert report.issued_at is not None
+              report_path = Path(report.file_ref)
+              assert report_path.is_file(), report_path
+              assert sha256(report_path) == report.sha256
+
+              ack = db.query(QualityAuditClosingAcknowledgement).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert ack.report_revision_id == report.id
+              assert ack.report_sha256 == report.sha256
+              assert ack.acknowledgement_status == "ACKNOWLEDGED"
+
+              signature = db.query(QualityAuditSignatureEvidence).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert signature.method == "WEBAUTHN", signature.method
+              assert signature.purpose == "APPROVED_REPORT", signature.purpose
+              assert signature.report_revision_id == report.id
+              assert signature.artifact_sha256 == report.sha256
+              assert signature.credential_id_hash
+              assert signature.ceremony_sha256
+              assert signature.webauthn_origin
+              assert signature.webauthn_rp_id
+
+              credentials = db.query(QualityAuditWebAuthnCredential).filter_by(amo_id=fixture["amo_id"], user_id=fixture["realtime_user_a_id"]).all()
+              assert len(credentials) == 1, len(credentials)
+              assert credentials[0].is_active is True
+              assert credentials[0].last_used_at is not None
+
+              challenges = db.query(QualityAuditWebAuthnChallenge).filter_by(amo_id=fixture["amo_id"], user_id=fixture["realtime_user_a_id"]).all()
+              assert {row.challenge_type for row in challenges} >= {"REGISTRATION", "REPORT_SIGNATURE"}
+              assert all(row.consumed_at is not None for row in challenges), [(row.challenge_type, row.consumed_at) for row in challenges]
+
+              verification = db.query(QualityAuditVerificationToken).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert verification.report_revision_id == report.id
+              assert verification.signature_evidence_id == signature.id
+              assert verification.revoked_at is None
+              assert verification.last_verified_at is not None
+
+              closure = db.query(QualityAuditClosureState).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
+              assert closure.execution_status == "CLOSED", closure.execution_status
+              assert closure.execution_closed_at is not None
+              assert closure.follow_up_status == "OPEN", closure.follow_up_status
+              assert closure.follow_up_completed_at is None
+
+              car = db.get(models.CorrectiveActionRequest, ceremony_car_id)
+              assert car is not None
+              assert str(getattr(car.status, "value", car.status)) == "OPEN"
+              assert str(car.finding_id) == fixture["ceremony_finding_id"]
+
+              manifest = db.query(QualityAuditArchiveManifest).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).order_by(QualityAuditArchiveManifest.manifest_version.desc()).first()
+              assert manifest is not None
+              assert manifest.manifest_version == 1
+              item_types = {item.item_type for item in manifest.items}
+              assert {"AUDIT", "CHECKLIST_EXECUTION", "FINDING", "CAR", "REPORT_REVISION", "SIGNATURE_EVIDENCE"}.issubset(item_types), item_types
+              assert len(manifest.manifest_sha256) == 64
+              assert manifest.package_file_ref and manifest.package_sha256
+              package_path = Path(manifest.package_file_ref)
+              assert package_path.is_file(), package_path
+              assert sha256(package_path) == manifest.package_sha256
+
+              hold_events = db.query(QualityAuditLegalHoldEvent).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id, hold_key="CASE-QMS-LIVE-992").order_by(QualityAuditLegalHoldEvent.created_at.asc()).all()
+              assert [row.event_type for row in hold_events] == ["PLACED", "RELEASED"], [row.event_type for row in hold_events]
+
+              print("Real browser lifecycle is committed through PostgreSQL: offline/exactly-once/conflict, SSE, exact-SHA acknowledgement, WebAuthn issue, verification, execution closure, open CAR separation and archive/legal hold")
+          finally:
+              db.close()
+          PY
+
+      - name: Verify runtime logs contain no schema or server failure
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi "UndefinedTable|UndefinedColumn|Traceback \(most recent call last\)|ERROR: +Exception in ASGI application" /tmp/qms-live-real-backend.log 2>/dev/null; then
+            echo "::error::Real Live Audit backend emitted a schema/runtime failure"
+            cat /tmp/qms-live-real-backend.log
+            exit 1
+          fi
+
+      - name: Upload real browser evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-live-audit-real-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+            /tmp/qms-live-real-backend.log
+            /tmp/qms-live-real-frontend.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop acceptance servers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/qms-live-real-frontend.pid ]; then kill "$(cat /tmp/qms-live-real-frontend.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/qms-live-real-backend.pid ]; then kill "$(cat /tmp/qms-live-real-backend.pid)" 2>/dev/null || true; fi

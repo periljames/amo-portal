@@ -103,15 +103,10 @@ async function fulfilApi(route: Route): Promise<void> {
   const json = (body: unknown, status = 200) =>
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-  if (url.origin === "http://127.0.0.1:4173") {
-    if (path === "/api/realtime/presence" && route.request().method() === "POST") {
-      return json({ state: "online" });
-    }
-    await route.continue();
-    return;
-  }
-
-  if (path.includes("/reliability/workbook-parity")) {
+  // apiClient intentionally uses same-origin first on Vite preview surfaces. Mock
+  // only the Reliability API prefix, not the UI navigation path under
+  // /maintenance/:tenant/reliability/workbook-parity.
+  if (path.startsWith("/reliability/workbook-parity")) {
     if (path.endsWith("/catalog")) return json(catalog());
     if (path.endsWith("/imports/csv-preview") && route.request().method() === "POST") return json(csvPreview(), 201);
     if (path.endsWith("/imports/501/commit") && route.request().method() === "POST") {
@@ -161,6 +156,14 @@ async function fulfilApi(route: Route): Promise<void> {
     }
     if (path.endsWith("/reports")) return json([]);
     return json({});
+  }
+
+  if (url.origin === "http://127.0.0.1:4173") {
+    if (path === "/api/realtime/presence" && route.request().method() === "POST") {
+      return json({ state: "online" });
+    }
+    await route.continue();
+    return;
   }
 
   if (url.origin === "http://127.0.0.1:8080") {

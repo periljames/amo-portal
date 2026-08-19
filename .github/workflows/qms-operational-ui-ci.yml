@@ -73,6 +73,18 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Start mocked portal readiness
+        run: |
+          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; retry direct mocked backend"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-operational-ui-readiness.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/qms-operational-ui-readiness.log
+          exit 1
+
       - name: Start preview server
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-operational-ui-preview.log 2>&1 &
@@ -87,7 +99,29 @@ jobs:
           exit 1
 
       - name: Browser - People 1080p
-        run: npx playwright test tests/e2e/qms-assurance-operating-system.spec.ts --grep "People is person-first" --workers=1 --reporter=github
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-assurance-operating-system.spec.ts --grep "People is person-first" --workers=1 --reporter=github --trace=retain-on-failure 2>&1 | tee /tmp/qms-operational-ui-people.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 100 /tmp/qms-operational-ui-people.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS People browser failure::$summary"
+          fi
+          exit "$status"
+
+      - name: Retain People browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-operational-ui-people-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-operational-ui-people.log
+            /tmp/qms-operational-ui-preview.log
+            /tmp/qms-operational-ui-readiness.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Browser - Assurance 1080p
         run: npx playwright test tests/e2e/qms-assurance-operating-system.spec.ts --grep "Assurance keeps case triage" --workers=1 --reporter=github
@@ -108,7 +142,29 @@ jobs:
         run: npx playwright test tests/e2e/qms-excellence-cockpit.spec.ts --workers=1
 
       - name: Browser - My Quality Work and bounded registers
-        run: npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/qms-register-bounded.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-operational-ui-registers.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(tail -n 120 /tmp/qms-operational-ui-registers.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
+            echo "::error title=QMS bounded-register browser failure::$summary"
+          fi
+          exit "$status"
+
+      - name: Retain bounded-register browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-operational-ui-registers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results
+            /tmp/qms-operational-ui-registers.log
+            /tmp/qms-operational-ui-preview.log
+            /tmp/qms-operational-ui-readiness.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Browser - CAR usability
         run: npx playwright test tests/e2e/qms-usability-enhancements.spec.ts --workers=1

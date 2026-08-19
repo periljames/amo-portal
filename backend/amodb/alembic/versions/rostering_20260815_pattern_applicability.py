@@ -18,9 +18,7 @@ depends_on = None
 
 
 def _has_column(table_name: str, column_name: str) -> bool:
-    """Handle clean installs where an older metadata-driven migration already
-    created a column from the current application model.
-    """
+    """Handle all-head installs where another lineage materialised the column."""
     bind = op.get_bind()
     inspector = inspect(bind)
     if not inspector.has_table(table_name):

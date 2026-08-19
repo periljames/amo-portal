@@ -61,3 +61,9 @@ def _promote_control_loop_routes(api_router: APIRouter) -> None:
 
 _promote_control_loop_routes(router)
 _promote_control_loop_routes(legacy_router)
+
+# The live-audit session projection is a read-only orchestration layer over the
+# authoritative audit workflow, preparation, closure and archive records. Load
+# it from an existing Quality route-order extension point so no central router
+# bootstrap duplication is introduced.
+from . import audit_session_route_order as _audit_session_route_order  # noqa: F401,E402

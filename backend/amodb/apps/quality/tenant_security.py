@@ -173,6 +173,43 @@ def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permis
         return None
 
 
+def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
+    """Honor an explicit tenant Quality subscription disable at the API boundary.
+
+    Some older installations predate module-subscription rows, so absence remains
+    backward-compatible. Once a Quality subscription exists, disabled, suspended,
+    not-yet-effective and expired states must not be bypassable through a direct
+    Quality deep link or API call.
+    """
+    subscription = (
+        db.query(account_models.ModuleSubscription)
+        .filter(
+            account_models.ModuleSubscription.amo_id == str(amo_id),
+            account_models.ModuleSubscription.module_code == "quality",
+        )
+        .first()
+    )
+    if subscription is None or not isinstance(subscription, account_models.ModuleSubscription):
+        return
+    state = _normalise(subscription.status).upper()
+    if state not in {
+        account_models.ModuleSubscriptionStatus.ENABLED.value,
+        account_models.ModuleSubscriptionStatus.TRIAL.value,
+    }:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module is not enabled for this AMO tenant.")
+    now = datetime.now(timezone.utc)
+    effective_from = subscription.effective_from
+    effective_to = subscription.effective_to
+    if effective_from is not None:
+        effective_from = effective_from if effective_from.tzinfo else effective_from.replace(tzinfo=timezone.utc)
+        if effective_from > now:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module subscription is not effective yet.")
+    if effective_to is not None:
+        effective_to = effective_to if effective_to.tzinfo else effective_to.replace(tzinfo=timezone.utc)
+        if effective_to <= now:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The Quality module subscription has expired.")
+
+
 def set_postgres_tenant_context(db: Session, *, amo_id: str, user_id: str) -> None:
     """Set request-local PostgreSQL context used by RLS policies."""
     bind = db.get_bind()
@@ -222,6 +259,7 @@ def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Start an active platform support session for this tenant before opening Quality tenant routes.",
             )
+        _assert_quality_module_available(db, amo_id=str(amo.id))
         set_postgres_tenant_context(db, amo_id=str(amo.id), user_id=str(current_user.id))
         return TenantContext(
             amo_code=amo_code,
@@ -236,6 +274,7 @@ def _resolve_tenant_context_impl(*, amo_code: str, current_user: account_models.
     if not effective_amo_id or str(effective_amo_id) != str(amo.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a member of this AMO tenant.")
 
+    _assert_quality_module_available(db, amo_id=str(amo.id))
     set_postgres_tenant_context(db, amo_id=str(amo.id), user_id=str(current_user.id))
     return TenantContext(amo_code=amo_code, amo_id=str(amo.id), user_id=str(current_user.id), is_superuser=False)
 

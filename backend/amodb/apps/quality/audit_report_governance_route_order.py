@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from . import audit_generated_report_adoption_router
 from . import audit_report_governance_router
 from .canonical_router import legacy_router, router
 
@@ -21,8 +22,14 @@ def _is_generic_catchall(route_item) -> bool:
 
 
 def _register(api_router: APIRouter) -> None:
-    if not any(_is_report_governance_route(item) for item in api_router.routes):
+    if not any(
+        _is_report_governance_route(item)
+        and str(getattr(item, "name", "")) != "adopt_generated_report_artifact"
+        for item in api_router.routes
+    ):
         api_router.include_router(audit_report_governance_router.router)
+    if not any(str(getattr(item, "name", "")) == "adopt_generated_report_artifact" for item in api_router.routes):
+        api_router.include_router(audit_generated_report_adoption_router.router)
 
 
 def _promote(api_router: APIRouter) -> None:
