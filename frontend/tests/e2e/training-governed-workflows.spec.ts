@@ -54,8 +54,9 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     if (path.endsWith("/training/status/me")) {
       await json(route, [{
         course_id: "HF-REC", course_name: "Human Factors Recurrent", status: "DUE_SOON",
-        frequency_months: 24, last_completion_date: "2024-09-01", due_date: "2026-09-01",
-        days_until_due: 14, upcoming_event_id: "event-hf-1", upcoming_event_date: "2026-08-25",
+        frequency_months: 24, last_completion_date: "2024-09-01", valid_until: "2026-09-01",
+        extended_due_date: null, days_until_due: 14, upcoming_event_id: "event-hf-1",
+        upcoming_event_date: "2026-08-25",
       }]);
       return;
     }
@@ -68,7 +69,12 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
       return;
     }
     if (path.endsWith("/training/status/access/me")) {
-      await json(route, { state: "ACTIVE", can_view_history: true, can_view_certificates: true, reason: null });
+      await json(route, {
+        state: "ACTIVE", portal_locked: false, crs_blocked: false,
+        can_view_history: true, can_view_certificates: true, reason: null,
+        overdue_mandatory_count: 0, due_soon_mandatory_count: 1,
+        deferred_mandatory_count: 0, upcoming_scheduled_count: 1,
+      });
       return;
     }
     if (
@@ -138,6 +144,11 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
 
   await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
+  // Production preview uses same-origin /training/* requests through Vite while
+  // other configurations use the direct backend origin. Intercept both so this
+  // browser acceptance exercises the UI contract instead of depending on an
+  // absent proxy backend.
+  await page.route("**/training/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
