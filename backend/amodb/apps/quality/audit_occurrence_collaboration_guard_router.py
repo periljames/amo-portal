@@ -13,7 +13,10 @@ from .audit_occurrence_completion_models import QualityAuditClosingNarrative, Qu
 from .audit_occurrence_completion_router import _enum_value, _meeting_dict, _narrative_dict, public_router
 
 
-router = APIRouter(tags=["Quality / Audit Occurrence Collaboration Guard"])
+# Routes are inserted directly into the occurrence public router, whose existing
+# route paths already include this prefix. Keep the guard path identical so it
+# shadows the compatibility handler instead of creating an unprefixed endpoint.
+router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration Guard"])
 
 
 @router.get("/collaboration")
