@@ -117,7 +117,7 @@ def _set_guest_cookie(response: Response, request: Request, token: str, expires_
         httponly=True,
         secure=request.url.scheme == "https" or production,
         samesite="strict",
-        path="/",
+        path="/quality/audit-access",
     )
 
 
