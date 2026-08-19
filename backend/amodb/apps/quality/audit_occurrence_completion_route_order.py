@@ -14,7 +14,7 @@ for api_router in (router, legacy_router):
         api_router.include_router(audit_occurrence_assignment_router.router)
     if not any("/governed-document-requests" in str(getattr(item, "path", "")) for item in api_router.routes):
         api_router.include_router(audit_occurrence_completion_router.router)
-    if not any("/controlled-document-submissions" in str(getattr(item, "path", "")) and "/submissions" in str(getattr(item, "path", "")) for item in api_router.routes):
+    if not any("/controlled-document-submissions" in str(getattr(item, "path", "")) for item in api_router.routes):
         api_router.include_router(audit_controlled_document_collaboration_router.router)
 
 if not any("/quality/audit-access/collaboration" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
