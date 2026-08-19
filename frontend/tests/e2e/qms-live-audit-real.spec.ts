@@ -49,7 +49,7 @@ async function loginInternalUser(context: BrowserContext, options: { amoSlug: st
   const page = await context.newPage();
   await page.goto(`/maintenance/${options.amoSlug}/login`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Email", { exact: true }).fill(options.email);
-  await page.getByLabel("Password").fill(options.password);
+  await page.getByLabel("Password", { exact: true }).fill(options.password);
   await Promise.all([
     page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
     page.getByRole("button", { name: "Sign In" }).click(),
