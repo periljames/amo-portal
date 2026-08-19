@@ -39,6 +39,14 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     const url = new URL(route.request().url());
     const path = url.pathname;
 
+    // The broad /training/* matcher below is for API calls only. Let the SPA
+    // document navigation continue to Vite instead of accidentally fulfilling
+    // /maintenance/:tenant/training/... with JSON.
+    if (path.startsWith("/maintenance/")) {
+      await route.continue();
+      return;
+    }
+
     if (path === "/auth/portal-preferences/") {
       await json(route, {
         user_id: "training-user-a", amo_id: "amo-a", text_scale: "standard",
@@ -114,7 +122,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
     if (path.endsWith("/training/operating/access")) {
       await json(route, {
-        can_open_operating_system: true, self_service_only: false,
+        can_open_operating_system: true, self_service_only: false, tenant_id: "amo-a",
         capabilities: [
           "training.view", "training.self.view", "training.plan.view", "training.plan.manage",
           "training.people.view", "training.requirement.view", "training.session.view",
@@ -132,7 +140,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
       return;
     }
     if (path.endsWith("/training/operating/my-tasks") || path.endsWith("/training/invitations/me") || path.includes("/training/operating/workflows")) {
-      await json(route, { items: [], total: 0, limit: 50, offset: 0, has_more: false });
+      await json(route, { items: [], total: 0, limit: 50, offset: 0, has_more: false, filtered_totals: {} });
       return;
     }
     if (path.includes("/training/")) {
@@ -145,9 +153,8 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
   await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   // Production preview uses same-origin /training/* requests through Vite while
-  // other configurations use the direct backend origin. Intercept both so this
-  // browser acceptance exercises the UI contract instead of depending on an
-  // absent proxy backend.
+  // other configurations use the direct backend origin. Intercept both API
+  // shapes; the handler explicitly passes SPA document routes through.
   await page.route("**/training/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
