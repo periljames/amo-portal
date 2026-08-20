@@ -185,7 +185,10 @@ def _support_fixture():
     job = SimpleNamespace(
         id="job-ai-1",
         created_by="support-user",
-        payload_json={"ticket_id": "ticket-1"},
+        payload_json={
+            "ticket_id": "ticket-1",
+            "support_session_id": "support-1",
+        },
     )
     ticket = SimpleNamespace(
         id="ticket-1",
@@ -229,6 +232,8 @@ def test_ai_support_reply_uses_governed_platform_gateway_and_is_deduplicated(
     monkeypatch: pytest.MonkeyPatch,
 ):
     db, job, ticket, existing_holder = _support_fixture()
+    access = MagicMock(return_value="support-1")
+    monkeypatch.setattr(saas_side_effects.ai_access, "require_tenant_data_access", access)
     gateway = MagicMock(
         return_value={
             "text": "Please retry the upload and share the correlation ID.",
@@ -253,6 +258,13 @@ def test_ai_support_reply_uses_governed_platform_gateway_and_is_deduplicated(
     }
     assert existing_holder["message"].source_job_id == job.id
     assert existing_holder["message"].body == "Please retry the upload and share the correlation ID."
+    assert access.call_count == 1
+    access.assert_called_with(
+        db,
+        tenant_id=ticket.tenant_id,
+        actor_user_id=job.created_by,
+        support_session_id="support-1",
+    )
     assert gateway.call_count == 1
     kwargs = gateway.call_args.kwargs
     assert kwargs["actor_user_id"] == job.created_by
@@ -261,10 +273,34 @@ def test_ai_support_reply_uses_governed_platform_gateway_and_is_deduplicated(
     assert kwargs["feature_code"] == "support.ai_reply"
 
 
+def test_expired_support_session_prevents_tenant_ticket_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db, job, _ticket, existing_holder = _support_fixture()
+    monkeypatch.setattr(
+        saas_side_effects.ai_access,
+        "require_tenant_data_access",
+        MagicMock(side_effect=PermissionError("support session expired")),
+    )
+    gateway = MagicMock()
+    monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
+
+    with pytest.raises(PermissionError, match="support session expired"):
+        saas_side_effects.process_ai_support_reply(db, job=job)
+
+    assert existing_holder["message"] is None
+    gateway.assert_not_called()
+
+
 def test_ai_support_gateway_policy_failure_creates_no_message(
     monkeypatch: pytest.MonkeyPatch,
 ):
     db, job, _ticket, existing_holder = _support_fixture()
+    monkeypatch.setattr(
+        saas_side_effects.ai_access,
+        "require_tenant_data_access",
+        MagicMock(return_value="support-1"),
+    )
     gateway = MagicMock(side_effect=ValueError("OpenAI provider is disabled or not operational"))
     monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
 
