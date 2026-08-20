@@ -57,32 +57,33 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
 
     const setupPath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.realtime_audit_ref)}/setup?tab=war-room`;
     await page.goto(setupPath, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Quality route not found" })).toHaveCount(0);
     const setup = page.getByRole("region", { name: "Audit setup workspace" });
     await expect(setup).toBeVisible({ timeout: 30_000 });
 
-    await setup.getByLabel("Scope").fill("Real browser setup scope covering controlled maintenance and Quality records.");
-    await setup.getByLabel("Criteria").fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
-    await setup.getByLabel("Auditee").fill("Preparation Journey Auditee");
-    await setup.getByLabel("Auditee email").fill("prepare.auditee@example.com");
-    await setup.getByLabel("Planned start").fill(futureDate(30));
-    await setup.getByLabel("Planned end").fill(futureDate(31));
-    await setup.getByLabel("Reminder interval (days)").fill("5");
+    await setup.getByRole("textbox", { name: "Scope", exact: true }).fill("Real browser setup scope covering controlled maintenance and Quality records.");
+    await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
+    await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
+    await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
+    await setup.getByLabel("Planned start", { exact: true }).fill(futureDate(30));
+    await setup.getByLabel("Planned end", { exact: true }).fill(futureDate(31));
+    await setup.getByLabel("Reminder interval (days)", { exact: true }).fill("5");
     await setup.getByRole("button", { name: "Save audit definition" }).click();
     await expect(setup.getByRole("status")).toContainText("Audit definition and notification settings saved", { timeout: 30_000 });
 
     const openingCard = setup.getByText("Opening meeting", { exact: true }).locator("xpath=ancestor::article[1]");
-    await openingCard.getByLabel("Start").fill(futureLocalDateTime(1));
-    await openingCard.getByLabel("End").fill(futureLocalDateTime(2));
-    await openingCard.getByLabel("Location").fill("Hangar briefing room");
-    await openingCard.getByLabel("Agenda").fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
+    await openingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(1));
+    await openingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(2));
+    await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
+    await openingCard.getByLabel("Agenda", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.getByRole("status")).toContainText("opening meeting saved", { timeout: 30_000 });
 
     const closingCard = setup.getByText("Closing meeting", { exact: true }).locator("xpath=ancestor::article[1]");
-    await closingCard.getByLabel("Start").fill(futureLocalDateTime(7));
-    await closingCard.getByLabel("End").fill(futureLocalDateTime(8));
-    await closingCard.getByLabel("Location").fill("Quality conference room");
-    await closingCard.getByLabel("Agenda").fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
+    await closingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(7));
+    await closingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(8));
+    await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
+    await closingCard.getByLabel("Agenda", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.getByRole("status")).toContainText("closing meeting saved", { timeout: 30_000 });
 
@@ -93,7 +94,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
       await noticeCard.getByRole("button", { name: action, exact: true }).click();
       await expect(setup.getByRole("status")).toContainText(action === "SUBMIT" ? "under review" : action === "APPROVE" ? "approved" : "generated", { timeout: 30_000 });
     }
-    await noticeCard.getByLabel("Delivery reference").fill("Real-browser governed notice delivery");
+    await noticeCard.getByLabel("Delivery reference", { exact: true }).fill("Real-browser governed notice delivery");
     await noticeCard.getByRole("button", { name: "DELIVER", exact: true }).click();
     await expect(setup.getByRole("status")).toContainText("delivered", { timeout: 30_000 });
     await noticeCard.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
@@ -105,21 +106,21 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(prepare.getByText("Real browser setup scope covering controlled maintenance and Quality records.")).toBeVisible();
 
     await prepare.getByRole("button", { name: "New request" }).click();
-    await prepare.getByLabel("Due date").fill(futureDate(20));
-    await prepare.getByLabel("Request title").fill("Current authorization and competence evidence");
-    await prepare.getByLabel("Purpose / records required").fill("Provide the current authorization and competence evidence for the sampled certifying personnel before fieldwork.");
-    await prepare.getByLabel("Linked criterion / requirement").fill("QMSM 5.4 and approved personnel authorization procedure");
-    await prepare.getByLabel("Submission source").selectOption("UPLOAD");
+    await prepare.getByLabel("Due date", { exact: true }).fill(futureDate(20));
+    await prepare.getByLabel("Request title", { exact: true }).fill("Current authorization and competence evidence");
+    await prepare.getByLabel("Purpose / records required", { exact: true }).fill("Provide the current authorization and competence evidence for the sampled certifying personnel before fieldwork.");
+    await prepare.getByLabel("Linked criterion / requirement", { exact: true }).fill("QMSM 5.4 and approved personnel authorization procedure");
+    await prepare.getByLabel("Submission source", { exact: true }).selectOption("UPLOAD");
     await prepare.getByRole("button", { name: "Create governed request" }).click();
     await expect(prepare.getByText("Current authorization and competence evidence", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(prepare.getByText(/QMSM 5\.4/)).toBeVisible();
 
     await prepare.getByRole("button", { name: "Invite" }).click();
-    await prepare.getByLabel("Full name").fill("Preparation Journey Auditee");
-    await prepare.getByLabel("Email").fill("prepare.auditee@example.com");
-    await prepare.getByLabel("Organisation").fill("Real Browser Auditee Organisation");
-    await prepare.getByLabel("Access expires").fill(futureLocalDateTime(24));
-    await prepare.getByLabel("View fieldwork progress").check();
+    await prepare.getByLabel("Full name", { exact: true }).fill("Preparation Journey Auditee");
+    await prepare.getByLabel("Email", { exact: true }).fill("prepare.auditee@example.com");
+    await prepare.getByLabel("Organisation", { exact: true }).fill("Real Browser Auditee Organisation");
+    await prepare.getByLabel("Access expires", { exact: true }).fill(futureLocalDateTime(24));
+    await prepare.getByLabel("View fieldwork progress", { exact: true }).check();
 
     const inviteResponsePromise = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/external-participants") && response.status() === 201);
     await prepare.getByRole("button", { name: "Create invitation" }).click();
@@ -133,12 +134,12 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await guestPage.goto(invited.access_url!, { waitUntil: "domcontentloaded" });
     await expect(guestPage.getByRole("heading", { name: new RegExp(`${data.realtime_audit_ref} · Concurrent realtime browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
     await expect(guestPage.getByText("Current authorization and competence evidence", { exact: true })).toBeVisible();
-    await guestPage.getByLabel("Provide document").setInputFiles({
+    await guestPage.getByLabel("Provide document", { exact: true }).setInputFiles({
       name: "authorization-competence-evidence.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("Controlled acceptance evidence for the real QMS setup and preparation browser journey.\n", "utf-8"),
     });
-    await guestPage.getByLabel("Response / context").fill("Submitted from the purpose-bound auditee browser session for internal review.");
+    await guestPage.getByLabel("Response / context", { exact: true }).fill("Submitted from the purpose-bound auditee browser session for internal review.");
     await guestPage.getByRole("button", { name: "Submit securely" }).click();
     await expect(guestPage.getByRole("status")).toContainText("authorization-competence-evidence.txt submitted · SHA-256", { timeout: 30_000 });
 

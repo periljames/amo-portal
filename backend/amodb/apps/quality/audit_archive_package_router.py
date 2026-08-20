@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -38,6 +39,8 @@ from .audit_archive_governance_router import (
     _utcnow,
 )
 from .audit_closure_models import QualityAuditClosureState
+from .audit_evidence_models import QualityAuditEvidenceArtifact
+from .audit_evidence_storage import resolve_audit_evidence, safe_filename
 from .router import AUDIT_REPORT_DIR
 from .tenant_security import (
     TenantContext,
@@ -60,8 +63,6 @@ def _safe_name(value: str) -> str:
 
 
 def _sha256(path: Path) -> str:
-    import hashlib
-
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -108,11 +109,70 @@ def _timeline(db: Session, *, amo_id: str, audit_id: uuid.UUID, inventory: list[
     ]
 
 
+def _evidence_inventory(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> list[dict[str, Any]]:
+    rows = db.query(QualityAuditEvidenceArtifact).filter(
+        QualityAuditEvidenceArtifact.amo_id == amo_id,
+        QualityAuditEvidenceArtifact.audit_id == audit_id,
+    ).order_by(QualityAuditEvidenceArtifact.created_at.asc(), QualityAuditEvidenceArtifact.id.asc()).all()
+    return [
+        {
+            "item_type": "EVIDENCE_ARTIFACT",
+            "authoritative_record_id": row.id,
+            "revision_ref": None,
+            "source_system": "QUALITY_AUDIT_EVIDENCE",
+            "content_hash": row.sha256,
+            "retention_role": "FIELDWORK_EVIDENCE",
+            "metadata": {
+                "checklist_item_id": str(row.checklist_item_id) if row.checklist_item_id else None,
+                "finding_id": str(row.finding_id) if row.finding_id else None,
+                "source_type": row.source_type,
+                "file_ref": row.file_ref,
+                "filename": row.filename,
+                "content_type": row.content_type,
+                "size_bytes": int(row.size_bytes),
+                "description": row.description,
+                "uploaded_by_user_id": row.uploaded_by_user_id,
+                "uploaded_by_participant_id": row.uploaded_by_participant_id,
+                "created_at": row.created_at,
+            },
+        }
+        for row in rows
+    ]
+
+
+def _zip_evidence_file(handle: zipfile.ZipFile, item: dict[str, Any]) -> None:
+    metadata = item.get("metadata") or {}
+    file_ref = str(metadata.get("file_ref") or "").strip()
+    expected_hash = str(item.get("content_hash") or "").strip().lower()
+    if not file_ref or len(expected_hash) != 64:
+        raise HTTPException(status_code=409, detail="Governed audit evidence is missing its retained storage reference or SHA-256 hash.")
+
+    source = resolve_audit_evidence(file_ref)
+    expected_size = metadata.get("size_bytes")
+    if expected_size is not None and source.stat().st_size != int(expected_size):
+        raise HTTPException(status_code=409, detail=f"Governed audit evidence size no longer matches the recorded artifact: {item['authoritative_record_id']}")
+
+    filename = safe_filename(str(metadata.get("filename") or source.name))
+    archive_name = f"evidence/files/{item['authoritative_record_id']}/{filename}"
+    info = zipfile.ZipInfo(archive_name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o600 << 16
+
+    digest = hashlib.sha256()
+    with source.open("rb") as reader, handle.open(info, "w", force_zip64=True) as writer:
+        for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+            digest.update(chunk)
+            writer.write(chunk)
+    if digest.hexdigest().lower() != expected_hash:
+        raise HTTPException(status_code=409, detail=f"Governed audit evidence no longer matches its recorded SHA-256 hash: {item['authoritative_record_id']}")
+
+
 def _package_indexes(inventory: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     buckets: dict[str, list[dict[str, Any]]] = {
         "scope-criteria.json": [],
         "preparation/index.json": [],
         "checklist/index.json": [],
+        "evidence/index.json": [],
         "findings/index.json": [],
         "report/index.json": [],
         "signatures/index.json": [],
@@ -127,6 +187,8 @@ def _package_indexes(inventory: list[dict[str, Any]]) -> dict[str, list[dict[str
             buckets["preparation/index.json"].append(item)
         elif item_type == "CHECKLIST_EXECUTION":
             buckets["checklist/index.json"].append(item)
+        elif item_type == "EVIDENCE_ARTIFACT":
+            buckets["evidence/index.json"].append(item)
         elif item_type == "FINDING":
             buckets["findings/index.json"].append(item)
         elif item_type == "REPORT_REVISION":
@@ -154,6 +216,9 @@ def _render_package(
         _zip_json(archive, "manifest.json", {**manifest_payload, "manifest_sha256": manifest_sha256})
         for name, items in sorted(indexes.items()):
             _zip_json(archive, name, {"items": items, "item_count": len(items)})
+        for item in inventory:
+            if item.get("item_type") == "EVIDENCE_ARTIFACT":
+                _zip_evidence_file(archive, item)
         _zip_json(archive, "timeline.json", {"items": timeline, "event_count": len(timeline)})
     return path.stat().st_size, _sha256(path)
 
@@ -258,6 +323,7 @@ def generate_archive_manifest_with_package(
     ).order_by(QualityAuditArchiveManifest.manifest_version.desc()).with_for_update().first()
     version = (latest.manifest_version + 1) if latest else 1
     inventory = _build_inventory(db, amo_id=ctx.amo_id, audit=audit)
+    inventory.extend(_evidence_inventory(db, amo_id=ctx.amo_id, audit_id=audit.id))
     manifest_id = generate_user_id()
     manifest_payload = {
         "manifest_id": manifest_id,
