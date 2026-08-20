@@ -36,6 +36,10 @@ def responses_request(
     provider-reported model, request id and usage are returned unchanged for the
     AI gateway to validate and meter. Paid tools are intentionally not enabled
     here; a future tool-enabled path must add its own price/accounting contract.
+
+    Network/transport failures are normalized to ``RuntimeError`` so callers can
+    apply their documented retry or deterministic-fallback policy without
+    depending on urllib/socket exception types.
     """
     api_key = str(secret.get("api_key") or "").strip()
     if not api_key:
@@ -56,13 +60,17 @@ def responses_request(
     if max_output_tokens is not None:
         body["max_output_tokens"] = max(1, int(max_output_tokens))
 
-    status, response, elapsed = saas_providers._json_request(
-        f"{api_base}/v1/responses",
-        method="POST",
-        headers=headers,
-        body=body,
-        timeout=20,
-    )
+    try:
+        status, response, elapsed = saas_providers._json_request(
+            f"{api_base}/v1/responses",
+            method="POST",
+            headers=headers,
+            body=body,
+            timeout=20,
+        )
+    except OSError as exc:
+        raise RuntimeError("OpenAI transport request failed") from exc
+
     if status < 200 or status >= 300 or not isinstance(response, dict):
         raise RuntimeError(f"OpenAI request failed ({status})")
 
