@@ -276,6 +276,20 @@ def _provider_model_matches(requested_model: str, provider_model: str) -> bool:
     return provider_model == requested_model or provider_model.startswith(f"{requested_model}-")
 
 
+def _bounded_customer_charge(
+    requested_charge_microusd: int,
+    *,
+    used_microusd: int,
+    budget_microusd: int,
+    hard_limit: bool,
+) -> int:
+    requested = max(0, int(requested_charge_microusd))
+    if not hard_limit or budget_microusd <= 0:
+        return requested
+    remaining = max(0, int(budget_microusd) - max(0, int(used_microusd)))
+    return min(requested, remaining)
+
+
 def _record_tenant_usage(
     db: Session,
     *,
@@ -284,14 +298,23 @@ def _record_tenant_usage(
     usage: dict[str, int],
     provider_cost_microusd: int,
     customer_charge_microusd: int,
-) -> None:
+    budget_microusd: int,
+    hard_limit: bool,
+) -> tuple[int, int]:
+    """Record measured provider usage and apply the customer budget atomically.
+
+    Provider cost and token usage always reflect what OpenAI actually consumed.
+    The customer-charge meter is separately row-locked after a zero-value upsert,
+    so concurrent in-flight requests can never push a hard tenant budget above
+    its configured ceiling. Any provider cost above the remaining hard budget is
+    retained as platform cost rather than silently overbilling the tenant.
+    """
     increments = {
         "requests": 1,
         "input_tokens": usage["input_tokens"],
         "cached_input_tokens": usage["cached_input_tokens"],
         "output_tokens": usage["output_tokens"],
         "provider_cost_microusd": provider_cost_microusd,
-        "customer_charge_microusd": customer_charge_microusd,
     }
     for metric, quantity in increments.items():
         account_services.record_usage(
@@ -301,6 +324,41 @@ def _record_tenant_usage(
             quantity=max(0, int(quantity)),
             commit=False,
         )
+
+    charge_key = _meter_key("customer_charge_microusd", month)
+    # Ensure the row exists through the platform's PostgreSQL-safe usage upsert,
+    # then take a short row lock only for the charge decision. The provider call
+    # has already completed, so no external network wait occurs while locked.
+    account_services.record_usage(
+        db,
+        amo_id=tenant_id,
+        meter_key=charge_key,
+        quantity=0,
+        commit=False,
+    )
+    charge_meter = (
+        db.query(account_models.UsageMeter)
+        .filter(
+            account_models.UsageMeter.amo_id == tenant_id,
+            account_models.UsageMeter.meter_key == charge_key,
+        )
+        .populate_existing()
+        .with_for_update()
+        .one()
+    )
+    used_before = max(0, int(charge_meter.used_units or 0))
+    applied_charge = _bounded_customer_charge(
+        customer_charge_microusd,
+        used_microusd=used_before,
+        budget_microusd=budget_microusd,
+        hard_limit=hard_limit,
+    )
+    if applied_charge:
+        charge_meter.used_units = used_before + applied_charge
+        charge_meter.last_recorded_at = utcnow()
+        db.add(charge_meter)
+        db.flush()
+    return applied_charge, used_before
 
 
 def _audit(
@@ -432,27 +490,38 @@ def run_ai(
     usage = cost["usage"]
     provider_cost = int(cost["provider_cost_microusd"])
     markup_bps = int((policy or {}).get("markup_bps") or 0)
-    customer_charge = _ceil_div(provider_cost * (10_000 + markup_bps), 10_000)
+    calculated_customer_charge = _ceil_div(provider_cost * (10_000 + markup_bps), 10_000)
+    customer_charge = calculated_customer_charge
+    pre_request_used = 0
     month = current_usage_month()
+    budget = int((policy or {}).get("monthly_budget_microusd") or 0)
+    hard_limit = bool((policy or {}).get("hard_limit", False))
 
     if billing_scope == "TENANT":
         assert tenant_id is not None
-        _record_tenant_usage(
+        customer_charge, pre_request_used = _record_tenant_usage(
             db,
             tenant_id=tenant_id,
             month=month,
             usage=usage,
             provider_cost_microusd=provider_cost,
-            customer_charge_microusd=customer_charge,
+            customer_charge_microusd=calculated_customer_charge,
+            budget_microusd=budget,
+            hard_limit=hard_limit,
         )
 
     response_id = str(draft.get("response_id") or "") or None
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
-    budget = int((policy or {}).get("monthly_budget_microusd") or 0)
-    pre_request_used = 0
-    if billing_scope == "TENANT" and tenant_id and budget:
-        pre_request_used = max(0, _meter_value(db, tenant_id, "customer_charge_microusd", month) - customer_charge)
-    budget_exceeded_by_request = bool(budget and (pre_request_used + customer_charge) > budget)
+    unbilled_overage = (
+        max(0, calculated_customer_charge - customer_charge)
+        if billing_scope == "TENANT"
+        else 0
+    )
+    budget_exceeded_by_request = bool(
+        billing_scope == "TENANT"
+        and budget
+        and (pre_request_used + calculated_customer_charge) > budget
+    )
     _audit(
         db,
         actor_user_id=actor_user_id,
@@ -470,7 +539,11 @@ def run_ai(
             "usage_month": month,
             "usage": usage,
             "provider_cost_microusd": provider_cost,
+            "calculated_customer_charge_microusd": (
+                calculated_customer_charge if billing_scope == "TENANT" else 0
+            ),
             "customer_charge_microusd": customer_charge if billing_scope == "TENANT" else 0,
+            "unbilled_overage_microusd": unbilled_overage,
             "markup_bps": markup_bps if billing_scope == "TENANT" else 0,
             "rate_snapshot": cost["rate_snapshot"],
             "prompt_sha256": prompt_hash,
@@ -479,6 +552,7 @@ def run_ai(
             "latency_ms": latency_ms,
             "credential_scope": "TENANT" if credential.tenant_id else "PLATFORM",
             "budget_exceeded_by_request": budget_exceeded_by_request,
+            "hard_budget_applied": bool(billing_scope == "TENANT" and budget and hard_limit),
         },
     )
     db.commit()
@@ -491,7 +565,11 @@ def run_ai(
         "text": str(draft.get("text") or ""),
         "usage": usage,
         "provider_cost_microusd": provider_cost,
+        "calculated_customer_charge_microusd": (
+            calculated_customer_charge if billing_scope == "TENANT" else 0
+        ),
         "customer_charge_microusd": customer_charge if billing_scope == "TENANT" else 0,
+        "unbilled_overage_microusd": unbilled_overage,
         "billing_scope": billing_scope,
         "tenant_id": tenant_id,
         "feature_code": feature_code,
