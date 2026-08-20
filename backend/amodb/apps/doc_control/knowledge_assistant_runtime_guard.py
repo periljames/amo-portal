@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -10,8 +9,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
-from amodb.apps.platform import ai_gateway
-from amodb.apps.platform import models as platform_models
+from amodb.apps.platform import ai_access, ai_gateway
 
 from .knowledge_assistant_router import DocumentationAssistRequest, SearchContext
 
@@ -154,58 +152,22 @@ def audit_assist_safely(
         )
 
 
-def _active_platform_support_session(
-    db: Session,
-    *,
-    tenant_id: str,
-    platform_user_id: str,
-) -> platform_models.PlatformTenantSupportSession | None:
-    now = datetime.now(timezone.utc)
-    return (
-        db.query(platform_models.PlatformTenantSupportSession)
-        .filter(
-            platform_models.PlatformTenantSupportSession.tenant_id == tenant_id,
-            platform_models.PlatformTenantSupportSession.platform_user_id == platform_user_id,
-            platform_models.PlatformTenantSupportSession.status == "ACTIVE",
-            platform_models.PlatformTenantSupportSession.expires_at > now,
-            platform_models.PlatformTenantSupportSession.ended_at.is_(None),
-        )
-        .order_by(platform_models.PlatformTenantSupportSession.created_at.desc())
-        .first()
-    )
-
-
 def _actor_tenant_ai_access(
     db: Session,
     *,
     tenant_id: str,
     user_id: str,
 ) -> tuple[bool, str | None]:
-    """Fail closed before any tenant document text is sent to an AI provider."""
-    actor = db.get(account_models.User, user_id)
-    if actor is None or not bool(getattr(actor, "is_active", False)):
-        return False, "AI synthesis requires an active authenticated tenant actor."
-
-    actor_tenant_id = str(getattr(actor, "amo_id", "") or "")
-    if not bool(getattr(actor, "is_superuser", False)):
-        if actor_tenant_id != str(tenant_id):
-            return False, "AI synthesis tenant scope does not match the authenticated AMO context."
+    """Use the shared AI tenant-data authority before provider prompt assembly."""
+    try:
+        ai_access.require_tenant_data_access(
+            db,
+            tenant_id=str(tenant_id),
+            actor_user_id=str(user_id),
+        )
         return True, None
-
-    # A platform identity is intentionally distinct from a tenant identity. A
-    # tenant-bound account marked as superuser is never accepted as a platform
-    # actor for external document synthesis.
-    if actor_tenant_id:
-        return False, "Tenant-bound superuser accounts cannot invoke platform AI access for another AMO."
-
-    support_session = _active_platform_support_session(
-        db,
-        tenant_id=str(tenant_id),
-        platform_user_id=str(user_id),
-    )
-    if support_session is None:
-        return False, "Cross-tenant AI synthesis requires an active governed platform support session for this AMO."
-    return True, None
+    except PermissionError as exc:
+        return False, str(exc)
 
 
 def _governed_synthesis(
@@ -217,10 +179,9 @@ def _governed_synthesis(
 ) -> tuple[str | None, list[str], str | None]:
     """Run controlled-document synthesis with explicit tenant request context.
 
-    No thread-local or process-global request state is used. The authorised tenant,
-    actor and SQLAlchemy session are passed directly from the authenticated route,
-    which makes tenant boundaries visible in the call contract and safe under
-    concurrent FastAPI worker execution.
+    Tenant authorization is checked before provider source snippets are assembled.
+    The common AI gateway then applies entitlement, model, budget, credential,
+    privacy and metering rules to the request.
     """
     allowed, scope_warning = _actor_tenant_ai_access(
         db,
