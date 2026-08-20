@@ -10,7 +10,7 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
 from amodb.observability import operation_span, record_provider_call
 
-from . import ai_gateway
+from . import ai_access, ai_gateway
 from . import saas_models as models
 from . import saas_execution_policy, saas_providers, saas_secrets, saas_services
 
@@ -141,6 +141,22 @@ def process_ai_support_reply(
     if ticket is None or detail is None:
         raise ValueError("Support ticket is missing")
 
+    # Revalidate the exact support session at execution time. A session can end
+    # or expire after the job was queued; in that case tenant ticket content must
+    # never be assembled into an external-provider prompt.
+    support_session_id = str(payload.get("support_session_id") or "").strip() or None
+    if ticket.tenant_id:
+        if not support_session_id:
+            raise PermissionError("Tenant support AI job is missing its governed support-session binding")
+        validated_session_id = ai_access.require_tenant_data_access(
+            db,
+            tenant_id=str(ticket.tenant_id),
+            actor_user_id=str(job.created_by or ""),
+            support_session_id=support_session_id,
+        )
+        if validated_session_id != support_session_id:
+            raise PermissionError("Tenant support AI job no longer has valid support-session access")
+
     messages = list(
         reversed(
             db.query(models.SaaSSupportTicketMessage)
@@ -167,10 +183,9 @@ def process_ai_support_reply(
         f"Conversation:\n{transcript}"
     )
 
-    # Support drafting is a platform-operated service. It may be associated with
-    # a tenant ticket for audit context, but it is never silently charged to that
-    # tenant. All provider access, rate accounting and prompt-safe audit logging
-    # go through the common AI gateway.
+    # Support drafting is platform-funded but still tenant-data scoped. The
+    # support-session check above determines data authority; the gateway handles
+    # provider credentials, privacy, rate accounting and prompt-safe auditing.
     draft = ai_gateway.run_ai(
         db,
         prompt=prompt,
