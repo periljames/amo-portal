@@ -8,9 +8,11 @@ from .canonical_router import legacy_router, router
 
 def _is_session_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
+    methods = set(getattr(route_item, "methods", None) or ())
+    is_setup_update = path.endswith("/audits/{audit_id}/setup") and "PATCH" in methods
     return (
         ("/quality/audits/" in path or "/qms/audits/" in path)
-        and (path.endswith("/session") or "/audits/resolve/" in path)
+        and (path.endswith("/session") or "/audits/resolve/" in path or is_setup_update)
     )
 
 

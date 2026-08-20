@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from amodb.database import get_read_db
+from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_closure_models import QualityAuditClosureState
@@ -35,6 +37,21 @@ SESSION_STAGE_TABS = {
     "follow-up": "cars",
     "archive": "evidence",
 }
+
+
+class AuditSetupUpdate(BaseModel):
+    """Mutable occurrence-definition fields owned by the governed Setup stage."""
+
+    title: str | None = Field(default=None, max_length=255)
+    scope: str | None = None
+    criteria: str | None = None
+    auditee: str | None = Field(default=None, max_length=255)
+    auditee_email: str | None = Field(default=None, max_length=255)
+    planned_start: date | None = None
+    planned_end: date | None = None
+    notify_auditors: bool | None = None
+    notify_auditees: bool | None = None
+    reminder_interval_days: int | None = Field(default=None, ge=1, le=60)
 
 
 def _workflow_stage(workflow: Any, stage_id: str) -> Any | None:
@@ -129,6 +146,53 @@ def resolve_audit_occurrence(
     """Resolve exactly one tenant audit by immutable ID, reference or route slug."""
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _audit_payload(_resolve_audit(db, amo_id=ctx.amo_id, audit_key=audit_key))
+
+
+@router.patch("/audits/{audit_id}/setup")
+def update_audit_setup(
+    audit_id: uuid.UUID,
+    payload: AuditSetupUpdate,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Persist the authoritative Setup definition without crossing into the legacy Quality API."""
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == ctx.amo_id,
+        models.QMSAudit.id == audit_id,
+        models.QMSAudit.deleted_at.is_(None),
+    ).with_for_update().first()
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Audit occurrence not found.")
+
+    update = payload.model_dump(exclude_unset=True)
+    if "title" in update:
+        title = (update["title"] or "").strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="Audit title is required.")
+        audit.title = title
+
+    for field_name in ("scope", "criteria", "auditee", "auditee_email"):
+        if field_name in update:
+            value = update[field_name]
+            setattr(audit, field_name, value.strip() if isinstance(value, str) and value.strip() else None)
+
+    next_start = update.get("planned_start", audit.planned_start)
+    next_end = update.get("planned_end", audit.planned_end)
+    if next_start is not None and next_end is not None and next_end < next_start:
+        raise HTTPException(status_code=422, detail="Planned end cannot be before planned start.")
+    if "planned_start" in update:
+        audit.planned_start = update["planned_start"]
+    if "planned_end" in update:
+        audit.planned_end = update["planned_end"]
+
+    for field_name in ("notify_auditors", "notify_auditees", "reminder_interval_days"):
+        if field_name in update and update[field_name] is not None:
+            setattr(audit, field_name, update[field_name])
+
+    db.commit()
+    db.refresh(audit)
+    return _audit_payload(audit)
 
 
 def project_audit_session(
