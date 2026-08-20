@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 
-from . import ai_access
+from . import ai_access, ai_gateway
 from . import models as platform_models
 from . import saas_models as models
 from . import saas_queue, saas_services
@@ -104,11 +104,14 @@ def install_saas_execution_policy() -> None:
         )
         require_operational_provider(credential, label="OpenAI")
 
-        # A tenant support ticket contains tenant data. Before queueing a job,
-        # prove the platform actor currently holds governed access to that exact
-        # AMO. Platform-only tickets do not require a tenant support session.
+        # A tenant support ticket contains tenant data. External AI processing is
+        # therefore allowed only after the tenant has explicitly enabled AI and
+        # the platform actor holds a governed support session for this exact AMO.
         support_session_id: str | None = None
         if ticket.tenant_id:
+            policy = ai_gateway.tenant_policy(db, str(ticket.tenant_id))
+            if not bool(policy.get("enabled")):
+                raise PermissionError("Tenant AI is not enabled for external support drafting")
             support_session_id = ai_access.require_tenant_data_access(
                 db,
                 tenant_id=str(ticket.tenant_id),
