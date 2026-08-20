@@ -75,6 +75,62 @@ def test_tenant_scoped_platform_funded_ai_still_checks_tenant_access(monkeypatch
     original.assert_called_once()
 
 
+def test_hard_limit_with_zero_budget_fails_closed(monkeypatch) -> None:
+    db = MagicMock()
+    original = MagicMock(return_value=_result())
+    monkeypatch.setattr(ai_execution_policy, "_ORIGINAL_RUN_AI", original)
+    monkeypatch.setattr(
+        ai_execution_policy.ai_access,
+        "require_tenant_data_access",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        ai_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"hard_limit": True, "monthly_budget_microusd": 0}),
+    )
+
+    with pytest.raises(PermissionError, match="positive monthly budget"):
+        ai_gateway.run_ai(
+            db,
+            prompt="tenant text",
+            instructions="test",
+            actor_user_id="tenant-user",
+            tenant_id="tenant-a",
+            billing_scope="TENANT",
+        )
+
+    original.assert_not_called()
+
+
+def test_soft_limit_can_explicitly_allow_zero_budget_ceiling(monkeypatch) -> None:
+    db = MagicMock()
+    original = MagicMock(return_value=_result())
+    monkeypatch.setattr(ai_execution_policy, "_ORIGINAL_RUN_AI", original)
+    monkeypatch.setattr(
+        ai_execution_policy.ai_access,
+        "require_tenant_data_access",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        ai_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"hard_limit": False, "monthly_budget_microusd": 0}),
+    )
+
+    result = ai_gateway.run_ai(
+        db,
+        prompt="tenant text",
+        instructions="test",
+        actor_user_id="tenant-user",
+        tenant_id="tenant-a",
+        billing_scope="TENANT",
+    )
+
+    assert result["text"] == "ok"
+    original.assert_called_once()
+
+
 def test_denied_tenant_scope_never_reaches_provider_gateway(monkeypatch) -> None:
     original = MagicMock(return_value=_result())
     monkeypatch.setattr(ai_execution_policy, "_ORIGINAL_RUN_AI", original)
