@@ -6,6 +6,7 @@ import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
 import QmsCarControlLoopPage from "./QmsCarControlLoopPage";
 import QmsCarPerformanceReportPage from "./QmsCarPerformanceReportPage";
+import QmsExternalProvidersPage from "./QmsExternalProvidersPage";
 import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
 
@@ -14,7 +15,8 @@ import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
  *
  * Specialist workflows own operational work. The compatibility reader is only
  * retained for bounded legacy/register surfaces that do not yet have a dedicated
- * owner; it must never impersonate an audit workflow merely because a route exists.
+ * owner; it must never impersonate an audit or provider workflow merely because a
+ * route exists.
  */
 export default function QmsCanonicalPage(): React.ReactElement {
   const location = useLocation();
@@ -27,6 +29,10 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   if (pathname.includes("/quality/cars") || pathname.includes("/qms/cars")) {
     return <QualityCarsPage />;
+  }
+
+  if (pathname.includes("/quality/suppliers") || pathname.includes("/qms/suppliers")) {
+    return <QmsExternalProvidersPage />;
   }
 
   if (/\/(?:quality|qms)\/audits\/program\/[^/]+\/items\/[^/]+\/schedule\/?$/i.test(location.pathname)) {
