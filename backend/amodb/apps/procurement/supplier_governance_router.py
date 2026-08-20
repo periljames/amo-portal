@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.quality.tenant_security import set_postgres_tenant_context
 from amodb.database import get_db
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
@@ -39,7 +40,9 @@ EVALUATION_AUTHOR_ROLES = (
 
 
 def _tenant(db: Session, *, amo_code: str, current_user: account_models.User) -> str:
-    return procurement_service.resolve_tenant_amo_id(db, amo_code=amo_code, current_user=current_user)
+    amo_id = procurement_service.resolve_tenant_amo_id(db, amo_code=amo_code, current_user=current_user)
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
+    return amo_id
 
 
 def _commit(db: Session, value):
