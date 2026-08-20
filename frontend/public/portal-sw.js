@@ -7,11 +7,42 @@
  * until their binary cache can use the same device-bound encryption contract.
  */
 
-const VERSION = "v5";
+const VERSION = "v6";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
 const SHELL_URLS = ["/", "/portal.webmanifest"];
+// Production releases contain hundreds of lazy route chunks. Fetching every
+// manifest entry with one Promise.all can exhaust Chromium/socket resources and
+// can compete with the login/API traffic that the live portal actually needs.
+// Keep release warming bounded while preserving the same offline cache coverage.
+const PRECACHE_CONCURRENCY = 4;
+
+async function cacheReleaseUrl(url, shellCache, assetCache) {
+  try {
+    const response = await fetch(url, { cache: "reload" });
+    if (!response.ok) return;
+    const target = url.startsWith("/assets/") || url.startsWith("/pdfjs/")
+      ? assetCache
+      : shellCache;
+    await target.put(url, response);
+  } catch {
+    // A single optional route chunk must not abort the service-worker update.
+  }
+}
+
+async function precacheWithBoundedConcurrency(urls, shellCache, assetCache) {
+  let cursor = 0;
+  const workerCount = Math.min(PRECACHE_CONCURRENCY, urls.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (cursor < urls.length) {
+      const index = cursor;
+      cursor += 1;
+      await cacheReleaseUrl(urls[index], shellCache, assetCache);
+    }
+  });
+  await Promise.all(workers);
+}
 
 async function precacheRelease() {
   const [shellCache, assetCache] = await Promise.all([
@@ -28,19 +59,7 @@ async function precacheRelease() {
   } catch {
     // The minimal shell still installs during a partially available rollout.
   }
-  await Promise.all(urls.map(async (url) => {
-    try {
-      const response = await fetch(url, { cache: "reload" });
-      if (response.ok) {
-        const target = url.startsWith("/assets/") || url.startsWith("/pdfjs/")
-          ? assetCache
-          : shellCache;
-        await target.put(url, response);
-      }
-    } catch {
-      // A single optional route chunk must not abort the service-worker update.
-    }
-  }));
+  await precacheWithBoundedConcurrency(urls, shellCache, assetCache);
 }
 
 self.addEventListener("install", (event) => {
