@@ -261,7 +261,7 @@ test("creates a draft programme and requires a reason before review transition",
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "New programme" }).click();
-  await expect(page.getByText("Create governed programme revision", { exact: true })).toBeVisible();
+  await expect(page.getByText("Create programme revision", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
   const detailHeader = page.locator(".qms-audit-programme__detail-header");
