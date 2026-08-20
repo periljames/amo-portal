@@ -6,6 +6,58 @@
   font-size: 13px;
 }
 
+/* Tenant workspaces own messaging from the global header. The hub root remains
+   only as a fixed panel host; the actual launch buttons are portalled into the
+   top bar by MessagingHub. */
+.messaging-hub--header {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  width: 0;
+  height: 0;
+}
+
+.messaging-header-launchers {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  order: 2;
+}
+
+.messaging-header-button {
+  position: relative;
+  overflow: visible;
+}
+
+.messaging-header-button b {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--surface-page, #fff);
+  border-radius: 999px;
+  background: var(--danger, #dc2626);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+/* The old header bell navigated to My Work rather than opening notifications.
+   Once the messaging controls are present it becomes a duplicate and is hidden. */
+.tenant-shell__topbar-actions > .tenant-shell__icon-button {
+  display: none;
+}
+
+.tenant-shell__topbar-actions .tenant-shell__profile {
+  order: 3;
+}
+
 .messaging-launcher {
   position: relative;
   display: grid;
@@ -52,6 +104,14 @@
   background: var(--surface-page, #fff);
   color: var(--text-primary, #111827);
   box-shadow: 0 24px 70px rgb(15 23 42 / 30%);
+}
+
+.messaging-hub--header .messaging-panel {
+  position: fixed;
+  top: 54px;
+  right: 12px;
+  bottom: auto;
+  height: min(680px, calc(100vh - 70px));
 }
 
 .messaging-header,
@@ -239,8 +299,10 @@
 .messaging-empty.is-centered { margin: auto; text-align: center; }
 
 @media (max-width: 720px) {
-  .messaging-hub { right: 10px; bottom: 10px; }
-  .messaging-panel { right: -2px; bottom: 58px; width: calc(100vw - 16px); height: calc(100vh - 88px); border-radius: 15px; }
+  .messaging-hub:not(.messaging-hub--header) { right: 10px; bottom: 10px; }
+  .messaging-hub--header .messaging-panel { top: 50px; right: 8px; width: calc(100vw - 16px); height: calc(100vh - 66px); border-radius: 15px; }
+  .messaging-hub:not(.messaging-hub--header) .messaging-panel { right: -2px; bottom: 58px; width: calc(100vw - 16px); height: calc(100vh - 88px); border-radius: 15px; }
+  .messaging-header-launchers { gap: 2px; }
   .messaging-chat-layout { grid-template-columns: 118px minmax(0, 1fr); }
   .messaging-thread { grid-template-columns: 28px minmax(0, 1fr); padding: 8px 6px; }
   .messaging-thread .messaging-badge { display: none; }
