@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from amodb.apps.platform import ai_gateway
+from amodb.apps.platform import ai_gateway, ai_openai
 
 
 def test_catalog_defaults_to_luna_for_standard_tier() -> None:
@@ -64,3 +64,22 @@ def test_standard_policy_cannot_select_professional_model() -> None:
 def test_unknown_model_has_no_implicit_price() -> None:
     with pytest.raises(ValueError, match="No audited price snapshot"):
         ai_gateway.calculate_provider_cost("unknown-model", {"input_tokens": 1})
+
+
+def test_openai_transport_failure_is_normalized_for_gateway_callers(monkeypatch) -> None:
+    def fail_request(*args, **kwargs):
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(ai_openai.saas_providers, "_json_request", fail_request)
+
+    with pytest.raises(RuntimeError, match="OpenAI transport request failed") as raised:
+        ai_openai.responses_request(
+            secret={"api_key": "test-key"},
+            config={},
+            model="gpt-5.6-luna",
+            instructions="Be concise.",
+            prompt="Test provider failure handling.",
+            max_output_tokens=64,
+        )
+
+    assert isinstance(raised.value.__cause__, OSError)
