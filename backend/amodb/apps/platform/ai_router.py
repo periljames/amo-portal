@@ -137,6 +137,11 @@ def ai_playground(
 ):
     if payload.charge_tenant and not payload.tenant_id:
         raise HTTPException(status_code=422, detail="charge_tenant requires a tenant_id")
+    if payload.tenant_id and not payload.charge_tenant:
+        raise HTTPException(
+            status_code=422,
+            detail="tenant_id is only accepted for explicitly tenant-metered playground requests",
+        )
     billing_scope: ai_gateway.BillingScope = "TENANT" if payload.charge_tenant else "PLATFORM_TEST"
     try:
         return ai_gateway.run_ai(
@@ -144,7 +149,7 @@ def ai_playground(
             prompt=payload.prompt,
             instructions=payload.instructions,
             actor_user_id=str(user.id),
-            tenant_id=payload.tenant_id,
+            tenant_id=payload.tenant_id if payload.charge_tenant else None,
             requested_model=payload.model,
             billing_scope=billing_scope,
             feature_code=payload.feature_code,
