@@ -143,15 +143,12 @@ def test_tenant_actor_must_match_ai_tenant_scope() -> None:
 
 
 def test_platform_actor_requires_active_support_session(monkeypatch) -> None:
-    actor = SimpleNamespace(
-        id="platform-1",
-        is_active=True,
-        is_superuser=True,
-        amo_id=None,
+    access = lambda *args, **kwargs: (_ for _ in ()).throw(
+        PermissionError("Cross-tenant AI data access requires an active governed platform support session")
     )
-    monkeypatch.setattr(guard, "_active_platform_support_session", lambda *args, **kwargs: None)
+    monkeypatch.setattr(guard.ai_access, "require_tenant_data_access", access)
     allowed, warning = guard._actor_tenant_ai_access(
-        ActorSession(actor),
+        object(),
         tenant_id="tenant-a",
         user_id="platform-1",
     )
@@ -160,19 +157,13 @@ def test_platform_actor_requires_active_support_session(monkeypatch) -> None:
 
 
 def test_platform_actor_with_exact_support_session_can_reach_tenant_ai(monkeypatch) -> None:
-    actor = SimpleNamespace(
-        id="platform-1",
-        is_active=True,
-        is_superuser=True,
-        amo_id=None,
-    )
     monkeypatch.setattr(
-        guard,
-        "_active_platform_support_session",
-        lambda *args, **kwargs: SimpleNamespace(id="support-1", tenant_id="tenant-a"),
+        guard.ai_access,
+        "require_tenant_data_access",
+        lambda *args, **kwargs: "support-1",
     )
     allowed, warning = guard._actor_tenant_ai_access(
-        ActorSession(actor),
+        object(),
         tenant_id="tenant-a",
         user_id="platform-1",
     )
