@@ -20,6 +20,7 @@ from .canonical_router_legacy import (
 from .planner_calendar_enrichment_router import planner_calendar_enrichment_router
 from .planner_router import planner_router
 from .planner_schedule_router import planner_schedule_router
+from .planner_strategic_router import router as planner_strategic_router
 from .provider_governance_router import provider_governance_router
 
 
@@ -91,7 +92,12 @@ def _insert_before_catchalls(api_router: APIRouter, routes: list) -> None:
 def _install_specialist_routes(api_router: APIRouter) -> None:
     """Register exact operational routes before generic QMS handlers."""
 
-    for extension_router in (planner_router, planner_schedule_router, provider_governance_router):
+    for extension_router in (
+        planner_router,
+        planner_schedule_router,
+        planner_strategic_router,
+        provider_governance_router,
+    ):
         _insert_before_catchalls(
             api_router,
             _capture_extension_routes(api_router, extension_router),
