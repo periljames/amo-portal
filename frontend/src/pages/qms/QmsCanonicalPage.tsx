@@ -37,6 +37,20 @@ export default function QmsCanonicalPage(): React.ReactElement {
     return <QmsAuditProgrammeWorkspacePage />;
   }
 
+  // Audit dates belong to the single shared Quality Planner. Retire the old
+  // audit-only schedule/calendar shell rather than maintaining two calendars.
+  if (/\/(?:quality|qms)\/audits\/(?:schedule|plan)\/?$/i.test(location.pathname)) {
+    const target = location.pathname.replace(/\/audits\/(?:schedule|plan)\/?$/i, "/calendar/audits");
+    return <Navigate to={target} replace />;
+  }
+
+  // The old "Active Audits" route was actually a findings/CAR closeout reader.
+  // Send old bookmarks to the real Audit operations overview instead of exposing
+  // a misleading register under an audit label.
+  if (/\/(?:quality|qms)\/audits\/register\/?$/i.test(location.pathname)) {
+    return <Navigate to={location.pathname.replace(/\/register\/?$/i, "/dashboard")} replace />;
+  }
+
   // The checklist library is rendered by QualityChecklistTemplateHost as a
   // first-class inline workspace. Do not render the old generic register behind it.
   if (/\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname)) {
