@@ -12,6 +12,7 @@ from . import saas_webhooks as _saas_webhooks
 from .saas_admin_links import install_tenant_admin_links
 from .saas_admin_policy import install_tenant_provider_override_policy
 from .managed_ai_provider_policy import install_managed_ai_provider_policy
+from .ai_execution_policy import install_ai_execution_policy
 from .saas_execution_policy import install_saas_execution_policy
 from .saas_fiscalization_policy import install_fiscalization_enqueue_policy
 from .saas_provider_network import install_provider_network_hardening
@@ -22,6 +23,7 @@ _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
 install_tenant_provider_override_policy()
 install_managed_ai_provider_policy()
+install_ai_execution_policy()
 install_fiscalization_enqueue_policy()
 install_saas_execution_policy()
 install_tenant_admin_links()
