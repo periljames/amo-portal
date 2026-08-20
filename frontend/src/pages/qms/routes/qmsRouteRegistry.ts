@@ -31,6 +31,12 @@ export type QmsPathClassification = {
 };
 
 const AUDIT_WORKSPACE_TAILS = [
+  "setup",
+  "prepare",
+  "live",
+  "closing",
+  "follow-up",
+  "archive",
   "overview",
   "war-room",
   "checklist",
