@@ -16,9 +16,15 @@ export async function qmsResolveAudit(
 ): Promise<QMSAuditOut | null> {
   const key = auditKey.trim();
   if (!key) return null;
+
+  // FastAPI decodes percent-encoded slashes before matching a normal path
+  // parameter. Audit references such as QAR/MO/26/015 therefore cannot be sent
+  // to /audits/resolve/{audit_key} as one encoded raw segment. The backend
+  // resolver deliberately accepts this deterministic route slug.
+  const routeKey = normalizedAuditKey(key);
   try {
     return await apiRequest<QMSAuditOut>(
-      `/quality/audits/resolve/${encodeURIComponent(key)}`,
+      `/quality/audits/resolve/${encodeURIComponent(routeKey)}`,
       { timeoutMs: 15_000, cacheTtlMs: 5_000 },
     );
   } catch (cause) {
@@ -28,11 +34,10 @@ export async function qmsResolveAudit(
     // compatibility fixtures do not yet expose the direct resolver. This is
     // deliberately a 404-only fallback: authorization, tenant-boundary and
     // server failures must never be hidden by enumerating the audit register.
-    const target = normalizedAuditKey(key);
     const audits = await qmsListAudits({ limit: 500 }, options);
     return audits.find((audit) =>
       audit.id === key
-      || normalizedAuditKey(audit.audit_ref || "") === target
+      || normalizedAuditKey(audit.audit_ref || "") === routeKey
     ) || null;
   }
 }
