@@ -15,6 +15,30 @@ def test_openai_provider_registry_does_not_offer_endpoint_or_model_override() ->
     assert "api_base_url" not in catalog["config_fields"]
 
 
+def test_managed_openai_health_check_strips_historical_endpoint_override(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    def original(provider, *, secret, config):
+        observed["provider"] = provider
+        observed["secret"] = secret
+        observed["config"] = config
+        return {"ok": True}
+
+    monkeypatch.setattr(policy, "_ORIGINAL_CHECK", original)
+    result = saas_providers.check_provider(
+        "openai",
+        secret={"api_key": "test-key"},
+        config={
+            "api_base_url": "https://attacker.example",
+            "model": "unrated-model",
+            "project": "proj-1",
+            "organization": "org-1",
+        },
+    )
+    assert result == {"ok": True}
+    assert observed["config"] == {"project": "proj-1", "organization": "org-1"}
+
+
 def test_tenant_provider_list_hides_managed_ai(monkeypatch) -> None:
     monkeypatch.setattr(
         policy,
