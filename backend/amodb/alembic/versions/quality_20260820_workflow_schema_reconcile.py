@@ -91,12 +91,12 @@ def _drop_index(name: str, table: str) -> None:
 
 def _drop_check(name: str, table: str) -> None:
     if name in _check_constraints(table):
-        op.drop_constraint(name, table, type_="check")
+        op.drop_constraint(op.f(name), table, type_="check")
 
 
 def _drop_unique(name: str, table: str) -> None:
     if name in _unique_constraints(table):
-        op.drop_constraint(name, table, type_="unique")
+        op.drop_constraint(op.f(name), table, type_="unique")
 
 
 def _has_unique_on_columns(table: str, columns: list[str]) -> bool:
@@ -116,7 +116,7 @@ def _drop_unique_on_columns(table: str, columns: list[str]) -> None:
     for constraint in _insp().get_unique_constraints(table):
         name = constraint.get("name")
         if name and set(constraint.get("column_names") or []) == target:
-            op.drop_constraint(name, table, type_="unique")
+            op.drop_constraint(op.f(name), table, type_="unique")
 
 
 def _drop_check_containing(table: str, tokens: list[str]) -> None:
@@ -125,7 +125,8 @@ def _drop_check_containing(table: str, tokens: list[str]) -> None:
     Quality uses a naming convention that expands explicit CHECK names with the
     table name and PostgreSQL may truncate the resulting identifier. Matching the
     actual SQL expression keeps this migration correct across both historical
-    and convention-named databases.
+    and convention-named databases. Reflected names are wrapped with ``op.f`` so
+    Alembic does not apply the naming convention a second time when dropping them.
     """
     if not _has_table(table):
         return
@@ -134,7 +135,7 @@ def _drop_check_containing(table: str, tokens: list[str]) -> None:
         name = constraint.get("name")
         sqltext = str(constraint.get("sqltext") or "").lower()
         if name and all(token in sqltext for token in required):
-            op.drop_constraint(name, table, type_="check")
+            op.drop_constraint(op.f(name), table, type_="check")
 
 
 def _reconcile_post_briefs() -> None:
