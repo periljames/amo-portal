@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import date
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -13,8 +14,10 @@ from amodb.database import get_read_db
 from . import models
 from .audit_programme_models import QualityAuditProgrammeItem, QualityAuditUniverseItem
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
+from .tenant_timezone import resolve_tenant_timezone
 
 router = APIRouter(tags=["Quality planner strategic views"])
+_CLIENT_TIMEZONE_HEADER = "X-AMO-Client-Timezone"
 
 
 def _quarter(month: int) -> int:
@@ -69,13 +72,30 @@ def _universe_item(row: QualityAuditUniverseItem, states: list[str]) -> dict[str
     }
 
 
+def _effective_timezone_name(request: Request, db: Session, amo_id: str) -> tuple[str, str]:
+    configured = resolve_tenant_timezone(db, amo_id=amo_id)
+    if configured.warning is None:
+        return configured.name, "tenant"
+
+    candidate = str(request.headers.get(_CLIENT_TIMEZONE_HEADER) or "").strip()
+    if candidate:
+        try:
+            ZoneInfo(candidate)
+            return candidate, "client"
+        except ZoneInfoNotFoundError:
+            pass
+    return configured.name, "utc_fallback"
+
+
 @router.get("/planner/strategic")
 def planner_strategic_view(
+    request: Request,
     year: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2200),
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    timezone_name, timezone_source = _effective_timezone_name(request, db, ctx.amo_id)
 
     schedules = db.query(models.QMSAuditSchedule).filter(
         models.QMSAuditSchedule.amo_id == ctx.amo_id,
@@ -136,7 +156,8 @@ def planner_strategic_view(
     unresolved_departments = sum(count for department, count in department_counts.items() if department in {"Unassigned department", "Unresolved personnel"})
     return {
         "year": year,
-        "timezone_name": "Africa/Nairobi",
+        "timezone_name": timezone_name,
+        "timezone_source": timezone_source,
         "schedule_count": len(schedules),
         "months": [{"month": month, "schedule_count": month_counts[month]} for month in range(1, 13)],
         "quarters": [{"quarter": quarter, "schedule_count": quarter_counts[quarter]} for quarter in range(1, 5)],
