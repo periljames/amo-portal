@@ -153,7 +153,10 @@ def _search_context(
         )
         if not requested:
             raise HTTPException(status_code=404, detail="The requested revision context is unavailable")
-        current_effective = manuals[requested_manual_id].current_published_rev_id == requested.id and _status_value(requested) == "PUBLISHED"
+        current_effective = (
+            manuals[requested_manual_id].current_published_rev_id == requested.id
+            and _status_value(requested) == "PUBLISHED"
+        )
         if not current_effective and not is_control_user(user):
             raise HTTPException(status_code=404, detail="The requested revision context is unavailable")
         allowed_revision_ids.add(requested.id)
@@ -165,7 +168,10 @@ def _search_context(
         .all()
         if row.manual_id in manuals
         and (
-            (_status_value(row) == "PUBLISHED" and manuals[row.manual_id].current_published_rev_id == row.id)
+            (
+                _status_value(row) == "PUBLISHED"
+                and manuals[row.manual_id].current_published_rev_id == row.id
+            )
             or (is_control_user(user) and row.id == requested_revision_id)
         )
     }
@@ -179,7 +185,13 @@ def _search_context(
         )
         .all()
     }
-    return SearchContext(tenant=tenant, manuals=manuals, revisions=revisions, profiles=profiles, nodes=nodes)
+    return SearchContext(
+        tenant=tenant,
+        manuals=manuals,
+        revisions=revisions,
+        profiles=profiles,
+        nodes=nodes,
+    )
 
 
 def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]]:
@@ -192,11 +204,24 @@ def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]
     results: list[dict[str, Any]] = []
     for manual in context.manuals.values():
         node = context.nodes.get(manual.id)
-        aliases = [manual.code, *list((node.metadata_json or {}).get("aliases", []))] if node else [manual.code]
+        aliases = (
+            [manual.code, *list((node.metadata_json or {}).get("aliases", []))]
+            if node
+            else [manual.code]
+        )
         identity = " ".join(
-            [manual.code, manual.title, manual.manual_type, node.node_type if node else "MANUAL", *(str(value) for value in aliases)]
+            [
+                manual.code,
+                manual.title,
+                manual.manual_type,
+                node.node_type if node else "MANUAL",
+                *(str(value) for value in aliases),
+            ]
         ).lower()
-        exact_code = bool(normalized and normalized in {normalize_code(value) for value in aliases})
+        exact_code = bool(
+            normalized
+            and normalized in {normalize_code(value) for value in aliases}
+        )
         token_hits = sum(1 for token in tokens if token in identity)
         if not exact_code and needle not in identity and not token_hits:
             continue
@@ -216,9 +241,18 @@ def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]
                     "section_id": None,
                     "anchor": None,
                     "page_number": None,
-                    "snippet": f"{manual.manual_type.replace('_', ' ').title()} · Revision {revision.rev_number} · {_status_value(revision).title()}",
+                    "snippet": (
+                        f"{manual.manual_type.replace('_', ' ').title()} · "
+                        f"Revision {revision.rev_number} · {_status_value(revision).title()}"
+                    ),
                     "score": score,
-                    "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=None, anchor=None),
+                    "reader_url": _reader_url(
+                        context.tenant,
+                        manual.id,
+                        revision.id,
+                        page=None,
+                        anchor=None,
+                    ),
                     "source_type": _source_type(revision),
                     "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
                     "reason": "Exact document code" if exact_code else "Document title, type, or alias match",
@@ -227,7 +261,12 @@ def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]
     return results
 
 
-def _content_results(db: Session, context: SearchContext, query: str, limit: int) -> list[dict[str, Any]]:
+def _content_results(
+    db: Session,
+    context: SearchContext,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
     revision_ids = list(context.revisions)
     if not revision_ids:
         return []
@@ -239,22 +278,45 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
             manual_models.ManualSection,
             manual_models.ManualBlock,
         )
-        .join(manual_models.ManualRevision, manual_models.ManualRevision.manual_id == manual_models.Manual.id)
-        .join(manual_models.ManualSection, manual_models.ManualSection.revision_id == manual_models.ManualRevision.id)
-        .outerjoin(manual_models.ManualBlock, manual_models.ManualBlock.section_id == manual_models.ManualSection.id)
+        .join(
+            manual_models.ManualRevision,
+            manual_models.ManualRevision.manual_id == manual_models.Manual.id,
+        )
+        .join(
+            manual_models.ManualSection,
+            manual_models.ManualSection.revision_id == manual_models.ManualRevision.id,
+        )
+        .outerjoin(
+            manual_models.ManualBlock,
+            manual_models.ManualBlock.section_id == manual_models.ManualSection.id,
+        )
         .filter(manual_models.ManualRevision.id.in_(revision_ids))
     )
     dialect = str(db.get_bind().dialect.name)
     rows: list[tuple[Any, ...]] = []
     if dialect == "postgresql":
         language = literal_column("'simple'")
-        heading_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualSection.heading, ""))
-        block_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualBlock.text_plain, ""))
+        heading_vector = func.to_tsvector(
+            language,
+            func.coalesce(manual_models.ManualSection.heading, ""),
+        )
+        block_vector = func.to_tsvector(
+            language,
+            func.coalesce(manual_models.ManualBlock.text_plain, ""),
+        )
         search_query = func.websearch_to_tsquery(language, query)
-        rank = func.ts_rank_cd(heading_vector, search_query) * 1.5 + func.ts_rank_cd(block_vector, search_query)
+        rank = (
+            func.ts_rank_cd(heading_vector, search_query) * 1.5
+            + func.ts_rank_cd(block_vector, search_query)
+        )
         rows = (
             base.add_columns(rank.label("search_rank"))
-            .filter(or_(heading_vector.op("@@")(search_query), block_vector.op("@@")(search_query)))
+            .filter(
+                or_(
+                    heading_vector.op("@@")(search_query),
+                    block_vector.op("@@")(search_query),
+                )
+            )
             .order_by(rank.desc(), manual_models.ManualSection.order_index.asc())
             .limit(max(40, limit * 8))
             .all()
@@ -271,7 +333,10 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
                     manual_models.ManualBlock.text_plain.ilike(f"%{token}%"),
                 ]
             )
-        rows = [(*row, 0.0) for row in base.filter(or_(*conditions)).limit(max(40, limit * 8)).all()]
+        rows = [
+            (*row, 0.0)
+            for row in base.filter(or_(*conditions)).limit(max(40, limit * 8)).all()
+        ]
 
     output: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -304,7 +369,13 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
                 "page_number": page,
                 "snippet": _snippet(text or section.heading, query),
                 "score": float(raw_rank or 0.0) * 100 + (45 if exact else 0) + token_hits * 4,
-                "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=page, anchor=section.anchor_slug),
+                "reader_url": _reader_url(
+                    context.tenant,
+                    manual.id,
+                    revision.id,
+                    page=page,
+                    anchor=section.anchor_slug,
+                ),
                 "source_type": _source_type(revision),
                 "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
                 "reason": "Exact phrase in controlled content" if exact else "Controlled-content keyword match",
@@ -313,7 +384,10 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
     return output
 
 
-def _apply_context_boost(items: list[dict[str, Any]], payload: DocumentationAssistRequest) -> None:
+def _apply_context_boost(
+    items: list[dict[str, Any]],
+    payload: DocumentationAssistRequest,
+) -> None:
     for item in items:
         if payload.manual_id and item["manual_id"] == payload.manual_id:
             item["score"] = float(item.get("score") or 0) + 14
@@ -325,11 +399,22 @@ def _apply_context_boost(items: list[dict[str, Any]], payload: DocumentationAssi
 
 
 def _deduplicate(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    ordered = sorted(items, key=lambda item: (-float(item.get("score") or 0), str(item.get("code") or ""), str(item.get("heading") or "")))
+    ordered = sorted(
+        items,
+        key=lambda item: (
+            -float(item.get("score") or 0),
+            str(item.get("code") or ""),
+            str(item.get("heading") or ""),
+        ),
+    )
     seen: set[tuple[str, str | None, int | None]] = set()
     result: list[dict[str, Any]] = []
     for item in ordered:
-        key = (str(item["revision_id"]), item.get("section_id"), item.get("page_number"))
+        key = (
+            str(item["revision_id"]),
+            item.get("section_id"),
+            item.get("page_number"),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -340,21 +425,44 @@ def _deduplicate(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]
     return result
 
 
-def _deterministic_answer(query: str, sources: list[dict[str, Any]], mode: str) -> str:
+def _deterministic_answer(
+    query: str,
+    sources: list[dict[str, Any]],
+    mode: str,
+) -> str:
     if not sources:
         return "No authorised effective document matched this request. Try a document code, exact phrase, form number, checklist title, or procedure name."
     first = sources[0]
     if mode == "NAVIGATE":
         location = f", page {first['page_number']}" if first.get("page_number") else ""
-        return f"The strongest authorised match is {first['code']} — {first['title']}{location}. Open the cited source to verify the controlled text."
-    return f"Found {len(sources)} authorised controlled source{'s' if len(sources) != 1 else ''} for “{query}”. Results are ranked by document code, title, heading, indexed text, and the current reading context."
+        return (
+            f"The strongest authorised match is {first['code']} — {first['title']}{location}. "
+            "Open the cited source to verify the controlled text."
+        )
+    return (
+        f"Found {len(sources)} authorised controlled source"
+        f"{'s' if len(sources) != 1 else ''} for “{query}”. Results are ranked by "
+        "document code, title, heading, indexed text, and the current reading context."
+    )
 
 
-def _openai_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | None, list[str], str | None]:
+def _openai_synthesis(
+    db: Session,
+    tenant_id: str,
+    user_id: str,
+    query: str,
+    sources: list[dict[str, Any]],
+) -> tuple[str | None, list[str], str | None]:
     # Safe default. Document Control's runtime guard replaces this helper with
-    # the tenant-aware AI gateway. No API key, provider URL or model is read here,
-    # so direct imports cannot bypass tenant entitlement and usage metering.
-    return None, [], "External AI synthesis requires the governed tenant AI runtime; deterministic assisted search remains available."
+    # the tenant-aware AI gateway. The authenticated request context is explicit
+    # in the function contract, so direct imports cannot bypass tenant entitlement
+    # and usage metering through hidden process/thread-local state.
+    del db, tenant_id, user_id, query, sources
+    return (
+        None,
+        [],
+        "External AI synthesis requires the governed tenant AI runtime; deterministic assisted search remains available.",
+    )
 
 
 def _audit_assist(
@@ -413,13 +521,22 @@ def assist_documentation_search(
     cited_ids = [source["id"] for source in sources[: min(3, len(sources))]]
     warning: str | None = None
     if payload.mode == "ASSIST" and sources:
-        provider_answer, provider_citations, warning = _openai_synthesis(payload.query, sources)
+        provider_answer, provider_citations, warning = _openai_synthesis(
+            db,
+            str(tenant.amo_id),
+            str(current_user.id),
+            payload.query,
+            sources,
+        )
         if provider_answer and provider_citations:
             answer = provider_answer
             cited_ids = provider_citations
             provider_mode = "OPENAI"
 
-    primary = next((source for source in sources if source["id"] in cited_ids), sources[0] if sources else None)
+    primary = next(
+        (source for source in sources if source["id"] in cited_ids),
+        sources[0] if sources else None,
+    )
     _audit_assist(
         db,
         context=context,
