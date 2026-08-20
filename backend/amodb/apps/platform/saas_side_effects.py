@@ -10,6 +10,7 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
 from amodb.observability import operation_span, record_provider_call
 
+from . import ai_gateway
 from . import saas_models as models
 from . import saas_execution_policy, saas_providers, saas_secrets, saas_services
 
@@ -135,12 +136,10 @@ def process_ai_support_reply(
 
     payload = job.payload_json or {}
     ticket_id = str(payload.get("ticket_id") or "")
-    credential = db.get(models.SaaSProviderCredential, str(payload.get("credential_id") or ""))
     ticket = db.get(platform_models.PlatformSupportTicket, ticket_id)
     detail = db.get(models.SaaSSupportTicketDetail, ticket_id)
-    if credential is None or ticket is None or detail is None:
-        raise ValueError("Support ticket or OpenAI credential is missing")
-    saas_execution_policy.require_operational_provider(credential, label="OpenAI")
+    if ticket is None or detail is None:
+        raise ValueError("Support ticket is missing")
 
     messages = list(
         reversed(
@@ -160,31 +159,27 @@ def process_ai_support_reply(
         "Do not claim that actions were performed. Do not expose secrets. Escalate aviation safety, billing disputes, "
         "security incidents, tax/fiscalization issues, or account access changes to a human support agent."
     )
-    secret = saas_secrets.decrypt_secret(credential.encrypted_secret)
-    provider_started = time.perf_counter()
-    provider_status = "ERROR"
-    try:
-        with operation_span("provider.ai.fetch", provider="AI", operation="FETCH"):
-            draft = saas_providers.openai_support_response(
-                secret=secret,
-                config=credential.config_json or {},
-                instructions=instructions,
-                user_message=(
-                    f"Ticket: {ticket.title}\n"
-                    f"Category: {detail.category}\n"
-                    f"Priority: {ticket.priority}\n"
-                    f"Description: {detail.description}\n"
-                    f"Conversation:\n{transcript}"
-                ),
-            )
-        provider_status = "SUCCESS"
-    finally:
-        record_provider_call(
-            provider="AI",
-            operation="FETCH",
-            status=provider_status,
-            duration_seconds=time.perf_counter() - provider_started,
-        )
+    prompt = (
+        f"Ticket: {ticket.title}\n"
+        f"Category: {detail.category}\n"
+        f"Priority: {ticket.priority}\n"
+        f"Description: {detail.description}\n"
+        f"Conversation:\n{transcript}"
+    )
+
+    # Support drafting is a platform-operated service. It may be associated with
+    # a tenant ticket for audit context, but it is never silently charged to that
+    # tenant. All provider access, rate accounting and prompt-safe audit logging
+    # go through the common AI gateway.
+    draft = ai_gateway.run_ai(
+        db,
+        prompt=prompt,
+        instructions=instructions,
+        actor_user_id=job.created_by,
+        tenant_id=ticket.tenant_id,
+        billing_scope="PLATFORM",
+        feature_code="support.ai_reply",
+    )
 
     reply = str(draft.get("text") or "").strip()
     if not reply:
@@ -208,4 +203,6 @@ def process_ai_support_reply(
         "provider": draft.get("provider"),
         "model": draft.get("model"),
         "usage": draft.get("usage"),
+        "provider_cost_microusd": draft.get("provider_cost_microusd"),
+        "billing_scope": draft.get("billing_scope"),
     }
