@@ -24,7 +24,13 @@ def _repository_root() -> Path:
 
 
 def test_base_provider_helper_is_fail_closed_without_runtime_guard() -> None:
-    answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
+    answer, citations, warning = assistant._openai_synthesis(
+        SimpleNamespace(),
+        "amo-1",
+        "user-1",
+        "Where is QAM 51?",
+        [_source()],
+    )
 
     assert answer is None
     assert citations == []
@@ -32,7 +38,9 @@ def test_base_provider_helper_is_fail_closed_without_runtime_guard() -> None:
     assert "governed tenant AI runtime" in warning
 
 
-def test_governed_synthesis_uses_tenant_gateway_and_filters_citations(monkeypatch) -> None:
+def test_governed_synthesis_uses_explicit_tenant_gateway_context_and_filters_citations(
+    monkeypatch,
+) -> None:
     captured: dict = {}
 
     def fake_run_ai(_db, **kwargs):
@@ -49,11 +57,14 @@ def test_governed_synthesis_uses_tenant_gateway_and_filters_citations(monkeypatc
         }
 
     monkeypatch.setattr(guard.ai_gateway, "run_ai", fake_run_ai)
-    token = guard._AI_CONTEXT.set((SimpleNamespace(), "amo-1", "user-1"))
-    try:
-        answer, citations, warning = guard._governed_synthesis("Where is QAM 51?", [_source()])
-    finally:
-        guard._AI_CONTEXT.reset(token)
+    db = SimpleNamespace()
+    answer, citations, warning = guard._governed_synthesis(
+        db,
+        "amo-1",
+        "user-1",
+        "Where is QAM 51?",
+        [_source()],
+    )
 
     assert answer == "Open QAM 51 and verify the controlled form."
     assert citations == ["section:rev:sec"]
@@ -68,7 +79,13 @@ def test_governed_synthesis_uses_tenant_gateway_and_filters_citations(monkeypatc
 
 def test_navigation_url_carries_precise_page_and_anchor() -> None:
     tenant = SimpleNamespace(slug="safarilink")
-    url = assistant._reader_url(tenant, "manual-1", "revision-2", page=51, anchor="qam-51")
+    url = assistant._reader_url(
+        tenant,
+        "manual-1",
+        "revision-2",
+        page=51,
+        anchor="qam-51",
+    )
     assert url == "/maintenance/SAFARILINK/document-control/library/manual-1?tab=content&revision=revision-2&page=51&anchor=qam-51"
 
 
@@ -96,9 +113,13 @@ def test_route_contract_filters_access_and_has_no_direct_openai_secret_path() ->
     assert "OPENAI_API_KEY" not in source
     assert "DOCUMENT_AI_MODEL" not in source
     assert "https://api.openai.com/v1/responses" not in source
+    assert "ContextVar" not in guard_source
+    assert "_AI_CONTEXT" not in guard_source
     assert "ai_gateway.run_ai" in guard_source
     assert 'billing_scope="TENANT"' in guard_source
     assert "requires_external_documents=True" in guard_source
+    assert "tenant_id: str" in guard_source
+    assert "user_id: str" in guard_source
 
 
 def test_assistant_route_precedes_compatibility_workspace_routes() -> None:
