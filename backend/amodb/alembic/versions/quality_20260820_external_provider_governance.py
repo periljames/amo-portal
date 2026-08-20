@@ -200,4 +200,3 @@ def downgrade() -> None:
     op.drop_table("quality_external_provider_contracts")
     op.drop_index("ix_quality_provider_profiles_due", table_name="quality_external_provider_profiles")
     op.drop_table("quality_external_provider_profiles")
-    op.drop_index("ix_quality_provider_profiles_due", table_name="quality_external_provider_profiles")
