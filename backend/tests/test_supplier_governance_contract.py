@@ -186,6 +186,7 @@ def test_frontend_no_longer_auto_passes_governed_procurement_decisions() -> None
     sections = _read(FRONTEND / "pages" / "procurement" / "ProcurementSections.tsx")
     forms = _read(FRONTEND / "pages" / "procurement" / "ProcurementForms.tsx")
     actions = _read(FRONTEND / "pages" / "procurement" / "procurementActions.ts")
+    supplier_panel = _read(FRONTEND / "pages" / "procurement" / "SupplierGovernancePanel.tsx")
 
     assert 'evaluation_score: 100' not in sections
     assert 'Approved through controlled supplier review.' not in sections
@@ -194,5 +195,8 @@ def test_frontend_no_longer_auto_passes_governed_procurement_decisions() -> None
     assert 'supplierScope: "yes"' not in sections
     assert 'disposition: "ACCEPTED"' not in sections
 
-    for required_field in ["decisionReason", "releaseComment", "evaluationNotes"]:
-        assert required_field in forms or required_field in actions
+    assert 'evaluationNotes' in forms and 'evaluationNotes' in actions
+    assert 'releaseComment' in forms and 'releaseComment' in actions
+    assert 'approvalComment' in forms and 'approvalComment' in actions
+    assert 'supplierDecisionReason' in supplier_panel
+    assert 'reason: supplierDecisionReason' in supplier_panel
