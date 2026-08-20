@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextvars import ContextVar
 from typing import Any
 from urllib.parse import quote
 
@@ -13,12 +12,6 @@ from amodb.apps.manuals import models as manual_models
 from amodb.apps.platform import ai_gateway
 
 from .knowledge_assistant_router import DocumentationAssistRequest, SearchContext
-
-
-_AI_CONTEXT: ContextVar[tuple[Session, str, str] | None] = ContextVar(
-    "document_control_ai_context",
-    default=None,
-)
 
 
 def governed_source_url(
@@ -43,7 +36,11 @@ def governed_source_url(
     return f"{base}?{'&'.join(params)}"
 
 
-def _source_manual_ids(context: SearchContext, request_payload: DocumentationAssistRequest, source_ids: list[str]) -> list[str]:
+def _source_manual_ids(
+    context: SearchContext,
+    request_payload: DocumentationAssistRequest,
+    source_ids: list[str],
+) -> list[str]:
     if request_payload.manual_id and request_payload.manual_id in context.manuals:
         return [request_payload.manual_id]
 
@@ -117,7 +114,12 @@ def audit_assist_safely(
                 if revision and revision.manual_id == manual_id:
                     relevant_source_ids.append(source_id)
 
-        revision_id = _source_revision_id(context, request_payload, relevant_source_ids, manual_id)
+        revision_id = _source_revision_id(
+            context,
+            request_payload,
+            relevant_source_ids,
+            manual_id,
+        )
         db.add(
             manual_models.ManualAIHookEvent(
                 tenant_id=context.tenant.id,
@@ -128,7 +130,9 @@ def audit_assist_safely(
                     "actor_contact_id": getattr(current_user, "contact_id", None),
                     "manual_id": manual_id,
                     "source_manual_id": manual_id,
-                    "query_sha256": hashlib.sha256(request_payload.query.strip().lower().encode("utf-8")).hexdigest(),
+                    "query_sha256": hashlib.sha256(
+                        request_payload.query.strip().lower().encode("utf-8")
+                    ).hexdigest(),
                     "query_length": len(request_payload.query),
                     "requested_mode": request_payload.mode,
                     "provider_mode": provider_mode,
@@ -138,18 +142,30 @@ def audit_assist_safely(
                     "source_count": len(relevant_source_ids),
                     "total_source_count": len(source_ids),
                     "fallback_warning": warning,
-                    "scope": "DOCUMENT" if request_payload.manual_id else "LIBRARY_RESULT_DOCUMENT",
+                    "scope": (
+                        "DOCUMENT"
+                        if request_payload.manual_id
+                        else "LIBRARY_RESULT_DOCUMENT"
+                    ),
                 },
             )
         )
 
 
-def _governed_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | None, list[str], str | None]:
-    request_context = _AI_CONTEXT.get()
-    if request_context is None:
-        return None, [], "AI synthesis has no authorised tenant request context; deterministic results are shown instead."
+def _governed_synthesis(
+    db: Session,
+    tenant_id: str,
+    user_id: str,
+    query: str,
+    sources: list[dict[str, Any]],
+) -> tuple[str | None, list[str], str | None]:
+    """Run controlled-document synthesis with explicit tenant request context.
 
-    db, tenant_id, user_id = request_context
+    No thread-local or process-global request state is used. The authorised tenant,
+    actor and SQLAlchemy session are passed directly from the authenticated route,
+    which makes tenant boundaries visible in the call contract and safe under
+    concurrent FastAPI worker execution.
+    """
     provider_sources = [
         {
             "id": source["id"],
@@ -193,17 +209,31 @@ def _governed_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str 
         structured = json.loads(raw)
         if not isinstance(structured, dict):
             raise ValueError("AI synthesis did not return a JSON object")
-        cited = [str(value) for value in structured.get("source_ids", []) if str(value) in allowed_ids]
+        cited = [
+            str(value)
+            for value in structured.get("source_ids", [])
+            if str(value) in allowed_ids
+        ]
         answer = str(structured.get("answer") or "").strip()
         if not answer or not cited:
-            return None, [], "AI synthesis returned no verifiable controlled-source citation; deterministic results are shown instead."
+            return (
+                None,
+                [],
+                "AI synthesis returned no verifiable controlled-source citation; deterministic results are shown instead.",
+            )
         return answer[:1600], cited[:8], None
     except PermissionError as exc:
-        return None, [], f"AI synthesis is unavailable under the tenant AI policy: {exc}. Deterministic results are shown instead."
+        return (
+            None,
+            [],
+            f"AI synthesis is unavailable under the tenant AI policy: {exc}. Deterministic results are shown instead.",
+        )
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
-        return None, [], f"AI synthesis could not be verified ({type(exc).__name__}); deterministic results are shown instead."
-    finally:
-        _AI_CONTEXT.set(None)
+        return (
+            None,
+            [],
+            f"AI synthesis could not be verified ({type(exc).__name__}); deterministic results are shown instead.",
+        )
 
 
 def install() -> None:
@@ -212,27 +242,6 @@ def install() -> None:
     # keeping the existing public contract stable.
     from . import knowledge_assistant_router as assistant
 
-    original_search_context = assistant._search_context
-
-    def governed_search_context(
-        db: Session,
-        *,
-        tenant: manual_models.Tenant,
-        user: account_models.User,
-        requested_manual_id: str | None,
-        requested_revision_id: str | None,
-    ) -> SearchContext:
-        context = original_search_context(
-            db,
-            tenant=tenant,
-            user=user,
-            requested_manual_id=requested_manual_id,
-            requested_revision_id=requested_revision_id,
-        )
-        _AI_CONTEXT.set((db, str(tenant.amo_id), str(user.id)))
-        return context
-
     assistant._reader_url = governed_source_url
     assistant._audit_assist = audit_assist_safely
-    assistant._search_context = governed_search_context
     assistant._openai_synthesis = _governed_synthesis
