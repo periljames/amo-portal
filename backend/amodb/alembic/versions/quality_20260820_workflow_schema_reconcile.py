@@ -1,7 +1,7 @@
 """reconcile Quality workflow tables with the active ORM contract
 
 Revision ID: quality_260820_wf_schema
-Revises: training_260818_connected_delivery
+Revises: training_260818_policy_merge
 Create Date: 2026-08-20
 
 The original June workflow-closure migration created the first versions of the
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 
 
 revision: str = "quality_260820_wf_schema"
-down_revision: Union[str, Sequence[str], None] = "training_260818_connected_delivery"
+down_revision: Union[str, Sequence[str], None] = "training_260818_policy_merge"
 branch_labels = None
 depends_on = None
 
