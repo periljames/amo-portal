@@ -9,6 +9,7 @@ import pytest
 from amodb.apps.training import compliance
 from amodb.apps.training import models as training_models
 from amodb.apps.training.record_presentation import (
+    _training_profile_html,
     absolute_training_verification_url,
     canonical_public_origin,
     explicit_recurrence_key,
@@ -34,6 +35,47 @@ def _course(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def _public_payload(*, scheduled=None, logo_url=None, photo_url=None):
+    return {
+        "tenant": {
+            "name": "Safarilink Aviation Limited",
+            "brand_accent": "#8a6f20",
+            "logo_url": logo_url,
+        },
+        "user": {
+            "full_name": "Mercy Etende",
+            "position_title": "Procurement Officer",
+            "staff_code": "ETEN01",
+            "licence_number": None,
+            "is_active": True,
+            "photo_url": photo_url,
+        },
+        "summary": {"current": 1, "due_soon": 0, "overdue": 0, "deferred": 0},
+        "requirements": [
+            {
+                "requirement_key": "group:avsec",
+                "course_id": "AVSEC-REF",
+                "course_name": "Aviation Security (Refresher)",
+                "course_type": "Recurrent",
+                "last_completed": "2026-08-04",
+                "next_due": "2028-08-04",
+                "scheduled": scheduled,
+                "compliance_status": "Current",
+                "evidence_available": False,
+                "record_count": 1,
+                "history": [
+                    {
+                        "record_id": "record-1",
+                        "type": "Recurrent",
+                        "course_code": "AVSEC-REF",
+                        "completed": "2026-08-04",
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def test_legacy_refresher_is_presented_as_recurrent_without_touching_code():
@@ -143,3 +185,60 @@ def test_canonical_origin_never_falls_back_to_relative_or_http(monkeypatch):
     monkeypatch.setenv("APP_PUBLIC_BASE_URL", "http://portal.example.test")
     with pytest.raises(RuntimeError, match="Canonical HTTPS public origin"):
         canonical_public_origin(None, None)
+
+
+def test_public_html_omits_empty_scheduling_and_duplicate_course_rendering():
+    response = _training_profile_html(_public_payload())
+    body = response.body.decode("utf-8")
+
+    assert "Not scheduled" not in body
+    assert "Scheduled —" not in body
+    assert "No public evidence link" not in body
+    assert body.count("Aviation Security (Refresher)") == 2  # one row + one next-due callout
+    assert "<table" not in body
+    assert "class='cards'" not in body
+
+
+def test_public_html_exposes_native_report_actions_and_ios_visual_contract():
+    response = _training_profile_html(_public_payload())
+    body = response.body.decode("utf-8")
+
+    assert "data-share-report" in body
+    assert "data-copy-link" in body
+    assert "data-download-pdf" in body
+    assert "data-print-report" in body
+    assert "navigator.share" in body
+    assert "-apple-system" in body
+    assert "backdrop-filter" in body
+    assert "viewport-fit=cover" in body
+
+
+def test_public_html_renders_schedule_only_when_real_event_exists():
+    response = _training_profile_html(_public_payload(scheduled="2028-07-28"))
+    body = response.body.decode("utf-8")
+
+    assert "Scheduled 28 Jul 2028" in body
+    assert "Not scheduled" not in body
+
+
+def test_public_html_uses_only_safe_high_resolution_image_sources():
+    response = _training_profile_html(
+        _public_payload(
+            logo_url="https://cdn.example.test/tenant-logo@2x.png",
+            photo_url="https://cdn.example.test/personnel/mercy@2x.webp",
+        )
+    )
+    body = response.body.decode("utf-8")
+
+    assert "tenant-logo@2x.png" in body
+    assert "mercy@2x.webp" in body
+    assert "fetchpriority='high'" in body
+    assert "decoding='async'" in body
+
+    unsafe = _public_payload(
+        logo_url="javascript:alert(1)",
+        photo_url="http://insecure.example.test/photo.png",
+    )
+    unsafe_body = _training_profile_html(unsafe).body.decode("utf-8")
+    assert "javascript:" not in unsafe_body
+    assert "http://insecure.example.test" not in unsafe_body

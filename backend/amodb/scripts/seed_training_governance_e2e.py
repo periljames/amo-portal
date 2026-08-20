@@ -7,9 +7,10 @@ prove browser -> FastAPI -> PostgreSQL behavior without production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+import json
 import sys
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,7 @@ MATERIAL_ID = "00000000-0000-4000-8100-000000000017"
 QUESTION_ID = "00000000-0000-4000-8100-000000000018"
 QUESTION_REVISION_ID = "00000000-0000-4000-8100-000000000019"
 BLUEPRINT_ID = "00000000-0000-4000-8100-000000000020"
+TRAINING_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8100-000000000021"
 
 AMO_CODE = "TRNGATE"
 AMO_SLUG = "trngate"
@@ -54,6 +56,7 @@ TODAY = date.today()
 def seed() -> None:
     db = WriteSessionLocal()
     try:
+        now = datetime.now(timezone.utc)
         amo = account_models.AMO(
             id=AMO_ID,
             amo_code=AMO_CODE,
@@ -97,9 +100,25 @@ def seed() -> None:
             is_auditor=False,
             is_system_account=False,
             must_change_password=False,
-            password_changed_at=datetime.now(timezone.utc),
+            password_changed_at=now,
         )
         db.add(admin)
+        db.flush()
+
+        # The canonical Training router is protected by require_module("training").
+        # The disposable live-browser tenant therefore needs the same explicit
+        # tenant module subscription as a real enabled tenant.  This keeps the CI
+        # journey behind production entitlement checks instead of bypassing them.
+        db.add(account_models.ModuleSubscription(
+            id=TRAINING_MODULE_SUBSCRIPTION_ID,
+            amo_id=AMO_ID,
+            module_code="training",
+            status=account_models.ModuleSubscriptionStatus.ENABLED,
+            effective_from=now - timedelta(minutes=5),
+            effective_to=now + timedelta(days=1),
+            plan_code="CI-TRAINING-GOVERNANCE",
+            metadata_json=json.dumps({"source": "training_governance_live_browser_ci"}),
+        ))
         db.flush()
 
         course = training.TrainingCourse(
@@ -160,7 +179,7 @@ def seed() -> None:
             supporting_dms_document_id="ci-controlled-approval",
             supporting_dms_revision_id="ci-controlled-approval-rev-1",
             verified_by_user_id=ADMIN_ID,
-            verified_at=datetime.now(timezone.utc),
+            verified_at=now,
             created_by_user_id=ADMIN_ID,
         ))
         db.flush()

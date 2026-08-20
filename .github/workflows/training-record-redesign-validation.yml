@@ -236,9 +236,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt opencv-python-headless
-      - name: Upgrade clean governed Training database
+      - name: Upgrade clean governed Training database to all Alembic heads
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade head
+        run: alembic -c amodb/alembic.ini upgrade heads
       - name: Seed governed Training browser fixture
         working-directory: backend
         run: python amodb/scripts/seed_training_governance_e2e.py
