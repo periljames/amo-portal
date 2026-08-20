@@ -29,6 +29,7 @@ install_resend_email_provider()
 from .ops_console_router import router as console_router  # noqa: E402
 from .product_analytics import router as product_analytics_router  # noqa: E402
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
+from .ai_router import router as ai_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
 from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
 from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
@@ -40,6 +41,7 @@ from .saas_usage import install_usage_meter_hardening  # noqa: E402
 router.include_router(console_router)
 router.include_router(product_analytics_router)
 router.include_router(platform_saas_router)
+router.include_router(ai_router)
 router.include_router(webhook_router)
 router.include_router(support_router)
 router.include_router(integration_router)
