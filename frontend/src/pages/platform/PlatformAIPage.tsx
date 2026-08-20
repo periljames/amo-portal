@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import { aiControlApi, type AIPlaygroundResult, type AITenantPolicy } from "../../services/aiControl";
 import { platformApi } from "../../services/platformControl";
@@ -22,6 +22,7 @@ export default function PlatformAIPage() {
   const tenants = usePlatformData(() => platformApi.tenants({ limit: 200 }), [], { pollMs: 60_000 });
   const catalog = usePlatformData(() => aiControlApi.catalog(), [], { pollMs: 60_000 });
   const [tenantId, setTenantId] = useState("");
+  const tenantIdRef = useRef("");
   const policy = usePlatformData(() => tenantId ? aiControlApi.policy(tenantId) : Promise.resolve(null), [tenantId]);
   const usage = usePlatformData(() => tenantId ? aiControlApi.usage(tenantId) : Promise.resolve(null), [tenantId]);
   const status = usePlatformData(() => aiControlApi.status(tenantId || null), [tenantId], { pollMs: 20_000 });
@@ -52,7 +53,15 @@ export default function PlatformAIPage() {
   const provider = statusMatchesTenant ? statusData?.provider ?? null : null;
   const models = catalog.data?.models ?? [];
 
+  const selectTenant = (nextTenantId: string) => {
+    // Update the ref synchronously so any already in-flight async action can
+    // detect the scope change before it is allowed to publish a result.
+    tenantIdRef.current = nextTenantId;
+    setTenantId(nextTenantId);
+  };
+
   useEffect(() => {
+    tenantIdRef.current = tenantId;
     // A tenant switch is a security boundary. Clear all tenant-derived controls,
     // metering intent and result state before the next tenant policy arrives.
     setTenantMetering(false);
@@ -60,6 +69,7 @@ export default function PlatformAIPage() {
     setRunError(null);
     setPolicyError(null);
     setPolicyNotice(null);
+    setRunning(false);
     setEnabled(false);
     setPlan("STANDARD");
     setModel("gpt-5.6-luna");
@@ -82,28 +92,31 @@ export default function PlatformAIPage() {
       setPolicyError("Wait for the selected tenant AI policy to finish loading before making changes.");
       return;
     }
+    const requestTenantId = tenantId;
+    const requestPlan = plan;
     setPolicyError(null);
     setPolicyNotice(null);
     try {
-      const updated = await aiControlApi.updatePolicy(tenantId, {
+      const updated = await aiControlApi.updatePolicy(requestTenantId, {
         enabled,
-        plan_code: plan,
-        model: defaultModel[plan],
+        plan_code: requestPlan,
+        model: defaultModel[requestPlan],
         monthly_budget_microusd: Math.max(0, Math.round(Number(budgetUsd || 0) * 1_000_000)),
         hard_limit: true,
         allow_external_documents: allowDocs,
         markup_bps: 0,
         reason: "AI policy updated from superadmin AI Control Centre",
       });
-      if (updated.policy.tenant_id !== tenantId) {
+      if (tenantIdRef.current !== requestTenantId) return;
+      if (updated.policy.tenant_id !== requestTenantId) {
         throw new Error("Tenant scope mismatch while saving AI policy. No cross-tenant result was accepted.");
       }
-      setModel(defaultModel[plan]);
+      setModel(defaultModel[requestPlan]);
       setPolicyNotice("Tenant AI policy saved and audited.");
       policy.reload();
       usage.reload();
     } catch (error) {
-      setPolicyError(errorText(error));
+      if (tenantIdRef.current === requestTenantId) setPolicyError(errorText(error));
     }
   };
 
@@ -112,6 +125,8 @@ export default function PlatformAIPage() {
       setRunError("Tenant-metered testing requires the selected tenant to have AI enabled.");
       return;
     }
+    const requestTenantId = tenantId;
+    const requestTenantMetering = tenantMetering;
     setRunning(true);
     setRunError(null);
     setResult(null);
@@ -120,20 +135,21 @@ export default function PlatformAIPage() {
         prompt,
         // Platform tests remain platform-only. A tenant identifier is sent only
         // when the administrator explicitly enables tenant metering.
-        tenant_id: tenantMetering ? tenantId : null,
+        tenant_id: requestTenantMetering ? requestTenantId : null,
         model,
-        charge_tenant: tenantMetering,
+        charge_tenant: requestTenantMetering,
         feature_code: "platform.playground",
       });
-      if (tenantMetering && next.tenant_id !== tenantId) {
+      if (tenantIdRef.current !== requestTenantId) return;
+      if (requestTenantMetering && next.tenant_id !== requestTenantId) {
         throw new Error("Tenant scope mismatch in AI response. The result was discarded.");
       }
       setResult(next);
-      if (tenantMetering) usage.reload();
+      if (requestTenantMetering) usage.reload();
     } catch (error) {
-      setRunError(errorText(error));
+      if (tenantIdRef.current === requestTenantId) setRunError(errorText(error));
     } finally {
-      setRunning(false);
+      if (tenantIdRef.current === requestTenantId) setRunning(false);
     }
   };
 
@@ -150,7 +166,7 @@ export default function PlatformAIPage() {
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Live admin test</h2><p>Default mode is platform-only test usage. Tenant ID and billing are sent only after the explicit metering switch is enabled.</p></div><StatusBadge value={tenantMetering ? "TENANT_METERED" : "PLATFORM_TEST"} /></div>
           <div className="platform-form" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <label><span>Tenant policy scope</span><select value={tenantId} onChange={(event) => setTenantId(event.target.value)}><option value="">Platform only</option>{(tenants.data?.items ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.amo_code}</option>)}</select></label>
+            <label><span>Tenant policy scope</span><select value={tenantId} onChange={(event) => selectTenant(event.target.value)}><option value="">Platform only</option>{(tenants.data?.items ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.amo_code}</option>)}</select></label>
             <label><span>Model</span><select value={model} onChange={(event) => setModel(event.target.value)}>{models.map((item) => <option key={item.model} value={item.model}>{item.display_name} · {item.tier}</option>)}</select></label>
           </div>
           <label style={{ display: "grid", gap: 5, marginTop: 10 }}><span>Prompt</span><textarea rows={8} value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
