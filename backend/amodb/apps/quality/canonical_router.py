@@ -1,9 +1,9 @@
 """Canonical Quality API composition.
 
-The established QMS endpoints remain in ``canonical_router_legacy`` while the
-modern planning and provider-governance surfaces are isolated in dedicated
-routers. Keeping composition in this module preserves every existing import path
-used by the application.
+Operational Quality routes are composed here so exact governed APIs take
+precedence over broad compatibility handlers. Superseded audit-schedule routes
+are removed from every mounted router; the Quality Operations Planner is the
+single schedule authority.
 """
 
 from fastapi import APIRouter
@@ -17,9 +17,11 @@ from .canonical_router_legacy import (
     legacy_router,
     router,
 )
+from .router import router as primary_quality_router
 from .planner_calendar_enrichment_router import planner_calendar_enrichment_router
 from .planner_router import planner_router
 from .planner_schedule_router import planner_schedule_router
+from .planner_schedule_authority_router import router as planner_schedule_authority_router
 from .planner_strategic_router import router as planner_strategic_router
 from .provider_governance_router import provider_governance_router
 
@@ -39,13 +41,23 @@ def _is_generic_catchall(route_item) -> bool:
     return str(getattr(route_item, "path", "")).endswith("/{module_path:path}")
 
 
-def _capture_extension_routes(api_router: APIRouter, extension_router: APIRouter):
-    """Clone extension routes without copying router lifecycle handlers.
+def _is_superseded_audit_schedule_route(route_item) -> bool:
+    """Identify the removed pre-Planner audit schedule HTTP family."""
 
-    ``include_router`` also propagates startup and shutdown callbacks. The
-    planner worker is owned by the deployed ASGI application, so composition
-    restores the destination lifecycle lists immediately after route cloning.
-    """
+    path = str(getattr(route_item, "path", ""))
+    return "/audits/schedules" in path
+
+
+def _retire_superseded_audit_schedule_routes(api_router: APIRouter) -> None:
+    api_router.routes[:] = [
+        route_item
+        for route_item in api_router.routes
+        if not _is_superseded_audit_schedule_route(route_item)
+    ]
+
+
+def _capture_extension_routes(api_router: APIRouter, extension_router: APIRouter):
+    """Clone extension routes without copying router lifecycle handlers."""
 
     extension_endpoints = {
         _route_endpoint(route_item)
@@ -90,11 +102,12 @@ def _insert_before_catchalls(api_router: APIRouter, routes: list) -> None:
 
 
 def _install_specialist_routes(api_router: APIRouter) -> None:
-    """Register exact operational routes before generic QMS handlers."""
+    """Register exact operational routes before generic Quality handlers."""
 
     for extension_router in (
         planner_router,
         planner_schedule_router,
+        planner_schedule_authority_router,
         planner_strategic_router,
         provider_governance_router,
     ):
@@ -105,7 +118,7 @@ def _install_specialist_routes(api_router: APIRouter) -> None:
 
 
 def _install_calendar_override(api_router: APIRouter) -> None:
-    """Replace the legacy projection route with the timed planner projection."""
+    """Replace the older projection route with the timed planner projection."""
 
     calendar_routes = _capture_extension_routes(api_router, planner_calendar_enrichment_router)
     override_keys = {_route_key(route_item) for route_item in calendar_routes}
@@ -117,10 +130,15 @@ def _install_calendar_override(api_router: APIRouter) -> None:
     _insert_before_catchalls(api_router, calendar_routes)
 
 
-# Direct core-router consumers and both public URL families must receive the same
-# specialist contract, ahead of every generic module-path catch-all. The calendar
-# override removes the older exact projection route, avoiding duplicate OpenAPI
-# operations while retaining all non-planner legacy endpoints.
+# Remove the old schedule CRUD/run/restore/purge HTTP family from the primary
+# Quality router before FastAPI mounts it. The shared router module still owns
+# other active Quality endpoints, so only the superseded route objects are
+# retired here.
+_retire_superseded_audit_schedule_routes(primary_quality_router)
+
+# Direct core-router consumers and both tenant URL families receive the same
+# authoritative planner contract ahead of generic catch-all handling.
 for _api_router in (core_router, router, legacy_router):
+    _retire_superseded_audit_schedule_routes(_api_router)
     _install_calendar_override(_api_router)
     _install_specialist_routes(_api_router)
