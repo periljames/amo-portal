@@ -136,23 +136,12 @@ def test_uncertain_etims_outcome_uses_real_invoice_fields_and_requires_reconcili
     assert provider.call_count == 1
 
 
-
-@pytest.mark.parametrize(
-    ("processor", "job_type", "label"),
-    [
-        (saas_side_effects.process_etims_fiscalization, "ETIMS_FISCALIZE_INVOICE", "eTIMS"),
-        (saas_side_effects.process_ai_support_reply, "AI_SUPPORT_REPLY", "OpenAI"),
-    ],
-)
-def test_disabled_provider_is_rejected_again_when_worker_executes(
+def test_disabled_etims_provider_is_rejected_again_when_worker_executes(
     monkeypatch: pytest.MonkeyPatch,
-    processor,
-    job_type: str,
-    label: str,
 ):
     credential = SimpleNamespace(
         id="credential-disabled",
-        provider="etims_oscu" if job_type == "ETIMS_FISCALIZE_INVOICE" else "openai",
+        provider="etims_oscu",
         status="DISABLED",
         encrypted_secret="encrypted",
         config_json={"certified": True},
@@ -164,7 +153,6 @@ def test_disabled_provider_is_rejected_again_when_worker_executes(
         payload_json={
             "credential_id": credential.id,
             "fiscalization_id": "fiscal-disabled",
-            "ticket_id": "ticket-disabled",
         },
     )
     fiscalization = SimpleNamespace(
@@ -172,8 +160,6 @@ def test_disabled_provider_is_rejected_again_when_worker_executes(
         invoice_id="invoice-disabled",
         status="PENDING",
     )
-    ticket = SimpleNamespace(id="ticket-disabled")
-    detail = SimpleNamespace(description="Support request", category="GENERAL")
     db = MagicMock()
 
     def get(model, identifier):
@@ -181,40 +167,32 @@ def test_disabled_provider_is_rejected_again_when_worker_executes(
             return credential
         if model is saas_models.SaaSInvoiceFiscalization:
             return fiscalization
-        if model is platform_models.PlatformSupportTicket:
-            return ticket
-        if model is saas_models.SaaSSupportTicketDetail:
-            return detail
         if model is account_models.BillingInvoice:
             return SimpleNamespace(id="invoice-disabled")
         raise AssertionError((model, identifier))
 
     db.get.side_effect = get
-    db.query.return_value.filter.return_value.first.return_value = None
     decrypt = MagicMock()
     monkeypatch.setattr(saas_side_effects.saas_secrets, "decrypt_secret", decrypt)
 
-    with pytest.raises(ValueError, match=f"{label} provider is disabled"):
-        processor(db, job=job)
+    with pytest.raises(ValueError, match="eTIMS provider is disabled"):
+        saas_side_effects.process_etims_fiscalization(db, job=job)
 
     decrypt.assert_not_called()
 
-def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_job(
-    monkeypatch: pytest.MonkeyPatch,
-):
+
+def _support_fixture():
     job = SimpleNamespace(
         id="job-ai-1",
         created_by="support-user",
-        payload_json={"ticket_id": "ticket-1", "credential_id": "credential-1"},
-    )
-    credential = SimpleNamespace(
-        id="credential-1",
-        status="HEALTHY",
-        encrypted_secret="encrypted",
-        config_json={"model": "test-model"},
+        payload_json={
+            "ticket_id": "ticket-1",
+            "support_session_id": "support-1",
+        },
     )
     ticket = SimpleNamespace(
         id="ticket-1",
+        tenant_id="amo-1",
         title="Unable to upload",
         priority="NORMAL",
         updated_at=None,
@@ -234,8 +212,6 @@ def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_jo
     db.query.side_effect = query
 
     def get(model, identifier):
-        if model is saas_models.SaaSProviderCredential:
-            return credential
         if model is platform_models.PlatformSupportTicket:
             return ticket
         if model is saas_models.SaaSSupportTicketDetail:
@@ -249,34 +225,122 @@ def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_jo
         existing_holder["message"] = message
 
     db.add.side_effect = add
+    return db, job, ticket, existing_holder
+
+
+def _enable_tenant_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        saas_side_effects.saas_secrets,
-        "decrypt_secret",
-        lambda value: {"api_key": "secret"},
+        saas_side_effects.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": True}),
     )
-    provider = MagicMock(
+
+
+def test_ai_support_reply_uses_governed_platform_gateway_and_is_deduplicated(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db, job, ticket, existing_holder = _support_fixture()
+    _enable_tenant_ai(monkeypatch)
+    access = MagicMock(return_value="support-1")
+    monkeypatch.setattr(saas_side_effects.ai_access, "require_tenant_data_access", access)
+    gateway = MagicMock(
         return_value={
             "text": "Please retry the upload and share the correlation ID.",
             "provider": "openai",
-            "model": "test-model",
-            "usage": {},
+            "model": "gpt-5.6-luna",
+            "usage": {"input_tokens": 50, "output_tokens": 12},
+            "provider_cost_microusd": 99,
+            "billing_scope": "PLATFORM",
         }
     )
-    monkeypatch.setattr(
-        saas_side_effects.saas_providers,
-        "openai_support_response",
-        provider,
-    )
+    monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
 
     first = saas_side_effects.process_ai_support_reply(db, job=job)
     second = saas_side_effects.process_ai_support_reply(db, job=job)
 
     assert first["message_id"] == "message-ai-1"
+    assert first["billing_scope"] == "PLATFORM"
+    assert first["visibility"] == "INTERNAL"
     assert second == {
         "ticket_id": "ticket-1",
         "message_id": "message-ai-1",
         "replayed": False,
     }
     assert existing_holder["message"].source_job_id == job.id
+    assert existing_holder["message"].visibility == "INTERNAL"
     assert existing_holder["message"].body == "Please retry the upload and share the correlation ID."
-    assert provider.call_count == 1
+    assert access.call_count == 1
+    access.assert_called_with(
+        db,
+        tenant_id=ticket.tenant_id,
+        actor_user_id=job.created_by,
+        support_session_id="support-1",
+    )
+    assert gateway.call_count == 1
+    kwargs = gateway.call_args.kwargs
+    assert kwargs["actor_user_id"] == job.created_by
+    assert kwargs["tenant_id"] == ticket.tenant_id
+    assert kwargs["billing_scope"] == "PLATFORM"
+    assert kwargs["feature_code"] == "support.ai_reply"
+
+
+def test_tenant_disabling_ai_while_job_waits_prevents_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db, job, _ticket, existing_holder = _support_fixture()
+    monkeypatch.setattr(
+        saas_side_effects.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": False}),
+    )
+    access = MagicMock()
+    monkeypatch.setattr(saas_side_effects.ai_access, "require_tenant_data_access", access)
+    gateway = MagicMock()
+    monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
+
+    with pytest.raises(PermissionError, match="no longer enabled"):
+        saas_side_effects.process_ai_support_reply(db, job=job)
+
+    assert existing_holder["message"] is None
+    access.assert_not_called()
+    gateway.assert_not_called()
+
+
+def test_expired_support_session_prevents_tenant_ticket_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db, job, _ticket, existing_holder = _support_fixture()
+    _enable_tenant_ai(monkeypatch)
+    monkeypatch.setattr(
+        saas_side_effects.ai_access,
+        "require_tenant_data_access",
+        MagicMock(side_effect=PermissionError("support session expired")),
+    )
+    gateway = MagicMock()
+    monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
+
+    with pytest.raises(PermissionError, match="support session expired"):
+        saas_side_effects.process_ai_support_reply(db, job=job)
+
+    assert existing_holder["message"] is None
+    gateway.assert_not_called()
+
+
+def test_ai_support_gateway_policy_failure_creates_no_message(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db, job, _ticket, existing_holder = _support_fixture()
+    _enable_tenant_ai(monkeypatch)
+    monkeypatch.setattr(
+        saas_side_effects.ai_access,
+        "require_tenant_data_access",
+        MagicMock(return_value="support-1"),
+    )
+    gateway = MagicMock(side_effect=ValueError("OpenAI provider is disabled or not operational"))
+    monkeypatch.setattr(saas_side_effects.ai_gateway, "run_ai", gateway)
+
+    with pytest.raises(ValueError, match="OpenAI provider is disabled"):
+        saas_side_effects.process_ai_support_reply(db, job=job)
+
+    assert existing_holder["message"] is None
+    gateway.assert_called_once()
