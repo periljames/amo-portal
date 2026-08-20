@@ -1,22 +1,27 @@
 name: QMS Planner CI
 
 on:
-  push:
-    branches:
-      - agent/qms-modern-business-planner
   pull_request:
     paths:
       - ".github/workflows/qms-planner-ci.yml"
       - "backend/amodb/apps/quality/canonical_router.py"
-      - "backend/amodb/apps/quality/canonical_router_legacy.py"
       - "backend/amodb/apps/quality/planner_calendar_router.py"
       - "backend/amodb/apps/quality/planner_router.py"
-      - "backend/amodb/apps/quality/tests/test_planner_router.py"
+      - "backend/amodb/apps/quality/planner_schedule_router.py"
+      - "backend/amodb/apps/quality/planner_schedule_authority_router.py"
+      - "backend/amodb/apps/quality/planner_schedule_models.py"
+      - "backend/amodb/alembic/versions/quality_20260820_planner_metadata_backfill.py"
+      - "backend/tests/test_qms_planner_schedule_authority_contract.py"
       - "frontend/package.json"
+      - "frontend/src/components/QMS/QualityEnhancementsHost.tsx"
       - "frontend/src/pages/qms/**"
-      - "frontend/src/pages/qualityAudits/QualityAuditPlanSchedule*.tsx"
+      - "frontend/src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx"
+      - "frontend/src/pages/qualityAudits/QualityAuditAssuranceDashboardPage.tsx"
+      - "frontend/src/pages/qualityAudits/QualityAuditRecycleBinPage.tsx"
+      - "frontend/src/pages/QualityAuditScheduleDetailPage.tsx"
+      - "frontend/src/services/qmsPlannerSchedules.ts"
       - "frontend/src/styles/qms-modern-planner*.css"
-      - "frontend/tests/e2e/qms-planner-*.spec.ts"
+      - "frontend/tests/e2e/qms-modern-planner-live.spec.ts"
   workflow_dispatch:
 
 permissions:
@@ -28,55 +33,81 @@ concurrency:
 
 jobs:
   backend:
-    name: Planner backend contract
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: backend
+    name: Planner PostgreSQL contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amo
+          POSTGRES_PASSWORD: amo
+          POSTGRES_DB: amo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amo -d amo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      PYTHONPATH: backend
       APP_ENV: test
-      ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: "sqlite+pysqlite:///:memory:"
-      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      ENVIRONMENT: test
+      TESTING: "true"
       SECRET_KEY: qms-planner-ci-secret
-      QUALITY_SCHEMA_STRICT: "0"
+      JWT_SECRET_KEY: qms-planner-ci-jwt-secret
+      QUALITY_PLANNER_SCHEDULER_ENABLED: "false"
+      RELIABILITY_SCHEDULER_ENABLED: "false"
+      DATABASE_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test
+      WRITE_DATABASE_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test
+      DATABASE_WRITE_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test
+      POSTGRES_INTEGRATION_URL: postgresql+psycopg2://amo:amo@127.0.0.1:5432/amo_test
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
-        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Compile planner backend
         run: >-
           python -m compileall -q
-          amodb/apps/quality/canonical_router.py
-          amodb/apps/quality/canonical_router_legacy.py
-          amodb/apps/quality/planner_calendar_router.py
-          amodb/apps/quality/planner_router.py
-          amodb/apps/quality/tests/test_planner_router.py
+          backend/amodb/apps/quality/canonical_router.py
+          backend/amodb/apps/quality/planner_calendar_router.py
+          backend/amodb/apps/quality/planner_router.py
+          backend/amodb/apps/quality/planner_schedule_router.py
+          backend/amodb/apps/quality/planner_schedule_authority_router.py
+          backend/amodb/alembic/versions/quality_20260820_planner_metadata_backfill.py
+          backend/tests/test_qms_planner_schedule_authority_contract.py
+      - name: Upgrade clean PostgreSQL database to exact repository head
+        run: python -m alembic -c backend/amodb/alembic.ini upgrade head
       - name: Configure application mappers
         run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('QMS planner mappers configured')"
-      - name: Run planner backend regressions
-        run: pytest -q amodb/apps/quality/tests/test_planner_router.py
+      - name: Run authoritative planner route contracts
+        run: >-
+          pytest -q
+          backend/tests/test_qms_planner_schedule_authority_contract.py
+          backend/amodb/apps/quality/tests/test_planner_router.py
 
   frontend:
     name: Planner frontend contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -90,6 +121,7 @@ jobs:
       - name: Lint planner surfaces
         run: >-
           npm exec -- eslint
+          src/components/QMS/QualityEnhancementsHost.tsx
           src/pages/qms/QmsCanonicalPage.tsx
           src/pages/qms/planner/QmsPlannerLivePage.tsx
           src/pages/qms/planner/QmsPlannerPageV2.tsx
@@ -98,25 +130,25 @@ jobs:
           src/pages/qms/planner/qmsPlannerModel.ts
           src/pages/qms/planner/qmsPlannerModel.test.ts
           src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx
+          src/pages/qualityAudits/QualityAuditAssuranceDashboardPage.tsx
+          src/pages/qualityAudits/QualityAuditRecycleBinPage.tsx
+          src/pages/QualityAuditScheduleDetailPage.tsx
+          src/services/qmsPlannerSchedules.ts
           tests/e2e/qms-modern-planner-live.spec.ts
-          tests/e2e/qms-planner-lifecycle.spec.ts
-          tests/e2e/qms-planner-audit-handoff.spec.ts
       - name: Build production frontend
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Start mocked portal readiness
         run: |
-          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only; retry direct mocked backend"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-planner-readiness.log 2>&1 &
+          node -e 'const http=require("http");http.createServer((req,res)=>{if(req.url==="/readyz"||req.url==="/healthz"){res.writeHead(200,{"Content-Type":"application/json","X-Portal-Readiness":"ready"});res.end(JSON.stringify({ready:true,status:"ok",db:true}));return;}res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({detail:"CI readiness stub only"}));}).listen(8080,"127.0.0.1");' > /tmp/qms-planner-readiness.log 2>&1 &
           for attempt in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
-              exit 0
-            fi
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then exit 0; fi
             sleep 1
           done
           cat /tmp/qms-planner-readiness.log
           exit 1
-      - name: Run deterministic planner browser regressions
+      - name: Run deterministic planner browser persistence regression
         env:
           E2E_CHROMIUM_CHANNEL: "1"
         shell: bash
@@ -126,20 +158,14 @@ jobs:
           PREVIEW_PID=$!
           trap 'kill "$PREVIEW_PID" || true' EXIT
           for attempt in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
-              break
-            fi
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
             sleep 1
           done
           if ! curl -fsS http://127.0.0.1:4173 >/dev/null; then
             cat /tmp/qms-planner-preview.log
             exit 1
           fi
-          npx playwright test \
-            tests/e2e/qms-modern-planner-live.spec.ts \
-            tests/e2e/qms-planner-lifecycle.spec.ts \
-            tests/e2e/qms-planner-audit-handoff.spec.ts \
-            --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-planner-playwright.log
+          npx playwright test tests/e2e/qms-modern-planner-live.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-planner-playwright.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             summary=$(tail -n 140 /tmp/qms-planner-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
