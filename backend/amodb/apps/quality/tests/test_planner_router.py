@@ -58,19 +58,17 @@ def test_reschedule_requires_reason_and_expected_date_is_optional() -> None:
         )
 
 
-def test_only_authoritative_active_schedule_sources_are_mutable() -> None:
+def test_generic_rescheduler_only_owns_non_template_source_records() -> None:
     assert set(_MUTABLE_CALENDAR_SOURCES) == {
-        "audit_schedule",
         "audit",
         "car",
         "training_event",
     }
+    assert "audit_schedule" not in _MUTABLE_CALENDAR_SOURCES
     assert "training_record" not in _MUTABLE_CALENDAR_SOURCES
     assert all(source["permission"] == "qms.calendar.manage" for source in _MUTABLE_CALENDAR_SOURCES.values())
 
     predicates = {key: str(value["active_predicate"]) for key, value in _MUTABLE_CALENDAR_SOURCES.items()}
-    assert "is_active IS TRUE" in predicates["audit_schedule"]
-    assert "deleted_at IS NULL" in predicates["audit_schedule"]
     assert "deleted_at IS NULL" in predicates["audit"]
     assert "CLOSED" in predicates["audit"] and "CANCELLED" in predicates["audit"]
     assert "closed_at IS NULL" in predicates["car"]
