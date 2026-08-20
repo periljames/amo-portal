@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from . import saas_services
+from . import saas_providers, saas_services
 
 
 MANAGED_AI_PROVIDERS = frozenset({"openai", "azure_openai"})
@@ -20,6 +20,40 @@ def is_managed_ai_provider(provider: str) -> bool:
     return str(provider or "").strip().lower() in MANAGED_AI_PROVIDERS
 
 
+def _install_provider_catalog_boundary() -> None:
+    """Remove model selection from generic provider configuration.
+
+    Provider credentials describe how the portal authenticates to OpenAI. Model
+    selection belongs exclusively to the governed AI catalogue and tenant policy,
+    so the legacy generic ``model`` field must not appear as a second source of
+    truth in the superadmin provider form.
+    """
+    definitions = []
+    for definition in saas_providers._PROVIDER_DEFINITIONS:
+        if definition.code != "openai":
+            definitions.append(definition)
+            continue
+        definitions.append(
+            saas_providers.ProviderDefinition(
+                code=definition.code,
+                display_name=definition.display_name,
+                category=definition.category,
+                secret_fields=definition.secret_fields,
+                config_fields=tuple(
+                    field for field in definition.config_fields if field != "model"
+                ),
+                description=(
+                    "Platform-managed OpenAI credential for governed AI workflows. "
+                    "Models are selected by the AI catalogue and tenant entitlement."
+                ),
+            )
+        )
+    saas_providers._PROVIDER_DEFINITIONS = tuple(definitions)
+    saas_providers.PROVIDERS = {
+        definition.code: definition for definition in saas_providers._PROVIDER_DEFINITIONS
+    }
+
+
 def install_managed_ai_provider_policy() -> None:
     """Keep portal-billed AI credentials platform-owned and tenant-safe.
 
@@ -33,6 +67,7 @@ def install_managed_ai_provider_policy() -> None:
     if _INSTALLED:
         return
 
+    _install_provider_catalog_boundary()
     _ORIGINAL_GET = saas_services.get_provider_credential
     _ORIGINAL_LIST = saas_services.list_provider_credentials
     _ORIGINAL_UPSERT = saas_services.upsert_provider_credential
