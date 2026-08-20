@@ -66,6 +66,16 @@ def qms_planner_calendar(
 ) -> dict[str, Any]:
     trace_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
+
+    # Reject a fully specified invalid range before touching tenant/database
+    # state. Apart from preserving the public validation contract, this avoids
+    # a needless timezone query for a request that cannot be executed.
+    if start is not None and end is not None and start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Calendar start date cannot be after the end date.",
+        )
+
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _pg_set_read_timeout(db, 1800)
 
