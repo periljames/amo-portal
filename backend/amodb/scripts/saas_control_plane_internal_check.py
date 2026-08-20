@@ -67,12 +67,35 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "def encrypt_secret",
         "def decrypt_secret",
     ),
+    BACKEND_ROOT / "amodb/apps/platform/ai_gateway.py": (
+        "def run_ai(",
+        "def calculate_provider_cost(",
+        "account_services.record_usage(",
+        "platform_models.PlatformAuditLog(",
+        "requires_external_documents",
+        "saas_services.require_operational_provider",
+        'billing_scope == "TENANT"',
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/ai_openai.py": (
+        "def responses_request(",
+        '"store": False',
+        'f"{api_base}/v1/responses"',
+        "usage accounting",
+        "Paid tools are intentionally not enabled",
+    ),
     BACKEND_ROOT / "amodb/apps/platform/saas_side_effects.py": (
         "account_services.format_invoice_number(invoice)",
         '"total_amount_cents": int(invoice.amount_cents)',
-        "saas_providers.openai_support_response",
+        "ai_gateway.run_ai(",
+        'billing_scope="PLATFORM"',
         'fiscalization.status = "RECONCILIATION_REQUIRED"',
         "source_job_id=job.id",
+    ),
+    BACKEND_ROOT / "amodb/apps/doc_control/knowledge_assistant_runtime_guard.py": (
+        "ai_gateway.run_ai(",
+        'billing_scope="TENANT"',
+        "requires_external_documents=True",
+        "audit_assist_safely",
     ),
     BACKEND_ROOT / "amodb/apps/platform/saas_admin_policy.py": (
         "def prepare_provider_payload",
@@ -115,6 +138,7 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
     BACKEND_ROOT / "amodb/apps/platform/__init__.py": (
         "_saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook",
         "install_tenant_provider_override_policy()",
+        "router.include_router(ai_router)",
         "router.include_router(tenant_saas_router)",
     ),
     BACKEND_ROOT / "amodb/apps/platform/saas_usage.py": (
@@ -238,6 +262,12 @@ FORBIDDEN: dict[Path, tuple[str, ...]] = {
         "invoice.tax_cents",
         "invoice.total_cents",
         "generate_openai_support_response",
+        "saas_providers.openai_support_response",
+    ),
+    BACKEND_ROOT / "amodb/apps/doc_control/knowledge_assistant_router.py": (
+        "OPENAI_API_KEY",
+        "DOCUMENT_AI_MODEL",
+        "https://api.openai.com/v1/responses",
     ),
     BACKEND_ROOT / "amodb/apps/platform/tenant_saas_router.py": (
         '"value": os.getenv',
@@ -248,11 +278,14 @@ FORBIDDEN: dict[Path, tuple[str, ...]] = {
 
 
 EXTRA_COMPILE = (
+    BACKEND_ROOT / "amodb/apps/platform/tests/test_ai_gateway.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_control_plane.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_queue_fencing.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_side_effect_safety.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_admin_and_webhooks.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_verified_tenant_pipeline.py",
+    BACKEND_ROOT / "amodb/apps/doc_control/tests/test_documentation_assistant_contract.py",
+    BACKEND_ROOT / "amodb/apps/doc_control/tests/test_knowledge_assistant_runtime_guard.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_broker_auth.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_messaging_hardening.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_security_hardening.py",
