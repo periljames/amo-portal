@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import inspect
@@ -13,16 +12,16 @@ from amodb.database import get_read_db
 from .planner_calendar_router import qms_planner_calendar
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 from .tenant_security import TenantContext, require_quality_permission
+from .tenant_timezone import resolve_tenant_timezone
 
 
 planner_calendar_enrichment_router = APIRouter()
-_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 
-def _event_timestamp(event_date: str, value) -> str | None:
+def _event_timestamp(event_date: str, value, *, timezone_info) -> str | None:
     if not event_date or value is None:
         return None
-    combined = datetime.combine(date.fromisoformat(event_date), value, tzinfo=_TIMEZONE)
+    combined = datetime.combine(date.fromisoformat(event_date), value, tzinfo=timezone_info)
     return combined.isoformat(timespec="minutes")
 
 
@@ -51,6 +50,7 @@ def qms_planner_calendar_enriched(
     if not items or not inspect(db.get_bind()).has_table("qms_planner_schedule_metadata"):
         return payload
 
+    tenant_timezone = resolve_tenant_timezone(db, amo_id=ctx.amo_id)
     schedule_ids = {
         str(item.get("entity_id"))
         for item in items
@@ -95,9 +95,19 @@ def qms_planner_calendar_enriched(
         if metadata is None:
             continue
         event_date = str(item.get("date") or "")
-        item["starts_at"] = _event_timestamp(event_date, metadata.start_time)
-        item["ends_at"] = _event_timestamp(event_date, metadata.end_time)
-        item["timezone_name"] = metadata.timezone_name
+        item["starts_at"] = _event_timestamp(
+            event_date,
+            metadata.start_time,
+            timezone_info=tenant_timezone.tzinfo,
+        )
+        item["ends_at"] = _event_timestamp(
+            event_date,
+            metadata.end_time,
+            timezone_info=tenant_timezone.tzinfo,
+        )
+        item["timezone_name"] = tenant_timezone.name
+        item["stored_timezone_name"] = metadata.timezone_name
+        item["timezone_reconciled"] = metadata.timezone_name == tenant_timezone.name
         item["location"] = metadata.location
         item["planner_notes"] = metadata.notes
         item["attendee_count"] = len(metadata.attendee_user_ids) + len(metadata.external_attendees)
