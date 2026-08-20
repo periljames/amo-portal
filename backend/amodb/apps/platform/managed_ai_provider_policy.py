@@ -14,6 +14,7 @@ _ORIGINAL_GET: Callable[..., Any] | None = None
 _ORIGINAL_LIST: Callable[..., list[dict[str, Any]]] | None = None
 _ORIGINAL_UPSERT: Callable[..., dict[str, Any]] | None = None
 _ORIGINAL_HEALTH: Callable[..., Any] | None = None
+_ORIGINAL_CHECK: Callable[..., dict[str, Any]] | None = None
 
 
 def is_managed_ai_provider(provider: str) -> bool:
@@ -65,7 +66,7 @@ def install_managed_ai_provider_policy() -> None:
     therefore platform scoped, hidden from tenant provider lists, and unavailable
     through tenant-scoped health/update operations.
     """
-    global _INSTALLED, _ORIGINAL_GET, _ORIGINAL_LIST, _ORIGINAL_UPSERT, _ORIGINAL_HEALTH
+    global _INSTALLED, _ORIGINAL_GET, _ORIGINAL_LIST, _ORIGINAL_UPSERT, _ORIGINAL_HEALTH, _ORIGINAL_CHECK
     if _INSTALLED:
         return
 
@@ -74,6 +75,7 @@ def install_managed_ai_provider_policy() -> None:
     _ORIGINAL_LIST = saas_services.list_provider_credentials
     _ORIGINAL_UPSERT = saas_services.upsert_provider_credential
     _ORIGINAL_HEALTH = saas_services.enqueue_provider_health
+    _ORIGINAL_CHECK = saas_providers.check_provider
 
     def managed_get_provider_credential(
         db: Session,
@@ -152,8 +154,27 @@ def install_managed_ai_provider_policy() -> None:
             actor_user_id=actor_user_id,
         )
 
+    def managed_check_provider(
+        provider: str,
+        *,
+        secret: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        assert _ORIGINAL_CHECK is not None
+        if str(provider or "").strip().lower() == "openai":
+            # Historical rows may still contain api_base_url/model from the old
+            # provider contract. Strip them before the health probe so the API
+            # key can only be sent to the original checker's official default.
+            config = {
+                key: value
+                for key, value in dict(config or {}).items()
+                if key in {"project", "organization"}
+            }
+        return _ORIGINAL_CHECK(provider, secret=secret, config=config)
+
     saas_services.get_provider_credential = managed_get_provider_credential
     saas_services.list_provider_credentials = managed_list_provider_credentials
     saas_services.upsert_provider_credential = managed_upsert_provider_credential
     saas_services.enqueue_provider_health = managed_enqueue_provider_health
+    saas_providers.check_provider = managed_check_provider
     _INSTALLED = True
