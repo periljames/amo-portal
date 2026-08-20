@@ -1,7 +1,7 @@
 """Add governed supplier evaluation, approval and re-evaluation controls.
 
 Revision ID: procurement_260820_supplier_gov
-Revises: training_260818_policy_merge, quality_260817_canonical_document_bridge
+Revises: quality_260820_wf_schema, quality_260817_canonical_document_bridge
 Create Date: 2026-08-20
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from amodb.apps.procurement import supplier_governance_models as governance
 
 revision = "procurement_260820_supplier_gov"
 down_revision = (
-    "training_260818_policy_merge",
+    "quality_260820_wf_schema",
     "quality_260817_canonical_document_bridge",
 )
 branch_labels = None
