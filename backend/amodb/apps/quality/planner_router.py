@@ -48,18 +48,11 @@ class PlannerCapabilitiesResponse(BaseModel):
     user_id: str
 
 
-# Each mutable source carries the same lifecycle predicate used to decide whether
-# the record belongs on the operational calendar. The predicate is applied to the
-# row lock and to the update so a stale browser tab cannot move a record that was
-# closed, cancelled, deactivated, or soft-deleted after the planner loaded.
+# Audit schedule templates deliberately do not appear here. They are governed by
+# /integrations/calendar/audit-schedules/*, which carries metadata versioning,
+# conflict checks and schedule-specific audit evidence. This generic adapter is
+# only for authoritative non-template source records already owned elsewhere.
 _MUTABLE_CALENDAR_SOURCES: dict[str, dict[str, Any]] = {
-    "audit_schedule": {
-        "table": "qms_audit_schedules",
-        "start_column": "next_due_date",
-        "end_column": None,
-        "permission": "qms.calendar.manage",
-        "active_predicate": "is_active IS TRUE AND deleted_at IS NULL",
-    },
     "audit": {
         "table": "qms_audits",
         "start_column": "planned_start",
@@ -157,7 +150,7 @@ def qms_planner_reschedule(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": "This calendar source is read-only and cannot be rescheduled from the planner.",
+                "message": "This calendar source is read-only here. Audit schedules must be changed through the authoritative schedule API.",
                 "event_id": payload.event_id,
                 "trace_id": trace_id,
             },
@@ -280,9 +273,6 @@ def qms_planner_reschedule(
             },
         )
 
-    # Append the schedule mutation to the tenant-scoped QMS activity ledger before
-    # committing. The source update and immutable audit record therefore succeed
-    # or roll back together.
     _log_qms_activity(
         db,
         amo_id=ctx.amo_id,
