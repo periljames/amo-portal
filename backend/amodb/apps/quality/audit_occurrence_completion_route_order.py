@@ -4,6 +4,7 @@ from . import audit_occurrence_completion_models as _audit_occurrence_completion
 from . import audit_occurrence_assignment_router
 from . import audit_occurrence_completion_router
 from . import audit_controlled_document_collaboration_router
+from . import audit_public_collaboration_scope_router
 from .canonical_router import legacy_router, router
 from .router import public_router as quality_public_router
 
@@ -16,7 +17,10 @@ for api_router in (router, legacy_router):
     if not any("/controlled-document-submissions" in str(getattr(item, "path", "")) for item in api_router.routes):
         api_router.include_router(audit_controlled_document_collaboration_router.router)
 
+# Use the scope-aware collaboration projection rather than mounting the legacy
+# public occurrence router. The hardened endpoint performs scope checks before
+# querying meetings, closing narrative, or released-finding CAR data.
 if not any("/quality/audit-access/collaboration" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
-    quality_public_router.include_router(audit_occurrence_completion_router.public_router)
+    quality_public_router.include_router(audit_public_collaboration_scope_router.router)
 if not any("/quality/audit-access/governed-document-requests" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
     quality_public_router.include_router(audit_controlled_document_collaboration_router.public_router)

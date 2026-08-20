@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException, Response
 
 import amodb.apps.quality.audit_external_access_router as access_router
+import amodb.apps.quality.audit_public_collaboration_scope_router as collaboration_router
 from amodb.apps.quality.audit_external_access_router import (
     AUDITEE_ALLOWED,
     EXTERNAL_AUDITOR_ALLOWED,
@@ -19,6 +20,8 @@ from amodb.apps.quality.audit_external_participant_guard_router import (
     _assert_identity_assurance_stable,
     create_external_participant_guarded,
 )
+from amodb.apps.quality.audit_external_passkey_router import _set_guest_cookie
+from amodb.apps.quality.canonical_router import router as canonical_quality_router
 
 
 def _future() -> datetime:
@@ -129,7 +132,7 @@ def test_unimplemented_mfa_and_auditee_passkey_fail_closed_before_db_write():
             create_external_participant_guarded(
                 audit_id=__import__("uuid").uuid4(),
                 payload=payload,
-                ctx=None,  # rejected before tenant/database access
+                ctx=None,
                 db=None,
             )
         assert exc.value.status_code == 422
@@ -143,6 +146,19 @@ def test_existing_external_identity_assurance_cannot_be_silently_changed():
         with pytest.raises(HTTPException) as exc:
             _assert_identity_assurance_stable(existing, requested)
         assert exc.value.status_code == 409
+
+
+def test_guarded_external_participant_creation_precedes_legacy_handler():
+    routes = [
+        route
+        for route in canonical_quality_router.routes
+        if str(getattr(route, "path", "")).endswith("/external-participants")
+        and "POST" in set(getattr(route, "methods", None) or ())
+    ]
+    names = [str(getattr(route, "name", "")) for route in routes]
+    assert "create_external_participant_guarded" in names
+    if "create_external_participant" in names:
+        assert names.index("create_external_participant_guarded") < names.index("create_external_participant")
 
 
 def test_regular_exchange_rejects_passkey_external_auditor_before_session_mutation(monkeypatch):
@@ -172,3 +188,35 @@ def test_regular_exchange_rejects_passkey_external_auditor_before_session_mutati
     assert participant.status == "INVITED"
     assert commits == []
     assert response.headers.get("set-cookie") is None
+
+
+def test_passkey_session_cookie_uses_same_path_as_logout():
+    response = Response()
+    request = SimpleNamespace(url=SimpleNamespace(scheme="https"))
+    _set_guest_cookie(response, request, "x" * 64, _future())
+    cookie = response.headers.get("set-cookie") or ""
+    assert "Path=/quality/audit-access" in cookie
+    assert "Path=/;" not in cookie
+
+
+def test_document_only_grant_cannot_query_collaboration_summary(monkeypatch):
+    participant = SimpleNamespace(participant_type="AUDITEE_GUEST")
+    grant = SimpleNamespace(
+        participant=participant,
+        scope_json=["audit:document_submit"],
+        amo_id="tenant-a",
+        audit_id=__import__("uuid").uuid4(),
+    )
+
+    monkeypatch.setattr(collaboration_router, "_active_grant", lambda _db, _token: grant)
+
+    def unexpected_query(*_args, **_kwargs):
+        pytest.fail("A document-only grant must not query meetings, closing narrative, or CAR data.")
+
+    db = SimpleNamespace(query=unexpected_query)
+    result = collaboration_router.get_public_occurrence_collaboration_scoped(
+        db=db,
+        amo_qms_audit_guest="x" * 64,
+    )
+
+    assert result == {"meetings": [], "cars": [], "closing_narrative": {}}

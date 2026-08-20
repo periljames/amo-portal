@@ -4,7 +4,7 @@ import { AlertTriangle, BellRing, CalendarClock, CheckCircle2, ClipboardList, Re
 import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import { qmsUpdateAudit, type QMSAuditOut } from "../../../services/qms";
+import { type QMSAuditOut } from "../../../services/qms";
 import {
   createAuditNotice,
   listAuditNotices,
@@ -18,7 +18,7 @@ import {
   updateAuditMeeting,
   type AuditMeeting,
 } from "../../../services/qmsAuditOccurrenceCompletion";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { resolveAuditOccurrence, updateAuditOccurrenceSetup } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession } from "../../../services/qmsAuditSession";
 import AuditAssignmentGovernancePanel from "./AuditAssignmentGovernancePanel";
 import { auditSessionPath } from "./auditSessionRoutes";
@@ -132,7 +132,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!draft || !auditId) throw new Error("Audit occurrence is not ready for setup changes.");
-      return qmsUpdateAudit(auditId, {
+      return updateAuditOccurrenceSetup(amoCode, auditId, {
         title: draft.title.trim(),
         scope: draft.scope.trim() || null,
         criteria: draft.criteria.trim() || null,
@@ -246,7 +246,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label><span>Planned end</span><input type="date" disabled={!canManage} value={draft.plannedEnd} onChange={(event) => setDraft({ ...draft, plannedEnd: event.target.value })} /></label>
             </div>
             <div className="qms-occurrence-stage__fields">
-              <label><span>Reminder interval (days)</span><input type="number" min={1} max={90} disabled={!canManage} value={draft.reminderIntervalDays} onChange={(event) => setDraft({ ...draft, reminderIntervalDays: event.target.value })} /></label>
+              <label><span>Reminder interval (days)</span><input type="number" min={1} max={60} disabled={!canManage} value={draft.reminderIntervalDays} onChange={(event) => setDraft({ ...draft, reminderIntervalDays: event.target.value })} /></label>
             </div>
             <div className="qms-occurrence-stage__checks"><label><input type="checkbox" disabled={!canManage} checked={draft.notifyAuditors} onChange={(event) => setDraft({ ...draft, notifyAuditors: event.target.checked })} /> Notify auditors</label><label><input type="checkbox" disabled={!canManage} checked={draft.notifyAuditees} onChange={(event) => setDraft({ ...draft, notifyAuditees: event.target.checked })} /> Notify auditee</label></div>
             {canManage ? <button type="button" className="is-primary" disabled={saveMutation.isPending || draft.title.trim().length < 3 || !draft.plannedStart || !draft.plannedEnd} onClick={() => saveMutation.mutate()}><Save size={15} /> {saveMutation.isPending ? "Saving…" : "Save audit definition"}</button> : null}

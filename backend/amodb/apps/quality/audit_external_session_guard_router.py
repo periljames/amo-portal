@@ -19,6 +19,8 @@ from .router import public_router
 
 
 router = APIRouter(prefix="/quality", tags=["Quality / External Audit Session Guard"])
+_CANONICAL_GUEST_COOKIE_PATH = "/quality/audit-access"
+_LEGACY_GUEST_COOKIE_PATH = "/"
 
 
 @router.post("/audit-access/exchange")
@@ -59,14 +61,28 @@ def exchange_audit_access_guarded(
         httponly=True,
         secure=request.url.scheme == "https" or app_env in {"prod", "production"},
         samesite="strict",
-        path="/",
+        path=_CANONICAL_GUEST_COOKIE_PATH,
     )
     return _public_read_model(db, grant)
 
 
 @router.delete("/audit-access/session", status_code=status.HTTP_204_NO_CONTENT)
 def end_audit_access_session_guarded(response: Response) -> Response:
-    response.delete_cookie(_GUEST_COOKIE, path="/", httponly=True, samesite="strict")
+    # Clear the canonical cookie written by current EMAIL_LINK and PASSKEY flows.
+    response.delete_cookie(
+        _GUEST_COOKIE,
+        path=_CANONICAL_GUEST_COOKIE_PATH,
+        httponly=True,
+        samesite="strict",
+    )
+    # Also expire the historical root-scoped cookie so browsers that authenticated
+    # before the path hardening cannot retain a parallel active session.
+    response.delete_cookie(
+        _GUEST_COOKIE,
+        path=_LEGACY_GUEST_COOKIE_PATH,
+        httponly=True,
+        samesite="strict",
+    )
     return response
 
 
