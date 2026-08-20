@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,6 +20,21 @@ from amodb.apps.accounts import services as account_services
 
 from .database import get_read_db
 from .security import get_current_active_user
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Return a comparable UTC-aware datetime for DB/runtime values.
+
+    PostgreSQL TIMESTAMP WITH TIME ZONE values are offset-aware while SQLite and
+    some legacy fixtures may still return naive values.  Treat legacy naive
+    values as UTC so entitlement-window decisions remain deterministic without
+    weakening any effective-from/effective-to boundary.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optional[bool]:
@@ -35,10 +50,12 @@ def _has_module_subscription(db: Session, amo_id: str, module_key: str) -> Optio
     if not subscription:
         return None
 
-    now = datetime.utcnow()
-    if subscription.effective_from and now < subscription.effective_from:
+    now = datetime.now(timezone.utc)
+    effective_from = _as_utc(subscription.effective_from)
+    effective_to = _as_utc(subscription.effective_to)
+    if effective_from and now < effective_from:
         return False
-    if subscription.effective_to and now > subscription.effective_to:
+    if effective_to and now > effective_to:
         return False
     return subscription.status in {
         account_models.ModuleSubscriptionStatus.ENABLED,

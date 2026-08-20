@@ -7,9 +7,10 @@ prove browser -> FastAPI -> PostgreSQL behavior without production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+import json
 import sys
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,9 @@ MATERIAL_ID = "00000000-0000-4000-8100-000000000017"
 QUESTION_ID = "00000000-0000-4000-8100-000000000018"
 QUESTION_REVISION_ID = "00000000-0000-4000-8100-000000000019"
 BLUEPRINT_ID = "00000000-0000-4000-8100-000000000020"
+TRAINING_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8100-000000000021"
+CATALOG_SKU_ID = "00000000-0000-4000-8100-000000000022"
+TENANT_LICENSE_ID = "00000000-0000-4000-8100-000000000023"
 
 AMO_CODE = "TRNGATE"
 AMO_SLUG = "trngate"
@@ -54,6 +58,7 @@ TODAY = date.today()
 def seed() -> None:
     db = WriteSessionLocal()
     try:
+        now = datetime.now(timezone.utc)
         amo = account_models.AMO(
             id=AMO_ID,
             amo_code=AMO_CODE,
@@ -65,6 +70,35 @@ def seed() -> None:
             is_demo=False,
         )
         db.add(amo)
+        db.flush()
+
+        # require_module("training") first enforces the tenant billing licence,
+        # then its module-level entitlement. Keep this disposable tenant on the
+        # production path rather than bypassing either control in browser CI.
+        sku = account_models.CatalogSKU(
+            id=CATALOG_SKU_ID,
+            code="CI-TRAINING-GOVERNANCE",
+            name="Training Governance Browser CI",
+            description="Disposable zero-cost licence for governed Training browser acceptance.",
+            term=account_models.BillingTerm.MONTHLY,
+            trial_days=0,
+            amount_cents=0,
+            currency="USD",
+            is_active=True,
+        )
+        db.add(sku)
+        db.flush()
+        db.add(account_models.TenantLicense(
+            id=TENANT_LICENSE_ID,
+            amo_id=AMO_ID,
+            sku_id=CATALOG_SKU_ID,
+            term=account_models.BillingTerm.MONTHLY,
+            status=account_models.LicenseStatus.ACTIVE,
+            is_read_only=False,
+            current_period_start=now - timedelta(minutes=5),
+            current_period_end=now + timedelta(days=1),
+            notes="Disposable governed Training browser CI licence.",
+        ))
         db.flush()
 
         department = account_models.Department(
@@ -97,9 +131,21 @@ def seed() -> None:
             is_auditor=False,
             is_system_account=False,
             must_change_password=False,
-            password_changed_at=datetime.now(timezone.utc),
+            password_changed_at=now,
         )
         db.add(admin)
+        db.flush()
+
+        db.add(account_models.ModuleSubscription(
+            id=TRAINING_MODULE_SUBSCRIPTION_ID,
+            amo_id=AMO_ID,
+            module_code="training",
+            status=account_models.ModuleSubscriptionStatus.ENABLED,
+            effective_from=now - timedelta(minutes=5),
+            effective_to=now + timedelta(days=1),
+            plan_code="CI-TRAINING-GOVERNANCE",
+            metadata_json=json.dumps({"source": "training_governance_live_browser_ci"}),
+        ))
         db.flush()
 
         course = training.TrainingCourse(
@@ -160,7 +206,7 @@ def seed() -> None:
             supporting_dms_document_id="ci-controlled-approval",
             supporting_dms_revision_id="ci-controlled-approval-rev-1",
             verified_by_user_id=ADMIN_ID,
-            verified_at=datetime.now(timezone.utc),
+            verified_at=now,
             created_by_user_id=ADMIN_ID,
         ))
         db.flush()
@@ -347,7 +393,7 @@ def seed() -> None:
             revision_no=1,
             title="Training Governance CI Exam",
             selection_rules={"question_count": 1},
-            result_rules={"pass_mark": 75, "max_attempts": 2, "cooldown_hours": 0},
+            result_rules={"pass_threshold": 75, "max_attempts": 2, "cooldown_hours": 0},
             security_rules={"proctor_required": False},
             status="ACTIVE",
             approved_by_user_id=ADMIN_ID,
