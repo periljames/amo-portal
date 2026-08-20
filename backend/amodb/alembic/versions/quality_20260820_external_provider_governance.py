@@ -1,7 +1,7 @@
 """Add governed external-provider profiles, contracts and evidence.
 
 Revision ID: quality_260820_provider_gov
-Revises: training_260818_policy_merge
+Revises: quality_260820_wf_schema, training_260820_record_updated
 Create Date: 2026-08-20
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "quality_260820_provider_gov"
-down_revision = "training_260818_policy_merge"
+down_revision = ("quality_260820_wf_schema", "training_260820_record_updated")
 branch_labels = None
 depends_on = None
 
@@ -200,3 +200,4 @@ def downgrade() -> None:
     op.drop_table("quality_external_provider_contracts")
     op.drop_index("ix_quality_provider_profiles_due", table_name="quality_external_provider_profiles")
     op.drop_table("quality_external_provider_profiles")
+    op.drop_index("ix_quality_provider_profiles_due", table_name="quality_external_provider_profiles")
