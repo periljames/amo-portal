@@ -10,7 +10,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
 
-from . import models, schemas, service
+from . import models, schemas, service, supplier_quality_control
 
 
 router = APIRouter(
@@ -307,6 +307,8 @@ def quote_evaluate(
     current_user: account_models.User = Depends(require_roles(*PROCUREMENT_ROLES, *TECHNICAL_APPROVAL_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
+    if payload.status == models.QuoteStatus.AWARDED:
+        supplier_quality_control.assert_quote_award_allowed(db, amo_id=amo_id, quote_id=quote_id)
     quote = service.evaluate_quote(
         db,
         amo_id=amo_id,
@@ -337,6 +339,15 @@ def purchase_order_create(
     current_user: account_models.User = Depends(require_roles(*PROCUREMENT_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
+    supplier_quality_control.assert_supplier_usage_allowed(
+        db,
+        amo_id=amo_id,
+        supplier_id=payload.supplier_id,
+        categories={"PART" if line.part_number else "SERVICE" for line in payload.lines},
+        allow_controlled_override=bool(payload.override_reference and payload.override_reason),
+        override_reference=payload.override_reference,
+        override_reason=payload.override_reason,
+    )
     po = service.create_purchase_order(
         db,
         amo_id=amo_id,
@@ -366,6 +377,8 @@ def purchase_order_approve(
     if current_user.role not in stage_roles[payload.stage] and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail=f"{payload.stage.title()} approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
+    if payload.stage in {"QUALITY", "FINAL"}:
+        supplier_quality_control.assert_purchase_order_allowed(db, amo_id=amo_id, po_id=po_id)
     po = service.approve_purchase_order(
         db,
         amo_id=amo_id,
@@ -385,6 +398,7 @@ def purchase_order_send(
     current_user: account_models.User = Depends(require_roles(*PROCUREMENT_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
+    supplier_quality_control.assert_purchase_order_allowed(db, amo_id=amo_id, po_id=po_id)
     po = service.send_purchase_order(db, amo_id=amo_id, po_id=po_id, actor_user_id=current_user.id)
     return _commit_refresh(db, po)
 
@@ -428,6 +442,17 @@ def receipt_create(
     current_user: account_models.User = Depends(require_roles(*RECEIVING_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
+    po = (
+        db.query(models.ProcurementPurchaseOrder)
+        .filter(
+            models.ProcurementPurchaseOrder.amo_id == amo_id,
+            models.ProcurementPurchaseOrder.id == payload.purchase_order_id,
+        )
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order was not found.")
+    supplier_quality_control.assert_purchase_order_allowed(db, amo_id=amo_id, po_id=po.id)
     receipt = service.create_receipt(
         db,
         amo_id=amo_id,

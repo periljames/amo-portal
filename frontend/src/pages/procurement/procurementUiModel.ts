@@ -23,7 +23,22 @@ import type {
 } from "../../types/procurement";
 
 export type Section = "command" | "requests" | "sourcing" | "orders" | "receiving" | "suppliers" | "control" | "documents";
-export type Modal = "requisition" | "supplier" | "scope" | "rfq" | "quote" | "po" | "receipt" | "inspection" | "hold" | "match" | null;
+export type Modal =
+  | "requisition"
+  | "supplier"
+  | "scope"
+  | "rfq"
+  | "quote"
+  | "quoteEvaluation"
+  | "po"
+  | "poApproval"
+  | "receipt"
+  | "inspection"
+  | "receiptRelease"
+  | "hold"
+  | "holdRelease"
+  | "match"
+  | null;
 export type FormState = Record<string, string | boolean>;
 export type WorkspaceData = {
   dashboard: ProcurementDashboard | null;

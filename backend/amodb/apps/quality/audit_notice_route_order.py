@@ -16,6 +16,12 @@ def _is_notice_route(route_item) -> bool:
     )
 
 
+def _is_generic_workflow_route(route_item) -> bool:
+    path = str(getattr(route_item, "path", ""))
+    methods = set(getattr(route_item, "methods", None) or ())
+    return path.endswith("/{module}/{record_id}/{action}") and "POST" in methods
+
+
 def _is_generic_catchall(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
     methods = set(getattr(route_item, "methods", None) or ())
@@ -32,8 +38,15 @@ def _promote(api_router: APIRouter) -> None:
     if not routes:
         raise RuntimeError("QMS audit notice routes were not registered")
     remaining = [item for item in api_router.routes if not _is_notice_route(item)]
-    catchall_index = next((index for index, item in enumerate(remaining) if _is_generic_catchall(item)), len(remaining))
-    api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
+    insertion_index = next(
+        (
+            index
+            for index, item in enumerate(remaining)
+            if _is_generic_workflow_route(item) or _is_generic_catchall(item)
+        ),
+        len(remaining),
+    )
+    api_router.routes[:] = [*remaining[:insertion_index], *routes, *remaining[insertion_index:]]
 
 
 for api_router in (router, legacy_router):

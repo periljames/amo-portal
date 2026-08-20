@@ -4,7 +4,6 @@ from datetime import date, datetime, timedelta
 import time
 import uuid
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -25,10 +24,10 @@ from .tenant_security import (
     require_quality_permission,
     set_postgres_tenant_context,
 )
+from .tenant_timezone import resolve_tenant_timezone
 
 
 planner_calendar_router = APIRouter()
-_PLANNER_TIMEZONE = ZoneInfo("Africa/Nairobi")
 _VALID_SOURCES = {"all", "audits", "cars", "training", "month", "week", "list", "agenda", "year"}
 
 
@@ -67,10 +66,21 @@ def qms_planner_calendar(
 ) -> dict[str, Any]:
     trace_id = uuid.uuid4().hex[:12]
     started = time.perf_counter()
+
+    # Reject a fully specified invalid range before touching tenant/database
+    # state. Apart from preserving the public validation contract, this avoids
+    # a needless timezone query for a request that cannot be executed.
+    if start is not None and end is not None and start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Calendar start date cannot be after the end date.",
+        )
+
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _pg_set_read_timeout(db, 1800)
 
-    today = datetime.now(_PLANNER_TIMEZONE).date()
+    tenant_timezone = resolve_tenant_timezone(db, amo_id=ctx.amo_id)
+    today = datetime.now(tenant_timezone.tzinfo).date()
     start_date = start or today - timedelta(days=30)
     end_date = end or today + timedelta(days=180)
     if start_date > end_date:
@@ -365,18 +375,23 @@ def qms_planner_calendar(
         limit=bounded_limit,
     )
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    warning_messages = [item for item in [tenant_timezone.warning] if item]
+    if source_errors:
+        warning_messages.append("Some calendar sources failed. See source_errors.")
     return {
         "module": "calendar",
         "view": view or requested_source,
         "start": start_date.isoformat(),
         "end": end_date.isoformat(),
+        "timezone_name": tenant_timezone.name,
+        "timezone_warning": tenant_timezone.warning,
         "items": visible,
         "limit": bounded_limit,
         "offset": bounded_offset,
         "next_offset": next_offset,
         "has_more": has_more,
         "source_errors": source_errors,
-        "warning": "Some calendar sources failed. See source_errors." if source_errors else None,
+        "warning": " ".join(warning_messages) if warning_messages else None,
         "trace_id": trace_id,
         "elapsed_ms": elapsed_ms,
     }

@@ -4,12 +4,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   BrainCircuit,
   CalendarDays,
-  ChevronDown,
   ClipboardCheck,
   FolderKanban,
   Gauge,
   ListChecks,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -62,6 +60,15 @@ const STATIC_CAR_VIEWS = new Set([
   "closed",
 ]);
 
+const ASSURANCE_MODULES = new Set([
+  "findings",
+  "cars",
+  "suppliers",
+  "equipment-calibration",
+  "external-interface",
+  "evidence-vault",
+]);
+
 const WORKSPACE_ICONS: Record<QmsWorkspaceId, LucideIcon> = {
   "control-room": Gauge,
   planner: CalendarDays,
@@ -86,18 +93,18 @@ function moduleTitle(segment: string | undefined): string {
   const labels: Record<string, string> = {
     calendar: "Planner",
     audits: "Audit Assurance",
-    findings: "Finding Assurance",
+    findings: "Findings",
     cars: "Corrective Action",
     risk: "Risk Intelligence",
     "change-control": "Missions",
     system: "Quality System",
     documents: "Controlled Documents",
-    suppliers: "Supplier Assurance",
+    suppliers: "External Providers",
     "equipment-calibration": "Tooling Assurance",
-    "external-interface": "External Assurance",
+    "external-interface": "External & Regulatory",
     "management-review": "Management Review",
     reports: "Quality Intelligence",
-    "evidence-vault": "Evidence Room",
+    "evidence-vault": "Evidence",
     settings: "QMS Settings",
     aerodoc: "AeroDoc",
   };
@@ -118,17 +125,14 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
     return pathMatches(current, target) && (params.get("tab") || "war-room") === tab.queryTab;
   }
 
-  // Query-backed workspace landings live on /quality during the transition,
-  // but their consolidated workspace must also remain active on governed legacy
-  // deep links such as /audits/*, /cars/*, /risk/* and /change-control/*.
-  if (tab.queryWorkspace && current === target) {
-    const requested = params.get("workspace");
-    return requested === tab.queryWorkspace;
+  if (tab.queryWorkspace) {
+    if (current === target) return params.get("workspace") === tab.queryWorkspace;
+    return Boolean(tab.activePrefixes?.some((prefix) => pathMatches(current, prefix)));
   }
 
   if (tab.activePrefixes?.some((prefix) => pathMatches(current, prefix))) return true;
   if (tab.exact) return current === target && !params.get("workspace") && !params.get("hub");
-  return pathMatches(current, target);
+  return current === target;
 }
 
 function topLevelTabs(route: QualityRoute): ContextTab[] {
@@ -169,27 +173,37 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
   }));
 }
 
+function assuranceSectionTabs(basePath: string): ContextTab[] {
+  return [
+    { id: "assurance-home", label: "Overview", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
+    { id: "assurance-audits", label: "Audit operations", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`] },
+    { id: "assurance-findings", label: "Findings", path: `${basePath}/findings/register`, activePrefixes: [`${basePath}/findings`] },
+    { id: "assurance-cars", label: "Corrective action", path: `${basePath}/cars/register`, activePrefixes: [`${basePath}/cars`] },
+    { id: "assurance-providers", label: "External providers", path: `${basePath}/suppliers/approved-list`, activePrefixes: [`${basePath}/suppliers`] },
+    { id: "assurance-tooling", label: "Tooling", path: `${basePath}/equipment-calibration/register`, activePrefixes: [`${basePath}/equipment-calibration`] },
+    { id: "assurance-external", label: "External & regulatory", path: `${basePath}/external-interface/regulator-findings`, activePrefixes: [`${basePath}/external-interface`] },
+    { id: "assurance-evidence", label: "Evidence", path: `${basePath}/evidence-vault/search`, activePrefixes: [`${basePath}/evidence-vault`] },
+  ];
+}
+
 function auditSectionTabs(basePath: string): ContextTab[] {
   return [
     { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
     { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
-    { id: "audit-schedule", label: "Schedule", path: `${basePath}/audits/plan?view=calendar`, activePrefixes: [`${basePath}/audits/plan`, `${basePath}/audits/schedule`, `${basePath}/audits/schedules`] },
-    { id: "audit-register", label: "Active Audits", path: `${basePath}/audits/register`, exact: true },
-    { id: "audit-checklists", label: "Checklists", path: `${basePath}/audits/checklists`, exact: true },
-    { id: "audit-reports", label: "Reports", path: `${basePath}/audits/reports`, exact: true },
+    { id: "audit-planner", label: "Planner", path: `${basePath}/calendar/audits` },
+    { id: "audit-checklists", label: "Checklist templates", path: `${basePath}/audits/checklists`, exact: true },
   ];
 }
 
 function auditRecordTabs(basePath: string, auditKey: string): ContextTab[] {
   const recordPath = `${basePath}/audits/${encodeURIComponent(auditKey)}`;
   return [
-    { id: "audit-war-room", label: "War Room", path: `${recordPath}?tab=war-room`, queryTab: "war-room" },
-    { id: "audit-checklist", label: "Checklist", path: `${recordPath}?tab=checklist`, queryTab: "checklist" },
-    { id: "audit-findings", label: "Findings", path: `${recordPath}?tab=findings`, queryTab: "findings" },
-    { id: "audit-cars", label: "CARs", path: `${recordPath}?tab=cars`, queryTab: "cars" },
-    { id: "audit-evidence", label: "Evidence", path: `${recordPath}?tab=evidence`, queryTab: "evidence" },
-    { id: "audit-report", label: "Report", path: `${recordPath}?tab=report`, queryTab: "report" },
-    { id: "audit-closeout", label: "Closeout", path: `${recordPath}?tab=closeout`, queryTab: "closeout" },
+    { id: "audit-setup", label: "Setup", path: `${recordPath}/setup`, exact: true },
+    { id: "audit-prepare", label: "Prepare", path: `${recordPath}/prepare`, exact: true },
+    { id: "audit-live", label: "Live audit", path: `${recordPath}/live`, exact: true },
+    { id: "audit-closing", label: "Closing", path: `${recordPath}/closing`, exact: true },
+    { id: "audit-follow-up", label: "Follow-up", path: `${recordPath}/follow-up`, exact: true },
+    { id: "audit-archive", label: "Archive", path: `${recordPath}/archive`, exact: true },
   ];
 }
 
@@ -260,25 +274,33 @@ const QualityContextTabs: React.FC = () => {
 
   const [moduleSegment, recordKey] = route.segments;
   const safeRecordKey = recordKey || "";
+  const workspace = new URLSearchParams(location.search).get("workspace");
   const isAuditRecord = moduleSegment === "audits" && Boolean(safeRecordKey) && !STATIC_AUDIT_VIEWS.has(safeRecordKey);
   const isCarRecord = moduleSegment === "cars" && Boolean(safeRecordKey) && !STATIC_CAR_VIEWS.has(safeRecordKey);
-  const tabs = isAuditRecord
+  const isAssuranceHub = !moduleSegment && workspace === "assurance";
+  const isAssuranceModule = Boolean(moduleSegment && ASSURANCE_MODULES.has(moduleSegment));
+  const workspaceTabs = topLevelTabs(route);
+  const contextualTabs = isAuditRecord
     ? auditRecordTabs(route.basePath, safeRecordKey)
     : isCarRecord
       ? carRecordTabs(route.basePath, safeRecordKey)
       : moduleSegment === "audits"
         ? auditSectionTabs(route.basePath)
-        : topLevelTabs(route);
+        : isAssuranceHub || isAssuranceModule
+          ? assuranceSectionTabs(route.basePath)
+          : [];
 
   const title = isAuditRecord
-    ? `Audit ${safeRecordKey}`
+    ? "Audit lifecycle"
     : isCarRecord
       ? `CAR ${safeRecordKey}`
-      : moduleTitle(moduleSegment);
+      : isAssuranceHub
+        ? "Assurance"
+        : moduleTitle(moduleSegment);
 
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
   const primaryAction = isAuditRecord
-    ? { label: "Audit register", path: `${route.basePath}/audits/register`, icon: ClipboardCheck }
+    ? { label: "Audits overview", path: `${route.basePath}/audits/dashboard`, icon: ClipboardCheck }
     : isCarRecord
       ? { label: "CAR register", path: `${route.basePath}/cars/register`, icon: ListChecks }
       : moduleSegment === "findings"
@@ -291,6 +313,16 @@ const QualityContextTabs: React.FC = () => {
 
   const PrimaryIcon = primaryAction.icon;
 
+  const renderTabs = (tabs: ContextTab[]) => tabs.map((tab) => {
+    const Icon = tab.icon;
+    const active = tabIsActive(tab, location.pathname, location.search);
+    return (
+      <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
+        {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
+      </button>
+    );
+  });
+
   return createPortal(
     <section className="quality-context-bar" aria-label="Quality Assurance workspace navigation">
       <div className="quality-context-bar__identity">
@@ -298,37 +330,20 @@ const QualityContextTabs: React.FC = () => {
         <span><small>Quality assurance</small><strong>{title}</strong></span>
       </div>
 
-      <nav className="quality-context-bar__tabs" aria-label={`${title} related pages`}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = tabIsActive(tab, location.pathname, location.search);
-          return (
-            <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
-              {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
-            </button>
-          );
-        })}
+      <nav className="quality-context-bar__tabs" aria-label="Quality Assurance workspaces">
+        {renderTabs(workspaceTabs)}
       </nav>
 
       <div className="quality-context-bar__actions">
         <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
         <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}><PrimaryIcon size={15} aria-hidden="true" /><span>{primaryAction.label}</span></button>
-        <details className="quality-context-bar__more">
-          <summary aria-label="Open Quality assurance lenses"><MoreHorizontal size={17} /><ChevronDown size={13} /></summary>
-          <div>
-            <strong>Assurance lenses</strong>
-            <button type="button" onClick={() => navigate(`${route.basePath}/audits/dashboard`)}>Audit operations</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/findings/register`)}>Findings</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/cars/register`)}>Corrective action</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/suppliers/approved-list`)}>Supplier assurance</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/equipment-calibration/overdue`)}>Tooling exposure</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/risk/risk-matrix`)}>Risk intelligence</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/management-review/dashboard`)}>Management review</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/evidence-vault/search`)}>Evidence room</button>
-            <button type="button" onClick={() => navigate(`${route.basePath}/settings/general`)}>QMS settings</button>
-          </div>
-        </details>
       </div>
+
+      {contextualTabs.length > 0 ? (
+        <nav className="quality-context-bar__subtabs" aria-label={`${title} related pages`}>
+          {renderTabs(contextualTabs)}
+        </nav>
+      ) : null}
     </section>,
     mountTarget,
   );

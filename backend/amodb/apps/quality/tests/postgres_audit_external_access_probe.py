@@ -215,7 +215,12 @@ def main() -> None:
 
     with engine.begin() as connection:
         versions = {str(row[0]) for row in connection.execute(text("SELECT version_num FROM alembic_version")).all()}
-        assert TARGET_REVISION in versions, versions
+        # Alembic stores only current heads. Once a later migration merges the
+        # live-audit branch (for example supplier governance), the historical
+        # bridge revision correctly disappears from alembic_version. The
+        # final-head schema/RLS/immutability assertions below are the durable
+        # proof that the required live-audit migration chain was applied.
+        assert versions, "Alembic upgrade produced no current heads"
 
         existing = {
             str(row[0])

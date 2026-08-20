@@ -45,6 +45,8 @@ QUESTION_ID = "00000000-0000-4000-8100-000000000018"
 QUESTION_REVISION_ID = "00000000-0000-4000-8100-000000000019"
 BLUEPRINT_ID = "00000000-0000-4000-8100-000000000020"
 TRAINING_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8100-000000000021"
+CATALOG_SKU_ID = "00000000-0000-4000-8100-000000000022"
+TENANT_LICENSE_ID = "00000000-0000-4000-8100-000000000023"
 
 AMO_CODE = "TRNGATE"
 AMO_SLUG = "trngate"
@@ -68,6 +70,35 @@ def seed() -> None:
             is_demo=False,
         )
         db.add(amo)
+        db.flush()
+
+        # require_module("training") first enforces the tenant billing licence,
+        # then its module-level entitlement. Keep this disposable tenant on the
+        # production path rather than bypassing either control in browser CI.
+        sku = account_models.CatalogSKU(
+            id=CATALOG_SKU_ID,
+            code="CI-TRAINING-GOVERNANCE",
+            name="Training Governance Browser CI",
+            description="Disposable zero-cost licence for governed Training browser acceptance.",
+            term=account_models.BillingTerm.MONTHLY,
+            trial_days=0,
+            amount_cents=0,
+            currency="USD",
+            is_active=True,
+        )
+        db.add(sku)
+        db.flush()
+        db.add(account_models.TenantLicense(
+            id=TENANT_LICENSE_ID,
+            amo_id=AMO_ID,
+            sku_id=CATALOG_SKU_ID,
+            term=account_models.BillingTerm.MONTHLY,
+            status=account_models.LicenseStatus.ACTIVE,
+            is_read_only=False,
+            current_period_start=now - timedelta(minutes=5),
+            current_period_end=now + timedelta(days=1),
+            notes="Disposable governed Training browser CI licence.",
+        ))
         db.flush()
 
         department = account_models.Department(
@@ -105,10 +136,6 @@ def seed() -> None:
         db.add(admin)
         db.flush()
 
-        # The canonical Training router is protected by require_module("training").
-        # The disposable live-browser tenant therefore needs the same explicit
-        # tenant module subscription as a real enabled tenant.  This keeps the CI
-        # journey behind production entitlement checks instead of bypassing them.
         db.add(account_models.ModuleSubscription(
             id=TRAINING_MODULE_SUBSCRIPTION_ID,
             amo_id=AMO_ID,
@@ -366,7 +393,7 @@ def seed() -> None:
             revision_no=1,
             title="Training Governance CI Exam",
             selection_rules={"question_count": 1},
-            result_rules={"pass_mark": 75, "max_attempts": 2, "cooldown_hours": 0},
+            result_rules={"pass_threshold": 75, "max_attempts": 2, "cooldown_hours": 0},
             security_rules={"proctor_required": False},
             status="ACTIVE",
             approved_by_user_id=ADMIN_ID,

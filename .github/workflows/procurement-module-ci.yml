@@ -5,13 +5,17 @@ on:
     paths:
       - "backend/amodb/apps/procurement/**"
       - "backend/amodb/apps/inventory/**"
+      - "backend/amodb/apps/quality/audit_assignment_guard.py"
       - "backend/amodb/alembic/versions/procure_*.py"
       - "backend/amodb/alembic/versions/procurement_*.py"
       - "backend/tests/test_procurement_*.py"
+      - "backend/tests/test_supplier_governance_contract.py"
       - "frontend/src/pages/procurement/**"
       - "frontend/src/services/procurement.ts"
+      - "frontend/src/services/supplierGovernance.ts"
       - "frontend/src/types/procurement.ts"
       - "frontend/src/styles/procurement*.css"
+      - "frontend/src/styles/supplier-governance.css"
       - "frontend/src/utils/departmentAccess.ts"
       - "frontend/src/utils/roleAccess.ts"
       - ".env.example"
@@ -87,6 +91,7 @@ jobs:
           tests/test_procurement_module_contract.py
           tests/test_procurement_document_contract.py
           tests/test_procurement_frontend_contract.py
+          tests/test_supplier_governance_contract.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -115,6 +120,7 @@ jobs:
           npm exec -- eslint
           src/pages/procurement
           src/services/procurement.ts
+          src/services/supplierGovernance.ts
           src/types/procurement.ts
       - name: Build production frontend
         run: npm run build

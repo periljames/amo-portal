@@ -1,5 +1,6 @@
 import {
   addSupplierApprovalScope,
+  approveProcurementPurchaseOrder,
   createProcurementInvoiceMatch,
   createProcurementPurchaseOrder,
   createProcurementQualityHold,
@@ -8,7 +9,10 @@ import {
   createProcurementRequisition,
   createProcurementRfq,
   createProcurementSupplier,
+  evaluateProcurementQuote,
   inspectProcurementReceipt,
+  releaseProcurementQualityHold,
+  releaseProcurementReceipt,
 } from "../../services/procurement";
 import type { ProcurementRequisition } from "../../types/procurement";
 import type { FormState, Modal, WorkspaceData } from "./procurementUiModel";
@@ -66,7 +70,7 @@ export async function submitProcurementForm(
       authority: text("authority") || "TENANT_QMS", approval_number: text("approvalNumber") || null,
       effective_on: text("effectiveOn") || null, expires_on: text("expiresOn") || null,
       restrictions: text("restrictions") || null, incoming_inspection_level: text("inspectionLevel") || "STANDARD",
-      evidence_reference: text("evidenceReference") || null, qms_evaluation_id: text("qmsEvaluationId") || null,
+      evidence_reference: text("evidenceReference") || null, qms_evaluation_id: text("qmsEvaluationId"),
       qms_audit_id: text("qmsAuditId") || null,
     });
   }
@@ -91,6 +95,13 @@ export async function submitProcurementForm(
         deviation: text("deviations") || null }],
     });
   }
+  if (modal === "quoteEvaluation") {
+    return evaluateProcurementQuote(amoCode, number("quoteId"), {
+      status: text("evaluationStatus"),
+      evaluation_score: text("evaluationScore") ? number("evaluationScore") : null,
+      evaluation_notes: text("evaluationNotes"),
+    });
+  }
   if (modal === "po") {
     return createProcurementPurchaseOrder(amoCode, {
       po_number: text("number"), supplier_id: number("supplierId"), quote_id: number("quoteId") || null,
@@ -106,6 +117,9 @@ export async function submitProcurementForm(
         promised_date: text("promisedDate") || null, work_order_id: number("workOrderId") || null,
         aircraft_serial_number: text("aircraftSerial") || null }],
     });
+  }
+  if (modal === "poApproval") {
+    return approveProcurementPurchaseOrder(amoCode, number("poId"), text("approvalStage"), text("approvalComment"));
   }
   if (modal === "receipt") {
     return createProcurementReceipt(amoCode, {
@@ -133,17 +147,23 @@ export async function submitProcurementForm(
       traceability_acceptable: yes("traceabilityAcceptable"),
       shelf_life_acceptable: yes("shelfLife"),
       suspected_unapproved_part: yes("suspectedUnapprovedPart"),
-      disposition: text("disposition") || "ACCEPTED",
+      disposition: text("disposition"),
       findings: text("findings") || null,
       conditions: text("conditions") || null,
       line_dispositions: {},
     });
+  }
+  if (modal === "receiptRelease") {
+    return releaseProcurementReceipt(amoCode, number("receiptId"), text("releaseComment"));
   }
   if (modal === "hold") {
     return createProcurementQualityHold(amoCode, {
       hold_number: text("number"), target_type: text("targetType"), target_id: text("targetId"),
       reason: text("reason"), qms_finding_id: text("qmsFindingId") || null, qms_car_id: text("qmsCarId") || null,
     });
+  }
+  if (modal === "holdRelease") {
+    return releaseProcurementQualityHold(amoCode, number("holdId"), text("releaseReason"));
   }
   return createProcurementInvoiceMatch(amoCode, {
     purchase_order_id: number("poId"), invoice_reference: text("invoiceReference"),
