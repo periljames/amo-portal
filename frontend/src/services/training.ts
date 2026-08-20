@@ -949,7 +949,7 @@ export async function listMyTrainingDeferrals(): Promise<TrainingDeferralRequest
 }
 
 export interface ListTrainingDeferralsParams {
-  status?: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  status?: "PENDING" | "RETURNED_FOR_INFORMATION" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
   user_id?: string;
   limit?: number;
   offset?: number;

@@ -33,8 +33,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def embedded_worker_enabled() -> bool:
-    # Background queues are isolated by default. A small single-process
-    # deployment may opt in explicitly, but it will still use bounded cycles.
     return _env_bool("PORTAL_EMBEDDED_JOB_WORKER", False)
 
 
@@ -115,6 +113,12 @@ def _run_training_plans_once() -> Any:
     return training_plan_automation.run_once()
 
 
+def _run_training_notifications_once() -> Any:
+    from amodb.jobs import training_notification_automation
+
+    return training_notification_automation.run_once()
+
+
 @dataclass(frozen=True)
 class WorkerFamily:
     name: str
@@ -124,9 +128,6 @@ class WorkerFamily:
 
 
 def _families() -> tuple[WorkerFamily, ...]:
-    # Imports intentionally live inside each runner. A broken optional worker
-    # family must be reported as DEGRADED without preventing the API (and all
-    # other job families) from starting.
     return (
         WorkerFamily(
             "workforce",
@@ -162,6 +163,12 @@ def _families() -> tuple[WorkerFamily, ...]:
             "training-plans",
             _bounded_float("TRAINING_PLAN_AUTOMATION_INTERVAL_SECONDS", 3600.0, 300.0, 86_400.0),
             _run_training_plans_once,
+            drain_backlog=False,
+        ),
+        WorkerFamily(
+            "training-notifications",
+            _bounded_float("TRAINING_NOTIFICATION_AUTOMATION_INTERVAL_SECONDS", 3600.0, 300.0, 86_400.0),
+            _run_training_notifications_once,
             drain_backlog=False,
         ),
     )
@@ -217,8 +224,6 @@ class PortalJobSupervisor:
     def _heartbeat(self, family: WorkerFamily, *, status: str, metadata: dict[str, Any], slot: int = 1) -> None:
         if not database_circuit.allow_request():
             return
-        # Heartbeats are low-priority. Do not let a burst of seven heartbeat
-        # writes bypass the same concurrency guard as real background work.
         if not self._work_slots.acquire(timeout=0.05):
             return
         db = None
@@ -274,9 +279,6 @@ class PortalJobSupervisor:
                 if not database_circuit.allow_request() and not probe_database():
                     raise ConnectionError("DATABASE_UNAVAILABLE")
 
-                # Bound total active queue families inside this process. This is
-                # the key guard that keeps parallelism useful instead of turning
-                # it into database-pool contention.
                 acquired = self._work_slots.acquire(timeout=0.5)
                 if not acquired:
                     self._stop.wait(0.05)
@@ -291,8 +293,6 @@ class PortalJobSupervisor:
                 outage_logged = False
                 failure_streak = 0
             except Exception as exc:
-                # probe_database already records the synthetic ConnectionError;
-                # only record direct worker database failures here.
                 if is_database_disconnect(exc):
                     database_circuit.mark_failure(exc)
                 status = "DEGRADED"
@@ -308,9 +308,6 @@ class PortalJobSupervisor:
                     self._work_slots.release()
 
             now = time.monotonic()
-            # A database heartbeat during an outage is another failed database
-            # connection. Keep degraded state in memory and write it once the
-            # shared recovery probe has succeeded.
             if status == "ONLINE" and (recovered_this_cycle or now - last_heartbeat >= self._heartbeat_seconds):
                 self._heartbeat(
                     family,
@@ -320,8 +317,6 @@ class PortalJobSupervisor:
                 )
                 last_heartbeat = now
 
-            # Drain backlogs without an artificial pause, but yield briefly so a
-            # hot queue cannot monopolise CPU or the database pool.
             if status == "DEGRADED":
                 base_delay = min(60.0, max(2.0, 2.0 ** min(failure_streak, 6)))
                 delay = base_delay + random.uniform(0.0, min(2.0, base_delay * 0.15))
