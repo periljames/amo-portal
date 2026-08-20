@@ -109,7 +109,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
             <section className="qms-assurance-room__summary" aria-label="Quality action summary">
               {hasAssignedWork ? (
                 <Link to={routes.myWork}>
-                  <span>My work</span>
+                  <span>My decisions & work</span>
                   <strong>{dashboard.my_work.length.toLocaleString()}</strong>
                   <small>assigned items</small>
                 </Link>
