@@ -105,6 +105,8 @@ async function preparePlanner(page: Page): Promise<void> {
           }],
           has_more: false,
           warning: null,
+          timezone_name: "Africa/Nairobi",
+          timezone_warning: null,
           source_errors: [],
         }),
       });
@@ -189,7 +191,7 @@ test.describe("QMS planner lifecycle", () => {
     await expect(rescheduleTrigger).toBeFocused();
   });
 
-  test("advances the Today marker across an Africa Nairobi midnight without reload", async ({ page }) => {
+  test("advances the Today marker across the tenant-configured midnight without reload", async ({ page }) => {
     await page.clock.install({ time: new Date("2026-08-18T20:59:45.000Z") });
     await page.setViewportSize({ width: 1600, height: 950 });
     await openPlanner(page, "week");
