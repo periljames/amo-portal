@@ -95,15 +95,16 @@ def test_portfolio_is_single_page_vertical_tab_workspace():
     assert "activateTab" in _PORTFOLIO_SCRIPT
 
 
-def test_training_table_has_five_row_client_pagination_contract():
+def test_training_table_has_ten_row_client_pagination_contract():
     body = _training_profile_html(_payload()).body.decode("utf-8")
 
-    assert "data-paginated-table data-page-size='5'" in body
+    assert "data-paginated-table data-page-size='10'" in body
     assert body.count("data-training-row") == 7
     assert "data-page-prev" in body
     assert "data-page-next" in body
     assert "data-page-numbers" in body
     assert "data-page-summary" in body
+    assert "table.dataset.pageSize || 10" in _PORTFOLIO_SCRIPT
     assert "Math.ceil(rows.length / pageSize)" in _PORTFOLIO_SCRIPT
     assert "Showing ${start + 1}" in _PORTFOLIO_SCRIPT
 
