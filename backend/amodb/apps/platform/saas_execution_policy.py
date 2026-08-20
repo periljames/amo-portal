@@ -92,10 +92,14 @@ def install_saas_execution_policy() -> None:
         if ticket is None:
             raise ValueError("Support ticket not found")
 
+        # Support drafting is operated by the platform and must never consume a
+        # tenant-owned API credential implicitly. Tenant-billed AI calls go
+        # through the governed tenant AI gateway instead.
         credential = saas_services.get_provider_credential(
             db,
             provider="openai",
-            tenant_id=ticket.tenant_id,
+            tenant_id=None,
+            allow_platform_fallback=True,
         )
         require_operational_provider(credential, label="OpenAI")
 
