@@ -190,7 +190,7 @@ function auditSectionTabs(basePath: string): ContextTab[] {
   return [
     { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
     { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
-    { id: "audit-schedule", label: "Schedule", path: `${basePath}/audits/plan?view=calendar`, activePrefixes: [`${basePath}/audits/plan`, `${basePath}/audits/schedule`, `${basePath}/audits/schedules`] },
+    { id: "audit-planner", label: "Planner", path: `${basePath}/calendar/audits` },
     { id: "audit-checklists", label: "Checklist templates", path: `${basePath}/audits/checklists`, exact: true },
   ];
 }
