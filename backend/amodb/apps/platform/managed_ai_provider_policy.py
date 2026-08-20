@@ -21,12 +21,12 @@ def is_managed_ai_provider(provider: str) -> bool:
 
 
 def _install_provider_catalog_boundary() -> None:
-    """Remove model selection from generic provider configuration.
+    """Remove endpoint/model overrides from managed OpenAI configuration.
 
-    Provider credentials describe how the portal authenticates to OpenAI. Model
-    selection belongs exclusively to the governed AI catalogue and tenant policy,
-    so the legacy generic ``model`` field must not appear as a second source of
-    truth in the superadmin provider form.
+    The OpenAI API key is a platform-owned managed secret and must never be sent
+    to a superadmin-supplied alternate host. Model selection belongs exclusively
+    to the governed AI catalogue and tenant policy. The generic provider form is
+    therefore limited to non-secret OpenAI project/organization scoping.
     """
     definitions = []
     for definition in saas_providers._PROVIDER_DEFINITIONS:
@@ -40,11 +40,13 @@ def _install_provider_catalog_boundary() -> None:
                 category=definition.category,
                 secret_fields=definition.secret_fields,
                 config_fields=tuple(
-                    field for field in definition.config_fields if field != "model"
+                    field
+                    for field in definition.config_fields
+                    if field not in {"model", "api_base_url"}
                 ),
                 description=(
                     "Platform-managed OpenAI credential for governed AI workflows. "
-                    "Models are selected by the AI catalogue and tenant entitlement."
+                    "Endpoint and models are fixed by the managed AI gateway; project and organization remain optional scopes."
                 ),
             )
         )
