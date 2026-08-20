@@ -87,8 +87,6 @@ def process_etims_fiscalization(
             )
         provider_status = "SUCCESS"
     except Exception as exc:
-        # A transport exception cannot prove whether the certified control unit
-        # accepted the invoice. Do not blindly POST it again.
         fiscalization = db.get(models.SaaSInvoiceFiscalization, fiscalization.id)
         if fiscalization is not None:
             fiscalization.status = "RECONCILIATION_REQUIRED"
@@ -141,11 +139,14 @@ def process_ai_support_reply(
     if ticket is None or detail is None:
         raise ValueError("Support ticket is missing")
 
-    # Revalidate the exact support session at execution time. A session can end
-    # or expire after the job was queued; in that case tenant ticket content must
-    # never be assembled into an external-provider prompt.
     support_session_id = str(payload.get("support_session_id") or "").strip() or None
     if ticket.tenant_id:
+        # Revalidate both tenant opt-in and the exact support session immediately
+        # before tenant text is assembled for the provider. A queued job cannot
+        # outlive either consent boundary.
+        policy = ai_gateway.tenant_policy(db, str(ticket.tenant_id))
+        if not bool(policy.get("enabled")):
+            raise PermissionError("Tenant AI is no longer enabled for external support drafting")
         if not support_session_id:
             raise PermissionError("Tenant support AI job is missing its governed support-session binding")
         validated_session_id = ai_access.require_tenant_data_access(
@@ -171,7 +172,7 @@ def process_ai_support_reply(
     )
     transcript = "\n".join(f"{row.author_type}: {row.body}" for row in messages)
     instructions = (
-        "You are the AMO Portal support assistant. Give a factual, safe troubleshooting reply. "
+        "You are the AMO Portal support assistant. Give a factual, safe troubleshooting draft. "
         "Do not claim that actions were performed. Do not expose secrets. Escalate aviation safety, billing disputes, "
         "security incidents, tax/fiscalization issues, or account access changes to a human support agent."
     )
@@ -183,9 +184,6 @@ def process_ai_support_reply(
         f"Conversation:\n{transcript}"
     )
 
-    # Support drafting is platform-funded but still tenant-data scoped. The
-    # support-session check above determines data authority; the gateway handles
-    # provider credentials, privacy, rate accounting and prompt-safe auditing.
     draft = ai_gateway.run_ai(
         db,
         prompt=prompt,
@@ -200,11 +198,13 @@ def process_ai_support_reply(
     if not reply:
         raise NonRepeatableJobError("AI provider returned an empty support draft")
 
+    # AI output is a draft, not a tenant communication. It remains internal until
+    # a human support operator reviews/edits and deliberately posts a PUBLIC reply.
     message = models.SaaSSupportTicketMessage(
         ticket_id=ticket_id,
         author_user_id=job.created_by,
         author_type="AI_ASSISTANT",
-        visibility="PUBLIC",
+        visibility="INTERNAL",
         body=reply,
         source_job_id=job.id,
     )
@@ -220,4 +220,5 @@ def process_ai_support_reply(
         "usage": draft.get("usage"),
         "provider_cost_microusd": draft.get("provider_cost_microusd"),
         "billing_scope": draft.get("billing_scope"),
+        "visibility": "INTERNAL",
     }
