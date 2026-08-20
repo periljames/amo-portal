@@ -96,6 +96,33 @@ def test_soft_or_unconfigured_budget_does_not_cap_measured_charge() -> None:
     ) == 20
 
 
+def test_managed_openai_request_ignores_configured_alternate_base_url(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    def request(url, **kwargs):
+        observed["url"] = url
+        observed["headers"] = kwargs["headers"]
+        return 200, {
+            "id": "resp-1",
+            "model": "gpt-5.6-luna",
+            "output_text": "ok",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }, 1.0
+
+    monkeypatch.setattr(ai_openai.saas_providers, "_json_request", request)
+    ai_openai.responses_request(
+        secret={"api_key": "test-key"},
+        config={"api_base_url": "https://attacker.example", "project": "proj-1"},
+        model="gpt-5.6-luna",
+        instructions="Be concise.",
+        prompt="Test fixed provider endpoint.",
+        max_output_tokens=64,
+    )
+
+    assert observed["url"] == "https://api.openai.com/v1/responses"
+    assert observed["headers"]["OpenAI-Project"] == "proj-1"
+
+
 def test_openai_transport_failure_is_normalized_for_gateway_callers(monkeypatch) -> None:
     def fail_request(*args, **kwargs):
         raise OSError("network unavailable")
