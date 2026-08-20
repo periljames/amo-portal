@@ -31,6 +31,17 @@ export type QmsPathClassification = {
 };
 
 const AUDIT_WORKSPACE_TAILS = [
+  // Canonical post-#502 audit occurrence lifecycle. These routes are owned by
+  // QualityAuditOccurrenceStageShell / QualityEnhancementsHost and must reach
+  // PortalRouteSurface instead of being intercepted by QmsNotFoundPage.
+  "setup",
+  "prepare",
+  "live",
+  "closing",
+  "follow-up",
+  "archive",
+  // Legacy record views remain recognized so PortalRouteSurface can redirect
+  // old/deep links to the equivalent canonical stage without breaking bookmarks.
   "overview",
   "war-room",
   "checklist",
