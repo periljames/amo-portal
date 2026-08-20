@@ -66,6 +66,36 @@ def test_unknown_model_has_no_implicit_price() -> None:
         ai_gateway.calculate_provider_cost("unknown-model", {"input_tokens": 1})
 
 
+def test_hard_budget_caps_customer_charge_at_remaining_amount() -> None:
+    assert ai_gateway._bounded_customer_charge(
+        20,
+        used_microusd=90,
+        budget_microusd=100,
+        hard_limit=True,
+    ) == 10
+    assert ai_gateway._bounded_customer_charge(
+        20,
+        used_microusd=100,
+        budget_microusd=100,
+        hard_limit=True,
+    ) == 0
+
+
+def test_soft_or_unconfigured_budget_does_not_cap_measured_charge() -> None:
+    assert ai_gateway._bounded_customer_charge(
+        20,
+        used_microusd=90,
+        budget_microusd=100,
+        hard_limit=False,
+    ) == 20
+    assert ai_gateway._bounded_customer_charge(
+        20,
+        used_microusd=90,
+        budget_microusd=0,
+        hard_limit=True,
+    ) == 20
+
+
 def test_openai_transport_failure_is_normalized_for_gateway_callers(monkeypatch) -> None:
     def fail_request(*args, **kwargs):
         raise OSError("network unavailable")
