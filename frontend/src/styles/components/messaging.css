@@ -49,8 +49,8 @@
 }
 
 /* The old header bell navigated to My Work rather than opening notifications.
-   Once the messaging controls are present it becomes a duplicate and is hidden. */
-.tenant-shell__topbar-actions > .tenant-shell__icon-button {
+   Hide it only while the real messaging/notification controls are mounted. */
+.tenant-shell__topbar-actions:has(.messaging-header-launchers) > .tenant-shell__icon-button {
   display: none;
 }
 
