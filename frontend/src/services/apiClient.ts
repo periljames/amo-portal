@@ -251,6 +251,11 @@ async function fetchOnce<T>(
     return { response, body };
   } catch (error) {
     if (isAbortError(error)) {
+      // Navigation/unmount cancellations are control flow, not user-facing
+      // failures. Preserve AbortError so callers can silently discard stale work.
+      if (!timedOut && callerSignal?.aborted) {
+        throw new DOMException("Request was cancelled", "AbortError");
+      }
       const reason = controller.signal.reason;
       const message = reason instanceof Error ? reason.message : String(reason || "Request timed out or was cancelled");
       throw new Error(timedOut ? "Request timed out. Confirm the backend is reachable, then retry." : message);
