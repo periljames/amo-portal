@@ -20,6 +20,14 @@ def _job_query(rows: list[object]) -> MagicMock:
     return query
 
 
+def _enable_tenant_ai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        saas_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": True}),
+    )
+
+
 def test_tenant_job_router_remains_importable_as_a_module() -> None:
     assert isinstance(tenant_saas_job_router, ModuleType)
     assert callable(tenant_saas_job_router.job_status)
@@ -78,6 +86,38 @@ def test_disabled_openai_provider_cannot_enqueue(monkeypatch: pytest.MonkeyPatch
         )
 
 
+def test_tenant_support_ai_requires_tenant_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(tenant_id="amo-1")
+    monkeypatch.setattr(
+        saas_services,
+        "get_provider_credential",
+        MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
+    )
+    monkeypatch.setattr(
+        saas_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": False}),
+    )
+    access = MagicMock()
+    monkeypatch.setattr(
+        saas_execution_policy.ai_access,
+        "require_tenant_data_access",
+        access,
+    )
+    enqueue = MagicMock()
+    monkeypatch.setattr(saas_queue, "enqueue_job", enqueue)
+
+    with pytest.raises(PermissionError, match="Tenant AI is not enabled"):
+        saas_services.enqueue_ai_support_reply(
+            db,
+            ticket_id="ticket-1",
+            actor_user_id="platform-user",
+        )
+    access.assert_not_called()
+    enqueue.assert_not_called()
+
+
 def test_tenant_support_ai_cannot_enqueue_without_governed_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -88,6 +128,7 @@ def test_tenant_support_ai_cannot_enqueue_without_governed_access(
         "get_provider_credential",
         MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
     )
+    _enable_tenant_ai(monkeypatch)
     monkeypatch.setattr(
         saas_execution_policy.ai_access,
         "require_tenant_data_access",
@@ -125,6 +166,7 @@ def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
         "get_provider_credential",
         MagicMock(return_value=credential),
     )
+    _enable_tenant_ai(monkeypatch)
     monkeypatch.setattr(
         saas_execution_policy.ai_access,
         "require_tenant_data_access",
@@ -175,6 +217,7 @@ def test_duplicate_ai_submission_returns_active_job_without_reenqueue(
         "get_provider_credential",
         MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
     )
+    _enable_tenant_ai(monkeypatch)
     access = MagicMock(return_value="support-1")
     monkeypatch.setattr(
         saas_execution_policy.ai_access,
