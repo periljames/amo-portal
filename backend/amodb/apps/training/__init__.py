@@ -27,7 +27,7 @@ from .operating_policy_guards import (
 )
 from .person_360_routes import install_training_person_360_routes
 from .planning_policy_bridge import bridge_demand_items as _bridge_demand_items
-from .record_presentation import install_training_record_presentation
+from .record_presentation_table import install_training_record_presentation
 from .session_closeout_routes import install_training_session_closeout_routes
 from .shared_storage_policy import install_training_shared_storage
 from .tenant_policy_validation import wrap_update_settings as _wrap_tenant_settings_update
