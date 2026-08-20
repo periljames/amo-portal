@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import quote
 
@@ -8,8 +10,15 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
+from amodb.apps.platform import ai_gateway
 
 from .knowledge_assistant_router import DocumentationAssistRequest, SearchContext
+
+
+_AI_CONTEXT: ContextVar[tuple[Session, str, str] | None] = ContextVar(
+    "document_control_ai_context",
+    default=None,
+)
 
 
 def governed_source_url(
@@ -135,11 +144,95 @@ def audit_assist_safely(
         )
 
 
+def _governed_synthesis(query: str, sources: list[dict[str, Any]]) -> tuple[str | None, list[str], str | None]:
+    request_context = _AI_CONTEXT.get()
+    if request_context is None:
+        return None, [], "AI synthesis has no authorised tenant request context; deterministic results are shown instead."
+
+    db, tenant_id, user_id = request_context
+    provider_sources = [
+        {
+            "id": source["id"],
+            "document": f"{source['code']} — {source['title']}",
+            "heading": source.get("heading"),
+            "page": source.get("page_number"),
+            "snippet": str(source.get("snippet") or "")[:900],
+        }
+        for source in sources[:8]
+    ]
+    allowed_ids = {str(source["id"]) for source in provider_sources}
+    instructions = (
+        "You are the AMO Portal controlled-document assistant. Use only the supplied authorised source excerpts. "
+        "Do not use outside knowledge to fill gaps. Return only one JSON object with keys answer and source_ids. "
+        "answer must be concise and source_ids must contain only IDs from the supplied sources that directly support the answer. "
+        "If the sources do not support an answer, return an empty answer and an empty source_ids array."
+    )
+    prompt = json.dumps(
+        {"question": query, "sources": provider_sources},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    try:
+        result = ai_gateway.run_ai(
+            db,
+            prompt=prompt,
+            instructions=instructions,
+            actor_user_id=user_id,
+            tenant_id=tenant_id,
+            billing_scope="TENANT",
+            feature_code="document_control.assisted_search",
+            requires_external_documents=True,
+        )
+        raw = str(result.get("text") or "").strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            raw = "\n".join(lines[1:-1]).strip() if len(lines) >= 3 else raw
+            if raw.lower().startswith("json\n"):
+                raw = raw[5:].strip()
+        structured = json.loads(raw)
+        if not isinstance(structured, dict):
+            raise ValueError("AI synthesis did not return a JSON object")
+        cited = [str(value) for value in structured.get("source_ids", []) if str(value) in allowed_ids]
+        answer = str(structured.get("answer") or "").strip()
+        if not answer or not cited:
+            return None, [], "AI synthesis returned no verifiable controlled-source citation; deterministic results are shown instead."
+        return answer[:1600], cited[:8], None
+    except PermissionError as exc:
+        return None, [], f"AI synthesis is unavailable under the tenant AI policy: {exc}. Deterministic results are shown instead."
+    except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        return None, [], f"AI synthesis could not be verified ({type(exc).__name__}); deterministic results are shown instead."
+    finally:
+        _AI_CONTEXT.set(None)
+
+
 def install() -> None:
     # Endpoint functions resolve these module globals at request time. Installing
-    # the hardened implementations here avoids a duplicate FastAPI route while
+    # the hardened implementations here avoids duplicate FastAPI routes while
     # keeping the existing public contract stable.
     from . import knowledge_assistant_router as assistant
 
+    original_search_context = assistant._search_context
+
+    def governed_search_context(
+        db: Session,
+        *,
+        tenant: manual_models.Tenant,
+        user: account_models.User,
+        requested_manual_id: str | None,
+        requested_revision_id: str | None,
+    ) -> SearchContext:
+        context = original_search_context(
+            db,
+            tenant=tenant,
+            user=user,
+            requested_manual_id=requested_manual_id,
+            requested_revision_id=requested_revision_id,
+        )
+        _AI_CONTEXT.set((db, str(tenant.amo_id), str(user.id)))
+        return context
+
     assistant._reader_url = governed_source_url
     assistant._audit_assist = audit_assist_safely
+    assistant._search_context = governed_search_context
+    assistant._openai_synthesis = _governed_synthesis
