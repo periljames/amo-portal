@@ -7,6 +7,16 @@ import { usePlatformData } from "./components/usePlatformData";
 
 const usd = (micros?: number | null) => `$${(Number(micros || 0) / 1_000_000).toFixed(6)}`;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+const defaultModel: Record<string, string> = {
+  STANDARD: "gpt-5.6-luna",
+  ADVANCED: "gpt-5.6-terra",
+  PROFESSIONAL: "gpt-5.6-sol",
+};
+
+type AIStatusPayload = {
+  provider?: { status?: string; scope?: string; display_name?: string } | null;
+  tenant_policy?: { tenant_id?: string } | null;
+};
 
 export default function PlatformAIPage() {
   const tenants = usePlatformData(() => platformApi.tenants({ limit: 200 }), [], { pollMs: 60_000 });
@@ -30,9 +40,32 @@ export default function PlatformAIPage() {
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policyNotice, setPolicyNotice] = useState<string | null>(null);
 
-  const currentPolicy = policy.data as AITenantPolicy | null;
-  const provider = (status.data?.provider ?? null) as { status?: string; scope?: string; display_name?: string } | null;
+  // usePlatformData deliberately retains its previous value while a new request
+  // is loading. Never treat that retained value as belonging to the newly
+  // selected tenant: require the server-returned tenant_id to match first.
+  const currentPolicy = tenantId && policy.data?.tenant_id === tenantId
+    ? policy.data as AITenantPolicy
+    : null;
+  const currentUsage = tenantId && usage.data?.tenant_id === tenantId ? usage.data : null;
+  const statusData = status.data as AIStatusPayload | null;
+  const statusMatchesTenant = !tenantId || statusData?.tenant_policy?.tenant_id === tenantId;
+  const provider = statusMatchesTenant ? statusData?.provider ?? null : null;
   const models = catalog.data?.models ?? [];
+
+  useEffect(() => {
+    // A tenant switch is a security boundary. Clear all tenant-derived controls,
+    // metering intent and result state before the next tenant policy arrives.
+    setTenantMetering(false);
+    setResult(null);
+    setRunError(null);
+    setPolicyError(null);
+    setPolicyNotice(null);
+    setEnabled(false);
+    setPlan("STANDARD");
+    setModel("gpt-5.6-luna");
+    setBudgetUsd("0");
+    setAllowDocs(false);
+  }, [tenantId]);
 
   useEffect(() => {
     if (!currentPolicy) return;
@@ -43,17 +76,16 @@ export default function PlatformAIPage() {
     setAllowDocs(currentPolicy.allow_external_documents);
   }, [currentPolicy]);
 
-  useEffect(() => {
-    if (!tenantId) setTenantMetering(false);
-  }, [tenantId]);
-
   const savePolicy = async () => {
     if (!tenantId) return;
+    if (!currentPolicy || policy.loading) {
+      setPolicyError("Wait for the selected tenant AI policy to finish loading before making changes.");
+      return;
+    }
     setPolicyError(null);
     setPolicyNotice(null);
-    const defaultModel: Record<string, string> = { STANDARD: "gpt-5.6-luna", ADVANCED: "gpt-5.6-terra", PROFESSIONAL: "gpt-5.6-sol" };
     try {
-      await aiControlApi.updatePolicy(tenantId, {
+      const updated = await aiControlApi.updatePolicy(tenantId, {
         enabled,
         plan_code: plan,
         model: defaultModel[plan],
@@ -63,6 +95,9 @@ export default function PlatformAIPage() {
         markup_bps: 0,
         reason: "AI policy updated from superadmin AI Control Centre",
       });
+      if (updated.policy.tenant_id !== tenantId) {
+        throw new Error("Tenant scope mismatch while saving AI policy. No cross-tenant result was accepted.");
+      }
       setModel(defaultModel[plan]);
       setPolicyNotice("Tenant AI policy saved and audited.");
       policy.reload();
@@ -73,17 +108,26 @@ export default function PlatformAIPage() {
   };
 
   const runTest = async () => {
+    if (tenantMetering && (!tenantId || !currentPolicy?.enabled)) {
+      setRunError("Tenant-metered testing requires the selected tenant to have AI enabled.");
+      return;
+    }
     setRunning(true);
     setRunError(null);
     setResult(null);
     try {
       const next = await aiControlApi.playground({
         prompt,
-        tenant_id: tenantId || null,
+        // Platform tests remain platform-only. A tenant identifier is sent only
+        // when the administrator explicitly enables tenant metering.
+        tenant_id: tenantMetering ? tenantId : null,
         model,
         charge_tenant: tenantMetering,
         feature_code: "platform.playground",
       });
+      if (tenantMetering && next.tenant_id !== tenantId) {
+        throw new Error("Tenant scope mismatch in AI response. The result was discarded.");
+      }
       setResult(next);
       if (tenantMetering) usage.reload();
     } catch (error) {
@@ -98,27 +142,27 @@ export default function PlatformAIPage() {
       <section className="platform-grid">
         <MetricCard label="Provider" value={provider?.display_name ?? "OpenAI"} caption={provider?.scope ? `${provider.scope} credential` : "Configure in Provider Registry"} mark="AI" />
         <MetricCard label="Health" value={<StatusBadge value={provider?.status ?? "NOT_CONFIGURED"} />} caption="Server-side credential only" mark="HC" />
-        <MetricCard label="Tenant requests" value={usage.data?.requests ?? 0} caption={tenantId ? usage.data?.month : "Select tenant"} mark="RQ" />
-        <MetricCard label="Measured usage" value={usd(usage.data?.customer_charge_microusd)} caption="Current month" mark="$" />
+        <MetricCard label="Tenant requests" value={currentUsage?.requests ?? 0} caption={tenantId && currentUsage ? currentUsage.month : "Select tenant"} mark="RQ" />
+        <MetricCard label="Measured usage" value={usd(currentUsage?.customer_charge_microusd)} caption="Current selected tenant month" mark="$" />
       </section>
 
       <section className="platform-two">
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Live admin test</h2><p>Default mode is platform test usage; tenant metering requires an explicit switch.</p></div><StatusBadge value={tenantMetering ? "TENANT_METERED" : "PLATFORM_TEST"} /></div>
+          <div className="platform-section-title"><div><h2>Live admin test</h2><p>Default mode is platform-only test usage. Tenant ID and billing are sent only after the explicit metering switch is enabled.</p></div><StatusBadge value={tenantMetering ? "TENANT_METERED" : "PLATFORM_TEST"} /></div>
           <div className="platform-form" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <label><span>Tenant context</span><select value={tenantId} onChange={(event) => setTenantId(event.target.value)}><option value="">Platform only</option>{(tenants.data?.items ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.amo_code}</option>)}</select></label>
+            <label><span>Tenant policy scope</span><select value={tenantId} onChange={(event) => setTenantId(event.target.value)}><option value="">Platform only</option>{(tenants.data?.items ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {tenant.amo_code}</option>)}</select></label>
             <label><span>Model</span><select value={model} onChange={(event) => setModel(event.target.value)}>{models.map((item) => <option key={item.model} value={item.model}>{item.display_name} · {item.tier}</option>)}</select></label>
           </div>
           <label style={{ display: "grid", gap: 5, marginTop: 10 }}><span>Prompt</span><textarea rows={8} value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
-          <div className="platform-actions" style={{ marginTop: 10 }}><label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={tenantMetering} disabled={!tenantId} onChange={(event) => setTenantMetering(event.target.checked)} />Record against selected tenant</label><button className="platform-btn primary" disabled={running || !prompt.trim()} onClick={runTest}>{running ? "Running…" : "Run live AI test"}</button></div>
+          <div className="platform-actions" style={{ marginTop: 10 }}><label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={tenantMetering} disabled={!tenantId || policy.loading || !currentPolicy?.enabled} onChange={(event) => setTenantMetering(event.target.checked)} />Record against selected tenant</label><button className="platform-btn primary" disabled={running || !prompt.trim() || (tenantMetering && !currentPolicy?.enabled)} onClick={runTest}>{running ? "Running…" : "Run live AI test"}</button></div>
           {runError ? <div className="platform-error">{runError}</div> : null}
           {result ? <div className="platform-card" style={{ marginTop: 12 }}><div className="platform-section-title"><div><h3>Response</h3><p>{result.model} · {result.latency_ms} ms · provider cost {usd(result.provider_cost_microusd)}</p></div><StatusBadge value="SUCCEEDED" /></div><div style={{ whiteSpace: "pre-wrap" }}>{result.text}</div><p><small>Input {result.usage.input_tokens.toLocaleString()} · cached {result.usage.cached_input_tokens.toLocaleString()} · output {result.usage.output_tokens.toLocaleString()} tokens</small></p></div> : null}
         </div>
 
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Tenant policy</h2><p>Disabled by default. Controlled-document AI requires separate permission.</p></div><StatusBadge value={currentPolicy?.status ?? "NO_TENANT"} /></div>
-          {!tenantId ? <p>Select a tenant to manage AI access.</p> : <><div className="platform-form" style={{ gridTemplateColumns: "1fr 1fr" }}><label><span>Plan</span><select value={plan} onChange={(event) => setPlan(event.target.value)}><option value="STANDARD">Standard · Luna</option><option value="ADVANCED">Advanced · Terra</option><option value="PROFESSIONAL">Professional · Sol</option></select></label><label><span>Monthly limit (USD)</span><input inputMode="decimal" value={budgetUsd} onChange={(event) => setBudgetUsd(event.target.value)} /></label></div><div className="platform-stack" style={{ marginTop: 10 }}><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />Enable tenant AI</label><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={allowDocs} onChange={(event) => setAllowDocs(event.target.checked)} />Allow authorised document excerpts to external AI</label></div><button className="platform-btn primary" style={{ marginTop: 12 }} onClick={savePolicy}>Save policy</button>{policyNotice ? <p>{policyNotice}</p> : null}{policyError ? <div className="platform-error">{policyError}</div> : null}</>}
-          {tenantId && usage.data ? <div className="platform-list" style={{ marginTop: 14 }}><div className="platform-list-row"><strong>Input tokens</strong><span>{usage.data.input_tokens.toLocaleString()}</span></div><div className="platform-list-row"><strong>Output tokens</strong><span>{usage.data.output_tokens.toLocaleString()}</span></div><div className="platform-list-row"><strong>Provider cost</strong><span>{usd(usage.data.provider_cost_microusd)}</span></div><div className="platform-list-row"><strong>Metered amount</strong><span>{usd(usage.data.customer_charge_microusd)}</span></div></div> : null}
+          <div className="platform-section-title"><div><h2>Tenant policy</h2><p>Disabled by default. Controlled-document AI requires separate permission.</p></div><StatusBadge value={currentPolicy?.status ?? (tenantId && policy.loading ? "LOADING" : "NO_TENANT")} /></div>
+          {!tenantId ? <p>Select a tenant to manage AI access.</p> : !currentPolicy ? <p>Loading the selected tenant AI policy…</p> : <><div className="platform-form" style={{ gridTemplateColumns: "1fr 1fr" }}><label><span>Plan</span><select value={plan} onChange={(event) => setPlan(event.target.value)}><option value="STANDARD">Standard · Luna</option><option value="ADVANCED">Advanced · Terra</option><option value="PROFESSIONAL">Professional · Sol</option></select></label><label><span>Monthly limit (USD)</span><input inputMode="decimal" value={budgetUsd} onChange={(event) => setBudgetUsd(event.target.value)} /></label></div><div className="platform-stack" style={{ marginTop: 10 }}><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />Enable tenant AI</label><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={allowDocs} onChange={(event) => setAllowDocs(event.target.checked)} />Allow authorised document excerpts to external AI</label></div><button className="platform-btn primary" style={{ marginTop: 12 }} disabled={policy.loading} onClick={savePolicy}>Save policy</button>{policyNotice ? <p>{policyNotice}</p> : null}{policyError ? <div className="platform-error">{policyError}</div> : null}</>}
+          {currentUsage ? <div className="platform-list" style={{ marginTop: 14 }}><div className="platform-list-row"><strong>Input tokens</strong><span>{currentUsage.input_tokens.toLocaleString()}</span></div><div className="platform-list-row"><strong>Output tokens</strong><span>{currentUsage.output_tokens.toLocaleString()}</span></div><div className="platform-list-row"><strong>Provider cost</strong><span>{usd(currentUsage.provider_cost_microusd)}</span></div><div className="platform-list-row"><strong>Metered amount</strong><span>{usd(currentUsage.customer_charge_microusd)}</span></div></div> : null}
         </div>
       </section>
 
