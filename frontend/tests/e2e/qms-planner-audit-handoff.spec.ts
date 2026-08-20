@@ -137,7 +137,14 @@ async function prepareApplication(page: Page): Promise<void> {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items: [], has_more: false, warning: null, source_errors: [] }),
+        body: JSON.stringify({
+          items: [],
+          has_more: false,
+          warning: null,
+          source_errors: [],
+          timezone_name: "UTC",
+          timezone_warning: "Tenant timezone is not configured; using UTC.",
+        }),
       });
       return;
     }
@@ -177,7 +184,7 @@ test.describe("QMS planner authoritative audit handoff", () => {
     await expect(openDrawer).toBeVisible({ timeout: 15_000 });
     await expect(openDrawer.getByLabel("Audit title")).toHaveValue("Planner handoff verification");
     await expect(openDrawer.getByLabel("Next due date")).toHaveValue("2026-08-21");
-    await expect(openDrawer.getByLabel("Criteria")).toHaveValue(/Planner requested start time: 10:30 EAT/);
+    await expect(openDrawer.getByLabel("Criteria")).toHaveValue(/Planner requested start time: 10:30 UTC/);
 
     const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), draftKey);
     expect(stored?.form?.title).toBe("Planner handoff verification");
