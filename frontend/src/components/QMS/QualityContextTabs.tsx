@@ -175,7 +175,7 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
 
 function assuranceSectionTabs(basePath: string): ContextTab[] {
   return [
-    { id: "assurance-home", label: "Assurance", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
+    { id: "assurance-home", label: "Overview", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
     { id: "assurance-audits", label: "Audit operations", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`] },
     { id: "assurance-findings", label: "Findings", path: `${basePath}/findings/register`, activePrefixes: [`${basePath}/findings`] },
     { id: "assurance-cars", label: "Corrective action", path: `${basePath}/cars/register`, activePrefixes: [`${basePath}/cars`] },
