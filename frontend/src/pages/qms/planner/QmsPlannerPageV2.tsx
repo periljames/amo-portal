@@ -11,7 +11,6 @@ import {
   Circle,
   CircleHelp,
   Clock3,
-  Command,
   ExternalLink,
   Filter,
   GripVertical,
@@ -38,7 +37,11 @@ import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import InlineError from "../../../components/shared/InlineError";
 import Button from "../../../components/UI/Button";
 import { apiRequest, qmsPath } from "../../../services/apiClient";
-import { plannerClockAt } from "./qmsPlannerClock";
+import {
+  plannerClockAt,
+  plannerTimezoneLabel,
+  plannerTimezoneOffsetMinutes,
+} from "./qmsPlannerClock";
 import {
   DEFAULT_PLANNER_PREFERENCES,
   PLANNER_CATEGORIES,
@@ -62,6 +65,8 @@ type CalendarResponse = {
   items?: Record<string, unknown>[];
   has_more?: boolean;
   warning?: string | null;
+  timezone_name?: string | null;
+  timezone_warning?: string | null;
   source_errors?: Array<{ label: string; message: string; type?: string }>;
 };
 
@@ -104,8 +109,8 @@ const DEFAULT_UI: PlannerUiPreferences = {
 };
 
 const HOUR_HEIGHT = 64;
-const TENANT_TIMEZONE = "Africa/Nairobi";
-const TENANT_TIMEZONE_LABEL = "EAT · UTC+3";
+const DEFAULT_TENANT_TIMEZONE = "UTC";
+const CLOCK_REFRESH_MS = 30_000;
 const QUICK_CREATE_OPTIONS: QuickCreateOption[] = [
   { kind: "audit", label: "Audit", enabled: true },
   { kind: "car", label: "CAR follow-up", enabled: false, unavailableReason: "CAR creation does not yet accept a planner draft." },
@@ -180,9 +185,12 @@ function hourLabel(hour: number, format: TimeFormat): string {
   return formatTime(`${String(hour % 24).padStart(2, "0")}:00`, format);
 }
 
-function utcHourLabel(hour: number, format: TimeFormat): string {
-  const utcHour = (hour - 3 + 24) % 24;
-  return formatTime(`${String(utcHour).padStart(2, "0")}:00`, format);
+function utcHourLabel(hour: number, format: TimeFormat, offsetMinutes: number): string {
+  const wallMinutes = hour * 60;
+  const utcMinutes = ((wallMinutes - offsetMinutes) % 1440 + 1440) % 1440;
+  const utcHour = Math.floor(utcMinutes / 60);
+  const utcMinute = utcMinutes % 60;
+  return formatTime(`${String(utcHour).padStart(2, "0")}:${String(utcMinute).padStart(2, "0")}`, format);
 }
 
 function initials(value: string | null | undefined): string {
@@ -200,10 +208,10 @@ function eventBelongsToUser(event: PlannerEvent, userId?: string): boolean {
   return keys.some((key) => String(event.source[key] || "") === String(userId));
 }
 
-function MiniMonth({ anchor, selectedDate, onSelect }: { anchor: Date; selectedDate: string; onSelect: (date: Date) => void }): React.ReactElement {
+function MiniMonth({ anchor, selectedDate, timeZone, onSelect }: { anchor: Date; selectedDate: string; timeZone: string; onSelect: (date: Date) => void }): React.ReactElement {
   const days = monthGridDays(anchor);
   const month = anchor.getMonth();
-  const today = plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey;
+  const today = plannerClockAt(new Date(), timeZone).dateKey;
   return (
     <section className="qms-planner-mini" aria-label="Mini month calendar">
       <header><strong>{anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong></header>
@@ -284,6 +292,7 @@ function MonthView({
   eventsByDate,
   selectedEventId,
   timeFormat,
+  timeZone,
   onSelectDate,
   onCreate,
   onSelectEvent,
@@ -294,6 +303,7 @@ function MonthView({
   eventsByDate: Map<string, PlannerEvent[]>;
   selectedEventId: string | null;
   timeFormat: TimeFormat;
+  timeZone: string;
   onSelectDate: (key: string) => void;
   onCreate: (date: string) => void;
   onSelectEvent: (event: PlannerEvent) => void;
@@ -302,7 +312,7 @@ function MonthView({
 }): React.ReactElement {
   const days = monthGridDays(anchor);
   const month = anchor.getMonth();
-  const today = plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey;
+  const today = plannerClockAt(new Date(), timeZone).dateKey;
   return (
     <div className="qms-planner-month" aria-label="Quality month planner">
       {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => <div key={label} className="qms-planner-month__dow">{label}</div>)}
@@ -357,6 +367,8 @@ function TimelineView({
   hourStart,
   hourEnd,
   timeFormat,
+  timeZone,
+  timeZoneLabel,
   showUtc,
   onCreate,
   onSelectEvent,
@@ -369,14 +381,18 @@ function TimelineView({
   hourStart: number;
   hourEnd: number;
   timeFormat: TimeFormat;
+  timeZone: string;
+  timeZoneLabel: string;
   showUtc: boolean;
   onCreate: (date: string, time: string) => void;
   onSelectEvent: (event: PlannerEvent) => void;
   onDropEvent: (eventId: string, targetDate: string) => void;
   onKeyboardMove: (event: PlannerEvent, days: number) => void;
 }): React.ReactElement {
-  const now = plannerClockAt(new Date(), TENANT_TIMEZONE);
+  const nowInstant = new Date();
+  const now = plannerClockAt(nowInstant, timeZone);
   const today = now.dateKey;
+  const offsetMinutes = plannerTimezoneOffsetMinutes(timeZone, days[0] || nowInstant);
   const hours = Array.from({ length: Math.max(1, hourEnd - hourStart + 1) }, (_, index) => hourStart + index);
   const height = Math.max(1, hourEnd - hourStart) * HOUR_HEIGHT;
   const nowMinutes = (now.hour - hourStart) * 60 + now.minute;
@@ -395,7 +411,7 @@ function TimelineView({
 
   return (
     <div className="qms-planner-timeline" style={{ "--planner-days": days.length, "--planner-hour-height": `${HOUR_HEIGHT}px` } as React.CSSProperties}>
-      <div className="qms-planner-timeline__corner"><strong>{TENANT_TIMEZONE_LABEL}</strong>{showUtc ? <small>UTC below</small> : null}</div>
+      <div className="qms-planner-timeline__corner"><strong>{timeZoneLabel}</strong>{showUtc ? <small>UTC below</small> : null}</div>
       {days.map((day) => {
         const key = isoDateKey(day);
         return (
@@ -444,7 +460,7 @@ function TimelineView({
       <div className="qms-planner-timeline__times" style={{ height }}>
         {hours.map((hour) => (
           <span key={hour} style={{ top: `${(hour - hourStart) * HOUR_HEIGHT}px` }}>
-            <b>{hourLabel(hour, timeFormat)}</b>{showUtc ? <small>{utcHourLabel(hour, timeFormat)}</small> : null}
+            <b>{hourLabel(hour, timeFormat)}</b>{showUtc ? <small>{utcHourLabel(hour, timeFormat, offsetMinutes)}</small> : null}
           </span>
         ))}
       </div>
@@ -527,7 +543,10 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const view = viewFromPath(location.pathname);
-  const todayKey = useMemo(() => plannerClockAt(new Date(), TENANT_TIMEZONE).dateKey, []);
+  const [tenantTimeZone, setTenantTimeZone] = useState(DEFAULT_TENANT_TIMEZONE);
+  const [clockInstant, setClockInstant] = useState(() => new Date());
+  const todayKey = useMemo(() => plannerClockAt(clockInstant, tenantTimeZone).dateKey, [clockInstant, tenantTimeZone]);
+  const tenantTimeZoneLabel = useMemo(() => plannerTimezoneLabel(tenantTimeZone, clockInstant), [clockInstant, tenantTimeZone]);
   const anchorKey = parseIsoDateKey(searchParams.get("date")) ? String(searchParams.get("date")) : todayKey;
   const anchor = useMemo(() => parseIsoDateKey(anchorKey) || parseIsoDateKey(todayKey) || new Date(), [anchorKey, todayKey]);
   const storageKey = `amoportal:qms-planner-v2:${amoCode}`;
@@ -556,6 +575,10 @@ export default function QmsPlannerPageV2(): React.ReactElement {
 
   useEffect(() => saveUiPreferences(storageKey, preferences), [preferences, storageKey]);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timer); }, [toast]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const setDateParam = useCallback((date: string, replace = true) => {
     const next = new URLSearchParams(searchParams);
@@ -585,9 +608,13 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         apiRequest<PlannerCapabilities>(qmsPath(amoCode, "/integrations/calendar/planner-capabilities"), { timeoutMs: 8000 }).catch(() => ({ can_reschedule: false, can_create_audit: false, can_manage_training: false })),
       ]);
       if (requestId !== loadRequestRef.current) return;
+      const resolvedTimeZone = String(calendar.timezone_name || DEFAULT_TENANT_TIMEZONE).trim() || DEFAULT_TENANT_TIMEZONE;
+      setTenantTimeZone(resolvedTimeZone);
+      setClockInstant(new Date());
       setCapabilities(access);
       setEvents((calendar.items || []).map((row) => normalisePlannerEvent(row, access.can_reschedule)).filter((event): event is PlannerEvent => Boolean(event)));
-      setWarning(calendar.has_more ? "This period contains more commitments than were returned. Use Agenda or narrow the range." : calendar.warning || null);
+      const limitWarning = calendar.has_more ? "This period contains more commitments than were returned. Use Agenda or narrow the range." : null;
+      setWarning([limitWarning, calendar.timezone_warning, calendar.warning].filter(Boolean).join(" ") || null);
       setSourceErrors(calendar.source_errors || []);
       if (force) setToast({ tone: "success", message: "Planner refreshed." });
     } catch (loadError) {
@@ -725,7 +752,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
           return;
         }
       }
-      const requestedTime = quickCreate.time ? `Planner requested start time: ${quickCreate.time} ${TENANT_TIMEZONE_LABEL}.` : "";
+      const requestedTime = quickCreate.time ? `Planner requested start time: ${quickCreate.time} ${tenantTimeZoneLabel}.` : "";
       window.localStorage.setItem(draftKey, JSON.stringify({
         form: {
           title: quickCreate.title.trim(),
@@ -770,7 +797,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
         <header className="qms-modern-planner__toolbar">
           <div className="qms-planner-toolbar__leading">
             <button type="button" className="qms-planner-icon-button" onClick={() => setPreferences((current) => ({ ...current, leftRailOpen: !current.leftRailOpen }))} aria-label={preferences.leftRailOpen ? "Hide planner sidebar" : "Show planner sidebar"}>{preferences.leftRailOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
-            <div className="qms-planner-title"><strong>{title}</strong><span>{filteredEvents.length} visible commitments · {TENANT_TIMEZONE_LABEL}</span></div>
+            <div className="qms-planner-title"><strong>{title}</strong><span>{filteredEvents.length} visible commitments · {tenantTimeZoneLabel}</span></div>
           </div>
           <button type="button" className="qms-planner-toolbar__search" onClick={() => setCommandOpen(true)}><Search size={16} /><span>Search planner or press / for commands</span><kbd>⌘K</kbd></button>
           <div className="qms-planner-toolbar__controls">
@@ -788,7 +815,7 @@ export default function QmsPlannerPageV2(): React.ReactElement {
 
         {preferences.leftRailOpen ? (
           <aside className="qms-planner-left-rail">
-            <MiniMonth anchor={anchor} selectedDate={selectedDate} onSelect={(date) => setDateParam(isoDateKey(date))} />
+            <MiniMonth anchor={anchor} selectedDate={selectedDate} timeZone={tenantTimeZone} onSelect={(date) => setDateParam(isoDateKey(date))} />
             <button type="button" className="qms-planner-quick-schedule" onClick={() => openQuickCreate()}><Plus size={16} /><span>Quick schedule</span><kbd>C</kbd></button>
             <section className="qms-planner-rail-section">
               <header><strong>Quality calendars</strong><Filter size={14} /></header>
@@ -835,8 +862,8 @@ export default function QmsPlannerPageV2(): React.ReactElement {
           {loading ? <div className="qms-planner-loading"><CalendarDays size={21} /><span>Loading quality commitments…</span></div> : null}
           {!loading && !error ? (
             <>
-              {view === "month" ? <MonthView anchor={anchor} eventsByDate={eventsByDate} selectedEventId={selectedEventId} timeFormat={preferences.timeFormat} onSelectDate={(key) => { setSelectedDate(key); setDateParam(key); }} onCreate={(date) => openQuickCreate(date)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
-              {view === "week" || view === "day" ? <TimelineView days={visibleDays} eventsByDate={eventsByDate} selectedEventId={selectedEventId} hourStart={preferences.hourStart} hourEnd={preferences.hourEnd} timeFormat={preferences.timeFormat} showUtc={preferences.showUtc} onCreate={(date, time) => openQuickCreate(date, time)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
+              {view === "month" ? <MonthView anchor={anchor} eventsByDate={eventsByDate} selectedEventId={selectedEventId} timeFormat={preferences.timeFormat} timeZone={tenantTimeZone} onSelectDate={(key) => { setSelectedDate(key); setDateParam(key); }} onCreate={(date) => openQuickCreate(date)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
+              {view === "week" || view === "day" ? <TimelineView days={visibleDays} eventsByDate={eventsByDate} selectedEventId={selectedEventId} hourStart={preferences.hourStart} hourEnd={preferences.hourEnd} timeFormat={preferences.timeFormat} timeZone={tenantTimeZone} timeZoneLabel={tenantTimeZoneLabel} showUtc={preferences.showUtc} onCreate={(date, time) => openQuickCreate(date, time)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
               {view === "agenda" ? <AgendaView events={filteredEvents} selectedEventId={selectedEventId} timeFormat={preferences.timeFormat} onSelect={selectEvent} /> : null}
             </>
           ) : null}
