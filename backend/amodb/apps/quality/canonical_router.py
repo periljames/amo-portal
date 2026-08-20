@@ -1,8 +1,9 @@
 """Canonical Quality API composition.
 
 The established QMS endpoints remain in ``canonical_router_legacy`` while the
-modern planning surfaces are isolated in dedicated routers. Keeping composition
-in this module preserves every existing import path used by the application.
+modern planning and provider-governance surfaces are isolated in dedicated
+routers. Keeping composition in this module preserves every existing import path
+used by the application.
 """
 
 from fastapi import APIRouter
@@ -19,6 +20,7 @@ from .canonical_router_legacy import (
 from .planner_calendar_enrichment_router import planner_calendar_enrichment_router
 from .planner_router import planner_router
 from .planner_schedule_router import planner_schedule_router
+from .provider_governance_router import provider_governance_router
 
 
 def _route_endpoint(route_item):
@@ -86,10 +88,10 @@ def _insert_before_catchalls(api_router: APIRouter, routes: list) -> None:
     api_router.routes[catchall_index:catchall_index] = routes
 
 
-def _install_planner_routes(api_router: APIRouter) -> None:
-    """Register exact planner routes before generic QMS handlers."""
+def _install_specialist_routes(api_router: APIRouter) -> None:
+    """Register exact operational routes before generic QMS handlers."""
 
-    for extension_router in (planner_router, planner_schedule_router):
+    for extension_router in (planner_router, planner_schedule_router, provider_governance_router):
         _insert_before_catchalls(
             api_router,
             _capture_extension_routes(api_router, extension_router),
@@ -110,9 +112,9 @@ def _install_calendar_override(api_router: APIRouter) -> None:
 
 
 # Direct core-router consumers and both public URL families must receive the same
-# planner contract, ahead of every generic module-path catch-all. The calendar
+# specialist contract, ahead of every generic module-path catch-all. The calendar
 # override removes the older exact projection route, avoiding duplicate OpenAPI
 # operations while retaining all non-planner legacy endpoints.
 for _api_router in (core_router, router, legacy_router):
     _install_calendar_override(_api_router)
-    _install_planner_routes(_api_router)
+    _install_specialist_routes(_api_router)

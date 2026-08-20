@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { Bell, MessageCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getCachedUser, getToken } from "../../services/auth";
@@ -42,12 +44,17 @@ function targetLabel(kind: ChatThread["kind"]): string {
   return "Group";
 }
 
+function badgeLabel(value: number): string {
+  return value > 99 ? "99+" : String(value);
+}
+
 export function MessagingHub() {
   const queryClient = useQueryClient();
   const user = getCachedUser();
   const authenticated = Boolean(getToken() && user?.id);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"chats" | "notifications">("chats");
+  const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [showDirectory, setShowDirectory] = useState(false);
   const [directoryTab, setDirectoryTab] = useState<DirectoryTab>("users");
@@ -115,6 +122,17 @@ export function MessagingHub() {
   });
 
   useEffect(() => {
+    const syncHeaderTarget = () => {
+      const next = document.querySelector<HTMLElement>(".tenant-shell__topbar-actions");
+      setHeaderTarget((current) => current === next ? current : next);
+    };
+    syncHeaderTarget();
+    const observer = new MutationObserver(syncHeaderTarget);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const onRealtime = () => void queryClient.invalidateQueries({ queryKey: ["messaging"] });
     window.addEventListener(EVENT_NAME, onRealtime);
     return () => window.removeEventListener(EVENT_NAME, onRealtime);
@@ -150,6 +168,14 @@ export function MessagingHub() {
     setSelectedThreadId(threadId);
     setMentionUserIds([]);
     setShowDirectory(false);
+  };
+  const openChats = () => {
+    setTab("chats");
+    setOpen(true);
+  };
+  const openNotifications = () => {
+    setTab("notifications");
+    setOpen(true);
   };
 
   const openTarget = useMutation({
@@ -206,10 +232,25 @@ export function MessagingHub() {
 
   if (!authenticated) return null;
   const unreadTotal = unreadQuery.data?.total || 0;
+  const unreadMessages = unreadQuery.data?.messages || 0;
+  const unreadNotifications = unreadQuery.data?.notifications || 0;
   const preferences = preferencesQuery.data;
 
+  const headerLaunchers = (
+    <div className="messaging-header-launchers" aria-label="Messages and notifications">
+      <button type="button" className="tenant-shell__icon-button messaging-header-button" onClick={openChats} aria-label={`Messages${unreadMessages ? `, ${unreadMessages} unread` : ""}`} title="Messages">
+        <MessageCircle size={17} aria-hidden="true" />
+        {unreadMessages ? <b>{badgeLabel(unreadMessages)}</b> : null}
+      </button>
+      <button type="button" className="tenant-shell__icon-button messaging-header-button" onClick={openNotifications} aria-label={`Notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`} title="Notifications">
+        <Bell size={17} aria-hidden="true" />
+        {unreadNotifications ? <b>{badgeLabel(unreadNotifications)}</b> : null}
+      </button>
+    </div>
+  );
+
   return (
-    <div className="messaging-hub" aria-live="polite">
+    <div className={`messaging-hub${headerTarget ? " messaging-hub--header" : ""}`} aria-live="polite">
       {open ? (
         <section className="messaging-panel" aria-label="Messages and notifications">
           <header className="messaging-header">
@@ -236,8 +277,8 @@ export function MessagingHub() {
           ) : null}
 
           <nav className="messaging-tabs" aria-label="Inbox sections">
-            <button type="button" className={tab === "chats" ? "is-active" : ""} onClick={() => setTab("chats")}>Chats <span>{unreadQuery.data?.messages || 0}</span></button>
-            <button type="button" className={tab === "notifications" ? "is-active" : ""} onClick={() => setTab("notifications")}>Notifications <span>{unreadQuery.data?.notifications || 0}</span></button>
+            <button type="button" className={tab === "chats" ? "is-active" : ""} onClick={() => setTab("chats")}>Chats <span>{unreadMessages}</span></button>
+            <button type="button" className={tab === "notifications" ? "is-active" : ""} onClick={() => setTab("notifications")}>Notifications <span>{unreadNotifications}</span></button>
           </nav>
 
           {tab === "notifications" ? (
@@ -252,7 +293,7 @@ export function MessagingHub() {
                     <button type="button" className={`messaging-thread ${thread.id === effectiveThreadId ? "is-selected" : ""}`} key={thread.id} onClick={() => selectThread(thread.id)}>
                       <span className="messaging-avatar">{initials(thread.title)}</span>
                       <span className="messaging-thread-copy"><span><strong>{thread.title || "Conversation"}</strong><time>{relativeTime(thread.last_message_at || thread.updated_at)}</time></span><span>{thread.last_message_preview || targetLabel(thread.kind)}</span></span>
-                      {thread.unread_count ? <b className="messaging-badge">{thread.unread_count}</b> : null}
+                      {thread.unread_count ? <b className="messaging-badge">{badgeLabel(thread.unread_count)}</b> : null}
                     </button>
                   ))}
                   {!threadsQuery.isLoading && threads.length === 0 ? <p className="messaging-empty">No conversations yet. Start with a person, department or group.</p> : null}
@@ -316,7 +357,10 @@ export function MessagingHub() {
           )}
         </section>
       ) : null}
-      <button type="button" className="messaging-launcher" onClick={() => setOpen(true)} aria-label={`Open inbox${unreadTotal ? `, ${unreadTotal} unread` : ""}`}><span aria-hidden="true">✉</span>{unreadTotal ? <b>{unreadTotal > 99 ? "99+" : unreadTotal}</b> : null}</button>
+
+      {headerTarget
+        ? createPortal(headerLaunchers, headerTarget)
+        : <button type="button" className="messaging-launcher" onClick={openChats} aria-label={`Open inbox${unreadTotal ? `, ${unreadTotal} unread` : ""}`}><MessageCircle size={20} aria-hidden="true" />{unreadTotal ? <b>{badgeLabel(unreadTotal)}</b> : null}</button>}
     </div>
   );
 }

@@ -56,6 +56,18 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/fieldwork").kind).toBe("known");
   });
 
+  it("recognises every canonical live-audit stage before the not-found guard", () => {
+    const auditId = "a22a4ec1-1bba-4b19-b2c1-f17b078a11ea";
+    for (const stage of ["setup", "prepare", "live", "closing", "follow-up", "archive"]) {
+      const path = `/maintenance/safarilink/quality/audits/${auditId}/${stage}`;
+      expect(classifyQmsPath(path), path).toMatchObject({
+        kind: "known",
+        amoCode: "safarilink",
+        module: expect.objectContaining({ id: "audits" }),
+      });
+    }
+  });
+
   it("accepts human-readable audit and CAR references", () => {
     expect(classifyQmsPath("/maintenance/safarilink/quality/audits/QAR-MO-26-002?tab=war-room")).toMatchObject({
       kind: "known",
