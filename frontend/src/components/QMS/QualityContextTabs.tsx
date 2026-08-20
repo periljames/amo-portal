@@ -279,7 +279,8 @@ const QualityContextTabs: React.FC = () => {
   const isCarRecord = moduleSegment === "cars" && Boolean(safeRecordKey) && !STATIC_CAR_VIEWS.has(safeRecordKey);
   const isAssuranceHub = !moduleSegment && workspace === "assurance";
   const isAssuranceModule = Boolean(moduleSegment && ASSURANCE_MODULES.has(moduleSegment));
-  const tabs = isAuditRecord
+  const workspaceTabs = topLevelTabs(route);
+  const contextualTabs = isAuditRecord
     ? auditRecordTabs(route.basePath, safeRecordKey)
     : isCarRecord
       ? carRecordTabs(route.basePath, safeRecordKey)
@@ -287,7 +288,7 @@ const QualityContextTabs: React.FC = () => {
         ? auditSectionTabs(route.basePath)
         : isAssuranceHub || isAssuranceModule
           ? assuranceSectionTabs(route.basePath)
-          : topLevelTabs(route);
+          : [];
 
   const title = isAuditRecord
     ? "Audit lifecycle"
@@ -312,6 +313,16 @@ const QualityContextTabs: React.FC = () => {
 
   const PrimaryIcon = primaryAction.icon;
 
+  const renderTabs = (tabs: ContextTab[]) => tabs.map((tab) => {
+    const Icon = tab.icon;
+    const active = tabIsActive(tab, location.pathname, location.search);
+    return (
+      <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
+        {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
+      </button>
+    );
+  });
+
   return createPortal(
     <section className="quality-context-bar" aria-label="Quality Assurance workspace navigation">
       <div className="quality-context-bar__identity">
@@ -319,22 +330,20 @@ const QualityContextTabs: React.FC = () => {
         <span><small>Quality assurance</small><strong>{title}</strong></span>
       </div>
 
-      <nav className="quality-context-bar__tabs" aria-label={`${title} related pages`}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = tabIsActive(tab, location.pathname, location.search);
-          return (
-            <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
-              {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
-            </button>
-          );
-        })}
+      <nav className="quality-context-bar__tabs" aria-label="Quality Assurance workspaces">
+        {renderTabs(workspaceTabs)}
       </nav>
 
       <div className="quality-context-bar__actions">
         <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
         <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}><PrimaryIcon size={15} aria-hidden="true" /><span>{primaryAction.label}</span></button>
       </div>
+
+      {contextualTabs.length > 0 ? (
+        <nav className="quality-context-bar__subtabs" aria-label={`${title} related pages`}>
+          {renderTabs(contextualTabs)}
+        </nav>
+      ) : null}
     </section>,
     mountTarget,
   );
