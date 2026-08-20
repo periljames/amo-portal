@@ -56,7 +56,7 @@ _PORTFOLIO_SCRIPT = r"""
   const table = root.querySelector('[data-paginated-table]');
   if (table) {
     const rows = Array.from(table.querySelectorAll('[data-training-row]'));
-    const pageSize = Math.max(1, Number(table.dataset.pageSize || 5));
+    const pageSize = Math.max(1, Number(table.dataset.pageSize || 10));
     const previous = root.querySelector('[data-page-prev]');
     const next = root.querySelector('[data-page-next]');
     const summary = root.querySelector('[data-page-summary]');
@@ -766,7 +766,7 @@ def _training_profile_html(payload: dict[str, Any]) -> HTMLResponse:
       <section class='portfolio-panel training-panel' id='panel-training' role='tabpanel' data-tab-panel='training' hidden>
         <div class='panel-heading'><div><h3>Training record</h3><p>Verified completions and recurrent due dates.</p></div></div>
         <section class='record-shell glass' aria-label='Training record table'>
-          <table class='record-table' data-paginated-table data-page-size='5'>
+          <table class='record-table' data-paginated-table data-page-size='10'>
             <colgroup><col class='course'><col class='completed'><col class='due'><col class='certificate'></colgroup>
             <thead><tr><th scope='col'>Course</th><th scope='col'>Completed</th><th scope='col'>Next due</th><th scope='col'>Certificate</th></tr></thead>
             <tbody>{''.join(table_rows)}</tbody>
