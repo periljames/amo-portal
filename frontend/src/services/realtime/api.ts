@@ -30,13 +30,36 @@ export async function fetchRealtimeToken(): Promise<RealtimeTokenResponse> {
   return res.json();
 }
 
+/**
+ * Realtime only needs process liveness here. Full readiness (/healthz or
+ * /readyz) also includes database, migration and worker-family checks and may
+ * legitimately return 503 while the API process remains reachable. Treating
+ * that as realtime transport failure creates false degraded/offline state and
+ * can unnecessarily gate unrelated interactive work such as QMS rescheduling.
+ *
+ * Keep the historical function name for call-site compatibility, but probe the
+ * dedicated process-only /livez endpoint and normalise its response to the
+ * status shape expected by RealtimeProvider.
+ */
 export async function fetchHealthz(): Promise<{ status: string }> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort("timeout"), 5000);
-  const res = await fetch(`${getApiBaseUrl()}/healthz`, { credentials: "include", signal: controller.signal });
-  window.clearTimeout(timeout);
-  if (!res.ok) throw new Error(`healthz failed ${res.status}`);
-  return res.json();
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/livez`, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json", "X-AMO-Silent-Error": "1" },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`livez failed ${res.status}`);
+    const body = await res.json().catch(() => null) as { status?: unknown; process?: unknown } | null;
+    if (body?.status !== "alive" && body?.process !== true) {
+      throw new Error("livez returned an invalid liveness response");
+    }
+    return { status: "ok" };
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export async function fetchServerTime(): Promise<{ epoch_ms: number }> {
