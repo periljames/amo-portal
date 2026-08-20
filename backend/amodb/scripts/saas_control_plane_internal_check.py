@@ -74,6 +74,13 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "Tenant-bound superuser accounts cannot use platform AI access for another AMO",
         "Cross-tenant AI data access requires an active governed platform support session",
     ),
+    BACKEND_ROOT / "amodb/apps/platform/ai_execution_policy.py": (
+        "def install_ai_execution_policy(",
+        "ai_access.require_tenant_data_access(",
+        'billing_scope == "TENANT"',
+        "positive monthly budget",
+        "ai_gateway.run_ai = guarded_run_ai",
+    ),
     BACKEND_ROOT / "amodb/apps/platform/ai_gateway.py": (
         "def run_ai(",
         "def calculate_provider_cost(",
@@ -90,6 +97,11 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "OPENAI_RESPONSES_URL,",
         "usage accounting",
         "Paid tools are intentionally not enabled",
+    ),
+    BACKEND_ROOT / "amodb/apps/platform/ai_router.py": (
+        "positive monthly budget",
+        "tenant_id is only accepted for explicitly tenant-metered playground requests",
+        "require_platform_superuser",
     ),
     BACKEND_ROOT / "amodb/apps/platform/managed_ai_provider_policy.py": (
         "install_managed_ai_provider_policy",
@@ -162,6 +174,7 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "_saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook",
         "install_tenant_provider_override_policy()",
         "install_managed_ai_provider_policy()",
+        "install_ai_execution_policy()",
         "router.include_router(ai_router)",
         "router.include_router(tenant_saas_router)",
     ),
@@ -308,6 +321,7 @@ FORBIDDEN: dict[Path, tuple[str, ...]] = {
 
 EXTRA_COMPILE = (
     BACKEND_ROOT / "amodb/apps/platform/tests/test_ai_gateway.py",
+    BACKEND_ROOT / "amodb/apps/platform/tests/test_ai_execution_policy.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_managed_ai_provider_policy.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_control_plane.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_queue_fencing.py",
@@ -359,11 +373,14 @@ def main() -> int:
     checks["gateway-puback-before-outbox-clear"] = {"passed": ack_order}
 
     package_init = (BACKEND_ROOT / "amodb/apps/platform/__init__.py").read_text(encoding="utf-8")
-    policy_order = package_init.index("install_tenant_provider_override_policy()") < package_init.index("from .saas_router import")
-    managed_ai_order = package_init.index("install_managed_ai_provider_policy()") < package_init.index("from .saas_router import")
-    passed = passed and policy_order and managed_ai_order
+    route_import = package_init.index("from .saas_router import")
+    policy_order = package_init.index("install_tenant_provider_override_policy()") < route_import
+    managed_ai_order = package_init.index("install_managed_ai_provider_policy()") < route_import
+    ai_execution_order = package_init.index("install_ai_execution_policy()") < route_import
+    passed = passed and policy_order and managed_ai_order and ai_execution_order
     checks["tenant-provider-policy-before-route-import"] = {"passed": policy_order}
     checks["managed-ai-policy-before-route-import"] = {"passed": managed_ai_order}
+    checks["ai-execution-policy-before-route-import"] = {"passed": ai_execution_order}
 
     compile_rows: list[dict[str, object]] = []
     compile_targets = tuple(REQUIRED) + EXTRA_COMPILE
