@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
@@ -110,13 +110,18 @@ const QualityDialogFocusRestorer: React.FC = () => {
 
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const queryClient = useQueryClient();
-  const [cacheRevision, setCacheRevision] = useState(0);
   const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
-  useEffect(() => queryClient.getQueryCache().subscribe(() => { setCacheRevision((current) => current + 1); }), [queryClient]);
-  const state = queryClient.getQueryState(queryKey);
-  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
-  const degraded = data?.degraded === true || state?.status === "error";
-  void cacheRevision;
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => queryClient.getQueryCache().subscribe(() => onStoreChange()),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(() => {
+    const state = queryClient.getQueryState(queryKey);
+    const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
+    return data?.degraded === true || state?.status === "error";
+  }, [queryClient, queryKey]);
+  const degraded = useSyncExternalStore(subscribe, getSnapshot, () => false);
+
   useEffect(() => {
     document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
     return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
