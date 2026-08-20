@@ -73,9 +73,8 @@ def seed() -> None:
         db.flush()
 
         # require_module("training") first enforces the tenant billing licence,
-        # then its module-level entitlement.  Keep this disposable tenant on the
-        # production path by seeding a real active zero-cost CI SKU/licence rather
-        # than bypassing billing inside either the application or the browser test.
+        # then its module-level entitlement. Keep this disposable tenant on the
+        # production path rather than bypassing either control in browser CI.
         sku = account_models.CatalogSKU(
             id=CATALOG_SKU_ID,
             code="CI-TRAINING-GOVERNANCE",
@@ -137,10 +136,6 @@ def seed() -> None:
         db.add(admin)
         db.flush()
 
-        # The canonical Training router is protected by require_module("training").
-        # The disposable live-browser tenant therefore needs the same explicit
-        # tenant module subscription as a real enabled tenant.  This keeps the CI
-        # journey behind production entitlement checks instead of bypassing them.
         db.add(account_models.ModuleSubscription(
             id=TRAINING_MODULE_SUBSCRIPTION_ID,
             amo_id=AMO_ID,
@@ -398,7 +393,7 @@ def seed() -> None:
             revision_no=1,
             title="Training Governance CI Exam",
             selection_rules={"question_count": 1},
-            result_rules={"pass_mark": 75, "max_attempts": 2, "cooldown_hours": 0},
+            result_rules={"pass_threshold": 75, "max_attempts": 2, "cooldown_hours": 0},
             security_rules={"proctor_required": False},
             status="ACTIVE",
             approved_by_user_id=ADMIN_ID,
