@@ -57,11 +57,12 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
 
     const setupPath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.realtime_audit_ref)}/setup?tab=war-room`;
     await page.goto(setupPath, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Quality route not found" })).toHaveCount(0);
     const setup = page.getByRole("region", { name: "Audit setup workspace" });
     await expect(setup).toBeVisible({ timeout: 30_000 });
 
-    await setup.getByLabel("Scope", { exact: true }).fill("Real browser setup scope covering controlled maintenance and Quality records.");
-    await setup.getByLabel("Criteria", { exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
+    await setup.getByRole("textbox", { name: "Scope", exact: true }).fill("Real browser setup scope covering controlled maintenance and Quality records.");
+    await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
     await setup.getByLabel("Planned start", { exact: true }).fill(futureDate(30));
