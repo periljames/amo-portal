@@ -34,9 +34,38 @@ export type PortalFetchInit = RequestInit & {
 };
 
 export const PROXY_TRANSPORT_ERROR_HEADER = "X-AMO-Proxy-Transport-Error";
+export const CLIENT_TIMEZONE_HEADER = "X-AMO-Client-Timezone";
 
 export function isProxyTransportFailureResponse(response: Response): boolean {
   return response.headers.get(PROXY_TRANSPORT_ERROR_HEADER) === "1";
+}
+
+/**
+ * Return the IANA timezone currently selected by the client operating system.
+ * Browsers expose this through Intl without requesting precise geolocation.
+ * This is preferable to GPS for clock selection: GPS provides coordinates,
+ * while the OS timezone already accounts for locality and daylight-saving rules.
+ */
+export function detectClientTimeZone(): string | null {
+  if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat !== "function") return null;
+  try {
+    const candidate = String(Intl.DateTimeFormat().resolvedOptions().timeZone || "").trim();
+    if (!candidate) return null;
+    // Validate the browser-provided identifier before it crosses the API boundary.
+    new Intl.DateTimeFormat("en", { timeZone: candidate }).format(new Date(0));
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+function requestHeadersWithClientContext(headersInit: HeadersInit | undefined): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has(CLIENT_TIMEZONE_HEADER)) {
+    const timeZone = detectClientTimeZone();
+    if (timeZone) headers.set(CLIENT_TIMEZONE_HEADER, timeZone);
+  }
+  return headers;
 }
 
 export class OfflineQueuedError extends Error {
@@ -262,7 +291,8 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   );
 
   try {
-    const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
+    const requestHeaders = requestHeadersWithClientContext(requestInit.headers);
+    const response = await fetch(absoluteUrl(path), { ...requestInit, headers: requestHeaders, signal: controller.signal });
     const proxyTransportFailure = isProxyTransportFailureResponse(response);
     // A Vite proxy connection failure is an HTTP-shaped transport error. Do
     // not classify it as a backend response or replace it with stale cache;
