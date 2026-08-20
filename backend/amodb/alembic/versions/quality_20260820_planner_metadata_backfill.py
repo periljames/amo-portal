@@ -1,12 +1,14 @@
 """Backfill authoritative Planner metadata for pre-existing audit schedules.
 
 Revision ID: quality_260820_planner_backfill
-Revises: quality_260820_provider_gov
+Revises: quality_260820_provider_gov, procurement_260820_supplier_gov
 Create Date: 2026-08-20
 
 This migration is intentionally data-preserving. Existing schedule identity,
 frequency, scope, ownership and dates remain untouched; only the metadata row
-required by the authoritative Planner lifecycle is added where absent.
+required by the authoritative Planner lifecycle is added where absent. It also
+joins the two governance heads already present on main so the repository returns
+to one exact Alembic head.
 """
 from __future__ import annotations
 
@@ -18,7 +20,10 @@ import sqlalchemy as sa
 
 
 revision = "quality_260820_planner_backfill"
-down_revision = "quality_260820_provider_gov"
+down_revision = (
+    "quality_260820_provider_gov",
+    "procurement_260820_supplier_gov",
+)
 branch_labels = None
 depends_on = None
 
