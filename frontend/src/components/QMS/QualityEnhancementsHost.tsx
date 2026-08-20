@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
@@ -83,7 +83,7 @@ const QualityDialogFocusRestorer: React.FC = () => {
       if (!(target instanceof HTMLElement) || target.closest('[role="dialog"][aria-modal="true"]')) return;
       lastExternalFocus = target;
     };
-    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => dialog.classList.contains("qms-planner-create-modal") ? document.querySelector<HTMLElement>(".qms-planner-quick-schedule") : null;
+    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => dialog.classList.contains("qms-planner-create-modal") ? document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button") : null;
     const observer = new MutationObserver(() => {
       const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
       if (dialog && !activeDialog) {
@@ -110,13 +110,18 @@ const QualityDialogFocusRestorer: React.FC = () => {
 
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const queryClient = useQueryClient();
-  const [cacheRevision, setCacheRevision] = useState(0);
   const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
-  useEffect(() => queryClient.getQueryCache().subscribe(() => { setCacheRevision((current) => current + 1); }), [queryClient]);
-  const state = queryClient.getQueryState(queryKey);
-  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
-  const degraded = data?.degraded === true || state?.status === "error";
-  void cacheRevision;
+  const subscribe = useCallback(
+    (notify: () => void) => queryClient.getQueryCache().subscribe(() => notify()),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(() => {
+    const state = queryClient.getQueryState(queryKey);
+    const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
+    return data?.degraded === true || state?.status === "error";
+  }, [queryClient, queryKey]);
+  const degraded = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
   useEffect(() => {
     document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
     return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
