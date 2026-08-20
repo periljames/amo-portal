@@ -3,7 +3,14 @@ from __future__ import annotations
 import pytest
 
 from amodb.apps.platform import managed_ai_provider_policy as policy
-from amodb.apps.platform import saas_services
+from amodb.apps.platform import saas_providers, saas_services
+
+
+def test_openai_provider_registry_does_not_offer_model_override() -> None:
+    definition = saas_providers.PROVIDERS["openai"]
+    assert "model" not in definition.config_fields
+    catalog = next(row for row in saas_providers.provider_catalog() if row["provider"] == "openai")
+    assert "model" not in catalog["config_fields"]
 
 
 def test_tenant_provider_list_hides_managed_ai(monkeypatch) -> None:
