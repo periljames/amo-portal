@@ -13,7 +13,7 @@ def _future():
 
 
 def _set_cookie_headers(response: Response) -> list[str]:
-    return response.headers.get_list("set-cookie")
+    return response.headers.getlist("set-cookie")
 
 
 def test_active_guarded_logout_clears_canonical_and_legacy_cookie_paths():
