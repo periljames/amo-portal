@@ -1,9 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import QmsPlannerPageV2 from "./QmsPlannerPageV2";
-import { plannerClockAt } from "./qmsPlannerClock";
 
-const PLANNER_TIMEZONE = "Africa/Nairobi";
-const CLOCK_REFRESH_MS = 30_000;
 const FOCUS_RESTORE_DELAYS_MS = [0, 40, 120, 240, 500, 1000, 1800];
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -252,21 +249,10 @@ function usePlannerDialogFocusManagement(): void {
   }, []);
 }
 
-// Creation stays in QmsPlannerPageV2 and its authoritative module handoffs;
-// this wrapper owns planner clock and dialog lifecycle behavior only.
+// QmsPlannerPageV2 owns the tenant timezone and live clock because those values
+// come from the tenant-scoped calendar projection. This wrapper owns only modal
+// focus containment and trigger restoration.
 export default function QmsPlannerLivePage(): React.ReactElement {
-  const [clockInstant, setClockInstant] = useState(() => new Date());
   usePlannerDialogFocusManagement();
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const plannerClock = useMemo(
-    () => plannerClockAt(clockInstant, PLANNER_TIMEZONE),
-    [clockInstant],
-  );
-
-  return <QmsPlannerPageV2 key={plannerClock.dateKey} />;
+  return <QmsPlannerPageV2 />;
 }
