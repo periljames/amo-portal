@@ -80,6 +80,12 @@ def ai_tenant_policy_update(
     db: Session = Depends(get_db),
     user=Depends(require_platform_superuser),
 ):
+    if payload.enabled and payload.hard_limit and payload.monthly_budget_microusd <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Enabled tenant AI with a hard limit requires a positive monthly budget",
+        )
+
     model = payload.model or ai_gateway.PLAN_DEFAULT_MODEL[payload.plan_code]
     definition = ai_gateway.AI_MODELS.get(model)
     if definition is None:
