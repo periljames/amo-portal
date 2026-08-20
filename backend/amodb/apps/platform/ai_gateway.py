@@ -14,8 +14,9 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.observability import operation_span, record_provider_call
 
+from . import ai_openai
 from . import models as platform_models
-from . import saas_providers, saas_services
+from . import saas_services
 
 
 AI_MODULE_CODE = "ai"
@@ -23,6 +24,7 @@ AI_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_TIER = "STANDARD"
 LONG_CONTEXT_THRESHOLD = 272_000
+MAX_PORTAL_OUTPUT_TOKENS = 8_192
 
 AI_TIER_ORDER = {"STANDARD": 10, "ADVANCED": 20, "PROFESSIONAL": 30}
 PLAN_DEFAULT_MODEL = {
@@ -47,9 +49,9 @@ class AIModelDefinition:
 
 # Direct OpenAI standard-processing rate snapshots. Money is represented in
 # micro-USD so a single low-cost request can be measured without rounding it to
-# a cent. The gateway currently sends text-only Responses API requests and does
-# not enable paid tools, regional processing or Fast mode; those must receive
-# their own explicit rate entries before they can be billable through the portal.
+# a cent. The gateway sends text-only Responses API requests and does not enable
+# paid tools, regional processing or Fast mode; those require their own explicit
+# rate entries before they can be billable through the portal.
 AI_MODELS: dict[str, AIModelDefinition] = {
     "gpt-5.6-luna": AIModelDefinition(
         "gpt-5.6-luna", "GPT-5.6 Luna", "STANDARD",
@@ -269,6 +271,11 @@ def _resolve_model(policy: dict[str, Any] | None, requested_model: str | None) -
     return item
 
 
+def _provider_model_matches(requested_model: str, provider_model: str) -> bool:
+    """Allow OpenAI's dated/versioned alias while retaining our rated catalogue id."""
+    return provider_model == requested_model or provider_model.startswith(f"{requested_model}-")
+
+
 def _record_tenant_usage(
     db: Session,
     *,
@@ -371,18 +378,19 @@ def run_ai(
     assert credential is not None
 
     config = dict(credential.config_json or {})
-    config["model"] = item.model
     secret = saas_services.provider_secrets(credential)
     prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     started = time.perf_counter()
     provider_status = "ERROR"
     try:
         with operation_span("provider.ai.fetch", provider="AI", operation="FETCH"):
-            draft = saas_providers.openai_support_response(
+            draft = ai_openai.responses_request(
                 secret=secret,
                 config=config,
+                model=item.model,
                 instructions=instructions,
-                user_message=prompt,
+                prompt=prompt,
+                max_output_tokens=min(item.max_output_tokens, MAX_PORTAL_OUTPUT_TOKENS),
             )
         provider_status = "SUCCESS"
     except Exception as exc:
@@ -415,10 +423,12 @@ def run_ai(
             duration_seconds=time.perf_counter() - started,
         )
 
-    actual_model = str(draft.get("model") or item.model)
-    if actual_model not in AI_MODELS:
-        raise RuntimeError(f"Provider returned unpriced model {actual_model!r}")
-    cost = calculate_provider_cost(actual_model, draft.get("usage") or {})
+    provider_model = str(draft.get("model") or item.model)
+    if not _provider_model_matches(item.model, provider_model):
+        raise RuntimeError(
+            f"Provider returned model {provider_model!r}, which does not match requested rated model {item.model!r}"
+        )
+    cost = calculate_provider_cost(item.model, draft.get("usage") or {})
     usage = cost["usage"]
     provider_cost = int(cost["provider_cost_microusd"])
     markup_bps = int((policy or {}).get("markup_bps") or 0)
@@ -438,6 +448,11 @@ def run_ai(
 
     response_id = str(draft.get("response_id") or "") or None
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    budget = int((policy or {}).get("monthly_budget_microusd") or 0)
+    pre_request_used = 0
+    if billing_scope == "TENANT" and tenant_id and budget:
+        pre_request_used = max(0, _meter_value(db, tenant_id, "customer_charge_microusd", month) - customer_charge)
+    budget_exceeded_by_request = bool(budget and (pre_request_used + customer_charge) > budget)
     _audit(
         db,
         actor_user_id=actor_user_id,
@@ -447,8 +462,9 @@ def run_ai(
         reason="AI request completed through the governed portal gateway",
         details={
             "provider": AI_PROVIDER,
-            "model": actual_model,
-            "tier": AI_MODELS[actual_model].tier,
+            "rated_model": item.model,
+            "provider_model": provider_model,
+            "tier": item.tier,
             "feature_code": feature_code,
             "billing_scope": billing_scope,
             "usage_month": month,
@@ -462,13 +478,15 @@ def run_ai(
             "response_chars": len(str(draft.get("text") or "")),
             "latency_ms": latency_ms,
             "credential_scope": "TENANT" if credential.tenant_id else "PLATFORM",
+            "budget_exceeded_by_request": budget_exceeded_by_request,
         },
     )
     db.commit()
     return {
         "provider": AI_PROVIDER,
-        "model": actual_model,
-        "tier": AI_MODELS[actual_model].tier,
+        "model": provider_model,
+        "rated_model": item.model,
+        "tier": item.tier,
         "response_id": response_id,
         "text": str(draft.get("text") or ""),
         "usage": usage,
@@ -479,4 +497,5 @@ def run_ai(
         "feature_code": feature_code,
         "latency_ms": latency_ms,
         "rate_snapshot": cost["rate_snapshot"],
+        "budget_exceeded_by_request": budget_exceeded_by_request,
     }
