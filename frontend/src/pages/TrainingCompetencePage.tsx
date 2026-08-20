@@ -8,6 +8,7 @@ import TrainingWorkbookImportDialog from "../components/training/TrainingWorkboo
 import { useToast } from "../components/feedback/ToastProvider";
 import { saveDownloadedFile } from "../utils/downloads";
 import { getCachedUser } from "../services/auth";
+import { trainingLifecyclePhase } from "../utils/trainingPresentation";
 import { invalidateAdminUserCache, listAdminUserSummaries, type AdminUserSummaryRead } from "../services/adminUsers";
 import {
   autoGroupTrainingEvents,
@@ -40,6 +41,7 @@ import type {
   TrainingAutoGroupScheduleCreate,
   TrainingCertificateArtifactOptions,
   TrainingCourseRead,
+  DeferralReasonCategory,
   TrainingDeferralRequestRead,
   TrainingEventBatchScheduleCreate,
   TrainingEventParticipantRead,
@@ -98,6 +100,8 @@ function trainingRouteStatusFilter(pathname: string, searchParams: URLSearchPara
   return "ALL";
 }
 
+type AdminUserSummaryWithDepartment = AdminUserSummaryRead & { department_code?: string | null };
+
 type PersonRow = {
   user: AdminUserSummaryRead;
   items: TrainingStatusItem[];
@@ -137,8 +141,6 @@ type SchedulerCohort = {
   members: Array<{ userId: string; userName: string; staffCode?: string | null; role?: string | null; dueDate: string | null; status: string; daysUntilDue?: number | null }>;
 };
 
-type CourseFamilyIndex = Record<string, string[]>;
-
 type SectionDrawer = {
   title: string;
   body: React.ReactNode;
@@ -175,22 +177,6 @@ function compactDate(value?: string | null): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString();
-}
-
-function coursePhase(course: TrainingCourseRead): "INITIAL" | "REFRESHER" | "ONE_OFF" | "UNKNOWN" {
-  const blob = `${course.status || ""} ${course.kind || ""} ${course.course_id || ""} ${course.course_name || ""}`.toLowerCase();
-  if (/one[_ -]?off/.test(blob)) return "ONE_OFF";
-  if (/\b(init|initial|induction)\b/.test(blob)) return "INITIAL";
-  if (/\b(refresh|refresher|recurrent|continuation|ref)\b/.test(blob)) return "REFRESHER";
-  return "UNKNOWN";
-}
-
-function familyKey(course: TrainingCourseRead): string {
-  return `${course.course_id || ""} ${course.course_name || ""}`
-    .toLowerCase()
-    .replace(/\b(init|initial|induction|refresh|refresher|recurrent|continuation|ref|rec|one[_ -]?off)\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
 }
 
 function buildCourseLookup(courses: TrainingCourseRead[]): Map<string, TrainingCourseRead> {
@@ -255,6 +241,10 @@ function downloadTextFile(content: string, filename: string, contentType = "text
   link.download = filename;
   link.click();
   window.URL.revokeObjectURL(url);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function csvEscape(value: unknown): string {
@@ -389,13 +379,12 @@ function buildRefresherAnomalies(
   records: TrainingRecordRead[],
 ): RefresherAnomaly[] {
   const courseLookup = buildCourseLookup(courses);
-  const initialsByFamily: CourseFamilyIndex = {};
+  const initialByGroup = new Map<string, TrainingCourseRead[]>();
   courses.forEach((course) => {
-    if (coursePhase(course) === "INITIAL") {
-      const key = familyKey(course);
-      if (!key) return;
-      initialsByFamily[key] = [...(initialsByFamily[key] || []), course.id, course.course_id].filter(Boolean) as string[];
-    }
+    if (trainingLifecyclePhase(course) !== "INITIAL") return;
+    const group = String(course.group_code || "").trim().toLocaleLowerCase();
+    if (!group) return;
+    initialByGroup.set(group, [...(initialByGroup.get(group) || []), course]);
   });
 
   const latestRecords = new Map<string, TrainingRecordRead>();
@@ -409,19 +398,13 @@ function buildRefresherAnomalies(
   const activeRecords = Array.from(latestRecords.values());
 
   const completedByUser = new Map<string, Set<string>>();
-  const completedInitialFamiliesByUser = new Map<string, Set<string>>();
   activeRecords.forEach((record) => {
     if (!completedByUser.has(record.user_id)) completedByUser.set(record.user_id, new Set());
     const completed = completedByUser.get(record.user_id)!;
-    completed.add(record.course_id);
+    completed.add(String(record.course_id));
     const resolved = resolveCourse(courseLookup, record.course_id);
-    if (resolved?.id) completed.add(resolved.id);
-    if (resolved?.course_id) completed.add(resolved.course_id);
-    if (resolved && coursePhase(resolved) === "INITIAL") {
-      if (!completedInitialFamiliesByUser.has(record.user_id)) completedInitialFamiliesByUser.set(record.user_id, new Set());
-      const family = familyKey(resolved);
-      if (family) completedInitialFamiliesByUser.get(record.user_id)!.add(family);
-    }
+    if (resolved?.id) completed.add(String(resolved.id));
+    if (resolved?.course_id) completed.add(String(resolved.course_id));
   });
 
   const userById = new Map(users.map((user) => [user.id, user]));
@@ -430,19 +413,18 @@ function buildRefresherAnomalies(
 
   activeRecords.forEach((record) => {
     const course = resolveCourse(courseLookup, record.course_id);
-    if (!course || coursePhase(course) !== "REFRESHER") return;
+    if (!course || trainingLifecyclePhase(course) !== "REFRESHER") return;
     const prerequisites = new Set<string>();
-    if (course.prerequisite_course_id) prerequisites.add(course.prerequisite_course_id);
-    const fk = familyKey(course);
-    (initialsByFamily[fk] || []).forEach((courseId) => {
-      if (courseId && courseId !== course.id && courseId !== course.course_id) prerequisites.add(courseId);
+    const declared = String(course.prerequisite_course_id || "").trim();
+    if (declared) prerequisites.add(declared);
+    const group = String(course.group_code || "").trim().toLocaleLowerCase();
+    (initialByGroup.get(group) || []).forEach((initial) => {
+      if (initial.id) prerequisites.add(String(initial.id));
+      if (initial.course_id) prerequisites.add(String(initial.course_id));
     });
-    if (prerequisites.size === 0 && !fk) return;
+    if (prerequisites.size === 0) return;
     const completed = completedByUser.get(record.user_id) || new Set<string>();
-    const completedFamilies = completedInitialFamiliesByUser.get(record.user_id) || new Set<string>();
-    const hasExactInitial = [...prerequisites].some((courseId) => completed.has(courseId));
-    const hasFamilyInitial = fk ? [...completedFamilies].some((family) => family === fk || family.includes(fk) || fk.includes(family)) : false;
-    if (hasExactInitial || hasFamilyInitial) return;
+    if ([...prerequisites].some((courseId) => completed.has(courseId))) return;
     const key = `${record.user_id}:${record.course_id}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -687,7 +669,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .catch(() => setParticipants([]));
   }, [selectedEventId]);
 
-  const load = async () => {
+  const load = React.useCallback(async () => {
     const requestId = ++loadSeq.current;
     if (!hydratedSnapshotRef.current) setLoading(true);
     setError(null);
@@ -763,11 +745,11 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     }
     setError(failures.length ? `Some datasets could not be loaded: ${failures.join(", ")}.` : null);
     setLoading(false);
-  };
+  }, [amoCode, peoplePage]);
 
   useEffect(() => {
     void load();
-  }, [peoplePage]);
+  }, [load]);
 
   const courseById = useMemo(() => new Map(courses.map((course) => [course.id, course])), [courses]);
   const courseLookup = useMemo(() => buildCourseLookup(courses), [courses]);
@@ -918,7 +900,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .sort((a, b) => (a.course?.course_name || a.course?.course_id || a.course_pk).localeCompare(b.course?.course_name || b.course?.course_id || b.course_pk));
   }, [courseById, requirements]);
 
-  const knownDepartments = useMemo(() => Array.from(new Set(users.map((user) => String((user as any).department_code || "").trim()).filter(Boolean))).sort(), [users]);
+  const knownDepartments = useMemo(() => Array.from(new Set(users.map((user) => String((user as AdminUserSummaryWithDepartment).department_code || "").trim()).filter(Boolean))).sort(), [users]);
   const knownRoles = useMemo(() => Array.from(new Set(users.map((user) => String(user.position_title || user.role || "").trim()).filter(Boolean))).sort(), [users]);
 
   const courseRows = useMemo(() => {
@@ -928,7 +910,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .sort((a, b) => a.course_id.localeCompare(b.course_id))
       .map((course) => ({
         course,
-        phase: coursePhase(course),
+        phase: trainingLifecyclePhase(course),
         requiredCount: requirements.filter((req) => req.course_pk === course.id && req.is_active).length,
         isRequired: requiredCourseIds.has(course.id),
       }));
@@ -1046,8 +1028,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         message: `${result.total_enrolled || 0} enrolments were placed into ${result.total_sessions || result.sessions.length} course session(s).${result.skipped.length ? ` ${result.skipped.length} item(s) were skipped.` : ""}`,
         variant: result.skipped.length ? "warning" : "info",
       });
-    } catch (error: any) {
-      pushToast({ title: "Grouped scheduling failed", message: error?.message || "Could not auto-group the selected personnel.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Grouped scheduling failed", message: errorMessage(error, "Could not auto-group the selected personnel."), variant: "error" });
     } finally {
       setAutoGrouping(false);
     }
@@ -1082,8 +1064,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await load();
       openTab("schedule");
       pushToast({ title: "Session scheduled", message: `${result.created_count} personnel were enrolled into ${result.event.title}.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Scheduling failed", message: error?.message || "Could not create the training session.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Scheduling failed", message: errorMessage(error, "Could not create the training session."), variant: "error" });
     } finally {
       setScheduling(false);
     }
@@ -1124,7 +1106,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         course_pk: deferralTarget.coursePk,
         original_due_date: deferralTarget.originalDueDate,
         requested_new_due_date: deferralForm.requested_new_due_date,
-        reason_category: deferralForm.reason_category as any,
+        reason_category: deferralForm.reason_category as DeferralReasonCategory,
         reason_text: deferralForm.reason_text || null,
       });
       await updateTrainingEventParticipant(deferralTarget.participantId, { status: "DEFERRED" });
@@ -1135,8 +1117,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         setParticipants(refreshed);
       }
       pushToast({ title: "Deferral submitted", message: `${deferralTarget.userName} has been marked deferred pending decision.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Deferral failed", message: error?.message || "Could not submit the deferral request.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Deferral failed", message: errorMessage(error, "Could not submit the deferral request."), variant: "error" });
     }
   };
 
@@ -1159,8 +1141,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       });
       setReportSetupOpen(false);
       pushToast({ title: "Report setup saved", message: "Training record PDFs will use the updated tenant settings.", variant: "success" });
-    } catch (error: any) {
-      pushToast({ title: "Report setup failed", message: error?.message || "Could not save the report settings.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Report setup failed", message: errorMessage(error, "Could not save the report settings."), variant: "error" });
     } finally {
       setReportSaving(false);
     }
@@ -1171,8 +1153,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       const downloaded = await downloadTrainingCertificateArtifact(record.id, certificateSetup);
       saveDownloadedFile(downloaded);
       await load();
-    } catch (error: any) {
-      pushToast({ title: "Certificate download failed", message: error?.message || "Could not generate the certificate PDF.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Certificate download failed", message: errorMessage(error, "Could not generate the certificate PDF."), variant: "error" });
     }
   };
 
@@ -1229,8 +1211,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       setCourseFormOpen(false);
       await load();
       pushToast({ title: editingCourseId ? "Course updated" : "Course created", message: `${payload.course_id} saved successfully.`, variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Save failed", message: error?.message || "Unable to save course.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Save failed", message: errorMessage(error, "Unable to save course."), variant: "error" });
     } finally {
       setSavingCourse(false);
     }
@@ -1341,8 +1323,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await load();
       openTab("matrix");
       pushToast({ title: editingRequirementId ? "Requirement updated" : "Requirement created", message: "The course requirement matrix has been updated.", variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Save failed", message: error?.message || "Unable to save the requirement rule.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Save failed", message: errorMessage(error, "Unable to save the requirement rule."), variant: "error" });
     } finally {
       setSavingRequirement(false);
     }
@@ -1356,8 +1338,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       await deleteTrainingRequirement(requirement.id);
       await load();
       pushToast({ title: "Requirement deleted", message: "The requirement rule has been removed.", variant: "info" });
-    } catch (error: any) {
-      pushToast({ title: "Delete failed", message: error?.message || "Could not delete the requirement rule.", variant: "error" });
+    } catch (error: unknown) {
+      pushToast({ title: "Delete failed", message: errorMessage(error, "Could not delete the requirement rule."), variant: "error" });
     }
   };
 

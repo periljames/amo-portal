@@ -328,108 +328,6 @@ def _extract_training_event_metadata(notes: Optional[str]) -> tuple[dict, Option
     return meta if isinstance(meta, dict) else {}, remainder.strip() or None
 
 
-def _course_family_key_from_course(course: training_models.TrainingCourse) -> str:
-    values: list[str] = []
-    for attr in ("course_id", "course_name", "category_raw", "scope", "regulatory_reference"):
-        value = getattr(course, attr, None)
-        if isinstance(value, str) and value.strip():
-            values.append(value.strip().lower())
-    blob = " ".join(values)
-    if not blob:
-        return ""
-    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|one[ _-]?off)\b", " ", blob)
-    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
-    return cleaned
-
-
-def _find_related_refresher_courses(
-    db: Session,
-    *,
-    amo_id: str,
-    initial_course: training_models.TrainingCourse,
-) -> list[training_models.TrainingCourse]:
-    courses = (
-        db.query(training_models.TrainingCourse)
-        .filter(
-            training_models.TrainingCourse.amo_id == amo_id,
-            training_models.TrainingCourse.is_active.is_(True),
-        )
-        .all()
-    )
-    initial_family = _course_family_key_from_course(initial_course)
-    initial_code = (getattr(initial_course, "course_id", "") or "").strip().upper()
-    related: list[training_models.TrainingCourse] = []
-    for course in courses:
-        if course.id == initial_course.id:
-            continue
-        if not training_compliance.is_refresher_course(course):
-            continue
-        prerequisite_code = (getattr(course, "prerequisite_course_id", "") or "").strip().upper()
-        if prerequisite_code and prerequisite_code == initial_code:
-            related.append(course)
-            continue
-        course_family = _course_family_key_from_course(course)
-        if initial_family and course_family and course_family == initial_family:
-            related.append(course)
-    return related
-
-
-def _seed_refresher_records_from_initial(
-    db: Session,
-    *,
-    amo_id: str,
-    trainee_id: str,
-    initial_course: training_models.TrainingCourse,
-    completion_date: date,
-    event_id: Optional[str],
-    remarks: Optional[str],
-    is_manual_entry: bool,
-    created_by_user_id: Optional[str],
-) -> list[training_models.TrainingRecord]:
-    seeded: list[training_models.TrainingRecord] = []
-    for refresher in _find_related_refresher_courses(db, amo_id=amo_id, initial_course=initial_course):
-        try:
-            seeded_record_id, _renewed_for_seed = training_record_lifecycle.prepare_training_record_insert(
-                db,
-                amo_id=amo_id,
-                user_id=trainee_id,
-                course_id=refresher.id,
-                completion_date=completion_date,
-                confirm_renewal=True,
-                actor_user_id=created_by_user_id,
-            )
-        except ValueError as exc:
-            if str(exc) == "DUPLICATE_TRAINING_RECORD":
-                continue
-            raise
-        valid_until = _add_months(completion_date, refresher.frequency_months) if refresher.frequency_months else None
-        note_parts = [part for part in [remarks, f"AUTO-SEEDED FROM INITIAL {initial_course.course_id}"] if part]
-        seeded_record = training_models.TrainingRecord(
-            id=seeded_record_id,
-            amo_id=amo_id,
-            user_id=trainee_id,
-            course_id=refresher.id,
-            event_id=event_id,
-            completion_date=completion_date,
-            valid_until=valid_until,
-            hours_completed=getattr(refresher, "nominal_hours", None),
-            exam_score=None,
-            certificate_reference=None,
-            remarks=" | ".join(note_parts) if note_parts else None,
-            is_manual_entry=is_manual_entry,
-            created_by_user_id=created_by_user_id,
-            record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
-            source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
-            verification_status=training_models.TrainingRecordVerificationStatus.VERIFIED,
-            verified_at=datetime.now(timezone.utc),
-            verified_by_user_id=created_by_user_id,
-            verification_comment="Derived from a verified initial-course completion.",
-        )
-        db.add(seeded_record)
-        seeded.append(seeded_record)
-    return seeded
-
-
 def _get_amo_logo_path(db: Session, amo_id: str) -> Optional[str]:
     logo_asset = (
         db.query(accounts_models.AMOAsset)
@@ -1943,6 +1841,14 @@ def _create_notification(
 
 def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str], subject: str, body: str) -> None:
     """
+    Legacy immediate email hook. Durable Training notification dispatch is the default.
+
+    Set TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY=1 only as an explicit
+    compatibility escape hatch while migrating tenant notification policy.
+    """
+    if str(os.getenv("TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY", "0")).strip().lower() not in {"1", "true", "yes"}:
+        return
+    """
     Optional email hook (safe-by-default).
     If SMTP env vars are not set, this does nothing.
 
@@ -2012,6 +1918,14 @@ def _preferred_phone(user: object) -> Optional[str]:
 
 
 def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[str], message: str) -> None:
+    """
+    Legacy immediate WhatsApp hook. Durable Training notification dispatch is the default.
+
+    Set TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY=1 only as an explicit
+    compatibility escape hatch while migrating tenant notification policy.
+    """
+    if str(os.getenv("TRAINING_LEGACY_IMMEDIATE_EXTERNAL_DELIVERY", "0")).strip().lower() not in {"1", "true", "yes"}:
+        return
     """
     Optional WhatsApp hook (safe-by-default).
     If WHATSAPP_WEBHOOK_URL is not set, this does nothing.
@@ -4456,26 +4370,11 @@ def create_training_record(
     record.verified_by_user_id = current_user.id
     record.verification_comment = "Captured by authorized training editor."
 
-    seeded_refresher_records: list[training_models.TrainingRecord] = []
-    if training_compliance.is_initial_course(course):
-        seeded_refresher_records = _seed_refresher_records_from_initial(
-            db,
-            amo_id=current_user.amo_id,
-            trainee_id=trainee.id,
-            initial_course=course,
-            completion_date=payload.completion_date,
-            event_id=payload.event_id,
-            remarks=payload.remarks,
-            is_manual_entry=payload.is_manual_entry,
-            created_by_user_id=current_user.id,
-        )
 
     notif_title = "Training record updated"
     notif_body = f"A training record for '{course.course_name}' has been added/updated on your profile."
     if renewed_records:
         notif_body += f" The previous active entr{'y was' if len(renewed_records) == 1 else 'ies were'} marked as renewed and hidden from the current record view."
-    if seeded_refresher_records:
-        notif_body += f" {len(seeded_refresher_records)} linked refresher entr{'y' if len(seeded_refresher_records) == 1 else 'ies'} were auto-seeded from the initial completion."
     _create_notification(
         db,
         amo_id=current_user.amo_id,
@@ -4502,7 +4401,6 @@ def create_training_record(
             "course_id": course.id,
             "completion_date": str(payload.completion_date),
             "renewed_record_ids": [row.id for row in renewed_records],
-            "auto_seeded_refresher_count": len(seeded_refresher_records),
         },
     )
 
@@ -4858,8 +4756,19 @@ def update_deferral_request(
     if not deferral:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deferral request not found.")
 
+    if str(current_user.id) in {str(deferral.user_id), str(deferral.requested_by_user_id or "")}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The learner/requester cannot decide their own deferral.",
+        )
+
     data = payload.model_dump(exclude_unset=True)
     status_value = data.get("status")
+    if status_value == training_models.DeferralStatus.RETURNED_FOR_INFORMATION and not (data.get("decision_comment") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Returned deferrals require a reviewer comment explaining what information is needed.",
+        )
 
     if "requested_new_due_date" in data and data["requested_new_due_date"] is not None:
         if data["requested_new_due_date"] < deferral.original_due_date:
@@ -5113,7 +5022,9 @@ def upload_training_file(
             sha.update(chunk)
             out.write(chunk)
 
-    auto_approved = bool(is_editor and owner.id != current_user.id or is_editor)
+    # Governance: upload permission is not review permission. Every evidence
+    # upload enters independent review, including files uploaded by Training editors.
+    auto_approved = False
     f = training_models.TrainingFile(
         id=file_id,
         amo_id=current_user.amo_id,
@@ -5227,6 +5138,17 @@ def review_training_file(
     if not f:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training file not found.")
 
+    if str(f.owner_user_id) == str(current_user.id) or str(f.uploaded_by_user_id or "") == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Training evidence must be reviewed by someone other than the learner/uploader.",
+        )
+    if payload.review_status == training_models.TrainingFileReviewStatus.RETURNED and not (payload.review_comment or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Returned evidence requires a reviewer comment explaining what must be corrected.",
+        )
+
     f.review_status = payload.review_status
     f.review_comment = payload.review_comment
     f.reviewed_at = datetime.utcnow()
@@ -5238,7 +5160,12 @@ def review_training_file(
         accounts_models.User.amo_id == current_user.amo_id,
     ).first()
     if owner:
-        title = "Evidence approved" if payload.review_status == training_models.TrainingFileReviewStatus.APPROVED else "Evidence rejected"
+        if payload.review_status == training_models.TrainingFileReviewStatus.APPROVED:
+            title = "Evidence approved"
+        elif payload.review_status == training_models.TrainingFileReviewStatus.RETURNED:
+            title = "Evidence returned for correction"
+        else:
+            title = "Evidence rejected"
         body = f"Your document '{f.original_filename}' has been {payload.review_status}."
         if payload.review_comment:
             body += f"\n\nComment: {payload.review_comment}"

@@ -96,9 +96,10 @@ class WorkbookCommitResilienceTests(unittest.TestCase):
 
     def test_database_restart_is_reported_as_retryable_service_unavailable(self) -> None:
         main = (TRAINING_DIR.parents[1] / "main.py").read_text(encoding="utf-8")
-        self.assertIn("except OperationalError:", main)
+        self.assertRegex(main, r"except OperationalError(?: as [A-Za-z_][A-Za-z0-9_]*)?:")
         self.assertIn('"error_code": "DB_TEMPORARILY_UNAVAILABLE"', main)
-        self.assertIn('headers={"Retry-After": "3"}', main)
+        self.assertIn("retry_after = database_circuit.retry_after_seconds()", main)
+        self.assertIn('"Retry-After": str(retry_after)', main)
 
     def test_licence_category_scope_is_not_limited_to_255_characters(self) -> None:
         models = source("workbook_models.py")

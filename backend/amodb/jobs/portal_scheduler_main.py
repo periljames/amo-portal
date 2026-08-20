@@ -58,7 +58,11 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    supervisor = PortalJobSupervisor(mode="scheduled", selected_families={"training-plans"}, concurrency=1)
+    supervisor = PortalJobSupervisor(
+        mode="scheduled",
+        selected_families={"training-plans", "training-notifications"},
+        concurrency=1,
+    )
     reliability_scheduler.start_reliability_scheduler()
     start_quality_planner_scheduler()
     supervisor.start()

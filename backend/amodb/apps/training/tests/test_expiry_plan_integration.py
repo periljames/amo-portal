@@ -78,31 +78,33 @@ def test_uploaded_personnel_records_become_traceable_person_month_obligations(mo
         id="rule-never", amo_id=amo.id, course_id=never.id, role_group_id=group.id,
         is_required=True, requirement_type="GENERAL", is_active=True,
     )
+    verified = training_models.TrainingRecordVerificationStatus.VERIFIED
     records = [
         training_models.TrainingRecord(
             id="record-march", amo_id=amo.id, user_id=person.id, course_id=march.id,
             completion_date=date(plan_year - 1, 3, 18), valid_until=date(plan_year, 3, 18),
             legacy_record_id="TRN-003", certificate_reference="CERT-MAR", record_status="ACTIVE",
+            verification_status=verified,
         ),
         training_models.TrainingRecord(
             id="record-nov", amo_id=amo.id, user_id=person.id, course_id=november.id,
             completion_date=date(plan_year - 1, 11, 4), valid_until=date(plan_year, 11, 4),
-            legacy_record_id="TRN-011", record_status="ACTIVE",
+            legacy_record_id="TRN-011", record_status="ACTIVE", verification_status=verified,
         ),
         training_models.TrainingRecord(
             id="record-old", amo_id=amo.id, user_id=person.id, course_id=overdue.id,
             completion_date=date(plan_year - 2, 6, 1), valid_until=date(plan_year - 1, 6, 1),
-            legacy_record_id="TRN-OLD", record_status="ACTIVE",
+            legacy_record_id="TRN-OLD", record_status="ACTIVE", verification_status=verified,
         ),
         training_models.TrainingRecord(
             id="record-one", amo_id=amo.id, user_id=person.id, course_id=one_off.id,
             completion_date=date(plan_year - 1, 1, 9), valid_until=None,
-            legacy_record_id="TRN-ONE", record_status="ACTIVE",
+            legacy_record_id="TRN-ONE", record_status="ACTIVE", verification_status=verified,
         ),
         training_models.TrainingRecord(
             id="record-future", amo_id=amo.id, user_id=person.id, course_id=after_year.id,
             completion_date=date(plan_year, 7, 1), valid_until=date(plan_year + 1, 7, 1),
-            legacy_record_id="TRN-FUT", record_status="ACTIVE",
+            legacy_record_id="TRN-FUT", record_status="ACTIVE", verification_status=verified,
         ),
     ]
     db.add_all([amo, department, person, march, november, overdue, never, one_off, after_year, group, role_rule, *records])

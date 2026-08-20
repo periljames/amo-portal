@@ -9,6 +9,7 @@ from sqlalchemy import inspect, or_
 from sqlalchemy.orm import Session, load_only, noload
 
 from ..accounts import models as accounts_models
+from . import course_lifecycle as training_course_lifecycle
 from . import models as training_models
 from . import workbook_models as training_workbook_models
 from . import record_lifecycle as training_record_lifecycle
@@ -78,89 +79,16 @@ def add_months(base: date, months: int) -> date:
     return date(year, month, day)
 
 
-def _normalized_course_text(course: training_models.TrainingCourse) -> str:
-    values: list[str] = []
-    for attr in (
-        "course_id",
-        "course_name",
-        "category_raw",
-        "scope",
-        "regulatory_reference",
-    ):
-        value = getattr(course, attr, None)
-        if isinstance(value, str) and value.strip():
-            values.append(value.strip().lower())
-    return " ".join(values)
-
-
 def is_initial_course(course: training_models.TrainingCourse) -> bool:
-    """Best-effort classifier for initial / first-time courses.
-
-    Legacy datasets mix enum kind, raw import status, and naming conventions.
-    The importer relies on this helper when deciding whether a course is one-off
-    or part of a recurrent chain, so it should accept the common legacy labels
-    without requiring perfect normalization.
-    """
-    kind = getattr(course, "kind", None)
-    if kind == training_models.TrainingKind.INITIAL:
-        return True
-
-    status = getattr(course, "status", None)
-    if isinstance(status, str) and status.strip().upper() == "INITIAL":
-        return True
-
-    text = _normalized_course_text(course)
-    if not text:
-        return False
-
-    padded = f" {text.replace('-', ' ').replace('_', ' ')} "
-    initial_markers = (
-        " initial ",
-        " init ",
-        " induction ",
-        " ab initio ",
-        " new hire ",
-        " onboarding ",
-        " familiarization ",
-        " familiarisation ",
-    )
-    return any(marker in padded for marker in initial_markers)
+    return training_course_lifecycle.is_initial_course(course)
 
 
 def is_refresher_course(course: training_models.TrainingCourse) -> bool:
-    kind = getattr(course, "kind", None)
-    if kind == training_models.TrainingKind.REFRESHER:
-        return True
-
-    status = getattr(course, "status", None)
-    if isinstance(status, str) and status.strip().upper() in {"RECURRENT", "REFRESHER", "RENEWAL"}:
-        return True
-
-    text = _normalized_course_text(course)
-    if not text:
-        return False
-
-    padded = f" {text.replace('-', ' ').replace('_', ' ')} "
-    refresher_markers = (
-        " refresher ",
-        " recurrent ",
-        " renewal ",
-        " continuation ",
-        " ref ",
-        " recurrent training ",
-    )
-    return any(marker in padded for marker in refresher_markers)
+    return training_course_lifecycle.is_recurrent_course(course)
 
 
 def _course_family_key(course: training_models.TrainingCourse) -> str:
-    text = _normalized_course_text(course)
-    if not text:
-        return ""
-    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|rec|one[ _-]?off)\b", " ", text)
-    # Remove common AMO numbering noise so INIT/REF variants in the same family match reliably.
-    cleaned = re.sub(r"\b(v\d+|rev\d+|issue\d+)\b", " ", cleaned)
-    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
-    return cleaned
+    return training_course_lifecycle.explicit_recurrence_key(course)
 
 
 def _should_suppress_refresher_until_initial_exists(
@@ -460,6 +388,76 @@ def _all_completed_initial_evidence_for_user(
     return completed_ids, completed_families
 
 
+
+def _initial_recurrence_anchors_for_user(
+    db: Session,
+    user: accounts_models.User,
+    courses: Sequence[training_models.TrainingCourse],
+) -> Dict[str, training_models.TrainingRecord]:
+    """Map recurrent course ids to genuine Initial completion anchors.
+
+    The returned TrainingRecord remains the actual Initial event; it is used only
+    to project the recurrent due date and is never copied into a recurrent row.
+    """
+    recurrent = [course for course in courses if is_refresher_course(course)]
+    if not recurrent:
+        return {}
+    catalogue = (
+        db.query(training_models.TrainingCourse)
+        .options(noload("*"))
+        .filter(
+            training_models.TrainingCourse.amo_id == user.amo_id,
+            training_models.TrainingCourse.is_active.is_(True),
+        )
+        .all()
+    )
+    initial_courses = [course for course in catalogue if is_initial_course(course)]
+    initial_ids = [course.id for course in initial_courses]
+    if not initial_ids:
+        return {}
+    rows = (
+        db.query(training_models.TrainingRecord)
+        .options(noload("*"))
+        .filter(
+            training_models.TrainingRecord.amo_id == user.amo_id,
+            training_models.TrainingRecord.user_id == user.id,
+            training_models.TrainingRecord.course_id.in_(initial_ids),
+            training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.VERIFIED,
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+        )
+        .order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc())
+        .all()
+    )
+    latest_initial: Dict[str, training_models.TrainingRecord] = {}
+    for row in rows:
+        latest_initial.setdefault(str(row.course_id), row)
+
+    anchors: Dict[str, training_models.TrainingRecord] = {}
+    for course in recurrent:
+        candidates: list[training_models.TrainingRecord] = []
+        prerequisite = str(getattr(course, "prerequisite_course_id", "") or "").strip().casefold()
+        group_code = str(getattr(course, "group_code", "") or "").strip().casefold()
+        for initial in initial_courses:
+            initial_identifiers = {
+                str(getattr(initial, "id", "") or "").strip().casefold(),
+                str(getattr(initial, "course_id", "") or "").strip().casefold(),
+            }
+            initial_group = str(getattr(initial, "group_code", "") or "").strip().casefold()
+            explicitly_related = bool(
+                prerequisite and prerequisite in initial_identifiers
+                or group_code and initial_group and group_code == initial_group
+            )
+            if explicitly_related:
+                record = latest_initial.get(str(initial.id))
+                if record is not None:
+                    candidates.append(record)
+        if candidates:
+            anchors[str(course.id)] = max(
+                candidates,
+                key=lambda row: (getattr(row, "completion_date", None) or date.min, str(getattr(row, "created_at", ""))),
+            )
+    return anchors
+
 def _latest_deferrals_for_user(db: Session, user: accounts_models.User, course_ids: Sequence[str]) -> Dict[str, training_models.TrainingDeferralRequest]:
     if not course_ids:
         return {}
@@ -537,6 +535,7 @@ def evaluate_user_training_policy(
     latest_record = _latest_records_for_user(db, user, course_ids)
     latest_deferral = _latest_deferrals_for_user(db, user, course_ids)
     earliest_event = _earliest_events_for_user(db, user, course_ids, today)
+    recurrence_anchors = _initial_recurrence_anchors_for_user(db, user, courses)
 
     course_by_code = {str(course.course_id).strip().upper(): course for course in courses if getattr(course, "course_id", None)}
     completed_initial_ids, completed_initial_families = _all_completed_initial_evidence_for_user(db, user)
@@ -565,6 +564,9 @@ def evaluate_user_training_policy(
         due_date = None
         if record:
             due_date = record.valid_until or (add_months(record.completion_date, course.frequency_months) if course.frequency_months else None)
+        elif course.frequency_months and str(course.id) in recurrence_anchors:
+            anchor = recurrence_anchors[str(course.id)]
+            due_date = add_months(anchor.completion_date, course.frequency_months)
         upcoming_event_id = event_info[0] if event_info else None
         upcoming_event_date = event_info[1] if event_info else None
         items.append(
