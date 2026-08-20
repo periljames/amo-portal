@@ -1,21 +1,14 @@
 import React from "react";
-import { useParams } from "react-router-dom";
-import { getContext } from "../services/auth";
-import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
-import AuditDetailView from "./qualityAudits/AuditDetailView";
+import { Navigate, useParams } from "react-router-dom";
 
+/**
+ * Schedule templates are managed in the Quality Operations Planner. This route
+ * remains only as a bookmark-safe redirect; no separate schedule-detail editing
+ * lifecycle is retained.
+ */
 const QualityAuditScheduleDetailPage: React.FC = () => {
-  const params = useParams<{ amoCode?: string; department?: string; scheduleId?: string }>();
-  const ctx = getContext();
-  const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
-  const department = params.department ?? ctx.department ?? "quality";
-  const scheduleId = params.scheduleId ?? "";
-
-  return (
-    <QualityAuditsSectionLayout title="Schedule Detail" subtitle="Compliance intelligence war room for audit execution.">
-      <AuditDetailView amoCode={amoCode} department={department} scheduleId={scheduleId} />
-    </QualityAuditsSectionLayout>
-  );
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string; scheduleId?: string }>();
+  return <Navigate replace to={`/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`} />;
 };
 
 export default QualityAuditScheduleDetailPage;
