@@ -7,7 +7,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.training import models as training_models
 from amodb.apps.training.integration import current_training_evidence
 
 from . import models as quality_models
@@ -20,6 +19,7 @@ _ROLE_TYPES = {
     "OBSERVER_AUDITOR": "AUDITOR",
     "ASSISTANT_AUDITOR": "AUDITOR",
 }
+_DEVELOPMENT_ROLES = {"OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"}
 
 
 def _enum_value(value: Any) -> str:
@@ -166,6 +166,27 @@ def _privilege_scope_matches(scope_key: str | None, assignment_scope_key: str | 
     return value == str(assignment_scope_key).strip().upper()
 
 
+def _development_rule(rule: QualityPrivilegeRule, role: str) -> bool:
+    """Return whether this rule explicitly authorizes supervised auditor development.
+
+    This is tenant configuration, not a portal default. Developmental privileges are
+    never valid for lead-auditor assignments and do not waive active privilege,
+    scope, capacity, or independence gates.
+    """
+
+    if role not in _DEVELOPMENT_ROLES:
+        return False
+    scope_schema = rule.scope_schema if isinstance(rule.scope_schema, dict) else {}
+    if scope_schema.get("supervised_development") is not True:
+        return False
+    allowed_roles = {
+        str(value).strip().upper()
+        for value in scope_schema.get("allowed_assignment_roles", [])
+        if str(value).strip()
+    }
+    return not allowed_roles or role in allowed_roles
+
+
 def evaluate_auditor_assignment(
     db: Session,
     *,
@@ -181,10 +202,10 @@ def evaluate_auditor_assignment(
 ) -> dict[str, Any]:
     """Evaluate one auditor assignment against governed People hard gates.
 
-    Tenants that have not configured the corresponding Quality privilege type
-    remain in explicit compatibility mode. Once at least one active rule exists,
-    the rule set becomes authoritative and the assignment is blocked unless one
-    rule/privilege combination passes every applicable hard gate.
+    Auditor assignment is fail-closed. A tenant must configure an active Quality
+    privilege rule for the requested auditor role before any assignment can pass.
+    Observer/assistant development remains possible only when the tenant has
+    explicitly marked the governing AUDITOR rule for supervised development.
     """
 
     role = str(assignment_role or "").strip().upper()
@@ -216,12 +237,12 @@ def evaluate_auditor_assignment(
     ).order_by(QualityPrivilegeRule.privilege_code.asc()).all()
     if not rules:
         return {
-            "eligible": True,
+            "eligible": False,
             "governance_configured": False,
-            "mode": "LEGACY_COMPATIBILITY",
+            "mode": "CONFIGURATION_REQUIRED",
             "assignment_role": role,
             "user_id": user_id,
-            "reason": f"No active {privilege_type} Quality privilege rule is configured for this tenant yet.",
+            "reason": f"No active {privilege_type} Quality privilege rule is configured for this tenant. Configure governed auditor competence before assignment.",
             "assessments": [],
             "independence_pending": False,
         }
@@ -269,11 +290,13 @@ def evaluate_auditor_assignment(
             context_id=context_id,
             enforce=enforce_independence,
         )
+        developmental = _development_rule(rule, role)
+        training_passed = bool(training["passed"]) or developmental
         hard_gates = {
             "workforce_active": True,
             "active_privilege": privilege is not None,
             "scope_authorized": privilege is not None,
-            "training_current_verified": bool(training["passed"]),
+            "training_current_verified": training_passed,
             "capacity": bool(capacity["passed"]),
             "independence": bool(independence["passed"]),
         }
@@ -281,6 +304,8 @@ def evaluate_auditor_assignment(
             "rule_id": str(rule.id),
             "privilege_code": rule.privilege_code,
             "privilege_type": rule.privilege_type,
+            "developmental_assignment": developmental,
+            "supervision_required": developmental,
             "hard_gates": hard_gates,
             "active_privilege": {
                 "id": str(privilege.id),
@@ -288,7 +313,11 @@ def evaluate_auditor_assignment(
                 "effective_from": privilege.effective_from.isoformat() if privilege and privilege.effective_from else None,
                 "expires_on": privilege.expires_on.isoformat() if privilege and privilege.expires_on else None,
             } if privilege else None,
-            "training": training,
+            "training": {
+                **training,
+                "passed": training_passed,
+                "developmental_exception": developmental and not bool(training["passed"]),
+            },
             "capacity": capacity,
             "independence": independence,
             "eligible": all(hard_gates.values()),
@@ -298,11 +327,13 @@ def evaluate_auditor_assignment(
             return {
                 "eligible": True,
                 "governance_configured": True,
-                "mode": "GOVERNED",
+                "mode": "GOVERNED_DEVELOPMENT" if developmental else "GOVERNED",
                 "assignment_role": role,
                 "user_id": user_id,
                 "rule_id": str(rule.id),
                 "privilege_code": rule.privilege_code,
+                "developmental_assignment": developmental,
+                "supervision_required": developmental,
                 "independence_pending": bool(independence.get("pending")),
                 "assessment": assessment,
                 "assessments": assessments,

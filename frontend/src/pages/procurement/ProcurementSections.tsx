@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -17,11 +17,6 @@ import {
 
 import {
   acknowledgeProcurementPurchaseOrder,
-  approveProcurementPurchaseOrder,
-  decideProcurementSupplier,
-  evaluateProcurementQuote,
-  releaseProcurementQualityHold,
-  releaseProcurementReceipt,
   sendProcurementPurchaseOrder,
   transitionProcurementRequisition,
 } from "../../services/procurement";
@@ -36,6 +31,7 @@ import type {
   ProcurementSupplier,
 } from "../../types/procurement";
 import { Empty, RecordActions, Skeleton } from "./procurementUiShared";
+import SupplierGovernancePanel from "./SupplierGovernancePanel";
 import {
   badgeClass,
   dateLabel,
@@ -141,10 +137,8 @@ export function Requests({
   );
 }
 
-export function Sourcing({
-  rfqs, quotes, loading, search, openModal, linkDocument, act,
-}: {
-  rfqs: ProcurementRFQ[]; quotes: ProcurementQuote[]; loading: boolean; search: React.ReactNode; openModal: OpenModal; linkDocument: LinkDocument; act: ControlledAction;
+export function Sourcing({ rfqs, quotes, loading, search, openModal, linkDocument }: {
+  rfqs: ProcurementRFQ[]; quotes: ProcurementQuote[]; loading: boolean; search: React.ReactNode; openModal: OpenModal; linkDocument: LinkDocument;
 }) {
   return (
     <div className="proc-stack">
@@ -154,64 +148,68 @@ export function Sourcing({
       </section>
       <section className="proc-panel">
         <header className="proc-section-heading proc-section-heading--split"><div><h2>Supplier quotations</h2><p>Commercial, technical, traceability, and lead-time comparison.</p></div><button type="button" className="proc-button proc-button--secondary" onClick={() => openModal("quote", { quantity: "1", currency: "USD" })}><Plus size={16} />Record quote</button></header>
-        {quotes.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Quote</th><th>Supplier</th><th>Value</th><th>Status</th><th>Actions</th></tr></thead><tbody>{quotes.map((item) => <tr key={item.id}><td><strong>{item.quote_reference}</strong><span>RFQ #{item.rfq_id}</span></td><td>Supplier #{item.supplier_id}</td><td>{money(item.total_amount, item.currency)}<small>{item.lead_time_days ? `${item.lead_time_days} days` : "Lead time not set"}</small></td><td><Status value={item.status} /></td><td><RecordActions><button type="button" onClick={() => linkDocument("QUOTE", item.id)}><Paperclip size={14} />Evidence</button><button type="button" onClick={() => void act("Evaluate quotation", () => evaluateProcurementQuote(amoCode(), item.id, { status: "COMPLIANT", evaluation_score: 100, evaluation_notes: "Technically compliant through Procurement workspace." }))}>Evaluate</button></RecordActions></td></tr>)}</tbody></table></div> : <Empty icon={CircleDollarSign} title="No supplier quotations" text="Record quotations against issued RFQs." />}
+        {quotes.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Quote</th><th>Supplier</th><th>Value</th><th>Status</th><th>Actions</th></tr></thead><tbody>{quotes.map((item) => <tr key={item.id}><td><strong>{item.quote_reference}</strong><span>RFQ #{item.rfq_id}</span></td><td>Supplier #{item.supplier_id}</td><td>{money(item.total_amount, item.currency)}<small>{item.lead_time_days ? `${item.lead_time_days} days` : "Lead time not set"}</small></td><td><Status value={item.status} /></td><td><RecordActions><button type="button" onClick={() => linkDocument("QUOTE", item.id)}><Paperclip size={14} />Evidence</button><button type="button" onClick={() => openModal("quoteEvaluation", { quoteId: String(item.id) })}>Evaluate</button></RecordActions></td></tr>)}</tbody></table></div> : <Empty icon={CircleDollarSign} title="No supplier quotations" text="Record quotations against issued RFQs." />}
       </section>
     </div>
   );
 }
 
-export function Orders({
-  items, loading, search, openModal, linkDocument, act,
-}: {
+export function Orders({ items, loading, search, openModal, linkDocument, act }: {
   items: ProcurementPurchaseOrder[]; loading: boolean; search: React.ReactNode; openModal: OpenModal; linkDocument: LinkDocument; act: ControlledAction;
 }) {
   return (
     <section className="proc-panel">
       <header className="proc-section-heading proc-section-heading--split"><div><h2>Purchase orders</h2><p>Supplier scope gates, staged approvals, delivery commitment, and spend control.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button proc-button--primary" onClick={() => openModal("po", { priority: "ROUTINE", quantity: "1", currency: "USD" })}><Plus size={16} />New PO</button></div></header>
-      {loading ? <Skeleton /> : items.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Order</th><th>Supplier</th><th>Value</th><th>Delivery</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.po_number}</strong><span>{item.lines.length} line{item.lines.length === 1 ? "" : "s"}</span></td><td>Supplier #{item.supplier_id}</td><td>{money(item.total_amount, item.currency)}</td><td>{dateLabel(item.promised_delivery_date)}<small>{item.supplier_ack_reference || "Awaiting acknowledgement"}</small></td><td><Status value={item.status} /></td><td><RecordActions><button type="button" onClick={() => linkDocument("PURCHASE_ORDER", item.id)}><Paperclip size={14} />Evidence</button>{item.status.includes("PENDING") ? <button type="button" onClick={() => void act("Approve purchase order stage", () => approveProcurementPurchaseOrder(amoCode(), item.id, item.status.includes("TECHNICAL") ? "TECHNICAL" : item.status.includes("BUDGET") ? "BUDGET" : item.status.includes("QUALITY") ? "QUALITY" : "PROCUREMENT", "Approved in controlled workspace"))}>Approve stage</button> : null}{item.status === "APPROVED" ? <button type="button" onClick={() => void act("Send purchase order", () => sendProcurementPurchaseOrder(amoCode(), item.id))}>Send</button> : null}{item.status === "SENT" ? <button type="button" onClick={() => void act("Acknowledge purchase order", () => acknowledgeProcurementPurchaseOrder(amoCode(), item.id, { supplier_ack_reference: `ACK-${item.po_number}`, acknowledged_at: new Date().toISOString() }))}>Acknowledge</button> : null}</RecordActions></td></tr>)}</tbody></table></div> : <Empty icon={ShoppingCart} title="No purchase orders" text="Prepare a purchase order from a selected quotation or requisition." />}
+      {loading ? <Skeleton /> : items.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Order</th><th>Supplier</th><th>Value</th><th>Delivery</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map((item) => { const stage = item.status.includes("TECHNICAL") ? "TECHNICAL" : item.status.includes("BUDGET") ? "BUDGET" : item.status.includes("QUALITY") ? "QUALITY" : "PROCUREMENT"; return <tr key={item.id}><td><strong>{item.po_number}</strong><span>{item.lines.length} line{item.lines.length === 1 ? "" : "s"}</span></td><td>Supplier #{item.supplier_id}</td><td>{money(item.total_amount, item.currency)}</td><td>{dateLabel(item.promised_delivery_date)}<small>{item.supplier_ack_reference || "Awaiting acknowledgement"}</small></td><td><Status value={item.status} /></td><td><RecordActions><button type="button" onClick={() => linkDocument("PURCHASE_ORDER", item.id)}><Paperclip size={14} />Evidence</button>{item.status.includes("PENDING") ? <button type="button" onClick={() => openModal("poApproval", { poId: String(item.id), approvalStage: stage })}>Approve stage</button> : null}{item.status === "APPROVED" ? <button type="button" onClick={() => void act("Send purchase order", () => sendProcurementPurchaseOrder(amoCode(), item.id))}>Send</button> : null}{item.status === "SENT" ? <button type="button" onClick={() => void act("Acknowledge purchase order", () => acknowledgeProcurementPurchaseOrder(amoCode(), item.id, { supplier_ack_reference: `ACK-${item.po_number}`, acknowledged_at: new Date().toISOString() }))}>Acknowledge</button> : null}</RecordActions></td></tr>; })}</tbody></table></div> : <Empty icon={ShoppingCart} title="No purchase orders" text="Prepare a purchase order from a selected quotation or requisition." />}
     </section>
   );
 }
 
-export function Receiving({
-  items, loading, search, canQuality, openModal, linkDocument, act,
-}: {
-  items: ProcurementReceipt[]; loading: boolean; search: React.ReactNode; canQuality: boolean; openModal: OpenModal; linkDocument: LinkDocument; act: ControlledAction;
+export function Receiving({ items, loading, search, canQuality, openModal, linkDocument }: {
+  items: ProcurementReceipt[]; loading: boolean; search: React.ReactNode; canQuality: boolean; openModal: OpenModal; linkDocument: LinkDocument;
 }) {
   return (
     <section className="proc-panel">
       <header className="proc-section-heading proc-section-heading--split"><div><h2>Receiving and quarantine</h2><p>Every delivery remains quarantined until independent inspection and Quality release.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button proc-button--primary" onClick={() => openModal("receipt", { quantity: "1" })}><Plus size={16} />Record receipt</button></div></header>
-      {loading ? <Skeleton /> : items.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Receipt</th><th>PO</th><th>Delivery evidence</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.receipt_number}</strong><span>{item.lines.length} received line{item.lines.length === 1 ? "" : "s"}</span></td><td>PO #{item.purchase_order_id}</td><td>{item.delivery_note_number || "No delivery note"}<small>{item.airway_bill_number || "No airway bill"}</small></td><td><Status value={item.status} /><small>{dateLabel(item.received_at)}</small></td><td><RecordActions><button type="button" onClick={() => linkDocument("RECEIPT", item.id)}><Paperclip size={14} />Evidence</button>{canQuality && ["QUARANTINED", "DOCUMENT_REVIEW", "PHYSICAL_INSPECTION"].includes(item.status) ? <button type="button" onClick={() => openModal("inspection", { receiptId: String(item.id), documentationComplete: "yes", physicalCondition: "yes", supplierScope: "yes", partIdentity: "yes", traceabilityAcceptable: "yes", shelfLife: "yes", suspectedUnapprovedPart: "no", disposition: "ACCEPTED" })}>Inspect</button> : null}{canQuality && item.status === "ACCEPTED_PENDING_RELEASE" ? <button type="button" onClick={() => void act("Release receipt", () => releaseProcurementReceipt(amoCode(), item.id, "Independent Quality release completed."))}>Release</button> : null}</RecordActions></td></tr>)}</tbody></table></div> : <Empty icon={Truck} title="No receipts" text="Record an incoming delivery against a controlled purchase order." />}
+      {loading ? <Skeleton /> : items.length ? <div className="proc-table-wrap"><table className="proc-table"><thead><tr><th>Receipt</th><th>PO</th><th>Delivery evidence</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.receipt_number}</strong><span>{item.lines.length} received line{item.lines.length === 1 ? "" : "s"}</span></td><td>PO #{item.purchase_order_id}</td><td>{item.delivery_note_number || "No delivery note"}<small>{item.airway_bill_number || "No airway bill"}</small></td><td><Status value={item.status} /><small>{dateLabel(item.received_at)}</small></td><td><RecordActions><button type="button" onClick={() => linkDocument("RECEIPT", item.id)}><Paperclip size={14} />Evidence</button>{canQuality && ["QUARANTINED", "DOCUMENT_REVIEW", "PHYSICAL_INSPECTION"].includes(item.status) ? <button type="button" onClick={() => openModal("inspection", { receiptId: String(item.id) })}>Inspect</button> : null}{canQuality && item.status === "ACCEPTED_PENDING_RELEASE" ? <button type="button" onClick={() => openModal("receiptRelease", { receiptId: String(item.id) })}>Release</button> : null}</RecordActions></td></tr>)}</tbody></table></div> : <Empty icon={Truck} title="No receipts" text="Record an incoming delivery against a controlled purchase order." />}
     </section>
   );
 }
 
 export function Suppliers({
-  items, loading, search, openModal, linkDocument, act,
+  items, loading, search, openModal, linkDocument, canQuality, currentUserId, onChanged,
 }: {
-  items: ProcurementSupplier[]; loading: boolean; search: React.ReactNode; openModal: OpenModal; linkDocument: LinkDocument; act: ControlledAction;
+  items: ProcurementSupplier[];
+  loading: boolean;
+  search: React.ReactNode;
+  openModal: OpenModal;
+  linkDocument: LinkDocument;
+  canQuality: boolean;
+  currentUserId?: string | null;
+  onChanged: () => Promise<void>;
 }) {
+  const [governedSupplierId, setGovernedSupplierId] = useState<number | null>(null);
+  const governedSupplier = items.find((item) => item.id === governedSupplierId) || null;
   return (
     <section className="proc-panel">
-      <header className="proc-section-heading proc-section-heading--split"><div><h2>Approved supplier control</h2><p>Status, risk, approval scope, validity, QMS links, and inspection level.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button proc-button--secondary" onClick={() => openModal("scope")}><Plus size={16} />Approval scope</button><button type="button" className="proc-button proc-button--primary" onClick={() => openModal("supplier", { risk: "MEDIUM", currency: "USD" })}><Plus size={16} />Supplier</button></div></header>
-      {loading ? <Skeleton /> : items.length ? <div className="proc-card-list proc-card-list--suppliers">{items.map((item) => <article key={item.id}><div className="proc-supplier-head"><div><strong>{item.supplier_code}</strong><span>{item.legal_name}</span></div><Status value={item.status} /></div><div className="proc-supplier-meta"><span>{humanize(item.supplier_type)}</span><span>{humanize(item.risk_level)} risk</span><span>{item.country || "Country not set"}</span><span>{item.approval_scopes.length} scope{item.approval_scopes.length === 1 ? "" : "s"}</span></div><RecordActions><button type="button" onClick={() => linkDocument("SUPPLIER", item.id)}><Paperclip size={14} />Evidence</button>{["PROSPECTIVE", "UNDER_REVIEW"].includes(item.status) ? <button type="button" onClick={() => void act("Approve supplier", () => decideProcurementSupplier(amoCode(), item.id, { action: "APPROVE", reason: "Approved through controlled supplier review." }))}>Approve</button> : null}{item.status === "APPROVED" ? <button type="button" onClick={() => void act("Suspend supplier", () => decideProcurementSupplier(amoCode(), item.id, { action: "SUSPEND", reason: "Suspended pending Quality review." }))}>Suspend</button> : null}</RecordActions></article>)}</div> : <Empty icon={UsersRound} title="No suppliers" text="Register a supplier and complete independent Quality approval." />}
+      <header className="proc-section-heading proc-section-heading--split"><div><h2>Approved supplier control</h2><p>Evaluation evidence, independent review, approved scope, validity, surveillance and lifecycle decisions.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button proc-button--primary" onClick={() => openModal("supplier", { risk: "MEDIUM", currency: "USD" })}><Plus size={16} />Supplier</button></div></header>
+      {loading ? <Skeleton /> : items.length ? <div className="proc-card-list proc-card-list--suppliers">{items.map((item) => <article key={item.id}><div className="proc-supplier-head"><div><strong>{item.supplier_code}</strong><span>{item.legal_name}</span></div><Status value={item.status} /></div><div className="proc-supplier-meta"><span>{humanize(item.supplier_type)}</span><span>{humanize(item.risk_level)} risk</span><span>{item.country || "Country not set"}</span><span>{item.approval_scopes.length} governed scope{item.approval_scopes.length === 1 ? "" : "s"}</span></div><RecordActions><button type="button" onClick={() => linkDocument("SUPPLIER", item.id)}><Paperclip size={14} />Evidence</button><button type="button" onClick={() => setGovernedSupplierId(item.id)}><ShieldCheck size={14} />Governance</button></RecordActions></article>)}</div> : <Empty icon={UsersRound} title="No suppliers" text="Register a supplier, then complete its governed evaluation before approval." />}
+      {governedSupplier ? <SupplierGovernancePanel amoCode={amoCode()} supplier={governedSupplier} canQuality={canQuality} currentUserId={currentUserId} onClose={() => setGovernedSupplierId(null)} onChanged={onChanged} /> : null}
     </section>
   );
 }
 
-export function Control({
-  holds, orders, receipts, canQuality, canFinance, openModal, linkDocument, act,
-}: {
-  holds: ProcurementQualityHold[]; orders: ProcurementPurchaseOrder[]; receipts: ProcurementReceipt[]; canQuality: boolean; canFinance: boolean; openModal: OpenModal; linkDocument: LinkDocument; act: ControlledAction;
+export function Control({ holds, orders, receipts, canQuality, canFinance, openModal, linkDocument }: {
+  holds: ProcurementQualityHold[]; orders: ProcurementPurchaseOrder[]; receipts: ProcurementReceipt[]; canQuality: boolean; canFinance: boolean; openModal: OpenModal; linkDocument: LinkDocument;
 }) {
   return (
     <div className="proc-stack">
       <section className="proc-panel">
         <header className="proc-section-heading proc-section-heading--split"><div><h2>Quality holds</h2><p>Supplier, purchase-order, and receipt holds have an enforceable release veto.</p></div>{canQuality ? <button type="button" className="proc-button proc-button--danger" onClick={() => openModal("hold")}><ShieldAlert size={16} />Place hold</button> : null}</header>
-        {holds.length ? <div className="proc-card-list">{holds.map((item) => <article key={item.id}><div><strong>{item.hold_number}</strong><span>{item.reason}</span><small>{item.target_type} #{item.target_id} · {item.qms_finding_id || item.qms_car_id || "No QMS reference"}</small></div><Status value={item.status} /><RecordActions><button type="button" onClick={() => linkDocument("QUALITY_HOLD", item.id)}><Paperclip size={14} />Evidence</button>{canQuality && item.status === "ACTIVE" ? <button type="button" onClick={() => void act("Release Quality hold", () => releaseProcurementQualityHold(amoCode(), item.id, "Quality reviewed and formally released."))}>Release hold</button> : null}</RecordActions></article>)}</div> : <Empty icon={ShieldCheck} title="No Quality holds" text="No active supplier, order, or receipt veto is recorded." />}
+        {holds.length ? <div className="proc-card-list">{holds.map((item) => <article key={item.id}><div><strong>{item.hold_number}</strong><span>{item.reason}</span><small>{item.target_type} #{item.target_id} · {item.qms_finding_id || item.qms_car_id || "No QMS reference"}</small></div><Status value={item.status} /><RecordActions><button type="button" onClick={() => linkDocument("QUALITY_HOLD", item.id)}><Paperclip size={14} />Evidence</button>{canQuality && item.status === "ACTIVE" ? <button type="button" onClick={() => openModal("holdRelease", { holdId: String(item.id) })}>Release hold</button> : null}</RecordActions></article>)}</div> : <Empty icon={ShieldCheck} title="No Quality holds" text="No active supplier, order, or receipt veto is recorded." />}
       </section>
       <section className="proc-command-grid">
-        <div className="proc-panel"><header><div><h2>Quarantine workload</h2><p>{receipts.length} receipt{receipts.length === 1 ? "" : "s"} waiting for inspection or release.</p></div></header><button type="button" className="proc-button proc-button--secondary" onClick={() => openModal("inspection", { documentationComplete: "yes", physicalCondition: "yes", supplierScope: "yes", partIdentity: "yes", traceabilityAcceptable: "yes", shelfLife: "yes", disposition: "ACCEPTED" })}>Open inspection</button></div>
+        <div className="proc-panel"><header><div><h2>Quarantine workload</h2><p>{receipts.length} receipt{receipts.length === 1 ? "" : "s"} waiting for inspection or release.</p></div></header><button type="button" className="proc-button proc-button--secondary" onClick={() => openModal("inspection")}>Open inspection</button></div>
         <div className="proc-panel"><header><div><h2>Finance reconciliation</h2><p>Three-way match uses ordered value and Quality-released receipt quantities.</p></div></header>{canFinance ? <button type="button" className="proc-button proc-button--primary" onClick={() => openModal("match", { tolerance: "0.01" })}><CircleDollarSign size={16} />Run invoice match</button> : <span className="proc-muted">Finance role required.</span>}<small>{orders.length} purchase order{orders.length === 1 ? "" : "s"} available for reconciliation.</small></div>
       </section>
     </div>

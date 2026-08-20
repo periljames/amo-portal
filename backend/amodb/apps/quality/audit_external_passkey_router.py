@@ -36,7 +36,10 @@ from .audit_live_completion_models import QualityAuditWebAuthnChallenge, Quality
 from .router import public_router
 
 
-router = APIRouter(prefix="/quality", tags=["Quality / External Audit Passkey"])
+# ``public_router`` already owns the /quality prefix. Keep this child router
+# prefix-free so these handlers are exposed exactly at
+# /quality/audit-access/passkey/* rather than /quality/quality/audit-access/*.
+router = APIRouter(tags=["Quality / External Audit Passkey"])
 
 
 class ExternalPasskeyVerify(BaseModel):
