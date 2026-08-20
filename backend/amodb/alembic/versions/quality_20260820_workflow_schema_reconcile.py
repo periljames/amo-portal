@@ -99,6 +99,44 @@ def _drop_unique(name: str, table: str) -> None:
         op.drop_constraint(name, table, type_="unique")
 
 
+def _has_unique_on_columns(table: str, columns: list[str]) -> bool:
+    if not _has_table(table):
+        return False
+    target = set(columns)
+    return any(
+        set(constraint.get("column_names") or []) == target
+        for constraint in _insp().get_unique_constraints(table)
+    )
+
+
+def _drop_unique_on_columns(table: str, columns: list[str]) -> None:
+    if not _has_table(table):
+        return
+    target = set(columns)
+    for constraint in _insp().get_unique_constraints(table):
+        name = constraint.get("name")
+        if name and set(constraint.get("column_names") or []) == target:
+            op.drop_constraint(name, table, type_="unique")
+
+
+def _drop_check_containing(table: str, tokens: list[str]) -> None:
+    """Drop a CHECK by its inspected definition, not its convention-derived name.
+
+    Quality uses a naming convention that expands explicit CHECK names with the
+    table name and PostgreSQL may truncate the resulting identifier. Matching the
+    actual SQL expression keeps this migration correct across both historical
+    and convention-named databases.
+    """
+    if not _has_table(table):
+        return
+    required = [token.lower() for token in tokens]
+    for constraint in _insp().get_check_constraints(table):
+        name = constraint.get("name")
+        sqltext = str(constraint.get("sqltext") or "").lower()
+        if name and all(token in sqltext for token in required):
+            op.drop_constraint(name, table, type_="check")
+
+
 def _reconcile_post_briefs() -> None:
     table = "quality_audit_post_briefs"
     if not _has_table(table):
@@ -227,7 +265,7 @@ def _reconcile_report_trackers() -> None:
             """
         ))
 
-    _drop_check("ck_quality_report_tracker_status", table)
+    _drop_check_containing(table, ["status", "submitted", "accepted", "overdue"])
     op.execute(sa.text(
         """
         UPDATE quality_audit_report_trackers
@@ -338,7 +376,7 @@ def _reconcile_reminder_milestones() -> None:
     # The historical unique constraint prevented one governed milestone from
     # being materialised for multiple recipients. The current model deliberately
     # permits recipient-specific rows and uses indexes instead.
-    _drop_unique("uq_quality_reminder_milestone", table)
+    _drop_unique_on_columns(table, ["amo_id", "entity_type", "entity_id", "milestone_key"])
     _create_index("ix_quality_reminder_entity_key", table, ["amo_id", "entity_type", "entity_id", "milestone_key"])
     _create_index("ix_quality_reminder_due_unsent", table, ["amo_id", "scheduled_for", "sent_at"])
     _create_index("ix_quality_reminder_milestones_recipient_user_id", table, ["recipient_user_id"])
@@ -400,12 +438,14 @@ def _reconcile_archive_packages() -> None:
             ondelete="SET NULL",
         )
 
-    _drop_unique("uq_quality_archive_package_ref", table)
-    op.create_unique_constraint(
-        "uq_quality_archive_package_ref",
-        table,
-        ["amo_id", "audit_id", "package_ref"],
-    )
+    _drop_unique_on_columns(table, ["amo_id", "package_ref"])
+    if not _has_unique_on_columns(table, ["amo_id", "audit_id", "package_ref"]):
+        op.create_unique_constraint(
+            "uq_quality_archive_package_ref",
+            table,
+            ["amo_id", "audit_id", "package_ref"],
+        )
+    _drop_check_containing(table, ["status", "ready", "locked", "superseded"])
     op.create_check_constraint(
         "ck_quality_archive_status",
         table,
@@ -439,9 +479,10 @@ def downgrade() -> None:
                 """
             ))
             op.alter_column(table, "storage_ref", existing_type=sa.String(length=512), nullable=False)
-        _drop_check("ck_quality_archive_status", table)
-        _drop_unique("uq_quality_archive_package_ref", table)
-        op.create_unique_constraint("uq_quality_archive_package_ref", table, ["amo_id", "package_ref"])
+        _drop_check_containing(table, ["status", "ready", "locked", "superseded"])
+        _drop_unique_on_columns(table, ["amo_id", "audit_id", "package_ref"])
+        if not _has_unique_on_columns(table, ["amo_id", "package_ref"]):
+            op.create_unique_constraint("uq_quality_archive_package_ref", table, ["amo_id", "package_ref"])
         for index_name in (
             "ix_quality_archive_audit_generated",
             "ix_quality_archive_packages_package_ref",
@@ -471,7 +512,7 @@ def downgrade() -> None:
         for column in ("message", "severity", "escalated_at", "due_date", "scheduled_for", "recipient_user_id"):
             if column in _columns(table):
                 op.drop_column(table, column)
-        if "uq_quality_reminder_milestone" not in _unique_constraints(table):
+        if not _has_unique_on_columns(table, ["amo_id", "entity_type", "entity_id", "milestone_key"]):
             op.create_unique_constraint(
                 "uq_quality_reminder_milestone",
                 table,
@@ -480,7 +521,7 @@ def downgrade() -> None:
 
     table = "quality_audit_report_trackers"
     if _has_table(table):
-        _drop_check("ck_quality_report_tracker_status", table)
+        _drop_check_containing(table, ["status", "submitted", "accepted", "overdue"])
         op.execute(sa.text(
             """
             UPDATE quality_audit_report_trackers
