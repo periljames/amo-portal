@@ -65,6 +65,14 @@ const CAR_WORKSPACE_TAILS = [
   "closeout",
 ] as const;
 
+const PROVIDER_WORKSPACE_TAILS = [
+  "overview",
+  "approval",
+  "contracts",
+  "evidence",
+  "monitoring",
+] as const;
+
 const MODULES: readonly QmsModuleRoute[] = [
   {
     id: "inbox",
@@ -181,14 +189,15 @@ const MODULES: readonly QmsModuleRoute[] = [
   {
     id: "suppliers",
     segment: "suppliers",
-    label: "Suppliers",
-    navigationLabel: "Suppliers",
+    label: "External Providers",
+    navigationLabel: "External Providers",
     permission: "qms.supplier.view",
     section: "control",
-    defaultView: "approved-list",
-    validViews: ["approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
-    componentType: "canonical",
+    defaultView: "register",
+    validViews: ["register", "approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
+    componentType: "specialist",
     allowRecordDetails: true,
+    recordRoutes: [{ allowBare: true, allowedTails: PROVIDER_WORKSPACE_TAILS }],
   },
   {
     id: "equipment-calibration",
