@@ -179,5 +179,5 @@ def test_due_colour_contract_maps_overdue_scheduled_current_and_discontinued():
     assert _due_tone({"next_due": "2028-08-04", "compliance_status": "Current"}, has_recurrence=True, discontinued=True) == "discontinued"
 
 
-def test_canonical_router_uses_lifecycle_table_renderer():
-    assert training_router._training_profile_html is _training_profile_html
+def test_canonical_router_keeps_lifecycle_table_installed_below_portfolio():
+    assert training_router._table_training_record_presentation_installed is True
