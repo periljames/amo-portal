@@ -261,3 +261,8 @@ from . import intelligence_route_order as _intelligence_route_order  # noqa: F40
 from . import audit_preparation_route_order as _audit_preparation_route_order  # noqa: F401,E402
 from . import planner_assignment_guard_route_order as _planner_assignment_guard_route_order  # noqa: F401,E402
 from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
+
+# Live-audit route-order registration is a startup contract, not a test-only
+# side effect. Loading the session registrar activates the full public/internal
+# Live Audit route chain before the application copies the Quality routers.
+from . import audit_session_route_order as _audit_session_route_order  # noqa: F401,E402
