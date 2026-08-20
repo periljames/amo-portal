@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from . import audit_archive_governance_models as _audit_archive_governance_models  # noqa: F401
 from . import audit_archive_governance_router
 from . import audit_archive_package_router
-from . import audit_archive_evidence_hardening as _audit_archive_evidence_hardening  # noqa: F401
+from . import audit_archive_size_guard as _audit_archive_size_guard  # noqa: F401
 from .canonical_router import legacy_router, router
 
 
