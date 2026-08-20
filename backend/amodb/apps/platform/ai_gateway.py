@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import time
 from dataclasses import dataclass
@@ -20,15 +19,16 @@ from . import saas_providers, saas_services
 
 
 AI_MODULE_CODE = "ai"
+AI_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_TIER = "STANDARD"
-AI_PROVIDER = "openai"
 LONG_CONTEXT_THRESHOLD = 272_000
 
-AI_TIER_ORDER = {
-    "STANDARD": 10,
-    "ADVANCED": 20,
-    "PROFESSIONAL": 30,
+AI_TIER_ORDER = {"STANDARD": 10, "ADVANCED": 20, "PROFESSIONAL": 30}
+PLAN_DEFAULT_MODEL = {
+    "STANDARD": "gpt-5.6-luna",
+    "ADVANCED": "gpt-5.6-terra",
+    "PROFESSIONAL": "gpt-5.6-sol",
 }
 
 
@@ -42,53 +42,27 @@ class AIModelDefinition:
     output_microusd_per_million: int
     context_window: int
     max_output_tokens: int
-    effective_from: str
+    rate_effective_from: str
 
 
-# Rate snapshots are deliberately explicit and versioned by effective date. They
-# are used for portal cost accounting only; provider invoices remain the final
-# external billing source of truth. Rates are stored in micro-USD to preserve
-# sub-cent accuracy without floating-point money arithmetic.
+# Direct OpenAI standard-processing rate snapshots. Money is represented in
+# micro-USD so a single low-cost request can be measured without rounding it to
+# a cent. The gateway currently sends text-only Responses API requests and does
+# not enable paid tools, regional processing or Fast mode; those must receive
+# their own explicit rate entries before they can be billable through the portal.
 AI_MODELS: dict[str, AIModelDefinition] = {
     "gpt-5.6-luna": AIModelDefinition(
-        model="gpt-5.6-luna",
-        display_name="GPT-5.6 Luna",
-        tier="STANDARD",
-        input_microusd_per_million=200_000,
-        cached_input_microusd_per_million=20_000,
-        output_microusd_per_million=1_200_000,
-        context_window=1_050_000,
-        max_output_tokens=128_000,
-        effective_from="2026-08-20",
+        "gpt-5.6-luna", "GPT-5.6 Luna", "STANDARD",
+        200_000, 20_000, 1_200_000, 1_050_000, 128_000, "2026-07-30",
     ),
     "gpt-5.6-terra": AIModelDefinition(
-        model="gpt-5.6-terra",
-        display_name="GPT-5.6 Terra",
-        tier="ADVANCED",
-        input_microusd_per_million=2_000_000,
-        cached_input_microusd_per_million=200_000,
-        output_microusd_per_million=12_000_000,
-        context_window=1_050_000,
-        max_output_tokens=128_000,
-        effective_from="2026-08-20",
+        "gpt-5.6-terra", "GPT-5.6 Terra", "ADVANCED",
+        2_000_000, 200_000, 12_000_000, 1_050_000, 128_000, "2026-07-30",
     ),
     "gpt-5.6-sol": AIModelDefinition(
-        model="gpt-5.6-sol",
-        display_name="GPT-5.6 Sol",
-        tier="PROFESSIONAL",
-        input_microusd_per_million=5_000_000,
-        cached_input_microusd_per_million=500_000,
-        output_microusd_per_million=30_000_000,
-        context_window=1_050_000,
-        max_output_tokens=128_000,
-        effective_from="2026-08-20",
+        "gpt-5.6-sol", "GPT-5.6 Sol", "PROFESSIONAL",
+        5_000_000, 500_000, 30_000_000, 1_050_000, 128_000, "2026-07-09",
     ),
-}
-
-PLAN_DEFAULT_MODEL = {
-    "STANDARD": "gpt-5.6-luna",
-    "ADVANCED": "gpt-5.6-terra",
-    "PROFESSIONAL": "gpt-5.6-sol",
 }
 
 BillingScope = Literal["PLATFORM_TEST", "PLATFORM", "TENANT"]
@@ -109,12 +83,20 @@ def _safe_month(value: str | None) -> str:
     return month
 
 
+def _ceil_div(numerator: int, denominator: int) -> int:
+    if denominator <= 0:
+        raise ValueError("denominator must be positive")
+    if numerator <= 0:
+        return 0
+    return (numerator + denominator - 1) // denominator
+
+
 def _subscription_metadata(row: account_models.ModuleSubscription | None) -> dict[str, Any]:
     if row is None or not row.metadata_json:
         return {}
     try:
         value = json.loads(row.metadata_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -134,20 +116,20 @@ def model_catalog() -> list[dict[str, Any]]:
     return [
         {
             "provider": AI_PROVIDER,
-            "model": definition.model,
-            "display_name": definition.display_name,
-            "tier": definition.tier,
-            "input_microusd_per_million": definition.input_microusd_per_million,
-            "cached_input_microusd_per_million": definition.cached_input_microusd_per_million,
-            "output_microusd_per_million": definition.output_microusd_per_million,
-            "context_window": definition.context_window,
-            "max_output_tokens": definition.max_output_tokens,
-            "effective_from": definition.effective_from,
+            "model": item.model,
+            "display_name": item.display_name,
+            "tier": item.tier,
+            "input_microusd_per_million": item.input_microusd_per_million,
+            "cached_input_microusd_per_million": item.cached_input_microusd_per_million,
+            "output_microusd_per_million": item.output_microusd_per_million,
+            "context_window": item.context_window,
+            "max_output_tokens": item.max_output_tokens,
+            "effective_from": item.rate_effective_from,
             "long_context_threshold": LONG_CONTEXT_THRESHOLD,
             "long_context_input_multiplier": 2.0,
             "long_context_output_multiplier": 1.5,
         }
-        for definition in AI_MODELS.values()
+        for item in AI_MODELS.values()
     ]
 
 
@@ -157,15 +139,14 @@ def tenant_policy(db: Session, tenant_id: str) -> dict[str, Any]:
         raise ValueError("Tenant not found")
     row = _ai_subscription(db, tenant_id)
     metadata = _subscription_metadata(row)
-    status = str(getattr(getattr(row, "status", None), "value", getattr(row, "status", "DISABLED")) or "DISABLED").upper()
+    raw_status = getattr(row, "status", "DISABLED") if row else "DISABLED"
+    status = str(getattr(raw_status, "value", raw_status) or "DISABLED").upper()
     plan = str(getattr(row, "plan_code", None) or metadata.get("max_model_tier") or DEFAULT_TIER).upper()
     if plan not in AI_TIER_ORDER:
         plan = DEFAULT_TIER
     model = str(metadata.get("model") or PLAN_DEFAULT_MODEL[plan]).strip()
     if model not in AI_MODELS or AI_TIER_ORDER[AI_MODELS[model].tier] > AI_TIER_ORDER[plan]:
         model = PLAN_DEFAULT_MODEL[plan]
-    budget = int(metadata.get("monthly_budget_microusd") or 0)
-    markup_bps = int(metadata.get("markup_bps") or 0)
     return {
         "tenant_id": tenant_id,
         "tenant_name": tenant.name,
@@ -175,10 +156,10 @@ def tenant_policy(db: Session, tenant_id: str) -> dict[str, Any]:
         "provider": str(metadata.get("provider") or AI_PROVIDER).lower(),
         "model": model,
         "max_model_tier": plan,
-        "monthly_budget_microusd": max(0, budget),
+        "monthly_budget_microusd": max(0, int(metadata.get("monthly_budget_microusd") or 0)),
         "hard_limit": bool(metadata.get("hard_limit", True)),
         "allow_external_documents": bool(metadata.get("allow_external_documents", False)),
-        "markup_bps": max(0, min(markup_bps, 100_000)),
+        "markup_bps": max(0, min(int(metadata.get("markup_bps") or 0), 100_000)),
     }
 
 
@@ -210,23 +191,23 @@ def usage_summary(db: Session, tenant_id: str, month: str | None = None) -> dict
         "customer_charge_microusd": _meter_value(db, tenant_id, "customer_charge_microusd", month),
     }
     budget = int(policy["monthly_budget_microusd"])
-    charge = int(values["customer_charge_microusd"])
+    used = int(values["customer_charge_microusd"])
     return {
         "tenant_id": tenant_id,
         "month": month,
         "policy": policy,
         **values,
-        "remaining_budget_microusd": max(0, budget - charge) if budget else None,
-        "budget_used_percent": round((charge / budget) * 100, 2) if budget else None,
+        "remaining_budget_microusd": max(0, budget - used) if budget else None,
+        "budget_used_percent": round((used / budget) * 100, 2) if budget else None,
     }
 
 
 def _usage_numbers(raw_usage: Any) -> dict[str, int]:
     usage = raw_usage if isinstance(raw_usage, dict) else {}
-    details = usage.get("input_tokens_details") if isinstance(usage.get("input_tokens_details"), dict) else {}
+    details = usage.get("input_tokens_details")
+    details = details if isinstance(details, dict) else {}
     input_tokens = max(0, int(usage.get("input_tokens") or 0))
-    cached_tokens = max(0, int(details.get("cached_tokens") or 0))
-    cached_tokens = min(input_tokens, cached_tokens)
+    cached_tokens = min(input_tokens, max(0, int(details.get("cached_tokens") or 0)))
     output_tokens = max(0, int(usage.get("output_tokens") or 0))
     total_tokens = max(0, int(usage.get("total_tokens") or (input_tokens + output_tokens)))
     return {
@@ -237,55 +218,55 @@ def _usage_numbers(raw_usage: Any) -> dict[str, int]:
     }
 
 
-def _ceil_rate(tokens: int, microusd_per_million: int) -> int:
-    if tokens <= 0 or microusd_per_million <= 0:
-        return 0
-    return math.ceil((tokens * microusd_per_million) / 1_000_000)
+def _token_cost(tokens: int, microusd_per_million: int) -> int:
+    return _ceil_div(max(0, tokens) * max(0, microusd_per_million), 1_000_000)
 
 
 def calculate_provider_cost(model: str, raw_usage: Any) -> dict[str, Any]:
-    definition = AI_MODELS.get(model)
-    if definition is None:
+    item = AI_MODELS.get(model)
+    if item is None:
         raise ValueError(f"No audited price snapshot is configured for model {model!r}")
     usage = _usage_numbers(raw_usage)
-    non_cached_input = max(0, usage["input_tokens"] - usage["cached_input_tokens"])
+    non_cached = max(0, usage["input_tokens"] - usage["cached_input_tokens"])
     long_context = usage["input_tokens"] > LONG_CONTEXT_THRESHOLD
-    input_multiplier = 2 if long_context else 1
-    output_num, output_den = (3, 2) if long_context else (1, 1)
-
-    input_rate = definition.input_microusd_per_million * input_multiplier
-    cached_rate = definition.cached_input_microusd_per_million * input_multiplier
-    output_rate = definition.output_microusd_per_million * output_num // output_den
+    input_rate = item.input_microusd_per_million * (2 if long_context else 1)
+    cached_rate = item.cached_input_microusd_per_million * (2 if long_context else 1)
+    output_rate = item.output_microusd_per_million
+    if long_context:
+        output_rate = _ceil_div(output_rate * 3, 2)
     provider_cost = (
-        _ceil_rate(non_cached_input, input_rate)
-        + _ceil_rate(usage["cached_input_tokens"], cached_rate)
-        + _ceil_rate(usage["output_tokens"], output_rate)
+        _token_cost(non_cached, input_rate)
+        + _token_cost(usage["cached_input_tokens"], cached_rate)
+        + _token_cost(usage["output_tokens"], output_rate)
     )
     return {
         "usage": usage,
         "provider_cost_microusd": provider_cost,
         "rate_snapshot": {
             "currency": "USD",
-            "effective_from": definition.effective_from,
+            "processing_mode": "STANDARD",
+            "effective_from": item.rate_effective_from,
             "input_microusd_per_million": input_rate,
             "cached_input_microusd_per_million": cached_rate,
             "output_microusd_per_million": output_rate,
             "long_context": long_context,
             "long_context_threshold": LONG_CONTEXT_THRESHOLD,
+            "paid_tools_enabled": False,
+            "regional_processing": False,
         },
     }
 
 
 def _resolve_model(policy: dict[str, Any] | None, requested_model: str | None) -> AIModelDefinition:
     model = str(requested_model or (policy or {}).get("model") or DEFAULT_MODEL).strip()
-    definition = AI_MODELS.get(model)
-    if definition is None:
+    item = AI_MODELS.get(model)
+    if item is None:
         raise ValueError("Requested AI model is not in the approved portal catalogue")
     if policy is not None:
         max_tier = str(policy.get("max_model_tier") or DEFAULT_TIER).upper()
-        if AI_TIER_ORDER[definition.tier] > AI_TIER_ORDER.get(max_tier, AI_TIER_ORDER[DEFAULT_TIER]):
-            raise PermissionError(f"Tenant plan {max_tier} does not permit {definition.display_name}")
-    return definition
+        if AI_TIER_ORDER[item.tier] > AI_TIER_ORDER.get(max_tier, AI_TIER_ORDER[DEFAULT_TIER]):
+            raise PermissionError(f"Tenant plan {max_tier} does not permit {item.display_name}")
+    return item
 
 
 def _record_tenant_usage(
@@ -373,35 +354,28 @@ def run_ai(
             raise ValueError("The tenant AI provider is not supported by this gateway")
         if requires_external_documents and not policy["allow_external_documents"]:
             raise PermissionError("Tenant policy does not permit controlled documents to be sent to an external AI provider")
-        month = current_usage_month()
         budget = int(policy["monthly_budget_microusd"])
         if budget and policy["hard_limit"]:
-            used = _meter_value(db, tenant_id, "customer_charge_microusd", month)
+            used = _meter_value(db, tenant_id, "customer_charge_microusd", current_usage_month())
             if used >= budget:
                 raise PermissionError("Tenant monthly AI budget has been exhausted")
 
-    definition = _resolve_model(policy, requested_model)
-
-    # Platform tests deliberately use only the platform credential even when a
-    # tenant context is supplied. Tenant-billed calls may use a tenant override
-    # and otherwise inherit the platform credential.
-    credential_tenant_id = tenant_id if billing_scope == "TENANT" else None
+    item = _resolve_model(policy, requested_model)
     credential = saas_services.get_provider_credential(
         db,
         provider=AI_PROVIDER,
-        tenant_id=credential_tenant_id,
+        tenant_id=tenant_id if billing_scope == "TENANT" else None,
         allow_platform_fallback=True,
     )
     saas_services.require_operational_provider(credential, label="OpenAI")
     assert credential is not None
 
     config = dict(credential.config_json or {})
-    config["model"] = definition.model
+    config["model"] = item.model
     secret = saas_services.provider_secrets(credential)
     prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     started = time.perf_counter()
     provider_status = "ERROR"
-
     try:
         with operation_span("provider.ai.fetch", provider="AI", operation="FETCH"):
             draft = saas_providers.openai_support_response(
@@ -412,7 +386,6 @@ def run_ai(
             )
         provider_status = "SUCCESS"
     except Exception as exc:
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
         _audit(
             db,
             actor_user_id=actor_user_id,
@@ -422,13 +395,13 @@ def run_ai(
             reason="AI provider request failed",
             details={
                 "provider": AI_PROVIDER,
-                "model": definition.model,
-                "tier": definition.tier,
+                "model": item.model,
+                "tier": item.tier,
                 "feature_code": feature_code,
                 "billing_scope": billing_scope,
                 "prompt_sha256": prompt_hash,
                 "prompt_chars": len(prompt),
-                "latency_ms": elapsed_ms,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "error_type": type(exc).__name__,
             },
         )
@@ -442,20 +415,18 @@ def run_ai(
             duration_seconds=time.perf_counter() - started,
         )
 
-    actual_model = str(draft.get("model") or definition.model)
+    actual_model = str(draft.get("model") or item.model)
     if actual_model not in AI_MODELS:
-        # Do not silently calculate money against a different provider-returned
-        # model. A changed/aliased model must first be added to the catalogue.
         raise RuntimeError(f"Provider returned unpriced model {actual_model!r}")
     cost = calculate_provider_cost(actual_model, draft.get("usage") or {})
     usage = cost["usage"]
     provider_cost = int(cost["provider_cost_microusd"])
     markup_bps = int((policy or {}).get("markup_bps") or 0)
-    customer_charge = math.ceil(provider_cost * (10_000 + markup_bps) / 10_000)
+    customer_charge = _ceil_div(provider_cost * (10_000 + markup_bps), 10_000)
     month = current_usage_month()
 
     if billing_scope == "TENANT":
-        assert tenant_id is not None and policy is not None
+        assert tenant_id is not None
         _record_tenant_usage(
             db,
             tenant_id=tenant_id,
@@ -466,7 +437,7 @@ def run_ai(
         )
 
     response_id = str(draft.get("response_id") or "") or None
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    latency_ms = round((time.perf_counter() - started) * 1000, 2)
     _audit(
         db,
         actor_user_id=actor_user_id,
@@ -489,12 +460,11 @@ def run_ai(
             "prompt_sha256": prompt_hash,
             "prompt_chars": len(prompt),
             "response_chars": len(str(draft.get("text") or "")),
-            "latency_ms": elapsed_ms,
+            "latency_ms": latency_ms,
             "credential_scope": "TENANT" if credential.tenant_id else "PLATFORM",
         },
     )
     db.commit()
-
     return {
         "provider": AI_PROVIDER,
         "model": actual_model,
@@ -507,6 +477,6 @@ def run_ai(
         "billing_scope": billing_scope,
         "tenant_id": tenant_id,
         "feature_code": feature_code,
-        "latency_ms": elapsed_ms,
+        "latency_ms": latency_ms,
         "rate_snapshot": cost["rate_snapshot"],
     }
