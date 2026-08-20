@@ -1,70 +1,12 @@
-import React, { useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
-import QualityAuditPlanScheduleBasePage from "./QualityAuditPlanScheduleBasePage";
-
-const PLANNER_SOURCE = "planner";
-const HANDOFF_STATE_KEY = "planner_handoff";
-const HANDOFF_OPENED = "opened";
-const CREATE_BUTTON_LABEL = "Create schedule";
-
-function isCreateScheduleButton(element: HTMLButtonElement): boolean {
-  return element.textContent?.replace(/\s+/g, " ").trim() === CREATE_BUTTON_LABEL;
-}
+import React from "react";
+import { Navigate, useParams } from "react-router-dom";
 
 /**
- * Compatibility boundary for the Quality Operations Planner handoff.
- *
- * The established audit planning page owns the actual schedule form and its
- * browser-persisted draft. A planner handoff therefore opens that existing form
- * after the page mounts, rather than introducing a second creation workflow or
- * passing unsupported draft fields through a register URL.
+ * Historical audit-plan URLs now resolve to the single authoritative Quality
+ * Operations Planner. Keeping this tiny route target prevents stale bookmarks
+ * from becoming dead links without retaining a second scheduling UI or API.
  */
 export default function QualityAuditPlanSchedulePage(): React.ReactElement {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const handledRef = useRef(false);
-  const isPlannerHandoff = searchParams.get("source") === PLANNER_SOURCE
-    && searchParams.get(HANDOFF_STATE_KEY) !== HANDOFF_OPENED;
-
-  useEffect(() => {
-    if (!isPlannerHandoff || handledRef.current) return;
-
-    const root = rootRef.current;
-    if (!root) return;
-
-    const openAuthoritativeForm = (): boolean => {
-      if (handledRef.current) return true;
-      const createButton = Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
-        .find(isCreateScheduleButton);
-      if (!createButton || createButton.disabled) return false;
-
-      handledRef.current = true;
-      createButton.click();
-
-      const next = new URLSearchParams(searchParams);
-      next.delete("create");
-      next.set(HANDOFF_STATE_KEY, HANDOFF_OPENED);
-      setSearchParams(next, { replace: true });
-      return true;
-    };
-
-    if (openAuthoritativeForm()) return;
-
-    const observer = new MutationObserver(() => {
-      if (openAuthoritativeForm()) observer.disconnect();
-    });
-    observer.observe(root, { childList: true, subtree: true });
-
-    const timeout = window.setTimeout(() => observer.disconnect(), 10_000);
-    return () => {
-      window.clearTimeout(timeout);
-      observer.disconnect();
-    };
-  }, [isPlannerHandoff, searchParams, setSearchParams]);
-
-  return (
-    <div ref={rootRef} data-qms-planner-handoff-root style={{ display: "contents" }}>
-      <QualityAuditPlanScheduleBasePage />
-    </div>
-  );
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  return <Navigate replace to={`/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`} />;
 }
