@@ -417,76 +417,222 @@ def _training_profile_html(payload: dict[str, Any]):
     tenant = payload.get("tenant") or {}
     summary = payload.get("summary") or {}
     requirements = payload.get("requirements") or []
-    org_name = html.escape(str(tenant.get("name") or tenant.get("organisation_name") or "Approved Maintenance Organisation"))
-    person_name = html.escape(str(user.get("full_name") or user.get("name") or "Personnel record"))
-    title = html.escape(str(user.get("position_title") or user.get("job_title") or user.get("position") or "Personnel"))
-    staff = html.escape(str(user.get("staff_code") or user.get("staff_no") or "—"))
-    licence = html.escape(str(user.get("licence_number") or user.get("license_number") or "—"))
+
+    org_name_raw = str(tenant.get("name") or tenant.get("organisation_name") or "Approved Maintenance Organisation")
+    person_name_raw = str(user.get("full_name") or user.get("name") or "Personnel record")
+    title_raw = str(user.get("position_title") or user.get("job_title") or user.get("position") or "Personnel")
+    org_name = html.escape(org_name_raw)
+    person_name = html.escape(person_name_raw)
+    title = html.escape(title_raw)
     profile_state = "Active" if user.get("is_active", True) else "Inactive"
+
     accent = str(tenant.get("brand_accent") or "#8a6f20")
     if not accent.startswith("#") or len(accent) not in (4, 7):
         accent = "#8a6f20"
 
+    def safe_image_url(*values: Any) -> Optional[str]:
+        for value in values:
+            raw = str(value or "").strip()
+            if not raw:
+                continue
+            if raw.startswith("/"):
+                return html.escape(raw, quote=True)
+            parsed = urlsplit(raw)
+            if parsed.scheme.lower() == "https" and parsed.netloc:
+                return html.escape(raw, quote=True)
+        return None
+
+    logo_url = safe_image_url(
+        tenant.get("logo_url"),
+        tenant.get("brand_logo_url"),
+        tenant.get("public_logo_url"),
+    )
+    photo_url = safe_image_url(
+        user.get("photo_url"),
+        user.get("profile_image_url"),
+        user.get("avatar_url"),
+    )
+
+    brand_visual = (
+        f"<img src='{logo_url}' alt='' width='56' height='56' decoding='async' fetchpriority='high'>"
+        if logo_url
+        else html.escape(_initials(org_name_raw))
+    )
+    avatar_visual = (
+        f"<img src='{photo_url}' alt='' width='88' height='88' decoding='async' fetchpriority='high'>"
+        if photo_url
+        else html.escape(_initials(person_name_raw))
+    )
+
+    meta_items: list[str] = []
+    staff = user.get("staff_code") or user.get("staff_no")
+    licence = user.get("licence_number") or user.get("license_number")
+    if staff:
+        meta_items.append(f"<span class='meta-pill'>Staff {html.escape(str(staff))}</span>")
+    if licence:
+        meta_items.append(f"<span class='meta-pill'>Licence {html.escape(str(licence))}</span>")
+    meta_items.append(f"<span class='meta-pill'>{profile_state}</span>")
+
     exception = next((row for row in requirements if row.get("compliance_status") == "Overdue"), None)
+    next_action = ""
     if exception:
-        next_block = f"<strong>ACTION REQUIRED</strong><span>{html.escape(exception['course_name'])}</span><span>Next Due: {_fmt_public_date(exception.get('next_due'))}</span><b>OVERDUE</b>"
+        next_action = (
+            "<section class='next-action is-overdue' aria-label='Training action required'>"
+            "<div class='next-icon' aria-hidden='true'>!</div>"
+            "<div><span class='eyebrow'>Action required</span>"
+            f"<strong>{html.escape(str(exception.get('course_name') or 'Training'))}</strong>"
+            f"<span>Due {_fmt_public_date(exception.get('next_due'))}</span></div>"
+            "</section>"
+        )
     else:
         candidate = next((row for row in requirements if row.get("next_due")), None)
         if candidate:
-            scheduled = _fmt_public_date(candidate.get("scheduled")) if candidate.get("scheduled") else "Not scheduled"
-            next_block = f"<strong>NEXT TRAINING</strong><span>{html.escape(candidate['course_name'])}</span><span>Next Due: {_fmt_public_date(candidate.get('next_due'))}</span><span>Scheduled: {scheduled}</span>"
-        else:
-            next_block = "<strong>TRAINING STATUS</strong><span>No recurrent training deadline is currently recorded.</span>"
+            schedule = ""
+            if candidate.get("scheduled"):
+                schedule = f"<span>Scheduled {_fmt_public_date(candidate.get('scheduled'))}</span>"
+            next_action = (
+                "<section class='next-action' aria-label='Next training due'>"
+                "<div class='next-icon' aria-hidden='true'>↗</div>"
+                "<div><span class='eyebrow'>Next due</span>"
+                f"<strong>{html.escape(str(candidate.get('course_name') or 'Training'))}</strong>"
+                f"<span>{_fmt_public_date(candidate.get('next_due'))}</span>{schedule}</div>"
+                "</section>"
+            )
 
-    cards: list[str] = []
-    table_rows: list[str] = []
+    training_rows: list[str] = []
     for row in requirements:
         name = html.escape(str(row.get("course_name") or "Training"))
         code = html.escape(str(row.get("course_id") or ""))
-        course_type = html.escape(str(row.get("course_type") or "—"))
-        status = html.escape(str(row.get("compliance_status") or ""))
+        course_type = html.escape(str(row.get("course_type") or "Training"))
+        status_raw = str(row.get("compliance_status") or "Not completed")
+        status = html.escape(status_raw)
+        status_class = status_raw.lower().replace(" ", "-").replace("_", "-")
         completed = _fmt_public_date(row.get("last_completed"))
         next_due = _fmt_public_date(row.get("next_due"))
-        scheduled = _fmt_public_date(row.get("scheduled"))
-        evidence = "Certificate/evidence available" if row.get("evidence_available") else "No public evidence link"
-        history_items = "".join(
-            f"<li><b>{html.escape(str(item.get('type') or 'Training'))}</b> · Completed {_fmt_public_date(item.get('completed'))}</li>"
-            for item in row.get("history") or []
-        ) or "<li>No verified completion record.</li>"
-        ref = html.escape(str(row.get("requirement_key") or row.get("course_id") or ""), quote=True)
-        details = f"<details class='row-details'><summary>View details</summary><dl><dt>Compliance Status</dt><dd>{status}</dd><dt>Last Completed</dt><dd>{completed}</dd><dt>Next Due</dt><dd>{next_due}</dd><dt>Scheduled</dt><dd>{scheduled}</dd><dt>Latest training</dt><dd>{course_type} · {code}</dd></dl><h4>Training history</h4><ul>{history_items}</ul></details>"
-        menu = f"<details class='row-menu'><summary aria-label='Actions for {name}'>⋯</summary><div role='menu'><button type='button' data-copy='{ref}'>Copy record reference</button></div></details>"
-        cards.append(f"<article class='training-card' data-action-row><header><div><h3>{name}</h3><small>{code} · {course_type}</small></div><span class='status status-{status.lower().replace(' ', '-')}'>{status}</span></header><dl><dt>Completed</dt><dd>{completed}</dd><dt>Next Due</dt><dd>{next_due}</dd><dt>Scheduled</dt><dd>{scheduled}</dd></dl><footer><span>{evidence}</span>{menu}</footer>{details}</article>")
-        table_rows.append(f"<tr data-action-row><td><strong>{name}</strong><small>{code} · {course_type}</small>{details}</td><td>{completed}</td><td>{next_due}<small>Scheduled {scheduled}</small></td><td><span class='status status-{status.lower().replace(' ', '-')}'>{status}</span></td><td>{'Available' if row.get('evidence_available') else '—'}</td><td>{menu}</td></tr>")
+
+        detail_items: list[str] = []
+        if row.get("scheduled"):
+            detail_items.append(
+                "<div class='detail-item'><span>Scheduled</span>"
+                f"<strong>{_fmt_public_date(row.get('scheduled'))}</strong></div>"
+            )
+        if row.get("evidence_available"):
+            detail_items.append(
+                "<div class='detail-item'><span>Evidence</span><strong>Verified evidence on file</strong></div>"
+            )
+
+        history = list(row.get("history") or [])
+        older_history = history[1:] if len(history) > 1 else []
+        history_html = ""
+        if older_history:
+            history_items = "".join(
+                "<li><div><strong>"
+                f"{html.escape(str(item.get('type') or 'Training'))}</strong>"
+                f"<span>{html.escape(str(item.get('course_code') or ''))}</span></div>"
+                f"<time>{_fmt_public_date(item.get('completed'))}</time></li>"
+                for item in older_history
+            )
+            history_html = f"<div class='history-block'><h4>Previous completions</h4><ul>{history_items}</ul></div>"
+
+        details_html = ""
+        if detail_items or history_html:
+            details_html = (
+                "<details class='row-details'>"
+                "<summary><span>Details</span><svg viewBox='0 0 24 24' aria-hidden='true'><path d='m9 18 6-6-6-6'/></svg></summary>"
+                f"<div class='detail-panel'>{''.join(detail_items)}{history_html}</div>"
+                "</details>"
+            )
+
+        evidence_badge = (
+            "<span class='evidence-badge' title='Verified evidence is recorded' aria-label='Verified evidence is recorded'>"
+            "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='M20 6 9 17l-5-5'/></svg></span>"
+            if row.get("evidence_available")
+            else ""
+        )
+
+        training_rows.append(
+            "<article class='training-row'>"
+            f"<div class='training-name'><strong>{name}</strong><span>{code} · {course_type}</span></div>"
+            f"<div class='data-cell'><span class='data-label'>Completed</span><strong>{completed}</strong></div>"
+            f"<div class='data-cell'><span class='data-label'>Next due</span><strong>{next_due}</strong></div>"
+            f"<div class='status-cell'><span class='status status-{status_class}'>{status}</span>{evidence_badge}</div>"
+            f"{details_html}</article>"
+        )
+
+    action_icons = """
+<nav class='report-actions' aria-label='Report actions'>
+  <button class='icon-button' type='button' data-share-report aria-label='Share report' title='Share'>
+    <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 16V3'/><path d='m7 8 5-5 5 5'/><path d='M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7'/></svg>
+  </button>
+  <button class='icon-button' type='button' data-copy-link aria-label='Copy verification link' title='Copy link'>
+    <svg viewBox='0 0 24 24' aria-hidden='true'><rect x='9' y='9' width='11' height='11' rx='2'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/></svg>
+  </button>
+  <button class='icon-button' type='button' data-download-pdf aria-label='Download PDF' title='Download PDF'>
+    <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><path d='M14 2v6h6'/><path d='M12 12v6'/><path d='m9 15 3 3 3-3'/></svg>
+  </button>
+  <button class='icon-button' type='button' data-print-report aria-label='Print report' title='Print'>
+    <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M6 9V2h12v7'/><path d='M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2'/><rect x='6' y='14' width='12' height='8'/></svg>
+  </button>
+</nav>
+"""
 
     css = f"""
-:root{{--accent:{accent};--ink:#17212b;--muted:#667085;--line:#e4e7ec;--surface:#fff;--bg:#f4f6f8;--danger:#b42318;--warning:#b54708;--ok:#067647}}
-*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Inter,Arial,sans-serif}}main{{max-width:1180px;margin:auto;padding:clamp(12px,3vw,32px)}}.mast{{display:flex;gap:18px;align-items:center;border-top:6px solid var(--accent);padding:20px 0 14px}}.brand-mark,.avatar{{display:grid;place-items:center;background:var(--accent);color:white;font-weight:800}}.brand-mark{{width:54px;height:54px;border-radius:10px}}.mast h1{{font-size:clamp(18px,3vw,28px);margin:0}}.mast p{{margin:2px 0;color:var(--muted)}}.verified{{margin-left:auto;border:1px solid #a6f4c5;background:#ecfdf3;color:#067647;border-radius:999px;padding:7px 12px;font-weight:800}}.identity{{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;background:white;border:1px solid var(--line);border-radius:14px;padding:16px}}.avatar{{width:84px;aspect-ratio:4/5;border-radius:10px;font-size:26px}}.identity h2{{margin:0}}.identity p{{margin:3px 0;color:var(--muted)}}.meta{{display:flex;gap:16px;flex-wrap:wrap;font-size:13px}}.qr-label{{text-align:right;color:var(--muted);font-size:12px}}.summary{{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}}.metric{{background:white;border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-weight:700}}.next-action{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-left:4px solid var(--accent);background:#fff;border-radius:8px;margin-bottom:14px}}.next-action strong{{letter-spacing:.04em}}.training-shell{{container-type:inline-size;background:white;border:1px solid var(--line);border-radius:14px;overflow:hidden}}table{{width:100%;border-collapse:collapse}}th,td{{padding:12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}}th{{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}}td small,td strong{{display:block}}td small{{color:var(--muted);margin-top:2px}}.cards{{display:none}}.status{{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800;border:1px solid currentColor}}.status-overdue{{color:var(--danger)}}.status-due-soon{{color:var(--warning)}}.status-current,.status-completed{{color:var(--ok)}}.row-menu{{position:relative}}.row-menu>summary{{list-style:none;cursor:pointer;font-size:22px;min-width:44px;min-height:44px;display:grid;place-items:center;border-radius:8px}}.row-menu>summary:focus-visible,.row-details>summary:focus-visible,button:focus-visible{{outline:3px solid var(--accent);outline-offset:2px}}.row-menu>div{{position:absolute;right:0;z-index:4;background:#fff;border:1px solid var(--line);box-shadow:0 8px 30px #10182822;padding:6px;border-radius:9px;min-width:190px}}button{{width:100%;border:0;background:white;padding:10px;text-align:left;cursor:pointer}}.row-details{{margin-top:7px}}.row-details>summary{{cursor:pointer;color:#344054;font-weight:700}}.row-details dl,.training-card dl{{display:grid;grid-template-columns:auto 1fr;gap:5px 12px}}dt{{color:var(--muted)}}dd{{margin:0;font-weight:650}}.training-card{{padding:14px;border-bottom:1px solid var(--line)}}.training-card header,.training-card footer{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}}.training-card h3{{margin:0;font-size:16px}}.training-card small{{color:var(--muted)}}.training-card footer{{align-items:center;border-top:1px solid var(--line);padding-top:8px;font-size:13px;color:var(--muted)}}.sr-only{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}
-@container (max-width:760px){{table{{display:none}}.cards{{display:block}}}}
-@media(max-width:600px){{main{{padding:10px}}.mast{{align-items:flex-start}}.brand-mark{{width:44px;height:44px}}.verified{{font-size:11px}}.identity{{grid-template-columns:auto 1fr}}.qr-label{{display:none}}.avatar{{width:64px}}.metric{{flex:1 1 42%;text-align:center}}}}
-@media print{{body{{background:#fff}}main{{max-width:none;padding:0}}.row-menu,.row-details{{display:none}}.training-shell{{border:0}}}}
+:root{{--accent:{accent};--bg:#f2f2f7;--surface:rgba(255,255,255,.82);--surface-solid:#fff;--label:#1c1c1e;--secondary:#636366;--tertiary:#8e8e93;--separator:rgba(60,60,67,.14);--blue:#007aff;--green:#248a3d;--orange:#c93400;--red:#d70015;--radius-xl:28px;--radius-lg:22px;--radius-md:16px;--shadow:0 1px 2px rgba(0,0,0,.025),0 12px 34px rgba(0,0,0,.055)}}
+*{{box-sizing:border-box}}html{{-webkit-text-size-adjust:100%;text-rendering:optimizeLegibility}}body{{margin:0;min-height:100vh;background:radial-gradient(circle at 12% -12%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 34rem),var(--bg);color:var(--label);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}}button{{font:inherit}}main{{width:min(1120px,100%);margin:auto;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(34px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left))}}.mast{{display:flex;align-items:center;gap:14px;min-height:72px;margin-bottom:18px}}.brand-mark{{width:56px;height:56px;flex:0 0 56px;display:grid;place-items:center;overflow:hidden;border-radius:17px;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 82%,white),var(--accent));color:#fff;font-size:18px;font-weight:760;letter-spacing:-.03em;box-shadow:inset 0 1px rgba(255,255,255,.24),0 6px 18px rgba(0,0,0,.08)}}.brand-mark img{{width:100%;height:100%;display:block;object-fit:contain;background:#fff;padding:5px}}.mast-copy{{min-width:0;flex:1}}.mast h1{{margin:0;font-size:clamp(20px,3vw,28px);line-height:1.1;font-weight:730;letter-spacing:-.03em}}.mast p{{margin:4px 0 0;color:var(--secondary);font-size:13px}}.report-actions{{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid var(--separator);border-radius:16px;background:rgba(255,255,255,.72);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 4px 18px rgba(0,0,0,.035)}}.icon-button{{width:44px;height:44px;display:grid;place-items:center;border:0;border-radius:12px;background:transparent;color:var(--blue);cursor:pointer;transition:background .15s ease,transform .12s ease}}.icon-button:hover{{background:rgba(0,122,255,.08)}}.icon-button:active{{transform:scale(.94);background:rgba(0,122,255,.13)}}.icon-button svg,.row-details svg,.evidence-badge svg{{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}}.identity{{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:18px;padding:20px;border:1px solid rgba(255,255,255,.72);border-radius:var(--radius-xl);background:var(--surface);-webkit-backdrop-filter:saturate(180%) blur(24px);backdrop-filter:saturate(180%) blur(24px);box-shadow:var(--shadow)}}.avatar{{width:88px;height:88px;display:grid;place-items:center;overflow:hidden;border-radius:24px;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 68%,white),var(--accent));color:#fff;font-size:29px;font-weight:730;letter-spacing:-.04em;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 7px 20px rgba(0,0,0,.09)}}.avatar img{{width:100%;height:100%;display:block;object-fit:cover;object-position:center}}.identity-copy{{min-width:0}}.identity h2{{margin:0;font-size:clamp(23px,3vw,30px);line-height:1.08;font-weight:740;letter-spacing:-.035em}}.identity .role{{margin:5px 0 0;color:var(--secondary)}}.meta{{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}}.meta-pill{{display:inline-flex;align-items:center;min-height:28px;padding:4px 9px;border-radius:9px;background:rgba(118,118,128,.08);color:var(--secondary);font-size:12px;font-weight:580}}.verified{{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;padding:8px 11px;border-radius:999px;background:rgba(52,199,89,.12);color:#16743c;font-size:12px;font-weight:720;white-space:nowrap}}.verified svg{{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}}.summary{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}}.metric{{padding:14px 15px;border:1px solid var(--separator);border-radius:var(--radius-md);background:rgba(255,255,255,.76);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 3px 14px rgba(0,0,0,.025)}}.metric strong{{display:block;font-size:23px;line-height:1;font-weight:740;letter-spacing:-.035em}}.metric span{{display:block;margin-top:5px;color:var(--secondary);font-size:12px;font-weight:530}}.next-action{{display:flex;align-items:center;gap:13px;min-height:70px;margin-bottom:14px;padding:13px 16px;border:1px solid color-mix(in srgb,var(--accent) 20%,transparent);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--accent) 7%,rgba(255,255,255,.9));box-shadow:0 4px 16px rgba(0,0,0,.025)}}.next-action.is-overdue{{border-color:rgba(215,0,21,.18);background:rgba(255,59,48,.065)}}.next-icon{{width:38px;height:38px;display:grid;place-items:center;flex:0 0 38px;border-radius:12px;background:rgba(255,255,255,.75);color:var(--accent);font-size:17px;font-weight:750}}.is-overdue .next-icon{{color:var(--red)}}.next-action>div:last-child{{display:flex;min-width:0;flex-wrap:wrap;align-items:baseline;gap:3px 10px}}.next-action .eyebrow{{width:100%;color:var(--secondary);font-size:11px;font-weight:720;letter-spacing:.055em;text-transform:uppercase}}.next-action strong{{font-size:15px;font-weight:680}}.next-action span:not(.eyebrow){{color:var(--secondary);font-size:13px}}.training-shell{{overflow:hidden;border:1px solid var(--separator);border-radius:var(--radius-xl);background:rgba(255,255,255,.82);-webkit-backdrop-filter:saturate(180%) blur(22px);backdrop-filter:saturate(180%) blur(22px);box-shadow:var(--shadow)}}.training-heading,.training-row{{display:grid;grid-template-columns:minmax(260px,1.7fr) minmax(118px,.7fr) minmax(118px,.7fr) minmax(120px,.6fr);align-items:center;gap:14px}}.training-heading{{min-height:44px;padding:0 18px;border-bottom:1px solid var(--separator);color:var(--tertiary);font-size:11px;font-weight:670;letter-spacing:.025em;text-transform:uppercase}}.training-row{{min-height:78px;padding:14px 18px}}.training-row+.training-row{{border-top:1px solid var(--separator)}}.training-row:hover{{background:rgba(118,118,128,.032)}}.training-name{{min-width:0}}.training-name strong{{display:block;overflow:hidden;text-overflow:ellipsis;font-size:15px;line-height:1.25;font-weight:660}}.training-name span{{display:block;margin-top:4px;color:var(--secondary);font-size:12px}}.data-cell{{font-variant-numeric:tabular-nums}}.data-cell strong{{font-size:14px;font-weight:590}}.data-label{{display:none}}.status-cell{{display:flex;align-items:center;gap:7px}}.status{{width:max-content;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 9px;border-radius:999px;font-size:12px;font-weight:660}}.status::before{{width:6px;height:6px;content:"";border-radius:50%;background:currentColor}}.status-current,.status-completed{{color:#16743c;background:rgba(52,199,89,.11)}}.status-due-soon{{color:#9a5b00;background:rgba(255,149,0,.12)}}.status-overdue{{color:#c62f27;background:rgba(255,59,48,.11)}}.status-deferred{{color:#755900;background:rgba(255,204,0,.14)}}.status-scheduled{{color:#235ea7;background:rgba(0,122,255,.10)}}.status-not-completed{{color:#7a2731;background:rgba(255,59,48,.08)}}.evidence-badge{{width:27px;height:27px;display:grid;place-items:center;border-radius:999px;background:rgba(52,199,89,.10);color:var(--green)}}.evidence-badge svg{{width:15px;height:15px}}.row-details{{grid-column:1/-1;margin:0}}.row-details>summary{{width:max-content;display:inline-flex;align-items:center;gap:4px;margin-top:4px;list-style:none;color:var(--blue);font-size:12px;font-weight:620;cursor:pointer}}.row-details>summary::-webkit-details-marker{{display:none}}.row-details>summary svg{{width:16px;height:16px;transition:transform .16s ease}}.row-details[open]>summary svg{{transform:rotate(90deg)}}.detail-panel{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px;margin-top:10px;padding:13px 15px;border-radius:var(--radius-md);background:rgba(118,118,128,.055)}}.detail-item span{{display:block;color:var(--tertiary);font-size:11px;font-weight:560}}.detail-item strong{{display:block;margin-top:3px;font-size:13px;font-weight:620}}.history-block{{grid-column:1/-1}}.history-block h4{{margin:3px 0 4px;font-size:12px}}.history-block ul{{margin:0;padding:0;list-style:none}}.history-block li{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--separator);font-size:12px}}.history-block li div strong,.history-block li div span{{display:block}}.history-block li div span,.history-block time{{color:var(--secondary);font-weight:450}}.icon-button:focus-visible,.row-details>summary:focus-visible{{outline:3px solid rgba(0,122,255,.28);outline-offset:2px}}.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
+@media(max-width:850px){{.summary{{grid-template-columns:repeat(2,minmax(0,1fr))}}.training-heading{{display:none}}.training-row{{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;padding:16px}}.training-name{{grid-column:1}}.status-cell{{grid-column:2;grid-row:1;justify-content:flex-end}}.data-cell{{display:grid;grid-template-columns:92px minmax(0,1fr);grid-column:1/-1;padding-top:3px}}.data-label{{display:inline;color:var(--tertiary);font-size:12px;font-weight:450}}.row-details{{grid-column:1/-1}}}}
+@media(max-width:600px){{main{{padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(26px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}}.mast{{align-items:flex-start;flex-wrap:wrap}}.brand-mark{{width:48px;height:48px;flex-basis:48px;border-radius:14px}}.mast-copy{{width:calc(100% - 64px)}}.mast h1{{font-size:21px}}.report-actions{{width:100%;justify-content:space-between;margin-top:2px}}.report-actions .icon-button{{flex:1}}.identity{{grid-template-columns:auto minmax(0,1fr);gap:13px;padding:16px;border-radius:24px}}.avatar{{width:64px;height:64px;border-radius:18px;font-size:21px}}.verified{{grid-column:1/-1;justify-self:start}}.identity h2{{font-size:21px}}.summary{{gap:8px}}.metric{{padding:12px}}.metric strong{{font-size:20px}}.next-action{{align-items:flex-start;padding:14px}}.training-shell{{border-radius:24px}}.status{{font-size:11px}}.detail-panel{{grid-template-columns:1fr}}.history-block{{grid-column:1}}}}
+@media print{{body{{background:#fff}}main{{width:100%;max-width:none;padding:0}}.report-actions{{display:none}}.identity,.metric,.training-shell{{background:#fff;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}}.training-row{{break-inside:avoid}}.row-details:not([open]){{display:none}}}}
 """
 
     body = f"""
 <main>
-<header class='mast'><div class='brand-mark' aria-hidden='true'>{html.escape(_initials(org_name))}</div><div><h1>{org_name}</h1><p>Personnel Training &amp; Compliance Record</p></div><span class='verified'>✓ VERIFIED</span></header>
-<section class='identity'><div class='avatar' role='img' aria-label='Personnel photograph unavailable; initials shown'>{html.escape(_initials(person_name))}</div><div><h2>{person_name}</h2><p>{title}</p><div class='meta'><span>Staff No: {staff}</span><span>Licence No: {licence}</span><span>Profile: {profile_state}</span></div></div><div class='qr-label'>Verification link validated<br/>Official public record</div></section>
-<section class='summary' aria-label='Training compliance summary'><span class='metric'>{summary.get('current',0)} Current</span><span class='metric'>{summary.get('due_soon',0)} Due Soon</span><span class='metric'>{summary.get('overdue',0)} Overdue</span><span class='metric'>{summary.get('deferred',0)} Deferred</span></section>
-<section class='next-action'>{next_block}</section>
-<section class='training-shell'><table><thead><tr><th>Training</th><th>Last Completed</th><th>Next Due</th><th>Status</th><th>Evidence</th><th><span class='sr-only'>Actions</span></th></tr></thead><tbody>{''.join(table_rows)}</tbody></table><div class='cards'>{''.join(cards)}</div></section>
+<header class='mast'>
+  <div class='brand-mark' aria-hidden='true'>{brand_visual}</div>
+  <div class='mast-copy'><h1>{org_name}</h1><p>Personnel Training &amp; Compliance Record</p></div>
+  {action_icons}
+</header>
+<section class='identity'>
+  <div class='avatar' role='img' aria-label='Personnel image'>{avatar_visual}</div>
+  <div class='identity-copy'><h2>{person_name}</h2><p class='role'>{title}</p><div class='meta'>{''.join(meta_items)}</div></div>
+  <span class='verified'><svg viewBox='0 0 24 24' aria-hidden='true'><path d='M20 6 9 17l-5-5'/></svg>Verified</span>
+</section>
+<section class='summary' aria-label='Training compliance summary'>
+  <div class='metric'><strong>{summary.get('current',0)}</strong><span>Current</span></div>
+  <div class='metric'><strong>{summary.get('due_soon',0)}</strong><span>Due soon</span></div>
+  <div class='metric'><strong>{summary.get('overdue',0)}</strong><span>Overdue</span></div>
+  <div class='metric'><strong>{summary.get('deferred',0)}</strong><span>Deferred</span></div>
+</section>
+{next_action}
+<section class='training-shell' aria-label='Training requirements'>
+  <div class='training-heading' aria-hidden='true'><span>Training</span><span>Completed</span><span>Next due</span><span>Status</span></div>
+  {''.join(training_rows)}
+</section>
+<p id='action-feedback' class='sr-only' aria-live='polite'></p>
 </main>
 <script>
-const closeMenus=()=>document.querySelectorAll('.row-menu[open]').forEach(x=>x.removeAttribute('open'));
-document.addEventListener('keydown',e=>{{if(e.key==='Escape')closeMenus()}});
-document.querySelectorAll('[data-copy]').forEach(btn=>btn.addEventListener('click',async()=>{{await navigator.clipboard?.writeText(btn.dataset.copy||'');closeMenus()}}));
-document.querySelectorAll('[data-action-row]').forEach(row=>{{
- row.addEventListener('contextmenu',e=>{{e.preventDefault();closeMenus();row.querySelector('.row-menu')?.setAttribute('open','')}});
- let timer; row.addEventListener('pointerdown',e=>{{if(e.pointerType!=='mouse')timer=setTimeout(()=>{{closeMenus();row.querySelector('.row-menu')?.setAttribute('open','')}},650)}});
- ['pointerup','pointercancel','pointermove'].forEach(name=>row.addEventListener(name,()=>clearTimeout(timer)));
+const feedback=document.getElementById('action-feedback');
+const say=(message)=>{{if(feedback)feedback.textContent=message;}};
+const currentUrl=()=>window.location.href;
+const copyCurrentUrl=async()=>{{
+  try{{await navigator.clipboard.writeText(currentUrl());say('Verification link copied.');}}
+  catch{{say('Unable to copy the verification link.');}}
+}};
+document.querySelector('[data-copy-link]')?.addEventListener('click',copyCurrentUrl);
+document.querySelector('[data-share-report]')?.addEventListener('click',async()=>{{
+  const data={{title:document.title,text:'Verified personnel training record',url:currentUrl()}};
+  if(navigator.share){{
+    try{{await navigator.share(data);return;}}
+    catch(error){{if(error?.name==='AbortError')return;}}
+  }}
+  await copyCurrentUrl();
 }});
+document.querySelector('[data-download-pdf]')?.addEventListener('click',()=>{{
+  const pdfUrl=new URL(currentUrl());pdfUrl.searchParams.set('format','pdf');window.location.assign(pdfUrl.toString());
+}});
+document.querySelector('[data-print-report]')?.addEventListener('click',()=>window.print());
 </script>
 """
-    return HTMLResponse(content=f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{person_name} · Training verification</title><style>{css}</style></head><body>{body}</body></html>")
+    return HTMLResponse(content=f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'><meta name='color-scheme' content='light'><meta name='theme-color' content='{accent}'><title>{person_name} · Training verification</title><style>{css}</style></head><body>{body}</body></html>")
 
 
 class _NumberedCanvas(canvas.Canvas):
