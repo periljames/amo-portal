@@ -125,9 +125,6 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
     return pathMatches(current, target) && (params.get("tab") || "war-room") === tab.queryTab;
   }
 
-  // Query-backed workspace landings must not inherit /quality as an active
-  // prefix on every deeper route. A workspace is active either on its exact
-  // query landing or on one of the explicit module prefixes it owns.
   if (tab.queryWorkspace) {
     if (current === target) return params.get("workspace") === tab.queryWorkspace;
     return Boolean(tab.activePrefixes?.some((prefix) => pathMatches(current, prefix)));
@@ -194,9 +191,7 @@ function auditSectionTabs(basePath: string): ContextTab[] {
     { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
     { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
     { id: "audit-schedule", label: "Schedule", path: `${basePath}/audits/plan?view=calendar`, activePrefixes: [`${basePath}/audits/plan`, `${basePath}/audits/schedule`, `${basePath}/audits/schedules`] },
-    { id: "audit-register", label: "Active Audits", path: `${basePath}/audits/register`, exact: true },
-    { id: "audit-checklists", label: "Checklists", path: `${basePath}/audits/checklists`, exact: true },
-    { id: "audit-reports", label: "Reports", path: `${basePath}/audits/reports`, exact: true },
+    { id: "audit-checklists", label: "Checklist templates", path: `${basePath}/audits/checklists`, exact: true },
   ];
 }
 
@@ -304,7 +299,7 @@ const QualityContextTabs: React.FC = () => {
 
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
   const primaryAction = isAuditRecord
-    ? { label: "Audit register", path: `${route.basePath}/audits/register`, icon: ClipboardCheck }
+    ? { label: "Audits overview", path: `${route.basePath}/audits/dashboard`, icon: ClipboardCheck }
     : isCarRecord
       ? { label: "CAR register", path: `${route.basePath}/cars/register`, icon: ListChecks }
       : moduleSegment === "findings"
