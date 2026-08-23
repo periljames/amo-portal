@@ -461,7 +461,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 </section>
               ) : null}
 
-              <details className="qms-audit-programme-flow__history" open>
+              <details className="qms-audit-programme-flow__history">
                 <summary>Programme history <small>{selected.events?.length || 0} events</small></summary>
                 <div>{[...(selected.events || [])].reverse().map((event) => <article key={event.id}><span><strong>{human(event.event_type)}</strong><small>{new Date(event.created_at).toLocaleString()}</small></span><p>{event.reason}</p></article>)}</div>
               </details>
