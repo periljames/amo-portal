@@ -62,6 +62,7 @@ import { errorMessage, isoDate, newIdempotencyKey } from "../rosterUi";
 import { formatInZone, moveIntervalToZonedDay, templateWindowInZone } from "../timezone";
 import { useRosterPlannerDataV2, type PlannerSourceErrors } from "../hooks/useRosterPlannerDataV2";
 import { AircraftAllocationEditor } from "./AircraftAllocationEditor";
+import { CycleStartBatchPanel, type CycleStartCandidate } from "./CycleStartBatchPanel";
 import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 import { RosterTaskAllocationEditor } from "./RosterTaskAllocationEditor";
 
@@ -590,6 +591,14 @@ export function RosterPlannerV2() {
       return firstSetupPeriod ? [{ person, rotation }] : [];
     });
   }, [generationPeople, period, rotationByUser]);
+  const cycleStartCandidates = useMemo<CycleStartCandidate[]>(() => initialRotationRows.map(({ person, rotation }) => ({
+    person,
+    assignment: rotation.assignment,
+    pattern: rotation.pattern,
+    targetDate: rotation.targetDate,
+    currentIndex: Number(rotation.value),
+    options: rotation.options,
+  })), [initialRotationRows]);
   const missingPatternPeople = useMemo(
     () => generationPeople.filter((person) => !rotationByUser.has(person.user_id)),
     [generationPeople, rotationByUser],
@@ -994,21 +1003,36 @@ export function RosterPlannerV2() {
       });
       const userIds = rosterPeople.items.map((person) => person.user_id);
       if (!userIds.length) throw new Error("No roster-eligible personnel have an active contract for this month.");
-      const batchSize = 10;
+      const daysInPeriod = Math.max(1, differenceInCalendarDays(parseISO(period.ends_on), parseISO(period.starts_on)) + 1);
+      // Keep each request below the backend's 1,000-assignment contract even
+      // when every calendar day is a duty day, while avoiding 100 tiny requests
+      // for a 1,000-person first setup.
+      const batchSize = Math.max(1, Math.min(50, Math.floor(900 / daysInPeriod)));
       const operationKey = newIdempotencyKey("pattern-generation");
       partial = { processedPeople: 0, totalPeople: userIds.length, created: 0, skipped: 0, conflicts: 0 };
       setGenerationProgress(partial);
       for (let offset = 0; offset < userIds.length; offset += batchSize) {
         const batchNumber = Math.floor(offset / batchSize);
         const batchUserIds = userIds.slice(offset, offset + batchSize);
-        const result = await generateRosterFromPattern(data.selectedVersion.id, {
-          from_date: period.starts_on,
-          to_date: period.ends_on,
-          user_ids: batchUserIds,
-          idempotency_key: `${operationKey}-${batchNumber + 1}`,
-          skip_duplicates: true,
-          expected_version_revision: batchNumber === 0 ? data.selectedVersion.state_revision : undefined,
-        });
+        let result: Awaited<ReturnType<typeof generateRosterFromPattern>> | null = null;
+        for (let attempt = 0; attempt < 3 && !result; attempt += 1) {
+          try {
+            result = await generateRosterFromPattern(data.selectedVersion.id, {
+              from_date: period.starts_on,
+              to_date: period.ends_on,
+              user_ids: batchUserIds,
+              idempotency_key: `${operationKey}-${batchNumber + 1}`,
+              skip_duplicates: true,
+              expected_version_revision: batchNumber === 0 ? data.selectedVersion.state_revision : undefined,
+            });
+          } catch (cause) {
+            const retryable = Boolean((cause as { retryable?: boolean }).retryable);
+            if (!retryable || attempt >= 2) throw cause;
+            setNotice(`The database is temporarily busy. Retrying generation batch ${batchNumber + 1} without duplicating saved duties…`);
+            await new Promise((resolve) => globalThis.setTimeout(resolve, 750 * (2 ** attempt)));
+          }
+        }
+        if (!result) throw new Error("Roster generation batch did not return a result.");
         partial = {
           processedPeople: Math.min(offset + batchUserIds.length, userIds.length),
           totalPeople: userIds.length,
@@ -1281,24 +1305,14 @@ export function RosterPlannerV2() {
           {generationPeopleQuery.error ? <div className="wr-inline-error">Could not load personnel for generation setup: {errorMessage(generationPeopleQuery.error)}</div> : null}
           {!generationPeopleQuery.isPending && missingPatternPeople.length ? <div className="wr-inline-warning"><AlertTriangle size={15} /> <span><strong>{missingPatternPeople.length} roster-eligible {missingPatternPeople.length === 1 ? "person has" : "people have"} no effective work pattern.</strong> Assign the correct tenant work pattern in Workforce before generating; the planner will not invent a shift.</span></div> : null}
           {!generationPeopleQuery.isPending && initialRotationRows.length ? (
-            <section className="wr-generation-starts" aria-labelledby="wr-generation-starts-title">
-              <div className="wr-generation-starts__head"><div><strong id="wr-generation-starts-title">Initial cycle starts</strong><p>Only first-time pattern assignments need a starting position. Once saved, later roster periods roll forward automatically from this anchor.</p></div><span className="wr-pill wr-pill--info">{initialRotationRows.length} first setup</span></div>
-              <div className="wr-generation-starts__list">
-                {initialRotationRows.map(({ person, rotation }) => (
-                  <label key={person.user_id}>
-                    <span><strong>{person.full_name}</strong><small>{rotation.pattern.name}</small></span>
-                    <select
-                      aria-label={`Initial shift for ${person.full_name}`}
-                      value={rotation.value}
-                      disabled={Boolean(busy) || rotationUpdatingUserId === person.user_id}
-                      onChange={(event) => void changeRotationStart(person.user_id, Number(event.target.value))}
-                    >
-                      {rotation.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            </section>
+            <CycleStartBatchPanel
+              candidates={cycleStartCandidates}
+              disabled={Boolean(busy) || Boolean(rotationUpdatingUserId)}
+              onIndividualChange={changeRotationStart}
+              onApplied={async () => { await rotationsQuery.refetch(); }}
+              onError={setError}
+              onNotice={setNotice}
+            />
           ) : !generationPeopleQuery.isPending && !missingPatternPeople.length ? <div className="wr-generation-continuity"><Repeat2 size={16} /><span><strong>Cycle continuity is already established.</strong> This month starts from the saved pattern anchors automatically.</span></div> : null}
           {generationProgress ? <div className="wr-prefill-batch-progress" role="status"><div><strong>{generationProgress.processedPeople}/{generationProgress.totalPeople} people</strong><span>{generationProgress.created} duties · {generationProgress.skipped} protected/occupied · {generationProgress.conflicts} exceptions</span></div><progress max={generationProgress.totalPeople} value={generationProgress.processedPeople} /></div> : null}
           <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" disabled={busy === "prefill-patterns"} onClick={() => setPrefillOpen(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || Boolean(rotationUpdatingUserId) || generationPeopleQuery.isPending || Boolean(generationPeopleQuery.error) || missingPatternPeople.length > 0} onClick={() => void prefillFromPatterns()}>{busy === "prefill-patterns" ? <RefreshCw size={15} className="is-spinning" /> : <WandSparkles size={15} />} {generationProgress ? "Generating…" : "Generate roster"}</button></div>
