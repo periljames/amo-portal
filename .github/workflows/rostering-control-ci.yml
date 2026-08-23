@@ -70,6 +70,7 @@ jobs:
             backend/amodb/apps/rostering/code_registry_router.py \
             backend/amodb/apps/rostering/compliance_audit_policy.py \
             backend/amodb/apps/rostering/compliance_policy.py \
+            backend/amodb/apps/rostering/configured_rule_policy.py \
             backend/amodb/apps/rostering/protected_rest_exact_policy.py \
             backend/amodb/apps/rostering/statutory_rule_policy.py \
             backend/amodb/apps/rostering/consent_models.py \
@@ -110,6 +111,7 @@ jobs:
           pytest -q \
             backend/amodb/apps/rostering/tests/test_application_bootstrap.py \
             backend/amodb/apps/rostering/tests/test_code_registry_aircraft_contract.py \
+            backend/amodb/apps/rostering/tests/test_configured_rule_policy_contract.py \
             backend/amodb/apps/rostering/tests/test_consent_exemption_contract.py \
             backend/amodb/apps/rostering/tests/test_duty_rest_policy.py \
             backend/amodb/apps/rostering/tests/test_governed_workflow_security.py \
@@ -132,7 +134,7 @@ jobs:
         run: npm ci
       - name: Run controlled rostering frontend contracts
         working-directory: frontend
-        run: npx vitest run src/pages/rostering/rosterControlContract.test.ts
+        run: npx vitest run src/pages/rostering/rosterControlContract.test.ts src/pages/rostering/rosterSpreadsheetInteractions.test.ts
       - name: Build production frontend
         working-directory: frontend
         run: npm run build

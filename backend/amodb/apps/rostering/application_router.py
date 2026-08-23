@@ -13,6 +13,7 @@ from . import (
     code_registry,
     compliance_audit_policy,
     compliance_policy,
+    configured_rule_policy,
     consent_notification_policy,
     consent_policy,
     consent_revalidation_policy,
@@ -73,6 +74,11 @@ roster_control.resolve_calendar_subscription = calendar_subscriptions.resolve_ca
 
 template_usage_policy.install_code_registry_policy(code_registry)
 starter_shift_semantics_policy.install(code_registry)
+# Historical catalogue/validation code still contains an implicit default-rule
+# bootstrap. Disable it before any validation wrapper is installed so tenants
+# use only their explicitly governed rule sets and a missing legacy helper can
+# never turn an ordinary planner mutation into HTTP 500.
+configured_rule_policy.install_service_policy(rostering_route_module.services)
 compliance_policy.install_validation_policy()
 # Replace candidate sampling with exact continuous interval coverage before any
 # validation request can run. The compatibility seam inside compliance_policy
