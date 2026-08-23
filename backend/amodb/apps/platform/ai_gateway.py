@@ -114,6 +114,30 @@ def _ai_subscription(db: Session, tenant_id: str) -> account_models.ModuleSubscr
     )
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _subscription_is_current(
+    row: account_models.ModuleSubscription | None,
+    status: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if row is None or status not in {"ENABLED", "TRIAL"}:
+        return False
+    current = _as_utc(now or utcnow())
+    effective_from = getattr(row, "effective_from", None)
+    effective_to = getattr(row, "effective_to", None)
+    if effective_from is not None and current < _as_utc(effective_from):
+        return False
+    if effective_to is not None and current >= _as_utc(effective_to):
+        return False
+    return True
+
+
 def model_catalog() -> list[dict[str, Any]]:
     return [
         {
@@ -152,7 +176,7 @@ def tenant_policy(db: Session, tenant_id: str) -> dict[str, Any]:
     return {
         "tenant_id": tenant_id,
         "tenant_name": tenant.name,
-        "enabled": status in {"ENABLED", "TRIAL"},
+        "enabled": _subscription_is_current(row, status),
         "status": status,
         "plan_code": plan,
         "provider": str(metadata.get("provider") or AI_PROVIDER).lower(),
@@ -482,20 +506,65 @@ def run_ai(
         )
 
     provider_model = str(draft.get("model") or item.model)
-    if not _provider_model_matches(item.model, provider_model):
-        raise RuntimeError(
-            f"Provider returned model {provider_model!r}, which does not match requested rated model {item.model!r}"
-        )
     cost = calculate_provider_cost(item.model, draft.get("usage") or {})
     usage = cost["usage"]
     provider_cost = int(cost["provider_cost_microusd"])
+    month = current_usage_month()
+    budget = int((policy or {}).get("monthly_budget_microusd") or 0)
+    hard_limit = bool((policy or {}).get("hard_limit", False))
+    response_id = str(draft.get("response_id") or "") or None
+    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    credential_scope = "TENANT" if credential.tenant_id else "PLATFORM"
+
+    if not _provider_model_matches(item.model, provider_model):
+        if billing_scope == "TENANT":
+            assert tenant_id is not None
+            _record_tenant_usage(
+                db,
+                tenant_id=tenant_id,
+                month=month,
+                usage=usage,
+                provider_cost_microusd=provider_cost,
+                customer_charge_microusd=0,
+                budget_microusd=budget,
+                hard_limit=hard_limit,
+            )
+        _audit(
+            db,
+            actor_user_id=actor_user_id,
+            tenant_id=tenant_id,
+            action="ai.request.rejected",
+            entity_id=response_id,
+            reason="AI provider response rejected because the returned model did not match the rated request",
+            details={
+                "provider": AI_PROVIDER,
+                "rated_model": item.model,
+                "provider_model": provider_model,
+                "tier": item.tier,
+                "feature_code": feature_code,
+                "billing_scope": billing_scope,
+                "usage_month": month,
+                "usage": usage,
+                "provider_cost_microusd": provider_cost,
+                "customer_charge_microusd": 0,
+                "rate_snapshot": cost["rate_snapshot"],
+                "prompt_sha256": prompt_hash,
+                "prompt_chars": len(prompt),
+                "response_chars": len(str(draft.get("text") or "")),
+                "latency_ms": latency_ms,
+                "credential_scope": credential_scope,
+                "error_type": "ProviderModelMismatch",
+            },
+        )
+        db.commit()
+        raise RuntimeError(
+            f"Provider returned model {provider_model!r}, which does not match requested rated model {item.model!r}"
+        )
+
     markup_bps = int((policy or {}).get("markup_bps") or 0)
     calculated_customer_charge = _ceil_div(provider_cost * (10_000 + markup_bps), 10_000)
     customer_charge = calculated_customer_charge
     pre_request_used = 0
-    month = current_usage_month()
-    budget = int((policy or {}).get("monthly_budget_microusd") or 0)
-    hard_limit = bool((policy or {}).get("hard_limit", False))
 
     if billing_scope == "TENANT":
         assert tenant_id is not None
@@ -510,8 +579,6 @@ def run_ai(
             hard_limit=hard_limit,
         )
 
-    response_id = str(draft.get("response_id") or "") or None
-    latency_ms = round((time.perf_counter() - started) * 1000, 2)
     unbilled_overage = (
         max(0, calculated_customer_charge - customer_charge)
         if billing_scope == "TENANT"
@@ -550,7 +617,7 @@ def run_ai(
             "prompt_chars": len(prompt),
             "response_chars": len(str(draft.get("text") or "")),
             "latency_ms": latency_ms,
-            "credential_scope": "TENANT" if credential.tenant_id else "PLATFORM",
+            "credential_scope": credential_scope,
             "budget_exceeded_by_request": budget_exceeded_by_request,
             "hard_budget_applied": bool(billing_scope == "TENANT" and budget and hard_limit),
         },
