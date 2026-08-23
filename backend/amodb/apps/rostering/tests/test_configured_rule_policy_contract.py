@@ -37,3 +37,20 @@ def test_policy_does_not_reintroduce_removed_default_rule_set_helper():
     source = (ROOT / "configured_rule_policy.py").read_text(encoding="utf-8")
     assert "governance.seed_default_rule_set(" not in source
     assert "validation.seed_default_rules = _configured_rules_only" in source
+    assert "validation.active_rules = _configured_active_rules" in source
+
+
+def test_active_validation_requires_active_effective_parent_rule_set():
+    source = (ROOT / "configured_rule_policy.py").read_text(encoding="utf-8")
+    expected = [
+        ".join(models.RosterRuleSet, models.RosterRule.rule_set_id == models.RosterRuleSet.id)",
+        "models.RosterRuleSet.amo_id == amo_id",
+        "models.RosterRuleSet.is_active.is_(True)",
+        "models.RosterRuleSet.effective_from <= on_date",
+        "models.RosterRuleSet.effective_to >= on_date",
+        "models.RosterRule.is_active.is_(True)",
+        "models.RosterRule.effective_from <= on_date",
+        "models.RosterRule.effective_to >= on_date",
+    ]
+    for fragment in expected:
+        assert fragment in source
