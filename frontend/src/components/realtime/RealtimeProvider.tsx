@@ -104,6 +104,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
   const lastPortalActivityRef = useRef(Date.now());
   const presenceStateRef = useRef<"online" | "away">("online");
+  const presenceAuthRejectedRef = useRef(false);
 
   const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
 
@@ -130,12 +131,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
 
   const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online", reason = "heartbeat", keepalive = false) => {
-    if (isPlatformUser || isLoginSurface()) return;
+    if (isPlatformUser || isLoginSurface() || presenceAuthRejectedRef.current) return;
     const token = getToken();
     if (!token || !isRealtimeEnabled() || !isPortalReady()) return;
     presenceStateRef.current = state;
     try {
-      await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
         method: "POST",
         credentials: "include",
         keepalive,
@@ -150,6 +151,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           client_instance_id: presenceClientInstanceId(),
         }),
       });
+      if (response.status === 401 || response.status === 403) {
+        // A stale bearer token must not create a 30-second stream of failed
+        // presence calls. Session authentication is authoritative; the next
+        // authenticated session event re-enables best-effort presence.
+        presenceAuthRejectedRef.current = true;
+      }
     } catch {
       // presence is best-effort only
     }
@@ -277,6 +284,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (detail.type === "authenticated") {
         retryCount.current = 0;
+        presenceAuthRejectedRef.current = false;
 
         mqttRef.current?.disconnect();
         mqttRef.current = null;
@@ -312,6 +320,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+        presenceAuthRejectedRef.current = true;
         controllerRef.current?.abort();
         mqttRef.current?.disconnect();
         mqttRef.current = null;
@@ -319,7 +328,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setBrokerState("offline");
       }
     });
-  }, [isPlatformUser, reconnectNow, serverNow, syncServerTime]);
+  }, [isPlatformUser, reconnectNow, serverNow, sendPresenceHeartbeat, syncServerTime]);
 
   useEffect(() => {
     connectRef.current = connectSse;
@@ -499,4 +508,3 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 };
-

@@ -1,0 +1,103 @@
+.wr-cycle-start-batch {
+  display: grid;
+  gap: 12px;
+}
+
+.wr-cycle-start-batch__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--wr-border, rgba(127, 127, 127, 0.2));
+  border-radius: 12px;
+  background: var(--wr-surface-subtle, rgba(127, 127, 127, 0.05));
+}
+
+.wr-cycle-start-batch__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wr-cycle-start-batch__toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.wr-cycle-start-batch__groups {
+  display: grid;
+  gap: 8px;
+}
+
+.wr-cycle-start-batch__group {
+  overflow: hidden;
+  border: 1px solid var(--wr-border, rgba(127, 127, 127, 0.2));
+  border-radius: 12px;
+  background: var(--wr-surface, transparent);
+}
+
+.wr-cycle-start-batch__group-main {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 190px) auto auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.wr-cycle-start-batch__identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.wr-cycle-start-batch__identity span,
+.wr-cycle-start-batch__group-main label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wr-cycle-start-batch__identity strong,
+.wr-cycle-start-batch__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-cycle-start-batch__group-main label > span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.72;
+}
+
+.wr-cycle-start-batch__individuals {
+  max-height: 340px;
+  overflow: auto;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--wr-border, rgba(127, 127, 127, 0.16));
+}
+
+@media (max-width: 980px) {
+  .wr-cycle-start-batch__group-main {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 190px);
+  }
+}
+
+@media (max-width: 620px) {
+  .wr-cycle-start-batch__toolbar,
+  .wr-cycle-start-batch__group-main {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .wr-cycle-start-batch__group-main .wr-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
