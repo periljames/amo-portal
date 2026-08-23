@@ -15,10 +15,11 @@ type Props = {
   amoCode: string;
   items: QmsOperationalObligation[];
   fallbackRoute: string;
+  referenceDate?: Date;
 };
 
-const QmsUpcomingObligations: React.FC<Props> = ({ amoCode, items, fallbackRoute }) => {
-  const rows = normaliseQmsCalendarEntries(items, new Date(), 10);
+const QmsUpcomingObligations: React.FC<Props> = ({ amoCode, items, fallbackRoute, referenceDate }) => {
+  const rows = normaliseQmsCalendarEntries(items, referenceDate || new Date(), 10);
 
   return (
     <section className="qms-overview-section" aria-labelledby="qms-upcoming-title">
