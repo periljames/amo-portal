@@ -30,6 +30,10 @@ def _utcnow() -> datetime:
 class QualityAuditProgramme(Base):
     """Versioned annual/periodic audit programme owned by Quality.
 
+    The programme is the governed set of audits for a defined period. The
+    methodology states the primary planning approach used to build that set;
+    it is deliberately separate from audit subject/type and schedule cadence.
+
     Approved revisions are not edited in place. Amendments create a new DRAFT
     revision linked through ``supersedes_programme_id`` while immutable events
     retain the human-attributed decision history.
@@ -42,6 +46,10 @@ class QualityAuditProgramme(Base):
         CheckConstraint(
             "status IN ('DRAFT','UNDER_REVIEW','APPROVED','ACTIVE','SUPERSEDED','CLOSED')",
             name="ck_quality_audit_programme_status",
+        ),
+        CheckConstraint(
+            "programme_methodology IN ('COMPLIANCE','PERFORMANCE','RISK')",
+            name="ck_quality_audit_programme_methodology",
         ),
         CheckConstraint("programme_year >= 2000 AND programme_year <= 2200", name="ck_quality_audit_programme_year"),
         CheckConstraint("revision_no >= 1", name="ck_quality_audit_programme_revision"),
@@ -58,6 +66,8 @@ class QualityAuditProgramme(Base):
     programme_year = Column(Integer, nullable=False)
     revision_no = Column(Integer, nullable=False, default=1, server_default="1")
     title = Column(String(255), nullable=False)
+    programme_methodology = Column(String(20), nullable=False, default="COMPLIANCE", server_default="COMPLIANCE")
+    methodology_rationale = Column(Text, nullable=True)
     objectives = Column(JSON, nullable=False, default=list)
     regulatory_basis = Column(JSON, nullable=False, default=list)
     status = Column(String(24), nullable=False, default="DRAFT", server_default="DRAFT")
