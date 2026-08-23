@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any
-from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
@@ -12,28 +11,6 @@ from amodb.apps.manuals import models as manual_models
 from amodb.apps.platform import ai_access, ai_gateway
 
 from .knowledge_assistant_router import DocumentationAssistRequest, SearchContext
-
-
-def governed_source_url(
-    tenant: manual_models.Tenant,
-    manual_id: str,
-    revision_id: str,
-    *,
-    page: int | None,
-    anchor: str | None,
-) -> str:
-    """Keep assistant source navigation inside the governed DMS document centre.
-
-    Revision/page/anchor context is preserved in the URL so the document workspace
-    can hand the user into the immutable reader without losing source provenance.
-    """
-    base = f"/maintenance/{tenant.slug.upper()}/document-control/library/{manual_id}"
-    params = ["tab=content", f"revision={quote(str(revision_id), safe='')}"]
-    if page:
-        params.append(f"page={int(page)}")
-    if anchor:
-        params.append(f"anchor={quote(anchor, safe='')}")
-    return f"{base}?{'&'.join(params)}"
 
 
 def _source_manual_ids(
@@ -263,10 +240,9 @@ def _governed_synthesis(
 
 def install() -> None:
     # Endpoint functions resolve these module globals at request time. Installing
-    # the hardened implementations here avoids duplicate FastAPI routes while
-    # keeping the existing public contract stable.
+    # only the AI/audit implementations keeps the canonical reader route owned by
+    # knowledge_assistant_router and prevents runtime imports from rewriting it.
     from . import knowledge_assistant_router as assistant
 
-    assistant._reader_url = governed_source_url
     assistant._audit_assist = audit_assist_safely
     assistant._openai_synthesis = _governed_synthesis
