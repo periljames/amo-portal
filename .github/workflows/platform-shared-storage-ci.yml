@@ -44,6 +44,7 @@ jobs:
       ALLOW_SQLITE_FOR_TESTS: "1"
       DATABASE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: "ci-only-shared-storage-key"
+      FORWARDED_ALLOW_IPS: "127.0.0.1"
       AMO_STORAGE_BACKEND: local
       AMO_STORAGE_LOCAL_ROOT: /tmp/amo-storage-ci
       AMO_STORAGE_CACHE_DIR: /tmp/amo-storage-cache-ci
