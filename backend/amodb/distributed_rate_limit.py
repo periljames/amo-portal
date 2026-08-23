@@ -71,7 +71,7 @@ class RedisAuthRateLimiter:
         if self.url:
             self.client = Redis.from_url(
                 self.url,
-                encoding=None,
+                encoding="utf-8",
                 decode_responses=False,
                 socket_connect_timeout=2.0,
                 socket_timeout=2.0,
