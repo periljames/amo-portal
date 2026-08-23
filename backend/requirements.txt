@@ -43,6 +43,7 @@ pytesseract==0.3.13
 PyMuPDF==1.26.5
 pypdfium2==5.12.1
 PyYAML==6.0.3
+redis==8.1.0
 resend==2.34.0
 rsa==4.9.1
 six==1.17.0
