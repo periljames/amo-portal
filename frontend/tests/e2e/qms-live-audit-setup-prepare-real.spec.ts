@@ -109,7 +109,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     // Select upload-only before filling the request. The default hybrid mode starts
     // an optional controlled-DMS lookup that this audit-only test user is not
     // entitled to perform and must not block the request form itself.
-    await prepare.getByLabel("Submission source", { exact: true }).selectOption("UPLOAD");
+    await prepare.getByRole("combobox", { name: "Submission source", exact: true }).selectOption("UPLOAD");
     await prepare.getByLabel("Due date", { exact: true }).fill(futureDate(20));
     await prepare.getByLabel("Request title", { exact: true }).fill("Current authorization and competence evidence");
     await prepare.getByLabel("Purpose / records required", { exact: true }).fill("Provide the current authorization and competence evidence for the sampled certifying personnel before fieldwork.");
