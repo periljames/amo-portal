@@ -1,10 +1,16 @@
 import { chromium, type FullConfig } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export default async function documentGovernanceGlobalSetup(config: FullConfig): Promise<void> {
   if (process.env.E2E_LIVE_DOCUMENT_GOVERNANCE !== "1") return;
-  if (process.env.E2E_DMS_ADMIN_STORAGE_STATE) return;
+
+  const configuredStorageState = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
+  const generatedStorageState = process.env.E2E_DMS_ADMIN_STORAGE_STATE_GENERATED === "1";
+  // An explicitly supplied state remains an opt-in escape hatch for local runs.
+  // The CI-generated path must be populated here before any test context opens.
+  if (configuredStorageState && !generatedStorageState) return;
 
   const amoCode = process.env.E2E_AMO_CODE || "safarilink";
   const email = process.env.E2E_AMO_ADMIN_EMAIL || "";
@@ -17,7 +23,8 @@ export default async function documentGovernanceGlobalSetup(config: FullConfig):
   const baseUrl = typeof configuredBaseUrl === "string"
     ? configuredBaseUrl
     : process.env.E2E_BASE_URL || "http://127.0.0.1:4173";
-  const storageStatePath = join(tmpdir(), `dms-admin-storage-${process.pid}.json`);
+  const storageStatePath = configuredStorageState || join(tmpdir(), `dms-admin-storage-${process.pid}.json`);
+  await mkdir(dirname(storageStatePath), { recursive: true });
 
   const browser = await chromium.launch({ channel: "chromium" });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -34,7 +41,6 @@ export default async function documentGovernanceGlobalSetup(config: FullConfig):
     await page.waitForURL((url) => !/\/login(?:\?|$)/.test(url.pathname + url.search), { timeout: 30_000 });
 
     await context.storageState({ path: storageStatePath });
-    process.env.E2E_DMS_ADMIN_STORAGE_STATE = storageStatePath;
   } finally {
     await context.close();
     await browser.close();
