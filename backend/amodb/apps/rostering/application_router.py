@@ -21,6 +21,7 @@ from . import (
     extended_duty_day_policy,
     extended_duty_policy,
     extended_duty_validation_policy,
+    generation_scale_policy,
     lifecycle_error_policy,
     lineage,
     protected_rest_exact_policy,
@@ -41,6 +42,7 @@ from .commitments_router import router as commitments_router
 from .consent_router import router as consent_router
 from .exemption_router import router as exemption_router
 from .extended_duty_router import router as extended_duty_router
+from .generation_setup_router import router as generation_setup_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from .shift_semantics_router import router as shift_semantics_router
@@ -79,6 +81,9 @@ starter_shift_semantics_policy.install(code_registry)
 # use only their explicitly governed rule sets and a missing legacy helper can
 # never turn an ordinary planner mutation into HTTP 500.
 configured_rule_policy.install_service_policy(rostering_route_module.services)
+# Large generated rosters must not repeatedly materialize every assignment in
+# the version simply to lock the parent row or return the current batch.
+generation_scale_policy.install(rostering_route_module.services)
 compliance_policy.install_validation_policy()
 # Replace candidate sampling with exact continuous interval coverage before any
 # validation request can run. The compatibility seam inside compliance_policy
@@ -163,5 +168,6 @@ router.include_router(workforce_governance_router)
 router.include_router(workforce_selection_router)
 router.include_router(workforce_bulk_router)
 router.include_router(workforce_pay_policy_router)
+router.include_router(generation_setup_router)
 
 __all__ = ["router"]
