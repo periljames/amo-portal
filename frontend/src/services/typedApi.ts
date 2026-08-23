@@ -54,8 +54,15 @@ function structuredError(
 
 async function parseError(response: Response): Promise<StructuredApiError> {
   const { raw } = await responseBody(response);
-  const wrapped = raw && typeof raw === "object" && "detail" in raw
-    ? (raw as { detail?: unknown }).detail
+  const rawObject = raw && typeof raw === "object"
+    ? raw as Record<string, unknown>
+    : null;
+  const nestedDetail = rawObject?.detail;
+  // FastAPI domain errors commonly wrap an object inside `detail`, while
+  // infrastructure errors (DB circuit/pool, proxy readiness) use a top-level
+  // object whose `detail` is the human-readable string. Only unwrap the former.
+  const wrapped = nestedDetail && typeof nestedDetail === "object"
+    ? nestedDetail
     : raw;
   const payload = wrapped && typeof wrapped === "object"
     ? wrapped as Record<string, unknown>
