@@ -136,16 +136,20 @@ class DistributedAuthRateLimitMiddleware:
 
         amo = str(payload.get("amo_slug") or "").strip().lower()
         if endpoint == "login":
-            # Match router_public.login/authenticate_user semantics exactly: an
-            # explicit email or staff code is authoritative. `identifier` is a
-            # compatibility fallback only when neither explicit credential is
-            # supplied, so an unused identifier can never rotate the Redis key.
-            identity = str(
-                payload.get("email")
-                or payload.get("staff_code")
-                or payload.get("identifier")
-                or ""
-            ).strip().lower()
+            # Match authenticate_user exactly. Platform/root login authenticates
+            # by email, while tenant login prefers staff_code over email. The
+            # legacy `identifier` is only a fallback when the authoritative
+            # credential field is absent, so unused fields cannot rotate the
+            # cross-replica limiter key.
+            if amo in {"", "system", "root"}:
+                identity = str(payload.get("email") or payload.get("identifier") or "").strip().lower()
+            else:
+                identity = str(
+                    payload.get("staff_code")
+                    or payload.get("email")
+                    or payload.get("identifier")
+                    or ""
+                ).strip().lower()
             if identity:
                 return f"{amo}|{identity}"
         elif endpoint == "password-reset-request":
