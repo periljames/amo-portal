@@ -41,6 +41,18 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     return max(minimum, value)
 
 
+def _forwarded_allow_ips() -> str:
+    configured = (os.getenv("FORWARDED_ALLOW_IPS") or "").strip()
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+    if app_env in {"prod", "production"} and not configured:
+        raise RuntimeError(
+            "FORWARDED_ALLOW_IPS must explicitly list the trusted reverse-proxy/ingress IPs or CIDRs in production"
+        )
+    # Development/test defaults may trust loopback only. Production must never
+    # silently collapse all users behind an untrusted proxy or use '*'.
+    return configured or "127.0.0.1"
+
+
 def _uvicorn_options() -> dict:
     reload_enabled = _env_bool("RELOAD", False)
     configured_workers = _env_int(
@@ -54,9 +66,7 @@ def _uvicorn_options() -> dict:
         "workers": 1 if reload_enabled else configured_workers,
         "log_level": os.getenv("LOG_LEVEL", "info"),
         "proxy_headers": _env_bool("PROXY_HEADERS_ENABLED", True),
-        # Never trust arbitrary Internet clients as forwarding proxies by default.
-        # Deployments behind a known proxy/load balancer must set this explicitly.
-        "forwarded_allow_ips": os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        "forwarded_allow_ips": _forwarded_allow_ips(),
         "backlog": _env_int("UVICORN_BACKLOG", 2048),
         "timeout_keep_alive": _env_int("UVICORN_KEEP_ALIVE_SEC", 5),
         "timeout_graceful_shutdown": _env_int("UVICORN_GRACEFUL_SHUTDOWN_SEC", 30),
