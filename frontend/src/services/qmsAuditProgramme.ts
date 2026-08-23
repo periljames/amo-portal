@@ -61,7 +61,7 @@ export type AuditProgramme = {
   programme_year: number;
   revision_no: number;
   title: string;
-  programme_methodology: AuditProgrammeMethodology;
+  programme_methodology?: AuditProgrammeMethodology;
   methodology_rationale?: string | null;
   objectives: string[];
   regulatory_basis: Array<string | Record<string, unknown>>;
@@ -232,7 +232,7 @@ export function getAuditProgramme(amoCode: string, programmeId: string, signal?:
 export function createAuditProgramme(amoCode: string, payload: {
   programme_year: number;
   title: string;
-  programme_methodology: AuditProgrammeMethodology;
+  programme_methodology?: AuditProgrammeMethodology;
   methodology_rationale?: string;
   objectives: string[];
   regulatory_basis: Array<string | Record<string, unknown>>;
