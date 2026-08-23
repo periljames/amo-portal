@@ -49,7 +49,7 @@ def test_subject_is_global_per_login_identity_without_storing_raw_key_material()
     assert subject == "safarilink|pilot@example.com"
 
 
-def test_login_subject_uses_explicit_authenticated_credential_before_identifier() -> None:
+def test_login_subject_uses_authenticated_credential_precedence() -> None:
     email_subject = DistributedAuthRateLimitMiddleware.subject(
         "login",
         json.dumps(
@@ -83,10 +83,46 @@ def test_login_subject_uses_explicit_authenticated_credential_before_identifier(
         ).encode(),
         _scope(),
     )
+    mixed_staff_email_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "safarilink",
+                "staff_code": "SL001",
+                "email": "unused-one@example.com",
+            }
+        ).encode(),
+        _scope(),
+    )
+    rotated_unused_email_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "safarilink",
+                "staff_code": "SL001",
+                "email": "unused-two@example.com",
+            }
+        ).encode(),
+        _scope(),
+    )
+    platform_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "system",
+                "staff_code": "UNUSED-STAFF",
+                "email": "owner@example.com",
+            }
+        ).encode(),
+        _scope(),
+    )
 
     assert email_subject == "safarilink|pilot@example.com"
     assert rotated_identifier_subject == email_subject
     assert staff_subject == "safarilink|sl001"
+    assert mixed_staff_email_subject == "safarilink|sl001"
+    assert rotated_unused_email_subject == mixed_staff_email_subject
+    assert platform_subject == "system|owner@example.com"
 
 
 def test_allowed_auth_request_is_replayed_to_inner_app() -> None:
