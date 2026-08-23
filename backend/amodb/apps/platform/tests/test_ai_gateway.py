@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
 import pytest
 
 from amodb.apps.platform import ai_gateway, ai_openai
@@ -88,6 +92,117 @@ def test_soft_budget_does_not_cap_measured_charge() -> None:
         budget_microusd=100,
         hard_limit=False,
     ) == 20
+
+
+def test_subscription_effective_period_controls_current_entitlement() -> None:
+    now = datetime(2026, 8, 23, 9, 30, tzinfo=timezone.utc)
+    active = SimpleNamespace(
+        effective_from=now - timedelta(days=1),
+        effective_to=now + timedelta(days=1),
+    )
+    scheduled = SimpleNamespace(
+        effective_from=now + timedelta(seconds=1),
+        effective_to=None,
+    )
+    expired = SimpleNamespace(
+        effective_from=now - timedelta(days=2),
+        effective_to=now,
+    )
+    naive_scheduled = SimpleNamespace(
+        effective_from=(now + timedelta(hours=1)).replace(tzinfo=None),
+        effective_to=None,
+    )
+
+    assert ai_gateway._subscription_is_current(active, "ENABLED", now=now) is True
+    assert ai_gateway._subscription_is_current(active, "TRIAL", now=now) is True
+    assert ai_gateway._subscription_is_current(active, "SUSPENDED", now=now) is False
+    assert ai_gateway._subscription_is_current(scheduled, "ENABLED", now=now) is False
+    assert ai_gateway._subscription_is_current(expired, "ENABLED", now=now) is False
+    assert ai_gateway._subscription_is_current(naive_scheduled, "ENABLED", now=now) is False
+
+
+def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monkeypatch) -> None:
+    class FakeDB:
+        def __init__(self) -> None:
+            self.commit_count = 0
+
+        def commit(self) -> None:
+            self.commit_count += 1
+
+    db = FakeDB()
+    recorded_usage: dict[str, object] = {}
+    audits: list[dict[str, object]] = []
+    policy = {
+        "enabled": True,
+        "provider": "openai",
+        "allow_external_documents": True,
+        "monthly_budget_microusd": 100_000,
+        "hard_limit": True,
+        "model": "gpt-5.6-luna",
+        "max_model_tier": "STANDARD",
+        "markup_bps": 0,
+    }
+    credential = SimpleNamespace(config_json={}, tenant_id=None)
+
+    monkeypatch.setattr(ai_gateway, "tenant_policy", lambda *_args, **_kwargs: policy)
+    monkeypatch.setattr(ai_gateway, "_meter_value", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        ai_gateway.saas_services,
+        "get_provider_credential",
+        lambda *_args, **_kwargs: credential,
+    )
+    monkeypatch.setattr(
+        ai_gateway.saas_services,
+        "require_operational_provider",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(ai_gateway.saas_services, "provider_secrets", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(ai_gateway, "operation_span", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(ai_gateway, "record_provider_call", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ai_gateway.ai_openai,
+        "responses_request",
+        lambda **_kwargs: {
+            "response_id": "resp-mismatch",
+            "model": "unexpected-model",
+            "text": "discard this provider response",
+            "usage": {"input_tokens": 1_000, "output_tokens": 100},
+        },
+    )
+
+    def record_usage(_db, **kwargs):
+        recorded_usage.update(kwargs)
+        return 0, 0
+
+    monkeypatch.setattr(ai_gateway, "_record_tenant_usage", record_usage)
+    monkeypatch.setattr(ai_gateway, "_audit", lambda _db, **kwargs: audits.append(kwargs))
+
+    with pytest.raises(RuntimeError, match="does not match requested rated model"):
+        ai_gateway.run_ai(
+            db,
+            prompt="Test governed mismatch accounting.",
+            instructions="Be concise.",
+            actor_user_id="user-1",
+            tenant_id="tenant-1",
+            billing_scope="TENANT",
+        )
+
+    assert recorded_usage["tenant_id"] == "tenant-1"
+    assert recorded_usage["usage"] == {
+        "input_tokens": 1_000,
+        "cached_input_tokens": 0,
+        "output_tokens": 100,
+        "total_tokens": 1_100,
+    }
+    assert recorded_usage["provider_cost_microusd"] == 320
+    assert recorded_usage["customer_charge_microusd"] == 0
+    assert len(audits) == 1
+    assert audits[0]["action"] == "ai.request.rejected"
+    assert audits[0]["details"]["rated_model"] == "gpt-5.6-luna"
+    assert audits[0]["details"]["provider_model"] == "unexpected-model"
+    assert audits[0]["details"]["provider_cost_microusd"] == 320
+    assert audits[0]["details"]["customer_charge_microusd"] == 0
+    assert db.commit_count == 1
 
 
 def test_managed_openai_request_ignores_configured_alternate_base_url(monkeypatch) -> None:
