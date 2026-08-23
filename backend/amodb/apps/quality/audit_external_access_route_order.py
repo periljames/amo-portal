@@ -15,7 +15,7 @@ from . import audit_external_finding_promotion_router
 from . import audit_external_fieldwork_draft_enable_router as _audit_external_fieldwork_draft_enable_router  # noqa: F401
 from . import audit_finding_release_status_router
 from . import audit_guest_documents_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 
 
 def _is_external_access_route(route_item) -> bool:
@@ -73,6 +73,6 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-for api_router in (router, legacy_router):
+for api_router in (router,):
     _register(api_router)
     _promote(api_router)

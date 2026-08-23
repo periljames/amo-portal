@@ -22,7 +22,7 @@ def _parse_timezone(value: str | None) -> TenantTimezone:
 
     Tenant timezone is configuration, not deployment geography. Invalid or absent
     legacy values fall back to UTC and return a warning so callers can surface the
-    configuration defect without silently treating the tenant as Nairobi/EAT.
+    configuration defect without silently choosing a deployment-specific zone.
     """
 
     label = (value or "").strip()

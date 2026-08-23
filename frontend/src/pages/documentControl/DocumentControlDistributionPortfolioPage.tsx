@@ -139,7 +139,7 @@ export default function DocumentControlDistributionPortfolioPage() {
     canControl
     actions={<>
       <button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={14} /> Refresh</button>
-      <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/controlled-copies`)}><Copy size={14} /> Copy operations</button>
+      <button type="button" className="dc-button" onClick={() => update("view", "physical-copies")}><Copy size={14} /> Copy operations</button>
       <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library`)}><Send size={14} /> Choose document to distribute</button>
     </>}
   >

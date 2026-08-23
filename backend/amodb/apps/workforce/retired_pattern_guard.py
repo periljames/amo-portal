@@ -10,14 +10,14 @@ RETIRED_DEFAULT_PATTERN_MESSAGE = (
 )
 
 
-def install_legacy_default_pattern_guard(hr_service_module) -> None:
+def install_retired_default_pattern_guard(hr_service_module) -> None:
     original = hr_service_module.bootstrap_default_day_pattern
-    if getattr(original, "_workforce_legacy_guard", False):
+    if getattr(original, "_workforce_retired_pattern_guard", False):
         return
 
     @wraps(original)
     def guarded(*args, **kwargs):
         raise ValueError(RETIRED_DEFAULT_PATTERN_MESSAGE)
 
-    guarded._workforce_legacy_guard = True
+    guarded._workforce_retired_pattern_guard = True
     hr_service_module.bootstrap_default_day_pattern = guarded

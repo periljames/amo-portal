@@ -9,9 +9,9 @@ type Props = { amoCode: string };
  *
  * The actual stage workspace is mounted by QualityEnhancementsHost, which is a
  * router sibling so it can preserve realtime, focus and lifecycle coordination.
- * Keeping this route shell intentionally empty prevents the legacy
- * QualityAuditRunHubPage from mounting its competing cockpit and duplicate data
- * queries on /setup, /prepare, /live, /closing, /follow-up and /archive.
+ * Keeping this route shell intentionally empty prevents a second page tree and
+ * duplicate data queries on /setup, /prepare, /live, /closing, /follow-up and
+ * /archive.
  */
 const QualityAuditOccurrenceStageShell: React.FC<Props> = ({ amoCode }) => (
   <QMSLayout

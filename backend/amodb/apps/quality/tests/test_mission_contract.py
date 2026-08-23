@@ -96,7 +96,6 @@ def test_mission_router_exposes_bounded_read_contract_and_base_write_contract() 
 def test_mission_routes_are_promoted_before_generic_quality_catchall() -> None:
     cases = (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     )
     for router, prefix in cases:
         list_path = f"{prefix}/missions"

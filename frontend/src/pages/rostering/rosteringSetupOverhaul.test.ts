@@ -113,11 +113,11 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(hrSource).toContain("Open employment record");
   });
 
-  it("simplifies primary navigation and combines reports with operations", () => {
+  it("keeps the simplified primary navigation and active reporting workspace", () => {
     expect(shellSource).toContain('label: "Operations"');
     expect(shellSource).toContain('label: "Workforce"');
     expect(shellSource).not.toContain('label: "Capacity"');
-    expect(shellSource).not.toContain('label: "Reports"');
+    expect(shellSource).toContain('label: "Reports"');
     expect(pagesSource).toContain("LazyRosterOperationsWorkspace");
   });
 

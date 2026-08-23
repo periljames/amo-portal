@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   QMS_AUDIT_DESTINATIONS,
-  QMS_AUDIT_WORKSPACE_TABS,
+  QMS_AUDIT_WORKSPACE_STAGES,
   QMS_CALENDAR_DESTINATIONS,
   QMS_NAVIGATION_GROUPS,
-  buildAuditWorkspaceTabPath,
+  buildAuditWorkspaceStagePath,
   getActiveAuditWorkspace,
   isQualityNavigationPath,
 } from "./qmsSidebarNavigation";
@@ -17,7 +17,7 @@ import {
 import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 
 describe("QMS sidebar navigation", () => {
-  it("keeps the complete audit preparation and reporting route set directly reachable", () => {
+  it("keeps the complete active audit route set directly reachable", () => {
     expect(QMS_AUDIT_DESTINATIONS.map((item) => item.view)).toEqual([
       "dashboard",
       "program",
@@ -27,7 +27,6 @@ describe("QMS sidebar navigation", () => {
       "new",
       "checklists",
       "templates",
-      "reports",
       "bin",
     ]);
     expect(new Set(QMS_AUDIT_DESTINATIONS.map((item) => item.id)).size).toBe(
@@ -75,23 +74,22 @@ describe("QMS sidebar navigation", () => {
   });
 
   it("exposes every active-audit workspace stage", () => {
-    expect(QMS_AUDIT_WORKSPACE_TABS.map((item) => item.tab)).toEqual([
-      "war-room",
-      "checklist",
-      "findings",
-      "cars",
-      "evidence",
-      "report",
-      "closeout",
+    expect(QMS_AUDIT_WORKSPACE_STAGES.map((item) => item.stage)).toEqual([
+      "setup",
+      "prepare",
+      "live",
+      "closing",
+      "follow-up",
+      "archive",
     ]);
 
     const auditPath = "/maintenance/safarilink/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128";
-    expect(getActiveAuditWorkspace(`${auditPath}/fieldwork`, "safarilink")).toEqual({
+    expect(getActiveAuditWorkspace(`${auditPath}/live`, "safarilink")).toEqual({
       auditKey: "2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128",
       basePath: auditPath,
     });
-    expect(buildAuditWorkspaceTabPath(auditPath, "checklist", "?source=register&tab=war-room")).toBe(
-      `${auditPath}?source=register&tab=checklist`,
+    expect(buildAuditWorkspaceStagePath(auditPath, "prepare", "?source=register&tab=war-room")).toBe(
+      `${auditPath}/prepare?source=register`,
     );
     expect(getActiveAuditWorkspace("/maintenance/safarilink/quality/audits/plan", "safarilink")).toBeNull();
   });
@@ -102,11 +100,11 @@ describe("QMS sidebar navigation", () => {
       department: "quality",
       auditRef: "QAR/MO/26/002",
     });
-    expect(auditPath).toBe("/maintenance/safarilink/quality/audits/QAR-MO-26-002");
-    expect(classifyQmsPath(`${auditPath}?tab=war-room`)).toMatchObject({ kind: "known" });
+    expect(auditPath).toBe("/maintenance/safarilink/quality/audits/QAR-MO-26-002/setup");
+    expect(classifyQmsPath(auditPath)).toMatchObject({ kind: "known" });
     expect(getActiveAuditWorkspace(auditPath, "safarilink")).toEqual({
       auditKey: "QAR-MO-26-002",
-      basePath: auditPath,
+      basePath: "/maintenance/safarilink/quality/audits/QAR-MO-26-002",
     });
   });
 

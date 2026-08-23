@@ -344,7 +344,7 @@ const BaseStationEditorDialog: React.FC<Props> = ({
     });
   };
 
-  const useDeviceForDraft = async () => {
+  const captureDeviceLocationForDraft = async () => {
     setCapturing("draft");
     setMessage(null);
     try {
@@ -557,7 +557,7 @@ const BaseStationEditorDialog: React.FC<Props> = ({
               <LocateFixed size={19} />
               <span><strong id="baseLocationHeading">Approved facility location</strong><small>Search Google Maps, select an aerodrome, click the map or drag the pin.</small></span>
             </div>
-            <Button type="button" size="sm" variant="secondary" disabled={capturing !== null} onClick={() => void useDeviceForDraft()}>
+            <Button type="button" size="sm" variant="secondary" disabled={capturing !== null} onClick={() => void captureDeviceLocationForDraft()}>
               <Crosshair size={15} /> {capturing === "draft" ? "Locating…" : "Use this device"}
             </Button>
           </div>

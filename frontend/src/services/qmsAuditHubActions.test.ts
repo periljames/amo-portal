@@ -145,11 +145,7 @@ describe("Quality audit hub API helpers", () => {
   });
 });
 
-describe("Quality checklist, workflow integrity and public CAR UI contracts", () => {
-  const checklistEditorSource = readFileSync(
-    new URL("../components/QMS/QualityChecklistPdfFormEditorHost.tsx", import.meta.url),
-    "utf8",
-  );
+describe("Quality workflow integrity and public CAR UI contracts", () => {
   const enhancementsHostSource = readFileSync(
     new URL("../components/QMS/QualityEnhancementsHost.tsx", import.meta.url),
     "utf8",
@@ -159,36 +155,16 @@ describe("Quality checklist, workflow integrity and public CAR UI contracts", ()
     "utf8",
   );
   const mainSource = readFileSync(new URL("../main.tsx", import.meta.url), "utf8");
-  const checklistEditorCss = readFileSync(
-    new URL("../styles/quality-checklist-pdf-form-editor.css", import.meta.url),
-    "utf8",
-  );
   const inviteCss = readFileSync(
     new URL("../styles/car-invite-responsive.css", import.meta.url),
     "utf8",
   );
-
-  it("renders AcroForm controls and saves PDF.js annotation storage to the portal", () => {
-    expect(checklistEditorSource).toContain("renderForms");
-    expect(checklistEditorSource).toContain("saveDocument()");
-    expect(checklistEditorSource).toContain("qmsUploadAuditChecklist");
-    expect(checklistEditorSource).toContain("getFieldObjects()");
-  });
-
-  it("protects unsaved and controlled checklist states", () => {
-    expect(checklistEditorSource).toContain("Discard the unsaved PDF form changes?");
-    expect(checklistEditorSource).toContain("setDirty(true)");
-    expect(checklistEditorSource).toContain("The audit report has been issued");
-    expect(checklistEditorSource).toContain("Only the assigned audit team or an AMO administrator");
-    expect(checklistEditorSource).toContain("Save to portal");
-  });
 
   it("fails closed when the authoritative audit workflow is unavailable", () => {
     expect(enhancementsHostSource).toContain("data?.degraded === true");
     expect(enhancementsHostSource).toContain("Authoritative workflow unavailable");
     expect(enhancementsHostSource).toContain("It will not use locally invented completion values");
     expect(enhancementsHostSource).toContain("quality-workflow-is-degraded");
-    expect(checklistEditorCss).toContain(".quality-workflow-integrity-blocker");
   });
 
   it("does not load PDF.js into unrelated portal workspaces", () => {
@@ -198,12 +174,10 @@ describe("Quality checklist, workflow integrity and public CAR UI contracts", ()
     expect(routeGateSource).toContain("/car-invite");
     expect(routeGateSource).toContain("<ModalTopLayerGuard />");
     expect(routeGateSource).not.toContain("QualityChecklistPdfFormEditorHost");
-    expect(enhancementsHostSource).toContain('route.activeTab === "checklist"');
-    expect(enhancementsHostSource).toContain('import("./QualityChecklistPdfFormEditorHost")');
+    expect(enhancementsHostSource).toContain('activeTab={auditSessionStage === "prepare" ? "checklist" : null}');
   });
 
-  it("keeps the PDF editor and public CAR workflow usable at normal browser zoom", () => {
-    expect(checklistEditorCss).toContain("height: min(94dvh, 1080px)");
+  it("keeps the public CAR workflow usable at normal browser zoom", () => {
     expect(inviteCss).toContain(".car-invite-stage:not(.is-active)");
     expect(inviteCss).toContain("max-height: none");
     expect(inviteCss).toContain(":has(.car-invite-badge--success)");

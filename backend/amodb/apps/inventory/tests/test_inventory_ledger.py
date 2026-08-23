@@ -114,6 +114,7 @@ def test_on_hand_derived_from_ledger(db_session):
         idempotency_key="recv-1",
         is_serialized=False,
         is_lot_controlled=False,
+        condition=inventory_models.InventoryConditionEnum.SERVICEABLE,
     )
     inventory_services.receive_inventory(
         db_session,

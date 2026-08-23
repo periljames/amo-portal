@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
 from ..audit import services as audit_services
-from . import bulk_contracts, bulk_models, bulk_patterns, bulk_schemas, hr_selection_integrity, legacy_guard
+from . import bulk_contracts, bulk_models, bulk_patterns, bulk_schemas, hr_selection_integrity, retired_pattern_guard
 from .bulk_worker import process_operation
 
 MAX_BULK_RECORDS = 10_000
@@ -148,7 +148,7 @@ def submit_contract_batch(db: Session, *, amo_id: str, actor, idempotency_key: s
 
 
 def submit_default_pattern_batch(db: Session, *, amo_id: str, actor, idempotency_key: str, payload):
-    raise ValueError(legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE)
+    raise ValueError(retired_pattern_guard.RETIRED_DEFAULT_PATTERN_MESSAGE)
 
 
 def submit_work_pattern_batch(db: Session, *, amo_id: str, actor, idempotency_key: str, payload):

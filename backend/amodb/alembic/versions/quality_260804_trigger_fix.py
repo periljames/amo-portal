@@ -15,6 +15,11 @@ down_revision = "quality_260804_assurance_wiring"
 branch_labels = None
 depends_on = None
 
+_ADDITIONAL_EVENT_SOURCES = (
+    ("qms_report_exports", "REPORT"),
+    ("qms_out_of_tolerance_events", "OUT_OF_TOLERANCE"),
+)
+
 
 def _is_postgresql() -> bool:
     return op.get_bind().dialect.name == "postgresql"
@@ -42,7 +47,7 @@ def upgrade() -> None:
                 invalid_reason text;
                 changed jsonb;
             BEGIN
-                current_row := CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
+                current_row := CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END;
                 previous_row := CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END;
                 tenant_id := COALESCE(current_row ->> 'amo_id', previous_row ->> 'amo_id');
                 record_id := COALESCE(current_row ->> 'id', previous_row ->> 'id');
@@ -147,6 +152,25 @@ def upgrade() -> None:
             """
         )
     )
+
+    for table_name, source_type in _ADDITIONAL_EVENT_SOURCES:
+        trigger_name = f"trg_{table_name}_assurance_event"
+        op.execute(
+            sa.text(
+                f"""
+                DO $$
+                BEGIN
+                    IF to_regclass('public.{table_name}') IS NOT NULL THEN
+                        DROP TRIGGER IF EXISTS {trigger_name} ON {table_name};
+                        CREATE TRIGGER {trigger_name}
+                        AFTER INSERT OR UPDATE OR DELETE ON {table_name}
+                        FOR EACH ROW EXECUTE FUNCTION quality_capture_assurance_event('{source_type}');
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
 
 
 def downgrade() -> None:

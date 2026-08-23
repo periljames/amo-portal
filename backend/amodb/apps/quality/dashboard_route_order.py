@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .dashboard_v2 import qms_operational_dashboard_v2
 
 
@@ -62,4 +62,3 @@ def _promote_dashboard_route(api_router: APIRouter, *, legacy: bool = False) -> 
 
 
 _promote_dashboard_route(router)
-_promote_dashboard_route(legacy_router, legacy=True)

@@ -40,14 +40,6 @@ def _create_quality_user(db_session, *, amo: account_models.AMO, email: str) -> 
     return user
 
 
-def test_derive_audit_unit_code_prefers_readable_cleaned_code(db_session):
-    amo = account_models.AMO(amo_code="amo-west-hangar", icao_code="hkx1", name="West", login_slug="west")
-    db_session.add(amo)
-    db_session.commit()
-
-    assert quality_router._derive_audit_unit_code(db_session, amo.id) == "AMOWESHA"
-
-
 def test_generate_audit_reference_increments_existing_scope(db_session):
     amo = account_models.AMO(amo_code="amo-demo", name="Demo", login_slug="demo")
     db_session.add(amo)
@@ -56,7 +48,7 @@ def test_generate_audit_reference_increments_existing_scope(db_session):
         quality_models.QMSAuditReferenceCounter(
             amo_id=amo.id,
             reference_family="QAR",
-            unit_code="AMODEMO",
+            unit_code="MO",
             ref_year=26,
             last_value=4,
         )
@@ -69,8 +61,8 @@ def test_generate_audit_reference_increments_existing_scope(db_session):
         target_date=date(2026, 3, 19),
     )
 
-    assert audit_ref == "QAR/AMODEMO/26/005"
-    assert unit_code == "AMODEMO"
+    assert audit_ref == "QAR/MO/26/005"
+    assert unit_code == "MO"
     assert ref_year == 26
     assert ref_sequence == 5
 
@@ -128,7 +120,7 @@ def test_generate_audit_reference_retries_first_insert_race():
     assert ref_sequence == 1
 
 
-def test_two_amos_with_same_display_unit_code_can_create_same_human_ref_without_collision(db_session, monkeypatch):
+def test_two_amos_with_same_display_unit_code_can_create_same_human_ref_without_collision(db_session):
     amo_a = account_models.AMO(amo_code="AMO-CAR", name="Carrier", login_slug="carrier")
     amo_b = account_models.AMO(amo_code="AMO-CAP", name="Capstone", login_slug="capstone")
     db_session.add_all([amo_a, amo_b])
@@ -143,8 +135,6 @@ def test_two_amos_with_same_display_unit_code_can_create_same_human_ref_without_
         planned_start=date(2026, 3, 19),
         planned_end=date(2026, 3, 20),
     )
-
-    monkeypatch.setattr(quality_router, "_derive_audit_unit_code", lambda db, amo_id: "AMOC")
 
     audit_a = quality_router.create_audit(payload=payload, request=_request(), db=db_session, current_user=user_a)
     audit_b = quality_router.create_audit(payload=payload, request=_request(), db=db_session, current_user=user_b)
@@ -188,8 +178,8 @@ def test_bulk_findings_endpoint_scopes_to_current_amo(db_session):
     )
     db_session.add_all(
         [
-            quality_models.QMSAuditFinding(audit_id=audit_a.id, description="Finding A"),
-            quality_models.QMSAuditFinding(audit_id=audit_b.id, description="Finding B"),
+            quality_models.QMSAuditFinding(amo_id=amo_a.id, audit_id=audit_a.id, description="Finding A"),
+            quality_models.QMSAuditFinding(amo_id=amo_b.id, audit_id=audit_b.id, description="Finding B"),
         ]
     )
     db_session.commit()

@@ -39,16 +39,14 @@ def test_generated_record_routes_are_registered() -> None:
     assert required.issubset(paths)
 
 
-def test_frontend_has_generated_record_register_and_review_surface() -> None:
+def test_frontend_surfaces_generated_records_in_canonical_reports_and_history() -> None:
     root = Path(__file__).resolve().parents[5]
-    page = (root / "frontend/src/pages/documentControl/DocumentControlRecordsPage.tsx").read_text(encoding="utf-8")
-    service = (root / "frontend/src/services/documentationRecords.ts").read_text(encoding="utf-8")
-    shell = (root / "frontend/src/pages/documentControl/DocumentControlShell.tsx").read_text(encoding="utf-8")
+    page = (root / "frontend/src/pages/documentControl/DocumentControlReportsPage.tsx").read_text(encoding="utf-8")
+    backend = (root / "backend/amodb/apps/doc_control/workspace_reports_register_router.py").read_text(encoding="utf-8")
     router = (root / "frontend/src/router.tsx").read_text(encoding="utf-8")
-    assert "Generated records" in page
-    assert "reviewGeneratedDocumentationRecord" in page
-    assert "integrity" in service
-    # Generated records remain deep-linkable during migration, but they are a
-    # retained-record/library concern rather than permanent daily DMS navigation.
-    assert '/maintenance/:amoCode/document-control/records' in router
-    assert 'path: "/records"' not in shell
+    assert "Retention / Disposition" in page
+    assert 'id: "retention"' in page
+    assert "km.DocumentationRecord" in backend
+    assert "artifact_filename" in backend
+    assert "?tab=history&record=" in backend
+    assert '/maintenance/:amoCode/document-control/records' not in router

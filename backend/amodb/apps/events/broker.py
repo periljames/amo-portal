@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, Iterable, Optional
 
 
@@ -17,8 +17,8 @@ class EventEnvelope:
     entityId: str
     action: str
     timestamp: str
-    actor: Optional[Dict[str, Any]]
-    metadata: Dict[str, Any]
+    actor: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
         payload = {

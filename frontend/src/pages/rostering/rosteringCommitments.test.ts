@@ -47,7 +47,7 @@ describe("rostering cross-module commitment integration", () => {
     expect(plannerSource).toContain('className="wr-roster-grid wr-roster-grid--month"');
     expect(plannerSource).toContain("data.month.days.map");
     expect(plannerSource).toContain("<PersonCard person={person}");
-    expect(plannerSource).toContain("assignedDays={summary?.dates.size || 0}");
+    expect(plannerSource).toContain('<div className="wr-grid-person" role="rowheader"><PersonCard person={person} /></div>');
     expect(plannerSource).not.toContain('className="wr-people-panel"');
   });
 });

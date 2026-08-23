@@ -1,3 +1,4 @@
+"""Core canonical Quality API routes and shared helpers."""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -30,7 +31,6 @@ from .tenant_security import TenantContext, assert_quality_permission, has_quali
 
 core_router = APIRouter()
 router = APIRouter(prefix="/api/maintenance/{amo_code}/quality", tags=["Quality"])
-legacy_router = APIRouter(prefix="/api/maintenance/{amo_code}/qms", tags=["Quality legacy alias"], deprecated=True)
 logger = logging.getLogger("amodb.quality")
 _TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
 
@@ -2578,7 +2578,5 @@ def generic_qms_delete(
     return {"module": module, "table": table, "deleted": row}
 
 
-# Mount the same canonical Quality handlers under the new /quality path and the legacy /qms alias.
-# Keep the legacy alias during frontend migration so existing screens do not break.
+# Mount the canonical Quality handlers under the active /quality path.
 router.include_router(core_router)
-legacy_router.include_router(core_router)

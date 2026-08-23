@@ -30,7 +30,7 @@ def _validate_approval(job: models.PlatformCommandJob) -> None:
 
 
 def reconcile_pending_jobs(db: Session, *, limit: int = 50) -> int:
-    """Move legacy/pending PlatformCommandJob rows onto the lease-fenced SaaS queue.
+    """Move pending PlatformCommandJob rows onto the lease-fenced SaaS queue.
 
     This reconciliation does not execute side effects. PostgreSQL row locking only
     protects the state transition into the durable queue; actual execution is
@@ -68,23 +68,12 @@ def reconcile_pending_jobs(db: Session, *, limit: int = 50) -> int:
 def process_leased_job(db: Session, queue_job) -> dict[str, Any]:
     """Execute a Platform command only after the SaaS queue lease is acquired.
 
-    Approval is revalidated immediately before execution. Both native queue rows
-    and pre-migration ``legacy_job_id`` rows are accepted, but neither path can
-    execute outside an already-acquired SaaSJob lease.
+    Approval is revalidated immediately before execution, and no command can run
+    outside an already-acquired SaaSJob lease.
     """
 
     payload = queue_job.payload_json or {}
     command_job_id = str(payload.get("command_job_id") or "").strip()
-    legacy_job_id = str(payload.get("legacy_job_id") or "").strip()
-    if not command_job_id and legacy_job_id:
-        from .saas_legacy_bridge import execute_legacy_command_in_worker
-
-        job = db.get(models.PlatformCommandJob, legacy_job_id)
-        if job is None:
-            raise ValueError("Legacy Platform command job not found")
-        _validate_approval(job)
-        actor_id = str(payload.get("actor_id") or _execution_actor(job) or "platform-worker")
-        return execute_legacy_command_in_worker(db, legacy_job_id=legacy_job_id, actor_id=actor_id)
     if not command_job_id:
         raise ValueError("Platform command queue payload is missing command_job_id")
 
@@ -107,6 +96,6 @@ def process_leased_job(db: Session, queue_job) -> dict[str, Any]:
 
 def queue_job_is_retryable(queue_job) -> bool:
     payload = queue_job.payload_json or {}
-    if not (str(payload.get("command_job_id") or "").strip() or str(payload.get("legacy_job_id") or "").strip()):
+    if not str(payload.get("command_job_id") or "").strip():
         return False
     return int(queue_job.max_attempts or 1) > int(queue_job.attempt_count or 0)

@@ -6,6 +6,7 @@ import os
 import re
 from typing import Any
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 
@@ -197,6 +198,12 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
     """
 
     from amodb.apps.platform import saas_services
+
+    # Inspect through the session connection. Inspecting the Engine can borrow
+    # and roll back the same DBAPI connection used by an in-memory SQLite
+    # transaction, discarding the queued email log before it is updated.
+    if not inspect(db.connection()).has_table("saas_provider_credentials"):
+        return NoopProvider(), False
 
     row = saas_services.get_provider_credential(
         db,

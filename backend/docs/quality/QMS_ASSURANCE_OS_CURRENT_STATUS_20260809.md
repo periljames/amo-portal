@@ -145,12 +145,11 @@ Audit-record detection excludes collection routes so `program`, `schedule`, `reg
 
 The cleanup requirement was audited rather than interpreted as a deletion target.
 
-Main audit dashboard, planning, schedule detail, register and Run Hub routes already have specialist owners. Two bounded collection routes remain behind the canonical compatibility dispatcher:
+Main audit dashboard, planning, schedule detail, register and Run Hub routes have specialist owners. One bounded collection route remains behind the canonical dispatcher:
 
-- `/quality/audits/checklists`;
-- `/quality/audits/reports`.
+- `/quality/audits/checklists`.
 
-They are intentionally retained because they still provide collection/register context underneath specialist checklist/report governance. Removing them would remove working functionality and violate the MD instruction not to delete a working system merely to clean up generic surfaces. Specialist audit-record workflows remain authoritative for revision/approval/issue operations.
+The superseded `/quality/audits/reports` collection route has been removed. Specialist audit-record workflows remain authoritative for report revision, approval, and issue operations.
 
 ## 7. Database and migration state
 

@@ -53,7 +53,7 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality").kind).toBe("overview");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedule").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
-    expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/fieldwork").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/live").kind).toBe("known");
   });
 
   it("recognises every canonical live-audit stage before the not-found guard", () => {
@@ -68,13 +68,13 @@ describe("QMS route registry", () => {
     }
   });
 
-  it("accepts human-readable audit and CAR references", () => {
-    expect(classifyQmsPath("/maintenance/safarilink/quality/audits/QAR-MO-26-002?tab=war-room")).toMatchObject({
+  it("accepts human-readable audit and CAR references on canonical stages", () => {
+    expect(classifyQmsPath("/maintenance/safarilink/quality/audits/QAR-MO-26-002/setup")).toMatchObject({
       kind: "known",
       amoCode: "safarilink",
       module: expect.objectContaining({ id: "audits" }),
     });
-    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/checklist").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/live").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedules/AUD-SCH-2026-04").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/CAR-2026-014/evidence").kind).toBe("known");
   });
@@ -93,18 +93,11 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/%2E%2E?tab=war-room").kind).toBe("unknown");
   });
 
-  it("maps intentional legacy aliases to canonical destinations", () => {
-    expect(classifyQmsPath("/maintenance/SAF/qms")).toMatchObject({
-      kind: "legacy",
-      canonicalTarget: "/maintenance/SAF/quality",
-    });
-    expect(classifyQmsPath("/maintenance/SAF/quality/tasks")).toMatchObject({
-      kind: "legacy",
-      canonicalTarget: "/maintenance/SAF/quality/inbox/assigned-to-me",
-    });
-    expect(classifyQmsPath("/maintenance/SAF/quality/audits/programme")).toMatchObject({
-      kind: "legacy",
-      canonicalTarget: "/maintenance/SAF/quality/audits/program",
-    });
+  it("rejects removed aliases and pre-stage audit occurrence URLs", () => {
+    expect(classifyQmsPath("/maintenance/SAF/qms").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/tasks").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/programme").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/checklist").kind).toBe("unknown");
   });
 });

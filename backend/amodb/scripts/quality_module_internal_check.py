@@ -156,10 +156,8 @@ REQUIRED_CHECKS = {
             "export function qmsNavigationItems(",
             "export function classifyQmsPath(",
             'kind: "unknown"',
-            'kind: "legacy"',
             "validViews",
             "componentType",
-            "legacyAliases",
         ],
     ),
     "frontend_qms_router_ownership": (
@@ -178,7 +176,7 @@ REQUIRED_CHECKS = {
         [
             'describe("QMS route registry"',
             "does not silently accept misspelled modules or views",
-            "maps intentional legacy aliases",
+            "rejects removed aliases and pre-stage audit occurrence URLs",
         ],
     ),
     "frontend_qms_operational_overview": (
@@ -248,17 +246,6 @@ REQUIRED_CHECKS = {
             "returns a deterministic timeout error",
         ],
     ),
-    "frontend_run_hub_import_boundary": (
-        FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
-        [
-            'from "../services/qmsAuditHubActions";',
-            "qmsGetAuditWorkflow",
-            "qmsIssueAuditNotice",
-            "qmsAddCarAction",
-            "qmsListCarActions",
-            "qmsShareAuditReport",
-        ],
-    ),
     "quality_ci_workflow": (
         ROOT / ".github/workflows/quality-module-ci.yml",
         [
@@ -276,10 +263,6 @@ FORBIDDEN_CHECKS = {
         FRONTEND_ROOT / "src/services/qmsAuditHubActions.ts",
         ["window.setTimeout", "window.clearTimeout"],
     ),
-    "frontend_run_hub_legacy_action_import": (
-        FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
-        ['qmsAddCarAction,\n} from "../services/qms"'],
-    ),
     "backend_quality_profile_operational_routers": (
         BACKEND_ROOT / "amodb/quality_main.py",
         [
@@ -293,10 +276,6 @@ FORBIDDEN_CHECKS = {
             "workforce_router",
         ],
     ),
-    "frontend_retired_cockpit_score": (
-        FRONTEND_ROOT / "src/dashboards/DashboardCockpit.tsx",
-        ["qualityScore", "manpowerSlide", "QualityCockpitCanvas"],
-    ),
 }
 
 FORBIDDEN_FILES = [
@@ -304,6 +283,7 @@ FORBIDDEN_FILES = [
     FRONTEND_ROOT / "src/pages/QMSHomePage.tsx",
     FRONTEND_ROOT / "src/components/dashboard/QualityCockpitCanvas.tsx",
     FRONTEND_ROOT / "src/components/dashboard/charts/QualityCockpitCharts.tsx",
+    FRONTEND_ROOT / "src/dashboards/DashboardCockpit.tsx",
 ]
 
 COMPILE_TARGETS = [

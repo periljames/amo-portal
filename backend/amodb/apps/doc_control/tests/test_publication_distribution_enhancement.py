@@ -61,7 +61,7 @@ def test_publication_distribution_policy_is_bounded() -> None:
 
 def test_manual_upload_guard_rejects_non_controller(monkeypatch) -> None:
     monkeypatch.setattr(
-        upload_guard_router.legacy,
+        upload_guard_router.core,
         "_tenant_by_slug",
         lambda *args, **kwargs: SimpleNamespace(amo_id="amo-1"),
     )
@@ -76,7 +76,7 @@ def test_manual_upload_guard_rejects_non_controller(monkeypatch) -> None:
 
 def test_manual_upload_guard_rejects_cross_tenant_controller(monkeypatch) -> None:
     monkeypatch.setattr(
-        upload_guard_router.legacy,
+        upload_guard_router.core,
         "_tenant_by_slug",
         lambda *args, **kwargs: SimpleNamespace(amo_id="amo-2"),
     )

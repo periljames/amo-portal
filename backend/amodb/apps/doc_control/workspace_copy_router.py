@@ -440,7 +440,7 @@ def physical_copy_register(
             "home_location_text": _home_location(copy),
             "holder_display": holder.full_name if holder else copy.holder_name,
             "overdue": bool(copy.due_back_at and copy.status in {"ISSUED", "RECALLED"} and copy.due_back_at.date() < datetime.utcnow().date()),
-            "scan_path": f"/maintenance/{tenant_slug}/document-control/controlled-copies?scan={copy.id}",
+            "scan_path": f"/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=distribution&scan={copy.id}",
             "label_path": f"/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy.id}/label.pdf",
         })
     return {
@@ -583,7 +583,7 @@ def controlled_copy_label(
     manual = get_manual(db, tenant, row.manual_id)
     revision = get_revision(db, manual, row.revision_id)
     origin = str(request.headers.get("origin") or str(request.base_url).rstrip("/")).rstrip("/")
-    scan_url = f"{origin}/maintenance/{tenant_slug}/document-control/controlled-copies?scan={row.id}"
+    scan_url = f"{origin}/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=distribution&scan={row.id}"
 
     output = BytesIO()
     page_width, page_height = A6

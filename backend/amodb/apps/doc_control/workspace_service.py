@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import role_registry
 from amodb.apps.manuals import models as manual_models
-from amodb.apps.manuals.router_legacy import _tenant_by_slug
+from amodb.apps.manuals.core_router import _tenant_by_slug
 from amodb.security import get_current_actor_id
 
 from . import domain_models

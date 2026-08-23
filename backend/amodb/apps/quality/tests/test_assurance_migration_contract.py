@@ -13,7 +13,7 @@ MIGRATION = (
 
 def test_trigger_fix_preserves_event_provenance_and_caller_context() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    assert "CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE current_row END" in source
+    assert "current_row := CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END" in source
     assert "set_config('app.tenant_id', tenant_id, true)" in source
     assert "set_config('app.tenant_id', COALESCE(previous_tenant_id, ''), true)" in source
     assert "set_config('app.user_id', COALESCE(previous_user_id, ''), true)" in source
@@ -22,7 +22,6 @@ def test_trigger_fix_preserves_event_provenance_and_caller_context() -> None:
 
 def test_report_and_out_of_tolerance_sources_emit_assurance_events() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    assert "trg_qms_report_exports_assurance_event" in source
-    assert "quality_capture_assurance_event('REPORT')" in source
-    assert "trg_qms_out_of_tolerance_events_assurance_event" in source
-    assert "quality_capture_assurance_event('OUT_OF_TOLERANCE')" in source
+    assert '("qms_report_exports", "REPORT")' in source
+    assert '("qms_out_of_tolerance_events", "OUT_OF_TOLERANCE")' in source
+    assert "FOR EACH ROW EXECUTE FUNCTION quality_capture_assurance_event('{source_type}')" in source

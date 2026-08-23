@@ -5,8 +5,8 @@
 //   CRS pages, aircraft import, QMS dashboard, and admin user management.
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import React, { Suspense, lazy, useEffect, useState } from "react";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import {
   fetchOnboardingStatus,
@@ -80,37 +80,16 @@ async function loadLazyModule<T>(loader: () => Promise<T>): Promise<T> {
   }
 }
 
-function lazyDefault<T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) {
+function lazyDefault<T extends React.ComponentType>(loader: () => Promise<{ default: T }>) {
   return lazy(() => loadLazyModule(loader));
 }
 
-function lazyNamed<T extends Record<string, React.ComponentType<any>>>(
+function lazyNamed<T extends Record<string, React.ComponentType>>(
   loader: () => Promise<T>,
   exportName: keyof T
 ) {
-  return lazy(async () => ({ default: (await loadLazyModule(loader))[exportName] as React.ComponentType<any> }));
+  return lazy(async () => ({ default: (await loadLazyModule(loader))[exportName] as React.ComponentType }));
 }
-
-const DocControlPages = {
-  LegacyDocControlRedirectPage: lazyNamed(() => import("./pages/DocControlPages"), "LegacyDocControlRedirectPage"),
-  DocControlDashboardPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDashboardPage"),
-  DocControlLibraryPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlLibraryPage"),
-  DocControlDocumentDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDocumentDetailPage"),
-  DocControlDraftsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDraftsPage"),
-  DocControlDraftDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDraftDetailPage"),
-  DocControlChangeProposalPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlChangeProposalPage"),
-  DocControlChangeProposalDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlChangeProposalDetailPage"),
-  DocControlRevisionsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlRevisionsPage"),
-  DocControlLEPPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlLEPPage"),
-  DocControlTRPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlTRPage"),
-  DocControlTRDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlTRDetailPage"),
-  DocControlDistributionPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDistributionPage"),
-  DocControlDistributionDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDistributionDetailPage"),
-  DocControlArchivePage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlArchivePage"),
-  DocControlReviewsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlReviewsPage"),
-  DocControlRegistersPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlRegistersPage"),
-  DocControlSettingsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlSettingsPage"),
-} as const;
 
 const PlanningProductionPages = {
   PlanningDashboardPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningDashboardPage"),
@@ -182,18 +161,7 @@ const PlatformIntegrationsPage = lazyDefault(() => import("./pages/platform/Plat
 const PlatformInfrastructurePage = lazyDefault(() => import("./pages/platform/PlatformInfrastructurePage"));
 const PasswordResetPage = lazyDefault(() => import("./pages/PasswordResetPage"));
 const DashboardPage = lazyDefault(() => import("./pages/DashboardPage"));
-const EhmDashboardPage = lazyDefault(() => import("./pages/ehm/EhmDashboardPage"));
-const EhmTrendsPage = lazyDefault(() => import("./pages/ehm/EhmTrendsPage"));
-const EhmUploadsPage = lazyDefault(() => import("./pages/ehm/EhmUploadsPage"));
 const ReliabilityWorkspacePage = lazyDefault(() => import("./pages/reliability/ReliabilityWorkspacePage"));
-const CRSNewPage = lazyDefault(() => import("./pages/CRSNewPage"));
-const AircraftImportPage = lazyDefault(() => import("./pages/AircraftImportPage"));
-const ComponentImportPage = lazyDefault(() => import("./pages/ComponentImportPage"));
-const AircraftDocumentsPage = lazyDefault(() => import("./pages/AircraftDocumentsPage"));
-const WorkOrderSearchPage = lazyDefault(() => import("./pages/work/WorkOrderSearchPage"));
-const WorkOrderDetailPage = lazyDefault(() => import("./pages/work/WorkOrderDetailPage"));
-const TaskSummaryPage = lazyDefault(() => import("./pages/work/TaskSummaryPage"));
-const TaskPrintPage = lazyDefault(() => import("./pages/work/TaskPrintPage"));
 const AdminUserNewPage = lazyDefault(() => import("./pages/AdminUserNewPage"));
 const AdminUserDetailPage = lazyDefault(() => import("./pages/AdminUserDetailPage"));
 const AdminDashboardPage = lazyDefault(() => import("./pages/AdminDashboardPage"));
@@ -216,8 +184,6 @@ const AeroDocHangarDashboardPage = lazyDefault(() => import("./pages/AeroDocHang
 const QualityCarsPage = lazyDefault(() => import("./pages/QualityCarsPage"));
 const PublicCarInvitePage = lazyDefault(() => import("./pages/PublicCarInvitePage"));
 const SubscriptionManagementPage = lazyDefault(() => import("./pages/SubscriptionManagementPage"));
-const UpsellPage = lazyDefault(() => import("./pages/UpsellPage"));
-const UserWidgetsPage = lazyDefault(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazyDefault(() => import("./pages/OnboardingPasswordPage"));
 const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/PublicCertificateVerificationPage"));
 const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
@@ -227,16 +193,9 @@ const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAu
 const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
 const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
 const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
-const QualityAuditRunHubPage = lazyDefault(() => import("./pages/QualityAuditRunHubPage"));
 const QualityEvidenceViewerPage = lazyDefault(() => import("./pages/QualityEvidenceViewerPage"));
 
-const ManualsDashboardPage = lazyDefault(() => import("./pages/manuals/ManualsDashboardPage"));
-const ManualOverviewPage = lazyDefault(() => import("./pages/manuals/ManualOverviewPage"));
 const ManualReaderPage = lazyDefault(() => import("./pages/manuals/ManualReaderPage"));
-const ManualDiffPage = lazyDefault(() => import("./pages/manuals/ManualDiffPage"));
-const ManualWorkflowPage = lazyDefault(() => import("./pages/manuals/ManualWorkflowPage"));
-const ManualExportsPage = lazyDefault(() => import("./pages/manuals/ManualExportsPage"));
-const ManualMasterListPage = lazyDefault(() => import("./pages/manuals/ManualMasterListPage"));
 const ProductionWorkspacePage = lazyDefault(() => import("./pages/ProductionWorkspacePage"));
 const UserProfilePage = lazyDefault(() => import("./pages/UserProfilePage"));
 const MaintenanceDashboardPage = lazyDefault(() => import("./pages/maintenance/MaintenanceDashboardPage"));
@@ -261,54 +220,6 @@ type RequireAuthProps = {
 type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
-
-function LegacyTrainingCompetenceRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
-  let suffixParts: string[] = [];
-  if (markerIndex >= 0) {
-    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
-  }
-  const suffix = suffixParts.join("/");
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
-
-function QualityTrainingCompetenceRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
-  let suffixParts: string[] = [];
-  if (markerIndex >= 0) {
-    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
-  }
-  const suffix = suffixParts.join("/");
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
-
-function LegacyQmsRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const qmsIndex = parts.indexOf("qms");
-  const suffix = qmsIndex >= 0 ? parts.slice(qmsIndex + 1).join("/") : "";
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/quality${suffix ? `/${suffix}` : ""}${location.search}`;
-  return <Navigate to={target} replace />;
-}
-
-function QmsInboxRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/inbox/assigned-to-me`} replace />;
-}
-
-function QmsProgrammeRedirect(): React.ReactElement {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/audits/program`} replace />;
-}
 
 type RequireQmsPermissionProps = {
   permission: string;
@@ -358,7 +269,6 @@ function inferAmoCodeFromPath(pathname: string): string | null {
  */
 const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   const location = useLocation();
-  const redirectedRef = useRef(false);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(
     getCachedOnboardingStatus()
   );
@@ -406,10 +316,8 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   if (
     onboardingStatus &&
     !onboardingStatus.is_complete &&
-    !isOnboardingRoute &&
-    !redirectedRef.current
+    !isOnboardingRoute
   ) {
-    redirectedRef.current = true;
     const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
     return <Navigate to={`/maintenance/${amoCode}/onboarding/setup`} replace />;
   }
@@ -466,33 +374,6 @@ const DepartmentHomeRedirect: React.FC = () => {
   const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
   return <Navigate to={`/maintenance/${amoCode}/${resolveDefaultDepartment(amoCode)}`} replace />;
 };
-
-const QualityRootRedirect: React.FC = () => {
-  const location = useLocation();
-  if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
-  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
-  return <Navigate to={`/maintenance/${amoCode}/quality${location.search}`} replace />;
-};
-
-const LegacyEngineeringRedirect: React.FC = () => {
-  const location = useLocation();
-  const parts = location.pathname.split("/").filter(Boolean);
-  const nextParts = parts.map((part) => (part === "engineering" ? "maintenance" : part));
-  const target = `/${nextParts.join("/")}${location.search}`;
-  return <Navigate to={target} replace />;
-};
-
-const LegacyTechnicalRecordsRedirect: React.FC = () => {
-  const location = useLocation();
-  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
-  const parts = location.pathname.split("/").filter(Boolean);
-  const recordsIndex = parts.indexOf("records");
-  const suffix = recordsIndex >= 0 ? parts.slice(recordsIndex + 1).join("/") : "";
-  const base = `/maintenance/${amoCode}/production/records`;
-  const target = suffix ? `${base}/${suffix}${location.search}` : `${base}${location.search}`;
-  return <Navigate to={target} replace />;
-};
-
 
 const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.ReactElement }> = ({ feature, children }) => {
   const location = useLocation();
@@ -575,45 +456,6 @@ export const AppRouter: React.FC = () => {
     <PortalRouteErrorBoundary>
       <Suspense fallback={<PageRouteLoading label="Loading portal workspace…" />}>
         <Routes>
-
-      <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
-      <Route path="/doc-control/*" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
-
-      <Route path="/maintenance/:amoCode/document-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<RequireAuth><DocControlPages.DocControlDocumentDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/drafts" element={<RequireAuth><DocControlPages.DocControlDraftsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<RequireAuth><DocControlPages.DocControlDraftDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<RequireAuth><DocControlPages.DocControlChangeProposalPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/change-proposals/:proposalId" element={<RequireAuth><DocControlPages.DocControlChangeProposalDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/revisions/:docId" element={<RequireAuth><DocControlPages.DocControlRevisionsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/lep/:docId" element={<RequireAuth><DocControlPages.DocControlLEPPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/tr" element={<RequireAuth><DocControlPages.DocControlTRPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/tr/:trId" element={<RequireAuth><DocControlPages.DocControlTRDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/distribution" element={<RequireAuth><DocControlPages.DocControlDistributionPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/distribution/:eventId" element={<RequireAuth><DocControlPages.DocControlDistributionDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/archive" element={<RequireAuth><DocControlPages.DocControlArchivePage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/reviews" element={<RequireAuth><DocControlPages.DocControlReviewsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/document-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
-
-      <Route path="/maintenance/:amoCode/:department/doc-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/library/:docId" element={<RequireAuth><DocControlPages.DocControlDocumentDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/drafts" element={<RequireAuth><DocControlPages.DocControlDraftsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/drafts/:draftId" element={<RequireAuth><DocControlPages.DocControlDraftDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/change-proposals" element={<RequireAuth><DocControlPages.DocControlChangeProposalPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/change-proposals/:proposalId" element={<RequireAuth><DocControlPages.DocControlChangeProposalDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/revisions/:docId" element={<RequireAuth><DocControlPages.DocControlRevisionsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/lep/:docId" element={<RequireAuth><DocControlPages.DocControlLEPPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/tr" element={<RequireAuth><DocControlPages.DocControlTRPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/tr/:trId" element={<RequireAuth><DocControlPages.DocControlTRDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/distribution" element={<RequireAuth><DocControlPages.DocControlDistributionPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/distribution/:eventId" element={<RequireAuth><DocControlPages.DocControlDistributionDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/archive" element={<RequireAuth><DocControlPages.DocControlArchivePage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/reviews" element={<RequireAuth><DocControlPages.DocControlReviewsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/doc-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
 
       {/* Root â†’ login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
@@ -905,9 +747,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/maintenance/reports" element={<RequireAuth><RequireFeatureAccess feature="maintenance.reports"><MaintenanceReportsPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/maintenance/settings" element={<RequireAuth><RequireFeatureAccess feature="maintenance.settings"><MaintenanceSettingsPage /></RequireFeatureAccess></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/engineering" element={<LegacyEngineeringRedirect />} />
-      <Route path="/maintenance/:amoCode/engineering/*" element={<LegacyEngineeringRedirect />} />
-
       <Route path="/maintenance/:amoCode/production/records" element={<RequireAuth><RequireFeatureAccess feature="production.records.dashboard"><TechnicalRecordsPages.TechnicalRecordsDashboardPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/production/records/aircraft" element={<RequireAuth><RequireFeatureAccess feature="production.records.aircraft"><TechnicalRecordsPages.AircraftRecordsPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/production/records/aircraft/:tailId" element={<RequireAuth><RequireFeatureAccess feature="production.records.aircraft"><TechnicalRecordsPages.AircraftRecordDetailPage /></RequireFeatureAccess></RequireAuth>} />
@@ -942,9 +781,6 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      <Route path="/maintenance/:amoCode/quality/tasks" element={<RequireAuth><QmsInboxRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/programme" element={<RequireAuth><QmsProgrammeRedirect /></RequireAuth>} />
-
       <Route path="/maintenance/:amoCode/quality/documents/reader/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/documents/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
 
@@ -952,14 +788,12 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/audits/dashboard" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditAssuranceDashboardPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/program" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/checklists" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/reports" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRegisterPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/bin" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRecycleBinPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScheduleDetailPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/:auditId/*" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRunHubPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/cars" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/cars/register" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
@@ -971,11 +805,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/cars/awaiting-effectiveness-review" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/cars/closed" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
-
-      <Route path="/maintenance/:amoCode/quality/training-competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training-competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training/competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/training/competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
 
       {/* Dedicated Training & Competence route surface. Keep these before the generic /quality/* route so training never falls into the canonical Quality table reader. */}
       <Route path="/maintenance/:amoCode/training/competence" element={<RequireAuth><RequireTrainingPermission><TrainingCompetencePage /></RequireTrainingPermission></RequireAuth>} />
@@ -997,13 +826,6 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
-
-      {/* Legacy Quality/QMS route surfaces are no longer active. They redirect to the canonical Quality route. */}
-      <Route path="/maintenance/:amoCode/:department/training-competence" element={<RequireAuth><LegacyTrainingCompetenceRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
-
       <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />
 
       {/* Department dashboard, e.g. /maintenance/safarilink/maintenance */}
@@ -1015,26 +837,6 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
-
-      <Route path="/maintenance/:amoCode/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
-
-      <Route path="/t/:tenantSlug/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
-      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
-
-
-      <Route path="/records" element={<LegacyTechnicalRecordsRedirect />} />
-      <Route path="/records/*" element={<LegacyTechnicalRecordsRedirect />} />
 
       {/* Catch-all â†’ login */}
       <Route path="*" element={<Navigate to="/login" replace />} />

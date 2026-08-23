@@ -181,10 +181,6 @@ const AdminAmoManagementPage: React.FC = () => {
     syncAdminContext(activeAmoId);
   }, [activeAmoId, isSuperuser]);
 
-  if (currentUser && !isSuperuser) {
-    return null;
-  }
-
   const handleAmoChange = async (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
@@ -398,6 +394,10 @@ const AdminAmoManagementPage: React.FC = () => {
     await syncAdminContext(selectedAmo.id);
     navigate(`/maintenance/${selectedAmo.login_slug}/admin/billing`);
   };
+
+  if (currentUser && !isSuperuser) {
+    return null;
+  }
 
   if (!isSuperuser) {
     return (

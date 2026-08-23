@@ -42,7 +42,7 @@ describe("AMO administrator setup flow", () => {
     for (const route of [
       "/admin/users",
       "/rostering/settings?section=workforce",
-      "/document-control/settings",
+      "/document-control/administration",
       "/admin/email-settings",
       "/admin/billing",
     ]) {
@@ -136,11 +136,11 @@ describe("AMO administrator setup flow", () => {
     expect(locationCss).toContain("@media (max-width: 760px)");
   });
 
-  it("verifies server assets and Chromium cache hits without weakening budgets", () => {
+  it("keeps release unit, bundle-budget and Chromium cache checks", () => {
     if (releaseWorkflow) {
-      expect(releaseWorkflow).toContain("find dist -maxdepth 2");
-      expect(releaseWorkflow).toContain("for attempt in $(seq 1 10)");
-      expect(releaseWorkflow).toContain("Asset not available");
+      expect(releaseWorkflow).toContain("npm exec -- vitest run");
+      expect(releaseWorkflow).toContain("npm run perf:report");
+      expect(releaseWorkflow).toContain("npm exec -- playwright install");
     }
     expect(performanceScript).toContain("fetchWithRetry");
     expect(performanceScript).toContain("cacheMode: \"force-cache\"");

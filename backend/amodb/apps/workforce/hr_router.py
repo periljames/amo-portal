@@ -11,7 +11,7 @@ from . import (
     hr_people_directory,
     hr_schemas,
     hr_service,
-    legacy_guard,
+    retired_pattern_guard,
     permissions,
     schemas,
     services,
@@ -181,7 +181,7 @@ def hr_preview_default_day_pattern_batch(
 ):
     _require_default_pattern_permissions(db, current_user)
     raise _error(
-        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        retired_pattern_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
         code="HR_DEFAULT_DAY_PATTERN_RETIRED",
         status_code=status.HTTP_410_GONE,
     )
@@ -198,7 +198,7 @@ def hr_apply_default_day_pattern_batch(
 ):
     _require_default_pattern_permissions(db, current_user)
     raise _error(
-        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        retired_pattern_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
         code="HR_DEFAULT_DAY_PATTERN_RETIRED",
         status_code=status.HTTP_410_GONE,
     )
@@ -241,7 +241,7 @@ def hr_bootstrap_default_day_pattern(
     """Backward-compatible tenant-wide bootstrap used by existing clients."""
     _require_default_pattern_permissions(db, current_user)
     raise _error(
-        legacy_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
+        retired_pattern_guard.RETIRED_DEFAULT_PATTERN_MESSAGE,
         code="HR_DEFAULT_DAY_PATTERN_RETIRED",
         status_code=status.HTTP_410_GONE,
     )

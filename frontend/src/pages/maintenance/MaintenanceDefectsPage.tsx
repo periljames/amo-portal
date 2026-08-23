@@ -7,9 +7,15 @@ const MaintenanceDefectsPage: React.FC = () => {
   const navigate = useNavigate();
   const { amoCode } = useParams<{ amoCode?: string }>();
   const [rows, setRows] = useState<DefectRead[]>([]);
+  const [clockMs, setClockMs] = useState(() => Date.now());
 
   useEffect(() => {
     listAllDefects().then(setRows).catch(() => setRows([]));
+  }, []);
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setClockMs(Date.now()), 60_000);
+    return () => window.clearInterval(timerId);
   }, []);
 
   return (
@@ -27,7 +33,7 @@ const MaintenanceDefectsPage: React.FC = () => {
                 <td>OPEN</td>
                 <td>No</td>
                 <td>{defect.work_order_id || "-"}</td>
-                <td>{Math.floor((Date.now() - new Date(defect.occurred_at).getTime()) / 86400000)}d</td>
+                <td>{Math.floor((clockMs - new Date(defect.occurred_at).getTime()) / 86400000)}d</td>
               </tr>
             ))}
           </tbody>

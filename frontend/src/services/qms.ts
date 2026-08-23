@@ -1,7 +1,4 @@
-// Compatibility facade for the mature QMS service surface.
-//
-// qmsLegacy retains the existing API helpers unchanged. The explicit resolver
-// export below replaces only the old client-side audit-register scan with the
-// bounded tenant-scoped resolver endpoint.
-export * from "./qmsLegacy";
+// Public QMS service surface. The explicit resolver uses the bounded,
+// tenant-scoped endpoint instead of scanning the audit register client-side.
+export * from "./qmsCore";
 export { qmsResolveAudit } from "./qmsAuditResolveDirect";

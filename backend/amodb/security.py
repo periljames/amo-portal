@@ -26,6 +26,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -280,7 +281,16 @@ def get_current_user(
     # New sessions are independently revocable. Tokens issued before this
     # migration remain valid through the legacy user-level revocation check
     # below, which permits a zero-downtime deployment after migrations run.
-    auth_session = db.get(account_models.PortalAuthSession, auth_session_id)
+    try:
+        auth_session = db.get(account_models.PortalAuthSession, auth_session_id)
+    except (OperationalError, ProgrammingError):
+        # Unmanaged tokens predate server-side auth sessions and remain valid
+        # during the documented rolling migration. Managed tokens must never
+        # bypass a missing revocation store.
+        db.rollback()
+        if payload.get("auth_session_managed") is True:
+            raise _credentials_exception()
+        auth_session = None
     if payload.get("auth_session_managed") is True and auth_session is None:
         raise _credentials_exception()
     if auth_session is not None:

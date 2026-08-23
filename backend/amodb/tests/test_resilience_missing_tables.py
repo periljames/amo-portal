@@ -56,7 +56,7 @@ def test_get_cockpit_snapshot_does_not_hide_programming_error(monkeypatch):
     monkeypatch.setattr(
         quality_service,
         "get_dashboard",
-        lambda db, domain=None: {
+        lambda db, domain=None, amo_id=None: {
             "distributions_pending_ack": 0,
             "audits_open": 0,
             "audits_total": 0,

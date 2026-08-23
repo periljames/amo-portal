@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
-from amodb.apps.manuals.router_legacy import MANUAL_UPLOAD_DIR
+from amodb.apps.manuals.core_router import MANUAL_UPLOAD_DIR
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 

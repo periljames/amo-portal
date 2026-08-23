@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import DashboardCockpit from "../dashboards/DashboardCockpit";
 import DepartmentLandingScaffold from "../components/dashboard/DepartmentLandingScaffold";
 import { getContext, getCachedUser, normalizeDepartmentCode } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
@@ -18,13 +17,6 @@ import {
   listDocumentAlerts,
   type AircraftDocument,
 } from "../services/fleet";
-import {
-  qmsGetAuditorStats,
-  qmsListNotifications,
-  qmsMarkNotificationRead,
-  type AuditorStatsOut,
-  type QMSNotificationOut,
-} from "../services/qms";
 import { DASHBOARD_WIDGETS, canSeeDashboardWidget, getWidgetStorageKey } from "../utils/dashboardWidgets";
 import { isUiShellV2Enabled } from "../utils/featureFlags";
 
@@ -128,7 +120,7 @@ function buildMonthDays(month: Date): Date[] {
 
 function safeEnv(key: string): string {
   try {
-    const v = (import.meta as any)?.env?.[key];
+    const v: unknown = import.meta.env[key];
     return typeof v === "string" ? v : "";
   } catch {
     return "";
@@ -168,8 +160,10 @@ async function fetchPublicHolidays(year: number, country: string): Promise<Holid
   const url = `https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`;
   const res = await fetch(url, { method: "GET" });
   if (!res.ok) throw new Error(`Holiday lookup failed (HTTP ${res.status})`);
-  const data = (await res.json()) as any[];
-  return (data || []).map((h) => ({
+  const payload: unknown = await res.json();
+  if (!Array.isArray(payload)) return [];
+  const data = payload as Array<Record<string, unknown>>;
+  return data.map((h) => ({
     date: String(h.date),
     localName: String(h.localName || h.name || ""),
     name: String(h.name || h.localName || ""),
@@ -195,9 +189,6 @@ const DashboardPage: React.FC = () => {
     !!currentUser &&
     (currentUser.is_superuser || currentUser.role === "SUPERUSER");
 
-  const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
-  const [auditorStats, setAuditorStats] = useState<AuditorStatsOut | null>(null);
-
   const [docAlerts, setDocAlerts] = useState<AircraftDocument[]>([]);
   const [docAlertsLoading, setDocAlertsLoading] = useState(false);
   const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
@@ -210,8 +201,8 @@ const DashboardPage: React.FC = () => {
     // For a first-time setup you likely have 0 aircraft; keep safe.
     // If doc alerts exist, approximate unique aircraft count from alerts.
     const serials = new Set(
-      (docAlerts || [])
-        .map((a) => (a as any)?.aircraft_serial_number)
+      docAlerts
+        .map((a) => a.aircraft_serial_number)
         .filter((v) => typeof v === "string" && v.trim())
         .map((v) => v.trim())
     );
@@ -304,16 +295,15 @@ const DashboardPage: React.FC = () => {
   ]);
 
   // While we are correcting routes for non-admins, render nothing to avoid flicker.
-  if (
+  // The decision is applied after all hooks so hook order remains stable.
+  const correctingRoute = Boolean(
     currentUser &&
     !isAdmin &&
     assignedDept &&
     (!requestedDept ||
       (requestedDept !== assignedDept &&
         !allowedDepartments.includes(requestedDept as DepartmentId)))
-  ) {
-    return null;
-  }
+  );
 
   // Effective department for rendering
   const department: DepartmentId = useMemo(() => {
@@ -331,18 +321,16 @@ const DashboardPage: React.FC = () => {
 
   const isCRSDept = department === "planning" || department === "production";
   const isSystemAdminDept = department === "admin";
-  const isQualityDept = department === "quality";
   const shouldShowComplianceAlerts =
     department === "planning" ||
-    department === "production" ||
-    department === "quality";
+    department === "production";
 
   const blockingDocAlerts = useMemo(() => {
     return docAlerts.filter(
       (alert) =>
         alert.is_blocking ||
         alert.status === "OVERDUE" ||
-        (alert as any).missing_evidence
+        alert.missing_evidence
     );
   }, [docAlerts]);
 
@@ -367,10 +355,6 @@ const DashboardPage: React.FC = () => {
 
   const handleCreateUser = () => {
     navigate(`/maintenance/${amoSlug}/admin/users/new`);
-  };
-
-  const handleOpenQms = () => {
-    navigate(`/maintenance/${amoSlug}/qms`);
   };
 
   const handleFixDocuments = () => {
@@ -403,31 +387,6 @@ const DashboardPage: React.FC = () => {
       </div>
     </div>
   );
-
-  const loadNotifications = async () => {
-    try {
-      const data = await qmsListNotifications();
-      setNotifications(data.filter((n) => !n.read_at));
-    } catch {
-      setNotifications([]);
-    }
-  };
-
-  const loadAuditorStats = async () => {
-    if (!currentUser?.id) return;
-    try {
-      const data = await qmsGetAuditorStats(currentUser.id);
-      setAuditorStats(data);
-    } catch {
-      setAuditorStats(null);
-    }
-  };
-
-  useEffect(() => {
-    loadNotifications();
-    loadAuditorStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Fleet metrics are currently derived safely (no backend dependency).
   // Keep hooks here so future API wiring is contained and doesn't break the page.
@@ -477,10 +436,12 @@ const DashboardPage: React.FC = () => {
         const data = await listDocumentAlerts({ due_within_days: 45 });
         if (!isMounted) return;
         setDocAlerts(data);
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!isMounted) return;
         setDocAlertsError(
-          err?.message || "Unable to load aircraft document alerts."
+          err instanceof Error
+            ? err.message
+            : "Unable to load aircraft document alerts."
         );
       } finally {
         if (isMounted) setDocAlertsLoading(false);
@@ -508,15 +469,6 @@ const DashboardPage: React.FC = () => {
     );
     setDocBannerDismissed(stored[amoSlug] === blockingDocSignature);
   }, [amoSlug, blockingDocSignature, isSuperuser]);
-
-  const handleMarkRead = async (id: string) => {
-    try {
-      await qmsMarkNotificationRead(id);
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    } catch {
-      // noop
-    }
-  };
 
   // ---- Calendar helpers ----
   useEffect(() => {
@@ -646,10 +598,12 @@ const DashboardPage: React.FC = () => {
         if (throttleStore.cacheHolidays) {
           setLocalStorageJson(cacheKey, data);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!mounted) return;
         setHolidays([]);
-        setHolidayError(err?.message || "Unable to load public holidays.");
+        setHolidayError(
+          err instanceof Error ? err.message : "Unable to load public holidays."
+        );
       } finally {
         if (mounted) setHolidayLoading(false);
       }
@@ -663,11 +617,11 @@ const DashboardPage: React.FC = () => {
     };
   }, [department, holidayCountry, holidayYear, throttleStore.cacheHolidays]);
 
+  if (correctingRoute) return null;
+
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      {uiShellV2 && isQualityDept ? (
-        <DashboardCockpit />
-      ) : uiShellV2 && department !== "planning" && department !== "production" ? (
+      {uiShellV2 && department !== "planning" && department !== "production" ? (
         <DepartmentLandingScaffold departmentLabel={niceLabel(department)} />
       ) : (
         <>
@@ -691,10 +645,10 @@ const DashboardPage: React.FC = () => {
                 <p className="text-muted" style={{ margin: "4px 0 0" }}>
                   Work on affected aircraft is blocked until overdue or missing
                   evidence is resolved. Upload the latest compliance evidence to
-                  restore planning and quality workflows.
+                  restore planning and production workflows.
                 </p>
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {blockingDocAlerts.slice(0, 3).map((alert: any) => (
+                  {blockingDocAlerts.slice(0, 3).map((alert) => (
                     <li key={alert.id}>
                       {alert.aircraft_serial_number} ·{" "}
                       {String(alert.document_type || "").replace(/_/g, " ")} ·{" "}
@@ -734,102 +688,6 @@ const DashboardPage: React.FC = () => {
           </section>
         )}
 
-      {notifications.length > 0 && (
-        <section className="page-section">
-          <div className="card">
-            <div className="card-header">
-              <h2>Notifications</h2>
-              <p className="text-muted">
-                Recent quality actions that need your attention.
-              </p>
-            </div>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {notifications.map((note) => (
-                <li
-                  key={note.id}
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 0",
-                    borderBottom: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                      }}
-                    >
-                      <span
-                        className={
-                          note.severity === "ACTION_REQUIRED"
-                            ? "badge badge--warning"
-                            : note.severity === "WARNING"
-                            ? "badge badge--danger"
-                            : "badge badge--info"
-                        }
-                      >
-                        {note.severity}
-                      </span>
-                      <span>{note.message}</span>
-                    </div>
-                    <div className="text-muted" style={{ fontSize: 12 }}>
-                      {new Date(note.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="secondary-chip-btn"
-                    onClick={() => handleMarkRead(note.id)}
-                  >
-                    Mark read
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      )}
-
-      {auditorStats && (
-        <section className="page-section">
-          <div className="card">
-            <div className="card-header">
-              <h2>Auditor workload</h2>
-              <p className="text-muted">
-                Summary of audits assigned to you across lead/observer/assistant
-                roles.
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span className="badge badge--info">
-                Total: {auditorStats.audits_total}
-              </span>
-              <span className="badge badge--warning">
-                Open: {auditorStats.audits_open}
-              </span>
-              <span className="badge badge--success">
-                Closed: {auditorStats.audits_closed}
-              </span>
-              <span className="badge badge--neutral">
-                Lead: {auditorStats.lead_audits}
-              </span>
-              <span className="badge badge--neutral">
-                Observer: {auditorStats.observer_audits}
-              </span>
-              <span className="badge badge--neutral">
-                Assistant: {auditorStats.assistant_audits}
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
-
       {isCRSDept && (
         <section className="page-section">
           <h2 className="page-section__title">
@@ -868,13 +726,6 @@ const DashboardPage: React.FC = () => {
                   {renderMetric("Active work orders", 0)}
                   {renderMetric("CRS issued", 0)}
                   {renderMetric("Delays", 0)}
-                </>
-              )}
-              {department === "quality" && (
-                <>
-                  {renderMetric("Open findings", 0)}
-                  {renderMetric("Open CARs", 0)}
-                  {renderMetric("Audits scheduled", 0)}
                 </>
               )}
               {department === "safety" && (
@@ -1326,10 +1177,9 @@ const DashboardPage: React.FC = () => {
         <section className="page-section">
           <h2 className="page-section__title">Airworthiness document alerts</h2>
           <p className="page-section__body">
-            Planning, Production, and Quality are notified when documents like C
+            Planning and Production are notified when documents like C
             of A, ARC, or radio licenses are due or missing. Work on an affected
-            aircraft is blocked until updated evidence is uploaded (Quality can
-            override with a recorded reason).
+            aircraft is blocked until updated evidence is uploaded.
           </p>
 
           {docAlertsLoading && (
@@ -1346,7 +1196,7 @@ const DashboardPage: React.FC = () => {
                 </p>
               ) : (
                 <ul className="card-list">
-                  {docAlerts?.map((alert: any) => (
+                  {docAlerts.map((alert) => (
                     <li className="card card--border" key={alert.id}>
                       <h3 className="card__title">
                         {String(alert.document_type || "").replace(/_/g, " ")} ·{" "}
@@ -1375,23 +1225,6 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {isQualityDept && (
-        <section className="page-section">
-          <h2 className="page-section__title">Quality Management System</h2>
-          <p className="page-section__body">
-            Review QMS documents, audits, change requests, and distribution
-            activity for {niceLabel(department)}.
-          </p>
-          <button
-            type="button"
-            className="primary-chip-btn"
-            onClick={handleOpenQms}
-          >
-            Open QMS overview
-          </button>
-        </section>
-      )}
-
       {!isSystemAdminDept && currentUser && (
         <section className="page-section">
           <h2 className="page-section__title">Your widgets</h2>
@@ -1407,7 +1240,9 @@ const DashboardPage: React.FC = () => {
             const widgets = DASHBOARD_WIDGETS.filter(
               (widget) =>
                 selected.includes(widget.id) &&
-                widget.departments.includes(department as any) &&
+                widget.departments.some(
+                  (widgetDepartment) => widgetDepartment === department
+                ) &&
                 canSeeDashboardWidget(widget, currentUser, department)
             );
             if (widgets.length === 0) {

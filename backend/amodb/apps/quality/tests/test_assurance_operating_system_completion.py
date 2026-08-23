@@ -183,7 +183,6 @@ def test_new_operating_system_models_are_registered_in_shared_metadata() -> None
 def test_people_assurance_intelligence_and_audit_governance_routes_precede_generic_catchall() -> None:
     cases = (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     )
     route_checks = (
         ("/people/summary", "GET", "people_summary"),
