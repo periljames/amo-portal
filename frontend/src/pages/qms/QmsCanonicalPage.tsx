@@ -1,6 +1,8 @@
 import React from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
+import QualityChecklistTemplateHost from "../../components/QMS/QualityChecklistTemplateHost";
 import QualityCarsPage from "../QualityCarsPage";
+import QualityAuditsSectionLayout from "../qualityAudits/QualityAuditsSectionLayout";
 import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
 import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
 import QmsCanonicalLegacyPage from "./QmsCanonicalLegacyPage";
@@ -9,6 +11,14 @@ import QmsCarPerformanceReportPage from "./QmsCarPerformanceReportPage";
 import QmsExternalProvidersPage from "./QmsExternalProvidersPage";
 import QmsRegisterPage from "./QmsRegisterPage";
 import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
+
+function assuranceWorkspace(title: string, subtitle: string, content: React.ReactNode): React.ReactElement {
+  return (
+    <QualityAuditsSectionLayout title={title} subtitle={subtitle}>
+      {content}
+    </QualityAuditsSectionLayout>
+  );
+}
 
 /**
  * Canonical compatibility dispatcher.
@@ -22,6 +32,7 @@ export default function QmsCanonicalPage(): React.ReactElement {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const pathname = location.pathname.toLowerCase();
+  const amoCode = location.pathname.match(/^\/maintenance\/([^/]+)\//i)?.[1] || "";
 
   if (searchParams.get("control") && (pathname.includes("/quality/cars") || pathname.includes("/qms/cars"))) {
     return <QmsCarControlLoopPage />;
@@ -36,11 +47,19 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }
 
   if (/\/(?:quality|qms)\/audits\/program\/[^/]+\/items\/[^/]+\/schedule\/?$/i.test(location.pathname)) {
-    return <QmsAuditProgrammeSchedulePage />;
+    return assuranceWorkspace(
+      "Audit programme",
+      "Schedule governed programme work without leaving the Assurance Workspace.",
+      <QmsAuditProgrammeSchedulePage />
+    );
   }
 
   if (/\/(?:quality|qms)\/audits\/program\/?$/i.test(location.pathname)) {
-    return <QmsAuditProgrammeWorkspacePage />;
+    return assuranceWorkspace(
+      "Audit programme",
+      "Govern the audit programme, commitments and planned assurance work.",
+      <QmsAuditProgrammeWorkspacePage />
+    );
   }
 
   // Audit dates belong to the single shared Quality Planner. Retire the old
@@ -57,10 +76,15 @@ export default function QmsCanonicalPage(): React.ReactElement {
     return <Navigate to={location.pathname.replace(/\/register\/?$/i, "/dashboard")} replace />;
   }
 
-  // The checklist library is rendered by QualityChecklistTemplateHost as a
-  // first-class inline workspace. Do not render the old generic register behind it.
+  // The controlled checklist library is mounted as the workspace content itself.
+  // QualityEnhancementsHost stays mounted for shared Quality support but omits its
+  // duplicate checklist-template child on this route.
   if (/\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname)) {
-    return <div className="qms-hosted-specialist-workspace" aria-hidden="true" />;
+    return assuranceWorkspace(
+      "Audit checklists",
+      "Use the controlled checklist library for audit preparation and execution.",
+      <QualityChecklistTemplateHost amoCode={decodeURIComponent(amoCode)} />
+    );
   }
 
   // Audit report approval/issue is part of each audit's canonical Closing stage.
@@ -79,7 +103,13 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }
 
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
-  if (isEvidenceRegister) return <QmsRegisterPage />;
+  if (isEvidenceRegister) {
+    return assuranceWorkspace(
+      "Evidence Vault",
+      "Review objective evidence, retained records and governed assurance packages.",
+      <QmsRegisterPage embedded />
+    );
+  }
 
   return <QmsCanonicalLegacyPage />;
 }

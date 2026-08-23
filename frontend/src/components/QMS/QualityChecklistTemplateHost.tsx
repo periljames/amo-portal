@@ -202,12 +202,12 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "", auditKey,
 
   if (libraryRoute) {
     return (
-      <main className="qms-checklist-template-page" aria-label="Audit checklist templates">
+      <section className="qms-checklist-template-page" aria-label="Audit checklist templates">
         <header className="qms-checklist-template-page__header">
           <div><span>Audit operations</span><h1>Checklist templates</h1><p>Create, revise and issue reusable audit checklists.</p></div>
         </header>
         {body}
-      </main>
+      </section>
     );
   }
 

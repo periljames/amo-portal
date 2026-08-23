@@ -29,9 +29,23 @@ type Props = {
   toolbar?: React.ReactNode;
   children: React.ReactNode;
   suppressHeader?: boolean;
+  onOverflowAction?: () => void;
+  overflowActionLabel?: string;
 };
 
-const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle, breadcrumbs, nav, toolbar, children, suppressHeader = false }) => {
+const AuditPageShell: React.FC<Props> = ({
+  amoCode,
+  department,
+  title,
+  subtitle,
+  breadcrumbs,
+  nav,
+  toolbar,
+  children,
+  suppressHeader = false,
+  onOverflowAction,
+  overflowActionLabel = "More audit page actions",
+}) => {
   const customHeader = suppressHeader ? <></> : (
     <div className="audit-shell-header">
       <div className="audit-shell-header__top-row">
@@ -61,13 +75,16 @@ const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle,
         </div>
         <div className="audit-shell-header__actions">
           {toolbar}
-          <button
-            type="button"
-            aria-label="More audit page actions"
-            className="secondary-chip-btn audit-shell-header__overflow"
-          >
-            <Ellipsis size={15} />
-          </button>
+          {onOverflowAction ? (
+            <button
+              type="button"
+              aria-label={overflowActionLabel}
+              className="secondary-chip-btn audit-shell-header__overflow"
+              onClick={onOverflowAction}
+            >
+              <Ellipsis size={15} />
+            </button>
+          ) : null}
         </div>
       </div>
       {nav ? <div className="audit-shell-header__nav">{nav}</div> : null}
