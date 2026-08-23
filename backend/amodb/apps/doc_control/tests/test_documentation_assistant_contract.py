@@ -94,7 +94,7 @@ def test_navigation_url_carries_precise_page_and_anchor() -> None:
         page=51,
         anchor="qam-51",
     )
-    assert url == "/maintenance/SAFARILINK/document-control/library/manual-1?tab=content&revision=revision-2&page=51&anchor=qam-51"
+    assert url == "/maintenance/SAFARILINK/publications/manual-1/rev/revision-2/read?page=51&anchor=qam-51"
 
 
 def test_results_are_ranked_and_deduplicated_by_revision_location() -> None:
