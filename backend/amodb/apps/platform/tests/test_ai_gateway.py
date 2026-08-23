@@ -124,10 +124,14 @@ def test_subscription_effective_period_controls_current_entitlement() -> None:
     assert ai_gateway._subscription_is_current(naive_scheduled, "ENABLED", now=now) is False
 
 
-def test_policy_update_preserves_existing_entitlement_window(monkeypatch) -> None:
+def test_policy_update_preserves_existing_entitlement_window_and_trial_status(monkeypatch) -> None:
     effective_from = datetime(2026, 8, 1, tzinfo=timezone.utc)
     effective_to = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    existing = SimpleNamespace(effective_from=effective_from, effective_to=effective_to)
+    existing = SimpleNamespace(
+        status="TRIAL",
+        effective_from=effective_from,
+        effective_to=effective_to,
+    )
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(ai_gateway, "_ai_subscription", lambda *_args, **_kwargs: existing)
@@ -157,6 +161,7 @@ def test_policy_update_preserves_existing_entitlement_window(monkeypatch) -> Non
     )
 
     change = captured["changes"][0]
+    assert change["status"] == "TRIAL"
     assert change["effective_from"] == effective_from
     assert change["effective_to"] == effective_to
 
